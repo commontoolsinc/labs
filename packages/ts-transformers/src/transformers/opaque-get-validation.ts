@@ -12,6 +12,7 @@ import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
 import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
+import { getNodeText } from "../ast/mod.ts";
 
 export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -74,7 +75,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
 
     if (isReactive) {
       // Get the receiver text for the error message
-      const receiverText = receiverExpr.getText();
+      const receiverText = getNodeText(receiverExpr);
       const callText = `${receiverText}.get()`;
 
       context.reportDiagnostic({

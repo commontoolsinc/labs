@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { getNodeText } from "../ast/mod.ts";
 
 export class WriteAuthorizedByValidationTransformer
   extends HelpersOnlyTransformer {
@@ -236,8 +237,9 @@ function declarationKey(
   declaration: ts.Declaration,
   reference: ts.TypeReferenceNode,
 ): string {
-  const args = reference.typeArguments?.map((arg) => arg.getText()).join(",") ??
-    "";
+  const args =
+    reference.typeArguments?.map((arg) => getNodeText(arg)).join(",") ??
+      "";
   return `${declaration.getSourceFile().fileName}:${declaration.pos}:${args}`;
 }
 
