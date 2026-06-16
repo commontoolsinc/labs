@@ -28,7 +28,10 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
-import { pretransformProgramForModules } from "./pretransform.ts";
+import {
+  pretransformProgramForModules,
+  transformInjectHelperModule,
+} from "./pretransform.ts";
 import {
   type ModuleImportEdges,
   resolveModuleImports,
@@ -256,18 +259,38 @@ export class Engine extends EventTarget implements Harness {
       const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
       const resolvedPins = fabricResolver?.resolvedPins() ?? [];
       const resolvedFiles = uniqueSourcesByName(resolvedProgram.files);
-      const resolvedForCompile = { ...resolvedProgram, files: resolvedFiles };
+      // For compilation, fabric mounts need the helper import too (they are
+      // fetched as authored source — see the identity fix below). Authored
+      // modules are already injected by `pretransformProgramForModules`.
+      const resolvedForCompile = {
+        ...resolvedProgram,
+        files: injectMountSources(resolvedFiles),
+      };
 
       // Authored (non-.d.ts) sources are the modules that must have a body.
       const moduleFiles = resolvedFiles.filter((f) =>
         !f.name.endsWith(".d.ts")
       );
 
+      // Module identity hashes the AUTHORED source, before the helper-injection
+      // decoration `pretransformProgramForModules` baked into `moduleFiles`
+      // (module-loading.md: identity is over authored TS, so it is TCB-version
+      // independent — CT-1740). Recover each authored module's original bytes by
+      // its stored (prefix-free) filename; mounts keep their resolved bytes.
+      const authoredByStoredName = new Map(
+        program.files.map((f) => [f.name, f.contents]),
+      );
+      const pristineModuleFiles = pristineModuleSources(
+        moduleFiles,
+        authoredByStoredName,
+        (name) => storedFilenameFor(name, id, mounts),
+      );
+
       // Prefix-free content identity per resolved module path. Computed here
       // (cheap, no TS compile) so the cache-hit check and the write-back
       // descriptors agree with the graph's `cf:module/<hash>` specifiers.
       const identityByPath = computeFabricModuleIdentities(
-        moduleFiles,
+        pristineModuleFiles,
         mounts,
         {
           idPrefix: `/${id}`,
@@ -433,15 +456,16 @@ export class Engine extends EventTarget implements Harness {
 
       // Serializable per-module descriptors for write-back to the cache, in
       // identity space (the engine's `/<id>` path prefix never leaks out). Each
-      // carries the resolved TS source (for the source set), the compiled JS
-      // (for the compiled set), and the internal import edges as
-      // specifier → dependency-identity links. On a cache hit these mirror the
-      // artifacts just loaded.
+      // carries the AUTHORED TS source (for the source set — pre-helper-injection,
+      // matching what identity hashed), the compiled JS (for the compiled set),
+      // and the internal import edges as specifier → dependency-identity links.
+      // On a cache hit these mirror the artifacts just loaded. Built over the
+      // pristine module set so `source` and the edges are over authored bytes.
       const importEdges = resolveModuleImports({
         main: "",
-        files: moduleFiles,
+        files: pristineModuleFiles,
       });
-      const modules: CacheableModule[] = moduleFiles.map((file) => {
+      const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
         const imports = cacheableImportsFor(
@@ -474,19 +498,21 @@ export class Engine extends EventTarget implements Harness {
   }
 
   /**
-   * Cold-recovery path: recompile cacheable modules from the
-   * inject-helper-transformed module set already stored in the content-addressed
-   * **source set** (`pattern:<identity>` cells), loaded by identity — i.e.
-   * recreate the pattern from its stored TypeScript alone. Skips **pretransform**
-   * (the source already carries the helper import and prefix-free normalized
-   * paths, so re-injecting/re-prefixing would corrupt it and shift identities)
-   * but still **resolves** to supply the runtime `.d.ts` type environment the CF
-   * transformer needs for schema generation (those types are TCB, from the
-   * static cache, not stored per pattern). Used when the compiled set misses
-   * (e.g. a runtimeVersion bump invalidates `compileCache:<rtver>/...`).
+   * Cold-recovery path: recompile cacheable modules from the AUTHORED source
+   * already stored in the content-addressed **source set** (`pattern:<identity>`
+   * cells), loaded by identity — i.e. recreate the pattern from its stored
+   * TypeScript alone. The stored source is prefix-free authored TS (the helper
+   * import is NOT baked in — identity is over authored source, module-loading.md),
+   * so we skip **re-prefixing** but DO re-inject the helper import for
+   * compilation (`transformInjectHelperModule`, before resolve so the resolver
+   * pulls the `commonfabric` types). We **resolve** to supply the runtime
+   * `.d.ts` type environment the CF transformer needs for schema generation
+   * (those types are TCB, from the static cache, not stored per pattern). Used
+   * when the compiled set misses (e.g. a runtimeVersion bump invalidates
+   * `compileCache:<rtver>/...`).
    *
    * Per-module identities recompute to the same content-addressed values (the
-   * module bodies + names are unchanged), so the rebuilt compiled set is
+   * authored source + names are unchanged), so the rebuilt compiled set is
    * addressable — and writable-back — under the new runtimeVersion. Returns the
    * `CacheableModule[]` (feed to {@link evaluateCachedModules}) + entry identity.
    * `entryFilename` is the entry module's normalized path.
@@ -501,10 +527,17 @@ export class Engine extends EventTarget implements Harness {
     const { compiler } = await this.getCompilerInternals();
     assertNoReservedFabricPaths(resolvedFiles);
     assertFabricImportsHaveSpace(resolvedFiles, options);
-    // Resolve to add the runtime `.d.ts` type environment, WITHOUT pretransform
-    // (no re-inject/re-prefix — the stored source is already transformed).
+    // The stored source set holds prefix-free AUTHORED TS (the helper import is
+    // NOT baked in — identity is over authored source, module-loading.md).
+    // Inject the helper BEFORE resolve so the resolver pulls the `commonfabric`
+    // runtime `.d.ts` the transformer needs; identity is recomputed over the
+    // authored bytes below and matches the stored keys.
+    const injectedInput = transformInjectHelperModule({
+      main: entryFilename,
+      files: resolvedFiles,
+    });
     const engineResolver = new EngineProgramResolver(
-      { main: entryFilename, files: resolvedFiles },
+      { main: entryFilename, files: injectedInput.files },
       this.ctRuntime.staticCache,
     );
     const fabricResolver = options.fabricImports
@@ -519,16 +552,31 @@ export class Engine extends EventTarget implements Harness {
     const mounts = fabricResolver?.mounts() ?? [];
     const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
     const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
+    // Fabric mounts are fetched as authored source; inject the helper for
+    // compilation (authored entry modules were injected before resolve above).
     const resolvedForCompile = {
       ...resolvedProgram,
-      files: resolvedProgramFiles,
+      files: injectMountSources(resolvedProgramFiles),
     };
     const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
     );
-    // Identities recompute prefix-free over the (already-normalized) closure —
-    // they match the stored identities the source docs were keyed by.
-    const identityByPath = computeFabricModuleIdentities(moduleFiles, mounts);
+    // Identity + stored source hash the AUTHORED bytes (recovered from the stored
+    // input, by stored filename); the resolved set above carries the injected
+    // form the compiler needs. Identities recompute prefix-free over the authored
+    // closure — they match the stored identities the source docs were keyed by.
+    const authoredByStoredName = new Map(
+      resolvedFiles.map((f) => [f.name, f.contents]),
+    );
+    const pristineModuleFiles = pristineModuleSources(
+      moduleFiles,
+      authoredByStoredName,
+      (name) => storedFilenameFor(name, undefined, mounts),
+    );
+    const identityByPath = computeFabricModuleIdentities(
+      pristineModuleFiles,
+      mounts,
+    );
 
     const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
@@ -549,8 +597,11 @@ export class Engine extends EventTarget implements Harness {
       }
     }
 
-    const importEdges = resolveModuleImports({ main: "", files: moduleFiles });
-    const modules: CacheableModule[] = moduleFiles.map((file) => {
+    const importEdges = resolveModuleImports({
+      main: "",
+      files: pristineModuleFiles,
+    });
+    const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
       const out = emitted.get(file.name)!;
       const imports = cacheableImportsFor(
         file.name,
@@ -1182,6 +1233,51 @@ function assertFabricImportsHaveSpace(
       }
     }
   }
+}
+
+// Recover each resolved AUTHORED module's pre-helper-injection source for module
+// identity and the stored source set. `resolved` carries the helper-injected,
+// prefixed bytes the compiler/transformer pipeline needs; identity must hash the
+// authored bytes instead (module-loading.md). Authored modules map back to
+// `authoredByStoredName` via their stored (prefix-free) filename. Fabric-MOUNT
+// modules (`/~cf/<identity>/...`) are left untouched: their fetched `doc.code`
+// is already the authored source their own space governs, and their stored
+// filename can collide with an authored module's (both `/main.tsx`), so they
+// must NOT be looked up in `authoredByStoredName`. `.d.ts` files are excluded by
+// callers before this runs.
+function pristineModuleSources(
+  resolved: readonly Source[],
+  authoredByStoredName: ReadonlyMap<string, string>,
+  storedNameOf: (name: string) => string,
+): Source[] {
+  return resolved.map((file) => {
+    if (file.name.startsWith(FABRIC_MOUNT_ROOT)) return file;
+    const authored = authoredByStoredName.get(storedNameOf(file.name));
+    return authored === undefined
+      ? file
+      : { name: file.name, contents: authored };
+  });
+}
+
+// Inject the `__cfHelpers` import into resolved fabric-MOUNT sources, for
+// compilation only. Authored modules are already helper-injected by
+// `pretransformProgramForModules` (hot) / the cold path's pre-resolve inject;
+// mounts are fetched as authored source (post the identity fix) and would
+// otherwise reach the compiler without the helper they need. `commonfabric` is
+// already resolved into the program by the authored entry's injected import, so
+// injecting here (after resolve) resolves cleanly. Non-mount and `.d.ts` files
+// pass through unchanged.
+function injectMountSources(files: readonly Source[]): Source[] {
+  const mounts = files.filter((f) => f.name.startsWith(FABRIC_MOUNT_ROOT));
+  if (mounts.length === 0) return [...files];
+  const injected = new Map(
+    transformInjectHelperModule({ main: mounts[0].name, files: mounts }).files
+      .map((f) => [f.name, f.contents] as const),
+  );
+  return files.map((f) => {
+    const next = injected.get(f.name);
+    return next === undefined ? f : { ...f, contents: next };
+  });
 }
 
 function uniqueSourcesByName(files: readonly Source[]): Source[] {
