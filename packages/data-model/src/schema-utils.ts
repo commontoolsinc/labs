@@ -37,7 +37,7 @@ function getBasicSchema(key: string) {
   } else {
     const result = BASIC_SCHEMAS[key] = internSchema({
       type: key as JSONSchemaTypes,
-    }) as JSONSchemaObj;
+    });
     return result;
   }
 }
@@ -299,7 +299,7 @@ export function emptySchemaObject() {
   if (found) {
     return found;
   } else {
-    const result = BASIC_SCHEMAS[key] = internSchema({}) as JSONSchemaObj;
+    const result = BASIC_SCHEMAS[key] = internSchema({});
     return result;
   }
 }
