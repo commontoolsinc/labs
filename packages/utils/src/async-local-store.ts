@@ -1,9 +1,18 @@
-import { isDeno } from "./env.ts";
-
 /**
  * A minimal async-context store: read the current value with `getStore()`, and
  * bind a value for the (sync or async) duration of `run`. A thin shared shape
- * over Deno/Node `AsyncLocalStorage` and a promise-aware fallback.
+ * over Deno/Node `AsyncLocalStorage` and the promise-aware fallback below.
+ *
+ * This module is intentionally free of top-level `await`: resolving the Deno
+ * `AsyncLocalStorage` constructor needs `await import("node:async_hooks")`,
+ * which stays at the (runner) call sites. A top-level await in this
+ * widely-imported utils module stalls module evaluation in some Deno test
+ * graphs ("Module evaluation is still pending after multiple event loop
+ * iterations"). Call sites pick the backing class like:
+ *
+ *     const Storage = (isDeno()
+ *       ? (await import("node:async_hooks")).AsyncLocalStorage
+ *       : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
  */
 export interface AsyncLocalStore<T> {
   getStore(): T | undefined;
@@ -16,7 +25,7 @@ export interface AsyncLocalStore<T> {
  * promise results and synchronously otherwise — so the bound value
  * conservatively spans the whole pending promise.
  */
-class FallbackAsyncLocalStore<T> implements AsyncLocalStore<T> {
+export class FallbackAsyncLocalStore<T> implements AsyncLocalStore<T> {
   #store: T | undefined;
 
   getStore(): T | undefined {
@@ -41,15 +50,3 @@ class FallbackAsyncLocalStore<T> implements AsyncLocalStore<T> {
     }
   }
 }
-
-const AsyncLocalStorageCtor = isDeno()
-  ? (await import("node:async_hooks"))
-    .AsyncLocalStorage as new <T>() => AsyncLocalStore<T>
-  : FallbackAsyncLocalStore;
-
-/**
- * Create an async-context store, backed by Deno/Node `AsyncLocalStorage` when
- * available and a promise-aware synchronous fallback otherwise.
- */
-export const createAsyncLocalStore = <T>(): AsyncLocalStore<T> =>
-  new AsyncLocalStorageCtor<T>();

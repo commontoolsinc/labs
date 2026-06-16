@@ -77,7 +77,10 @@ import { ExtendedStorageTransaction } from "./storage/extended-storage-transacti
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
-import { createAsyncLocalStore } from "@commonfabric/utils/async-local-store";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
@@ -114,6 +117,14 @@ const isFullNormalizedLinkShape = (
     Array.isArray(link.path) &&
     (link.scope === undefined || isCellScope(link.scope));
 };
+
+// Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
+// otherwise. The `await import` stays here (not in the shared utils module): a
+// top-level await in widely-imported utils stalls Deno module evaluation.
+const WriteDebugContextStorage =
+  (isDeno()
+    ? (await import("node:async_hooks")).AsyncLocalStorage
+    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -311,7 +322,7 @@ export class Runtime {
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
-  private writeDebugContext = createAsyncLocalStore<string>();
+  private writeDebugContext = new WriteDebugContextStorage<string>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
 
   constructor(options: RuntimeOptions) {

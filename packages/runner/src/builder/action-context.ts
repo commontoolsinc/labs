@@ -1,4 +1,8 @@
-import { createAsyncLocalStore } from "@commonfabric/utils/async-local-store";
+import { isDeno } from "@commonfabric/utils/env";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
 import { getTopFrame } from "./pattern.ts";
 
 /**
@@ -25,7 +29,15 @@ import { getTopFrame } from "./pattern.ts";
  * mints — including under the non-Deno fallback store, whose window
  * conservatively spans the whole pending action promise.
  */
-const actionWindow = createAsyncLocalStore<true>();
+// Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
+// otherwise. The `await import` stays here (not in the shared utils module): a
+// top-level await in widely-imported utils stalls Deno module evaluation.
+const ActionWindowStorage =
+  (isDeno()
+    ? (await import("node:async_hooks")).AsyncLocalStorage
+    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
+
+const actionWindow = new ActionWindowStorage<true>();
 
 /**
  * Run an action's user code inside the no-minting window. Async results keep
