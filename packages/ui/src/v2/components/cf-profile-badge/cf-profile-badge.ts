@@ -515,7 +515,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           view,
         ),
       );
-      globalThis.open(url, "_blank");
+      globalThis.open(url, "_blank", "noopener");
     } else {
       navigate(view);
     }
