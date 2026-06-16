@@ -30,6 +30,7 @@ export {
 } from "./program.ts";
 export {
   composeBundleSourceMap,
+  identitySourceMap,
   isSourceMap,
   type MappedPosition,
   parseSourceMap,

@@ -944,15 +944,32 @@ const rebindWriteAuthorizedByClaims = (
   if (!moduleIdentity) {
     return schema;
   }
+  // Only the function NAMED by a binding may stamp that binding's provenance
+  // moduleIdentity. The writer's own binding (sourceFile + bindingPath) must
+  // match the claim's binding (file + path); otherwise a foreign writer that
+  // merely *initializes* the protected field — e.g. profile-create's
+  // `submitProfileCreation` seeding a freshly `inSpace`'d ProfileHome whose
+  // `elements` bind to profile-home's `mutateElements` — would stamp ITS module
+  // identity onto someone else's binding. That stamp can never match the live
+  // bound writer at verification time (CT-1740: seed stamped profile-create's
+  // id, the card-add write stamped profile-home's → "writeAuthorizedBy must
+  // remain stable"). Leaving the foreign-seeded claim unstamped lets the
+  // genuine bound writer stamp it (one-stamped/one-unstamped reconciles).
+  const writerFile = normalizeIdentitySource(identity.sourceFile);
+  const writerPath = identity.bindingPath;
   return rebindWriteAuthorizedByClaimsInner(
     schema,
-    { moduleIdentity },
+    { moduleIdentity, writerFile, writerPath },
   ) as JSONSchema;
 };
 
 const rebindWriteAuthorizedByClaimsInner = (
   value: unknown,
-  ids: { moduleIdentity?: string },
+  ids: {
+    moduleIdentity?: string;
+    writerFile?: string;
+    writerPath?: readonly string[];
+  },
 ): unknown => {
   if (Array.isArray(value)) {
     let changed = false;
@@ -983,10 +1000,28 @@ const rebindWriteAuthorizedByClaimsInner = (
     // stamp is NOT unstamped: it is recognized as stamped — and unservable —
     // so it fails closed at verification instead of being silently re-bound
     // to whichever verified writer touches it next.
+    const bindingFile = isRecord(claim.__ctWriterIdentityOf) &&
+        typeof claim.__ctWriterIdentityOf.file === "string"
+      ? normalizeIdentitySource(claim.__ctWriterIdentityOf.file)
+      : undefined;
+    const bindingPath = isRecord(claim.__ctWriterIdentityOf) &&
+        Array.isArray(claim.__ctWriterIdentityOf.path)
+      ? claim.__ctWriterIdentityOf.path as readonly string[]
+      : undefined;
+    // The writer must BE the function named by the binding (see the binding
+    // match rationale in rebindWriteAuthorizedByClaims). When we can identify
+    // both bindings, require they match; a mismatch means a foreign writer is
+    // initializing the field, so we leave the claim unstamped.
+    const writerOwnsBinding = ids.writerFile !== undefined &&
+      ids.writerPath !== undefined && bindingFile !== undefined &&
+      bindingPath !== undefined &&
+      ids.writerFile === bindingFile &&
+      arraysEqual(ids.writerPath, bindingPath);
     if (
       isRecord(claim.__ctWriterIdentityOf) &&
       claim.__ctWriterIdentityOf.bundleId === undefined &&
-      claim.__ctWriterIdentityOf.moduleIdentity === undefined
+      claim.__ctWriterIdentityOf.moduleIdentity === undefined &&
+      writerOwnsBinding
     ) {
       const nextIfc = { ...value.ifc };
       nextIfc.writeAuthorizedBy = {

@@ -362,6 +362,40 @@ describe("CFProfileBadge", () => {
       expect(navigated).toBe(false);
     });
 
+    it("stays non-navigable when noNavigate is set, even on a root cell", async () => {
+      // The profile-home self-badge is bound to a `computed()` projection that
+      // happens to resolve as a root cell (path []) but is NOT a real piece, so
+      // navigating would route to a non-piece cell id. `noNavigate` suppresses
+      // it (a root cell would otherwise be navigable — see the first test).
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceN",
+        id: "fid1:profileN",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.noNavigate = true;
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      expect(el._navigable).toBe(false);
+
+      let navigated = false;
+      const onNav = () => {
+        navigated = true;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        // Even a direct call is guarded (belt-and-braces with `_navigable`).
+        el._navigateToProfile(false);
+        el._handleClick(fakeClick());
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(navigated).toBe(false);
+    });
+
     it("navigates on Enter and Space keydown", async () => {
       const resolved = navResolvedCell({
         path: [],

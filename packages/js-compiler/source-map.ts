@@ -89,6 +89,36 @@ export function composeBundleSourceMap(
 }
 
 /**
+ * Build an IDENTITY source map for a compiled body whose authored source map
+ * was not retained — every generated line maps to the same line/column of
+ * `source`. Used by the warm/cached module-record load path, where the
+ * content-addressed cache stores compiled bodies but not their per-module
+ * source maps: without a registered frame the ESM loader resolves `fn.src` to
+ * the raw bundle coordinate (`<evalId>.js:..`), which the harness cannot
+ * canonicalize, and CFC verified-source identity fails closed. An identity map
+ * makes `mapPosition(<name>, line, col)` resolve to `<name>:line:col`, which
+ * the engine then rewrites to the canonical `cf:module/<id>/<path>` form via
+ * its per-module name → canonical table (parity with the source-compile path,
+ * which carries a real authored map).
+ *
+ * Line/column coordinates are preserved verbatim (the compiled body IS the
+ * eval'd text under this load), so no positional information is invented — the
+ * map only re-labels the bundle coordinate with the per-module source name.
+ */
+export function identitySourceMap(body: string, source: string): SourceMap {
+  const generator = new SourceMapGenerator({ file: source });
+  const lineCount = (body.match(/\n/g)?.length ?? 0) + 1;
+  for (let line = 1; line <= lineCount; line++) {
+    generator.addMapping({
+      generated: { line, column: 0 },
+      original: { line, column: 0 },
+      source,
+    });
+  }
+  return JSON.parse(generator.toString()) as SourceMap;
+}
+
+/**
  * Maximum number of source maps to cache in memory.
  * When exceeded, oldest (least recently used) entries are evicted.
  *
