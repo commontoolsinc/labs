@@ -344,6 +344,11 @@ jobs:
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
           CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
+      - name: ⏳ Wait for Toolshed to be ready
+        uses: ./.github/actions/wait-for-toolshed
+        with:
+          url: http://localhost:${{ matrix.toolshed_port }}
+
       - name: 📦 Install CLI integration dependencies
         env:
           INSTALL_FUSE_DEPS: ${{ matrix.install_fuse_deps }}
@@ -436,6 +441,11 @@ jobs:
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed &
+
+      - name: ⏳ Wait for Toolshed to be ready
+        uses: ./.github/actions/wait-for-toolshed
+        with:
+          url: http://localhost:8000
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
