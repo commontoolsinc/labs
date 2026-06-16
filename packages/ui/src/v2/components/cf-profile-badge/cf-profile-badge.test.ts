@@ -38,6 +38,33 @@ function markConnected(element: CFProfileBadge, isConnected = true): void {
   });
 }
 
+/**
+ * A resolved-cell stub for the navigation tests: a root cell (empty `path`) is a
+ * navigable profile piece; a sub-path cell is not. The minimal `asSchema` /
+ * `getCfcLabel` surface keeps `_resolve` + `_refreshVerification` happy.
+ */
+function navResolvedCell(
+  opts: { path: PropertyKey[]; space?: string; id?: string },
+) {
+  return {
+    ref: () => ({ path: opts.path }),
+    space: () => opts.space ?? "did:key:zSpace",
+    id: () => opts.id ?? "fid1:piece",
+    asSchema: () => ({
+      subscribe: (cb: (val: unknown) => void) => {
+        cb({ name: "Ada" });
+        return () => {};
+      },
+    }),
+    getCfcLabel: () => Promise.resolve(undefined),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function fakeClick(): any {
+  return { stopPropagation() {}, metaKey: false, ctrlKey: false };
+}
+
 describe("CFProfileBadge", () => {
   it("registers the custom element", () => {
     expect(customElements.get("cf-profile-badge")).toBe(CFProfileBadge);
@@ -53,6 +80,7 @@ describe("CFProfileBadge", () => {
       const slowResolution = deferred<any>();
       let subscribeCount = 0;
       const resolvedCell = {
+        ref: () => ({ path: [] }),
         asSchema: () => ({
           subscribe: () => {
             subscribeCount++;
@@ -89,6 +117,7 @@ describe("CFProfileBadge", () => {
       let subscribeCount = 0;
       let unsubscribeCount = 0;
       const resolvedCell = {
+        ref: () => ({ path: [] }),
         asSchema: () => ({
           subscribe: (cb: (val: unknown) => void) => {
             subscribeCount++;
@@ -210,6 +239,193 @@ describe("CFProfileBadge", () => {
       expect(logged).toBe(1);
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
+    });
+  });
+
+  describe("navigation (CT-1750)", () => {
+    it("navigates to the profile page when bound to a root profile cell", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceX",
+        id: "fid1:profileX",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      expect(el._navigable).toBe(true);
+
+      let captured: unknown;
+      const onNav = (e: Event) => {
+        captured = (e as CustomEvent).detail;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleClick(fakeClick());
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(captured).toEqual({
+        spaceDid: "did:key:zSpaceX",
+        pieceId: "fid1:profileX",
+      });
+    });
+
+    it("does not navigate when bound to a non-root (derived/sub-path) cell", async () => {
+      const resolved = navResolvedCell({ path: ["name"] });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      expect(el._navigable).toBe(false);
+
+      let navigated = false;
+      const onNav = () => {
+        navigated = true;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleClick(fakeClick());
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(navigated).toBe(false);
+    });
+
+    it("opens a new tab (not in-place navigate) on cmd/ctrl-click", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceX",
+        id: "fid1:profileX",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      // `_navigateToProfile` composes the new-tab URL from `location.href`;
+      // Deno has no `location` unless --location is set, so stub it.
+      const hadLocation = "location" in globalThis &&
+        globalThis.location !== undefined;
+      // deno-lint-ignore no-explicit-any
+      const origLocation = (globalThis as any).location;
+      // deno-lint-ignore no-explicit-any
+      const origOpen = (globalThis as any).open;
+      let openedUrl: string | undefined;
+      let openedTarget: string | undefined;
+      let navigated = false;
+      const onNav = () => {
+        navigated = true;
+      };
+      Object.defineProperty(globalThis, "location", {
+        value: { href: "http://localhost:8000/home" },
+        configurable: true,
+        writable: true,
+      });
+      // deno-lint-ignore no-explicit-any
+      (globalThis as any).open = (url: string, target: string) => {
+        openedUrl = url;
+        openedTarget = target;
+        return null;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleClick({
+          stopPropagation() {},
+          metaKey: true,
+          ctrlKey: false,
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).open = origOpen;
+        if (hadLocation) {
+          Object.defineProperty(globalThis, "location", {
+            value: origLocation,
+            configurable: true,
+            writable: true,
+          });
+        } else {
+          // deno-lint-ignore no-explicit-any
+          delete (globalThis as any).location;
+        }
+      }
+
+      expect(openedTarget).toBe("_blank");
+      expect(openedUrl).toContain("fid1:profileX");
+      // New-tab must NOT also fire the in-place navigation.
+      expect(navigated).toBe(false);
+    });
+
+    it("navigates on Enter and Space keydown", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceK",
+        id: "fid1:profileK",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      for (const key of ["Enter", " "]) {
+        let captured: unknown;
+        let prevented = false;
+        const onNav = (e: Event) => {
+          captured = (e as CustomEvent).detail;
+        };
+        globalThis.addEventListener("cf-navigate", onNav);
+        try {
+          el._handleKeydown({
+            key,
+            metaKey: false,
+            ctrlKey: false,
+            preventDefault() {
+              prevented = true;
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any);
+        } finally {
+          globalThis.removeEventListener("cf-navigate", onNav);
+        }
+        expect(captured).toEqual({
+          spaceDid: "did:key:zSpaceK",
+          pieceId: "fid1:profileK",
+        });
+        expect(prevented).toBe(true);
+      }
+    });
+
+    it("ignores non-activation keydowns", async () => {
+      const resolved = navResolvedCell({ path: [] });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      let navigated = false;
+      const onNav = () => {
+        navigated = true;
+      };
+      globalThis.addEventListener("cf-navigate", onNav);
+      try {
+        el._handleKeydown({
+          key: "a",
+          metaKey: false,
+          ctrlKey: false,
+          preventDefault() {},
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNav);
+      }
+
+      expect(navigated).toBe(false);
     });
   });
 
