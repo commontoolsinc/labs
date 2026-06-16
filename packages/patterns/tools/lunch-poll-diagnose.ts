@@ -157,6 +157,8 @@ const TEST_WEB_SEARCH_URL =
 const VOTE_COLORS = ["green", "yellow", "red"] as const;
 let matrixProgram = "main.tsx";
 const ROOT_PATH = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const LUNCH_POLL_DIR = new URL("../lunch-poll/", import.meta.url).pathname
+  .replace(/\/$/, "");
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -503,7 +505,7 @@ async function optionIds(session: MultiRuntimeSession): Promise<string[]> {
 
 async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
   const harness = await MultiRuntimeHarness.create({
-    programPath: new URL(`./${matrixProgram}`, import.meta.url).pathname,
+    programPath: `${LUNCH_POLL_DIR}/${matrixProgram}`,
     rootPath: ROOT_PATH,
     diagnostics: true,
     input: {
