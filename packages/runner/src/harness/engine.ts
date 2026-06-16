@@ -48,6 +48,7 @@ import {
 } from "../sandbox/module-record-compiler.ts";
 import {
   composeBundleSourceMap,
+  identitySourceMap,
   type SourceMap,
 } from "@commonfabric/js-compiler";
 import {
@@ -829,12 +830,29 @@ export class Engine extends EventTarget implements Harness {
       for (const [name, specifier] of graph.specifierByPath) {
         sourceNameBySpecifier.set(specifier, name);
       }
+      // On the warm/cached record load (`buildRecordsFromCompiled`) no authored
+      // per-module map is retained, so fall back to an IDENTITY map keyed on the
+      // module's per-module source `name`. Without a registered bundle map the
+      // ESM loader leaves `fn.src` as the raw `${evalId}.js:line:col` bundle
+      // coordinate, which the engine's name → canonical table cannot resolve, so
+      // identity downgrades to `unsupported` and CFC verified-source identity
+      // fails closed (the inSpace-child owner-protected write regression,
+      // CT-1754). The identity map preserves coordinates verbatim and only
+      // re-labels the bundle frame with the canonical source name, so the
+      // EXISTING verified-binding check passes for legitimately compiled modules
+      // without weakening it.
       const bundleSourceMap = composeBundleSourceMap(
-        [...graph.compiledBodies].map(([specifier, body]) => ({
-          body,
-          map: graph.moduleSourceMaps.get(specifier),
-          source: sourceNameBySpecifier.get(specifier),
-        })),
+        [...graph.compiledBodies].map(([specifier, body]) => {
+          const source = sourceNameBySpecifier.get(specifier);
+          return {
+            body,
+            map: graph.moduleSourceMaps.get(specifier) ??
+              (source !== undefined
+                ? identitySourceMap(body, source)
+                : undefined),
+            source,
+          };
+        }),
         `${evalId}.js`,
       );
       if (bundleSourceMap) {
@@ -848,9 +866,22 @@ export class Engine extends EventTarget implements Harness {
       // under Deno's tamed SES stacks). The frame is keyed on the per-module
       // sourceURL with eval-relative line numbers, so register the per-module
       // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      //
+      // When no authored map exists for a module (the warm/cached record load \u2014
+      // `buildRecordsFromCompiled` populates `moduleSourceMaps` only for cached
+      // bodies that retained one), fall back to an IDENTITY map keyed on the
+      // module's per-module source `name`. Without this the eval frame stays a
+      // raw `${evalId}.js:line:col` bundle coordinate that the engine's
+      // per-module name \u2192 canonical table cannot canonicalize, so `fn.src`
+      // never reaches `cf:module/<id>/<path>` and CFC verified-source identity
+      // downgrades to `unsupported` \u2014 the inSpace-child owner-protected write
+      // regression (CT-1754). The identity map preserves coordinates verbatim;
+      // it only re-labels the bundle frame with the module's canonical source
+      // name, so the EXISTING verified-binding check passes for legitimately
+      // compiled modules without weakening it.
       for (const [name, specifier] of graph.specifierByPath) {
-        const map = graph.moduleSourceMaps.get(specifier);
-        if (!map) continue;
+        const map = graph.moduleSourceMaps.get(specifier) ??
+          identitySourceMap(graph.compiledBodies.get(specifier) ?? "", name);
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const moduleMap = composeBundleSourceMap(
           [{ body: "", map, source: name }],
