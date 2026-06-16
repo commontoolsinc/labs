@@ -53,6 +53,47 @@ export function make() {
     assert(!main.includes('.for("already", true)'));
   });
 
+  it("registers cast-wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
+    // A non-exported top-level handler written as `const x = handler(...) as T`
+    // must still be __cfReg-registered. Without unwrapping the `as` cast its
+    // AsExpression initializer fails the CallExpression check, so it is excluded
+    // from __cfReg, gets no content-addressed provenance, and at resolve time
+    // falls to the SES source fallback that strips its builder imports — the
+    // CT-1743 `navigateTo`-of-undefined crash. The no-cast sibling is the
+    // positive control (it has always registered).
+    const source = `
+import { handler } from "commonfabric";
+
+type OpenFactory = (args: { id: string }) => unknown;
+
+const openWithCast = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+}) as OpenFactory;
+
+const openNoCast = handler<
+  { id: string },
+  { count: number }
+>((_event, { count }) => {
+  void count;
+});
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.ts"]!;
+
+    const reg = main.match(/__cfReg\(\{([\s\S]*?)\}\)/);
+    assert(reg, "expected a __cfReg registration call in the output");
+    assertStringIncludes(reg[1], "openNoCast"); // positive control
+    assertStringIncludes(reg[1], "openWithCast"); // CT-1743 regression guard
+  });
+
   it("adds stable property causes to pattern-owned lowered derives", async () => {
     const source = `
 import { pattern } from "commonfabric";
