@@ -177,6 +177,12 @@ export function createQueryResultProxy<T>(
   // deep-clones or freezes the surrounding value (e.g. schema interning).
   if (!isRecord(value) || value instanceof FabricPrimitive) return value;
 
+  // TODO(danfuzz): This may have to do something special to handle concrete
+  // instances of `FabricInstance` so that they get perceived as such by the
+  // proxy's clients. Unlike `FabricPrimitive`, `FabricInstance`s are not
+  // necessarily frozen and _do_ expose outgoing references (just as plain
+  // objects and arrays do).
+
   // Stored objects are deep-frozen during storage normalization
   // (fabricFromNativeValueModern). A frozen proxy target would force every
   // property access through the invariant guard (ECMAScript 10.5.8: a [[Get]]
