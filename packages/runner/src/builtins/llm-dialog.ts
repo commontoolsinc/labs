@@ -1230,9 +1230,7 @@ function buildToolCatalog(
       logger.warn("llm", `No input schema found for tool ${entry.name}`);
       continue;
     }
-    const normalizedInputSchema = normalizeInputSchema(
-      inputSchema as JSONSchema | boolean,
-    ) as JSONSchema;
+    const normalizedInputSchema = normalizeInputSchema(inputSchema);
     const description: string = toolValue.description ??
       (normalizedInputSchema as any)?.description ?? "";
     llmTools[entry.name] = {
