@@ -350,7 +350,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     const subscribed = this.#subscribed.get(cellRefToKey(cellRef));
     if (subscribed && subscribed.size > 0) {
       for (const instance of subscribed) {
-        instance[$onCellUpdate](value);
+        instance[$onCellUpdate](value, message.seq);
       }
     }
   }

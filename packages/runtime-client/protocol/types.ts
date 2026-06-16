@@ -703,6 +703,9 @@ export interface BooleanResponse {
 
 export interface JSONValueResponse {
   value: JSONValue | undefined;
+  // PROTOTYPE: doc confirmed seq, so a pull (sync) establishes the handle's
+  // baseline seq for dropping stale pushes.
+  seq?: number;
 }
 
 export interface CellResponse {
@@ -736,6 +739,9 @@ export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
   value: JSONValue;
+  // PROTOTYPE: doc confirmed seq at emit time, so the client can drop a push
+  // older than what a handle already holds (stale-push clobber fix).
+  seq?: number;
 }
 
 export interface ConsoleNotification {

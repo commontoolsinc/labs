@@ -625,6 +625,32 @@ export class RuntimeProcessor {
     return ctx;
   }
 
+  // PROTOTYPE: doc confirmed seq for a cell ref, so the client can order/drop
+  // pushes. Returns undefined if unavailable.
+  private docSeq(
+    cellRef: { id: string; space: string; scope?: unknown },
+  ): number | undefined {
+    try {
+      const provider = this.runtime.storageManager.open(
+        cellRef.space as never,
+      ) as unknown as {
+        replica?: {
+          get(e: { id: string; type: string; scope?: unknown }):
+            | { since?: number }
+            | undefined;
+        };
+      };
+      const state = provider.replica?.get({
+        id: cellRef.id,
+        type: "application/json",
+        scope: (cellRef as { scope?: unknown }).scope,
+      });
+      return typeof state?.since === "number" ? state.since : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   handleCellGet(
     request: CellGetRequest,
   ): JSONValueResponse {
@@ -657,7 +683,7 @@ export class RuntimeProcessor {
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
     });
-    return { value: converted };
+    return { value: converted, seq: this.docSeq(request.cell) };
   }
 
   handleCellSet(request: CellSetRequest): void {
@@ -714,13 +740,15 @@ export class RuntimeProcessor {
       // `.sink` fires synchronously on invocation. Trigger the notification
       // in a microtask so that the subscription response returns
       // before a notification fires.
-      queueMicrotask(() =>
+      const seq = this.docSeq(request.cell);
+      queueMicrotask(() => {
         self.postMessage({
           type: NotificationType.CellUpdate,
           cell: request.cell,
           value: converted,
-        })
-      );
+          seq,
+        });
+      });
     });
 
     this.subscriptions.set(key, cancel);
