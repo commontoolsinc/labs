@@ -15,7 +15,6 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  JSONSchema,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
