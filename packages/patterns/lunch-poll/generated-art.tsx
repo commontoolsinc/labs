@@ -137,6 +137,10 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
     const url = computed(() =>
       safeImageUrl(sourceUrl) || safeImageUrl(generatedArt.result)
     );
+    const hasSourceUrl = computed(() => safeImageUrl(sourceUrl) !== "");
+    const hasGeneratedUrl = computed(() =>
+      safeImageUrl(generatedArt.result) !== ""
+    );
 
     const fetchState = computed(() => {
       if (safeImageUrl(sourceUrl)) return "stored";
@@ -166,10 +170,22 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
             justifyContent: "center",
           }}
         >
-          {url
+          {hasSourceUrl
             ? (
               <img
-                src={url}
+                src={sourceUrl}
+                alt=""
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            )
+            : hasGeneratedUrl
+            ? (
+              <img
+                src={generatedArt.result}
                 alt=""
                 style={{
                   width: "100%",

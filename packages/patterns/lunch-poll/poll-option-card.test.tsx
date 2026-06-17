@@ -186,6 +186,14 @@ export default pattern(() => {
     return remove !== undefined && logVisit !== undefined;
   });
 
+  const assert_stored_art_renders = computed(() =>
+    findNodeByProp(
+      card[UI],
+      "src",
+      STORED_OPTION.imageUrl,
+    ) !== undefined
+  );
+
   const assert_host_did_not_rewrite_stored_art = computed(() =>
     lastImageUrl.get() === ""
   );
@@ -196,6 +204,7 @@ export default pattern(() => {
       { assertion: assert_my_green_vote_styles_buttons },
       { assertion: assert_host_homepage_link_renders },
       { assertion: assert_host_controls_render },
+      { assertion: assert_stored_art_renders },
       { assertion: assert_host_did_not_rewrite_stored_art },
     ],
     card,
