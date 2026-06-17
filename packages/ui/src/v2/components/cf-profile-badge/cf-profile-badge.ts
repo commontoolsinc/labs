@@ -43,7 +43,7 @@ export type ProfileBadgeTooltip = {
 };
 
 /**
- * Extracts the tooltip details (bio + pinned-pattern count) from a subscribed
+ * Extracts the tooltip details (bio + pinned-piece count) from a subscribed
  * profile-cell value. `bio` is the owner-authored free-text description;
  * `pinnedCount` is the number of profile `elements` (pinned pieces / cards).
  * Both are best-effort: a badge bound to a derived projection (e.g. the
@@ -142,7 +142,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }
 
       /* CT-1648: hover/focus tooltip surfacing the profile's configured bio +
-        pinned-pattern count. Hidden until the badge is hovered or focused
+        pinned-piece count. Hidden until the badge is hovered or focused
         (keyboard focus drives it on touch/AT). pointer-events:none so it never
         intercepts the badge's own click/navigation. */
       .tooltip {
@@ -739,7 +739,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const auraStyle = verified ? `--seal-hue: ${hue};` : "";
 
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
-    // (bio + pinned-pattern count). Only rendered when there's something extra
+    // (bio + pinned-piece count). Only rendered when there's something extra
     // to show beyond the name already on the badge.
     const pinnedLabel = this._pinnedCount === 1
       ? "1 pinned piece"

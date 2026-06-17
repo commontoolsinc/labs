@@ -30,7 +30,7 @@ import {
  *   - the badge's bio + pinned-count hover tooltip (CT-1648).
  *
  * If cross-space profile reads work across users, viewer A hovering viewer B's
- * badge sees B's bio + pinned-pattern count. If they don't, this demo is exactly
+ * badge sees B's bio + pinned-piece count. If they don't, this demo is exactly
  * the harness that surfaces the gap.
  */
 

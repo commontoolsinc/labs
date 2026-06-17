@@ -450,7 +450,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       [NAME]: name.get(),
       name: name.get(),
       avatar: avatar.get(),
-      // Surfaced in the badge hover tooltip (CT-1648); the pinned-pattern count
+      // Surfaced in the badge hover tooltip (CT-1648); the pinned-piece count
       // populates on roster badges bound to the full profile cell.
       bio: bio.get(),
     }));
