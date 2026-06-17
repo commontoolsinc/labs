@@ -128,17 +128,24 @@ home-field convention is `homeSpaceCell.defaultPattern.profile`.
 
 ### Profile Space Identity
 
-Profile creation uses `PatternFactory.inSpace(...)`:
+Profile creation uses the **anonymous** `PatternFactory.inSpace()` (CT-1650):
 
 ```ts
-const profile = ProfileHome.inSpace(spaceName)({ initialName: name });
+const profile = ProfileHome.inSpace()({ initialName: name });
 ```
 
-When `spaceName` is a non-DID string, the runner resolves it during async
-post-run through the existing named-space derivation path. When the argument is
-omitted, the runner generates a fresh DID. The home default pattern's `profile`
-link is the durable source of truth after creation. Runtime-only `.inSpace`
-annotations are also rewritten to the resolved DID during post-run.
+The argument MUST be omitted. A *named* `inSpace(spaceName)` derives the space
+DID from `Identity.fromPassphrase("common user").derive(spaceName)` (the
+`createSession` spaceName path) — the name ALONE, ignoring the authenticated
+user — so two users picking the same profile name, or one user creating two
+same-named profiles, collide into a single shared space. The anonymous case
+instead derives a fresh DID from the creating handler's frame cause (per-user
+home-space input links + the durable per-event id), so the space is unique per
+user AND per creation event, stable across the cross-space-commit retry. The
+display name is therefore independent of the space identity (it flows only to
+`initialName` and stays editable). The home default pattern's `profile` link is
+the durable source of truth after creation, and runtime-only `.inSpace`
+annotations are rewritten to the resolved DID during post-run.
 
 ### Profile Default Pattern Output
 
@@ -212,8 +219,9 @@ If `profile` is missing:
 - render an input field for the user's profile name
 - submitting it stores the requested name, which drives a profile-creation
   action/lift
-- that action starts `system/profile-home.tsx` with `.inSpace(name)`, passes the
-  submitted name as the initial profile name, and writes the resulting profile
+- that action starts `system/profile-home.tsx` with the anonymous `.inSpace()`
+  (see Profile Space Identity above), passes the submitted name as the initial
+  profile name, and writes the resulting profile
   default-pattern link to `homeDefaultPattern.profile`
 
 If `profile` is present:
