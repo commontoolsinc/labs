@@ -2,6 +2,7 @@ import {
   computed,
   Default,
   handler,
+  type JSONValue,
   NAME,
   pattern,
   Stream,
@@ -24,16 +25,16 @@ interface WebhookPatternInput {
 export interface WebhookPatternOutput {
   [NAME]: string;
   [UI]: VNode;
-  webhookInbox: Stream<unknown>;
+  webhookInbox: Stream<JSONValue>;
   webhookConfig: WebhookConfig | null;
-  lastEvent: unknown;
+  lastEvent: JSONValue | null;
 }
 
 // ===== Handler =====
 
 const onWebhookEvent = handler<
-  unknown,
-  { lastEvent: Writable<unknown> }
+  JSONValue,
+  { lastEvent: Writable<JSONValue | null> }
 >((event, { lastEvent }) => {
   lastEvent.set(event);
 });
@@ -42,7 +43,7 @@ const onWebhookEvent = handler<
 
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
   ({ webhookConfig }) => {
-    const lastEvent = new Writable(null as unknown);
+    const lastEvent = new Writable<JSONValue | null>(null);
     const webhookInbox = onWebhookEvent({ lastEvent });
 
     const inboxDisplay = computed(() => {
