@@ -57,7 +57,6 @@ const EXCLUDED_PATTERN_FILES = new Set<string>([
   "packages/patterns/google/extractors/usps-informed-delivery.tsx",
   "packages/patterns/mod.ts",
   "packages/patterns/scrabble/scrabble-words.ts",
-  "packages/patterns/test/webhook-test.tsx",
   "packages/patterns/weekly-calendar/weekly-calendar.tsx",
 ]);
 

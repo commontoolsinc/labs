@@ -233,12 +233,12 @@ Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   // Create a link from A to A/foo using setRaw to bypass cycle detection on write
   cellA.setRaw(cellA.key("foo").getAsLink());
 
-  // resolveLink throws when it hits the iteration limit for growing path cycles
+  // resolveLink detects the self-subpath cycle on the first hop and throws
   let threw = false;
   try {
     resolveLink(runtime, tx, cellA.getAsNormalizedFullLink());
   } catch (e) {
-    if (e instanceof Error && e.message.includes("iteration limit")) {
+    if (e instanceof Error && e.message.includes("Link cycle detected")) {
       threw = true;
     } else {
       throw e;
@@ -246,7 +246,7 @@ Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   }
 
   if (!threw) {
-    throw new Error("Expected resolveLink to throw iteration limit error");
+    throw new Error("Expected resolveLink to throw a cycle error");
   }
 
   tx.commit();
