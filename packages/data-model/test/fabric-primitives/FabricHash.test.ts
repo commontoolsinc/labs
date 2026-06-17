@@ -80,17 +80,6 @@ describe("FabricHash", () => {
       });
     });
 
-    describe('["/"]', () => {
-      it("returns a copy of the raw hash bytes", () => {
-        const cid = new FabricHash(SAMPLE_HASH, "test2");
-        const slash = cid["/"];
-        expect(slash).toEqual(SAMPLE_HASH);
-        // Each call returns a fresh copy.
-        expect(slash).not.toBe(cid["/"]);
-        expect(cid.tag).toBe("test2");
-      });
-    });
-
     describe(".hashString", () => {
       it("returns base64url without the algorithm tag", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");

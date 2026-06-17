@@ -67,7 +67,9 @@ export function createRef(
       seen.add(obj);
     }
 
-    // Don't traverse into ids.
+    // Don't traverse into ids (a `FabricHash` is an entity id; a `{ "/": ... }`
+    // object is a serialized one).
+    if (obj instanceof FabricHash) return obj;
     if (isRecord(obj) && "/" in obj) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
