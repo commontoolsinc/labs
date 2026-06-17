@@ -142,6 +142,6 @@ export function getEntityId(value: any): { "/": string } | undefined {
   const entityId = { "/": fromURI(link.id) };
 
   if (link.path && link.path.length > 0) {
-    return createRef({ path: link.path }, entityId).toJSON!();
+    return { "/": createRef({ path: link.path }, entityId).taggedHashString };
   } else return entityId;
 }

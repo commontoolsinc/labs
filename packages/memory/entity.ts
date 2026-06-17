@@ -14,7 +14,7 @@ export type ToString<T> = string & { toString(): ToString<T> };
 export const entity = <T extends null | NonNullable<unknown>>(
   description: NonNullable<unknown> | null,
 ): Entity<T> => {
-  return { "@": hashOf(description).toJSON()["/"] };
+  return { "@": hashOf(description).taggedHashString };
 };
 
 export const toString = <T extends null | NonNullable<unknown>>(
@@ -31,7 +31,7 @@ export const fromString = <T extends null | NonNullable<unknown>>(
       }`,
     );
   } else {
-    return { "@": FabricHash.fromJson({ "/": source.slice(1) }).toJSON()["/"] };
+    return { "@": FabricHash.fromString(source.slice(1)).taggedHashString };
   }
 };
 
