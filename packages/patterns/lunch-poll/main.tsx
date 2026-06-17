@@ -908,8 +908,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       "SELECT count(*) AS n FROM visits",
       { reactOn: sqliteRev },
     );
-    const historyCount = computed(() => visitCount.result?.[0]?.n ?? 0);
-    const hasHistory = computed(() => (visitCount.result?.[0]?.n ?? 0) > 0);
+    const historyCount = computed(() => {
+      const counted = Number(visitCount.result?.[0]?.n ?? 0);
+      // The bounded row query is the source of truth for rendering. On deployed
+      // pieces, the aggregate count query can temporarily resolve as 0 while
+      // recentVisits already has rows after a source update.
+      return Math.max(counted, recentRows.length);
+    });
+    const hasHistory = computed(() => historyCount > 0);
+    const hasRecentRows = computed(() => recentRows.length > 0);
     const mostRecentTitle = computed(() =>
       recentVisits.result?.[0]?.title ?? ""
     );
@@ -1108,7 +1115,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
-                {participantIdentity}
+                {participantIdentity[UI]}
 
                 {/* Top choice — only when there are votes */}
                 {computed(() => {
@@ -1176,11 +1183,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 })}
 
                 {/* All options summary — only when there are options */}
-                {computed(() => {
-                  const list = ranked;
-                  if (!list || list.length === 0) return null;
-                  const viewer = me;
-                  return (
+                {options.length > 0
+                  ? (
                     <div
                       style={{
                         marginBottom: "16px",
@@ -1202,66 +1206,88 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       >
                         All options
                       </div>
-                      {list.map((tally) => (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "6px 10px",
-                            marginBottom: "4px",
-                            backgroundColor: "white",
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "6px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              flex: 1,
-                              fontSize: "13px",
-                              fontWeight: 500,
-                              color: "#111827",
-                            }}
-                          >
-                            {tally.option.title}
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "4px",
-                              flexWrap: "wrap",
-                              justifyContent: "flex-end",
-                            }}
-                          >
-                            {tally.voters.map((v) => (
-                              <span
-                                title={v.name}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                        }}
+                      >
+                        {options.map((option) => {
+                          const oid = option.id;
+                          const summaryRank = computed(() => {
+                            const idx = ranked.findIndex(
+                              (t) => t.option.id === oid,
+                            );
+                            return idx >= 0 ? idx + 1 : 9999;
+                          });
+                          return (
+                            <div
+                              style={{
+                                order: summaryRank,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "6px 10px",
+                                backgroundColor: "white",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "6px",
+                              }}
+                            >
+                              <div
                                 style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  minWidth: "22px",
-                                  height: "22px",
-                                  padding: "0 6px",
-                                  borderRadius: "9999px",
-                                  backgroundColor: VOTE_SWATCH[v.voteType],
-                                  color: "white",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  boxShadow: v.name === viewer
-                                    ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                    : "none",
+                                  flex: 1,
+                                  fontSize: "13px",
+                                  fontWeight: 500,
+                                  color: "#111827",
                                 }}
                               >
-                                {getInitials(v.name)}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                                {option.title}
+                              </div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "4px",
+                                  flexWrap: "wrap",
+                                  justifyContent: "flex-end",
+                                }}
+                              >
+                                {votes.map((vote) =>
+                                  vote.optionId === oid
+                                    ? (
+                                      <span
+                                        title={vote.voterName}
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          minWidth: "22px",
+                                          height: "22px",
+                                          padding: "0 6px",
+                                          borderRadius: "9999px",
+                                          backgroundColor:
+                                            VOTE_SWATCH[vote.voteType],
+                                          color: "white",
+                                          fontSize: "11px",
+                                          fontWeight: 700,
+                                          boxShadow: vote.voterName === me
+                                            ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                            : "none",
+                                        }}
+                                      >
+                                        {getInitials(vote.voterName)}
+                                      </span>
+                                    )
+                                    : null
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  );
-                })}
+                  )
+                  : null}
 
                 {/* Empty state */}
                 {computed(() => {
@@ -1351,7 +1377,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   VNode, so the interactive onClick handlers lower as handlers
                   rather than lifts ("$event in inputs" / non-idempotent trap). */
                 }
-                {hasHistory
+                {hasRecentRows
                   ? (
                     <div
                       style={{
@@ -1437,6 +1463,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         const entryId = entry.id;
                         return (
                           <div
+                            data-recent-visit-title={entry.title}
                             style={{
                               display: "flex",
                               alignItems: "baseline",

@@ -10,7 +10,11 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import GeneratedArt, { type GeneratedArtFetchState } from "./generated-art.tsx";
+import {
+  FOOD_FALLBACK_IMAGE,
+  type GeneratedArtFetchState,
+  generatedImageUrlFor,
+} from "./generated-art.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
@@ -247,18 +251,29 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
     const refresh = computed(() => Number(homePageRefresh.get() ?? 0));
-    const generatedArt = GeneratedArt({
-      prompt: option.title,
-      sourceUrl: option.imageUrl,
-      shouldGenerate: isAdmin,
+    const storedImageDisplay = computed(() =>
+      safeImageUrl(option.imageUrl) ? "block" : "none"
+    );
+    const generatedArtRequestUrl = computed(() => {
+      if (safeImageUrl(option.imageUrl)) return "";
+      if (!isAdmin) return "";
+      return generatedImageUrlFor(option.title);
+    });
+    const generatedArt = fetchData<string>({
+      url: generatedArtRequestUrl,
+      mode: "dataUrl",
+      options: {
+        mutexTimeoutMs: 30_000,
+      },
     });
 
     // Host persists the generated image returned by the image route as a data
     // URL. Other viewers render the stored value without running image-gen.
-    const artSyncState = computed(() => {
-      if (safeImageUrl(option.imageUrl)) return "stored";
-      if (!isAdmin) return "";
-      const url = safeImageUrl(generatedArt.url);
+    const storedArtSyncState = computed(() =>
+      safeImageUrl(option.imageUrl) ? "stored" : ""
+    );
+    const generatedArtSyncState = computed(() => {
+      const url = safeImageUrl(generatedArt.result);
       if (url) {
         setOptionImage.send({
           optionId: oid,
@@ -266,8 +281,14 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
         });
         return "stored";
       }
-      return generatedArt.fetchState;
+      if (generatedArt.pending) return "pending";
+      return generatedArt.error ? "error" : "requested";
     });
+    const artSyncState = storedArtSyncState
+      ? "stored"
+      : isAdmin
+      ? generatedArtSyncState
+      : "";
 
     const homePageSearch = fetchData<WebSearchResponse>({
       url: computed(() =>
@@ -387,7 +408,34 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
           data-homepage-sync={displayHomePageUrl}
         >
           {/* Pen-and-ink cuisine illustration (~1in square). */}
-          {generatedArt}
+          <div
+            style={{
+              width: "96px",
+              height: "96px",
+              flexShrink: 0,
+              borderRadius: "8px",
+              overflow: "hidden",
+              backgroundColor: "#f9fafb",
+              backgroundImage: `url("${FOOD_FALLBACK_IMAGE}")`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              border: "1px solid #eee",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <img
+              src={option.imageUrl}
+              alt=""
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: storedImageDisplay,
+              }}
+            />
+          </div>
           <span
             style={{
               minWidth: "28px",
