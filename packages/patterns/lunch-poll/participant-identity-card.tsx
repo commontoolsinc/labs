@@ -219,7 +219,7 @@ export default pattern<
                   timing-strategy="immediate"
                   style="flex:1"
                 />
-                <cf-button onClick={boundJoin}>Join</cf-button>
+                <cf-button onClick={() => boundJoin.send({})}>Join</cf-button>
               </div>
             </div>
           )}

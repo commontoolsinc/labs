@@ -93,6 +93,15 @@ const STORED_OPTION: Option = {
   imageUrl: "data:image/png;base64,stored",
 };
 
+const EMPTY_IMAGE_OPTION: Option = {
+  id: "opt-no-image",
+  title: "No Image Cafe",
+  addedByName: "Blair",
+  homePageUrl: "",
+  homePageUrlOverride: "",
+  imageUrl: "",
+};
+
 const votes: Vote[] = [
   {
     optionId: "opt-sushi",
@@ -123,6 +132,26 @@ export default pattern(() => {
     me: "Alex",
     isJoined: true,
     isAdmin: true,
+    votes,
+    cityLabel: "Berkeley, CA",
+    searchEndpoint: "",
+    homePageRefresh,
+    linkEditTarget,
+    linkDraft,
+    removeConfirmTarget,
+    castVote,
+    removeOption,
+    logVisit,
+    setOptionUrl,
+    setOptionHomePageUrl,
+    setOptionImage,
+  });
+  const noImageViewerCard = PollOptionCard({
+    option: EMPTY_IMAGE_OPTION,
+    rank: 2,
+    me: "Alex",
+    isJoined: true,
+    isAdmin: false,
     votes,
     cityLabel: "Berkeley, CA",
     searchEndpoint: "",
@@ -193,9 +222,11 @@ export default pattern(() => {
       STORED_OPTION.imageUrl,
     ) !== undefined
   );
-
   const assert_host_did_not_rewrite_stored_art = computed(() =>
     lastImageUrl.get() === ""
+  );
+  const assert_missing_art_is_not_marked_stored = computed(() =>
+    propValue(noImageViewerCard[UI], "data-art-sync") !== "stored"
   );
 
   return {
@@ -206,6 +237,7 @@ export default pattern(() => {
       { assertion: assert_host_controls_render },
       { assertion: assert_stored_art_renders },
       { assertion: assert_host_did_not_rewrite_stored_art },
+      { assertion: assert_missing_art_is_not_marked_stored },
     ],
     card,
   };
