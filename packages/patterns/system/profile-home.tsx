@@ -426,11 +426,16 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       const viewer = viewerProfile.result;
       return viewer !== undefined && equals(self, viewer) === true;
     });
-    // Edit form shows only when the owner has toggled into edit mode; visitors
-    // (and the owner before toggling) see the read-only presentation. Ownership
-    // is re-derived inline rather than referencing `isOwner` so each computed is
-    // self-contained (avoids nested-computed unwrap surprises).
-    const isEditing = computed(() => {
+    // `isEditing` is the raw view-toggle state (the user's intent), kept
+    // independent of ownership so it stays a clean, testable signal. The edit
+    // FORM is gated separately on `showEditForm` below; a visitor never sees the
+    // toggle button, so for them `editing` stays false in practice anyway.
+    const isEditing = computed(() => editing.get() === true);
+    // The edit form is shown only to the owner who has toggled into edit mode;
+    // visitors (and the owner before toggling) see the read-only presentation.
+    // Ownership is re-derived inline rather than referencing `isOwner` so each
+    // computed is self-contained (avoids nested-computed unwrap surprises).
+    const showEditForm = computed(() => {
       const viewer = viewerProfile.result;
       const owner = viewer !== undefined && equals(self, viewer) === true;
       return editing.get() === true && owner;
@@ -514,7 +519,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                 profile cell. The edit form is gated behind the toggle below. */
             }
             {ifElse(
-              isEditing,
+              showEditForm,
               null,
               <cf-vstack gap="4" data-ui-region="profile-presentation">
                 <cf-profile-badge
@@ -587,9 +592,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
               </cf-vstack>,
             )}
 
-            {/* The existing edit form, now revealed only in edit mode. */}
+            {/* The existing edit form, revealed only to the owner in edit mode. */}
             {ifElse(
-              isEditing,
+              showEditForm,
               <cf-vstack gap="4" data-ui-region="profile-edit">
                 <cf-vstack gap="2">
                   <label>Name</label>
