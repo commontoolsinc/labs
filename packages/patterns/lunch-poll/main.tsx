@@ -908,15 +908,18 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       "SELECT count(*) AS n FROM visits",
       { reactOn: sqliteRev },
     );
-    const historyCount = computed(() => {
-      const counted = Number(visitCount.result?.[0]?.n ?? 0);
-      // The bounded row query is the source of truth for rendering. On deployed
-      // pieces, the aggregate count query can temporarily resolve as 0 while
-      // recentVisits already has rows after a source update.
-      return Math.max(counted, recentRows.length);
-    });
-    const hasHistory = computed(() => historyCount > 0);
+    // The true total visit count (can exceed the LIMIT 8 the row query bounds
+    // itself to), used only as an exported scalar — never rendered directly.
+    const historyCount = computed(() => Number(visitCount.result?.[0]?.n ?? 0));
+    // "Is there any history?" gates visibility of the history-derived cards.
+    // The bounded row query is the rendering source of truth: on deployed
+    // pieces the aggregate count query can transiently resolve 0 while
+    // recentVisits already has rows after a source update, so gate on the rows.
+    // (Combining the two queries via Math.max() was glitch-prone — they settle
+    // independently, so on a delete the max could cling to a stale-high value
+    // and never reach the new lower count.)
     const hasRecentRows = computed(() => recentRows.length > 0);
+    const hasHistory = hasRecentRows;
     const mostRecentTitle = computed(() =>
       recentVisits.result?.[0]?.title ?? ""
     );
