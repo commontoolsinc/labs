@@ -91,7 +91,7 @@ const canFollowLinkHop = (
  *
  * It returns a `ResolvedFullLink` that points to a document that no longer has
  * any links between the top and the value at `link.path`. When a cycle is
- * detected, a warning is logged and a static link to `undefined` returned.
+ * detected, an error is logged and thrown.
  *
  * `lastNode` controls whether to follow links on the last path segment. By
  * default all links are followed, but if `lastNode` is `LastNode.WriteRedirect`
@@ -107,13 +107,16 @@ const canFollowLinkHop = (
  * - A/foo → A/foo
  * - A → B → C → A
  *
- * But there are cycles that can lead to growing paths, e.g.
- * - A → A/foo
+ * A link whose target passes back through the link's own position in the same
+ * document (e.g. A → A/foo) makes the path grow on every hop, so the pair
+ * never repeats; that shape is detected separately on the first hop.
+ *
+ * Growing-path cycles that span documents, e.g.
  * - A → B, B → A/foo
  *
- * These are difficult to detect, since there are many legitimate cases for the
- * same link to be followed several times, so instead we just have an upper
- * bound of 1000 iterations, and log a warning.
+ * are difficult to detect, since there are many legitimate cases for the
+ * same link to be followed several times, so they are bounded by an upper
+ * limit of `MAX_PATH_RESOLUTION_LENGTH` iterations, which throws.
  *
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
@@ -281,6 +284,24 @@ export function resolveLink(
         ]);
         link = undefinedDataLink(link);
         break;
+      }
+      // A link whose target passes back through the link's own position can
+      // never resolve: the value at that position is the link itself, so
+      // every hop re-follows it with a longer path and the (document, path)
+      // cycle key never repeats. Detect this on the first hop.
+      const hopSource = nextHop.source;
+      const hopTarget = nextHop.link;
+      if (
+        hopTarget.space === hopSource.space &&
+        hopTarget.id === hopSource.id &&
+        hopTarget.scope === hopSource.scope &&
+        hopTarget.path.length > hopSource.path.length &&
+        hopSource.path.every((part, i) => hopTarget.path[i] === part)
+      ) {
+        const detail = `link at [${hopSource.path.join("/")}] targets its ` +
+          `own subpath [${hopTarget.path.join("/")}]`;
+        logger.error("link-res-error", `Link cycle detected: ${detail}`);
+        throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       recordDereferenceHop(tx, nextHop);
       const nextLink = nextHop.link;
