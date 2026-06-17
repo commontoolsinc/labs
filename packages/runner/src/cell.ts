@@ -70,6 +70,7 @@ import {
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
+import { excludeReadFromConflict } from "./storage/reactivity-log.ts";
 import {
   type Action,
   ignoreReadForScheduling,
@@ -1151,6 +1152,25 @@ export class CellImpl<T extends FabricValue>
      * the post-commit outbox for external side effects that must happen only
      * after success.
      */
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): Cell<T> {
+    // Run the write under an ambient "exclude from conflict" read meta so the
+    // write machinery's reads (link resolution of the target + the diff read of
+    // the slot being written) are not recorded as conflict dependencies — a
+    // blind write logically depends on nothing. Genuine handler reads happen
+    // during argument evaluation, before set() runs, so they are not wrapped and
+    // still take a dependency (read-modify-write still conflicts).
+    if (this.tx) {
+      return this.tx.runWithAmbientReadMeta(
+        excludeReadFromConflict,
+        () => this.#setInner(newValue, onCommit),
+      );
+    }
+    return this.#setInner(newValue, onCommit);
+  }
+
+  #setInner(
+    newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(

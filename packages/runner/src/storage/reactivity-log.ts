@@ -63,6 +63,29 @@ export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {
   return meta?.[markReadAsAttemptedWriteMarker] === true;
 }
 
+// Marks reads performed by WRITE MACHINERY
+// (link resolution of the write target + the diff read of the slot being
+// written). These are NOT genuine read-dependencies of the writer — a blind
+// write is a pure producer that depends on nothing — so they must NOT be
+// recorded as conflict dependencies (else two writes to DIFFERENT keys of one
+// document collide via the writer's incidental container/target reads and the
+// peer add-patch's parent-injection). They stay in the journal for reactivity;
+// only the commit-time conflict set (buildReads) excludes them. Genuine handler
+// reads happen OUTSIDE the write op (argument evaluation precedes set()), so
+// they are not tagged and still take a dependency (read-modify-write still
+// conflicts). Orthogonal to attemptedWrite (CFC) and schedulerDependency.
+const excludeReadFromConflictMarker: unique symbol = Symbol(
+  "excludeReadFromConflictMarker",
+);
+
+export const excludeReadFromConflict: Metadata = {
+  [excludeReadFromConflictMarker]: true,
+};
+
+export function isReadExcludedFromConflict(meta?: Metadata): boolean {
+  return meta?.[excludeReadFromConflictMarker] === true;
+}
+
 export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
   return meta?.[allowMutableTransactionReadMarker] === true;
 }

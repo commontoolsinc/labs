@@ -77,6 +77,7 @@ import type {
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
+import { isReadExcludedFromConflict } from "./reactivity-log.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
@@ -1886,6 +1887,17 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
 
+      // Reads performed by write machinery (link resolution of the target + the
+      // diff read of the slot being written) are tagged excludeReadFromConflict
+      // via the ambient meta set in Cell.set. They are NOT genuine
+      // read-dependencies — a blind write depends on nothing — so excluding them
+      // lets two writes to DIFFERENT keys of one document merge instead of
+      // colliding. They remain in the journal for reactivity; genuine handler
+      // reads (evaluated before set()) are unmarked and still recorded.
+      if (isReadExcludedFromConflict(read.meta)) {
+        continue;
+      }
+
       const scope = normalizeCellScope(read.scope);
       const record = this.#docs.get(docKey(read.id as URI, scope));
       const pendingLocalSeq = record?.pending
@@ -1911,14 +1923,13 @@ class SpaceReplica implements ISpaceReplica {
         });
       }
     }
-    return {
-      confirmed: compactCommitReads(this.#space, confirmed).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-      pending: compactCommitReads(this.#space, pending).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-    };
+    const confirmedCompacted = compactCommitReads(this.#space, confirmed).map((
+      { nonRecursive: _skip, ...read },
+    ) => read);
+    const pendingCompacted = compactCommitReads(this.#space, pending).map((
+      { nonRecursive: _skip, ...read },
+    ) => read);
+    return { confirmed: confirmedCompacted, pending: pendingCompacted };
   }
 
   private applySessionSync(
