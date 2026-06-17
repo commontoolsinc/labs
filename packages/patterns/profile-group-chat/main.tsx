@@ -25,9 +25,10 @@ import {
  *     `wish({ query: "#profile" })`, and the live profile **cell** is stored on
  *     each message — cross-space reads resolve for any viewer (CT-1667/1687), so
  *     every identity in the UI renders through the trusted, first-class
- *     `<cf-profile-badge>`: messages as `full` badges, the participant strip as
- *     `chip` badges, the viewer's own as `full`. Each badge carries the
- *     verified-identity seal and links to that person's profile.
+ *     `<cf-profile-badge>`: message gutters as `circle` badges (avatar + seal,
+ *     with a plain name label), the participant strip as `chip` badges, the
+ *     viewer's own as `full`. Each badge carries the verified-identity seal and
+ *     links to that person's profile.
  *   - A snapshot of name/avatar rides alongside the cell as a durable fallback
  *     label (used for participant dedup and if the live cell is momentarily
  *     unresolved).
@@ -185,28 +186,30 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
             </cf-vstack>
 
             {
-              /* Messages — each sender's identity is a first-class `full` badge
-              (avatar + name + seal, navigable to their profile); the body sits
-              indented beneath it. */
+              /* Messages — classic chat layout: the sender's avatar as a
+              `circle` profile badge (verified seal ring, navigable to their
+              profile) in the gutter, with the name as a plain text label above
+              the body. */
             }
             <cf-vstack gap="3" style={{ minHeight: "160px" }}>
               {messages.map((message) => (
-                <cf-vstack gap="1">
+                <cf-hstack gap="2" align="start">
                   <cf-profile-badge
-                    variant="full"
+                    variant="circle"
                     size="sm"
                     $profile={message.authorProfile}
                   />
-                  <span
-                    style={{
-                      fontSize: "0.875rem",
-                      whiteSpace: "pre-wrap",
-                      marginLeft: "1.875rem",
-                    }}
-                  >
-                    {message.body}
-                  </span>
-                </cf-vstack>
+                  <cf-vstack gap="0">
+                    <span style={{ fontSize: "0.8125rem", fontWeight: "600" }}>
+                      {message.author}
+                    </span>
+                    <span
+                      style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap" }}
+                    >
+                      {message.body}
+                    </span>
+                  </cf-vstack>
+                </cf-hstack>
               ))}
             </cf-vstack>
 

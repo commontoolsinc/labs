@@ -227,11 +227,15 @@ variants, all carrying the seal/glint (CT-1761):
 
 Storing a live profile **cell** in shared state is what lets every viewer render
 the badge. Keep that shared state **object-wrapped** (`{ items: [...] }`, like the
-roster's `Roster`) rather than a bare `Writable<T[]>`: a bare array with a nested
-live cell unwraps to a weak object and breaks CTS handler-state / `.get()`-snapshot
-output typing (group-chat's message array avoids it by outputting the raw
-`PerSpace` cell; scrabble's `players` array, output as a `.get()` snapshot, hits
-it — so its scoreboard still badges only the viewer's own card).
+roster's `Roster` or scrabble's `PlayerRoster`) rather than a bare
+`Writable<T[]>`: a bare array with a nested live cell unwraps to a weak object and
+breaks CTS handler-state / `.get()`-snapshot output typing. Two rules make it
+work (see `scrabble.tsx`): type the **input** value-side — `PerSpace<Roster>`,
+not `PerSpace<Writable<Roster>>` (handlers still take `Writable<Roster>` state, so
+the body uses field access `players.list` while handlers use `.get()`/`.key()`);
+and type the **output** as a profile-less view (`Omit<Player, "profile">`) so the
+flat `.get()` snapshot doesn't try to reconcile the live cell. With both, the
+whole scrabble scoreboard renders `circle` badges for every player.
 
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
