@@ -51,7 +51,7 @@ export function deriveDiskHandleId(space: string, absPath: string): string {
     scheme: "sqlite",
   });
   // The canonical id string is the tagged-hash form, matching
-  // `handle.entityId["/"]` — the form the runtime uses for a db handle's
-  // `value.id`.
+  // `entityRefToString(handle.entityId)` — the form the runtime uses for a db
+  // handle's `value.id`.
   return ref.taggedHashString;
 }

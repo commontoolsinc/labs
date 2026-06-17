@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
@@ -106,7 +107,7 @@ describe("cell-map", () => {
       // Use Cell API to retrieve by entity ID
       const retrievedCell = runtime.getCellFromEntityId<{ value: number }>(
         space,
-        entityIdFrom(c.entityId!["/"]),
+        entityIdFrom(entityRefToString(c.entityId)),
       );
 
       // Verify we got the same cell
@@ -132,7 +133,9 @@ describe("cell-map", () => {
       const json = JSON.parse(JSON.stringify(c));
       expect(json["/"]).toBeDefined();
       expect(json["/"][LINK_V1_TAG]).toBeDefined();
-      expect(json["/"][LINK_V1_TAG].id).toContain(c.entityId!["/"].toString());
+      expect(json["/"][LINK_V1_TAG].id).toContain(
+        entityRefToString(c.entityId),
+      );
       expect(json["/"][LINK_V1_TAG].path).toEqual([]);
       expect(json["/"][LINK_V1_TAG].space).toEqual(space);
     });

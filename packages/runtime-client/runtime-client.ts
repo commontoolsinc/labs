@@ -38,6 +38,7 @@ import {
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commonfabric/runner/schemas";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { RuntimeTransport } from "./client/transport.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import {
@@ -127,7 +128,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   // could be built using this
   async getCell<T>(
     space: DID,
-    cause: JSONValue,
+    cause: FabricValue,
     schema?: JSONSchema,
   ): Promise<CellHandle<T>> {
     const response = await this.#conn.request<RequestType.GetCell>({

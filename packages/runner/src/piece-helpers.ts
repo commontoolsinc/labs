@@ -1,3 +1,7 @@
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 import { type Cell, isCell } from "./cell.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
@@ -64,9 +68,7 @@ export function resolveCellPath<T>(
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
   const id = cell.entityId;
-  if (!id) return undefined;
-  const idValue = id["/"];
-  return typeof idValue === "string" ? idValue : undefined;
+  return isEntityRef(id) ? entityRefToString(id) : undefined;
 }
 
 export function getResultCellWithSourceSchema<T = unknown>(

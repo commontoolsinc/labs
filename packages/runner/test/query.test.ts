@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
@@ -78,14 +79,14 @@ describe("Query", () => {
       tx,
     );
     testCell1.set(docValue1);
-    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
+    const entityId1 = entityRefToString(testCell1.entityId);
     const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}`,
+      of: `of:${entityId1}`,
       is: { value: testCell1.get() },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId1["/"]}`,
+        of: `of:${entityId1}`,
       }),
       since: 1,
     };
@@ -93,7 +94,7 @@ describe("Query", () => {
       name: {
         "/": {
           [LINK_V1_TAG]: {
-            id: `of:${entityId1["/"]}`,
+            id: `of:${entityId1}`,
             path: ["employees", "0", "fullName"],
           },
         },
@@ -108,14 +109,14 @@ describe("Query", () => {
       tx,
     );
     testCell2.setRaw(docValue2);
-    const entityId2 = testCell2.entityId!;
+    const entityId2 = entityRefToString(testCell2.entityId);
     const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}`,
+      of: `of:${entityId2}`,
       is: { value: docValue2 },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId2["/"]}`,
+        of: `of:${entityId2}`,
       }),
       since: 2,
     };
@@ -155,10 +156,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -181,14 +182,14 @@ describe("Query", () => {
       tx,
     );
     testCell1.set({ employees: [{ name: { first: "Bob" } }] });
-    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
+    const entityId1 = entityRefToString(testCell1.entityId);
     const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}`,
+      of: `of:${entityId1}`,
       is: { value: testCell1.get() },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId1["/"]}`,
+        of: `of:${entityId1}`,
       }),
       since: 1,
     };
@@ -204,21 +205,21 @@ describe("Query", () => {
       name: {
         "/": {
           [LINK_V1_TAG]: {
-            id: `of:${entityId1["/"]}`,
+            id: `of:${entityId1}`,
             path: ["employees", "0", "name"],
           },
         },
       },
     };
     testCell2.setRaw(docValue2);
-    const entityId2 = testCell2.entityId!;
+    const entityId2 = entityRefToString(testCell2.entityId);
     const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}`,
+      of: `of:${entityId2}`,
       is: { value: docValue2 },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId2["/"]}`,
+        of: `of:${entityId2}`,
       }),
       since: 2,
     };
@@ -251,10 +252,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -300,16 +301,16 @@ describe("Query", () => {
         },
       },
     });
-    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
+    const entityId1 = entityRefToString(testCell1.entityId);
     const assert1 = {
       the: "application/json" as MIME,
-      of: `of:${entityId1["/"]}` as URI,
+      of: `of:${entityId1}` as URI,
       is: {
         value: {
           name: {
             "/": {
               [LINK_V1_TAG]: {
-                id: `of:${entityId1["/"]}`,
+                id: `of:${entityId1}`,
                 path: ["name"],
               },
             },
@@ -318,7 +319,7 @@ describe("Query", () => {
       },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId1["/"]}`,
+        of: `of:${entityId1}`,
       }),
       since: 1,
     };
@@ -345,7 +346,7 @@ describe("Query", () => {
       value: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1}`,
     );
     expect(selectorSet1?.size).toBe(2);
     expect(selectorSet1).toContainEqual({ path: ["value"], schema });
@@ -500,14 +501,14 @@ describe("Query", () => {
       tx,
     );
     testCell1.set(docValue1);
-    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
+    const entityId1 = entityRefToString(testCell1.entityId);
     const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}`,
+      of: `of:${entityId1}`,
       is: { value: testCell1.get() },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId1["/"]}`,
+        of: `of:${entityId1}`,
       }),
       since: 1,
     };
@@ -517,7 +518,7 @@ describe("Query", () => {
         address: {
           "/": {
             [LINK_V1_TAG]: {
-              id: `of:${entityId1["/"]}`,
+              id: `of:${entityId1}`,
               path: ["home"],
             },
           },
@@ -538,14 +539,14 @@ describe("Query", () => {
       schema,
     };
 
-    const entityId2 = testCell2.entityId!;
+    const entityId2 = entityRefToString(testCell2.entityId);
     const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}`,
+      of: `of:${entityId2}`,
       is: { value: testCell2.getRaw() },
       cause: hashOf({
         the: "application/json",
-        of: `of:${entityId2["/"]}`,
+        of: `of:${entityId2}`,
       }),
       since: 2,
     };
@@ -575,10 +576,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);

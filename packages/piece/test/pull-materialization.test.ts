@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { NAME, Pattern, Runtime } from "@commonfabric/runner";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
@@ -192,7 +193,7 @@ describe("piece pull materialization", () => {
 
     await manager.runWithPattern(
       trustPattern(runtime, tenfoldPattern()),
-      piece.entityId!["/"] as string,
+      entityRefToString(piece.entityId),
       { input: 5 },
       { start: true },
     );
@@ -267,7 +268,7 @@ describe("piece pull materialization", () => {
 
     await manager.runWithPattern(
       trustPattern(runtime, tenfoldPattern()),
-      piece.entityId!["/"] as string,
+      entityRefToString(piece.entityId),
       { input: 5 },
       { start: true },
     );
@@ -293,7 +294,7 @@ describe("piece pull materialization", () => {
 
     await manager.runWithPattern(
       trustPattern(runtime, namedPattern("tenfold", 10)),
-      piece.entityId!["/"] as string,
+      entityRefToString(piece.entityId),
       { input: 5 },
       { start: true },
     );

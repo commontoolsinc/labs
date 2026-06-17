@@ -1,4 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
@@ -288,9 +289,10 @@ export class RuntimeInternals extends EventTarget {
 
   async getSlugCell(space: DID, slug: string): Promise<CellHandle<unknown>> {
     this.#check();
-    return await this.#client.getCell(space, {
-      "/": slugIdForSpace(space, slug),
-    });
+    return await this.#client.getCell(
+      space,
+      entityRefFromString(slugIdForSpace(space, slug)),
+    );
   }
 
   async getSlug(space: DID, id: string): Promise<string | undefined> {

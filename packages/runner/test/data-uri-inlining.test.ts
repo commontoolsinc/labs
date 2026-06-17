@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -482,7 +483,7 @@ describe("data URI inlining", () => {
       const linkToOtherDoc = {
         "/": {
           [LINK_V1_TAG]: {
-            id: linkedCell.entityId["/"],
+            id: entityRefToString(linkedCell.entityId),
             path: [],
             schema: {
               type: "object",
@@ -646,7 +647,7 @@ describe("data URI inlining", () => {
       const linkWithSchema = {
         "/": {
           [LINK_V1_TAG]: {
-            id: docCell.entityId["/"],
+            id: entityRefToString(docCell.entityId),
             path: [],
             schema: {
               type: "object",

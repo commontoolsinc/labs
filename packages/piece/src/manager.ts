@@ -20,6 +20,11 @@ import {
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import {
+  type EntityRef,
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type Session } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
@@ -374,10 +379,10 @@ export class PieceManager {
       }
 
       // Helper function to add a matching piece to the result
-      const addMatchingPiece = (docId: { "/": string }) => {
-        if (!docId || !docId["/"]) return;
+      const addMatchingPiece = (docId: EntityRef) => {
+        if (!isEntityRef(docId)) return;
 
-        const entityIdStr = docId["/"];
+        const entityIdStr = entityRefToString(docId);
 
         // Skip if we've already processed this entity
         if (seenEntityIds.has(entityIdStr)) return;
@@ -386,7 +391,7 @@ export class PieceManager {
         // Find matching piece by entity ID
         const matchingPiece = allPieces.find((c) => {
           const cId = getEntityId(c);
-          return cId && docId["/"] === cId["/"];
+          return isEntityRef(cId) && entityRefToString(cId) === entityIdStr;
         });
 
         if (matchingPiece) {
@@ -514,11 +519,9 @@ export class PieceManager {
     // Helper function to add a matching piece to the result
     const addReadingPiece = (otherPiece: Cell<unknown>) => {
       const otherPieceId = getEntityId(otherPiece);
-      if (!otherPieceId || !otherPieceId["/"]) return;
+      if (!isEntityRef(otherPieceId)) return;
 
-      const entityIdStr = typeof otherPieceId["/"] === "string"
-        ? otherPieceId["/"]
-        : JSON.stringify(otherPieceId["/"]);
+      const entityIdStr = entityRefToString(otherPieceId);
 
       // Skip if we've already processed this entity
       if (seenEntityIds.has(entityIdStr)) return;
@@ -1027,11 +1030,9 @@ function followCellToResult(
 
   try {
     const docId = cell.entityId;
-    if (!docId || !docId["/"]) return undefined;
+    if (!isEntityRef(docId)) return undefined;
 
-    const docIdStr = typeof docId["/"] === "string"
-      ? docId["/"]
-      : JSON.stringify(docId["/"]);
+    const docIdStr = entityRefToString(docId);
 
     // Prevent cycles
     if (visited.has(docIdStr)) return undefined;

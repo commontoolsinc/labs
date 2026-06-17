@@ -11,6 +11,7 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
@@ -232,7 +233,7 @@ export interface CellGetCfcLabelRequest extends BaseRequest {
 export interface GetCellRequest extends BaseRequest {
   type: RequestType.GetCell;
   space: DID;
-  cause: JSONValue;
+  cause: FabricValue;
   schema?: JSONSchema;
 }
 
