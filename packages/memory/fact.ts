@@ -171,7 +171,7 @@ export function normalizeFact<
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? FabricHash.fromJson(arg.cause as unknown as { "/": string })
+    ? FabricHash.fromString((arg.cause as unknown as { "/": string })["/"])
     : hashOf({
       the: arg.cause.the,
       of: arg.cause.of,

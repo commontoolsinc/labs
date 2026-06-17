@@ -39,9 +39,5 @@ export function slugCause(space: MemorySpace, slug: string): SlugCause {
 }
 
 export function slugIdForSpace(space: MemorySpace, slug: string): string {
-  const id = hashOf({ causal: slugCause(space, slug) }).toJSON?.()["/"];
-  if (typeof id !== "string") {
-    throw new Error("Could not derive slug id.");
-  }
-  return id;
+  return hashOf({ causal: slugCause(space, slug) }).taggedHashString;
 }

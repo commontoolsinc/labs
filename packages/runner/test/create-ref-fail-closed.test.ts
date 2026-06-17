@@ -23,12 +23,12 @@ describe("createRef fail-closed", () => {
   it("derives a stable id from concrete inputs (unchanged)", () => {
     const a = createRef({ x: 1, y: "z" }, "cause");
     const b = createRef({ x: 1, y: "z" }, "cause");
-    expect(a.toJSON!()).toEqual(b.toJSON!());
+    expect(a.taggedHashString).toEqual(b.taggedHashString);
   });
 
   it("still mints a fresh id when no cause is given (documented behavior)", () => {
     const a = createRef({ x: 1 });
     const b = createRef({ x: 1 });
-    expect(a.toJSON!()).not.toEqual(b.toJSON!());
+    expect(a.taggedHashString).not.toEqual(b.taggedHashString);
   });
 });

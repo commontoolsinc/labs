@@ -33,16 +33,6 @@ describe("FabricHash", () => {
       });
     });
 
-    describe("toJSON()", () => {
-      it("produces `{ '/': 'fid1:<base64>' }`", () => {
-        const cid = new FabricHash(SAMPLE_HASH, "fid1");
-        const json = cid.toJSON();
-        expect(typeof json["/"]).toBe("string");
-        expect(json["/"].startsWith("fid1:")).toBe(true);
-        expect(json["/"]).toBe(cid.toString());
-      });
-    });
-
     describe(".bytes", () => {
       it("returns a defensive copy", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");
@@ -108,18 +98,6 @@ describe("FabricHash", () => {
   });
 
   describe("static members", () => {
-    describe("fromJson()", () => {
-      it("works on the result of the instance method `toJSON()`", () => {
-        const original = new FabricHash(SAMPLE_HASH, "fid1");
-        const json = original.toJSON();
-        const reconstructed = FabricHash.fromJson(json);
-
-        expect(reconstructed).toBeInstanceOf(FabricHash);
-        expect(reconstructed.toString()).toBe(original.toString());
-        expect(reconstructed.bytes).toEqual(original.bytes);
-      });
-    });
-
     describe("fromString()", () => {
       it("works on the result of the instance method `toString()`", () => {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.

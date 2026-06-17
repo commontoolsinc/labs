@@ -13,7 +13,8 @@ const BASE_URIS = [
 ] as const;
 const PATTERN_ID = "bench-pattern:source-topology";
 const PATTERN_URI = `of:${
-  hashOf({ causal: { patternId: PATTERN_ID, type: "pattern" } }).toJSON()["/"]
+  hashOf({ causal: { patternId: PATTERN_ID, type: "pattern" } })
+    .taggedHashString
 }` as const;
 
 type TestProvider = ReturnType<typeof StorageManager.emulate> extends {

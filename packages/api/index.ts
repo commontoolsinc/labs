@@ -106,7 +106,6 @@ export interface FabricHash extends FabricPrimitive {
   readonly length: number;
   readonly hashString: string;
   toString(): string;
-  toJSON(): { "/": string };
 }
 
 export interface FabricHashConstructor {

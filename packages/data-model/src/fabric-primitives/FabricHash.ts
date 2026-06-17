@@ -108,23 +108,6 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   }
 
   /**
-   * Returns the JSON representation: `{ '/': '<tag>:<base64urlHash>' }`.
-   * Preserves the `{"/": string}` shape used by `Reference.View.toJSON()`.
-   */
-  toJSON(): { "/": string } {
-    return { "/": this.#fullStringForm };
-  }
-
-  /**
-   * Parses an instance from its legacy JSON representation
-   * `{ '/': '<tag>:<base64urlHash>' }` (same as what is _produced_ by
-   * `toJSON()`).
-   */
-  static fromJson(source: { "/": string }): FabricHash {
-    return this.fromString(source["/"]);
-  }
-
-  /**
    * Parses an instance from its string representation
    * (`<tag>:<base64urlHash>`).
    */

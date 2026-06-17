@@ -136,7 +136,7 @@ function schedulerRawActionName(
     name: rawTargetName,
     inputs: inputCells.map(schedulerActionLinkIdentity),
     outputs: outputCells.map(schedulerActionLinkIdentity),
-  }).toJSON()["/"].slice(0, 12);
+  }).hashString.slice(0, 12);
   return `raw:${rawTargetName}:${identity}`;
 }
 
@@ -154,7 +154,7 @@ function schedulerJavaScriptActionName(
     ),
     reads: reads.map(schedulerActionLinkIdentity),
     writes: writes.map(schedulerActionLinkIdentity),
-  }).toJSON()["/"].slice(0, 12);
+  }).hashString.slice(0, 12);
   return `action:${actionName}:${identity}`;
 }
 
