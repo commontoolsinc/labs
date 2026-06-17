@@ -4256,11 +4256,13 @@ interface CFProfileBadgeAttributes<T> extends CFHTMLAttributes<T> {
   "$profile"?: CellLike<any>;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   /**
-   * Badge shape (CT-1761), all carrying the same verification treatment:
-   * `full` (default) = avatar + name + shield; `chip` = compact name + seal dot
-   * (no avatar); `circle` = avatar + seal ring only (name on hover / for AT).
+   * Badge shape (CT-1761), all carrying the same generative seal (aura ring +
+   * cursor glint — there is no shield icon): `full` (default) = avatar + name;
+   * `chip` = compact name + seal dot (no avatar); `circle` = avatar + seal ring
+   * only (name on hover / for AT); `hero` = large avatar-over-name for a profile
+   * page header (pair with `noNavigate`).
    */
-  "variant"?: "full" | "chip" | "circle" | CellLike<string>;
+  "variant"?: "full" | "chip" | "circle" | "hero" | CellLike<string>;
   /**
    * Suppress click-to-navigate. Set when the badge is bound to a derived view
    * of a profile (e.g. the self-badge on a profile-home page) rather than the

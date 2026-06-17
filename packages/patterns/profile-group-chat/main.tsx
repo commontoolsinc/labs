@@ -2,6 +2,7 @@ import {
   type Cell,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -131,16 +132,19 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
 
     const messageCount = messages.length;
 
-    // Distinct participants (deduped by author name), derived from the shared
-    // log — the roster, rendered as a strip of `chip` profile badges bound to
-    // each contributor's live profile cell.
+    // Distinct participants, derived from the shared log — the roster, rendered
+    // as a strip of `chip` profile badges bound to each contributor's live
+    // profile cell. Dedupe by profile-CELL identity (`equals`), never the
+    // display name: two distinct people can share a name ("Ben" + "Ben"), and
+    // each is a separate participant — keying on the name would collapse them.
     const participants = computed<{ name: string; profile: ChatProfileCell }[]>(
       () => {
-        const seen = new Set<string>();
         const out: { name: string; profile: ChatProfileCell }[] = [];
         for (const m of messages ?? []) {
-          if (m && m.author && m.authorProfile && !seen.has(m.author)) {
-            seen.add(m.author);
+          if (
+            m && m.authorProfile &&
+            !out.some((p) => equals(p.profile, m.authorProfile))
+          ) {
             out.push({ name: m.author, profile: m.authorProfile });
           }
         }

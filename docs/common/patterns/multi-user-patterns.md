@@ -214,16 +214,18 @@ the self-containment fallback (renders with remote profile spaces offline). See
 `packages/patterns/lunch-poll/main.tsx`.
 
 **`<cf-profile-badge>` is the one idiomatic way to render an identity** — avatar +
-name + the runtime-attested verification seal, navigable to the person's profile.
-Prefer it anywhere an identity appears (rosters, message authors, "playing as",
-scoreboards); inline a name into a string only as an explicit fallback. Three
-variants, all carrying the seal/glint (CT-1761):
+name + the runtime-attested generative seal (a DID-derived aura ring + cursor
+glint; there is no shield icon), navigable to the person's profile. Prefer it
+anywhere an identity appears (rosters, message authors, "playing as",
+scoreboards); inline a name into a string only as an explicit fallback. Four
+variants, all carrying the same seal (CT-1761):
 
 | variant | shows | use for |
 | ------- | ----- | ------- |
-| `full` (default) | avatar + name + seal | profile pages, roster rows, "playing as", message authors |
+| `full` (default) | avatar + name pill | roster rows, "playing as" |
 | `chip` | name + compact seal dot (no avatar) | inline names in dense UI, participant strips |
 | `circle` | avatar + seal ring only (name on hover / for AT) | avatar strips, message gutters |
+| `hero` | large avatar over name | profile page header (pair with `noNavigate`) |
 
 Storing a live profile **cell** in shared state is what lets every viewer render
 the badge. Keep that shared state **object-wrapped** (`{ items: [...] }`, like the

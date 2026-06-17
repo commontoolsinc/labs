@@ -84,7 +84,7 @@ describe("CFProfileBadge", () => {
       // The render branches (avatar vs seal-dot, name on/off, shield on/off,
       // circle aria-label, inline accent styles) must all be reachable without a
       // DOM. The real visual check is the browser pass; this guards the wiring.
-      for (const variant of ["full", "chip", "circle"] as const) {
+      for (const variant of ["full", "chip", "circle", "hero"] as const) {
         const el = new CFProfileBadge() as any;
         el.variant = variant;
         el._name = "Ada";
