@@ -1062,7 +1062,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   const piece = {
     id: "of:entity-123",
     name: () => "Sparse Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "Sparse Fixture" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () =>
         Promise.resolve(
@@ -1079,7 +1079,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   interface SparsePiece {
     id: string;
     name(): string;
-    getPatternMeta(): Promise<{ patternName: string }>;
+    getPatternMeta(): Promise<{ program?: unknown }>;
     input: {
       getCell(): Promise<FakeCell>;
       get(): Promise<unknown>;
@@ -1187,7 +1187,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const piece = {
     id: "of:entity-123",
     name: () => "Mixed Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "Mixed Fixture" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () =>
         Promise.resolve(
@@ -1204,7 +1204,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   interface MixedPiece {
     id: string;
     name(): string;
-    getPatternMeta(): Promise<{ patternName: string }>;
+    getPatternMeta(): Promise<{ program?: unknown }>;
     input: {
       getCell(): Promise<FakeCell>;
       get(): Promise<unknown>;

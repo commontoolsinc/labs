@@ -42,8 +42,11 @@ export interface SchedulerGraphNode {
   // Timing controls
   debounceMs?: number; // Current debounce delay in ms (if set)
   throttleMs?: number; // Current throttle period in ms (if set)
-  // Pattern association
-  patternId?: string; // ID of the pattern this action belongs to -- without `of:`
+  // Pattern association: the content-addressed { identity, symbol } of the
+  // pattern this action belongs to (the only pattern pointer post-patternId
+  // retirement). `identity` is a module content hash; `symbol` distinguishes
+  // co-located patterns of one module (the export vs hoisted sub-patterns).
+  patternIdentity?: { identity: string; symbol: string };
 }
 
 export interface SchedulerGraphEdge {

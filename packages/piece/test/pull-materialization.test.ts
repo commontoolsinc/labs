@@ -202,11 +202,13 @@ describe("piece pull materialization", () => {
 
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {
     const pattern = doublePattern();
-    const patternId = "test-pattern-id";
+    const patternRef = { identity: "test-pattern-identity", symbol: "default" };
     const originalSetup = manager.runtime.setup.bind(manager.runtime);
-    const originalGetPatternId = manager.runtime.patternManager.getPatternId
-      .bind(manager.runtime.patternManager);
-    const originalSyncPatternById = manager.syncPatternById.bind(manager);
+    const originalGetArtifactEntryRef = manager.runtime.patternManager
+      .getArtifactEntryRef.bind(manager.runtime.patternManager);
+    const originalSyncPatternByIdentity = manager.syncPatternByIdentity.bind(
+      manager,
+    );
     let setupResolved = false;
     let releaseSetup: (() => void) | undefined;
 
@@ -220,15 +222,17 @@ describe("piece pull materialization", () => {
       });
     }) as typeof manager.runtime.setup;
 
-    const getPatternIdStub: unknown = () => patternId;
-    manager.runtime.patternManager.getPatternId =
-      getPatternIdStub as typeof manager.runtime.patternManager.getPatternId;
+    const getRefStub: unknown = () => patternRef;
+    manager.runtime.patternManager.getArtifactEntryRef =
+      getRefStub as typeof manager.runtime.patternManager.getArtifactEntryRef;
 
-    manager.syncPatternById = ((id: string) => {
-      expect(id).toBe(patternId);
+    manager.syncPatternByIdentity = ((
+      ref: { identity: string; symbol: string },
+    ) => {
+      expect(ref).toEqual(patternRef);
       expect(setupResolved).toBe(true);
       return Promise.resolve(pattern);
-    }) as typeof manager.syncPatternById;
+    }) as typeof manager.syncPatternByIdentity;
 
     try {
       const pending = manager.setupPersistent(pattern, { input: 5 });
@@ -241,8 +245,9 @@ describe("piece pull materialization", () => {
       await pending;
     } finally {
       manager.runtime.setup = originalSetup;
-      manager.runtime.patternManager.getPatternId = originalGetPatternId;
-      manager.syncPatternById = originalSyncPatternById;
+      manager.runtime.patternManager.getArtifactEntryRef =
+        originalGetArtifactEntryRef;
+      manager.syncPatternByIdentity = originalSyncPatternByIdentity;
     }
   });
 

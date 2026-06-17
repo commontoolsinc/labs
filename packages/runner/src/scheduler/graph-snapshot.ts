@@ -34,7 +34,9 @@ export interface SchedulerGraphSnapshotState {
   readonly isDemandedPullComputation: (action: Action) => boolean;
   readonly isLiveEffect: (action: Action) => boolean;
   readonly isPullDemandRootEffect: (action: Action) => boolean;
-  readonly getPatternId: (action: Action) => string | undefined;
+  readonly getPatternIdentity: (
+    action: Action,
+  ) => { identity: string; symbol: string } | undefined;
 }
 
 export function buildSchedulerGraphSnapshot(
@@ -100,7 +102,7 @@ export function buildSchedulerGraphSnapshot(
       writes,
       debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
       throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
-      patternId: state.getPatternId(action),
+      patternIdentity: state.getPatternIdentity(action),
     });
   }
 

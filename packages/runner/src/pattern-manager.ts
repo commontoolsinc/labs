@@ -4,8 +4,9 @@ import {
   collectImportSpecifiers,
   type Source,
 } from "@commonfabric/js-compiler";
-import { Module, Pattern, Schema } from "./builder/types.ts";
+import { Module, Pattern } from "./builder/types.ts";
 import {
+  brandTrustedPattern,
   getArtifactEntryRef,
   getPatternProgram,
   isTrustedBuilderArtifact,
@@ -14,8 +15,6 @@ import {
   setArtifactEntryRef,
   setPatternProgram,
 } from "./builder/pattern-metadata.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
 import type {
@@ -33,6 +32,7 @@ import {
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
+  sourceDocKey,
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -41,19 +41,11 @@ import {
   parseFabricRef,
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
-import { URI } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
-import { parseLink } from "./link-utils.ts";
+import { fromURI, toURI } from "./uri-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
 
 const logger = getLogger("pattern-manager");
 
-/**
- * Maximum number of patterns to cache in memory.
- * When exceeded, oldest (least recently used) patterns are evicted.
- * Set conservatively to prevent OOM in long-running processes and tests.
- */
-const MAX_PATTERN_CACHE_SIZE = 100;
 // Bound for the in-memory identity->module cache. Higher than the pattern cache
 // because a single bundle contributes one entry per module (a big space-root
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
@@ -108,52 +100,23 @@ function uniqueCacheableImports(
   return out;
 }
 
-export const patternMetaSchema = internSchema(
-  {
-    type: "object",
-    properties: {
-      spec: { type: "string" },
-      parents: { type: "array", items: { type: "string" } },
-      patternName: { type: "string" },
-      // Content identity of the entry module (the prefix-free `cf:module/<hash>`
-      // minus the scheme), learned on the first cold ESM compile. Persisting it
-      // here is what makes the resolve-free by-identity fast path fire on every
-      // later load: `compilePatternOnce` reads it back and passes it as
-      // `knownEntryIdentity`. Absent on legacy/AMD patterns (the load simply
-      // falls back to resolve + compile, then re-learns + stores it).
-      entryIdentity: { type: "string" },
-      program: {
-        type: "object",
-        properties: {
-          main: { type: "string" },
-          mainExport: { type: "string" },
-          files: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                contents: { type: "string" },
-              },
-              required: ["name", "contents"],
-            },
-          },
-        },
-        required: ["main", "files"],
-      },
-    },
-  },
-);
-
-export type PatternMeta = Schema<typeof patternMetaSchema>;
-
 export class PatternManager {
+  // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
+  // keyed by a content hash of the program (NOT a cell id, NOT the retired
+  // patternId) so identical source returns one shared, already-compiled pattern
+  // instance. The hash is computed with `createRef` purely as a stable digest
+  // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
-  // Maps keyed by patternId for consistent lookups
-  private patternMetaCellById = new Map<string, Cell<PatternMeta>>();
-  private patternIdMap = new Map<URI, Pattern>();
-  // Map from pattern object instance to patternId
-  private patternToIdMap = new WeakMap<Pattern, URI>();
+  // Content-hash → { compiled pattern, the space its closure was first written
+  // into }. The space is tracked so a cross-space cache hit can replicate the
+  // source/compiled closure into the requested space (see compileOrGetPattern):
+  // identical source dedupes the expensive TS compile, but every space holding
+  // a piece that points at the pattern still needs the closure persisted there
+  // to reload by { identity, symbol } in a fresh runtime.
+  private compiledByContent = new Map<
+    string,
+    { pattern: Pattern; space?: MemorySpace }
+  >();
   // The forward value → {identity, symbol} map lives module-level in
   // builder/pattern-metadata.ts (`setArtifactEntryRef`/`getArtifactEntryRef`)
   // so builder-layer copy sites can carry refs onto derived copies without a
@@ -174,8 +137,6 @@ export class PatternManager {
   // misses recover through the async storage-backed load. Instance field so
   // tests can shrink it.
   private maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
-  // Pending metadata set before the meta cell exists (e.g., spec, parents)
-  private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
   // ESM content-addressed compile-cache instrumentation.
   private esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
   // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
@@ -193,13 +154,6 @@ export class PatternManager {
   // before reading the origin space — its own promise lives in
   // `compileCacheWrites`, so awaiting that whole set would deadlock on itself.
   private pendingCacheWriteBacks = new Set<Promise<unknown>>();
-  // `${patternId}\0${space}` pairs whose meta has been persisted this session.
-  // Per-SPACE (not per-pattern): an `inSpace` child piece is loaded from its
-  // own space by a fresh runtime, so the same pattern's meta may need to exist
-  // in several spaces (CT-1687). Entries record durable storage facts, so they
-  // intentionally survive `evictIfNeeded` (a re-save would be an idempotent,
-  // content-addressed write anyway).
-  private savedMetaSpaces = new Set<string>();
   // `${entryIdentity}\0${space}` closure replications already kicked off this
   // session (see `replicatePatternToSpace`). An entry is removed on failure so
   // the next child creation retries.
@@ -229,313 +183,80 @@ export class PatternManager {
   }
 
   /**
-   * Evict oldest patterns if cache exceeds MAX_PATTERN_CACHE_SIZE.
-   * Uses Map insertion order for LRU - oldest entries are first.
+   * Attach a rehydration `program` to a hand-built pattern object (one with no
+   * module-scope entry ref). The only surviving job of the old
+   * `registerPattern`: source-bearing tests/builtins that construct a Pattern in
+   * hand can associate its source so `getPatternProgram` (and thus
+   * `getPatternFilesBySync`) returns it. No-op when the pattern already carries a
+   * program. Walks to the derivation root so a copy inherits the association.
    */
-  private evictIfNeeded(): void {
-    while (this.patternIdMap.size > MAX_PATTERN_CACHE_SIZE) {
-      const oldestId = this.patternIdMap.keys().next().value;
-      if (oldestId === undefined) break;
-
-      // Remove from all caches
-      this.patternIdMap.delete(oldestId);
-      this.patternMetaCellById.delete(oldestId);
-      // Note: patternToIdMap is WeakMap, will be GC'd when pattern is collected
-
-      logger.debug(
-        "pattern-manager",
-        `Evicted pattern ${oldestId} (cache size: ${this.patternIdMap.size})`,
-      );
-    }
-  }
-
-  /**
-   * Touch a pattern to mark it as recently used (moves to end of Map).
-   * Call this on cache hits to maintain LRU order.
-   */
-  private touchPattern(patternId: URI): void {
-    const pattern = this.patternIdMap.get(patternId);
-    if (pattern) {
-      // Re-insert to move to end (most recently used)
-      this.patternIdMap.delete(patternId);
-      this.patternIdMap.set(patternId, pattern);
-    }
-
-    const metaCell = this.patternMetaCellById.get(patternId);
-    if (metaCell) {
-      this.patternMetaCellById.delete(patternId);
-      this.patternMetaCellById.set(patternId, metaCell);
-    }
-  }
-
-  private getPatternMetaCell(
-    { patternId, space }: { patternId: URI; space: MemorySpace },
-    tx?: IExtendedStorageTransaction,
-  ): Cell<PatternMeta> {
-    return createCell(
-      this.runtime,
-      {
-        id: patternId,
-        path: [],
-        space,
-        schema: patternMetaSchema,
-      },
-      tx,
-      true,
-    );
-  }
-
-  /** Legacy fallback: read pattern meta from the old {patternId, type: "pattern"} cause. */
-  private getLegacyPatternMetaCell(
-    { patternId, space }: { patternId: URI; space: MemorySpace },
-    tx?: IExtendedStorageTransaction,
-  ): Cell<PatternMeta> {
-    return this.runtime.getCell(
-      space,
-      { patternId, type: "pattern" },
-      patternMetaSchema,
-      tx,
-    );
-  }
-
-  /**
-   * Get the patternId for a pattern or module object.
-   * Returns undefined if the pattern is not registered.
-   */
-  getPatternId(pattern: Pattern | Module): URI | undefined {
-    return this.patternToIdMap.get(
-      this.findOriginalPattern(pattern as Pattern),
-    );
-  }
-
-  private findOriginalPattern(pattern: Pattern): Pattern {
-    // Derivation links live in the module-level side table (pattern-metadata);
-    // the former `unsafe_originalPattern` symbol backref is gone.
-    return resolveOriginal(pattern);
-  }
-
-  async loadPatternMeta(
-    patternId: URI,
-    space: MemorySpace,
-  ): Promise<PatternMeta> {
-    const cell = this.getPatternMetaCell({ patternId, space });
-    await cell.sync();
-    if (cell.get() !== undefined) {
-      // Cache so sync getPatternMeta({ patternId }) works afterward
-      this.patternMetaCellById.set(patternId, cell);
-      return cell.get();
-    }
-
-    // Fall back to legacy {patternId, type: "pattern"} cause
-    const legacyPatternCell = this.getLegacyPatternMetaCell({
-      patternId,
-      space,
-    });
-    await legacyPatternCell.sync();
-    if (legacyPatternCell.get() !== undefined) {
-      this.patternMetaCellById.set(patternId, legacyPatternCell);
-      return legacyPatternCell.get();
-    }
-
-    throw new Error("missing pattern meta cell");
-  }
-
-  getPatternMeta(
-    input: Pattern | Module | { patternId: URI },
-  ): PatternMeta {
-    let patternId: URI | undefined;
-    if ("patternId" in input) {
-      patternId = input.patternId;
-    } else if (
-      input && (typeof input === "object" || typeof input === "function")
-    ) {
-      patternId = this.patternToIdMap.get(
-        this.findOriginalPattern(input as Pattern),
-      );
-    }
-
-    if (!patternId) throw new Error("Pattern is not registered");
-
-    const cell = this.patternMetaCellById.get(patternId);
-    if (cell) {
-      const meta = cell.get();
-      if (meta) return meta;
-    }
-
-    // If we don't have a stored cell yet, return whatever pending/meta we have
-    const pending = this.pendingMetaById.get(patternId) ?? {};
-    const source = getPatternProgram(this.patternIdMap.get(patternId));
-    if (!source && Object.keys(pending).length === 0) {
-      throw new Error(`Pattern ${patternId} has no metadata available`);
-    }
-    const meta: PatternMeta = {
-      ...(typeof source === "object" ? { program: source } : {}),
-      ...(pending as Partial<PatternMeta>),
-    } as PatternMeta;
-    return meta;
-  }
-
-  registerPattern(
+  associatePatternProgram(
     pattern: Pattern | Module,
-    src?: RuntimeProgram,
-  ): URI {
-    // Walk up derivation copies to original
-    pattern = this.findOriginalPattern(pattern as Pattern);
-
-    if (src && !getPatternProgram(pattern)) {
-      if (typeof src === "string") {
-        setPatternProgram(pattern, {
-          main: "/main.tsx",
-          files: [{ name: "/main.tsx", contents: src }],
-        });
-      } else {
-        setPatternProgram(pattern, src);
-      }
-    }
-
-    // If this pattern object was already registered, return its id
-    const existingId = this.patternToIdMap.get(pattern);
-    if (existingId) {
-      return existingId;
-    }
-
-    const generatedRef = src
-      ? createRef({ src }, "pattern source")
-      : createRef(pattern, "pattern");
-    const generatedId = toURI(generatedRef);
-
-    this.patternToIdMap.set(pattern as Pattern, generatedId);
-
-    if (!this.patternIdMap.has(generatedId)) {
-      this.patternIdMap.set(generatedId, pattern as Pattern);
-      this.evictIfNeeded();
-    } else {
-      // Pattern exists - touch to mark as recently used
-      this.touchPattern(generatedId);
-    }
-
-    return generatedId;
-  }
-
-  savePattern(
-    { patternId, space }: {
-      patternId: URI;
-      space: MemorySpace;
-    },
-    providedTx?: IExtendedStorageTransaction,
-  ): boolean {
-    // HACK(seefeld): Let's always use a new transaction for now. The reason is
-    // that this will fail when saving the same pattern again, even though it's
-    // identical (it's effecively content addresed). So let's just parallelize
-    // and eat the conflict, until we support these kinds of writes properly.
-    providedTx = undefined;
-
-    // "Already saved" is per (patternId, space), NOT per pattern: an `inSpace`
-    // child piece is loaded from its OWN space by a fresh runtime, so the meta
-    // must be persisted there even when the parent's space already has a copy
-    // (CT-1687). The first-saved (or first-loaded) meta cell stays canonical in
-    // `patternMetaCellById`; saves into further spaces don't displace it.
-    const spaceKey = `${patternId}\0${space}`;
-    if (this.savedMetaSpaces.has(spaceKey)) return true;
-    const canonicalMetaCell = this.patternMetaCellById.get(patternId);
-    if (canonicalMetaCell && canonicalMetaCell.space === space) {
-      this.savedMetaSpaces.add(spaceKey);
-      return true;
-    }
-
-    const tx = providedTx ?? this.runtime.edit();
-
-    // Prefer the live program; fall back to the canonical meta cell's stored
-    // value when the in-memory pattern is source-free (a by-identity load).
-    const canonicalMeta = canonicalMetaCell?.get();
-    const program = getPatternProgram(this.patternIdMap.get(patternId)) ??
-      canonicalMeta?.program;
-    if (!program) return false;
-
-    const pending = this.pendingMetaById.get(patternId) ?? {};
-    const patternMeta: PatternMeta = {
-      ...(canonicalMeta as Partial<PatternMeta> | undefined),
-      program,
-      ...(pending as Partial<PatternMeta>),
-    } as PatternMeta;
-
-    const patternMetaCell = this.getPatternMetaCell({ patternId, space }, tx);
-    patternMetaCell.set(patternMeta);
-
-    if (!providedTx) {
-      this.runtime.prepareTxForCommit(tx);
-      tx.commit().then(async (result) => {
-        if (!result.error) return;
-        // A commit error here is usually the benign content-addressed
-        // "already existed" conflict (see HACK above) — but for a cross-space
-        // save it can be a real failure (no write access to the child space,
-        // offline). Verify rather than taxonomize: if the meta is readable
-        // with a program, the desired state holds and the claim stands;
-        // otherwise release the claim so the next save into this space
-        // retries instead of silently never landing (CT-1687).
-        try {
-          const metaCell = this.getPatternMetaCell({ patternId, space });
-          await metaCell.sync();
-          if (metaCell.get()?.program) {
-            // Info, not warn: in a shared space every runtime after the first
-            // races the same meta save — finding it already landed is the
-            // normal idempotent outcome (every multi-user run hits this).
-            logger.info("pattern", "Pattern already existed", patternId);
-            return;
-          }
-        } catch {
-          // fall through to release
-        }
-        this.savedMetaSpaces.delete(spaceKey);
-        logger.warn(
-          "pattern",
-          "Pattern meta save failed",
-          patternId,
-          space,
-        );
+    src: RuntimeProgram | string,
+  ): void {
+    const root = resolveOriginal(pattern as Pattern);
+    if (getPatternProgram(root)) return;
+    if (typeof src === "string") {
+      setPatternProgram(root, {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: src }],
       });
+    } else {
+      setPatternProgram(root, src);
     }
-
-    if (!canonicalMetaCell) {
-      this.patternMetaCellById.set(patternId, patternMetaCell.withTx());
-    }
-    this.savedMetaSpaces.add(spaceKey);
-    // If we have a pattern object for this id, ensure the back mapping exists
-    const pattern = this.patternIdMap.get(patternId);
-    if (pattern) this.patternToIdMap.set(pattern, patternId);
-    // Clear pending once persisted
-    this.pendingMetaById.delete(patternId);
-    // Evict if cache is full
-    this.evictIfNeeded();
-    return true;
   }
 
-  async saveAndSyncPattern(
-    { patternId, space }: {
-      patternId: URI;
-      space: MemorySpace;
-    },
-    tx?: IExtendedStorageTransaction,
-  ) {
-    if (this.savePattern({ patternId, space }, tx)) {
-      await this.getPatternMetaCell({ patternId, space }, tx).sync();
-    }
+  /**
+   * Give a hand-built pattern a content-addressed `{ identity, symbol }` pointer
+   * and index it so `artifactFromIdentitySync` / `loadPatternByIdentity` resolve
+   * it in-session — the manual analog of what `compilePattern` does for an ESM
+   * pattern. The caller asserts trust for `pattern` (same host-trust model as
+   * `Runtime.unsafeTrustPattern`); the pattern is branded so it is treated as a
+   * verified-loaded pattern. SESSION-ONLY: there is no source/compiled closure
+   * behind a synthetic identity, so a fresh-runtime reload of such a pointer is
+   * unrecoverable. Intended for runner internals and tests that exercise the
+   * by-identity resume path without a compiled bundle.
+   */
+  associatePatternIdentity(
+    pattern: Pattern,
+    ref: { identity: string; symbol: string },
+  ): void {
+    brandTrustedPattern(pattern);
+    this.indexArtifact(ref.identity, ref.symbol, pattern);
+  }
+
+  /**
+   * The session pointer for a KEYLESS (hand-built) pattern — one with no
+   * content-addressed entry ref (it never went through an ESM compile). The
+   * identity is a CONTENT hash of the pattern's structure (`createRef`), so two
+   * structurally-identical hand-built patterns share one identity: a lift that
+   * returns the same sub-pattern shape on every run does not churn its result
+   * cell's pointer (the CT-1623 structural-dedup property the old per-structure
+   * patternId provided). The pattern is branded + indexed so
+   * `artifactFromIdentitySync` / `loadPatternByIdentity` resolve it. SESSION-ONLY
+   * (no source/compiled closure behind a hand-built structure hash).
+   */
+  ensureKeylessPatternIdentity(
+    pattern: Pattern,
+  ): { identity: string; symbol: string } {
+    const root = resolveOriginal(pattern);
+    const existing = getArtifactEntryRef(root);
+    if (existing) return existing;
+    const identity = `keyless:${fromURI(toURI(createRef(root, "pattern")))}`;
+    const ref = { identity, symbol: "default" };
+    this.associatePatternIdentity(root, ref);
+    return ref;
   }
 
   /**
    * Make a cross-space child piece independently loadable from its own space
    * (CT-1687). A fresh runtime navigating to a `Factory.inSpace(...)` child
    * loads pattern artifacts from the CHILD's space — but the parent bundle's
-   * meta save and compile-cache write-back both target the space the parent
-   * compiled into, so the child space had nothing and the load died with
-   * "has no stored source". Replicates both recovery paths into `toSpace`:
-   *
-   * - the pattern meta (program), when a program is available (a pattern
-   *   registered with source in hand, or one whose canonical meta cell holds
-   *   the stored program);
-   * - the content-addressed source + compiled closures, when the pattern
-   *   carries an artifact entry ref (the by-identity reload path — the only
-   *   one available to an ESM bundle SUB-pattern, which has no program object).
+   * compile-cache write-back targets the space the parent compiled into, so the
+   * child space had nothing and the load died with "has no stored source".
+   * Replicates the content-addressed source + compiled closures into `toSpace`
+   * when the pattern carries an artifact entry ref (the by-identity reload path
+   * — the only one a `{ identity, symbol }` piece pointer can take).
    *
    * Closure replication is fire-and-forget (tracked in `compileCacheWrites`,
    * awaited by `flushCompileCacheWrites`): the child is loadable in-session
@@ -548,8 +269,6 @@ export class PatternManager {
     fromSpace: MemorySpace,
   ): void {
     if (toSpace === fromSpace) return;
-    const patternId = this.registerPattern(pattern);
-    this.savePattern({ patternId, space: toSpace });
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
@@ -683,51 +402,6 @@ export class PatternManager {
         visited,
       );
     }
-  }
-
-  private async syncLinkedPatternSource(
-    metaCell: Cell<PatternMeta>,
-    rawMeta: unknown,
-  ): Promise<void> {
-    if (!isRecord(rawMeta) || !isRecord(rawMeta.program)) {
-      return;
-    }
-    const program = rawMeta.program;
-
-    const base = metaCell.getAsNormalizedFullLink();
-    const seen = new Set<string>();
-    const linkedCells: Cell<unknown>[] = [];
-
-    const collectLinks = (value: unknown): void => {
-      const link = parseLink(value, base);
-      if (link?.space && link.id) {
-        const key = `${link.space}\0${link.scope}\0${link.id}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          linkedCells.push(this.runtime.getCellFromLink(link));
-        }
-        return;
-      }
-
-      if (Array.isArray(value)) {
-        for (const item of value) collectLinks(item);
-      } else if (isRecord(value)) {
-        for (const item of Object.values(value)) collectLinks(item);
-      }
-    };
-
-    collectLinks(program);
-    await Promise.all(linkedCells.map((cell) => cell.sync()));
-  }
-
-  // returns a pattern already loaded
-  patternById(patternId: URI): Pattern | undefined {
-    const pattern = this.patternIdMap.get(patternId);
-    if (pattern) {
-      // Touch to mark as recently used
-      this.touchPattern(patternId);
-    }
-    return pattern;
   }
 
   async compilePattern(
@@ -991,14 +665,17 @@ export class PatternManager {
 
   /**
    * Load a pattern referenced purely by content identity — the
-   * `{identity, symbol}` result-cell reference — straight from the compiled
-   * cache, with NO TypeScript program in hand and NO meta-cell roundtrip. The
-   * pattern's TS source is never pulled on this path; it is only needed for cold
-   * recovery, which the caller handles by falling back to the patternId load.
+   * `{identity, symbol}` result-cell reference — the ONLY pattern pointer. The
+   * resolution chain is: in-memory live module → integrity-valid compiled
+   * closure → cold recompile from the verified `pattern:<identity>` source-doc
+   * closure ({@link tryColdLoadByIdentity}, which survives a
+   * `COMPILE_CACHE_RUNTIME_VERSION` bump). No TypeScript program in hand, no meta
+   * cell — the source docs are the single durable source.
    *
    * Returns the pattern, or `undefined` when the by-identity load is
-   * unavailable (CFC not enforcing / closure absent or incomplete / invalid)
-   * so the caller can fall back to `loadPattern`.
+   * unavailable (CFC not enforcing / closure absent or incomplete / invalid /
+   * no stored source). A piece carrying only a legacy `pattern` link (no
+   * `patternIdentity`) is unrecoverable — the sanctioned data-wipe outcome.
    */
   async loadPatternByIdentity(
     entryIdentity: string,
@@ -1006,6 +683,16 @@ export class PatternManager {
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
+    // In-memory artifact index: the pattern may already be live this session —
+    // an evaluated ESM artifact, or a hand-built pattern given a synthetic
+    // pointer via `associatePatternIdentity`. This path is independent of the
+    // compiled cache (and of CFC enforcement), so it serves the same artifact
+    // `artifactFromIdentitySync` would return.
+    const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
+    if (indexed !== undefined && isTrustedPattern(indexed)) {
+      this.esmCacheStats.byIdentityHits++;
+      return indexed;
+    }
     if (this.runtime.cfcEnforcementMode === "disabled") {
       return undefined;
     }
@@ -1323,6 +1010,25 @@ export class PatternManager {
   }
 
   /**
+   * Best-effort authored source files for a live pattern by its content
+   * `{ identity, symbol }` — the source-viewing debug surface
+   * (`getPatternSources`). Returns undefined when the pattern is not live in
+   * this session or carries no program (e.g. a source-free by-identity
+   * reload); callers degrade gracefully (omit the pattern). Source-bearing
+   * cross-session recovery is the source-doc closure's job, not this.
+   */
+  getPatternFilesBySync(
+    identity: string,
+    symbol: string,
+  ): { name: string; contents: string }[] | undefined {
+    const pattern = this.artifactFromIdentitySync(identity, symbol) as
+      | Pattern
+      | undefined;
+    if (!pattern) return undefined;
+    return getPatternProgram(pattern)?.files;
+  }
+
+  /**
    * Reuse a module already evaluated in-memory (as part of any bundle) for a
    * by-identity load, skipping the storage closure read + SES re-evaluation.
    * Returns undefined on a miss so the caller falls back to the cache path.
@@ -1454,184 +1160,131 @@ export class PatternManager {
       program = input;
     }
 
-    // Compute deterministic patternId (matches registerPattern's ID generation)
-    const patternRef = createRef({ src: program }, "pattern source");
-    const patternId = toURI(patternRef);
+    // Content-hash key (createRef as a pure digest, NOT a cell id). Identical
+    // source returns the same compiled instance; concurrent compiles share one
+    // evaluation.
+    const dedupeKey = toURI(createRef({ src: program }, "pattern source"));
 
-    // Check cache
-    const existing = this.patternIdMap.get(patternId);
-    if (existing) {
-      this.touchPattern(patternId);
-      return Promise.resolve(existing);
+    const cached = this.compiledByContent.get(dedupeKey);
+    if (cached) {
+      // Refresh recency (FIFO ~LRU).
+      this.compiledByContent.delete(dedupeKey);
+      this.compiledByContent.set(dedupeKey, cached);
+      // The content cache is space-agnostic, but a piece persisted in `space`
+      // needs the source/compiled closure IN that space to reload by
+      // { identity, symbol } in a fresh runtime (the meta-cell fallback is
+      // gone). When this hit serves a different space than the one we first
+      // compiled into, replicate the closure there — cheap (no TS recompile),
+      // deduped, and fire-and-forget (tracked in compileCacheWrites).
+      if (space && cached.space && space !== cached.space) {
+        this.replicatePatternToSpace(cached.pattern, space, cached.space);
+      }
+      return Promise.resolve(cached.pattern);
     }
 
-    // Check in-flight compilation (single-flight deduplication)
-    const inProgress = this.inProgressCompilations.get(patternId);
-    if (inProgress) {
-      return inProgress;
-    }
+    const inProgress = this.inProgressCompilations.get(dedupeKey);
+    if (inProgress) return inProgress;
 
-    // Compile with single-flight pattern. Pass the cell-cache context when a
-    // space is available so nested/dynamic compiles benefit from the cache too.
+    // Pass the cell-cache context when a space is available so nested/dynamic
+    // compiles benefit from the cache too.
     const compilationPromise = this.compilePattern(
       program,
       space ? { space } : undefined,
     )
       .then((pattern) => {
-        // Register directly with pre-computed patternId to avoid double-hashing
-        // (registerPattern would recompute the same hash from program)
-        pattern = this.findOriginalPattern(pattern);
-        this.patternToIdMap.set(pattern, patternId);
-        if (!this.patternIdMap.has(patternId)) {
-          this.patternIdMap.set(patternId, pattern);
-          this.evictIfNeeded();
+        this.compiledByContent.set(dedupeKey, { pattern, space });
+        while (this.compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+          const oldest = this.compiledByContent.keys().next().value;
+          if (oldest === undefined) break;
+          this.compiledByContent.delete(oldest);
         }
         return pattern;
       })
       .finally(() => {
-        this.inProgressCompilations.delete(patternId);
+        this.inProgressCompilations.delete(dedupeKey);
       });
 
-    this.inProgressCompilations.set(patternId, compilationPromise);
+    this.inProgressCompilations.set(dedupeKey, compilationPromise);
     return compilationPromise;
   }
 
-  // we need to ensure we only compile once otherwise we get ~12 +/- 4
-  // compiles of each pattern
-  private async compilePatternOnce(
-    patternId: URI,
-    space: MemorySpace,
-    tx?: IExtendedStorageTransaction,
-  ): Promise<Pattern> {
-    let metaCell = this.getPatternMetaCell({ patternId, space }, tx);
-    await metaCell.sync();
-    let patternMeta = metaCell.get();
-    if (!patternMeta?.program) {
-      const rawMeta = metaCell.getRaw();
-      await this.syncLinkedPatternSource(metaCell, rawMeta);
-      patternMeta = metaCell.get();
-    }
-
-    // Fall back to legacy {patternId, type: "pattern"} cause
-    if (!patternMeta?.program) {
-      metaCell = this.getLegacyPatternMetaCell({ patternId, space }, tx);
-      await metaCell.sync();
-      patternMeta = metaCell.get();
-      if (!patternMeta?.program) {
-        const rawMeta = metaCell.getRaw();
-        await this.syncLinkedPatternSource(metaCell, rawMeta);
-        patternMeta = metaCell.get();
-      }
-    }
-
-    if (!patternMeta?.program) {
-      throw new Error(`Pattern ${patternId} has no stored source`);
-    }
-
-    const source = patternMeta.program!;
-    // A previously-stored entry identity (set on the first cold ESM compile)
-    // lets the cache path skip resolve + compile and load by identity.
-    const knownEntryIdentity = patternMeta.entryIdentity;
-    let learnedEntryIdentity: string | undefined;
-    // Pass the target space so the ESM path can use the per-space cell cache.
-    const pattern = await this.compilePattern(source, {
-      space,
-      tx,
-      knownEntryIdentity,
-      onEntryIdentity: (id) => {
-        learnedEntryIdentity = id;
-      },
-    });
-    this.patternIdMap.set(patternId, pattern);
-    this.patternToIdMap.set(pattern, patternId);
-    this.patternMetaCellById.set(patternId, metaCell.withTx());
-    this.evictIfNeeded();
-    // Persist the entry identity once learned (cold compile) so the next load
-    // takes the by-identity fast path. Fire-and-forget — never blocks the load,
-    // but tracked alongside the cache writes so shutdown / tests can flush it.
-    if (learnedEntryIdentity && learnedEntryIdentity !== knownEntryIdentity) {
-      const metaWrite = this.setPatternMetaFields(patternId, {
-        entryIdentity: learnedEntryIdentity,
-      });
-      this.compileCacheWrites.add(metaWrite);
-      metaWrite.finally(() => this.compileCacheWrites.delete(metaWrite));
-    }
-    return pattern;
-  }
-
-  async loadPattern(
-    id: URI,
-    space: MemorySpace,
-    tx?: IExtendedStorageTransaction,
-  ): Promise<Pattern> {
-    const existing = this.patternIdMap.get(id);
-    if (existing) {
-      // Touch to mark as recently used
-      this.touchPattern(id);
-      return existing;
-    }
-
-    if (this.inProgressCompilations.has(id)) {
-      return this.inProgressCompilations.get(id)!;
-    }
-
-    // single-flight compilation
-    const compilationPromise = this.compilePatternOnce(id, space, tx)
-      .finally(() => this.inProgressCompilations.delete(id)); // tidy up
-
-    this.inProgressCompilations.set(id, compilationPromise);
-
-    return await compilationPromise;
-  }
-
   /**
-   * Load a pattern by its content-addressed {identity, symbol} reference and
-   * register it under `patternId` so `patternById(patternId)` resolves it (the
-   * reload path keys on patternId everywhere). The source-free fast path: no TS
-   * program, no meta-cell sync. Returns undefined when the by-identity load is
-   * unavailable, so the caller falls back to `loadPattern(patternId)`.
+   * Best-effort authored source program for a stored pattern by its content
+   * `entryIdentity` — recovered from the verified `pattern:<identity>` source-doc
+   * closure in `space`. The single-source replacement for the deleted meta
+   * cell's `program`: the source docs are written (awaited) by every cold
+   * compile, so this returns the same bytes that produced the identity. `main`
+   * is the entry document's authored filename. Returns `undefined` when no
+   * verified source closure exists in the space.
    */
-  async loadPatternByIdentityAs(
-    patternId: URI,
+  async getPatternSourceProgramByIdentity(
     entryIdentity: string,
-    symbol: string,
     space: MemorySpace,
-  ): Promise<Pattern | undefined> {
-    const existing = this.patternIdMap.get(patternId);
-    if (existing) {
-      this.touchPattern(patternId);
-      return existing;
+  ): Promise<
+    { main: string; files: { name: string; contents: string }[] } | undefined
+  > {
+    const readTx = this.runtime.edit();
+    let sourceDocs;
+    try {
+      sourceDocs = await loadVerifiedSourceClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        readTx,
+      );
+    } finally {
+      readTx.abort?.("get-pattern-source-files read complete");
     }
-    const pattern = await this.loadPatternByIdentity(
-      entryIdentity,
-      symbol,
-      space,
-    );
-    if (!pattern) return undefined;
-    this.patternIdMap.set(patternId, pattern);
-    this.patternToIdMap.set(pattern, patternId);
-    this.evictIfNeeded();
-    return pattern;
+    if (sourceDocs === undefined) return undefined;
+    const entry = sourceDocs.get(entryIdentity);
+    if (entry === undefined) return undefined;
+    // Return only the AUTHORED files — the faithful replacement for the old
+    // meta-cell `program`. The verified source closure also contains
+    // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
+    // resolves WITHOUT the `/<id>/` prefix (see Engine), so authored files are
+    // exactly the grounded (`/`-prefixed) ones. The full closure is used for
+    // recompilation via `loadVerifiedSourceClosure` directly, not here.
+    return {
+      main: entry.filename,
+      files: [...sourceDocs.values()]
+        .filter((doc) => doc.filename.startsWith("/"))
+        .map((doc) => ({
+          name: doc.filename,
+          contents: doc.code,
+        })),
+    };
   }
 
   /**
-   * Set or update metadata fields for a pattern before or after saving.
-   * If the metadata cell already exists, it updates it in-place.
-   * Otherwise, it stores the fields to be applied on the next save.
+   * Attach an optional, NON-NORMATIVE annotation link to a pattern's entry
+   * source doc (`pattern:<identity>` in `space`). Annotations are product
+   * metadata (a name doc, a spec doc, lineage); the runtime NEVER reads them for
+   * execution, and `verifySourceDocs` excludes them from the content hash — an
+   * annotated and an unannotated doc verify identically. First-write semantics
+   * are last-write-wins per `key` (the merge below). Fire-and-forget at the
+   * caller's discretion.
    */
-  async setPatternMetaFields(
-    patternId: URI,
-    fields: Partial<PatternMeta>,
+  async annotatePattern(
+    entryIdentity: string,
+    space: MemorySpace,
+    key: string,
+    link: unknown,
   ): Promise<void> {
-    const cell = this.patternMetaCellById.get(patternId);
-    if (cell) {
+    await this.runtime.editWithRetry((tx) => {
+      const cell = this.runtime.getCell<
+        { annotations?: Record<string, unknown> }
+      >(
+        space,
+        sourceDocKey(entryIdentity),
+        undefined,
+        tx,
+      );
       const current = cell.get();
-      await this.runtime.editWithRetry((tx) => {
-        cell.withTx(tx).set({ ...current, ...fields });
-      });
-    } else {
-      const pending = this.pendingMetaById.get(patternId) ?? {};
-      this.pendingMetaById.set(patternId, { ...pending, ...fields });
-    }
+      const annotations = {
+        ...(isRecord(current?.annotations) ? current!.annotations : {}),
+        [key]: link,
+      };
+      cell.key("annotations").set(annotations);
+    });
   }
 }

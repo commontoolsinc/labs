@@ -1,6 +1,6 @@
 import type { Cell } from "@commonfabric/runner";
 import {
-  getMetaLink,
+  getPatternIdentityRef,
   isSlugAddress,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
   slugIdForSpace,
@@ -76,7 +76,7 @@ export async function resolvePieceAddress(
   }
 
   const target = await resolveSlugTargetCell(manager, token);
-  if (getMetaLink(target, "pattern") === undefined) {
+  if (getPatternIdentityRef(target) === undefined) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document that is not a piece.`,
       "not-piece",

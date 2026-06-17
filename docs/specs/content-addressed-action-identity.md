@@ -94,6 +94,13 @@ Phase 3 shipped in two PRs:
 Phase 4 is COMPLETE: there is one resolution model — content-addressed
 `{ identity, symbol }`, by identity, everywhere.
 
+The last parallel addressing scheme — the `pattern:<createRef>` patternId and
+the pattern meta cell — is now also retired (patternId is the same content
+address in a second, non-canonical encoding). See
+[pattern-id-retirement](./pattern-id-retirement.md): `{ identity, symbol }` is
+the only pattern pointer; cold recovery recompiles from the `pattern:<identity>`
+source docs.
+
 The design assumes the shipped state after the AMD-loader removal: the ESM
 module-record loader is the only loader, every module has a content-addressed
 identity (`cf:module/<hash>`), and every module-scope builder artifact

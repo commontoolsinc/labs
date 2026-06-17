@@ -65,6 +65,11 @@ export {
   parseLLMFriendlyLink,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
+export {
+  asPatternIdentityRef,
+  getPatternIdentityRef,
+  patternIdentityKey,
+} from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
 export { createBuilder, type CreateBuilderOptions } from "./builder/factory.ts";

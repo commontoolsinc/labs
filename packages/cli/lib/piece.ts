@@ -3,7 +3,7 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
-  getMetaLink,
+  getPatternIdentityRef,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -305,7 +305,7 @@ async function getPinnedProgramFromFile(
 export async function listPieces(
   config: SpaceConfig,
 ): Promise<
-  { id: string; name?: string; patternName?: string; error?: string }[]
+  { id: string; name?: string; error?: string }[]
 > {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
@@ -317,11 +317,9 @@ export async function listPieces(
         const name = (await (
           livePiece.getCell().key(NAME) as Cell<unknown>
         ).pull()) as string | undefined;
-        const patternMeta = await livePiece.getPatternMeta();
         return {
           id: piece.id,
           name,
-          patternName: patternMeta.patternName,
         };
       } catch (err) {
         return {
@@ -528,10 +526,10 @@ export async function savePiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  const meta = await piece.getPatternMeta();
+  const files = await piece.getPatternSourceFiles();
 
-  if (meta.program) {
-    for (const { name, contents } of meta.program.files) {
+  if (files) {
+    for (const { name, contents } of files) {
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in pattern.");
       }
@@ -818,8 +816,9 @@ export async function linkPieces(
           options?.sourceScope,
         ),
     );
-    const sourcePatternLink = getMetaLink(sourcePiece.getCell(), "pattern");
-    if (sourcePatternLink === undefined) {
+    const sourceHasPattern =
+      getPatternIdentityRef(sourcePiece.getCell()) !== undefined;
+    if (!sourceHasPattern) {
       errors.push(`Source piece ${sourcePieceId} does not have pattern`);
     } else if (sourcePath.length > 0) {
       const sourceData = await timeCliPhase(
@@ -859,8 +858,9 @@ export async function linkPieces(
           options?.targetScope,
         ),
     );
-    const targetPatternLink = getMetaLink(targetPiece.getCell(), "pattern");
-    if (targetPatternLink === undefined) {
+    const targetHasPattern =
+      getPatternIdentityRef(targetPiece.getCell()) !== undefined;
+    if (!targetHasPattern) {
       errors.push(`Target piece ${targetPieceId} does not have pattern`);
     } else if (targetPath.length > 0) {
       // Check target path resolves on the input cell
@@ -1136,7 +1136,6 @@ export async function generateSpaceMap(
 export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
-  patternName?: string;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1165,7 +1164,6 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 
   const id = piece.id;
   const name = piece.name();
-  const patternName = (await piece.getPatternMeta()).patternName;
   const source = (await piece.input.get()) as Readonly<unknown>;
   const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
@@ -1180,7 +1178,6 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   return {
     id,
     name,
-    patternName,
     source,
     result,
     readingFrom,
@@ -1194,7 +1191,6 @@ async function inspectSlugTargetCell(
 ): Promise<{
   id: string;
   name?: string;
-  patternName?: string;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1210,7 +1206,6 @@ async function inspectSlugTargetCell(
   return {
     id: slug,
     name,
-    patternName: "slug target cell",
     result,
     readingFrom: [],
     readBy: [],

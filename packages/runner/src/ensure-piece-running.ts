@@ -1,8 +1,27 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
 import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+
+/**
+ * Read a result cell's `{ identity, symbol }` pattern pointer. Inlined (rather
+ * than imported from runner.ts) to avoid a module-init cycle:
+ * built-in → scheduler/events → ensure-piece-running → runner → built-in.
+ */
+function readPatternIdentity(
+  cell: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  const raw = cell.getMetaRaw("patternIdentity");
+  if (
+    isRecord(raw) && typeof raw.identity === "string" &&
+    typeof raw.symbol === "string"
+  ) {
+    return { identity: raw.identity, symbol: raw.symbol };
+  }
+  return undefined;
+}
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
@@ -94,11 +113,12 @@ export async function ensurePieceRunning(
       const resultCell = followResultCellChain(runtime, rootCell, tx);
       if (resultCell === undefined) return false;
 
-      // If rootCell is a result cell, it will have a pattern
-      const patternId = getMetaLink(resultCell, "pattern")?.id;
-      if (!patternId) {
+      // If rootCell is a result cell, it will carry a `{ identity, symbol }`
+      // pattern pointer.
+      const identityRef = readPatternIdentity(resultCell);
+      if (!identityRef) {
         logger.debug("ensure-piece", () => [
-          `No pattern ID (pattern) found in result metadata`,
+          `No pattern identity found in result metadata`,
         ]);
         return false;
       }
@@ -107,21 +127,22 @@ export async function ensurePieceRunning(
       runtime.prepareTxForCommit(tx);
       await tx.commit();
 
-      // Load the pattern from persisted result metadata.
-      const pattern = await runtime.patternManager.loadPattern(
-        patternId,
+      // Load the pattern by its content identity.
+      const pattern = await runtime.patternManager.loadPatternByIdentity(
+        identityRef.identity,
+        identityRef.symbol,
         cellLink.space,
       );
 
       if (!pattern) {
         logger.debug("ensure-piece", () => [
-          `Failed to load pattern: ${patternId}`,
+          `Failed to load pattern: ${identityRef.identity}#${identityRef.symbol}`,
         ]);
         return false;
       }
 
       logger.debug("ensure-piece", () => [
-        `Starting piece with pattern ${patternId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
+        `Starting piece with pattern ${identityRef.identity} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
 
       // Start the existing piece - this registers event handlers without

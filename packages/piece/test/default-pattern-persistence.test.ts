@@ -168,6 +168,7 @@ describe("PieceManager default pattern persistence", () => {
   it("adds a persisted piece from a fresh runtime", async () => {
     const compiledDefaultPattern = await runtime.patternManager.compilePattern(
       defaultPatternProgram,
+      { space: manager.getSpace() },
     );
     const defaultPatternPiece = await manager.runPersistent(
       compiledDefaultPattern,
@@ -178,8 +179,12 @@ describe("PieceManager default pattern persistence", () => {
     await manager.runtime.idle();
     await manager.synced();
 
+    // Compile INTO the space so the content-addressed source + compiled docs
+    // persist — a fresh runtime recovers the pattern by its `{ identity, symbol }`
+    // pointer (there is no longer a meta cell holding the program).
     const compiledPiecePattern = await runtime.patternManager.compilePattern(
       persistedPieceProgram,
+      { space: manager.getSpace() },
     );
     const persistedPiece = await manager.runPersistent(
       compiledPiecePattern,

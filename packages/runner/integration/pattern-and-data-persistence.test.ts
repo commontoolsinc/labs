@@ -18,7 +18,10 @@ import { assert, assertEquals } from "@std/assert";
 import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { Cell, JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
+import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
+
+/** A content-addressed pattern pointer. */
+type PatternRef = { identity: string; symbol: string };
 import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
@@ -138,21 +141,23 @@ function getResultCell(
 async function phase1SavePatternAndData(
   identity: Identity,
   space: MemorySpace,
-): Promise<URI> {
+): Promise<PatternRef> {
   console.log("\n--- Phase 1: Save pattern and data ---");
 
   const ctx = createTestContext(identity);
 
-  // Compile and save the pattern
+  // Compile the pattern INTO the space: this persists the content-addressed
+  // source + compiled docs (the single durable source), so a fresh runtime can
+  // recover the pattern by its `{ identity, symbol }` pointer.
   const compiled = await ctx.runtime.patternManager.compilePattern(
     patternProgram,
+    { space },
   );
-  const patternId = ctx.runtime.patternManager.registerPattern(
-    compiled,
-    patternProgram,
-  );
-  await ctx.runtime.patternManager.saveAndSyncPattern({ patternId, space });
-  console.log(`Pattern saved with ID: ${patternId}`);
+  const patternRef = ctx.runtime.patternManager.getArtifactEntryRef(compiled);
+  if (!patternRef) throw new Error("compiled pattern has no entry ref");
+  await ctx.runtime.patternManager.flushCompileCacheWrites();
+  await ctx.runtime.storageManager.synced();
+  console.log(`Pattern saved with identity: ${patternRef.identity}`);
 
   // Save initial data for Phase 2's instance
   const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2);
@@ -166,7 +171,7 @@ async function phase1SavePatternAndData(
   await disposeTestContext(ctx);
   console.log("Runtime 1 disposed (cache cleared)");
 
-  return patternId;
+  return patternRef;
 }
 
 /**
@@ -175,17 +180,19 @@ async function phase1SavePatternAndData(
 async function phase2LoadAndVerify(
   identity: Identity,
   space: MemorySpace,
-  patternId: URI,
+  patternRef: PatternRef,
 ): Promise<void> {
   console.log("\n--- Phase 2: Load pattern and data from storage ---");
 
   const ctx = createTestContext(identity);
 
-  // Load pattern from storage (fresh cache)
-  const pattern = await ctx.runtime.patternManager.loadPattern(
-    patternId,
+  // Load pattern from storage by content identity (fresh cache)
+  const pattern = await ctx.runtime.patternManager.loadPatternByIdentity(
+    patternRef.identity,
+    patternRef.symbol,
     space,
   );
+  if (!pattern) throw new Error("pattern failed to load by identity");
   console.log("Pattern loaded from storage");
 
   // Load data cell from storage
@@ -232,17 +239,19 @@ async function phase2LoadAndVerify(
 async function phase3ReactivityAndIsolation(
   identity: Identity,
   space: MemorySpace,
-  patternId: URI,
+  patternRef: PatternRef,
 ): Promise<void> {
   console.log("\n--- Phase 3: Reactivity and instance isolation ---");
 
   const ctx = createTestContext(identity);
 
-  // Load pattern from storage (fresh cache)
-  const pattern = await ctx.runtime.patternManager.loadPattern(
-    patternId,
+  // Load pattern from storage by content identity (fresh cache)
+  const pattern = await ctx.runtime.patternManager.loadPatternByIdentity(
+    patternRef.identity,
+    patternRef.symbol,
     space,
   );
+  if (!pattern) throw new Error("pattern failed to load by identity");
   console.log("Pattern loaded from storage (third runtime)");
 
   // Create a NEW input cell for Phase 3's instance (same initial values)
@@ -418,9 +427,9 @@ async function testPatternAndDataPersistence() {
   );
   const space = identity.did();
 
-  const patternId = await phase1SavePatternAndData(identity, space);
-  await phase2LoadAndVerify(identity, space, patternId);
-  await phase3ReactivityAndIsolation(identity, space, patternId);
+  const patternRef = await phase1SavePatternAndData(identity, space);
+  await phase2LoadAndVerify(identity, space, patternRef);
+  await phase3ReactivityAndIsolation(identity, space, patternRef);
   await phase4CrossSessionReactivity(identity, space);
 
   console.log("\n=== TEST PASSED ===");

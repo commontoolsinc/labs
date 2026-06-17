@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Pattern } from "../src/builder/types.ts";
-import { getSigilLink } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
@@ -90,7 +89,10 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({ value: 1 });
-    resultCell.setMetaRaw("pattern", getSigilLink("of:missing-pattern-test"));
+    resultCell.setMetaRaw("patternIdentity", {
+      identity: "missing-pattern-identity",
+      symbol: "default",
+    });
     resultCell.setMetaRaw("argument", { value: 1 });
 
     await tx.commit();
@@ -135,8 +137,13 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-1",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     // Create result cell
@@ -161,7 +168,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setRaw({
       doubled: doubledCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     setResultCell(doubledCell, resultCell);
     argumentCell.set({ value: 5 });
@@ -204,8 +211,13 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-2",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     const resultCell = runtime.getCell(
@@ -223,7 +235,7 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     argumentCell.set({});
 
@@ -272,8 +284,13 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-3",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     const resultCell = runtime.getCell(
@@ -291,7 +308,7 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     argumentCell.set({});
 
@@ -419,8 +436,13 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-4",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     // Create result cell
@@ -447,7 +469,7 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
@@ -563,8 +585,13 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-5",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     // Create result cell
@@ -595,7 +622,7 @@ describe("queueEvent with auto-start", () => {
       events: eventsCell.getAsWriteRedirectLink(),
       eventCount: eventCountCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
@@ -706,8 +733,13 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(
+    const patternIdentity = {
+      identity: "test-ensure-piece-6",
+      symbol: "default",
+    };
+    runtime.patternManager.associatePatternIdentity(
       trustPattern(runtime, pattern),
+      patternIdentity,
     );
 
     const resultCell = runtime.getCell(
@@ -735,7 +767,7 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     setResultCell(doubledCell, intermediateCell);
     setResultCell(eventsCell, intermediateCell);

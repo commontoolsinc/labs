@@ -1509,12 +1509,15 @@ export async function main(argv: string[] = Deno.args) {
           }
         }
 
-        // Get current meta to build the updated program
-        let meta: Awaited<ReturnType<typeof piece.getPatternMeta>> | undefined;
+        // Recover the current source program (from the pattern's source-doc
+        // closure) to rebuild it with the edited file.
+        let program:
+          | Awaited<ReturnType<typeof piece.getPatternSourceProgram>>
+          | undefined;
         try {
-          meta = await piece.getPatternMeta();
+          program = await piece.getPatternSourceProgram();
         } catch (e) {
-          console.error(`[source] Failed to get pattern meta: ${e}`);
+          console.error(`[source] Failed to get pattern source: ${e}`);
           const errorMsg = isConnectionWriteFailure(e)
             ? noteWriteFailure(e)
             : String(e);
@@ -1522,18 +1525,16 @@ export async function main(argv: string[] = Deno.args) {
           return isConnectionWriteFailure(e) ? EROFS : EACCES;
         }
 
-        // Normalise to a files array, mirroring buildSourceTree:
-        // multi-file programs use program.files, single-file use meta.src.
         let baseMain: string;
         let baseMainExport: string | undefined;
         let baseFiles: { name: string; contents: string }[];
-        if (meta?.program?.files?.length) {
-          baseMain = meta.program.main;
-          baseMainExport = meta.program.mainExport;
-          baseFiles = meta.program.files;
+        if (program?.files?.length) {
+          baseMain = program.main;
+          baseMainExport = program.mainExport;
+          baseFiles = program.files;
         } else {
           console.error(
-            `[source] No program or src in pattern meta for ${relPath}`,
+            `[source] No recoverable source program for ${relPath}`,
           );
           markExistingFailed("no source program metadata");
           return EACCES;

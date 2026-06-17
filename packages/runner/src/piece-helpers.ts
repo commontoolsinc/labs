@@ -3,8 +3,6 @@ import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
-import type { PatternMeta } from "./pattern-manager.ts";
-import type { Mutable } from "@commonfabric/utils/types";
 
 export type CellPath = (string | number)[];
 
@@ -85,13 +83,18 @@ export function getResultCellWithSourceSchema<T = unknown>(
   return cell;
 }
 
+/**
+ * Compile a pattern into `space` and persist its content-addressed source +
+ * compiled documents there (the awaited write-back inside `compilePattern`).
+ * The compiled pattern carries its `{ identity, symbol }` entry ref, the single
+ * durable pattern pointer; no separate meta-cell save is needed. (Formerly
+ * `compileAndSavePattern`, which additionally wrote a now-deleted meta cell.)
+ */
 export async function compileAndSavePattern(
   runtime: Runtime,
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    spec?: string;
-    parents?: string[];
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -101,23 +104,14 @@ export async function compileAndSavePattern(
     };
   }
   // Route through the content-addressed cell cache in the target space so the
-  // saved pattern's compiled module set is reused on subsequent loads (CT-1623).
+  // compiled module set + source docs are written back (awaited) and reused on
+  // subsequent loads (CT-1623).
   const pattern = await runtime.patternManager.compilePattern(patternSrc, {
     space: options.space,
   });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");
   }
-
-  const patternId = runtime.patternManager.registerPattern(pattern, patternSrc);
-  await runtime.patternManager.setPatternMetaFields(patternId, {
-    spec: options.spec,
-    parents: options.parents?.map((id) => id.toString()),
-  } as Partial<Mutable<PatternMeta>>);
-  await runtime.patternManager.saveAndSyncPattern({
-    patternId,
-    space: options.space,
-  });
 
   return pattern;
 }

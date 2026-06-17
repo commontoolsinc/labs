@@ -8,12 +8,8 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { writeSourceDocs } from "../src/compilation-cache/cell-cache.ts";
 import { rewriteFabricPins } from "../src/fabric-pin-rewrite.ts";
 import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
-import { createRef } from "../src/create-ref.ts";
-import { fromURI, toURI } from "../src/uri-utils.ts";
-import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import type { Cell } from "../src/cell.ts";
-import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase(
   "fabric imports snapshot semantics test",
@@ -80,29 +76,23 @@ describe("fabric import snapshot semantics", () => {
     return compiled;
   }
 
-  function newPatternId(label: string): URI {
-    return toURI(createRef({ pattern: label }, "snapshot semantics"));
-  }
-
-  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
-    return runtime.getCellFromEntityId(
-      space,
-      { "/": fromURI(patternId) },
-      [],
-      patternMetaSchema,
-    );
-  }
-
-  async function writePatternMeta(
+  // Write a piece cell carrying the content-addressed `patternIdentity` pointer
+  // so a slug → piece chase resolves to its entry identity.
+  async function writePieceWithIdentity(
     label: string,
     entryIdentity: string,
-  ): Promise<Cell<PatternMeta>> {
-    const cell = patternMetaCell(newPatternId(label));
+  ): Promise<Cell<unknown>> {
+    const cell = runtime.getCell(
+      space,
+      { space, random: `piece-${label}` },
+    );
     await runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set({
-        spec: "pattern",
-        entryIdentity,
-      } as PatternMeta);
+      const cellWithTx = cell.withTx(tx);
+      cellWithTx.set({ name: "piece" });
+      cellWithTx.setMetaRaw("patternIdentity", {
+        identity: entryIdentity,
+        symbol: "default",
+      });
     });
     return cell;
   }
@@ -174,7 +164,7 @@ describe("fabric import snapshot semantics", () => {
 
   it("pins mutable refs into stable snapshots and updates only on re-pin", async () => {
     const depV1 = await publishDependency(10);
-    const metaV1 = await writePatternMeta("dep-v1", depV1.entryIdentity);
+    const metaV1 = await writePieceWithIdentity("dep-v1", depV1.entryIdentity);
     await writeSlug("dep", metaV1);
 
     const unpinned = importerProgram("cf:dep");
@@ -187,7 +177,7 @@ describe("fabric import snapshot semantics", () => {
     expect(runV1.result).toEqual({ result: 11 });
 
     const depV2 = await publishDependency(20);
-    const metaV2 = await writePatternMeta("dep-v2", depV2.entryIdentity);
+    const metaV2 = await writePieceWithIdentity("dep-v2", depV2.entryIdentity);
     await writeSlug("dep", metaV2);
 
     const rerunV1 = await compileAndRun(pinnedV1, 1);

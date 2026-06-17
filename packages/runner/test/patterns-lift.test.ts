@@ -14,7 +14,7 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getMetaLink } from "@commonfabric/runner";
+import { getPatternIdentityRef } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -241,9 +241,9 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternId = getMetaLink(piece, "pattern")?.id;
-    expect(patternId).toBeDefined();
-    expect(lastError?.patternId).toBe(patternId);
+    const patternIdentity = getPatternIdentityRef(piece)?.identity;
+    expect(patternIdentity).toBeDefined();
+    expect(lastError?.patternId).toBe(patternIdentity);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(piece.entityId))["/"],

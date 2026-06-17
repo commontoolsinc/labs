@@ -901,8 +901,6 @@ describe("moduleToJSON", () => {
 
     expect(targetModule).toBeDefined();
 
-    runtime.patternManager.registerPattern(pattern);
-
     // The implementation became verified during the STANDALONE Engine's
     // evaluation, so it carries process-global content-addressed provenance
     // (Engine.recordModuleProvenance) and `moduleToJSON` writes a `$implRef`.

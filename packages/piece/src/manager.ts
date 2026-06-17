@@ -4,6 +4,7 @@ import {
   EntityId,
   getEntityId,
   getMetaLink,
+  getPatternIdentityRef,
   isCell,
   isLink,
   isStream,
@@ -15,7 +16,6 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
-  URI,
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -177,7 +177,7 @@ export class PieceManager {
     );
     if (
       defaultPattern.getRaw() === undefined &&
-      defaultPattern.getMetaRaw("pattern") === undefined
+      getPatternIdentityRef(defaultPattern) === undefined
     ) {
       return undefined;
     }
@@ -788,13 +788,12 @@ export class PieceManager {
       cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    const knownPatternId = (() => {
-      try {
-        return this.runtime.patternManager.getPatternId(pattern);
-      } catch {
-        return undefined;
-      }
-    })();
+    // Fast path: the pattern's content-addressed entry ref, if it carries one
+    // (every space-compiled pattern does). Lets us load by identity without
+    // waiting for the piece's `patternIdentity` meta to settle.
+    const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
+      pattern,
+    );
     await timePiecePhase(
       "setupPersistent.runtime.setup",
       () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
@@ -802,8 +801,8 @@ export class PieceManager {
     await timePiecePhase(
       "setupPersistent.syncPattern",
       () =>
-        knownPatternId
-          ? this.syncPatternById(knownPatternId)
+        knownEntryRef
+          ? this.syncPatternByIdentity(knownEntryRef)
           : this.syncPattern(piece),
     );
 
@@ -841,29 +840,30 @@ export class PieceManager {
   async syncPattern(piece: Cell<unknown>) {
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
-    // When we subscribe to a doc, our subscription includes the doc's pattern,
-    // so get that.
-    let patternId = getMetaLink(piece, "pattern")?.id;
-    if (!patternId) {
+    // When we subscribe to a doc, our subscription includes the doc's pattern
+    // pointer (`patternIdentity`), so read that.
+    let ref = getPatternIdentityRef(piece);
+    if (!ref) {
       // Under remote sync, metadata can transiently lag the result value even
       // though setup just wrote both. Wait for storage to settle and retry once
       // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      patternId = getMetaLink(piece, "pattern")?.id;
+      ref = getPatternIdentityRef(piece);
     }
-    if (!patternId) throw new Error("piece missing pattern ID");
+    if (!ref) throw new Error("piece missing pattern identity");
 
     return await timePiecePhase(
       "syncPattern.loadPattern",
-      () => this.syncPatternById(patternId),
+      () => this.syncPatternByIdentity(ref),
     );
   }
 
-  async syncPatternById(patternId: URI) {
-    if (!patternId) throw new Error("patternId is required");
-    const pattern = await this.runtime.patternManager.loadPattern(
-      patternId,
+  async syncPatternByIdentity(ref: { identity: string; symbol: string }) {
+    if (!ref) throw new Error("pattern identity is required");
+    const pattern = await this.runtime.patternManager.loadPatternByIdentity(
+      ref.identity,
+      ref.symbol,
       this.space,
     );
     return pattern;
@@ -983,7 +983,7 @@ async function getCellByIdOrPiece(
     }
     if (
       getMetaLink(piece, "result") === undefined &&
-      getMetaLink(piece, "pattern") === undefined
+      getPatternIdentityRef(piece) === undefined
     ) {
       throw new Error(
         `Piece ${cellId} has neither a parent result nor a pattern`,

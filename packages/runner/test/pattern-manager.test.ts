@@ -6,7 +6,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { patternMetaSchema } from "../src/pattern-manager.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -32,7 +31,7 @@ describe("PatternManager program persistence", () => {
     await storageManager?.close();
   });
 
-  it("compiles multi-file program, attaches program, saves and reloads by id", async () => {
+  it("compiles multi-file program, attaches program, persists source docs and reloads by identity", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -54,7 +53,11 @@ describe("PatternManager program persistence", () => {
       ],
     };
 
-    const compiled = await runtime.patternManager.compilePattern(program);
+    // Compiling INTO a space persists the content-addressed source +
+    // compiled docs (the single durable source — no more meta cell).
+    const compiled = await runtime.patternManager.compilePattern(program, {
+      space,
+    });
     expect(getPatternProgram(compiled)).toBeDefined();
     expect(getPatternProgram(compiled)?.main).toEqual("/main.tsx");
     // Ensure original file names are preserved (no injected prefix leaked here)
@@ -63,139 +66,42 @@ describe("PatternManager program persistence", () => {
     ).sort();
     expect(fileNames).toEqual(["/main.tsx", "/util.ts"].sort());
 
-    const patternId = runtime.patternManager.registerPattern(compiled, program);
-    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
+    const entryRef = runtime.patternManager.getArtifactEntryRef(compiled);
+    expect(entryRef).toBeDefined();
 
-    const meta = runtime.patternManager.getPatternMeta({ patternId });
-    expect(meta.program).toBeDefined();
-    expect(meta.program?.main).toEqual("/main.tsx");
-    const metaFileNames = (meta.program?.files ?? []).map((f) => f.name).sort();
-    expect(metaFileNames).toEqual(["/main.tsx", "/util.ts"].sort());
+    // Recover the source files from the persisted source-doc closure. The
+    // closure is the recovery unit, so it includes the authored modules plus
+    // any injected helper modules (e.g. cfc.ts) — assert the authored files are
+    // present rather than an exact set.
+    const recovered = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(entryRef!.identity, space);
+    expect(recovered?.main).toEqual("/main.tsx");
+    const recoveredNames = (recovered?.files ?? []).map((f) => f.name);
+    expect(recoveredNames).toContain("/main.tsx");
+    expect(recoveredNames).toContain("/util.ts");
 
-    // Verify we can re-load and run the saved pattern
-    const loaded = await runtime.patternManager.loadPattern(
-      patternId,
+    // Verify we can re-load the pattern by its content identity and run it.
+    const loaded = await runtime.patternManager.loadPatternByIdentity(
+      entryRef!.identity,
+      entryRef!.symbol,
       space,
-      tx,
     );
+    expect(loaded).toBeDefined();
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "pattern-manager: run loaded",
       undefined,
       tx,
     );
-    const result = runtime.run(tx, loaded, { value: 3 }, resultCell);
+    const result = runtime.run(tx, loaded!, { value: 3 }, resultCell);
     await tx.commit();
     tx = runtime.edit();
     await result.pull();
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
   });
-
-  it("register/save idempotency: saving same pattern id twice is harmless", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "import { pattern } from 'commonfabric';",
-            "export default pattern<{ x: number }>(({ x }) => ({ x }));",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const compiled = await runtime.patternManager.compilePattern(program);
-    const patternId = runtime.patternManager.registerPattern(compiled, program);
-    const first = runtime.patternManager.savePattern({ patternId, space });
-    const second = runtime.patternManager.savePattern({ patternId, space });
-    expect(first).toBe(true);
-    expect(second).toBe(true);
-
-    const meta = runtime.patternManager.getPatternMeta({ patternId });
-    expect(meta.program?.main).toEqual("/main.ts");
-  });
-
-  it("stores pattern metadata at the pattern id", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "import { pattern } from 'commonfabric';",
-            "export default pattern<{ x: number }>(({ x }) => ({ x }));",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const compiled = await runtime.patternManager.compilePattern(program);
-    const patternId = runtime.patternManager.registerPattern(compiled, program);
-    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
-
-    const metaCell = runtime.getCellFromEntityId(
-      space,
-      patternId,
-      [],
-      patternMetaSchema,
-    );
-    expect(metaCell.getAsNormalizedFullLink().id).toEqual(patternId);
-    await metaCell.sync();
-    expect(metaCell.get()?.program?.main).toEqual("/main.ts");
-  });
-
-  it("loads pattern metadata from the legacy causal cell", async () => {
-    const patternId = "of:legacy-pattern-meta";
-    const program = {
-      main: "/legacy.ts",
-      mainExport: "default",
-      files: [
-        {
-          name: "/legacy.ts",
-          contents: "export default undefined;",
-        },
-      ],
-    };
-    const legacyCell = runtime.getCell(
-      space,
-      { patternId, type: "pattern" },
-      patternMetaSchema,
-      tx,
-    );
-
-    legacyCell.set({ program } as any);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const meta = await runtime.patternManager.loadPatternMeta(patternId, space);
-    expect(meta.program?.main).toEqual("/legacy.ts");
-  });
-
-  it("returns metadata for a registered compiled pattern factory", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "import { pattern } from 'commonfabric';",
-            "export default pattern(() => ({ name: 'factory meta' }));",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const compiled = await runtime.patternManager.compilePattern(program);
-    const patternId = runtime.patternManager.registerPattern(compiled, program);
-    const meta = runtime.patternManager.getPatternMeta(compiled);
-
-    expect(patternId).toBeDefined();
-    expect(meta.program?.main).toEqual("/main.ts");
-  });
 });
 
-describe("PatternManager.loadPattern error handling", () => {
+describe("PatternManager.loadPatternByIdentity error handling", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -212,18 +118,13 @@ describe("PatternManager.loadPattern error handling", () => {
     await storageManager?.close();
   });
 
-  it("throws descriptive error for missing pattern, not TypeError", async () => {
-    const bogusId = "of:nonexistent-pattern-id";
-    try {
-      await runtime.patternManager.loadPattern(bogusId, space);
-      throw new Error("should have thrown");
-    } catch (err) {
-      // Should throw the descriptive "has no stored source" error,
-      // NOT a TypeError about reading properties of undefined
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).not.toMatch(/Cannot read properties/);
-      expect((err as Error).message).toContain("has no stored source");
-    }
+  it("returns undefined for a missing identity, not a TypeError", async () => {
+    const result = await runtime.patternManager.loadPatternByIdentity(
+      "nonexistent-pattern-identity",
+      "default",
+      space,
+    );
+    expect(result).toBeUndefined();
   });
 });
 

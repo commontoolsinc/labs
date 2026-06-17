@@ -109,7 +109,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 
 # View piece metadata
 cat home/pieces/todo-app/meta.json
-# => {"id":"of:ba4j...","entityId":"ba4j...","patternName":"todo-app"}
+# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app"}
 
 # Mounted callables are executable and start with a cf exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
