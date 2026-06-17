@@ -70,9 +70,13 @@ function collectPrimaryPullIterationSeeds(
     }
   }
 
-  for (const record of state.nodes.nodes()) {
-    if (isRunnableSchedulingSeed(state, record)) {
-      workSet.add(record.action);
+  // Every runnable seed is invalid/never-ran (isRunnableSchedulingSeed gates
+  // on isInvalidOrNeverRan), so the invalid-node index is exactly the
+  // candidate set — iterate it instead of every registered node.
+  for (const action of state.nodes.getInvalidNodes()) {
+    const record = state.nodes.get(action);
+    if (record && isRunnableSchedulingSeed(state, record)) {
+      workSet.add(action);
     }
   }
 }
@@ -112,12 +116,14 @@ function hasRunnablePrimaryPullWork(state: PullSchedulingState): boolean {
     }
   }
 
-  for (const record of state.nodes.nodes()) {
+  for (const action of state.nodes.getInvalidNodes()) {
+    const record = state.nodes.get(action);
     if (
+      record &&
       isRunnableSchedulingSeed(state, record) &&
       isDirtyPullActionRunnable(
         state.dirtyPullRunnableStateWithDebounce,
-        record.action,
+        action,
       )
     ) {
       return true;

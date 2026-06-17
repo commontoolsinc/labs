@@ -47,16 +47,19 @@ describe("invalid cause dedup keys", () => {
 
     // Distinct path arrays that a naive join("/") would collapse.
     markInvalid(
-      record,
+      nodes,
+      action,
       { ...makeChange({ id: "of:cell", path: ["a", "b"] }).address, space },
     );
     markInvalid(
-      record,
+      nodes,
+      action,
       { ...makeChange({ id: "of:cell", path: ["a/b"] }).address, space },
     );
     // Same space/id/path in a different scope is a distinct trigger entity.
     markInvalid(
-      record,
+      nodes,
+      action,
       {
         ...makeChange({ id: "of:cell", path: ["a", "b"], scope: "user" })
           .address,
@@ -65,7 +68,8 @@ describe("invalid cause dedup keys", () => {
     );
     // Exact duplicate (scope omitted ≡ scope "space") dedups.
     markInvalid(
-      record,
+      nodes,
+      action,
       {
         ...makeChange({ id: "of:cell", path: ["a", "b"], scope: "space" })
           .address,
@@ -99,8 +103,7 @@ function makeNotificationState(args: {
     recordTriggerTrace: () => {},
     scheduleWithDebounce: () => {},
     markInvalid: (action, cause) => {
-      const record = nodes.get(action);
-      if (record) markInvalid(record, cause);
+      markInvalid(nodes, action, cause);
     },
     isInvalid: (action) => {
       const record = nodes.get(action);

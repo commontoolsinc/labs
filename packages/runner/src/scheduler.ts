@@ -589,7 +589,7 @@ export class Scheduler {
 
     const record = this.nodes.get(action);
     if (record) {
-      record.status = "clean";
+      this.nodes.setStatus(action, "clean");
       record.invalidCauses = [];
     }
     this.pending.delete(action);
@@ -2157,14 +2157,14 @@ export class Scheduler {
     if (record.status === "clean") {
       this.clearNodeBackoff(record);
     }
-    markInvalidRecord(record, cause);
+    markInvalidRecord(this.nodes, action, cause);
   }
 
   private clearInvalidAction(action: Action): void {
     const record = this.nodes.get(action);
     if (!record) return;
     if (record.status === "invalid") {
-      record.status = "clean";
+      this.nodes.setStatus(action, "clean");
     }
     record.invalidCauses = [];
     this.clearNodeBackoff(record);
@@ -2267,7 +2267,7 @@ export class Scheduler {
     if (!record) return;
 
     if (record.status === "never-ran") {
-      record.status = "clean";
+      this.nodes.setStatus(action, "clean");
     }
 
     if (

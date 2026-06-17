@@ -211,7 +211,7 @@ export function resubscribePullSchedulerAction(
   );
   const record = state.subscriptionState.nodes.get(action);
   if (!existingRecord && record?.status === "never-ran") {
-    record.status = "clean";
+    state.subscriptionState.nodes.setStatus(action, "clean");
   }
   const actionId = state.getActionId(action);
 

@@ -628,8 +628,9 @@ export function planPullExecuteContinuation(state: {
     !noteFutureEligibility(action)
   );
 
-  const hasDirtyPullWork = [...state.nodes.nodes()].some((record) => {
-    const action = record.action;
+  // Dirty pull work is by definition invalid — scan the invalid-node index
+  // rather than every registered node.
+  const hasDirtyPullWork = [...state.nodes.getInvalidNodes()].some((action) => {
     if (!isInvalidAction(state.nodes, action)) {
       return false;
     }

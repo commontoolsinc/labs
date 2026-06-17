@@ -42,14 +42,19 @@ export function collectTriggeredActionsForChange(
  * even if that run's branch never re-reads them.
  */
 export function markInvalid(
-  record: SchedulerNode,
+  nodes: NodeRegistry,
+  action: Action,
   cause?: IMemorySpaceAddress,
 ): void {
+  const record = nodes.get(action);
+  if (!record) return;
   if (cause !== undefined) {
     addInvalidCause(record, cause);
   }
+  // Status transition goes through the registry so the invalid-node index
+  // stays in lockstep; never-ran nodes keep their status (already indexed).
   if (record.status === "clean") {
-    record.status = "invalid";
+    nodes.setStatus(action, "invalid");
   }
 }
 
@@ -92,11 +97,12 @@ export function takeInvalidCauses(
 }
 
 export function restoreInvalidCauses(
-  record: SchedulerNode,
+  nodes: NodeRegistry,
+  action: Action,
   addresses: readonly IMemorySpaceAddress[],
 ): void {
   for (const address of addresses) {
-    markInvalid(record, address);
+    markInvalid(nodes, action, address);
   }
 }
 

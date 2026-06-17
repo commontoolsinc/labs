@@ -264,7 +264,7 @@ export async function runSchedulerAction(
   const record = state.nodes.get(action);
   const invalidCauses = record ? takeInvalidCauses(record) : undefined;
   if (record) {
-    record.status = "clean";
+    state.nodes.setStatus(action, "clean");
   }
   // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
   // run to the transaction so flow-label derivation can taint its writes
@@ -387,7 +387,7 @@ function rescheduleActionForImmediateRetry(
       args.invalidCauses !== undefined &&
       args.invalidCauses.length > 0
     ) {
-      restoreInvalidCauses(record, args.invalidCauses);
+      restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
     }
     state.markInvalid(args.action);
     state.pending.add(args.action);
@@ -460,7 +460,7 @@ function finalizeReactiveActionCommit(
         args.invalidCauses !== undefined &&
         args.invalidCauses.length > 0
       ) {
-        restoreInvalidCauses(record, args.invalidCauses);
+        restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
   });

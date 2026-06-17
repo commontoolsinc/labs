@@ -28,6 +28,13 @@ export class NodeRegistry {
   private all = new Set<SchedulerNode>();
   private activeEffects = new Set<Action>();
   private activeComputations = new Set<Action>();
+  // Active nodes whose status is `invalid` or `never-ran` — i.e. the nodes
+  // `isInvalidOrNeverRan` would match. Maintained incrementally through
+  // setStatus/activate/remove so the event-preflight gate (decision 15) and
+  // the pull seed scans can iterate the (small) invalid set instead of every
+  // registered node. Membership tracks both status AND active membership:
+  // a removed node drops out even though its record persists in `records`.
+  private invalidNodes = new Set<Action>();
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
@@ -84,11 +91,44 @@ export class NodeRegistry {
     this.all.delete(record);
     this.activeEffects.delete(action);
     this.activeComputations.delete(action);
+    this.invalidNodes.delete(action);
     return record;
   }
 
   get(action: Action): SchedulerNode | undefined {
     return this.records.get(action);
+  }
+
+  /**
+   * The only sanctioned status mutator. Routing every status write here keeps
+   * the `invalidNodes` index in lockstep with `record.status` (the index is a
+   * derived view, never authoritative). Callers keep their own transition
+   * guards (e.g. clean→invalid only); this just assigns and re-indexes.
+   */
+  setStatus(action: Action, status: NodeStatus): void {
+    const record = this.records.get(action);
+    if (!record) return;
+    record.status = status;
+    this.syncInvalidIndex(record);
+  }
+
+  /**
+   * Active nodes whose status is `invalid` or `never-ran`. Seeds the inverted
+   * event-preflight walk (decision 15) and the pull scheduling scans.
+   */
+  getInvalidNodes(): ReadonlySet<Action> {
+    return this.invalidNodes;
+  }
+
+  private syncInvalidIndex(record: SchedulerNode): void {
+    if (
+      this.all.has(record) &&
+      (record.status === "invalid" || record.status === "never-ran")
+    ) {
+      this.invalidNodes.add(record.action);
+    } else {
+      this.invalidNodes.delete(record.action);
+    }
   }
 
   linkParent(
@@ -211,5 +251,8 @@ export class NodeRegistry {
       this.activeComputations.add(record.action);
       this.activeEffects.delete(record.action);
     }
+    // A freshly registered node is born `never-ran`; a reactivated record
+    // re-enters the index iff its (preserved) status still qualifies.
+    this.syncInvalidIndex(record);
   }
 }
