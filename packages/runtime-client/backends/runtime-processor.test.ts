@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -64,6 +65,10 @@ function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
   return { pieceManager: this.pieceManager, cc: this.cc };
 }
 
+// A valid `fid1:` page id from a readable seed (handlers parse pageId via
+// `entityIdFrom`, which requires a real tagged-hash string).
+const fid = (seed: string) => taggedHashStringOf(seed);
+
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
     const reads: unknown[] = [];
@@ -91,7 +96,7 @@ describe("page slug metadata", () => {
     const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
       .call(processor, {
         type: RequestType.PageGetSlug,
-        pageId: "fid1-slugged-piece",
+        pageId: fid("slugged-piece"),
       });
 
     expect(result).toEqual({ slug: "demo" });
@@ -121,7 +126,7 @@ describe("page slug metadata", () => {
     const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
       .call(processor, {
         type: RequestType.PageGetSlug,
-        pageId: "fid1-slugged-piece",
+        pageId: fid("slugged-piece"),
       });
 
     expect(result).toEqual({ slug: undefined });
@@ -207,7 +212,7 @@ describe("page slug redirects", () => {
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
       .call(processor, {
         type: RequestType.PageGet,
-        pageId: "fid1-slug-doc",
+        pageId: fid("slug-doc"),
         runIt: true,
       });
 
@@ -282,7 +287,7 @@ describe("page slug redirects", () => {
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
       .call(processor, {
         type: RequestType.PageGet,
-        pageId: "fid1-slug-doc",
+        pageId: fid("slug-doc"),
         runIt: true,
       });
 
@@ -341,7 +346,7 @@ describe("page slug redirects", () => {
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
       .call(processor, {
         type: RequestType.PageGet,
-        pageId: "fid1-slug-doc",
+        pageId: fid("slug-doc"),
         runIt: true,
       });
 
@@ -1746,13 +1751,13 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     try {
       const resHome = await handlePageGet.call(processor, {
         type: RequestType.PageGet,
-        pageId: "fid1-cross-space-probe",
+        pageId: fid("cross-space-probe"),
         runIt: false,
         space: homeSpace,
       });
       const resB = await handlePageGet.call(processor, {
         type: RequestType.PageGet,
-        pageId: "fid1-cross-space-probe",
+        pageId: fid("cross-space-probe"),
         runIt: false,
         space: spaceB,
       });

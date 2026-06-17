@@ -418,10 +418,13 @@ describe("cli piece parsing", () => {
     expect(resolved).toBe(token);
   });
 
-  it("preserves non-fid link endpoints when no slug document exists", async () => {
+  it("rejects a bare endpoint with no slug document, even with the fallback", async () => {
     const manager = {};
-    const token = "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";
-    const resolved = await resolveLinkEndpointAddress(
+    // A colon-less token (a bare name, or a legacy CID) is not an id-shaped
+    // endpoint, so the missing-slug fallback does not preserve it; with no slug
+    // document it is genuinely missing rather than a usable raw id.
+    const token = "a-bare-name";
+    await expect(resolveLinkEndpointAddress(
       manager as any,
       token,
       () =>
@@ -429,9 +432,7 @@ describe("cli piece parsing", () => {
           new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
         ),
       { allowMissingSlugFallback: true },
-    );
-
-    expect(resolved).toBe(token);
+    )).rejects.toThrow(/Slug "a-bare-name" not found/);
   });
 
   it("rejects missing destination slug endpoints", async () => {

@@ -5,6 +5,7 @@ import {
   Cell,
   entityIdFrom,
   getPatternIdentityRef,
+  isSlugAddress,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -369,7 +370,12 @@ export async function resolveLinkEndpointAddress(
     if (
       options?.allowMissingSlugFallback &&
       error instanceof SlugResolutionError &&
-      error.code === "missing"
+      error.code === "missing" &&
+      // Only fall back for an id-shaped token (one with a scheme/colon, e.g.
+      // `fid1:…`). A bare slug-shaped token that didn't resolve is genuinely
+      // missing — surface the clean SlugResolutionError rather than letting a
+      // non-hash string reach `entityIdFrom`.
+      !isSlugAddress(token)
     ) {
       return token;
     }

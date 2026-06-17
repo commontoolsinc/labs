@@ -152,9 +152,15 @@ async function runCharm(data: RunData): Promise<void> {
     latestError = null;
 
     // Get the charm cell from the pieceId
+    let charmEntityId;
+    try {
+      charmEntityId = entityIdFrom(pieceId);
+    } catch {
+      throw new Error(`Charm pieceId is not a valid entity id: ${pieceId}`);
+    }
     const charmCell = manager.runtime.getCellFromEntityId(
       spaceId,
-      entityIdFrom(pieceId),
+      charmEntityId,
     );
 
     // Check whether the charm is still active (in charms or pinned-charms)

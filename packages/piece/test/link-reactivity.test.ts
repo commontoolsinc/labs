@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { parseLink, resolveCellPath, Runtime } from "@commonfabric/runner";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
@@ -124,14 +125,16 @@ describe("PieceManager.link() reactivity", () => {
   });
 
   it("links scoped source cells into scoped target cells", async () => {
+    const sourceId = taggedHashStringOf("scoped-source");
+    const targetId = taggedHashStringOf("scoped-target");
     const sourceCell = runtime.getCellFromLink({
-      id: "of:scoped-source",
+      id: `of:${sourceId}`,
       path: [],
       space: manager.getSpace(),
       scope: "user",
     });
     const targetCell = runtime.getCellFromLink({
-      id: "of:scoped-target",
+      id: `of:${targetId}`,
       path: [],
       space: manager.getSpace(),
       scope: "session",
@@ -144,9 +147,9 @@ describe("PieceManager.link() reactivity", () => {
     await runtime.idle();
 
     await manager.link(
-      "scoped-source",
+      sourceId,
       ["data"],
-      "scoped-target",
+      targetId,
       ["linked"],
       { start: false, sourceScope: "user", targetScope: "session" },
     );
