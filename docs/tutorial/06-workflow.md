@@ -48,7 +48,7 @@ is Chapter 10.)
 deno task cf piece new pattern.tsx -s myspace
 
 # Every iteration after that: update the SAME piece in place
-deno task cf piece setsrc pattern.tsx --piece bafyreia... -s myspace
+deno task cf piece setsrc pattern.tsx --piece fid1:abc... -s myspace
 ```
 
 The most common workflow mistake is rerunning `piece new` after each edit —

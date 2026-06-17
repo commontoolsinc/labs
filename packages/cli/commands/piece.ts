@@ -268,8 +268,8 @@ export const piece = new Command()
   )
   .usage(spaceUsage)
   .example(
-    cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes bafypiece1`),
-    `Set slug "project-notes" to piece "bafypiece1".`,
+    cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece1`),
+    `Set slug "project-notes" to piece "fid1:piece1".`,
   )
   .example(
     cliText(
@@ -581,31 +581,31 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   .usage(spaceUsage)
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/outputEmails bafypiece2/emails`,
+      `cf piece link ${EX_ID} ${EX_COMP} fid1:piece1/outputEmails fid1:piece2/emails`,
     ),
-    `Link outputEmails field from piece "bafypiece1" to emails field in piece "bafypiece2".`,
+    `Link outputEmails field from piece "fid1:piece1" to emails field in piece "fid1:piece2".`,
   )
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/data/users/0/email bafypiece2/config/primaryEmail`,
+      `cf piece link ${EX_ID} ${EX_COMP} fid1:piece1/data/users/0/email fid1:piece2/config/primaryEmail`,
     ),
     `Link deep nested field including array access.`,
   )
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1@user/profile bafypiece2@session/currentProfile`,
+      `cf piece link ${EX_ID} ${EX_COMP} fid1:piece1@user/profile fid1:piece2@session/currentProfile`,
     ),
     `Link scoped cell instances using @user or @session on the piece ID.`,
   )
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/allPieces`,
     ),
     `Link well-known "allPieces" list to a piece field.`,
   )
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db bafypiece1/refDb`,
+      `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db fid1:piece1/refDb`,
     ),
     `Inject a read-only on-disk SQLite file as a piece's SqliteDb input (Phase 7).`,
   )

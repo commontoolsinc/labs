@@ -264,7 +264,7 @@ Pieces must be registered to receive background polling:
 # Via curl
 curl -X POST http://localhost:8000/api/integrations/bg \
   -H "Content-Type: application/json" \
-  -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
+  -d '{"pieceId":"fid1:abc...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
 Or use the `<cf-updater>` component in your piece's UI.

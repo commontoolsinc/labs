@@ -323,8 +323,8 @@ const matchSpacePrefix = new RegExp("^@(did:[^:]+:[^/]+)$");
 /**
  * Parses a LLM friendly link from a target string.
  * Supports both standard and cross-space formats:
- * - Standard: /of:bafyabc123/path
- * - Cross-space: /@did:key:z6Mk.../of:bafyabc123/path
+ * - Standard: /of:fid1:abc123/path
+ * - Cross-space: /@did:key:z6Mk.../of:fid1:abc123/path
  *
  * @param target - The target string to parse
  * @param space - The fallback space to use if not embedded in link
@@ -346,7 +346,7 @@ export function parseLLMFriendlyLink(
 
   if (!matchLLMFriendlyLink.test(target)) {
     throw new Error(
-      'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+      'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
     );
   }
 
@@ -361,18 +361,18 @@ export function parseLLMFriendlyLink(
   let path: string[];
   const spaceMatch = firstSegment?.match(matchSpacePrefix);
   if (spaceMatch) {
-    // Cross-space format: /@did:key:z6Mk.../of:bafyabc123/path
+    // Cross-space format: /@did:key:z6Mk.../of:fid1:abc123/path
     const embeddedSpace = spaceMatch[1] as MemorySpace;
     [id, ...path] = rest;
     space = embeddedSpace;
   } else {
-    // Standard format: /of:bafyabc123/path
+    // Standard format: /of:fid1:abc123/path
     id = firstSegment;
     path = rest;
   }
   if (id === undefined) {
     throw new Error(
-      'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+      'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
     );
   }
   const scopedId = parseScopedIdSegment(id);
@@ -386,7 +386,7 @@ export function parseLLMFriendlyLink(
   // format)
   if (id === undefined || id.length < 20) {
     throw new Error(
-      `Piece references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
+      `Piece references must use handles (e.g., "/of:fid1:abc123/path"), not human names (e.g., "${id}").`,
     );
   }
 

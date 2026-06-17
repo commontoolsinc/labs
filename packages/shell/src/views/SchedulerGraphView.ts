@@ -1339,14 +1339,14 @@ export class XSchedulerGraph extends LitElement {
    * Format: prefix:...last4/path
    *
    * Examples:
-   * - "sink:did:key:z6Mkk.../of:baedrei.../value" → "sink:...i.../value"
+   * - "sink:did:key:z6Mkk.../of:fid1:abc.../value" → "sink:...c.../value"
    * - "parentAction" → "parentAction"
    */
   private truncateLabel(label: string, maxLen = 20): string {
     // Simple case - short enough already
     if (label.length <= maxLen) return label;
 
-    // Try to parse structured IDs like "sink:did:key:.../of:baedrei.../path"
+    // Try to parse structured IDs like "sink:did:key:.../of:fid1:abc.../path"
     // or "action:space/entity/path"
 
     // Check for sink: or other prefix
@@ -1358,7 +1358,7 @@ export class XSchedulerGraph extends LitElement {
 
     // Look for entity ID pattern (of:xxx or just the entity part after space/)
     // Common patterns:
-    // - did:key:z6Mkk.../of:baedreide2e4l6ej534c3yimtw5g2bpfwve4xm6abycmfpk6oyml2dx4mme/path
+    // - did:key:z6Mkk.../of:fid1:abc123/path
     // - space/entityid/path
 
     // Try to find the last path segment(s) which are most meaningful

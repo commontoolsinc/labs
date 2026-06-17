@@ -48,7 +48,7 @@ stable entity references. To get the real piece cell ID, use `resolveAsCell()`:
 
 ```tsx
 const resolved = await subCell.resolveAsCell();
-const stableId = resolved.ref().id; // e.g., "of:bafyabc123"
+const stableId = resolved.ref().id; // e.g., "of:fid1:abc123"
 ```
 
 **Important:** `CellHandle.id()` strips the `of:` prefix, while
@@ -60,10 +60,10 @@ wiki-link format in `cf-code-editor`).
 
 The system uses two link formats for mentions, depending on context:
 
-| Format        | Example                  | Used by                                      |
-| ------------- | ------------------------ | -------------------------------------------- |
-| Markdown link | `[Note](/of:bafyabc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
-| Wiki-link     | `[[Note (bafyabc123)]]`  | `cf-code-editor`, `note-md.tsx`              |
+| Format        | Example                   | Used by                                      |
+| ------------- | ------------------------- | -------------------------------------------- |
+| Markdown link | `[Note](/of:fid1:abc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
+| Wiki-link     | `[[Note (fid1:abc123)]]`  | `cf-code-editor`, `note-md.tsx`              |
 
 ### Markdown links (`/of:...`)
 

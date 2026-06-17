@@ -11,7 +11,7 @@ import { createTableSQL, type TableSchema } from "./schema.ts";
 // Reserved schema names that may never be used as a pattern-db attach alias.
 const RESERVED_ALIASES = new Set(["main", "temp"]);
 
-/** Derive a safe attach alias from an opaque db id (e.g. an `of:bafy…` entity
+/** Derive a safe attach alias from an opaque db id (e.g. an `of:fid1:abc…` entity
  *  id). The `cf_` prefix guarantees a valid leading identifier char. */
 export function aliasForDbId(id: string): string {
   return `cf_${id.replace(/[^A-Za-z0-9]/g, "_")}`;

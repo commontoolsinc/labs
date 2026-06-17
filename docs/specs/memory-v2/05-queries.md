@@ -719,7 +719,7 @@ Example:
   "author": {
     "/": {
       "link@1": {
-        "id": "of:bafy...abc123",
+        "id": "of:fid1:abc123",
         "path": []
       }
     }

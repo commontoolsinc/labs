@@ -335,7 +335,7 @@ export const backgroundIntegration = createRoute({
             })
             .openapi({
               example: {
-                pieceId: "bafy...",
+                pieceId: "fid1:abc...",
                 space: "did:",
                 integration: "plaid",
               },
