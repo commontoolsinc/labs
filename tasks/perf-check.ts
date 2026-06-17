@@ -21,11 +21,16 @@ import {
   applyBaselineOverrides,
   type Artifact,
   type BaselineOverrides,
+  buildCoverageDebtSuggestionComment,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
+  COVERAGE_SUGGESTION_MARKER,
+  coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
+  type CoverageSuggestionFileLines,
+  type CoverageSuggestionGroup,
   downloadAndExtractArtifact,
   downloadAndParseJUnit,
   downloadAndParsePerfMetrics,
@@ -34,12 +39,14 @@ import {
   extractTestFileMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
+  fetchIssueComments,
   fetchJobsForRun,
   fetchPRFiles,
   fetchPRForCommit,
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  githubPost,
   isCoverageDebtMetric,
   mapConcurrent,
   type MetricTimeline,
@@ -47,11 +54,13 @@ import {
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   newestArtifactsByName,
+  parseAddedLinesFromPatch,
   parseBaselineOverrides,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_FILE,
   PERF_METRICS_FILE,
+  type PRFile,
   type PRInfo,
   readAndParseEvent,
   REPO,
@@ -68,9 +77,10 @@ import {
 } from "./perf-lib.ts";
 import * as path from "@std/path";
 import {
-  collectCoverageDebtMetrics,
-  collectCoverageDebtMetricsFromLcov,
+  collectCoverageDebtReport,
+  collectCoverageDebtReportFromLcov,
   COVERAGE_PROFILE_ARTIFACT_PREFIX,
+  type FileUncoveredLines,
 } from "./coverage-metrics.ts";
 
 /** How many recent main-branch runs to use for baseline. */
@@ -372,7 +382,9 @@ function printMetricTable(rows: Row[], includeStatus = false): void {
 async function extractCoverageDebtSamples(
   run: WorkflowRun,
   artifacts: Artifact[],
-): Promise<Map<string, TimingSample>> {
+): Promise<
+  { samples: Map<string, TimingSample>; uncovered: FileUncoveredLines[] }
+> {
   const metrics = new Map<string, TimingSample>();
   const coverageArtifacts = newestArtifactsByName(artifacts.filter(
     (artifact) =>
@@ -394,6 +406,7 @@ async function extractCoverageDebtSamples(
 
   const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
   const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
+  let uncovered: FileUncoveredLines[] = [];
   try {
     let profileFileCount = 0;
     let lcovFileCount = 0;
@@ -413,25 +426,26 @@ async function extractCoverageDebtSamples(
       );
     }
 
-    const coverageMetrics = lcovFileCount > 0
-      ? await collectCoverageDebtMetricsFromLcov({
+    const report = lcovFileCount > 0
+      ? await collectCoverageDebtReportFromLcov({
         rootDir: Deno.cwd(),
         lcov: await readCombinedLcov(lcovDir),
       })
-      : await collectCoverageDebtMetrics({
+      : await collectCoverageDebtReport({
         rootDir: Deno.cwd(),
         coverageProfileDir: profileDir,
       });
 
-    for (const metric of coverageMetrics) {
+    for (const metric of report.metrics) {
       metrics.set(
         metric.name,
         sampleForRun(run, metric.uncoveredLines),
       );
     }
+    uncovered = report.files;
 
     console.log(
-      `Extracted ${coverageMetrics.length} coverage debt metrics from ${
+      `Extracted ${report.metrics.length} coverage debt metrics from ${
         lcovFileCount > 0
           ? `${lcovFileCount} LCOV report files`
           : `${profileFileCount} coverage profile files`
@@ -446,7 +460,76 @@ async function extractCoverageDebtSamples(
     } catch { /* ignore cleanup errors */ }
   }
 
-  return metrics;
+  return { samples: metrics, uncovered };
+}
+
+/**
+ * Post a once-per-PR comment that tells the author (and an LLM) how to cover the
+ * new code that tripped the coverage gate. Skips silently if a previous run
+ * already posted one, and never throws — posting is best-effort so it cannot
+ * mask the regression failure itself.
+ */
+async function postCoverageDebtSuggestion(
+  prNumber: number,
+  coverageFailures: Row[],
+  prFiles: PRFile[],
+  uncoveredFiles: FileUncoveredLines[],
+  runUrl: string,
+): Promise<void> {
+  const groups = coverageFailures
+    .map((failure) => ({
+      group: coverageMetricGroupName(failure.metric),
+      target: Math.round(failure.median ?? 0),
+      current: Math.round(failure.current),
+    }))
+    .filter((group): group is CoverageSuggestionGroup => group.group !== null);
+
+  if (groups.length === 0) return;
+
+  const failingGroups = new Set(groups.map((group) => group.group));
+  const uncoveredByPath = new Map(
+    uncoveredFiles.map((file) => [file.relativePath, file]),
+  );
+
+  // Intersect the lines this PR added with the lines coverage marks uncovered,
+  // restricted to the source groups that actually regressed.
+  const files: CoverageSuggestionFileLines[] = [];
+  for (const prFile of prFiles) {
+    const relativePath = prFile.filename.replaceAll("\\", "/");
+    const group = coverageGroupForChangedFile(relativePath);
+    if (!group || !failingGroups.has(group)) continue;
+
+    const uncovered = uncoveredByPath.get(relativePath);
+    if (!uncovered || !prFile.patch) continue;
+
+    const addedLines = parseAddedLinesFromPatch(prFile.patch);
+    const lines = uncovered.uncoveredLines
+      .filter((line) => addedLines.has(line))
+      .map((line) => ({ line, text: addedLines.get(line)! }));
+    if (lines.length > 0) files.push({ relativePath, group, lines });
+  }
+
+  try {
+    const existing = await fetchIssueComments(prNumber);
+    if (
+      existing.some((comment) =>
+        comment.body.includes(COVERAGE_SUGGESTION_MARKER)
+      )
+    ) {
+      console.log(
+        `Coverage suggestion comment already present on PR #${prNumber}; not posting again.`,
+      );
+      return;
+    }
+
+    const body = buildCoverageDebtSuggestionComment({ groups, files, runUrl });
+    await githubPost(`/repos/${REPO}/issues/${prNumber}/comments`, { body });
+    console.log(`Posted coverage suggestion comment to PR #${prNumber}.`);
+  } catch (error) {
+    console.warn(
+      `  Warning: could not post coverage suggestion comment to PR #${prNumber}: ${error}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +607,11 @@ async function main() {
   // another API request on the current workflow run.
   const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
   let changedCoverageGroups: Set<string> | undefined;
+  let prFiles: PRFile[] = [];
 
   if (prNumber) {
     try {
-      const prFiles = await fetchPRFiles(parseInt(prNumber));
+      prFiles = await fetchPRFiles(parseInt(prNumber));
       changedCoverageGroups = coverageGroupsForChangedFiles(
         prFiles.map((file) => file.filename),
       );
@@ -595,19 +679,21 @@ async function main() {
 
   // Extract coverage debt metrics from coverage profile artifacts.
   let coverageDataError: unknown;
+  let coverageUncoveredFiles: FileUncoveredLines[] = [];
   try {
     if (currentArtifactsError) {
       throw new Error(
         `Could not fetch current run artifacts: ${currentArtifactsError}`,
       );
     }
-    const coverageMetrics = await extractCoverageDebtSamples(
+    const coverage = await extractCoverageDebtSamples(
       currentRunInfo,
       currentArtifacts,
     );
-    for (const [name, sample] of coverageMetrics) {
+    for (const [name, sample] of coverage.samples) {
       currentMetrics.set(name, sample);
     }
+    coverageUncoveredFiles = coverage.uncovered;
   } catch (e) {
     coverageDataError = e;
     console.error(
@@ -1222,6 +1308,18 @@ async function main() {
       console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
     }
     console.log("---END COPY-PASTE---");
+  }
+
+  // A coverage regression on a real PR earns a once-per-PR comment pointing the
+  // author at the uncovered lines and how to cover them.
+  if (coverageFailures.length > 0 && prNumber) {
+    await postCoverageDebtSuggestion(
+      parseInt(prNumber),
+      coverageFailures,
+      prFiles,
+      coverageUncoveredFiles,
+      currentRunInfo.html_url,
+    );
   }
 
   Deno.exit(1);

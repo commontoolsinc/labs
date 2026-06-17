@@ -51,11 +51,25 @@ export interface CoverageDebtMetric {
   uncoveredLines: number;
 }
 
+/** Per-file list of source line numbers that no test executed. */
+export interface FileUncoveredLines {
+  relativePath: string;
+  metricGroup: string;
+  /** Source line numbers with zero hits, sorted ascending. */
+  uncoveredLines: number[];
+}
+
+/** Aggregate debt metrics plus the per-file breakdown of uncovered lines. */
+export interface CoverageDebtReport {
+  metrics: CoverageDebtMetric[];
+  files: FileUncoveredLines[];
+}
+
 interface SourceFile {
   absolutePath: string;
   relativePath: string;
   metricGroup: string;
-  trackedLineCount: number;
+  trackedLines: number[];
 }
 
 interface LcovFileCoverage {
@@ -65,34 +79,57 @@ interface LcovFileCoverage {
 export async function collectCoverageDebtMetrics(
   options: CoverageDebtMetricsOptions,
 ): Promise<CoverageDebtMetric[]> {
-  const lcov = await denoCoverageLcov(options.coverageProfileDir);
-  return await collectCoverageDebtMetricsFromLcov({
-    rootDir: options.rootDir,
-    lcov,
-  });
+  return (await collectCoverageDebtReport(options)).metrics;
 }
 
 export async function collectCoverageDebtMetricsFromLcov(
   options: CoverageDebtMetricsFromLcovOptions,
 ): Promise<CoverageDebtMetric[]> {
+  return (await collectCoverageDebtReportFromLcov(options)).metrics;
+}
+
+export async function collectCoverageDebtReport(
+  options: CoverageDebtMetricsOptions,
+): Promise<CoverageDebtReport> {
+  const lcov = await denoCoverageLcov(options.coverageProfileDir);
+  return await collectCoverageDebtReportFromLcov({
+    rootDir: options.rootDir,
+    lcov,
+  });
+}
+
+export async function collectCoverageDebtReportFromLcov(
+  options: CoverageDebtMetricsFromLcovOptions,
+): Promise<CoverageDebtReport> {
   const sourceFiles = await collectSourceFiles(options.rootDir);
   const lcovCoverage = parseLcov(options.lcov);
 
   let workspaceUncovered = 0;
   const groupUncovered = new Map<string, number>();
   const groupNames = new Set(sourceFiles.map((source) => source.metricGroup));
+  const files: FileUncoveredLines[] = [];
 
   for (const source of sourceFiles) {
     const coverage = lcovCoverage.get(source.absolutePath);
-    const uncovered = coverage
-      ? countUncoveredProfileLines(coverage)
-      : source.trackedLineCount;
+    // A file the tests never loaded has no coverage record; every tracked
+    // line counts as uncovered, matching how the debt metric scores it.
+    const uncoveredLines = coverage
+      ? uncoveredProfileLineNumbers(coverage)
+      : source.trackedLines;
 
-    workspaceUncovered += uncovered;
+    workspaceUncovered += uncoveredLines.length;
     groupUncovered.set(
       source.metricGroup,
-      (groupUncovered.get(source.metricGroup) ?? 0) + uncovered,
+      (groupUncovered.get(source.metricGroup) ?? 0) + uncoveredLines.length,
     );
+
+    if (uncoveredLines.length > 0) {
+      files.push({
+        relativePath: source.relativePath,
+        metricGroup: source.metricGroup,
+        uncoveredLines,
+      });
+    }
   }
 
   const metrics: CoverageDebtMetric[] = [
@@ -109,7 +146,7 @@ export async function collectCoverageDebtMetricsFromLcov(
     });
   }
 
-  return metrics;
+  return { metrics, files };
 }
 
 export async function collectSourceFiles(
@@ -129,7 +166,7 @@ export async function collectSourceFiles(
         absolutePath: path.normalize(file),
         relativePath,
         metricGroup: metricGroupFor(relativePath),
-        trackedLineCount: countTrackedSourceLines(content),
+        trackedLines: trackedSourceLineNumbers(content),
       });
     }
   }
@@ -165,11 +202,16 @@ export function metricGroupFor(relativePath: string): string {
 }
 
 export function countTrackedSourceLines(content: string): number {
-  let count = 0;
+  return trackedSourceLineNumbers(content).length;
+}
+
+export function trackedSourceLineNumbers(content: string): number[] {
+  const lineNumbers: number[] = [];
   let inBlockComment = false;
 
-  for (const line of content.split(/\r?\n/)) {
-    let text = line.trim();
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    let text = lines[index].trim();
     if (text.length === 0) continue;
 
     while (text.length > 0) {
@@ -200,12 +242,12 @@ export function countTrackedSourceLines(content: string): number {
         continue;
       }
 
-      count++;
+      lineNumbers.push(index + 1);
       break;
     }
   }
 
-  return count;
+  return lineNumbers;
 }
 
 export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
@@ -244,11 +286,15 @@ export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
 }
 
 export function countUncoveredProfileLines(coverage: LcovFileCoverage): number {
-  let uncovered = 0;
-  for (const hits of coverage.lineHits.values()) {
-    if (hits === 0) uncovered++;
+  return uncoveredProfileLineNumbers(coverage).length;
+}
+
+function uncoveredProfileLineNumbers(coverage: LcovFileCoverage): number[] {
+  const lineNumbers: number[] = [];
+  for (const [lineNumber, hits] of coverage.lineHits) {
+    if (hits === 0) lineNumbers.push(lineNumber);
   }
-  return uncovered;
+  return lineNumbers.sort((a, b) => a - b);
 }
 
 async function denoCoverageLcov(coverageProfileDir: string): Promise<string> {

@@ -667,7 +667,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: read
+      # write: the coverage gate posts a once-per-PR comment on regressions.
+      pull-requests: write
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4

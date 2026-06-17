@@ -20,6 +20,25 @@ export const PERF_METRICS_BACKFILL_FILE = "perf-metrics-backfill.json";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
 export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
 
+/**
+ * Hidden marker placed at the top of the coverage-debt suggestion comment so
+ * the gate posts it at most once per PR.
+ */
+export const COVERAGE_SUGGESTION_MARKER = "<!-- coverage-debt-suggestion -->";
+
+/**
+ * Command an author (or an LLM) runs locally to reproduce the coverage gate.
+ * Collects coverage from the unit-test suites and prints the per-group
+ * uncovered-line counts as JSON. The integration suites are omitted, so the
+ * local counts are conservative: meeting the target locally also clears CI.
+ */
+export const COVERAGE_LOCAL_CHECK_COMMAND = [
+  "rm -rf coverage/raw/local",
+  'DENO_COVERAGE_DIR="$(pwd)/coverage/raw/local" deno task test',
+  "deno run --allow-read --allow-write --allow-run tasks/coverage-metrics.ts \\",
+  '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
+].join("\n");
+
 /** Minimum number of historical samples before we compute a baseline. */
 export const MIN_SAMPLES = 5;
 
@@ -182,6 +201,13 @@ export interface PRInfo {
 
 export interface PRFile {
   filename: string;
+  /** Unified diff for this file. Absent for binary or oversized changes. */
+  patch?: string;
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
 }
 
 export interface CurrentPRBody {
@@ -1416,6 +1442,261 @@ export function shouldGateCoverageDebtMetric(
   return changedCoverageGroups.has(group);
 }
 
+/**
+ * Parse a unified diff (the per-file `patch` from the GitHub PR files API) and
+ * return the lines this PR adds, keyed by their line number in the new file
+ * and mapped to the added source text (without the leading `+`).
+ */
+export function parseAddedLinesFromPatch(patch: string): Map<number, string> {
+  const added = new Map<number, string>();
+  let newLineNumber = 0;
+
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@")) {
+      const match = /@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (match) newLineNumber = parseInt(match[1], 10);
+      continue;
+    }
+
+    if (line.startsWith("+")) {
+      if (line.startsWith("+++")) continue;
+      added.set(newLineNumber, line.slice(1));
+      newLineNumber++;
+      continue;
+    }
+
+    if (line.startsWith("-")) {
+      // Deletion: present only in the old file, so the new-file cursor holds.
+      continue;
+    }
+
+    // "\ No newline at end of file" markers and the trailing empty element
+    // from splitting do not advance the new-file cursor.
+    if (line.startsWith("\\") || line === "") continue;
+
+    // Context line: present in both files.
+    newLineNumber++;
+  }
+
+  return added;
+}
+
+/** A changed source group whose uncovered-line count regressed. */
+export interface CoverageSuggestionGroup {
+  group: string;
+  /** Uncovered-line count from latest `main`; the PR must not exceed it. */
+  target: number;
+  /** Uncovered-line count this PR produced. */
+  current: number;
+}
+
+/** Lines a PR added that no test executes, for one file. */
+export interface CoverageSuggestionFileLines {
+  relativePath: string;
+  group: string;
+  lines: { line: number; text: string }[];
+}
+
+export interface CoverageDebtSuggestionInput {
+  groups: CoverageSuggestionGroup[];
+  files: CoverageSuggestionFileLines[];
+  /** URL of the workflow run that detected the regression. */
+  runUrl?: string;
+}
+
+const MAX_SUGGESTION_LINES_PER_FILE = 40;
+const MAX_SUGGESTION_LINES_TOTAL = 200;
+
+/**
+ * Cap the uncovered-line listing so a large PR does not produce an enormous
+ * comment. Returns the files trimmed to the budget and whether anything was
+ * dropped.
+ */
+function limitSuggestionFiles(
+  files: CoverageSuggestionFileLines[],
+): { files: CoverageSuggestionFileLines[]; truncated: boolean } {
+  const limited: CoverageSuggestionFileLines[] = [];
+  let remaining = MAX_SUGGESTION_LINES_TOTAL;
+  let truncated = false;
+
+  for (const file of files) {
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const perFile = file.lines.slice(0, MAX_SUGGESTION_LINES_PER_FILE);
+    const lines = perFile.slice(0, remaining);
+    if (lines.length < file.lines.length) truncated = true;
+    remaining -= lines.length;
+    limited.push({ ...file, lines });
+  }
+
+  return { files: limited, truncated };
+}
+
+function formatTargetList(groups: CoverageSuggestionGroup[]): string[] {
+  return groups.map((group) =>
+    `  ${COVERAGE_METRIC_PREFIX} ${group.group} uncovered lines  <=  ${group.target}   (this PR: ${group.current})`
+  );
+}
+
+/**
+ * Build the plain-text prompt an author can paste into an AI coding agent. It
+ * is self-contained: the specific uncovered lines, the command to reproduce the
+ * gate, and the target thresholds it must reach.
+ */
+function buildCoverageSuggestionPrompt(
+  input: CoverageDebtSuggestionInput,
+  limitedFiles: CoverageSuggestionFileLines[],
+  truncated: boolean,
+): string[] {
+  const lines: string[] = [
+    "Test coverage for this branch regressed: it adds source lines that no",
+    "test executes, and the CI coverage gate is failing. Add or extend tests so",
+    "the uncovered lines below are executed. Write real tests that exercise the",
+    "code paths; do not delete assertions, mark lines ignored, or weaken the gate.",
+    "",
+  ];
+
+  if (limitedFiles.length > 0) {
+    lines.push(
+      "Uncovered lines added in this change (file, then `line: code`):",
+    );
+    lines.push("");
+    for (const file of limitedFiles) {
+      lines.push(file.relativePath);
+      for (const entry of file.lines) {
+        lines.push(`  ${entry.line}: ${entry.text}`);
+      }
+      lines.push("");
+    }
+    if (truncated) {
+      lines.push(
+        "(Listing truncated. Run the command below to see every uncovered line.)",
+      );
+      lines.push("");
+    }
+  } else {
+    lines.push(
+      "The uncovered lines could not be tied to specific added lines from the",
+      "diff. Run the command below to find which lines are uncovered.",
+      "",
+    );
+  }
+
+  lines.push("After adding tests, verify from the repository root:");
+  lines.push("");
+  for (const command of COVERAGE_LOCAL_CHECK_COMMAND.split("\n")) {
+    lines.push(`  ${command}`);
+  }
+  lines.push("");
+  lines.push(
+    "That prints one JSON object of coverage-debt metrics. The gate passes when",
+    "each of these metrics is at or below its target:",
+    "",
+  );
+  lines.push(...formatTargetList(input.groups));
+  lines.push("");
+  lines.push(
+    "The local run omits the integration suites, so its counts are conservative:",
+    "if every metric meets its target locally, CI will pass too.",
+  );
+
+  return lines;
+}
+
+/**
+ * Build the Markdown body of the once-per-PR coverage-regression comment. Leads
+ * with the hidden marker so a later run can detect that it was already posted.
+ */
+export function buildCoverageDebtSuggestionComment(
+  input: CoverageDebtSuggestionInput,
+): string {
+  const { files, truncated } = limitSuggestionFiles(input.files);
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+
+  out.push("## 🧪 Test coverage regressed");
+  out.push("");
+  out.push(
+    "This PR adds source lines that no test exercises, so the coverage gate in " +
+      "the **Performance Check** job is failing. The gate ratchets each changed " +
+      "source group against its uncovered-line count on `main`: the group must " +
+      "not end up with more uncovered lines than that baseline.",
+  );
+  out.push("");
+
+  out.push("| Source group | Baseline (target) | This PR | Over by |");
+  out.push("| --- | ---: | ---: | ---: |");
+  for (const group of input.groups) {
+    out.push(
+      `| \`${group.group}\` | ${group.target} | ${group.current} | +${
+        group.current - group.target
+      } |`,
+    );
+  }
+  out.push("");
+
+  out.push("### Uncovered lines added in this PR");
+  out.push("");
+  if (files.length > 0) {
+    for (const file of files) {
+      const body = file.lines
+        .map((entry) => `${String(entry.line).padStart(6)}  ${entry.text}`)
+        .join("\n");
+      out.push(`\`${file.relativePath}\``);
+      out.push("```");
+      out.push(body);
+      out.push("```");
+    }
+    if (truncated) {
+      out.push(
+        "_Showing the first uncovered lines only; the command below lists them all._",
+      );
+    }
+  } else {
+    out.push(
+      "Could not tie the regression to specific added lines from the diff " +
+        "(the uncovered code may be in modified rather than newly-added lines). " +
+        "Use the command below to locate the uncovered lines.",
+    );
+  }
+  out.push("");
+
+  out.push("### Prompt for an AI coding agent");
+  out.push("");
+  out.push(
+    "Copy the block below into an AI coding agent to add the missing tests:",
+  );
+  out.push("");
+  out.push("````text");
+  out.push(...buildCoverageSuggestionPrompt(input, files, truncated));
+  out.push("````");
+  out.push("");
+
+  out.push("### Verify locally");
+  out.push("");
+  out.push("```bash");
+  out.push(COVERAGE_LOCAL_CHECK_COMMAND);
+  out.push("```");
+  out.push("");
+  out.push("The gate passes when each metric is at or below its target:");
+  out.push("");
+  out.push("```");
+  out.push(...formatTargetList(input.groups));
+  out.push("```");
+  out.push("");
+
+  out.push("---");
+  const runRef = input.runUrl ? ` ([run](${input.runUrl}))` : "";
+  out.push(
+    `*Posted once per PR by the coverage gate in \`tasks/perf-check.ts\`${runRef}. ` +
+      "To intentionally accept the new debt instead, add `" +
+      COVERAGE_BASELINE_RESET_MARKER + "` to the PR description.*",
+  );
+
+  return out.join("\n");
+}
+
 /** Escape a string for use inside a Markdown table cell. */
 export function escapeTableCell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -1509,6 +1790,26 @@ export async function fetchPRFiles(prNumber: number): Promise<PRFile[]> {
   }
 
   return files;
+}
+
+/** Fetch every issue comment on a PR (PR conversation comments). */
+export async function fetchIssueComments(
+  issueNumber: number,
+): Promise<IssueComment[]> {
+  const comments: IssueComment[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<{ id: number; body: string | null }[]>(
+      `/repos/${REPO}/issues/${issueNumber}/comments?per_page=${perPage}&page=${page}`,
+    );
+    for (const comment of data) {
+      comments.push({ id: comment.id, body: comment.body ?? "" });
+    }
+    if (data.length < perPage) break;
+  }
+
+  return comments;
 }
 
 export function pullRequestBodyFromEvent(
