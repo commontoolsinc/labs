@@ -4522,3 +4522,45 @@ Full runner suite green (618 → 620 with the two new tests). The
 dominated by per-iteration graph setup (512-node build + pull), not the
 preflight; the walk reduction is proven by the visitCount guards above.
 Deviations: none.
+
+## RELOAD HANG — root cause re-verified + fixed (rehydration barrier)
+
+The `Pattern Reload Integration Tests` failure ("reloads every rapidly
+created notebook note" -> `RuntimeClient request timed out: runtime:idle`)
+is a real 3c regression, deterministic on CI, that did not reproduce as a
+hang on fast local hardware (but reload action-runs were bimodal/racy
+locally).
+
+Root cause (bisect + 6-agent adversarial re-verification; bisect kept):
+`e28d59b72` "cut duplicate invalidation channels" is the origin. It replaced
+the dirty-SET pull-seed selection (`collectPrimaryPullIterationSeeds` over
+`state.dirty`) with STATUS-based seeds (`isRunnableSchedulingSeed` ->
+`isInvalidOrNeverRan`; `getInvalidNodes`) — neither exists on main — and
+flipped the trigger notification op `mark-dirty`->`invalidate`. On reload,
+storage sync-fills of a resuming action's inputs now flip its node status,
+promoting the never-ran/invalid resuming action into the runnable-seed set;
+the settle runs it fresh and `markActionHasRun` deletes its rehydration
+token, aborting the resume. Run-vs-rehydrate is timing-dependent ->
+nondeterministic run counts (24 on main, 76-106 on 3c), and via iteration-
+cap backoff the slow-runner `runtime:idle` hang. main is deterministic
+because its seeds never come from a load-driven status flip.
+
+Fix (rehydration barrier): hold ALL pull work while any initial rehydration
+is in flight, reproducing main's ordering (resume first, then a single
+settle). `backgroundTasks` is rehydration-only and `idle()` already awaits
+it, so the barrier never reports idle early; after resumes drain, `idle()`
+re-checks `hasRunnablePullWork` and the held fallbacks run once. Added
+`hasPendingInitialRehydrations: () => backgroundTasks.size > 0` to
+`PullSchedulingState`, early-returns in `collectPullIterationSeeds` and
+`hasRunnablePullWork`. Three edits.
+
+Verified: reload action-runs deterministic ~51 (was 76-106), rehydrateOk
+~54 (was 8-32), reloadToRendered ~3s, every action runs exactly once (no
+render storm, no iteration-cap hits, no backoff). 14/14 reload runs pass,
+including 4 under full CPU saturation (slow-runner sim; idle ~3s vs the 60s
+RPC timeout). Full runner suite green (618). Unit guard
+`scheduler-rehydration-barrier.test.ts`. Rejected attempts (all
+ineffective or storming, recorded in memory): rehydration-gate
+status-tolerance; markActionInvalid token-keep; sync-fill invalidation
+suppression at processPullStorageNotification; seed-exclusion of pending-
+rehydration actions (race fixed but render sinks 6x -> 235 runs).
