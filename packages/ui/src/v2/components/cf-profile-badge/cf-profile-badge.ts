@@ -341,6 +341,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
+  // Bumped on each verification read so a slower earlier read can't overwrite a
+  // newer one's state when verification re-runs reactively (below).
+  private _verifyRequestId = 0;
 
   // Liveness: whether this seal is currently registered with the shared cursor
   // controller, and the last sheen alpha written (so far-from-cursor frames can
@@ -497,7 +500,17 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           avatar: { type: "string" },
         },
       });
-      this._unsubscribe = named.subscribe((val) => this._applyValue(val));
+      // Re-derive verification on every value update, not just once: the
+      // runtime-attested label (`getCfcLabel`) is read as a pure, non-blocking
+      // store read, so a not-yet-loaded profile doc first returns no label and
+      // leaves the badge "presented". When the subscription delivers the doc
+      // (the same load that populates name/avatar), the label is present and the
+      // badge re-derives to "verified". The request-id guard in
+      // `_refreshVerification` drops a slower earlier read.
+      this._unsubscribe = named.subscribe((val) => {
+        this._applyValue(val);
+        void this._refreshVerification(resolved);
+      });
 
       void this._refreshVerification(resolved);
     } catch (e) {
@@ -569,9 +582,13 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    */
   private async _refreshVerification(cell: CellHandle): Promise<void> {
     const generation = this._resolveGeneration;
+    const requestId = ++this._verifyRequestId;
+    const superseded = () =>
+      generation !== this._resolveGeneration ||
+      requestId !== this._verifyRequestId || !this.isConnected;
     try {
       const view = await readCfcLabelView(cell);
-      if (generation !== this._resolveGeneration || !this.isConnected) return;
+      if (superseded()) return;
       const owner = ownerPrincipalFromLabel(view);
       if (owner) {
         this._seal = identitySeal(owner);
@@ -581,7 +598,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         this._state = "presented";
       }
     } catch (e) {
-      if (generation !== this._resolveGeneration || !this.isConnected) return;
+      if (superseded()) return;
       // Surface the IPC/label-read failure (mirrors `_resolve`'s catch) rather
       // than silently collapsing every failure to the unverified state.
       console.error(

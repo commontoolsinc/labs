@@ -852,7 +852,7 @@ describe("RuntimeProcessor home pattern IPC", () => {
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
-  it("returns a label view for a cell ref", async () => {
+  it("returns a label view for a cell ref", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -882,17 +882,16 @@ describe("RuntimeProcessor CFC label IPC", () => {
           },
           getAsNormalizedFullLink: () => ref,
           getMetaRaw: () => undefined,
-          sync: () => Promise.resolve(),
         }),
       },
     } as unknown as RuntimeProcessor;
 
-    await expect(
+    expect(
       RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
         type: RequestType.CellGetCfcLabel,
         cell: ref,
       }),
-    ).resolves.toEqual({
+    ).toEqual({
       cfcLabel: {
         version: 1,
         entries: [{
@@ -1022,7 +1021,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
-  it("does not look up CFC labels from a result meta cell", async () => {
+  it("does not look up CFC labels from a result meta cell", () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -1084,97 +1083,65 @@ describe("RuntimeProcessor CFC label IPC", () => {
     };
     const processor = { runtime } as unknown as RuntimeProcessor;
 
-    await expect(Promise.resolve(
+    expect(
       RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
         type: RequestType.CellGetCfcLabel,
         cell: resultRef,
       }),
-    )).resolves.toEqual({
+    ).toEqual({
       cfcLabel: undefined,
     });
-    expect(resultSynced).toBe(true);
+    // getCfcLabel is a pure read: it never syncs (the reactive caller owns
+    // liveness), and it reads only the cell's OWN stored label — it does not
+    // follow the "result" meta link to pull CFC from a source/meta cell.
+    expect(resultSynced).toBe(false);
     expect(sourceSynced).toBe(false);
   });
 
-  it("syncs pattern and argument metadata links before reading labels", async () => {
-    const resultRef: CellRef = {
-      id: "of:cfc-label-sync-result" as CellRef["id"],
+  it("reads the cell's own stored label without syncing (caller owns liveness)", () => {
+    const ref: CellRef = {
+      id: "of:cfc-label-pure-read" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: [],
     };
-    const patternRef: CellRef = {
-      id: "of:cfc-label-sync-pattern" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const argumentRef: CellRef = {
-      id: "of:cfc-label-sync-argument" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const syncLog: string[] = [];
-    const cells = new Map<string, unknown>();
-    const runtime = {
-      getCellFromLink: (link: CellRef) => cells.get(link.id),
-      readTx: () => {
-        return {
+    let synced = false;
+    const cell = {
+      runtime: {
+        readTx: () => ({
           readOrThrow: () => ({
-            version: 1,
-            schemaHash: "test-schema",
-            labelMap: {
+            value: "labelled data",
+            cfc: {
               version: 1,
-              entries: [{
-                path: [],
-                label: { confidentiality: ["result-label"] },
-              }],
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { confidentiality: ["result-label"] },
+                }],
+              },
             },
           }),
-        };
+        }),
+      },
+      getAsNormalizedFullLink: () => ref,
+      getMetaRaw: () => undefined,
+      sync: () => {
+        synced = true;
+        return Promise.resolve();
       },
     };
-    const makeCell = (
-      name: string,
-      ref: CellRef,
-      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
-    ) => {
-      let synced = false;
-      return {
-        ...ref,
-        sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
-        runtime,
-        getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument") => {
-          return synced && links[metaField] !== undefined
-            ? cellRefToSigilLink(links[metaField]!)
-            : undefined;
-        },
-        sync: () => {
-          synced = true;
-          syncLog.push(name);
-          return Promise.resolve();
-        },
-      };
-    };
-    cells.set(
-      resultRef.id,
-      makeCell("result", resultRef, {
-        pattern: patternRef,
-        argument: argumentRef,
-      }),
-    );
-    cells.set(patternRef.id, makeCell("pattern", patternRef));
-    cells.set(argumentRef.id, makeCell("argument", argumentRef));
-    const processor = { runtime } as unknown as RuntimeProcessor;
+    const processor = {
+      runtime: { getCellFromLink: () => cell },
+    } as unknown as RuntimeProcessor;
 
-    await expect(
+    expect(
       RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
         type: RequestType.CellGetCfcLabel,
-        cell: resultRef,
+        cell: ref,
       }),
-    ).resolves.toEqual({
+    ).toEqual({
       cfcLabel: {
         version: 1,
         entries: [{
@@ -1183,81 +1150,10 @@ describe("RuntimeProcessor CFC label IPC", () => {
         }],
       },
     });
-
-    expect(syncLog).toEqual([
-      "result",
-      "pattern",
-      "argument",
-      "result",
-    ]);
-  });
-
-  it("does not loop when metadata links form a cycle", async () => {
-    const resultRef: CellRef = {
-      id: "of:cfc-label-cycle-result" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const patternRef: CellRef = {
-      id: "of:cfc-label-cycle-pattern" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const syncLog: string[] = [];
-    const cells = new Map<string, unknown>();
-    const runtime = {
-      getCellFromLink: (link: CellRef) => cells.get(link.id),
-      readTx: () => ({
-        readOrThrow: () => undefined,
-      }),
-    };
-    const makeCell = (
-      name: string,
-      ref: CellRef,
-      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
-    ) => {
-      let synced = false;
-      return {
-        ...ref,
-        sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
-        runtime,
-        getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument") => {
-          return synced && links[metaField] !== undefined
-            ? cellRefToSigilLink(links[metaField]!)
-            : undefined;
-        },
-        sync: () => {
-          synced = true;
-          syncLog.push(name);
-          return Promise.resolve();
-        },
-      };
-    };
-    cells.set(
-      resultRef.id,
-      makeCell("result", resultRef, {
-        pattern: patternRef,
-      }),
-    );
-    cells.set(
-      patternRef.id,
-      makeCell("pattern", patternRef, {
-        argument: resultRef,
-      }),
-    );
-    const processor = { runtime } as unknown as RuntimeProcessor;
-
-    await expect(
-      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
-        type: RequestType.CellGetCfcLabel,
-        cell: resultRef,
-      }),
-    ).resolves.toEqual({ cfcLabel: undefined });
-
-    expect(syncLog).toEqual(["result", "pattern", "result"]);
+    // No sync: the label is read from the current store. A not-yet-loaded doc
+    // would yield an empty label that self-heals when the reactive caller's
+    // subscription delivers it.
+    expect(synced).toBe(false);
   });
 
   it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
