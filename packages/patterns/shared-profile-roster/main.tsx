@@ -27,9 +27,15 @@ import {
  * Storage model: a **snapshot** (name + avatar copied at join time) is the
  * recommended default — the roster is then fully self-describing inside the
  * shared space and never depends on other users' profile spaces being reachable.
- * Participants render from those snapshot strings via `<cf-avatar>`. The current
- * viewer's OWN live profile is the one case where a live profile cell is
- * reliably resolvable, so it's shown with the trusted `<cf-profile-badge>`.
+ * Participants render from those snapshot strings via `<cf-avatar>`, and the
+ * current viewer's OWN live profile is shown with the trusted
+ * `<cf-profile-badge>`.
+ *
+ * Live cross-space profile reads now resolve for *any* participant (CT-1667/1687
+ * materialize absent cross-space link targets on read), so a roster CAN render
+ * every participant with a live `<cf-profile-badge>` — see
+ * `profile-roster-live-demo.tsx` for that variant. Snapshotting is still the
+ * recommended default here for self-containment and first-render stability.
  */
 
 /**
