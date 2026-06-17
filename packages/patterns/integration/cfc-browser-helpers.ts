@@ -837,14 +837,21 @@ export async function collectBrowserLoadSummary(
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
       const workerTiming = workerCounts?.timing ?? {};
       const selected: Record<string, Stats> = {};
-      for (const name of ["scheduler", "runner", "storage"]) {
+      for (
+        const name of [
+          "scheduler",
+          "runner",
+          "storage",
+          "runtime-client.cfc-label",
+        ]
+      ) {
         const groupStats = workerTiming[name];
         if (!groupStats) continue;
         for (const [key, stats] of Object.entries(groupStats)) {
           selected[`${name}/${key}`] = stats;
         }
       }
-      worker = toRows(selected, 12);
+      worker = toRows(selected, 16);
 
       const counts: Record<string, Record<string, CountEntry>> =
         workerCounts?.counts ?? {};

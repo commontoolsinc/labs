@@ -5,6 +5,7 @@ import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
+  getLogger,
   getLoggerCountsBreakdown,
   getLoggerFlagsBreakdown,
   getTimingStatsBreakdown,
@@ -131,6 +132,13 @@ import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
+
+// Split-timing for the CFC label IPC path. Counts/timing are readable via
+// getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
+const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
+  enabled: true,
+  level: "error",
+});
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
@@ -757,20 +765,33 @@ export class RuntimeProcessor {
       ...cell.getAsNormalizedFullLink(),
       path: [],
     });
+    const totalStart = performance.now();
+    const syncMetaStart = performance.now();
     await syncMetaLinkedDocs(rootCell);
-    await cell.sync();
+    cfcLabelLogger.time(syncMetaStart, "syncMetaLinkedDocs");
+    const cellSyncStart = performance.now();
+    // Same rationale as syncMetaLinkedDocs: only cold-load the target cell, so a
+    // warm display-label read never blocks on an in-flight watch refresh.
+    if (!isDocLocallyAvailable(cell)) {
+      await cell.sync();
+    }
+    cfcLabelLogger.time(cellSyncStart, "cellSync");
     // `getCfcLabel()` is the pattern-facing INTROSPECTION surface: the response
     // is returned to the caller, not round-tripped back into a cell. Redact
     // `Caveat.source` identities here so a pattern can't learn which principal
     // introduced a caveat (audit item 28b, inv-12). Observation labeling, the
     // dereference-trace enforcement path, and the carried-label view all read
     // the label through other seams and keep `source`.
+    const computeStart = performance.now();
     const cfcLabel = cfcLabelViewForCell(cell);
-    return {
+    const response = {
       cfcLabel: cfcLabel === undefined
         ? undefined
         : redactCaveatSourcesForDisplay(cfcLabel),
     };
+    cfcLabelLogger.time(computeStart, "computeAndRedact");
+    cfcLabelLogger.time(totalStart, "total");
+    return response;
   }
 
   handleGetCell(request: GetCellRequest): CellResponse {
@@ -1455,29 +1476,65 @@ export class RuntimeProcessor {
   }
 }
 
+/** True when a cell's doc is already loaded in the local store. */
+function isDocLocallyAvailable(cell: Cell<any>): boolean {
+  try {
+    const { space, id, scope } = cell.getAsNormalizedFullLink();
+    if (!space || typeof id !== "string") return false;
+    return cell.runtime.storageManager.open(space).replica.getDocument(
+      id as URI,
+      scope,
+    ) !== undefined;
+  } catch {
+    // If we cannot determine availability, fall back to syncing.
+    return false;
+  }
+}
+
 /**
  * Sync a root cell and each direct metadata-linked cell reachable from it.
  *
  * `internal` is raw manifest metadata, not a direct metadata link. Callers that
  * need a transactional root cell can create it first and pass it.
+ *
+ * Only docs NOT already present in the local store are synced. The hot caller —
+ * the renderer reading display labels for cells it is actively rendering — has
+ * already subscribed to these docs, so they are present and we read the current
+ * (possibly mid-refresh) state WITHOUT awaiting an in-flight watch refresh. That
+ * await was the entire cost of `getCfcLabel` under multi-writer churn: split
+ * timing put `syncMetaLinkedDocs` at ~99.97% of the IPC, bimodal p50 0.1ms /
+ * p95 >1s, where the slow tail is one `sync()` blocking on the root doc's
+ * in-flight refresh — latency that scales with how hard OTHER browsers churn the
+ * shared space. `getCfcLabel` is the DISPLAY label seam (the enforcement path
+ * reads the label through other seams); it is eventually consistent via the live
+ * subscription, so a one-revision-stale read self-heals on the next render.
+ * Genuinely cold docs are still loaded (in parallel per BFS level, so a cold
+ * level costs one round-trip, not one per node). Same BFS discovery order and
+ * cycle detection as before.
  */
 async function syncMetaLinkedDocs(
   cell: Cell<any>,
   cycleCheck: Set<string> = new Set<string>(),
 ) {
-  const pendingCells = [cell];
+  let frontier = [cell];
   cycleCheck.add(cell.sourceURI);
-  while (pendingCells.length > 0) {
-    const currentCell = pendingCells.shift()!;
-    await currentCell.sync();
-    for (const meta of ["pattern", "argument"] as const) {
-      const link = getMetaLink(currentCell, meta);
-      if (link === undefined) continue;
-      const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);
-      if (linkedCell === undefined) continue;
-      if (cycleCheck.has(linkedCell.sourceURI)) continue;
-      cycleCheck.add(linkedCell.sourceURI);
-      pendingCells.push(linkedCell);
+  while (frontier.length > 0) {
+    const cold = frontier.filter((current) => !isDocLocallyAvailable(current));
+    if (cold.length > 0) {
+      await Promise.all(cold.map((current) => current.sync()));
     }
+    const next: Cell<any>[] = [];
+    for (const currentCell of frontier) {
+      for (const meta of ["pattern", "argument"] as const) {
+        const link = getMetaLink(currentCell, meta);
+        if (link === undefined) continue;
+        const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);
+        if (linkedCell === undefined) continue;
+        if (cycleCheck.has(linkedCell.sourceURI)) continue;
+        cycleCheck.add(linkedCell.sourceURI);
+        next.push(linkedCell);
+      }
+    }
+    frontier = next;
   }
 }
