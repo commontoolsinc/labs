@@ -1,4 +1,5 @@
 import {
+  type Cell,
   computed,
   Default,
   handler,
@@ -21,20 +22,29 @@ import {
  * Demonstrates the CT-1649 roster approach in a genuine multiplayer pattern:
  *   - Messages live in a `PerSpace` array (shared by everyone in the space).
  *   - The sender's identity is resolved from THEIR shared profile via
- *     `wish({ query: "#profileName" / "#profileAvatar" })` and snapshotted onto
- *     each message at send time — so every other viewer renders it from plain
- *     strings already in the space (no cross-space profile resolution needed).
- *   - Each message + the participant strip render with `<cf-avatar>`; the
- *     current viewer's own live profile renders with the trusted
- *     `<cf-profile-badge>`.
+ *     `wish({ query: "#profile" })`, and the live profile **cell** is stored on
+ *     each message — cross-space reads resolve for any viewer (CT-1667/1687), so
+ *     every identity in the UI renders through the trusted, first-class
+ *     `<cf-profile-badge>`: messages as `full` badges, the participant strip as
+ *     `chip` badges, the viewer's own as `full`. Each badge carries the
+ *     verified-identity seal and links to that person's profile.
+ *   - A snapshot of name/avatar rides alongside the cell as a durable fallback
+ *     label (used for participant dedup and if the live cell is momentarily
+ *     unresolved).
  *
  * Compare to `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`, which
- * this is modeled on — the only change is sourcing name/avatar from the shared
- * profile rather than a typed-in name. See `docs/specs/shared-profile-rosters.md`.
+ * this is modeled on — the change is sourcing identity from the shared profile
+ * (cell, not just strings) and rendering it through the badge.
+ * See `docs/specs/shared-profile-rosters.md`.
  */
 
+/** Live link to a contributor's profile cell — stable identity + live data. */
+export type ChatProfileCell = Cell<{ name?: string; avatar?: string }>;
+
 export interface ChatMessage {
-  /** Sender's profile name, snapshotted at send time. */
+  /** Sender's live profile cell — rendered first-class via cf-profile-badge. */
+  authorProfile: ChatProfileCell;
+  /** Sender's profile name, snapshotted at send time (durable fallback label). */
   author: string;
   /** Sender's profile avatar (URL or glyph), snapshotted at send time. */
   avatar: string;
@@ -49,19 +59,25 @@ type DraftCell = Writable<string>;
 
 export type SendEvent = Record<PropertyKey, never>;
 
-// Append a message, snapshotting the sender's resolved profile name/avatar.
-// `name`/`avatar` arrive as plain strings (named `computed` values auto-unwrap
-// as handler state); `draft` is a live PerUser cell.
+// Append a message. `profile` is the sender's live profile cell (the identity
+// rendered first-class via cf-profile-badge); it round-trips through `push` as a
+// link. `name`/`avatar` arrive as plain strings (named `computed` values
+// auto-unwrap as handler state) and are snapshotted as a durable fallback label;
+// `draft` is a live PerUser cell.
 const sendMessage = handler<SendEvent, {
   messages: MessagesCell;
   draft: DraftCell;
+  // May be undefined until the viewer's `#profile` wish resolves; guarded below.
+  profile: ChatProfileCell | undefined;
   name: string;
   avatar: string;
-}>((_event, { messages, draft, name, avatar }) => {
+}>((_event, { messages, draft, profile, name, avatar }) => {
   const author = (name ?? "").trim();
   const body = (draft.get() ?? "").trim();
   if (!author || !body) return; // No profile yet, or empty message.
+  if (!profile) return; // No resolved profile cell — no first-class identity.
   messages.push({
+    authorProfile: profile,
     author,
     avatar: (avatar ?? "").trim(),
     body,
@@ -97,36 +113,45 @@ const headerLabel = {
 export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
   ({ messages, draft }) => {
     // Resolve THIS viewer's shared profile (their default profile / picker
-    // result under PR #3830). `#profile` is the live cell for cf-profile-badge;
-    // the field targets give the strings we snapshot onto each message.
-    const profileWish = wish({ query: "#profile" });
+    // result under PR #3830). `#profile` is the live cell — the identity key
+    // stored on each message and rendered via cf-profile-badge; the field
+    // targets give the snapshot strings (fallback label + participant dedup).
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
     const myName = computed(() => profileNameWish.result ?? "");
     const myAvatar = computed(() => profileAvatarWish.result ?? "");
     const hasProfile = computed(() => (profileNameWish.result ?? "") !== "");
+    // The live profile cell — stored on each message and passed to the badge.
+    const myProfile = profileWish.result;
 
     const messageCount = messages.length;
 
-    // Distinct participants (deduped by author), derived from the shared log —
-    // the roster, rendered as a strip of cf-avatars.
-    const participants = computed<{ name: string; avatar: string }[]>(() => {
-      const seen = new Set<string>();
-      const out: { name: string; avatar: string }[] = [];
-      for (const m of messages ?? []) {
-        if (m && m.author && !seen.has(m.author)) {
-          seen.add(m.author);
-          out.push({ name: m.author, avatar: m.avatar ?? "" });
+    // Distinct participants (deduped by author name), derived from the shared
+    // log — the roster, rendered as a strip of `chip` profile badges bound to
+    // each contributor's live profile cell.
+    const participants = computed<{ name: string; profile: ChatProfileCell }[]>(
+      () => {
+        const seen = new Set<string>();
+        const out: { name: string; profile: ChatProfileCell }[] = [];
+        for (const m of messages ?? []) {
+          if (m && m.author && m.authorProfile && !seen.has(m.author)) {
+            seen.add(m.author);
+            out.push({ name: m.author, profile: m.authorProfile });
+          }
         }
-      }
-      return out;
-    });
+        return out;
+      },
+    );
     const participantCount = computed(() => participants.length);
 
     const send = sendMessage({
       messages,
       draft,
+      profile: myProfile,
       name: myName,
       avatar: myAvatar,
     });
@@ -144,41 +169,44 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
               </cf-vstack>
             </cf-hstack>
 
-            {/* Roster strip — distinct participants by shared profile. */}
+            {
+              /* Roster strip — distinct participants, each a `chip` badge bound
+              to their live profile cell (name + DID-hued seal dot, navigable). */
+            }
             <cf-vstack gap="1">
               <span style={headerLabel}>
                 In this room ({participantCount})
               </span>
               <cf-hstack gap="2" align="center" style={{ flexWrap: "wrap" }}>
                 {participants.map((p) => (
-                  <cf-hstack gap="1" align="center">
-                    <cf-avatar src={p.avatar} name={p.name} size="xs" />
-                    <span style={{ fontSize: "0.8125rem" }}>{p.name}</span>
-                  </cf-hstack>
+                  <cf-profile-badge variant="chip" $profile={p.profile} />
                 ))}
               </cf-hstack>
             </cf-vstack>
 
-            {/* Messages — each shows the sender's snapshotted profile avatar. */}
+            {
+              /* Messages — each sender's identity is a first-class `full` badge
+              (avatar + name + seal, navigable to their profile); the body sits
+              indented beneath it. */
+            }
             <cf-vstack gap="3" style={{ minHeight: "160px" }}>
               {messages.map((message) => (
-                <cf-hstack gap="2" align="start">
-                  <cf-avatar
-                    src={message.avatar}
-                    name={message.author}
+                <cf-vstack gap="1">
+                  <cf-profile-badge
+                    variant="full"
                     size="sm"
+                    $profile={message.authorProfile}
                   />
-                  <cf-vstack gap="0">
-                    <span style={{ fontSize: "0.8125rem", fontWeight: "600" }}>
-                      {message.author}
-                    </span>
-                    <span
-                      style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap" }}
-                    >
-                      {message.body}
-                    </span>
-                  </cf-vstack>
-                </cf-hstack>
+                  <span
+                    style={{
+                      fontSize: "0.875rem",
+                      whiteSpace: "pre-wrap",
+                      marginLeft: "1.875rem",
+                    }}
+                  >
+                    {message.body}
+                  </span>
+                </cf-vstack>
               ))}
             </cf-vstack>
 

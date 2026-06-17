@@ -1143,8 +1143,11 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const hasProfile = computed(() =>
       (profileNameWish.result ?? "").trim() !== ""
     );
+    // The button is the JOIN action; the adjacent `#profile` wish UI is the
+    // create/pick surface. Label it as such (a disabled "Join" until the viewer
+    // has a profile) rather than mislabeling the button "Create a profile…".
     const joinLabel = computed(() =>
-      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
+      hasProfile ? `Join as ${profileName}` : "Join"
     );
 
     const joined = computed(() =>
@@ -1237,9 +1240,16 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
               <h2 style={{ margin: 0, fontSize: "24px" }}>{gameName}</h2>
               {joined
                 ? (
-                  <span style={{ color: "#d9f99d", fontSize: "14px" }}>
-                    Playing as <strong>{myName}</strong>
-                  </span>
+                  <cf-hstack gap="2" align="center">
+                    <span style={{ color: "#d9f99d", fontSize: "14px" }}>
+                      Playing as
+                    </span>
+                    {/* The viewer's own identity, first-class (CT-1761). */}
+                    <cf-profile-badge
+                      variant="chip"
+                      $profile={profileWish.result}
+                    />
+                  </cf-hstack>
                 )
                 : (
                   <div
