@@ -44,10 +44,11 @@ Runtime notes:
 - `deno task cf test` exits 0 for every test file. A failing test is not a valid
   done state unless a concrete external, tooling, or environment blocker
   prevents further repair.
+- New or changed source code has automated test coverage. PRs that introduce new
+  untested lines of code will fail in CI.
 - Coverage matches the testing guide's expected shape: the product contract, not
   only the happy path (first-run/default states; primary add, remove, edit,
   toggle, or submit flows; repeated actions; validation and edge-case branches
   from the spec).
-- The test report explains what was covered and what was intentionally omitted.
 - The pattern still compiles after any interface changes made to support
   testing.
