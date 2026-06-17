@@ -130,6 +130,9 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+// Mirrors the scheduler's DEFAULT_RETRIES_FOR_EVENTS: direct UI cell writes
+// get the same bounded rebase-and-retry on commit rejection as handler events.
+const CELL_SET_COMMIT_RETRIES = 5;
 const blobUploadEncoding = new JsonEncodingContext();
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
@@ -295,6 +298,27 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  // Latest direct write per cell key. A newer set supersedes the value an
+  // already-queued/in-flight commit will write (value is read at commit time,
+  // not capture time). `seq` is a monotonic supersession token: a rebase that
+  // finds seq advanced knows a newer value arrived and rebases to THAT without
+  // spending retry budget on the stale one. Budget refreshes on each user write
+  // (raw UI input is legitimately last-write-wins — Ubik).
+  private cellSetLatest = new Map<
+    string,
+    { seq: number; value: unknown; retriesLeft: number }
+  >();
+  // Per-key COMMIT QUEUE. Value = the tail of an in-flight promise chain for
+  // this key. Same-key writes link onto the tail so their tx.commit() calls
+  // SERIALIZE: the (N+1)th commit is not issued until the Nth commit's
+  // confirmation resolves. This PREVENTS the own-write race (two same-path
+  // patches overlapping, the 2nd confirming, the 1st rejecting and rolling
+  // back past the confirmed value) that the after-the-fact reapply only
+  // repaired. Absent key = no chain in flight. Cross-key writes never serialize
+  // against each other (only same-doc same-path writes race). Subsumes the
+  // dropped read-your-writes barrier: link N+1 rebases off the latest value
+  // only after link N has settled.
+  private cellSetChains = new Map<string, Promise<void>>();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
@@ -551,6 +575,13 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        // Quiesce the commit queue: stop scheduling rebases. In-flight
+        // tx.commit() promises are awaited below via storageManager.synced();
+        // commitLatestForKey also bails on isDisposed() at each loop boundary,
+        // so no NEW rebase is issued after disposal.
+        this.cellSetChains.clear();
+        this.cellSetLatest.clear();
+
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
@@ -661,14 +692,131 @@ export class RuntimeProcessor {
   }
 
   handleCellSet(request: CellSetRequest): void {
-    const tx = this.runtime.edit();
-    const cell = getCell(this.runtime, request.cell);
+    const key = cellRefToKey(request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    cell.withTx(tx).set(value);
-    this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // `value` is freshly minted by mapCellRefsToSigilLinks (new objects per
+    // request, never aliased) and is only READ across rebases, so no defensive
+    // clone is needed here. If a future change aliases it, clone with
+    // cloneIfNecessary from @commonfabric/data-model/value-clone — NEVER
+    // JSON.parse(JSON.stringify) or structuredClone.
+
+    // Supersede: the queued/in-flight link for this key reads THIS value at
+    // commit time. Bump seq (supersession token) and refresh the rebase budget
+    // (raw UI input is legitimately last-write-wins — Ubik).
+    const prev = this.cellSetLatest.get(key);
+    const enqueuedSeq = (prev?.seq ?? 0) + 1;
+    this.cellSetLatest.set(key, {
+      seq: enqueuedSeq,
+      value,
+      retriesLeft: CELL_SET_COMMIT_RETRIES,
+    });
+
+    // Append a link to this key's serialized chain. The link commits the LATEST
+    // value, rebasing on genuine rejection within budget. The NEXT same-key
+    // write's link does not run until THIS link's promise resolves — that is
+    // the serialization guarantee. (.then with no rejection handler is safe:
+    // commitLatestForKey never rejects — every path returns — so prevTail never
+    // carries a rejection forward.)
+    const prevTail = this.cellSetChains.get(key) ?? Promise.resolve();
+    const tail = prevTail.then(() => this.commitLatestForKey(key, request));
+    this.cellSetChains.set(key, tail);
+
+    // Self-cleanup when this link is the last one standing. Guard on BOTH the
+    // tail identity (a newer link hasn't replaced us) AND seq (no newer write
+    // arrived during our final await). Otherwise a set that landed during the
+    // final await would be stranded with its chain entry dropped.
+    tail.finally(() => {
+      if (this.cellSetChains.get(key) === tail) {
+        this.cellSetChains.delete(key);
+        const cur = this.cellSetLatest.get(key);
+        if (cur && cur.seq === enqueuedSeq) this.cellSetLatest.delete(key);
+      }
+    });
+  }
+
+  // One serialized chain step for a key: commit the latest value once, rebasing
+  // on a genuine rejection within budget, skipping wasted budget when a newer
+  // value superseded mid-flight. Resolves (never rejects) when this step has
+  // fully settled — landed, given up, disposed, or threw. That resolution is
+  // what gates the next chain link.
+  //
+  // We observed (two-browser repro) the local optimistic value end up staler
+  // than the latest confirmed write after an out-of-order rejection: input
+  // emits two sets; the second confirms; the first is rejected afterwards and
+  // its rollback reverts the local doc past the confirmed value. The commit
+  // queue PREVENTS that race by serialization (the 2nd commit is not issued
+  // until the 1st resolves); the bounded rebase below additionally repairs any
+  // residual staleness on a genuine rejection (idempotent when local state
+  // already matches). We have not pinned the optimistic-mirror staleness to the
+  // runtime/storage layer — instrumentation of the runtime rollback there shows
+  // it preserving confirmed writes — so the mechanism is most likely the
+  // client's optimistic mirror, which serialization closes.
+  private async commitLatestForKey(
+    key: string,
+    request: CellSetRequest,
+  ): Promise<void> {
+    for (;;) {
+      if (this.isDisposed()) return;
+      const latest = this.cellSetLatest.get(key);
+      if (!latest) return; // superseded-away / cleaned up; nothing to write.
+
+      const attemptSeq = latest.seq;
+      const applied = latest.value;
+
+      // Local visibility is established synchronously by commit(); the promise
+      // tracks remote confirmation/rollback. AWAIT is the serialization point:
+      // the next chain link cannot issue its tx.commit() until this resolves.
+      // The try spans the WHOLE tx setup, not just the await: a synchronous
+      // throw from edit()/set()/prepareTxForCommit() (a CFC-label violation,
+      // write-guard, or malformed ref — exactly the op-types this queue
+      // serializes) must not reject this link, or the chain's `.then` carries
+      // an unhandled rejection and the next same-key write wedges. Any throw is
+      // terminal (not a rebaseable conflict verdict): log and return, which
+      // resolves this link and frees the next. This is what makes
+      // commitLatestForKey's "never rejects" invariant actually hold.
+      let result: { error?: unknown };
+      try {
+        const tx = this.runtime.edit();
+        const cell = getCell(this.runtime, request.cell);
+        cell.withTx(tx).set(applied);
+        this.runtime.prepareTxForCommit(tx);
+        result = await tx.commit();
+      } catch (error) {
+        console.error(
+          "[RuntimeProcessor] cell set commit rejected",
+          error,
+        );
+        return;
+      }
+
+      if (!result.error) return; // landed.
+
+      // Genuine commit rejection. Re-read latest: a newer write may have arrived
+      // (and refreshed the budget) while we were in flight.
+      const current = this.cellSetLatest.get(key);
+      if (!current) return; // disposed / cleaned up mid-flight.
+      if (this.isDisposed()) return;
+      if (current.seq !== attemptSeq) {
+        // Superseded: rebase to the newer value WITHOUT spending budget on the
+        // now-moot stale one.
+        continue;
+      }
+      if (current.retriesLeft <= 0) {
+        console.error(
+          "[RuntimeProcessor] cell set commit failed after exhausting " +
+            "all retries",
+          result.error,
+        );
+        return;
+      }
+      current.retriesLeft--;
+      console.warn(
+        "[RuntimeProcessor] cell set commit failed; reapplying latest " +
+          `value (${current.retriesLeft} retries left)`,
+        result.error,
+      );
+      // loop -> rebase on a fresh tx with the (possibly newer) latest value.
+    }
   }
 
   handleCellSend(request: CellSendRequest): void {
@@ -677,8 +825,25 @@ export class RuntimeProcessor {
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // confirmation/rollback and must not block cell IPC. The event itself is
+    // queued through the scheduler (which has its own bounded retry on commit
+    // rejection), so a failed commit here is not retried — re-sending would
+    // double-fire the event — but it must not fail silently either.
+    tx.commit().then((result) => {
+      if (result.error) {
+        console.error(
+          "[RuntimeProcessor] cell send commit failed",
+          result.error,
+        );
+      }
+    }).catch((error) => {
+      // A rejected commit promise (transport/storage throw) must not become an
+      // unhandled rejection — mirror handleCellSet's confirmation.catch.
+      console.error(
+        "[RuntimeProcessor] cell send commit rejected",
+        error,
+      );
+    });
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {

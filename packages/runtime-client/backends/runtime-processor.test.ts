@@ -1566,8 +1566,23 @@ describe("RuntimeProcessor CFC commit preparation", () => {
         expect(value).toBe("new value");
       },
     };
+    let sent = false;
+    cellWithTx.send = (value: unknown) => {
+      expect(value).toBe("new value");
+      sent = true;
+    };
     return {
       processor: {
+        isDisposed: () => false,
+        cellSetLatest: new Map<
+          string,
+          { seq: number; value: unknown; retriesLeft: number }
+        >(),
+        cellSetChains: new Map<string, Promise<void>>(),
+        commitLatestForKey: (RuntimeProcessor.prototype as unknown as {
+          commitLatestForKey: (...a: unknown[]) => Promise<void>;
+        }).commitLatestForKey,
+        pendingCellWrites: new Set<Promise<unknown>>(),
         runtime: {
           edit: () => tx,
           prepareTxForCommit: (candidate: unknown) => {
@@ -1585,27 +1600,35 @@ describe("RuntimeProcessor CFC commit preparation", () => {
           },
         },
       } as unknown as RuntimeProcessor,
+      wasSent: () => sent,
     };
+  };
+
+  const flushTicks = async (n = 10) => {
+    for (let i = 0; i < n; i++) await Promise.resolve();
   };
 
   it("prepares cell set transactions before committing", async () => {
     const { processor } = createProcessor();
 
-    await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+    RuntimeProcessor.prototype.handleCellSet.call(processor, {
       type: RequestType.CellSet,
       cell: ref,
       value: "new value",
     });
+    await flushTicks();
   });
 
   it("prepares cell send transactions before committing", async () => {
-    const { processor } = createProcessor();
+    const { processor, wasSent } = createProcessor();
 
-    await RuntimeProcessor.prototype.handleCellSend.call(processor, {
+    RuntimeProcessor.prototype.handleCellSend.call(processor, {
       type: RequestType.CellSend,
       cell: ref,
       event: "new value",
     });
+    expect(wasSent()).toBe(true);
+    await flushTicks();
   });
 });
 
@@ -1971,5 +1994,267 @@ describe("RuntimeProcessor vdom mount render policy", () => {
   it("keeps mounts unbounded when no ceiling is configured", async () => {
     const policy = await mountAndGetRootPolicy(undefined);
     expect(policy.maxConfidentiality).toBeUndefined();
+  });
+});
+
+describe("RuntimeProcessor cell set IPC", () => {
+  const cellRef: CellRef = {
+    id: "of:cell-set-retry" as CellRef["id"],
+    space: "did:key:test-space" as CellRef["space"],
+    scope: "space",
+    path: ["nameDraft"],
+  };
+
+  type Deferred = {
+    resolve: (r: { error?: { message: string } }) => void;
+    promise: Promise<{ error?: { message: string } }>;
+  };
+
+  function makeProcessor(opts?: { editThrowsFirstN?: number }) {
+    const setValues: unknown[] = [];
+    const commits: Deferred[] = [];
+    let editCalls = 0;
+    const processor = {
+      isDisposed: () => false,
+      cellSetLatest: new Map<
+        string,
+        { seq: number; value: unknown; retriesLeft: number }
+      >(),
+      // The per-key commit queue: handleCellSet links same-key writes onto this
+      // chain so their tx.commit() calls serialize (see the U3/supersede tests).
+      cellSetChains: new Map<string, Promise<void>>(),
+      // The chain links call this.commitLatestForKey; bind the real (private)
+      // prototype method so the mock exercises the production loop, not a stub.
+      commitLatestForKey: (RuntimeProcessor.prototype as unknown as {
+        commitLatestForKey: (...a: unknown[]) => Promise<void>;
+      }).commitLatestForKey,
+      runtime: {
+        edit: () => {
+          // Inject a SYNCHRONOUS throw on the first N tx setups (simulates a
+          // CFC-label violation / write-guard / malformed ref). commitLatestForKey
+          // must catch this and resolve the link, not reject + wedge the chain.
+          if (++editCalls <= (opts?.editThrowsFirstN ?? 0)) {
+            throw new Error("synthetic tx-setup throw");
+          }
+          return {
+            commit: () => {
+              let resolve!: Deferred["resolve"];
+              const promise = new Promise<{ error?: { message: string } }>(
+                (res) => {
+                  resolve = res;
+                },
+              );
+              commits.push({ resolve, promise });
+              return promise;
+            },
+          };
+        },
+        getCellFromLink: () => ({
+          withTx: () => ({
+            set: (value: unknown) => {
+              setValues.push(value);
+            },
+          }),
+        }),
+        prepareTxForCommit: () => {},
+      },
+    } as unknown as RuntimeProcessor;
+    const set = (value: string) =>
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: cellRef,
+        value,
+      });
+    return { processor, setValues, commits, set };
+  }
+
+  const flushAsync = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+  const REJECTED = { error: { message: "stale confirmed read: of:test" } };
+
+  it("reapplies the latest value until a rejected commit lands", async () => {
+    // U1 (preserved): a single key's commit, rejected twice, rebases each time
+    // on a fresh tx and lands on the third. Under the per-key commit queue the
+    // first link runs on a microtask (the chain's .then), so flush ONCE before
+    // touching commits[0] — that is the only change from the pre-queue test;
+    // the observable commit/set sequence is identical.
+    const { setValues, commits, set } = makeProcessor();
+    set("Bob");
+    await flushAsync();
+    commits[0].resolve(REJECTED);
+    await flushAsync();
+    commits[1].resolve(REJECTED);
+    await flushAsync();
+    commits[2].resolve({});
+    await flushAsync();
+    // Initial apply + two reapplies, each on a fresh tx.
+    expect(setValues).toEqual(["Bob", "Bob", "Bob"]);
+    expect(commits.length).toBe(3);
+  });
+
+  it("gives up after exhausting the bounded per-cell budget", async () => {
+    // U2 (preserved): the rebase loop is bounded to CELL_SET_COMMIT_RETRIES.
+    // Same one-microtask-later first link as U1, so flush before the loop reads
+    // commits.length.
+    const { setValues, commits, set } = makeProcessor();
+    set("Bob");
+    await flushAsync();
+    for (let i = 0; i < 10 && i < commits.length; i++) {
+      commits[i].resolve(REJECTED);
+      await flushAsync();
+    }
+    // 1 initial + CELL_SET_COMMIT_RETRIES reapplies.
+    expect(setValues.length).toBe(6);
+  });
+
+  it("serializes same-key writes: the 2nd commit is not issued until the 1st resolves", async () => {
+    // U3 (NEW — the prevention property the after-the-fact reapply could not
+    // provide). Two same-key sets are enqueued back-to-back. The queue links
+    // them, so only ONE tx.commit() is in flight: the 2nd link cannot issue its
+    // commit until the 1st link's commit resolves. This structurally forbids the
+    // own-write race (two same-path patches overlapping, the 2nd confirming, the
+    // 1st rejecting and rolling back past the confirmed value).
+    const { processor, setValues, commits, set } = makeProcessor();
+    set("B");
+    set("Bob");
+    await flushAsync();
+    // THE PREVENTION PROPERTY: two same-key sets were enqueued, yet only ONE
+    // tx.commit() is in flight. The 2nd link cannot issue its commit until the
+    // 1st resolves — so the own-write race (two concurrent same-path commits,
+    // one confirming while the other rejects-and-rolls-back) can never form.
+    expect(commits.length).toBe(1);
+    // Read-at-commit supersession: the in-flight link reads the LATEST value
+    // ("Bob"), so the superseded "B" is never committed.
+    expect(setValues).toEqual(["Bob"]);
+
+    // Resolve the first commit successfully. ONLY NOW does the 2nd link run —
+    // proving the serialization barrier. It re-commits the latest ("Bob", an
+    // idempotent re-write) on its own fresh tx; still at most one in flight.
+    commits[0].resolve({});
+    await flushAsync();
+    expect(commits.length).toBe(2);
+    expect(setValues).toEqual(["Bob", "Bob"]);
+    // Drain the 2nd link; the per-key maps clean up to bounded (empty) state.
+    commits[1].resolve({});
+    await flushAsync();
+    const chains =
+      (processor as unknown as { cellSetChains: Map<string, unknown> })
+        .cellSetChains;
+    const latest =
+      (processor as unknown as { cellSetLatest: Map<string, unknown> })
+        .cellSetLatest;
+    expect(chains.size).toBe(0);
+    expect(latest.size).toBe(0);
+  });
+
+  it("rebases to the LATEST value on a rejection, never a stale one", async () => {
+    // U4 (re-pinned). The pre-queue test exercised TWO concurrent commits
+    // (commits[1] resolving before commits[0]) to prove a late rollback of an
+    // older write could not erase a newer confirmed one. Under serialization
+    // that interleaving is structurally impossible to FORM (proven by U3), so
+    // we re-pin to the residual rebase-correctness invariant the queue still
+    // owns: when a commit is rejected, the rebase re-applies the LATEST value,
+    // never the rejected-stale one. A SINGLE set keeps exactly one chain link so
+    // the rebase loop is observed without a trailing idempotent re-commit.
+    const { setValues, commits, set } = makeProcessor();
+    set("B");
+    set("Bob"); // supersedes "B" before the first link even commits
+    await flushAsync();
+    expect(setValues).toEqual(["Bob"]); // first commit already carries latest
+    expect(commits.length).toBe(1);
+    commits[0].resolve(REJECTED); // the (latest-valued) commit is rejected
+    await flushAsync();
+    // The rebase re-applies the LATEST value ("Bob"), never the superseded "B".
+    expect(setValues).toEqual(["Bob", "Bob"]);
+    // "B" was never committed at all — supersession dropped it before any tx.
+    expect(setValues.includes("B")).toBe(false);
+    // Land the rebase, then drain the trailing (2nd enqueued) link's idempotent
+    // re-commit so the test leaves no pending microtasks.
+    commits[1].resolve({});
+    await flushAsync();
+    commits[commits.length - 1].resolve({});
+    await flushAsync();
+    // Every committed value was the latest; no stale "B" ever reached a tx.
+    expect(setValues.every((v) => v === "Bob")).toBe(true);
+  });
+
+  it("a newer set supersedes a pending write without spending retry budget", async () => {
+    // U5 (re-pinned). The pre-queue test asserted a fixed interleaving
+    // (["old","old","new","new"]) that was an artifact of two racing chains.
+    // Under the serialized queue the invariant — not a fixed array — is the
+    // contract: the final landed value is the LATEST input, no value older than
+    // the latest is ever written after it, and a supersession does NOT consume
+    // the rebase budget (seq-skip).
+    const { processor, setValues, commits, set } = makeProcessor();
+    set("old");
+    await flushAsync();
+    expect(setValues).toEqual(["old"]);
+    // A newer set arrives while "old"'s commit is in flight (commits[0]). It
+    // bumps seq and refreshes budget; the in-flight link reads it on rejection.
+    set("new");
+    commits[0].resolve(REJECTED); // the "old" commit fails
+    await flushAsync();
+    // The rejection was for a SUPERSEDED seq, so the loop rebased to "new"
+    // WITHOUT decrementing budget. Land it.
+    const newIdx = setValues.lastIndexOf("new");
+    expect(newIdx).toBeGreaterThanOrEqual(0);
+    // Invariant: no "old" written after the first "new".
+    expect(setValues.slice(newIdx).includes("old")).toBe(false);
+    // Discriminator for the seq-skip optimization itself: the in-flight "new"
+    // entry must still hold FULL budget — the superseded rejection consumed
+    // none. (If the seq-skip were broken and decremented on supersession, this
+    // would read CELL_SET_COMMIT_RETRIES - 1.)
+    // deno-lint-ignore no-explicit-any
+    const entry = [...(processor as any).cellSetLatest.values()][0];
+    expect(entry?.retriesLeft).toBe(5); // CELL_SET_COMMIT_RETRIES, undecremented
+    commits[commits.length - 1].resolve({});
+    await flushAsync();
+    expect(setValues.at(-1)).toBe("new");
+  });
+
+  it("stops issuing commits after dispose mid-flight", async () => {
+    // Dispose while a commit is unresolved: no further tx.commit() is issued
+    // (the loop short-circuits on isDisposed() at each boundary, and dispose
+    // clears the queue maps). The in-flight commit is left to settle under the
+    // existing storageManager.synced() await in the real dispose(); here we just
+    // resolve it as rejected and confirm no rebase follows.
+    const { processor, setValues, commits, set } = makeProcessor();
+    set("Bob");
+    await flushAsync();
+    expect(commits.length).toBe(1);
+    // Simulate disposal: flip the flag and clear the queue, mirroring dispose().
+    (processor as unknown as { isDisposed: () => boolean }).isDisposed = () =>
+      true;
+    (processor as unknown as { cellSetChains: Map<string, unknown> })
+      .cellSetChains.clear();
+    (processor as unknown as { cellSetLatest: Map<string, unknown> })
+      .cellSetLatest.clear();
+    const before = commits.length;
+    commits[0].resolve(REJECTED); // would normally trigger a rebase
+    await flushAsync();
+    // No new commit was issued after disposal.
+    expect(commits.length).toBe(before);
+    expect(setValues).toEqual(["Bob"]);
+  });
+
+  it("a synchronous tx-setup throw resolves the link and frees the key (no wedge, no unhandled rejection)", async () => {
+    // Regression for the widened try in commitLatestForKey: a SYNCHRONOUS throw
+    // from edit()/set()/prepareTxForCommit() (a CFC-label violation, write-guard
+    // or malformed ref — exactly the op-types this queue serializes) must be
+    // caught so the link RESOLVES, not rejects. Without the widened try, the
+    // chain's `.then` carries an unhandled rejection (deno fails the test) AND
+    // the next same-key write wedges (its commit is never issued).
+    const { setValues, commits, set } = makeProcessor({ editThrowsFirstN: 1 });
+    set("a"); // first link: edit() throws synchronously, before any commit
+    await flushAsync();
+    expect(commits.length).toBe(0); // nothing committed; link resolved cleanly
+    // The key is freed: a subsequent same-key write still commits and lands.
+    set("b");
+    await flushAsync();
+    expect(commits.length).toBe(1); // chain NOT wedged — "b" issued its commit
+    commits[0].resolve({});
+    await flushAsync();
+    expect(setValues.at(-1)).toBe("b");
   });
 });
