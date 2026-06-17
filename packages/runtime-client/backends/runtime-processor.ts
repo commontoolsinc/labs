@@ -117,7 +117,7 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { cellRefToKey } from "../shared/utils.ts";
+import { cellRefToIdentityKey, cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
   normalizeRenderConfidentialityCeiling,
@@ -692,7 +692,11 @@ export class RuntimeProcessor {
   }
 
   handleCellSet(request: CellSetRequest): void {
-    const key = cellRefToKey(request.cell);
+    // Key the commit queue on storage IDENTITY (space:id:path), NOT the full
+    // cellRefToKey: schema/cfcLabelView differences between two writes to the
+    // SAME location must not split them onto separate chains, or same-path
+    // writes could commit out of order again (the race this queue prevents).
+    const key = cellRefToIdentityKey(request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
     // `value` is freshly minted by mapCellRefsToSigilLinks (new objects per
     // request, never aliased) and is only READ across rebases, so no defensive

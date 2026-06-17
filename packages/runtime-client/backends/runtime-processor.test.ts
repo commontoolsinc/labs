@@ -2148,6 +2148,32 @@ describe("RuntimeProcessor cell set IPC", () => {
     expect(latest.size).toBe(0);
   });
 
+  it("serializes same-identity writes even when schema/cfcLabelView differ", async () => {
+    // Regression (cubic P2 on #4196): the queue keys on storage IDENTITY
+    // (space:id:path), NOT the full cellRefToKey. Two writes to the SAME cell
+    // whose refs carry DIFFERENT schema must still serialize onto ONE chain —
+    // otherwise same-path writes could commit out of order again (the very race
+    // this queue prevents). With the old schema-inclusive key these split into
+    // two parallel chains and BOTH commits issue at once (commits.length === 2).
+    const { processor, commits } = makeProcessor();
+    const setWithSchema = (value: string, schema: unknown) =>
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: { ...cellRef, schema } as CellRef,
+        value,
+      });
+    setWithSchema("B", { type: "string" });
+    setWithSchema("Bob", { type: "string", title: "name" }); // same id/path, diff schema
+    await flushAsync();
+    // Identity-keyed queue => ONE chain => at most one commit in flight.
+    expect(commits.length).toBe(1);
+    commits[0].resolve({});
+    await flushAsync();
+    expect(commits.length).toBe(2); // 2nd link runs only after the 1st resolves
+    commits[1].resolve({});
+    await flushAsync();
+  });
+
   it("rebases to the LATEST value on a rejection, never a stale one", async () => {
     // U4 (re-pinned). The pre-queue test exercised TWO concurrent commits
     // (commits[1] resolving before commits[0]) to prove a late rollback of an
