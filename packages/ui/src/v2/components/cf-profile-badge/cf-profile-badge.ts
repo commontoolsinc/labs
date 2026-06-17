@@ -36,6 +36,34 @@ export type ProfileBadgeDisplay = {
   avatar: string | undefined;
 };
 
+/** Extra profile details surfaced in the badge hover/focus tooltip (CT-1648). */
+export type ProfileBadgeTooltip = {
+  bio: string | undefined;
+  pinnedCount: number;
+};
+
+/**
+ * Extracts the tooltip details (bio + pinned-pattern count) from a subscribed
+ * profile-cell value. `bio` is the owner-authored free-text description;
+ * `pinnedCount` is the number of profile `elements` (pinned pieces / cards).
+ * Both are best-effort: a badge bound to a derived projection (e.g. the
+ * self-view `{name, avatar}` cell) simply yields no bio and a zero count. Pure,
+ * so it is unit-testable without a runtime.
+ */
+export const profileTooltipFromValue = (val: unknown): ProfileBadgeTooltip => {
+  if (!val || typeof val !== "object") {
+    return { bio: undefined, pinnedCount: 0 };
+  }
+  const record = val as Record<PropertyKey, unknown>;
+  const rawBio = record["bio"];
+  const bio = typeof rawBio === "string" && rawBio.trim().length > 0
+    ? rawBio.trim()
+    : undefined;
+  const elements = record["elements"];
+  const pinnedCount = Array.isArray(elements) ? elements.length : 0;
+  return { bio, pinnedCount };
+};
+
 /**
  * Extracts the display name + avatar from a subscribed profile-cell value.
  * Prefers the profile's own editable `name` field, falling back to the cell's
@@ -99,6 +127,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }
 
       .badge {
+        position: relative;
         box-sizing: border-box;
         display: inline-flex;
         align-items: center;
@@ -110,6 +139,77 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         background: var(--cf-theme-color-surface, hsl(0, 0%, 99%));
         color: var(--cf-theme-color-text, hsl(0, 0%, 9%));
         line-height: 1;
+      }
+
+      /* CT-1648: hover/focus tooltip surfacing the profile's configured bio +
+        pinned-pattern count. Hidden until the badge is hovered or focused
+        (keyboard focus drives it on touch/AT). pointer-events:none so it never
+        intercepts the badge's own click/navigation. */
+      .tooltip {
+        position: absolute;
+        top: calc(100% + 0.4rem);
+        left: 0;
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        box-sizing: border-box;
+        width: max-content;
+        max-width: 18rem;
+        padding: 0.5rem 0.625rem;
+        border-radius: var(--cf-border-radius-md, 0.5rem);
+        border: 1px solid var(--cf-theme-color-border, hsl(0, 0%, 89%));
+        background: var(--cf-theme-color-surface, hsl(0, 0%, 99%));
+        color: var(--cf-theme-color-text, hsl(0, 0%, 9%));
+        box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.28);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-2px);
+        transition:
+          opacity 120ms ease-out,
+          transform 120ms ease-out,
+          visibility 120ms;
+        pointer-events: none;
+        text-align: left;
+        white-space: normal;
+      }
+
+      .badge:hover .tooltip,
+      .badge:focus-visible .tooltip,
+      .badge:focus-within .tooltip {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+
+      .tooltip-name {
+        font-size: var(--cf-font-size-sm, 0.8125rem);
+        font-weight: var(--cf-font-weight-semibold, 600);
+      }
+
+      .tooltip-bio {
+        font-size: var(--cf-font-size-xs, 0.75rem);
+        line-height: 1.35;
+        color: var(--cf-theme-color-text-secondary, hsl(0, 0%, 40%));
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .tooltip-meta {
+        font-size: var(--cf-font-size-xs, 0.75rem);
+        color: var(--cf-theme-color-muted-foreground, hsl(0, 0%, 45%));
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tooltip {
+          transition: none;
+          transform: none;
+        }
+        .badge:hover .tooltip,
+        .badge:focus-visible .tooltip,
+        .badge:focus-within .tooltip {
+          transform: none;
+        }
       }
 
       /* CT-1750: navigable badges (bound to a real profile cell) act as links. */
@@ -322,6 +422,13 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _avatar: string | undefined = undefined;
 
+  // CT-1648: extra details surfaced in the hover/focus tooltip.
+  @state()
+  private accessor _bio: string | undefined = undefined;
+
+  @state()
+  private accessor _pinnedCount = 0;
+
   @state()
   private accessor _state: ProfileBadgeState = "presented";
 
@@ -486,15 +593,32 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
       // Subscribe with a minimal schema so the runtime only resolves the fields
       // we render, rather than walking the whole profile output graph (mirrors
-      // cf-cell-link's $NAME-only subscription).
+      // cf-cell-link's $NAME-only subscription). `bio` + `elements` feed the
+      // hover tooltip (CT-1648); `elements` items request only `title` (a
+      // same-space string) so we never deep-resolve the cross-space `cell` links
+      // just to count them.
       const named = resolved.asSchema<
-        { [NAME]?: string; name?: string; avatar?: string }
+        {
+          [NAME]?: string;
+          name?: string;
+          avatar?: string;
+          bio?: string;
+          elements?: Array<{ title?: string }>;
+        }
       >({
         type: "object",
         properties: {
           [NAME]: { type: "string" },
           name: { type: "string" },
           avatar: { type: "string" },
+          bio: { type: "string" },
+          elements: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: { type: "string" } },
+            },
+          },
         },
       });
       this._unsubscribe = named.subscribe((val) => this._applyValue(val));
@@ -548,8 +672,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   private _applyValue(val: unknown): void {
     const { name, avatar } = profileDisplayFromValue(val);
+    const { bio, pinnedCount } = profileTooltipFromValue(val);
     this._name = name;
     this._avatar = avatar;
+    this._bio = bio;
+    this._pinnedCount = pinnedCount;
     this.requestUpdate();
   }
 
@@ -611,6 +738,14 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // this identity's palette.
     const auraStyle = verified ? `--seal-hue: ${hue};` : "";
 
+    // CT-1648: hover/focus tooltip surfacing the profile's configured details
+    // (bio + pinned-pattern count). Only rendered when there's something extra
+    // to show beyond the name already on the badge.
+    const pinnedLabel = this._pinnedCount === 1
+      ? "1 pinned pattern"
+      : `${this._pinnedCount} pinned patterns`;
+    const hasTooltip = this._bio !== undefined || this._pinnedCount > 0;
+
     return html`
       <span
         class="badge"
@@ -618,8 +753,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         data-cf-profile-badge
         data-state="${this._state}"
         ?data-navigable="${this._navigable}"
+        ?data-has-tooltip="${hasTooltip}"
         role="${this._navigable ? "link" : nothing}"
-        tabindex="${this._navigable ? "0" : nothing}"
+        tabindex="${this._navigable ? "0" : (hasTooltip ? "0" : nothing)}"
         @click="${this._handleClick}"
         @keydown="${this._handleKeydown}"
       >
@@ -669,6 +805,24 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
               : null}
           </svg>
         </span>
+        ${hasTooltip
+          ? html`
+            <span class="tooltip" part="tooltip" role="tooltip">
+              <span class="tooltip-name">${this._name ?? "Profile"}</span>
+              ${this._bio !== undefined
+                ? html`
+                  <span class="tooltip-bio">${this._bio}</span>
+                `
+                : null} ${this._pinnedCount > 0
+                ? html`
+                  <span class="tooltip-meta">
+                    <span aria-hidden="true">📌</span> ${pinnedLabel}
+                  </span>
+                `
+                : null}
+            </span>
+          `
+          : null}
       </span>
     `;
   }
