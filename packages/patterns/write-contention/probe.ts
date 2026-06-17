@@ -48,15 +48,16 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
-/** Read (list, mapKeys) from a runtime's piece output. */
+/** Read (list, mapKeys, tallyLeaves) from a runtime's piece output. */
 async function readView(
   read: () => Promise<unknown>,
-): Promise<{ list: string[]; mapKeys: string[] }> {
+): Promise<{ list: string[]; mapKeys: string[]; tally: string[] }> {
   const out = await read();
-  if (!isRecord(out)) return { list: [], mapKeys: [] };
+  if (!isRecord(out)) return { list: [], mapKeys: [], tally: [] };
   return {
     list: asStringArray(out.list),
     mapKeys: asStringArray(out.mapKeys),
+    tally: asStringArray(out.tallyLeaves),
   };
 }
 
@@ -98,9 +99,11 @@ function account(
 async function main(): Promise<void> {
   const users = numberArg("users", 10);
   const rounds = numberArg("rounds", 5);
-  const mode = stringArg("mode", "both"); // both | list | map
+  const mode = stringArg("mode", "both"); // both | list | map | nested
+  const buckets = numberArg("buckets", 3); // nested-mode: # of shared sub-buckets
   const doList = mode === "both" || mode === "list";
   const doMap = mode === "both" || mode === "map";
+  const doNested = mode === "nested";
 
   console.log(
     `# write-contention probe  users=${users} rounds=${rounds} mode=${mode}  ` +
@@ -126,12 +129,20 @@ async function main(): Promise<void> {
     // simultaneously (max contention), using a UNIQUE marker per (runtime,round).
     for (let round = 0; round < rounds; round++) {
       await Promise.all(
-        sessions.map((s) => {
+        sessions.map((s, index) => {
           const marker = `${s.label}#${round}`;
           attempted.push(marker);
           const writes: Promise<void>[] = [];
           if (doList) writes.push(s.send("append", { marker }));
           if (doMap) writes.push(s.send("setKey", { id: marker, marker }));
+          if (doNested) {
+            // Same rotation as the lunch-poll diagnose: spreads writers across
+            // `buckets` shared sub-buckets (~users/buckets writers share each).
+            const bucket = String((round + index) % buckets);
+            writes.push(
+              s.send("nestedSet", { bucket, leafKey: marker, marker }),
+            );
+          }
           return Promise.all(writes).then(() => undefined);
         }),
       );
@@ -158,6 +169,14 @@ async function main(): Promise<void> {
     }
     if (doMap) {
       account("MAP (distinct-key set)", attemptedUnique, coldView.mapKeys, liveAfter.mapKeys);
+    }
+    if (doNested) {
+      account(
+        "NESTED (shared-subrecord RMW)",
+        attemptedUnique,
+        coldView.tally,
+        liveAfter.tally,
+      );
     }
 
     console.log(

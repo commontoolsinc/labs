@@ -78,10 +78,37 @@ const appendB = handler<AppendEvent, { listB: ListCell }>(
   },
 );
 
+// Nested Record (bucket -> {leafKey: marker}) for the shared-SUBRECORD
+// read-modify-write shape that the lunch-poll castVote uses (a full .get() of
+// the parent doc, then a deep keyed .set() into a SHARED bucket). All writers
+// share one bucket "B" but write DISTINCT leaves — the candidate silent
+// lost-update path (a write commits, then a peer's commit clobbers it without a
+// CAS conflict and without a logged exhaustion).
+type Tally = Record<string, Record<string, string>>;
+const EMPTY_TALLY: Tally = {};
+type TallyCell = Writable<Tally | Default<typeof EMPTY_TALLY>>;
+
+export interface NestedSetEvent {
+  bucket?: string;
+  leafKey?: string;
+  marker?: string;
+}
+
+const nestedSet = handler<NestedSetEvent, { tally: TallyCell }>(
+  ({ bucket, leafKey, marker }, { tally }) => {
+    if (!bucket || !leafKey || !marker) return;
+    // Full-document read of the parent, exactly like castVote's
+    // `votesByOption.get()?.[optionId]` — captures a whole-doc since-snapshot.
+    const _snapshot = tally.get();
+    tally.key(bucket).key(leafKey).set(marker);
+  },
+);
+
 export interface ContentionInput {
   list?: PerSpace<MarkerList | Default<typeof EMPTY_LIST>>;
   listB?: PerSpace<MarkerList | Default<typeof EMPTY_LIST>>;
   map?: PerSpace<MarkerMap | Default<typeof EMPTY_MAP>>;
+  tally?: PerSpace<Tally | Default<typeof EMPTY_TALLY>>;
 }
 
 export interface ContentionOutput {
@@ -90,39 +117,53 @@ export interface ContentionOutput {
   list: readonly string[];
   listB: readonly string[];
   mapKeys: readonly string[];
+  tallyLeaves: readonly string[];
   listCount: number;
   listBCount: number;
   mapCount: number;
+  tallyCount: number;
   append: Stream<AppendEvent>;
   appendB: Stream<AppendEvent>;
   setKey: Stream<SetKeyEvent>;
+  nestedSet: Stream<NestedSetEvent>;
 }
 
 export default pattern<ContentionInput, ContentionOutput>(
-  ({ list, listB, map }) => {
+  ({ list, listB, map, tally }) => {
     const listSnapshot = computed(() => list ?? EMPTY_LIST);
     const listBSnapshot = computed(() => listB ?? EMPTY_LIST);
     const mapKeys = computed(() => Object.keys(map ?? EMPTY_MAP));
+    const tallyLeaves = computed(() =>
+      Object.values(tally ?? EMPTY_TALLY).flatMap((b) => Object.keys(b ?? {}))
+    );
     const listCount = computed(() => (list ?? EMPTY_LIST).length);
     const listBCount = computed(() => (listB ?? EMPTY_LIST).length);
     const mapCount = computed(() => Object.keys(map ?? EMPTY_MAP).length);
+    const tallyCount = computed(() =>
+      Object.values(tally ?? EMPTY_TALLY)
+        .flatMap((b) => Object.keys(b ?? {})).length
+    );
 
     return {
       [NAME]: "write-contention repro",
       [UI]: (
         <div>
-          list={listCount} · listB={listBCount} · map={mapCount}
+          list={listCount} · listB={listBCount} · map={mapCount} ·
+          tally={tallyCount}
         </div>
       ),
       list: listSnapshot,
       listB: listBSnapshot,
       mapKeys,
+      tallyLeaves,
       listCount,
       listBCount,
       mapCount,
+      tallyCount,
       append: append({ list }),
       appendB: appendB({ listB }),
       setKey: setKey({ map }),
+      nestedSet: nestedSet({ tally }),
     };
   },
 );

@@ -209,6 +209,35 @@ Deterministically crashes the `array` 3×2 join phase; spreads to more workers u
 load (user-2 then user-9 at 3×10). Exit code stays 0 (`results[].ok=false`) — harness
 exit-code blindness. Data-integrity hazard for any array-variant sweep.
 
+### Root cause grounded + residual RESOLVED — 2026-06-16
+
+Structural grounding (multi-agent code read + adversarial verify) + direct
+instrumentation. Full team-facing writeup: **`DROPPED-WRITES-EVIDENCE.md`**.
+
+- **Conflict unit = the entity-DOCUMENT** `(branch, id, scope_key)`, server-side.
+  The governing predicate `SELECT_SET_DELETE_CONFLICT` (`memory/v2/engine.ts:529`)
+  has NO field/path/space column. So: distinct keys in one Record collide (keying
+  doesn't help — `cell.ts:1492-1521`, `data-updating.ts:838-902`); disjoint cells
+  don't (distinct ids; `scope` "space" → constant `DEFAULT_SCOPE_KEY`,
+  `engine.ts:46-53`). Retry budget 5 (`scheduler/constants.ts:5`); commit is
+  fire-and-forget (`events.ts:609-616`) so the drop is **silent to the caller**.
+- **The "unlogged residual" (12 missing > 6 exhaustions) is RESOLVED — it is a
+  CASCADE of the same bug, NOT a second mechanism.** `joinAs` writes the contended
+  `usersByName`/`userOrder` docs AND `myName` (`PerUser`) in one tx
+  (`main-indexed.tsx:156-177`); a dropped join takes `myName.set()` with it →
+  empty `myName` → `castVote`'s guard `if (!me) return` (`:246`) silently no-ops
+  that user's votes. Instrumented: **9 `castVote`s fired with `me=""`** at 3×10.
+  So the "extra" missing votes were never *attempted* as writes; their root drop
+  was logged at the *join* phase, not the vote phase.
+- **Two hypotheses REFUTED** by a minimal SQLite-free repro
+  (`write-contention/repro.tsx`): the shared-subrecord write *shape* (minimal
+  `tally.get()` + `key().set()` → `missing == exhaustions`, no silent loss) and the
+  multi-bucket *structure* (buckets 1/2/3 all clean). This supersedes the
+  line-90 `sqlite-rev` lost-update guess.
+- **`events.ts:663` counter instrumentation is no longer needed** — the cascade
+  (not a hidden silent path) explains the residual; the per-row exhaustion mapping
+  is moot.
+
 ### Cross-cutting insight (bridges this session's earlier work)
 
 The vote-read failure is the **same SQLite-query cross-runtime reactivity gap**
