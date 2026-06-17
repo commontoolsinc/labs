@@ -138,8 +138,10 @@ describe("json-encoding", () => {
     });
 
     it('`{ "/": "string" }` round-trips via `/object` escaping', () => {
-      const entityId = { "/": "bafyabc123" } as FabricValue;
-      expect(roundTrip(entityId)).toEqual(entityId);
+      // An arbitrary string-valued `/` key — not an entity ref; exercises the
+      // escaping for the `/` key per se.
+      const slashKeyed = { "/": "an arbitrary string" } as FabricValue;
+      expect(roundTrip(slashKeyed)).toEqual(slashKeyed);
     });
 
     it("`$stream` marker passes through unchanged", () => {
@@ -158,10 +160,16 @@ describe("json-encoding", () => {
 
     it('`$alias` marker with nested `{ "/": value }` round-trips', () => {
       const value = {
-        $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
+        $alias: {
+          path: ["value", "name"],
+          cell: { "/": "an arbitrary string" },
+        },
       } as FabricValue;
       expect(roundTrip(value)).toEqual({
-        $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
+        $alias: {
+          path: ["value", "name"],
+          cell: { "/": "an arbitrary string" },
+        },
       });
     });
 
@@ -169,7 +177,7 @@ describe("json-encoding", () => {
       const value = {
         count: 42n,
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
-        items: [1, { "/": "bafyxyz" }, undefined],
+        items: [1, { "/": "another arbitrary string" }, undefined],
       } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.count).toBe(42n);
@@ -177,7 +185,9 @@ describe("json-encoding", () => {
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
       );
       expect((decoded.items as unknown[])[0]).toBe(1);
-      expect((decoded.items as unknown[])[1]).toEqual({ "/": "bafyxyz" });
+      expect((decoded.items as unknown[])[1]).toEqual({
+        "/": "another arbitrary string",
+      });
       expect((decoded.items as unknown[])[2]).toBe(undefined);
     });
 
