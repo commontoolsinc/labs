@@ -34,10 +34,14 @@ contribute their own entry when they join**:
   and launches the framework picker when there are two or more. Patterns just
   read `wish(...).result`; the multi-profile selection is handled for them.
 - The join handler writes that viewer's contribution into the shared roster —
-  either a **link** to their live profile or a **stable snapshot** of
-  name/avatar (see next section).
-- Every other user renders names and avatars straight from `participants`. No
-  cross-user profile enumeration is ever required.
+  by default a **link** to their live profile cell (rendered with
+  `<cf-profile-badge>`), or a **stable snapshot** of name/avatar for the
+  self-containment case (see next section).
+- Every other user renders each participant from `participants` — a live
+  `<cf-profile-badge $profile={p.profile} />` bound to the contributed profile
+  cell, which resolves cross-space for any authorized viewer (CT-1667/1687) and
+  is **visitable** (clicking it opens that user's live profile). No cross-user
+  profile enumeration is ever required.
 
 This is the same shape used by `packages/patterns/scrabble/scrabble.tsx`
 (a `PerSpace` `players` roster + a join handler that `push`es the current
@@ -48,11 +52,35 @@ name/avatar from the shared profile instead of a free-text field.
 
 ## Why links vs snapshots
 
-A roster entry can store either a **live link** to the contributor's profile or
-a **snapshot** of the values copied at join time. They are different
-trade-offs.
+A roster entry can store a **live link** to the contributor's profile cell (the
+default — rendered with the trusted, visitable `<cf-profile-badge>`) or a
+**snapshot** of the values copied at join time (a self-containment fallback).
+They are different trade-offs.
 
-### Snapshot (recommended default)
+### Live link (recommended)
+
+Store a reference to the contributor's profile cell (the `result` of their
+`#profile` wish) and render it with `<cf-profile-badge $profile={p.profile} />`:
+
+```ts
+participants.push({ profile: myProfile, joinedAt: safeDateNow() });
+// render: <cf-profile-badge $profile={p.profile} />
+```
+
+- **Pros:** Always current — a profile rename or avatar change propagates to
+  every roster that links it, with no refresh path. The runtime materializes
+  cross-space link targets on read (a read that finds the target absent kicks an
+  async load and re-renders on arrival — CT-1667/1687, PR #4019), so the link
+  resolves for any viewer with access to the profile's space. The badge is
+  **visitable** — clicking it opens the contributor's live profile — and carries
+  the runtime-attested verified-identity seal plus the bio / pinned-count
+  tooltip. This is the idiom: wish for `#profile`, key identity with `equals()`,
+  render the real cell.
+- **Cons:** First render shows blanks until the cross-space load lands, and
+  the roster's freshness couples to the remote space's availability — offline
+  or unreachable profile spaces render empty rather than stale.
+
+### Snapshot (self-containment fallback)
 
 Copy the resolved `name` and `avatar` strings into the roster entry when the user
 joins:
@@ -64,46 +92,40 @@ participants.push({ name, avatar, joinedAt: safeDateNow() });
 - **Pros:** Self-contained — every other viewer renders from plain strings
   already in the shared space, no cross-space resolution, no dependency on the
   joiner's profile space being reachable later. Cheap, durable, and trivially
-  serializable. Renders identically for all viewers.
+  serializable. Renders identically and immediately for all viewers. Best when
+  the roster must stay legible with remote profile spaces offline, or when you
+  explicitly do not want a live cross-space dependency.
 - **Cons:** Goes stale. If the user renames themselves or changes their avatar
   after joining, the roster keeps the old values until they re-join / you add a
-  refresh path.
-
-### Live link
-
-Store a reference to the contributor's profile cell (the `result` of their
-`#profile` wish) and let consumers render it reactively (e.g. via
-`cf-cell-link` / `cf-render`):
-
-- **Pros:** Always current — a profile rename propagates to every roster that
-  links it. The runtime materializes cross-space link targets on read (a read
-  that finds the target absent kicks an async load and re-renders on arrival —
-  CT-1667, PR #4019), so the link resolves for any viewer with access to the
-  profile's space.
-- **Cons:** First render shows blanks until the cross-space load lands, and
-  the roster's freshness couples to the remote space's availability — offline
-  or unreachable profile spaces render empty rather than stale.
+  refresh path. Renders a plain `<cf-avatar>` — no verified seal, not visitable.
 
 ### Verdict
 
-**Default to a snapshot.** It matches the "each user contributes their own data"
-model, keeps the shared roster fully self-describing inside the space, and
-renders identically (and immediately) for all viewers regardless of remote
-space availability. Reach for a live link when freshness genuinely matters —
-it resolves cross-space for any authorized viewer — and consider a **hybrid**:
-store the snapshot for immediate, availability-independent rendering *and*
-keep the link alongside it for live freshness or an explicit "refresh from
-profile" action.
+**Default to a live link rendered with `<cf-profile-badge>`.** Cross-space reads
+now resolve for any authorized viewer (CT-1667/1687, verified end-to-end across
+multiple real identities), so the live badge gives current data, a verified
+identity seal, the bio/pinned tooltip, and a visitable link to each
+contributor's profile — for the whole price of storing one cell reference.
+Reach for a **snapshot** when the roster must render with remote profile spaces
+unreachable, or when you deliberately want no live cross-space dependency; a
+**hybrid** (snapshot for immediate, availability-independent text *plus* the
+live link for the badge and freshness) gives both.
 
-## Reference demo
+## Reference demos
 
-A complete, copy-pasteable pattern. It uses the snapshot approach (the
-recommended default) for *rendering* — name/avatar are copied at join time —
+The **canonical live-link reference** is
+[`packages/patterns/profile-roster-live-demo.tsx`](../../packages/patterns/profile-roster-live-demo.tsx):
+every participant renders with a live, visitable `<cf-profile-badge>` bound to
+their real profile cell, identity is keyed with `equals()`, and it was verified
+end-to-end across multiple real identities. Prefer it as the starting point.
+
+The snapshot pattern below is the **self-containment variant** — it renders
+name/avatar from strings copied at join time (no live cross-space dependency)
 and additionally stores each joiner's profile **cell as the stable identity
-key**, deduped with `equals()`. Note this is distinct from the "live link" path
-above: the cell is used for *identity comparison*, not dereferenced for
-cross-space render, so it does not depend on other users' profile spaces being
-reachable. Every API used below is exercised elsewhere in the repo:
+key**, deduped with `equals()`. Here the cell is used only for *identity
+comparison*, not dereferenced for cross-space render, so it never depends on
+other users' profile spaces being reachable. Every API used below is exercised
+elsewhere in the repo:
 
 - `wish<string>({ query: "#profileName" | "#profileAvatar" })` and reading
   `.result` — `packages/patterns/shared-profile-demo/main.tsx`,
@@ -350,22 +372,25 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
 - **No `.set()` before the pattern takes over.** The roster/viewer cells use
   `Default<>` so they start empty without any imperative seeding.
 
-### Live-link variant (advanced)
+### Live-link variant (the recommended idiom)
 
-If you adopt the live-link approach instead, resolve the whole profile and store
-its cell reference, then render reactively. The current viewer's own result is
-known to render via `cf-cell-link` / `cf-render`:
+The live-link approach — store each joiner's profile **cell** and render it with
+a visitable `<cf-profile-badge>` — is the recommended idiom; see
+[`profile-roster-live-demo.tsx`](../../packages/patterns/profile-roster-live-demo.tsx)
+for the complete pattern. The shape:
 
 ```tsx
 const profileWish = wish({ query: "#profile" }); // result is ProfileHomeOutput-shaped
-// In a handler that has access to the live cell, push { profile: profileWish.result, joinedAt }.
-// Render an entry with: <cf-cell-link $cell={entry.profile} /> or <cf-render $cell={entry.profile} />.
+// In the join handler, push { profile: profileWish.result, joinedAt }.
+// Render each entry with: <cf-profile-badge $profile={entry.profile} />
+//   — live, carries the verified-identity seal + bio/pinned tooltip, visitable.
 ```
 
-Cross-space resolution works for any viewer with access to the profile's
-space (CT-1667, PR #4019); the trade-off is availability — entries render
-blank while the remote space is unreachable. A hybrid (snapshot for immediate
-rendering + link for freshness or an explicit refresh) gives both.
+Cross-space resolution works for any viewer with access to the profile's space
+(CT-1667/1687, PR #4019); the trade-off is availability — entries render blank
+while the remote space is unreachable. A hybrid (snapshot strings for immediate,
+availability-independent text + the link for the badge and freshness) gives
+both.
 
 ## Recommended approach for chat/game patterns
 
@@ -377,39 +402,35 @@ rendering + link for freshness or an explicit refresh) gives both.
    `wish({ query: "#profile" })` (or `#profileName` / `#profileAvatar` for just
    the fields). This returns the user's default profile under PR #3830, with the
    framework picker handling the multi-profile case.
-3. **Store a snapshot** (name + avatar copied at join time) in the roster by
-   default. Use a live link when freshness matters; prefer a hybrid if you
-   want freshness without coupling first render to remote-space availability.
-4. Append idempotently — guard on "already joined" so re-renders and reconnects
+3. **Store a live link** to each joiner's profile cell by default and render it
+   with `<cf-profile-badge $profile={p.profile} />` (live, visitable, verified
+   seal + tooltip). Fall back to a snapshot (name + avatar copied at join time)
+   when the roster must render with remote profile spaces unreachable; a hybrid
+   gives availability-independent text plus the live badge.
+4. Append idempotently — guard on "already joined" (keyed on the profile cell
+   with `equals()`, never the mutable display name) so re-renders and reconnects
    don't duplicate entries (see the `join` handler above).
-5. Render every other participant's name/avatar directly from `participants`.
-   Do not attempt to enumerate other users' profiles — there is no runtime
-   primitive for it, and the contributed roster already has everything you need.
+5. Render every participant directly from `participants`. Do not attempt to
+   enumerate other users' profiles — there is no runtime primitive for it, and
+   the contributed roster already has everything you need.
 
-## Runnable pattern
+## Runnable patterns
 
-A deployable version now lives at
-[`packages/patterns/shared-profile-roster/main.tsx`](../../packages/patterns/shared-profile-roster/main.tsx).
-It follows the snapshot model above and renders with the identity components:
+Two deployable versions:
 
-- Participants render via **`<cf-avatar src={p.avatar} name={p.name} />`** — one
-  component covering the image / glyph / initials cases uniformly (no hand-rolled
-  `<img>` + placeholder `<div>`).
-- The current viewer's own identity renders via the trusted
-  **`<cf-profile-badge $profile={profileWish.result} />`**. (Live profile cells
-  now also resolve cross-space for other authorized viewers — CT-1667.)
-
-Verified deployed (`cf piece new … main.tsx`): renders with 0 console errors;
-participant rows show image/emoji/initials avatars; the viewer badge shows the
-profile (or a graceful "Unknown profile" fallback when the identity has none).
-
-## Follow-ups (not done here)
-
-- The runnable pattern uses a **snapshot** roster. A live-link / hybrid variant
-  (rendering *other* users' entries via `cf-profile-badge` bound to their profile
-  cell) is unblocked now that cross-space link targets materialize on read
-  (CT-1667, PR #4019); it still deserves a multi-user browser pass before being
-  promoted to the recommended path.
+- **Live link (canonical):**
+  [`packages/patterns/profile-roster-live-demo.tsx`](../../packages/patterns/profile-roster-live-demo.tsx)
+  renders *every* participant with a live, visitable
+  **`<cf-profile-badge $profile={p.profile} />`** bound to their real profile
+  cell — current data, verified seal, bio/pinned tooltip, navigable to each
+  contributor's profile. Verified end-to-end across multiple real identities.
+- **Snapshot (self-containment variant):**
+  [`packages/patterns/shared-profile-roster/main.tsx`](../../packages/patterns/shared-profile-roster/main.tsx)
+  renders participants via **`<cf-avatar src={p.avatar} name={p.name} />`** from
+  strings copied at join time, with the current viewer's own identity on a
+  trusted `<cf-profile-badge>`. Verified deployed (`cf piece new … main.tsx`): 0
+  console errors; participant rows show image/emoji/initials avatars; the viewer
+  badge shows the profile (or a graceful "Unknown profile" fallback).
 
 ## References
 
@@ -420,7 +441,11 @@ profile (or a graceful "Unknown profile" fallback when the identity has none).
 - `packages/patterns/system/profile-home.tsx` — `ProfileHomeOutput`
   (`name`, `avatar`, `elements`, `initialNameApplied`) that `#profile` resolves
   to.
+- `packages/patterns/profile-roster-live-demo.tsx` — canonical live-link roster:
+  every participant on a visitable `<cf-profile-badge>` bound to their real cell.
 - `packages/patterns/shared-profile-demo/main.tsx` — minimal `#profile` consumer.
+- `packages/ui/src/v2/components/cf-profile-badge/` — trusted, visitable identity
+  badge (verified seal + bio / pinned-piece tooltip).
 - `packages/patterns/scrabble/scrabble.tsx`,
   `packages/patterns/scoped-user-directory/main.tsx`,
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx` — `PerSpace`

@@ -196,13 +196,19 @@ remember which entry is theirs. For simpler demos where names are immutable and
 unique enough for the domain, a `PerUser<string>` display name plus shared
 records that carry that name can also be acceptable.
 
-Source the display name and avatar from the viewer's **shared profile** rather
-than a free-text field: `wish({ query: "#profile" })` resolves the current
-viewer's profile, and its built-in `[UI]` covers the whole lifecycle (create
-surface when the user has no profile, a picker with inline create when they
-have several). Snapshot the resolved `#profileName` / `#profileAvatar` strings
-into the shared entry on join. See `docs/specs/shared-profile-rosters.md`;
-worked examples: `packages/patterns/profile-group-chat/main.tsx`,
+Source identity from the viewer's **shared profile** rather than a free-text
+field: `wish({ query: "#profile" })` resolves the current viewer's profile, and
+its built-in `[UI]` covers the whole lifecycle (create surface when the user has
+no profile, a picker with inline create when they have several). On join, store
+a **link to that profile cell** in the shared entry and render every participant
+with a live, visitable `<cf-profile-badge $profile={p.profile} />` — cross-space
+reads resolve for any authorized viewer (CT-1667/1687), so the badge stays
+current, carries the verified-identity seal, and links to each contributor's
+profile. Snapshotting the `#profileName` / `#profileAvatar` strings instead is
+the self-containment fallback (renders with remote profile spaces offline). See
+`docs/specs/shared-profile-rosters.md`; canonical live-link demo:
+`packages/patterns/profile-roster-live-demo.tsx`; snapshot examples:
+`packages/patterns/profile-group-chat/main.tsx`,
 `packages/patterns/scrabble/scrabble.tsx`,
 `packages/patterns/battleship/multiplayer/lobby.tsx`,
 `packages/patterns/lunch-poll/main.tsx`.
