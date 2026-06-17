@@ -4,7 +4,6 @@ import {
   handler,
   NAME,
   navigateTo,
-  nonPrivateRandom,
   pattern,
   patternTool,
   Stream,
@@ -120,9 +119,6 @@ export default pattern<OmniboxFABInput>(
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result!;
-    const sandboxId = new Writable(
-      `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
-    );
 
     const profile = wish<string>({ query: "#learnedSummary" });
 
@@ -187,7 +183,7 @@ Be matter-of-fact. Prefer action to explanation.`;
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
       updateProfile: patternTool(updateProfile),
-      bash: patternTool(bash, { sandboxId }),
+      bash: patternTool(bash),
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,
       }),
