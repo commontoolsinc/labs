@@ -38,7 +38,6 @@ trusted UI action.
 
 From `api-cfc.ts`:
 
-- `CFC_ATOM_BASE`
 - `CFC_ATOM_TYPE`
 - `CFC_CONCEPT_KIND`
 - `CFC_FUSE_ATOM_CLASS`

@@ -21,8 +21,6 @@ export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
 
 export type CfcAtom = CfcJsonValue;
 
-export declare const CFC_ATOM_BASE: "https://commonfabric.org/cfc/atom/";
-
 export declare const CFC_ATOM_TYPE: {
   readonly Builtin: "https://commonfabric.org/cfc/atom/Builtin";
   readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";

@@ -16,7 +16,6 @@ const EXCLUDED_PATTERN_FILES = new Set<string>([
   "packages/patterns/base/person.tsx",
   "packages/patterns/battleship/multiplayer/repro-minimal.tsx",
   "packages/patterns/cfc-agent-prompt-injection-demo/main.tsx",
-  "packages/patterns/cfc/prompt-injection/atoms.ts",
   "packages/patterns/cfc/prompt-injection/mod.ts",
   "packages/patterns/cfc/prompt-injection/schemas.ts",
   "packages/patterns/cfc/prompt-injection/tools.ts",
