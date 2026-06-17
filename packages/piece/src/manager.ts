@@ -377,9 +377,7 @@ export class PieceManager {
       const addMatchingPiece = (docId: { "/": string }) => {
         if (!docId || !docId["/"]) return;
 
-        const entityIdStr = typeof docId["/"] === "string"
-          ? docId["/"]
-          : JSON.stringify(docId["/"]);
+        const entityIdStr = docId["/"];
 
         // Skip if we've already processed this entity
         if (seenEntityIds.has(entityIdStr)) return;

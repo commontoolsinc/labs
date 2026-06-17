@@ -40,7 +40,7 @@ describe("Piece reference detection", () => {
     };
 
     // Track the references we find
-    const foundRefs: { "/": string | Uint8Array }[] = [];
+    const foundRefs: { "/": string }[] = [];
 
     // Direct manual detection (not using maybeGetCellLink which requires proper Cell implementation)
     const findDirectReferences = (value: unknown): void => {
@@ -52,7 +52,7 @@ describe("Piece reference detection", () => {
         value.path !== undefined
       ) {
         const addr = value.cell["/"];
-        if (typeof addr !== "string" && !(addr instanceof Uint8Array)) {
+        if (typeof addr !== "string") {
           return;
         }
         const id = { "/": addr };
@@ -143,8 +143,8 @@ describe("Piece reference detection", () => {
     // Let's implement our own reference finding logic to compare with what the system does
     const findAllReferences = (
       obj: unknown,
-    ): { "/": string | Uint8Array }[] => {
-      const refs: { "/": string | Uint8Array }[] = [];
+    ): { "/": string }[] => {
+      const refs: { "/": string }[] = [];
       const seenIds = new Set<string>();
 
       const traverse = (value: unknown): void => {
