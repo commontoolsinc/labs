@@ -54,6 +54,22 @@ const sectionLabel = {
   margin: "0 0 8px",
 };
 
+// Fixed-width monospace tag so the three variant rows line up.
+const variantTag = {
+  fontFamily: "monospace",
+  fontSize: "0.75rem",
+  color: "#9ca3af",
+  width: "3.5rem",
+  flex: "0 0 auto",
+};
+
+const variantRow = {
+  display: "flex",
+  gap: "12px",
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
 // deno-lint-ignore no-empty-interface
 interface ProfileBadgeStoryInput {}
 export interface ProfileBadgeStoryOutput {
@@ -110,6 +126,32 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           </div>
         </div>
 
+        <div>
+          <p style={sectionLabel}>Variants (CT-1761) — full · chip · circle</p>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+          >
+            <div style={variantRow}>
+              <span style={variantTag}>full</span>
+              <cf-profile-badge $profile={ada} variant="full" noNavigate />
+              <cf-profile-badge $profile={grace} variant="full" noNavigate />
+              <cf-profile-badge $profile={alan} variant="full" noNavigate />
+            </div>
+            <div style={variantRow}>
+              <span style={variantTag}>chip</span>
+              <cf-profile-badge $profile={ada} variant="chip" noNavigate />
+              <cf-profile-badge $profile={grace} variant="chip" noNavigate />
+              <cf-profile-badge $profile={alan} variant="chip" noNavigate />
+            </div>
+            <div style={variantRow}>
+              <span style={variantTag}>circle</span>
+              <cf-profile-badge $profile={ada} variant="circle" noNavigate />
+              <cf-profile-badge $profile={grace} variant="circle" noNavigate />
+              <cf-profile-badge $profile={alan} variant="circle" noNavigate />
+            </div>
+          </div>
+        </div>
+
         <span
           style={{ fontSize: "0.875rem", color: "#6b7280", maxWidth: "40ch" }}
         >
@@ -119,7 +161,11 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           CFC label), which this story can’t mint, so these badges stay in the
           plain “presented” state. Hover or focus a badge to see its tooltip
           (CT-1648): Ada has a bio + 3 pinned pieces, Grace has a bio only, and
-          Alan — with neither — shows no tooltip.
+          Alan — with neither — shows no tooltip. The variants (CT-1761) all
+          carry the same verification treatment: <code>full</code> is
+          avatar + name + shield; <code>chip</code> is a compact name + seal dot
+          for inline use; <code>circle</code> is avatar + seal ring only (name on
+          hover / for screen readers).
         </span>
       </div>
     ),

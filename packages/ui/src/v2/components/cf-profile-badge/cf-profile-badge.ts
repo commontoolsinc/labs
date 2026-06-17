@@ -386,6 +386,41 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       .badge[data-state="verified"] .seal {
         color: var(--cf-theme-color-primary, hsl(212, 100%, 47%));
       }
+
+      /* ---- Variants (CT-1761) -------------------------------------------- */
+
+      /* chip: compact name-first pill. No avatar — a small DID-hued "seal dot"
+        carries the identity treatment, so an inline name still reads as a
+        first-class, verifiable identity rather than plain text. */
+      .badge[data-variant="chip"] {
+        gap: 0.375rem;
+        padding: 0.125rem 0.5rem 0.125rem 0.3125rem;
+      }
+
+      .seal-dot {
+        display: block;
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        background: var(--cf-theme-color-border, hsl(0, 0%, 80%));
+        box-sizing: border-box;
+      }
+
+      /* The verified dot is filled with the identity accent (supplied inline)
+        and sits inside the shared .aura, so it inherits the same ring + glow +
+        cursor-sheen liveness as the full badge — just at dot scale. */
+      .badge[data-variant="chip"][data-state="verified"] .aura .seal-dot {
+        box-shadow: 0 0 0 1.5px var(--cf-theme-color-surface, hsl(0, 0%, 99%));
+      }
+
+      /* circle: avatar + seal ring only. Drop the pill chrome and the name; the
+        ring IS the seal. Used for dense avatar strips and message gutters. */
+      .badge[data-variant="circle"] {
+        gap: 0;
+        padding: 0;
+        border: none;
+        background: transparent;
+      }
     `,
   ];
 
@@ -395,6 +430,21 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   @property({ type: String, reflect: true })
   accessor size: AvatarSize = "md";
+
+  /**
+   * Badge shape. All variants carry the same verification treatment (the
+   * DID-derived seal/glint); they differ only in how much chrome they draw:
+   *  - `full` (default): avatar + name + verification shield. The canonical
+   *    presentation for profile pages, roster rows, "playing as", etc.
+   *  - `chip`: name + a compact DID-hued seal dot (no avatar). For inline names
+   *    in dense UI where a full pill is too heavy but the identity treatment
+   *    should still read.
+   *  - `circle`: avatar + seal ring only, no name text (the name rides
+   *    `aria-label` + the hover tooltip). For avatar strips and message gutters.
+   * @attr {string} variant - full | chip | circle (default full)
+   */
+  @property({ type: String, reflect: true })
+  accessor variant: "full" | "chip" | "circle" = "full";
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -727,6 +777,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }; box-shadow: 0 0 0 1px hsl(${hue} 80% 58% / 0.3), 0 0 10px -1px hsl(${hue} 85% 60% / 0.7);`
       : "";
     const sealStyle = verified ? `color: ${this._seal!.accent};` : "";
+    // The chip's seal-dot is filled with the same DID-derived accent when
+    // verified (supplied inline, like the shield), so an inline name still
+    // carries the identity's color even without an avatar.
+    const dotStyle = verified ? `background: ${this._seal!.accent};` : "";
     const sealTitle = verified
       ? "Identity verified by the system"
       : "System-rendered identity";
@@ -734,23 +788,36 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // this identity's palette.
     const auraStyle = verified ? `--seal-hue: ${hue};` : "";
 
+    // CT-1761: variant shape. `full` is the canonical avatar+name+shield pill;
+    // `chip` drops the avatar for a compact name + seal dot; `circle` drops the
+    // name + shield for an avatar + seal ring (name rides aria-label/tooltip).
+    const variant = this.variant;
+    const showAvatar = variant !== "chip";
+    const showName = variant !== "circle";
+    const showShield = variant === "full";
+    const displayName = this._name ?? "Unknown profile";
+
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
-    // (bio + pinned-piece count). Only rendered when there's something extra
-    // to show beyond the name already on the badge.
+    // (bio + pinned-piece count). Always shown for `circle` (whose name is
+    // otherwise invisible); otherwise only when there's something beyond the
+    // already-visible name.
     const pinnedLabel = this._pinnedCount === 1
       ? "1 pinned piece"
       : `${this._pinnedCount} pinned pieces`;
-    const hasTooltip = this._bio !== undefined || this._pinnedCount > 0;
+    const hasTooltip = this._bio !== undefined || this._pinnedCount > 0 ||
+      variant === "circle";
 
     return html`
       <span
         class="badge"
         part="root"
         data-cf-profile-badge
+        data-variant="${variant}"
         data-state="${this._state}"
         ?data-navigable="${this._navigable}"
         ?data-has-tooltip="${hasTooltip}"
-        role="${this._navigable ? "link" : nothing}"
+        role="${this._navigable ? "link" : (variant === "circle" ? "img" : nothing)}"
+        aria-label="${variant === "circle" ? displayName : nothing}"
         tabindex="${this._navigable ? "0" : (hasTooltip ? "0" : nothing)}"
         @click="${this._handleClick}"
         @keydown="${this._handleKeydown}"
@@ -761,13 +828,19 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
               <span class="aura-ring" part="aura-ring" style="${ringStyle}"> </span>
             `
             : null}
-          <cf-avatar
-            part="avatar"
-            exportparts="avatar"
-            .src="${this._avatar}"
-            .name="${this._name}"
-            size="${this.size}"
-          ></cf-avatar>
+          ${showAvatar
+            ? html`
+              <cf-avatar
+                part="avatar"
+                exportparts="avatar"
+                .src="${this._avatar}"
+                .name="${this._name}"
+                size="${this.size}"
+              ></cf-avatar>
+            `
+            : html`
+              <span class="seal-dot" part="seal-dot" style="${dotStyle}"></span>
+            `}
           ${verified
             ? html`
               <span class="aura-glow" part="aura-glow" aria-hidden="true"></span>
@@ -775,32 +848,38 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
             `
             : null}
         </span>
-        <span class="name" part="name">
-          ${this._name ?? "Unknown profile"}
-        </span>
-        <span
-          class="seal"
-          part="seal"
-          aria-hidden="true"
-          title="${sealTitle}"
-          style="${sealStyle}"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            ${verified
-              ? html`
-                <path d="M9 12l2 2 4-4" />
-              `
-              : null}
-          </svg>
-        </span>
+        ${showName
+          ? html`
+            <span class="name" part="name">${displayName}</span>
+          `
+          : null}
+        ${showShield
+          ? html`
+            <span
+              class="seal"
+              part="seal"
+              aria-hidden="true"
+              title="${sealTitle}"
+              style="${sealStyle}"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                ${verified
+                  ? html`
+                    <path d="M9 12l2 2 4-4" />
+                  `
+                  : null}
+              </svg>
+            </span>
+          `
+          : null}
         ${hasTooltip
           ? html`
             <span class="tooltip" part="tooltip" role="tooltip">
