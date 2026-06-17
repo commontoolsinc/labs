@@ -207,11 +207,31 @@ current, carries the verified-identity seal, and links to each contributor's
 profile. Snapshotting the `#profileName` / `#profileAvatar` strings instead is
 the self-containment fallback (renders with remote profile spaces offline). See
 `docs/specs/shared-profile-rosters.md`; canonical live-link demo:
-`packages/patterns/profile-roster-live-demo.tsx`; snapshot examples:
+`packages/patterns/profile-roster-live-demo.tsx`; worked examples:
 `packages/patterns/profile-group-chat/main.tsx`,
 `packages/patterns/scrabble/scrabble.tsx`,
 `packages/patterns/battleship/multiplayer/lobby.tsx`,
 `packages/patterns/lunch-poll/main.tsx`.
+
+**`<cf-profile-badge>` is the one idiomatic way to render an identity** — avatar +
+name + the runtime-attested verification seal, navigable to the person's profile.
+Prefer it anywhere an identity appears (rosters, message authors, "playing as",
+scoreboards); inline a name into a string only as an explicit fallback. Three
+variants, all carrying the seal/glint (CT-1761):
+
+| variant | shows | use for |
+| ------- | ----- | ------- |
+| `full` (default) | avatar + name + seal | profile pages, roster rows, "playing as", message authors |
+| `chip` | name + compact seal dot (no avatar) | inline names in dense UI, participant strips |
+| `circle` | avatar + seal ring only (name on hover / for AT) | avatar strips, message gutters |
+
+Storing a live profile **cell** in shared state is what lets every viewer render
+the badge. Keep that shared state **object-wrapped** (`{ items: [...] }`, like the
+roster's `Roster`) rather than a bare `Writable<T[]>`: a bare array with a nested
+live cell unwraps to a weak object and breaks CTS handler-state / `.get()`-snapshot
+output typing (group-chat's message array avoids it by outputting the raw
+`PerSpace` cell; scrabble's `players` array, output as a `.get()` snapshot, hits
+it — so its scoreboard still badges only the viewer's own card).
 
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
