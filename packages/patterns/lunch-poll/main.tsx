@@ -916,6 +916,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       return Math.max(counted, recentRows.length);
     });
     const hasHistory = computed(() => historyCount > 0);
+    const hasRecentRows = computed(() => recentRows.length > 0);
     const mostRecentTitle = computed(() =>
       recentVisits.result?.[0]?.title ?? ""
     );
@@ -1376,7 +1377,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   VNode, so the interactive onClick handlers lower as handlers
                   rather than lifts ("$event in inputs" / non-idempotent trap). */
                 }
-                {hasHistory
+                {hasRecentRows
                   ? (
                     <div
                       style={{
@@ -1462,6 +1463,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         const entryId = entry.id;
                         return (
                           <div
+                            data-recent-visit-title={entry.title}
                             style={{
                               display: "flex",
                               alignItems: "baseline",

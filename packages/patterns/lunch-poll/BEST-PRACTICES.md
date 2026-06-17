@@ -9,12 +9,20 @@ shared pattern documentation.
 
 ## Sub-Pattern Composition
 
-- A function-call sub-pattern instance is an output object. When it also needs
-  to render, place the child object itself in the VDOM (`{child}`) so the
-  composition machinery can extract `[UI]`. Use named fields such as
-  `child.someStream` or `child.someComputed` only for non-UI outputs.
+- A function-call sub-pattern instance is an output object. Use named fields
+  such as `child.someStream` or `child.someComputed` for non-UI outputs. If the
+  same child also renders UI, validate the exact embedding form in the browser;
+  nested mapped composition has shown differences from `cf test`.
 - JSX-only embedding remains appropriate when the parent does not need outputs:
   `<Child prop={value} />`.
+- Be careful embedding a function-call child UI inside another mapped child
+  while also reading the child's outputs. On deployed browser state, this can
+  settle differently from `cf test`; keep data-heavy rendering at the boundary
+  that owns the data unless browser validation proves the nested composition.
+- If a parent only needs generated data, fetch state, streams, or other
+  non-visual outputs, do not function-call a UI-bearing child and hide its
+  `[UI]`. Split out a headless helper/pattern or keep the data fetch in the
+  parent, then render from durable parent-owned data.
 - Keep `[UI]` outputs as static VNodes. Do not wrap the whole UI in
   `computed(() => <... />)`. Use `computed` for data and branch values, then
   render those values from ordinary JSX.
@@ -47,6 +55,9 @@ shared pattern documentation.
 - For large data-URI image `src` values, compute only the boolean gate. Use the
   original input or fetch result directly as `src`; do not route the large URI
   itself through a lifted `computed` before rendering.
+- Treat generated image presence as transport success, not visual QA. A stored
+  data URL can be valid 128x128 image bytes and still be visually blank; check
+  the rendered thumbnail when image quality matters.
 
 ## Testing And Deployment
 

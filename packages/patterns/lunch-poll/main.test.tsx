@@ -11,8 +11,57 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, UI } from "commonfabric";
 import CozyPoll from "./main.tsx";
+
+const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
+  typeof value === "object" && value !== null;
+
+const readValue = (value: unknown): unknown => {
+  if (!isRecord(value) || typeof value.get !== "function") {
+    return value;
+  }
+  return (value.get as () => unknown)();
+};
+
+const propsOf = (node: unknown): Record<PropertyKey, unknown> | undefined => {
+  const value = readValue(node);
+  if (!isRecord(value)) return undefined;
+  const props = readValue(value.props);
+  return isRecord(props) ? props : undefined;
+};
+
+const childrenArray = (children: unknown): unknown[] => {
+  const value = readValue(children);
+  if (Array.isArray(value)) return value;
+  return value === undefined || value === null || typeof value === "boolean"
+    ? []
+    : [value];
+};
+
+const childNodes = (node: unknown): unknown[] => {
+  const value = readValue(node);
+  if (Array.isArray(value)) return value;
+  if (!isRecord(value)) return [];
+  const ui = value[UI];
+  return [
+    ...(ui === undefined || ui === value ? [] : [ui]),
+    ...childrenArray(value.children),
+  ];
+};
+
+const findNodeByProp = (
+  root: unknown,
+  prop: string,
+  expected: unknown,
+): unknown | undefined => {
+  const value = readValue(root);
+  const props = propsOf(value);
+  if (props && readValue(props[prop]) === expected) return value;
+  return childNodes(value)
+    .map((child) => findNodeByProp(child, prop, expected))
+    .find((child) => child !== undefined);
+};
 
 export default pattern(() => {
   const poll = CozyPoll({});
@@ -214,6 +263,14 @@ export default pattern(() => {
       poll.mostRecentTitle === "Thai Kitchen";
   });
 
+  const assert_recent_visit_row_renders = computed(() =>
+    findNodeByProp(
+      poll[UI],
+      "data-recent-visit-title",
+      "Thai Kitchen",
+    ) !== undefined
+  );
+
   // The live green vote on Thai was snapshotted into vote_history when Thai was
   // logged → exactly one snapshot row.
   const assert_vote_snapshot = computed(() => poll.voteHistoryCount === 1);
@@ -313,6 +370,7 @@ export default pattern(() => {
       // plus one vote_history snapshot row for the green vote.
       { action: action_log_thai },
       { assertion: assert_thai_logged },
+      { assertion: assert_recent_visit_row_renders },
       { assertion: assert_vote_snapshot },
       // A second, backdated, explicit log → two entries (proves backdating).
       { action: action_log_visit_chipotle_backdated },
