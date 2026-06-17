@@ -836,17 +836,18 @@ export async function collectBrowserLoadSummary(
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
       const workerTiming = workerCounts?.timing ?? {};
+      // Prefix-match so sub-loggers are included: storage commit/conflict
+      // timings live under `storage.v2` (+ `.transaction`/`.multi-space-commit`),
+      // not a bare `storage` logger; runner/scheduler similarly have sub-loggers.
+      const prefixes = ["scheduler", "runner", "storage"];
+      const includeLogger = (name: string): boolean =>
+        name === "runtime-client.cfc-label" ||
+        prefixes.some((prefix) =>
+          name === prefix || name.startsWith(`${prefix}.`)
+        );
       const selected: Record<string, Stats> = {};
-      for (
-        const name of [
-          "scheduler",
-          "runner",
-          "storage",
-          "runtime-client.cfc-label",
-        ]
-      ) {
-        const groupStats = workerTiming[name];
-        if (!groupStats) continue;
+      for (const [name, groupStats] of Object.entries(workerTiming)) {
+        if (!includeLogger(name)) continue;
         for (const [key, stats] of Object.entries(groupStats)) {
           selected[`${name}/${key}`] = stats;
         }

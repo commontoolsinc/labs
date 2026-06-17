@@ -1021,7 +1021,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
-  it("does not look up CFC labels from a result meta cell", async () => {
+  it("does not look up CFC labels from a result meta cell", () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
