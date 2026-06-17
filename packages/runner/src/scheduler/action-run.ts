@@ -8,7 +8,10 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
-import { isPermanentRejection } from "../storage/rejection.ts";
+import {
+  isConflictRejection,
+  isPermanentRejection,
+} from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -149,16 +152,22 @@ export function watchReactiveActionCommit(state: {
             );
           }
         }
-        // Re-schedule the action to run again on conflict failure.
-        // Use resubscribe to set up dependencies/triggers from the log,
-        // then mark as dirty/pending to ensure it runs again.
-        // The retry run still exists only because of the consumed trigger
-        // reads (§8.9.2), so restore them for its transaction.
+        // Resubscribe sets up dependencies/triggers from the log so the action
+        // re-runs when its inputs change. The run still exists only because of
+        // the consumed trigger reads (§8.9.2), so restore them for its tx.
         state.restoreCfcTriggerReads();
         state.resubscribe(state.action, state.log);
-        state.markDirectDirty(state.action);
-        state.pending.add(state.action);
-        state.queueExecution();
+        // A CONFLICT is already being re-triggered by the write that caused it:
+        // that write dirtied this action's (still-subscribed) reads, so normal
+        // reader-dirty propagation re-runs it with the latest state. An immediate
+        // re-queue would be redundant work that amplifies contention, so skip it
+        // for conflicts. Other (non-permanent, non-conflict) errors are NOT
+        // re-triggered that way, so they still re-queue to retry.
+        if (!isConflictRejection(error)) {
+          state.markDirectDirty(state.action);
+          state.pending.add(state.action);
+          state.queueExecution();
+        }
       } else {
         // WATCH(scheduler-v2): exhausted retries can leave a piece registered
         // against rolled-back data (accepted zombie — spec §15 decision 9).
