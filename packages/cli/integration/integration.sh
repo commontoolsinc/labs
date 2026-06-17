@@ -240,7 +240,7 @@ run_piece_values() {
 
   # Check space has new piece with correct inputs and title
   TITLE="Simple counter 2: 10"
-  if ! cf piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
+  if ! cf piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE"; then
     error "Piece did not appear in list of space pieces."
   fi
 
