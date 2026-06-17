@@ -122,6 +122,48 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("verified");
   });
 
+  it("retries the resolved cell label until its cold doc loads", async () => {
+    // getCfcLabel is a pure, non-blocking store read, so a resolved cell whose
+    // doc hasn't loaded yet returns nothing. This component does not subscribe
+    // to the internally-resolved cell, so it must poll until the label lands —
+    // otherwise a cold linked/bound-prop author stays unverified forever.
+    const cfcLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { integrity: [{ kind: "authored-by", subject: "alice" }] },
+      }],
+    };
+    let labelAvailable = false;
+    const element = new CFCFCAuthorship();
+    Object.defineProperty(element, "isConnected", {
+      value: true,
+      configurable: true,
+    });
+
+    try {
+      element.author = "alice";
+      element.value = {
+        getCfcLabel: () => Promise.resolve(undefined),
+        resolveAsCell: () =>
+          Promise.resolve({
+            getCfcLabel: () =>
+              Promise.resolve(labelAvailable ? cfcLabel : undefined),
+          }),
+      };
+
+      await element.refreshLabel();
+      expect(element.authorshipState).not.toBe("verified");
+
+      labelAvailable = true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(element.authorshipState).toBe("verified");
+    } finally {
+      element.disconnectedCallback();
+    }
+  });
+
   it("uses resolved root authorship when the direct label only has nested entries", async () => {
     const directLabel = {
       version: 1 as const,
