@@ -210,7 +210,14 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         }
       }
 
-      /* CT-1750: navigable badges (bound to a real profile cell) act as links. */
+      /* CT-1750: navigable badges (bound to a real profile cell) act as links.
+        The pointer is set on BOTH the host and the inner badge: the badge fills
+        the host's content box, but a flex/line-box can stretch the host past it,
+        and that uncovered host area would otherwise show the default arrow. */
+      :host([data-navigable]) {
+        cursor: pointer;
+      }
+
       .badge[data-navigable] {
         cursor: pointer;
       }
@@ -228,7 +235,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         text-overflow: ellipsis;
         max-width: 16ch;
       }
-
 
       /* The generative aura ring. Transparent until the badge is verified; when
         verified, a separate aura-ring layer carries the per-identity conic
@@ -534,6 +540,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   protected override updated(changed: PropertyValues): void {
     super.updated(changed);
+    // Reflect navigability to the host so `:host([data-navigable])` can draw the
+    // pointer cursor over the whole host box (not just the inner `.badge`).
+    this.toggleAttribute("data-navigable", this._navigable);
     // Register for cursor sheen only while actually verified + connected. The
     // shared controller manages reduced-motion (it won't run the loop while the
     // user prefers reduced motion, and tears it down live if they enable it).
@@ -817,7 +826,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         data-state="${this._state}"
         ?data-navigable="${this._navigable}"
         ?data-has-tooltip="${hasTooltip}"
-        role="${this._navigable ? "link" : (variant === "circle" ? "img" : nothing)}"
+        role="${this._navigable
+          ? "link"
+          : (variant === "circle" ? "img" : nothing)}"
         aria-label="${variant === "circle" ? displayName : nothing}"
         tabindex="${this._navigable ? "0" : (hasTooltip ? "0" : nothing)}"
         @click="${this._handleClick}"
@@ -828,8 +839,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
             ? html`
               <span class="aura-ring" part="aura-ring" style="${ringStyle}"> </span>
             `
-            : null}
-          ${showAvatar
+            : null} ${showAvatar
             ? html`
               <cf-avatar
                 part="avatar"
@@ -841,8 +851,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
             `
             : html`
               <span class="seal-dot" part="seal-dot" style="${dotStyle}"></span>
-            `}
-          ${verified
+            `} ${verified
             ? html`
               <span class="aura-glow" part="aura-glow" aria-hidden="true"></span>
               <span class="aura-sheen" part="aura-sheen" aria-hidden="true"></span>
@@ -853,8 +862,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           ? html`
             <span class="name" part="name">${displayName}</span>
           `
-          : null}
-        ${hasTooltip
+          : null} ${hasTooltip
           ? html`
             <span class="tooltip" part="tooltip" role="tooltip">
               <span class="tooltip-name">${this._name ?? "Profile"}</span>
