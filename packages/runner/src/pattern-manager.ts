@@ -107,7 +107,16 @@ export class PatternManager {
   // instance. The hash is computed with `createRef` purely as a stable digest
   // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
-  private compiledByContent = new Map<string, Pattern>();
+  // Content-hash → { compiled pattern, the space its closure was first written
+  // into }. The space is tracked so a cross-space cache hit can replicate the
+  // source/compiled closure into the requested space (see compileOrGetPattern):
+  // identical source dedupes the expensive TS compile, but every space holding
+  // a piece that points at the pattern still needs the closure persisted there
+  // to reload by { identity, symbol } in a fresh runtime.
+  private compiledByContent = new Map<
+    string,
+    { pattern: Pattern; space?: MemorySpace }
+  >();
   // The forward value → {identity, symbol} map lives module-level in
   // builder/pattern-metadata.ts (`setArtifactEntryRef`/`getArtifactEntryRef`)
   // so builder-layer copy sites can carry refs onto derived copies without a
@@ -1161,7 +1170,16 @@ export class PatternManager {
       // Refresh recency (FIFO ~LRU).
       this.compiledByContent.delete(dedupeKey);
       this.compiledByContent.set(dedupeKey, cached);
-      return Promise.resolve(cached);
+      // The content cache is space-agnostic, but a piece persisted in `space`
+      // needs the source/compiled closure IN that space to reload by
+      // { identity, symbol } in a fresh runtime (the meta-cell fallback is
+      // gone). When this hit serves a different space than the one we first
+      // compiled into, replicate the closure there — cheap (no TS recompile),
+      // deduped, and fire-and-forget (tracked in compileCacheWrites).
+      if (space && cached.space && space !== cached.space) {
+        this.replicatePatternToSpace(cached.pattern, space, cached.space);
+      }
+      return Promise.resolve(cached.pattern);
     }
 
     const inProgress = this.inProgressCompilations.get(dedupeKey);
@@ -1174,7 +1192,7 @@ export class PatternManager {
       space ? { space } : undefined,
     )
       .then((pattern) => {
-        this.compiledByContent.set(dedupeKey, pattern);
+        this.compiledByContent.set(dedupeKey, { pattern, space });
         while (this.compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
           const oldest = this.compiledByContent.keys().next().value;
           if (oldest === undefined) break;
