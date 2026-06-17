@@ -75,8 +75,10 @@ most-recently-used (MRU) ordering:
 - `homeSpaceCell.defaultPattern.mru` — recency-ordered links; drives ordering
   after the default.
 
-Each profile lives in its own space, created with `PatternFactory.inSpace(name)`
-running `/api/patterns/system/profile-home.tsx`; the link is appended to
+Each profile lives in its own space, created with the anonymous
+`PatternFactory.inSpace()` (CT-1650 — a *named* `inSpace(name)` would derive the
+space DID from the display name alone and collide same-named profiles across
+users) running `/api/patterns/system/profile-home.tsx`; the link is appended to
 `profiles`. The home Profile tab renders the **profile picker**
 (`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
 the default, and stamp MRU. There is no `profileName` mirror field anymore.

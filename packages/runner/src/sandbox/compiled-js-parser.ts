@@ -1153,6 +1153,16 @@ function advanceScanner(
 
   const charCode = source.charCodeAt(cursor);
 
+  // Trivia is transparent to regex-vs-division classification: the previous
+  // significant token decides whether the next `/` opens a regex literal, so
+  // skipping it leaves `regexAllowed` unchanged. Leading whitespace consumes any
+  // following comments through skipTrivia, mirroring how a leading comment (in
+  // the `/` branch below) already consumes following whitespace — a run of mixed
+  // whitespace and comments is skipped the same way regardless of its order.
+  if (isWhitespaceCode(charCode)) {
+    return skipTrivia(source, cursor, end);
+  }
+
   if (charCode === 39 || charCode === 34) {
     state.regexAllowed = false;
     return scanStringLiteral(source, cursor, charCode, end);

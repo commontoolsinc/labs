@@ -1,4 +1,3 @@
-import { isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -12,8 +11,7 @@ import {
   resolveSlugTargetCell,
   SlugResolutionError,
 } from "./slug-resolution.ts";
-import { getPatternId, getPatternIdentityRef } from "./runner.ts";
-import type { PatternMeta } from "./pattern-manager.ts";
+import { getPatternIdentityRef } from "./runner.ts";
 
 const DID_RE = /^did:[a-z0-9]+:.+$/;
 
@@ -59,7 +57,7 @@ export async function resolveFabricRefToIdentity(
     await cell.sync();
   }
 
-  return await resolveCellToIdentity(runtime, specifier, cell, chain);
+  return await resolveCellToIdentity(specifier, cell, chain);
 }
 
 function resolveRefSpace(
@@ -73,67 +71,23 @@ function resolveRefSpace(
   );
 }
 
-async function resolveCellToIdentity(
-  runtime: Runtime,
+function resolveCellToIdentity(
   specifier: string,
   cell: Cell<unknown>,
   chain: string[],
 ): Promise<FabricChaseResult> {
   const link = cell.getAsNormalizedFullLink();
-  const cellSpace = link.space;
   const identityRef = getPatternIdentityRef(cell);
-  const patternId = getPatternId(cell);
 
-  if (identityRef !== undefined || patternId !== undefined) {
+  if (identityRef !== undefined) {
     chain.push(`piece:${link.id}`);
-    if (identityRef !== undefined) {
-      chain.push(`patternIdentity:${identityRef.identity}`);
-      return done(identityRef.identity, chain);
-    }
-
-    const meta = await runtime.patternManager.loadPatternMeta(
-      patternId!,
-      cellSpace,
-    );
-    chain.push(`patternMeta:${patternId}`);
-    return patternMetaToIdentity(specifier, meta, chain);
-  }
-
-  const directMeta = patternMetaFromCell(cell);
-  if (directMeta !== undefined) {
-    chain.push(`patternMeta:${link.id}`);
-    return patternMetaToIdentity(specifier, directMeta, chain);
+    chain.push(`patternIdentity:${identityRef.identity}`);
+    return Promise.resolve(done(identityRef.identity, chain));
   }
 
   throw new Error(
     `${specifier} does not resolve to a pattern (chain: ${formatChain(chain)})`,
   );
-}
-
-function patternMetaToIdentity(
-  specifier: string,
-  meta: PatternMeta,
-  chain: string[],
-): FabricChaseResult {
-  if (typeof meta.entryIdentity !== "string" || meta.entryIdentity === "") {
-    throw new Error(
-      `pattern meta for ${specifier} has no entryIdentity (legacy pattern; re-deploy it) (chain: ${
-        formatChain(chain)
-      })`,
-    );
-  }
-  return done(meta.entryIdentity, chain);
-}
-
-function patternMetaFromCell(cell: Cell<unknown>): PatternMeta | undefined {
-  const raw = cell.get();
-  if (
-    isRecord(raw) &&
-    (raw.spec === "pattern" || "program" in raw || "entryIdentity" in raw)
-  ) {
-    return raw as PatternMeta;
-  }
-  return undefined;
 }
 
 function done(entryIdentity: string, chain: string[]): FabricChaseResult {

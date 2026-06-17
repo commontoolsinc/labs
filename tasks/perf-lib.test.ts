@@ -1,20 +1,32 @@
-import { assertAlmostEquals, assertEquals } from "@std/assert";
+import { assertAlmostEquals, assertEquals, assertThrows } from "@std/assert";
 import {
+  applyBaselineOverrides,
   type Artifact,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
+  COVERAGE_BASELINE_RESET_MARKER,
+  coverageGroupsForChangedFiles,
+  coverageMetricGroupName,
+  downloadAndExtractArtifact,
   extractMetrics,
+  fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchPRBody,
+  fetchPRFiles,
+  formatMetricValue,
+  formatOverrideSuggestion,
   githubGet,
   type Job,
   newestArtifactsByName,
+  parseBaselineOverrides,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
   serializePerfMetrics,
   serializePerfMetricsBackfill,
+  shouldGateCoverageDebtMetric,
   type Step,
   timingArtifactLabel,
+  type TimingSample,
   type WorkflowRun,
 } from "./perf-lib.ts";
 
@@ -610,6 +622,147 @@ Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent
   assertEquals(baseline?.threshold, 160);
 });
 
+Deno.test("coverage debt metrics format and parse line units", () => {
+  const metric = "coverage-debt: workspace uncovered lines";
+  assertEquals(formatMetricValue(metric, 12), "12 lines");
+  assertEquals(formatMetricValue(metric, 1), "1 line");
+  assertEquals(formatOverrideSuggestion(metric, 12.2), "13 lines");
+
+  const overrides = parseBaselineOverrides(
+    "NEW_PERF_BASELINE: coverage-debt: workspace uncovered lines = 7 lines",
+  );
+  assertEquals(overrides.metrics.get(metric), 7);
+  assertEquals(overrides.coverageBaselineReset, false);
+});
+
+Deno.test("baseline override parser rejects line units for non-coverage metrics", () => {
+  assertThrows(
+    () =>
+      parseBaselineOverrides(
+        "NEW_PERF_BASELINE: job: Check = 7 lines",
+      ),
+    Error,
+    "line units are only valid for coverage-debt metrics",
+  );
+});
+
+Deno.test("baseline override parser rejects time units for coverage metrics", () => {
+  assertThrows(
+    () =>
+      parseBaselineOverrides(
+        "NEW_PERF_BASELINE: coverage-debt: workspace uncovered lines = 7s",
+      ),
+    Error,
+    "coverage-debt metrics must use line units",
+  );
+});
+
+Deno.test("coverage baseline reset marker parses from PR body", () => {
+  const overrides = parseBaselineOverrides(
+    `Reset coverage debt for one cycle\n${COVERAGE_BASELINE_RESET_MARKER}\n`,
+  );
+
+  assertEquals(overrides.coverageBaselineReset, true);
+  assertEquals(overrides.metrics.size, 0);
+});
+
+Deno.test("coverage baseline reset truncates coverage timelines only", () => {
+  const coverageMetric = "coverage-debt: workspace uncovered lines";
+  const jobMetric = "job: Check";
+  const sample = (
+    sha: string,
+    day: number,
+    durationSeconds: number,
+  ): TimingSample => ({
+    runId: day,
+    runUrl: `https://example.test/run/${day}`,
+    sha,
+    createdAt: `2026-01-0${day}T00:00:00Z`,
+    durationSeconds,
+  });
+  const oldCoverage = sample("old", 1, 9);
+  const resetCoverage = sample("reset", 2, 12);
+  const newCoverage = sample("new", 3, 10);
+  const oldJob = sample("old", 1, 20);
+  const resetJob = sample("reset", 2, 21);
+  const newJob = sample("new", 3, 22);
+  const timelines = new Map([
+    [
+      coverageMetric,
+      {
+        name: coverageMetric,
+        samples: [oldCoverage, resetCoverage, newCoverage],
+      },
+    ],
+    [
+      jobMetric,
+      { name: jobMetric, samples: [oldJob, resetJob, newJob] },
+    ],
+  ]);
+
+  applyBaselineOverrides(
+    timelines,
+    new Map([
+      [
+        "reset",
+        { metrics: new Map(), coverageBaselineReset: true },
+      ],
+    ]),
+  );
+
+  assertEquals(
+    timelines.get(coverageMetric)?.samples.map((s) => s.sha),
+    ["reset", "new"],
+  );
+  assertEquals(
+    timelines.get(jobMetric)?.samples.map((s) => s.sha),
+    ["old", "reset", "new"],
+  );
+});
+
+Deno.test("coverage debt gating follows changed source groups", () => {
+  const groups = coverageGroupsForChangedFiles([
+    "packages/runner/src/cell.ts",
+    "packages/patterns/README.md",
+    "packages/ui/src/button.test.tsx",
+    "tasks/perf-check.ts",
+  ]);
+
+  assertEquals([...groups].sort(), ["packages/runner", "packages/ui", "tasks"]);
+  assertEquals(
+    coverageMetricGroupName("coverage-debt: packages/runner uncovered lines"),
+    "packages/runner",
+  );
+  assertEquals(
+    shouldGateCoverageDebtMetric(
+      "coverage-debt: packages/runner uncovered lines",
+      groups,
+    ),
+    true,
+  );
+  assertEquals(
+    shouldGateCoverageDebtMetric(
+      "coverage-debt: packages/patterns uncovered lines",
+      groups,
+    ),
+    false,
+  );
+  assertEquals(
+    shouldGateCoverageDebtMetric(
+      "coverage-debt: workspace uncovered lines",
+      groups,
+    ),
+    false,
+  );
+  assertEquals(
+    shouldGateCoverageDebtMetric(
+      "coverage-debt: packages/patterns uncovered lines",
+      undefined,
+    ),
+    true,
+  );
+});
+
 Deno.test("fetchPRBody reads the live pull request body from the GitHub API", async () => {
   const originalFetch = globalThis.fetch;
   let requestedUrl: string | undefined;
@@ -732,6 +885,124 @@ Deno.test("githubGet does not retry non-transient GitHub responses", async () =>
     assertEquals(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchArtifactsForRun reads every artifact page", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedPages: string[] = [];
+  const artifact = (id: number, name: string): Artifact => ({
+    id,
+    name,
+    size_in_bytes: 1,
+    expired: false,
+  });
+  try {
+    globalThis.fetch = ((input, _init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      requestedPages.push(
+        `${url.searchParams.get("per_page")}:${url.searchParams.get("page")}`,
+      );
+      const page = Number(url.searchParams.get("page"));
+      const artifacts = page === 1
+        ? [artifact(1, "coverage-profile-workspace")]
+        : [artifact(2, "coverage-profile-generated-patterns-1")];
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ total_count: 2, artifacts }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const artifacts = await fetchArtifactsForRun(123);
+    assertEquals(
+      artifacts.map((artifact) => artifact.name),
+      [
+        "coverage-profile-workspace",
+        "coverage-profile-generated-patterns-1",
+      ],
+    );
+    assertEquals(requestedPages, ["100:1", "100:2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchPRFiles reads every changed-file page", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedPages: string[] = [];
+  try {
+    globalThis.fetch = ((input, _init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      requestedPages.push(
+        `${url.searchParams.get("per_page")}:${url.searchParams.get("page")}`,
+      );
+      const page = Number(url.searchParams.get("page"));
+      const files = page === 1
+        ? Array.from({ length: 100 }, (_, index) => ({
+          filename: `packages/runner/src/file-${index}.ts`,
+        }))
+        : [{ filename: "packages/ui/src/card.ts" }];
+
+      return Promise.resolve(
+        new Response(JSON.stringify(files), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const files = await fetchPRFiles(123);
+    assertEquals(files.length, 101);
+    assertEquals(files.at(-1)?.filename, "packages/ui/src/card.ts");
+    assertEquals(requestedPages, ["100:1", "100:2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("downloadAndExtractArtifact retries transient artifact downloads", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  let calls = 0;
+  try {
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.join(" "));
+    };
+    globalThis.fetch = ((_input, _init) => {
+      calls++;
+      if (calls < 4) {
+        return Promise.resolve(
+          new Response("temporary artifact backend error", {
+            status: 503,
+            headers: { "retry-after": "0" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("gone", { status: 410 }));
+    }) as typeof fetch;
+
+    assertEquals(await downloadAndExtractArtifact(123, "artifact-test-"), null);
+    assertEquals(calls, 4);
+    assertEquals(
+      warnings.some((warning) =>
+        warning.includes("GitHub artifact download 410")
+      ),
+      true,
+    );
+    assertEquals(
+      warnings.some((warning) =>
+        warning.includes("attempt 1: GitHub artifact download 503") &&
+        warning.includes("attempt 4: GitHub artifact download 410")
+      ),
+      true,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
   }
 });
 

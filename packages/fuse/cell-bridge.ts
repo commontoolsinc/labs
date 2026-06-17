@@ -4,7 +4,7 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
-import type { Cell, PatternMeta } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
@@ -212,7 +212,7 @@ export interface SpaceState {
   pieceMap: Map<string, string>; // name → entity ID
   pieceInos: Map<string, bigint>; // name → root inode
   pieceControllers: Map<string, PieceController>; // name → controller
-  pieceManifest: Map<string, { pattern: string; summary: string }>;
+  pieceManifest: Map<string, { summary: string }>;
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
@@ -591,15 +591,7 @@ export class CellBridge {
     state: SpaceState,
     piece: PieceController,
   ): Promise<void> {
-    let pattern = "";
     let summary = "";
-
-    try {
-      const meta = await piece.getPatternMeta();
-      pattern = meta?.patternName || "";
-    } catch {
-      // Pattern metadata is optional.
-    }
 
     try {
       const result = await piece.result.get();
@@ -608,22 +600,19 @@ export class CellBridge {
       // Summary is best-effort only.
     }
 
-    this.updatePieceManifest(state, piece.id, { pattern, summary });
+    this.updatePieceManifest(state, piece.id, { summary });
   }
 
   private updatePieceManifest(
     state: SpaceState,
     pieceId: string,
-    updates: Partial<{ pattern: string; summary: string }>,
+    updates: Partial<{ summary: string }>,
   ): boolean {
-    const current = state.pieceManifest.get(pieceId) ??
-      { pattern: "", summary: "" };
+    const current = state.pieceManifest.get(pieceId) ?? { summary: "" };
     const next = {
-      pattern: updates.pattern ?? current.pattern,
       summary: updates.summary ?? current.summary,
     };
-    const changed = next.pattern !== current.pattern ||
-      next.summary !== current.summary;
+    const changed = next.summary !== current.summary;
     state.pieceManifest.set(pieceId, next);
     return changed;
   }
@@ -631,25 +620,21 @@ export class CellBridge {
   private buildPiecesManifestEntries(state: SpaceState): Array<{
     id: string;
     name: string;
-    pattern: string;
     summary: string;
     entityPath: string;
   }> {
     const entries: Array<{
       id: string;
       name: string;
-      pattern: string;
       summary: string;
       entityPath: string;
     }> = [];
 
     for (const [name, id] of state.pieceMap) {
-      const manifest = state.pieceManifest.get(id) ??
-        { pattern: "", summary: "" };
+      const manifest = state.pieceManifest.get(id) ?? { summary: "" };
       entries.push({
         id,
         name,
-        pattern: manifest.pattern,
         summary: manifest.summary,
         entityPath: `entities/${encodeFuseComponent(id)}`,
       });
@@ -3125,6 +3110,7 @@ export class CellBridge {
     };
   }
 
+  // deno-lint-ignore require-await
   private async loadPieceTree(
     piece: PieceController,
     parentIno: bigint,
@@ -3136,19 +3122,10 @@ export class CellBridge {
     const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
 
     // Create meta.json first so it's always present
-    let patternName = "";
-    try {
-      const meta = await piece.getPatternMeta();
-      patternName = meta?.patternName || "";
-    } catch {
-      // Pattern meta not always available
-    }
-
     const metaObject = {
       id: piece.id,
       entityId: piece.id,
       name: piece.name() || "",
-      patternName,
     };
     const pieceAnnotator = this.makeCfcAnnotator({
       spaceName,
@@ -3210,8 +3187,10 @@ export class CellBridge {
   }
 
   /**
-   * Build the .src/ subtree for a piece, containing all source files from
-   * PatternMeta.program.files[]. Skips system pieces that have no program.
+   * Build the .src/ subtree for a piece, containing all of the pattern's
+   * authored source files (recovered from the content-addressed
+   * `pattern:<identity>` source-doc closure). Skips system pieces that have no
+   * recoverable source.
    */
   private async buildSourceTree(
     pieceIno: bigint,
@@ -3219,22 +3198,18 @@ export class CellBridge {
     state: SpaceState,
     pieceName: string,
   ): Promise<void> {
-    let meta: PatternMeta | undefined;
+    let sourceFiles: { name: string; contents: string }[] | undefined;
     try {
-      meta = await piece.getPatternMeta();
+      sourceFiles = await piece.getPatternSourceFiles();
     } catch {
-      // Pattern meta not always available
+      // Pattern source not always available
     }
 
-    // Normalise to a files array: multi-file programs use program.files,
-    // single-file programs use the top-level src string (exposed as main.tsx).
-    let files: { name: string; contents: string }[];
-    if (meta?.program?.files?.length) {
-      files = meta.program.files;
-    } else {
+    if (!sourceFiles?.length) {
       // System piece or no source — skip .src/
       return;
     }
+    const files = sourceFiles;
 
     const annotator = this.makeCfcAnnotator({
       spaceName: this.spaceNameForState(state) ?? state.did,

@@ -8,12 +8,8 @@ import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { writeSourceDocs } from "../src/compilation-cache/cell-cache.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
-import { createRef } from "../src/create-ref.ts";
-import { fromURI, toURI } from "../src/uri-utils.ts";
-import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import type { Cell } from "../src/cell.ts";
-import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
 const space = signer.did();
@@ -80,31 +76,24 @@ describe("Engine fabric imports", () => {
     return compiled;
   }
 
-  function newPatternId(label: string): URI {
-    return toURI(createRef({ pattern: label }, "fabric imports engine test"));
-  }
-
-  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
-    return runtime.getCellFromEntityId(
-      space,
-      { "/": fromURI(patternId) },
-      [],
-      patternMetaSchema,
-    );
-  }
-
-  async function writePatternMeta(
+  // Write a piece cell carrying the content-addressed `patternIdentity` pointer
+  // so a slug → piece chase resolves to its entry identity.
+  async function writePieceWithIdentity(
     entryIdentity: string,
-  ): Promise<{ patternId: URI; cell: Cell<PatternMeta> }> {
-    const patternId = newPatternId(entryIdentity);
-    const cell = patternMetaCell(patternId);
+  ): Promise<{ cell: Cell<unknown> }> {
+    const cell = runtime.getCell(
+      space,
+      { space, random: `piece-${entryIdentity}` },
+    );
     await runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set({
-        spec: "pattern",
-        entryIdentity,
-      } as PatternMeta);
+      const cellWithTx = cell.withTx(tx);
+      cellWithTx.set({ name: "piece" });
+      cellWithTx.setMetaRaw("patternIdentity", {
+        identity: entryIdentity,
+        symbol: "default",
+      });
     });
-    return { patternId, cell };
+    return { cell };
   }
 
   async function writeSlug(slug: string, target: Cell<unknown>): Promise<void> {
@@ -232,7 +221,7 @@ describe("Engine fabric imports", () => {
 
   it("resolves unpinned fabric imports in dev mode and surfaces resolved pins", async () => {
     const dependency = await publish(dependencyProgram(9));
-    const { patternId, cell } = await writePatternMeta(
+    const { cell } = await writePieceWithIdentity(
       dependency.entryIdentity,
     );
     await writeSlug("dep", cell);
@@ -250,7 +239,8 @@ describe("Engine fabric imports", () => {
         resolvedIdentity: dependency.entryIdentity,
         chain: [
           "slug:dep",
-          `patternMeta:${patternId}`,
+          `piece:${cell.getAsNormalizedFullLink().id}`,
+          `patternIdentity:${dependency.entryIdentity}`,
           `entryIdentity:${dependency.entryIdentity}`,
         ],
       },
@@ -266,7 +256,7 @@ describe("Engine fabric imports", () => {
 
   it("does not chase the slug for already-pinned mutable refs", async () => {
     const dependency = await publish(dependencyProgram(11));
-    const { cell } = await writePatternMeta(dependency.entryIdentity);
+    const { cell } = await writePieceWithIdentity(dependency.entryIdentity);
     await writeSlug("dep", cell);
     await poisonSlug("dep");
 
@@ -496,7 +486,7 @@ describe("Engine fabric imports", () => {
 
   it("refuses to write back modules from an unpinned (dev) compile", async () => {
     const dependency = await publish(dependencyProgram(8));
-    const { cell } = await writePatternMeta(dependency.entryIdentity);
+    const { cell } = await writePieceWithIdentity(dependency.entryIdentity);
     await writeSlug("dep", cell);
 
     const compiled = await engine.compileToRecordGraph(

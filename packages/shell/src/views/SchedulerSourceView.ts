@@ -36,7 +36,8 @@ export interface SourceViewNode {
   type: string;
   label: string;
   stats?: { totalTime: number; runCount: number };
-  patternId?: string;
+  /** Content identity of the pattern this node belongs to. */
+  patternIdentity?: string;
 }
 
 /**
@@ -334,8 +335,8 @@ export class XSchedulerSource extends LitElement {
       );
       const currentPattern = this.patternSources[patternIdx];
       if (
-        currentPattern && node.patternId &&
-        node.patternId !== currentPattern.patternId
+        currentPattern && node.patternIdentity &&
+        node.patternIdentity !== currentPattern.identity
       ) {
         continue;
       }
@@ -467,11 +468,11 @@ export class XSchedulerSource extends LitElement {
     const loc = parseActionLocation(this.selectedNodeId);
     if (!loc) return;
 
-    // Find the node to get its patternId
+    // Find the node to get its pattern identity
     const node = this.nodes.get(this.selectedNodeId);
-    if (node?.patternId) {
+    if (node?.patternIdentity) {
       const patternIdx = this.patternSources.findIndex(
-        (p) => p.patternId === node.patternId,
+        (p) => p.identity === node.patternIdentity,
       );
       if (patternIdx >= 0 && patternIdx !== this.selectedPatternIdx) {
         this.selectedPatternIdx = patternIdx;
@@ -567,7 +568,7 @@ export class XSchedulerSource extends LitElement {
                 (p, i) =>
                   html`
                     <option ?selected="${i === patternIdx}">
-                      ${p.patternName || p.patternId.slice(0, 12)}
+                      ${p.identity.slice(0, 12)}
                     </option>
                   `,
               )}
@@ -575,7 +576,7 @@ export class XSchedulerSource extends LitElement {
           `
           : html`
             <label>
-              ${pattern.patternName || pattern.patternId.slice(0, 12)}
+              ${pattern.identity.slice(0, 12)}
             </label>
           `} ${pattern.files.length > 1
           ? html`

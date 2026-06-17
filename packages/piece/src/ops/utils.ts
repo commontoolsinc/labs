@@ -11,7 +11,7 @@ export async function compileProgram(
   const pattern = await compileAndSavePattern(
     manager.runtime,
     program,
-    { spec: "pattern", space: manager.getSpace() },
+    { space: manager.getSpace() },
   );
   return pattern;
 }

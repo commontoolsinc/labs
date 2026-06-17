@@ -30,7 +30,7 @@ interface LayoutNode {
   writes?: string[]; // Diagnostic: cell paths this action writes
   debounceMs?: number; // Current debounce delay in ms
   throttleMs?: number; // Current throttle period in ms
-  patternId?: string; // Pattern this action belongs to
+  patternIdentity?: string; // Content identity of the pattern this action belongs to
 }
 
 interface LayoutEdge {
@@ -1303,7 +1303,7 @@ export class XSchedulerGraph extends LitElement {
           writes: originalNode?.writes,
           debounceMs: originalNode?.debounceMs,
           throttleMs: originalNode?.throttleMs,
-          patternId: originalNode?.patternId,
+          patternIdentity: originalNode?.patternIdentity?.identity,
         });
       }
     }
@@ -2683,7 +2683,7 @@ export class XSchedulerGraph extends LitElement {
             runCount: node.stats.runCount,
           }
           : undefined,
-        patternId: node.patternId,
+        patternIdentity: node.patternIdentity,
       });
     }
 

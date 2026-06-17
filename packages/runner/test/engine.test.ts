@@ -438,7 +438,10 @@ describe("Engine.evaluateRecordGraph()", () => {
     };
 
     const { main } = await engine.compileAndEvaluateModules(program);
-    runtime.patternManager.registerPattern(main!.default as never, program);
+    runtime.patternManager.associatePatternProgram(
+      main!.default as never,
+      program,
+    );
     const pattern = main!.default as { nodes: Array<{ module: unknown }> };
     const serialized = JSON.parse(
       JSON.stringify(

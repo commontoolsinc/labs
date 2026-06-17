@@ -191,19 +191,17 @@ export const piece = new Command()
         pieces.map((p) => ({
           id: p.id,
           name: p.name ?? null,
-          patternName: p.patternName ?? null,
         })),
         { json: true },
       );
       return;
     }
     const piecesData = [
-      ["ID", "NAME", "PATTERN"],
+      ["ID", "NAME"],
       ...(pieces.map(
         (data) => [
           data.id,
           data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
-          data.error ? "" : (data.patternName ?? "<unnamed>"),
         ],
       )),
     ];
@@ -421,7 +419,6 @@ export const piece = new Command()
     let output = `
 === Piece: ${pieceData.id} ===
 Name: ${pieceData.name || "<no name>"}
-Pattern: ${pieceData.patternName || "<no pattern name>"}
 
 --- Source (Inputs) ---`;
 

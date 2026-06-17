@@ -134,4 +134,44 @@ describe("verifyCompiledModuleBody", () => {
     }, "/main.ts");
     expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow();
   });
+
+  it("accepts a module with several regex literals", () => {
+    // The scanner classifies each `/` as a regex start or a division operator
+    // based on the previous token. Whitespace between a regex-prefix keyword
+    // (e.g. `return`) and the regex must stay transparent to that decision —
+    // otherwise the opening `/` is read as division and a later `/` (after a
+    // `+` quantifier or `]` class close that re-allows a regex) is mistaken for
+    // a regex start, running the closing-`/` scan off the end of the module.
+    const body = compiledBody({
+      "/regexes.ts": `export function anchored(s: string): boolean {\n` +
+        `  return /^#[\\p{L}\\p{M}\\p{Nd}_]+/u.test(s);\n` +
+        `}\n` +
+        `export function global(s: string): string[] {\n` +
+        `  return s.match(/#[\\p{L}\\p{M}\\p{Nd}_]+/gu) ?? [];\n` +
+        `}\n` +
+        `export function charClass(s: string): boolean {\n` +
+        `  return /[a-z0-9]+/u.test(s);\n` +
+        `}\n` +
+        `export function escapedSlash(s: string): boolean {\n` +
+        `  return /a\\/b/u.test(s);\n` +
+        `}\n`,
+    }, "/regexes.ts");
+    expect(() => verifyCompiledModuleBody(body, "/regexes.ts")).not.toThrow();
+  });
+
+  it("still classifies real division after the whitespace fix", () => {
+    // The companion regression: making whitespace transparent must not turn a
+    // genuine division operator into a regex. A module that only divides should
+    // verify (the `/` is an operator, never a literal).
+    const body = compiledBody({
+      "/division.ts":
+        `export function ratio(x: number, y: number): number {\n` +
+        `  return x / y / 2;\n` +
+        `}\n` +
+        `export function half(x: number): number {\n` +
+        `  return (x + 1) / 2;\n` +
+        `}\n`,
+    }, "/division.ts");
+    expect(() => verifyCompiledModuleBody(body, "/division.ts")).not.toThrow();
+  });
 });

@@ -116,7 +116,7 @@ async function runTest() {
   const pattern = await compileAndSavePattern(
     runtime,
     patternContent,
-    { spec: "pattern", space: space_thingy_space },
+    { space: space_thingy_space },
   );
   console.log("Pattern compiled successfully");
 

@@ -3,15 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createRef } from "../../runner/src/create-ref.ts";
-import {
-  type PatternMeta,
-  patternMetaSchema,
-} from "../../runner/src/pattern-manager.ts";
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
-import type { Cell } from "../../runner/src/cell.ts";
-import type { URI } from "../../runner/src/sigil-types.ts";
-import { fromURI, toURI } from "../../runner/src/uri-utils.ts";
 import { InMemoryProgram } from "@commonfabric/js-compiler";
 import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
@@ -38,26 +30,20 @@ describe("cli fabric deps", () => {
     await storageManager?.close();
   });
 
-  function newPatternId(): URI {
-    return toURI(createRef({ pattern: "dep" }, "cli fabric deps test"));
-  }
-
-  function patternMetaCell(patternId: URI): Cell<PatternMeta> {
-    return runtime.getCellFromEntityId(
-      space,
-      { "/": fromURI(patternId) },
-      [],
-      patternMetaSchema,
-    );
-  }
-
+  // Write a piece cell carrying the content-addressed `patternIdentity` pointer
+  // and slug-redirect to it, so the fabric ref chase resolves to its identity.
   async function writePatternSlug(slug: string): Promise<void> {
-    const patternId = newPatternId();
-    const meta = patternMetaCell(patternId);
+    const piece = runtime.getCell(
+      space,
+      { space, random: `piece-${slug}` },
+    );
     await runtime.editWithRetry((tx) => {
-      meta.withTx(tx).set(
-        { spec: "pattern", entryIdentity: ENTRY } as PatternMeta,
-      );
+      const pieceWithTx = piece.withTx(tx);
+      pieceWithTx.set({ name: "piece" });
+      pieceWithTx.setMetaRaw("patternIdentity", {
+        identity: ENTRY,
+        symbol: "default",
+      });
     });
     const slugCell = runtime.getCellFromEntityId(space, {
       "/": slugIdForSpace(space, slug),
@@ -65,7 +51,7 @@ describe("cli fabric deps", () => {
     await runtime.editWithRetry((tx) => {
       const slugWithTx = slugCell.withTx(tx);
       slugWithTx.setRawUntyped(
-        meta.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
+        piece.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
       );
     });
   }

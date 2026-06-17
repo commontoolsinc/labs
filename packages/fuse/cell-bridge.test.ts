@@ -227,14 +227,14 @@ type WriteFsFile = (
 // Group 1: loadPieceTree — initial tree structure
 // ---------------------------------------------------------------------------
 
-Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName", async () => {
+Deno.test("CellBridge.loadPieceTree creates meta.json with id, name", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:entity-123",
     name: () => "My Note",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -254,7 +254,6 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName
   const meta = JSON.parse(getFileContent(tree, pieceIno, "meta.json"));
   assertEquals(meta.id, "of:entity-123");
   assertEquals(meta.name, "My Note");
-  assertEquals(meta.patternName, "note");
 });
 
 Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without eager hydration", async () => {
@@ -264,7 +263,7 @@ Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without ea
   const piece = {
     id: "of:entity-456",
     name: () => "Article",
-    getPatternMeta: () => Promise.resolve({ patternName: "article" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () =>
         Promise.resolve(makeCell({ title: "hello" }, {
@@ -309,7 +308,7 @@ Deno.test("CellBridge CFC annotations attach to hydrated JSON projections and fa
   const piece = {
     id: "of:entity-cfc",
     name: () => "Annotated Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -396,7 +395,7 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
   const piece = {
     id: "of:entity-derived-generation",
     name: () => "Derived Generation",
-    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -483,7 +482,7 @@ Deno.test("CellBridge finalizes CFC annotations after committed writeback", asyn
   const piece = {
     id: "of:entity-finalize-generation",
     name: () => "Finalize Generation",
-    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -624,7 +623,7 @@ Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeba
   const piece = {
     id: "of:entity-finalize-namespace",
     name: () => "Finalize Namespace",
-    getPatternMeta: () => Promise.resolve({ patternName: "annotated" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -744,7 +743,7 @@ Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", asyn
   const piece = {
     id: "of:entity-result-json",
     name: () => "Lookup JSON",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -821,7 +820,7 @@ Deno.test("CellBridge.hydratePieceProp renders link-backed handlers only at disc
   const piece = {
     id: "of:entity-link-handler",
     name: () => "Link Handler",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -866,7 +865,7 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
   const piece = {
     id: "of:entity-789",
     name: () => "Post",
-    getPatternMeta: () => Promise.resolve({ patternName: "post" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () =>
         Promise.resolve(makeCell({ title: "hello" }, {
@@ -928,7 +927,7 @@ Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydr
   const piece = {
     id: "of:cached-piece",
     name: () => "Cached Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1000,7 +999,7 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
   const piece = {
     id: "of:entity-stale-callable",
     name: () => "Callable Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "callable-fixture" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1151,7 +1150,7 @@ Deno.test("CellBridge.rebuildPieceProp clears stale result mounts when value bec
   const piece = {
     id: "of:entity-null-result",
     name: () => "Null Result Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "null-result" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1216,7 +1215,7 @@ Deno.test("CellBridge.rebuildPieceProp clears stale FS projection mounts when va
   const piece = {
     id: "of:entity-null-fs",
     name: () => "Null FS Fixture",
-    getPatternMeta: () => Promise.resolve({ patternName: "null-fs" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1281,7 +1280,7 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
   const piece = {
     id: "of:entity-void-handler",
     name: () => "Contact Book",
-    getPatternMeta: () => Promise.resolve({ patternName: "contact-book" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1324,7 +1323,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   const makeNotePiece = (id: string) => ({
     id,
     name: () => "My Note",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1378,7 +1377,7 @@ Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming th
         },
       }),
     }),
-    getPatternMeta: () => Promise.resolve({ patternName: "fixture" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1409,7 +1408,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three colli
   const makeStandupPiece = (id: string) => ({
     id,
     name: () => "Standup",
-    getPatternMeta: () => Promise.resolve({ patternName: "standup" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1453,7 +1452,7 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
     {
       id: "of:alpha",
       name: () => "Alpha",
-      getPatternMeta: () => Promise.resolve({ patternName: "alpha" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(makeCell({}, undefined)),
         get: () => Promise.resolve({}),
@@ -1471,7 +1470,7 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
     {
       id: "of:beta",
       name: () => "Beta",
-      getPatternMeta: () => Promise.resolve({ patternName: "beta" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(makeCell({}, undefined)),
         get: () => Promise.resolve({}),
@@ -1503,11 +1502,9 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
   state.pieceMap.set("Alpha", "of:alpha");
   state.pieceMap.set("Beta", "of:beta");
   state.pieceManifest.set("of:alpha", {
-    pattern: "alpha-pattern",
     summary: "alpha summary",
   });
   state.pieceManifest.set("of:beta", {
-    pattern: "beta-pattern",
     summary: "beta summary",
   });
 
@@ -1521,14 +1518,12 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
     {
       id: "of:alpha",
       name: "Alpha",
-      pattern: "alpha-pattern",
       summary: "alpha summary",
       entityPath: "entities/of%3Aalpha",
     },
     {
       id: "of:beta",
       name: "Beta",
-      pattern: "beta-pattern",
       summary: "beta summary",
       entityPath: "entities/of%3Abeta",
     },
@@ -1544,7 +1539,7 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
   const piece = {
     id: "of:summary-piece",
     name: () => "Summary Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "summary-pattern" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1702,15 +1697,10 @@ Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes w
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const piece = {
     id: "of:source-piece",
-    getPatternMeta: () =>
-      Promise.resolve({
-        program: {
-          main: "/src/has:colon.tsx",
-          files: [
-            { name: "/src/has:colon.tsx", contents: "export default 1;" },
-          ],
-        },
-      }),
+    getPatternSourceFiles: () =>
+      Promise.resolve([
+        { name: "/src/has:colon.tsx", contents: "export default 1;" },
+      ]),
   };
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
@@ -1755,13 +1745,10 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const piece = {
     id: "of:encoded-source-piece",
-    getPatternMeta: () =>
-      Promise.resolve({
-        program: {
-          main: "/src/main.ts",
-          files: [{ name: "/src/main.ts", contents: "export default 1;" }],
-        },
-      }),
+    getPatternSourceFiles: () =>
+      Promise.resolve([
+        { name: "/src/main.ts", contents: "export default 1;" },
+      ]),
   };
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
@@ -1790,7 +1777,7 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
   const existingPiece = {
     id: "of:p1",
     name: () => "Piece One",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1804,7 +1791,7 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
   const newPiece = {
     id: "of:p2",
     name: () => "Piece Two",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1841,7 +1828,7 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
   const piece = {
     id: "of:gone",
     name: () => "Gone Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -1902,7 +1889,7 @@ Deno.test({
     const piece = {
       id: "of:abc",
       name: () => pieceName,
-      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(makeCell({}, undefined)),
         get: () => Promise.resolve({}),
@@ -1979,7 +1966,7 @@ Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names
   const piece = {
     id: "of:piece-123",
     name: () => "  Hello, world! 🚀 / notes  ",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -2019,7 +2006,7 @@ Deno.test("CellBridge.addPieceToSpace falls back to a normalized piece id for sy
   const piece = {
     id: "of:emoji-piece",
     name: () => "🔥✨",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -2055,7 +2042,7 @@ Deno.test({
     const piece = {
       id: "of:abc",
       name: () => pieceName,
-      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(makeCell({}, undefined)),
         get: () => Promise.resolve({}),
@@ -2125,7 +2112,7 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
   const piece = {
     id: "of:fs-piece",
     name: () => "FS Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
       get: () => Promise.resolve(inputCell.get()),
@@ -2207,7 +2194,7 @@ Deno.test("CellBridge hydrates and writes back markdown FS projection scalars", 
   const piece = {
     id: "of:fs-roundtrip",
     name: () => "FS Roundtrip",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
       get: () => Promise.resolve(inputCell.get()),
@@ -2297,7 +2284,7 @@ Deno.test({
     const piece = {
       id: "of:status-piece",
       name: () => "Status Piece",
-      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
         get: () => Promise.resolve(resultCell.get()),
@@ -2356,7 +2343,7 @@ Deno.test({
     const piece = {
       id: "of:undefined-sink-piece",
       name: () => "Undefined Sink Piece",
-      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
         get: () => Promise.resolve(inputCell.get()),
@@ -2405,7 +2392,7 @@ Deno.test({
     const piece = {
       id: "of:undefined-transient-piece",
       name: () => "Undefined Transient Piece",
-      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      getPatternMeta: () => Promise.resolve({}),
       input: {
         getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
         get: () => Promise.resolve(inputCell.get()),
@@ -2445,7 +2432,7 @@ Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", a
   const piece = {
     id: "of:invalidate-piece",
     name: () => "Invalidate Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -2499,7 +2486,7 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
   const piece = {
     id: "of:entity-handler-piece",
     name: () => "Handler Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -2549,7 +2536,7 @@ Deno.test("CellBridge.resolveEntity rejects non-canonical entity aliases", async
   const piece = {
     id: "of:alias-piece",
     name: () => "Alias Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -2602,7 +2589,7 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
   const piece = {
     id: "of:race-piece",
     name: () => "Race Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    getPatternMeta: () => Promise.resolve({}),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),

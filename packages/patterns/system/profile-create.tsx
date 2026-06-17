@@ -56,6 +56,18 @@ export type CreateProfileEvent = {
 // the `.inSpace(...)` call opts the transaction into a multi-space commit (see
 // builder/pattern.ts `optIntoInSpaceMultiSpaceCommit` → runner
 // `enableCrossSpaceChildCommit`).
+//
+// CT-1650: the profile space is created via ANONYMOUS `inSpace()` — never
+// `inSpace(name)`. A named target derives its DID from
+// `fromPassphrase("common user").derive(name)` (createSession spaceName path),
+// i.e. the display NAME alone, so two different users picking the same profile
+// name — or one user creating two same-named profiles — collide into a single
+// shared space. The anonymous case instead derives the DID from this handler's
+// frame cause, which carries the creating user's per-home-space input links plus
+// the durable per-event id (runner.ts `createPatternFrame` cause): unique per
+// user AND per creation event, stable across the cross-space-commit retry. The
+// display name flows ONLY to `initialName` (editable later, independent of the
+// space identity). Existing profiles keep their already-baked concrete DID link.
 export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
@@ -67,7 +79,7 @@ export const submitProfileCreation = handler<
     draftName?.get() ?? "").trim();
   if (name) {
     profiles.push(
-      ProfileHome.inSpace(name)({
+      ProfileHome.inSpace()({
         initialName: name,
       }) as ProfileHomeOutput,
     );

@@ -117,4 +117,6 @@ The sub-pattern's Output type must include `[UI]: VNode` — see
 
 - Pattern compiles: `deno task cf check pattern.tsx --no-run`
 - The top-level UI or sub-pattern UI renders the behavior needed for the task
+- New behavior is structured so tests can exercise it through typed streams,
+  handlers, or observable state
 - Ready for testing

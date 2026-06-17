@@ -19,11 +19,7 @@ import {
 } from "../src/compilation-cache/cell-cache.ts";
 import { FabricAwareResolver } from "../src/harness/fabric-resolver.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
-import { createRef } from "../src/create-ref.ts";
-import { fromURI, toURI } from "../src/uri-utils.ts";
-import { type PatternMeta, patternMetaSchema } from "../src/pattern-manager.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
-import type { URI } from "../src/sigil-types.ts";
 import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("fabric resolver test");
@@ -95,35 +91,26 @@ describe("FabricAwareResolver", () => {
     return entryIdentity;
   }
 
-  function newPatternId(label: string): URI {
-    return toURI(createRef({ pattern: label }, "fabric resolver test"));
-  }
-
-  function patternMetaCell(
-    patternId: URI,
-    targetSpace = space,
-  ): Cell<PatternMeta> {
-    return runtime.getCellFromEntityId(
-      targetSpace,
-      { "/": fromURI(patternId) },
-      [],
-      patternMetaSchema,
-    );
-  }
-
-  async function writePatternMeta(
+  // Write a piece cell carrying the content-addressed `patternIdentity` pointer
+  // (the only pattern pointer post-retirement), so a slug → piece chase resolves
+  // to its entry identity.
+  async function writePieceWithIdentity(
     entryIdentity: string,
     targetSpace = space,
-  ): Promise<{ patternId: URI; cell: Cell<PatternMeta> }> {
-    const patternId = newPatternId(entryIdentity);
-    const cell = patternMetaCell(patternId, targetSpace);
+  ): Promise<{ cell: Cell<unknown> }> {
+    const cell = runtime.getCell(
+      targetSpace,
+      { space: targetSpace, random: `piece-${entryIdentity}` },
+    );
     await runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set({
-        spec: "pattern",
-        entryIdentity,
-      } as PatternMeta);
+      const cellWithTx = cell.withTx(tx);
+      cellWithTx.set({ name: "piece" });
+      cellWithTx.setMetaRaw("patternIdentity", {
+        identity: entryIdentity,
+        symbol: "default",
+      });
     });
-    return { patternId, cell };
+    return { cell };
   }
 
   async function writeSlug(
@@ -258,7 +245,7 @@ describe("FabricAwareResolver", () => {
 
   it("resolves unpinned refs when allowed and records resolved pins", async () => {
     const entryIdentity = await publish();
-    const { patternId, cell } = await writePatternMeta(entryIdentity);
+    const { cell } = await writePieceWithIdentity(entryIdentity);
     await writeSlug("dep", cell);
     const resolver = new FabricAwareResolver(innerProgram(), {
       runtime,
@@ -275,7 +262,8 @@ describe("FabricAwareResolver", () => {
         resolvedIdentity: entryIdentity,
         chain: [
           "slug:dep",
-          `patternMeta:${patternId}`,
+          `piece:${cell.getAsNormalizedFullLink().id}`,
+          `patternIdentity:${entryIdentity}`,
           `entryIdentity:${entryIdentity}`,
         ],
       },

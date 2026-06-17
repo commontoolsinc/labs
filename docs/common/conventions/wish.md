@@ -106,6 +106,7 @@ ordered **default first, then by MRU**:
 wish({ query: "#profile" }) // the default profile (headless); see [UI] below
 wish({ query: "#profileName" }) // default profile's initialNameApplied
 wish({ query: "#profileAvatar" }) // default profile's avatar
+wish({ query: "#profileBio" }) // default profile's bio (free-text description)
 wish({ query: "#profileSpace" }) // default profile's space cell
 ```
 
