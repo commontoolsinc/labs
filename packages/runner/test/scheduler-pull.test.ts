@@ -1820,11 +1820,105 @@ describe("pull-based scheduling", () => {
       expect(preflights.length).toBe(1);
       expect(preflights[0].skipped).toBe(false);
       expect(preflights[0].hasDirtyDependencies).toBe(false);
-      expect(preflights[0].stats.visitCount).toBeGreaterThan(0);
-      expect(preflights[0].stats.visitCount).toBeLessThan(100);
+      // Inverted preflight (decision 15): the walk seeds from the invalid-node
+      // set and walks down to the closure, so its cost is bounded by the
+      // (here near-empty) invalid set, NOT the 32-wide closure cone. The old
+      // upstream walk visited the whole cone (~33+); the inverted walk visits
+      // only a stray never-ran seed or two. This bound is the O(N^2)→O(N) fix
+      // for rapid creation against a hub.
+      expect(preflights[0].stats.visitCount).toBeLessThan(10);
     } finally {
       runtime.telemetry.removeEventListener("telemetry", listener);
     }
+  });
+
+  it("defers an event handler behind an invalid upstream materializer", async () => {
+    // Exercises the materializer arm of the inverted preflight walk: a
+    // materializer feeds a cell the handler reads, so it joins the handler's
+    // closure; when its source changes it is invalid and the event must not
+    // dispatch on the stale value until the materializer re-runs.
+    const source = runtime.getCell<number>(
+      space,
+      "mat-preflight-source",
+      undefined,
+      tx,
+    );
+    const materialized = runtime.getCell<number>(
+      space,
+      "mat-preflight-materialized",
+      undefined,
+      tx,
+    );
+    const eventStream = runtime.getCell<number>(
+      space,
+      "mat-preflight-event",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<number>(
+      space,
+      "mat-preflight-result",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    materialized.set(0);
+    eventStream.set(0);
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let materializerRuns = 0;
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        materialized.withTx(actionTx).send(
+          (source.withTx(actionTx).get() ?? 0) + 100,
+        );
+      },
+      {
+        materializerWriteEnvelopes: [materialized.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof materialized.getAsNormalizedFullLink
+      >[];
+    };
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    await runtime.idle();
+    expect(materializerRuns).toBe(1);
+    expect(materialized.get()).toBe(101);
+
+    let handlerRuns = 0;
+    const handler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      result.withTx(handlerTx).send(
+        (materialized.withTx(handlerTx).get() ?? 0) + event,
+      );
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => materialized.withTx(depTx).get(),
+    );
+
+    // Invalidate the materializer via its source; `materialized` is now stale.
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(5);
+    await updateTx.commit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 7);
+    await result.pull();
+
+    // The gate re-ran the materializer before dispatching, so the handler saw
+    // the fresh value (105), not the stale 101.
+    expect(materializerRuns).toBe(2);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(105 + 7);
   });
 
   it("should update invalid status when dynamic dependencies change", async () => {

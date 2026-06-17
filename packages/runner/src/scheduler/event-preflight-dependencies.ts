@@ -9,6 +9,8 @@ import {
   type MaterializerIndexState,
 } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
+import { readsOverlapWrites } from "./scheduling-writes.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,
   EventPreflightTraceContext,
@@ -21,10 +23,15 @@ export interface EventPreflightDependencyState {
   readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
+  // Inverse of `reverseDependencies` (writer → readers); maintained together
+  // by the dependency graph. The downstream half of the inverted preflight
+  // reachability (decision 15).
+  readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   readonly materializerIndex: MaterializerIndexState;
+  readonly triggerIndex: Pick<TriggerIndexState, "collectReadersForWrite">;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -60,99 +67,113 @@ export function collectInvalidUpstreamForLog(
     }
   }
 
+  // Inverted reachability (decision 15). The consistency gate needs the set of
+  // invalid nodes that are transitively upstream of the handler's closure.
+  // Walking *up* from the closure visits its entire upstream cone — O(graph)
+  // against a hub (a list cell aggregating N rows), which is O(N^2) under
+  // rapid creation. Instead, seed from the maintained invalid-node set and
+  // walk *down* to the closure: cost is bounded by the invalid set and its
+  // downstream cone, not the closure's upstream fan-out.
+  const invalidNodes = state.nodes.getInvalidNodes();
+  if (invalidNodes.size === 0 || directWriters.size === 0) {
+    return false;
+  }
+
   let hasInvalidUpstream = false;
-  const visiting = new Set<Action>();
-  const visited = new Set<Action>();
-  for (const writer of directWriters) {
-    if (visitInvalidUpstream(state, writer, workSet, visiting, visited)) {
-      hasInvalidUpstream = true;
-    }
-  }
-  return hasInvalidUpstream;
-}
-
-function visitInvalidUpstream(
-  state: EventPreflightDependencyState,
-  action: Action,
-  workSet: Set<Action>,
-  visiting: Set<Action>,
-  visited: Set<Action>,
-): boolean {
-  const trace = state.getTrace();
-  if (trace) {
-    trace.visitCount++;
-    trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
-    const actionSummary = getTraceActionSummary(state, trace, action);
-    actionSummary.visitCount++;
-    if (isInvalidNode(state.nodes.get(action))) {
-      trace.dirtyInputCount++;
-      actionSummary.dirtyInputCount++;
-    }
-  }
-
-  if (visited.has(action)) {
+  for (const candidate of invalidNodes) {
+    if (!reachesClosure(state, candidate, directWriters)) continue;
     if (trace) {
-      trace.memoHitCount++;
-      getTraceActionSummary(state, trace, action).memoHitCount++;
+      if (!workSet.has(candidate)) trace.workSetAddCount++;
+      trace.dirtyInputCount++;
+      const summary = getTraceActionSummary(state, trace, candidate);
+      summary.dirtyInputCount++;
+      summary.resultTrueCount++;
     }
-    return workSet.has(action);
-  }
-
-  if (visiting.has(action)) {
-    if (trace) trace.cycleHitCount++;
-    return workSet.has(action);
-  }
-
-  visiting.add(action);
-  let hasInvalidUpstream = false;
-  if (isInvalidNode(state.nodes.get(action))) {
+    workSet.add(candidate);
     hasInvalidUpstream = true;
-    if (!workSet.has(action) && trace) trace.workSetAddCount++;
-    workSet.add(action);
-  }
-
-  const upstreamWriters = collectUpstreamWriters(state, action);
-  if (upstreamWriters.size > 0 && trace) {
-    recordReverseDependencyTrace(state, trace, action, upstreamWriters);
-  }
-  for (const writer of upstreamWriters) {
-    if (trace) trace.depth++;
-    try {
-      if (visitInvalidUpstream(state, writer, workSet, visiting, visited)) {
-        hasInvalidUpstream = true;
-      }
-    } finally {
-      if (trace) trace.depth--;
-    }
-  }
-
-  visiting.delete(action);
-  visited.add(action);
-  if (hasInvalidUpstream && trace) {
-    trace.resultTrueCount++;
-    getTraceActionSummary(state, trace, action).resultTrueCount++;
   }
   return hasInvalidUpstream;
 }
 
-function collectUpstreamWriters(
+/**
+ * True iff the handler `closure` is reachable downstream from `start` — i.e.
+ * `start` is transitively upstream of the closure. Plain BFS with a visited
+ * set: cycle-safe and bounded by `start`'s downstream cone. The adjacency is
+ * the exact inverse of the forward `collectUpstreamWriters`.
+ */
+function reachesClosure(
   state: EventPreflightDependencyState,
-  action: Action,
-): Set<Action> {
-  const writers = new Set(state.reverseDependencies.get(action) ?? []);
-  const log = state.dependencies.get(action);
-  if (!log) return writers;
+  start: Action,
+  closure: ReadonlySet<Action>,
+): boolean {
+  if (closure.has(start)) return true;
 
-  for (
-    const materializer of collectMaterializerWritersForLog(
-      state.materializerIndex,
-      log,
-      { exclude: action },
-    )
-  ) {
-    writers.add(materializer);
+  const trace = state.getTrace();
+  const visited = new Set<Action>([start]);
+  const frontier: Action[] = [start];
+  while (frontier.length > 0) {
+    const node = frontier.pop() as Action;
+    if (trace) {
+      trace.visitCount++;
+      getTraceActionSummary(state, trace, node).visitCount++;
+    }
+    const readers = collectDownstreamReaders(state, node);
+    if (readers.size > 0 && trace) {
+      recordReverseDependencyTrace(state, trace, node, readers);
+    }
+    for (const reader of readers) {
+      if (closure.has(reader)) return true;
+      if (!visited.has(reader)) {
+        visited.add(reader);
+        frontier.push(reader);
+      }
+    }
   }
-  return writers;
+  return false;
+}
+
+/**
+ * Downstream readers of `node` — the exact inverse of the forward
+ * `collectUpstreamWriters`. `dependents` is the maintained inverse of
+ * `reverseDependencies` (dependency edges). Materializer edges all originate
+ * from materializer writers, so they are mirrored only when `node` is a
+ * materializer: an action whose reads overlap the materializer's write
+ * envelopes is its downstream reader (same overlap test as
+ * `collectMaterializerWritersForLog`, with the self-edge excluded).
+ */
+function collectDownstreamReaders(
+  state: EventPreflightDependencyState,
+  node: Action,
+): Set<Action> {
+  const readers = new Set<Action>(state.dependents.get(node) ?? []);
+
+  if (state.materializerIndex.isMaterializer(node)) {
+    const envelopes = state.materializerIndex.getMaterializerWriteEnvelopes(
+      node,
+    );
+    if (envelopes && envelopes.length > 0) {
+      const candidates = new Set<Action>();
+      for (const envelope of envelopes) {
+        for (
+          const reader of state.triggerIndex.collectReadersForWrite(envelope)
+        ) {
+          candidates.add(reader);
+        }
+      }
+      for (const reader of candidates) {
+        if (reader === node) continue;
+        const readerLog = state.dependencies.get(reader);
+        if (!readerLog) continue;
+        if (
+          readsOverlapWrites(readerLog.reads, readerLog.shallowReads, envelopes)
+        ) {
+          readers.add(reader);
+        }
+      }
+    }
+  }
+
+  return readers;
 }
 
 function isInvalidNode(record: SchedulerNode | undefined): boolean {

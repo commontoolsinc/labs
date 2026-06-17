@@ -1629,10 +1629,12 @@ export class Scheduler {
       nodes: this.nodes,
       pending: this.pending,
       reverseDependencies: this.reverseDependencies,
+      dependents: this.dependents,
       dependencies: this.dependencies,
       writersByEntity: this.writeIndex.writersByEntity,
       effects: this.nodes.effects,
       materializerIndex: this.materializers,
+      triggerIndex: this.triggerIndex,
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
       getActionId: (target) => this.getActionId(target),
