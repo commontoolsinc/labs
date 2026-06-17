@@ -243,3 +243,109 @@ describe("CellHandle CFC label IPC", () => {
     }]);
   });
 });
+
+describe("CellHandle reactive CFC label delivery", () => {
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:reactive-label-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+  const labelA = {
+    version: 1 as const,
+    entries: [{ path: [], label: { integrity: ["authored-by-alice"] } }],
+  };
+  const labelB = {
+    version: 1 as const,
+    entries: [{ path: [], label: { integrity: ["authored-by-bob"] } }],
+  };
+
+  it("delivers the label and re-fires a label-aware subscriber on a label-only change", () => {
+    const cell = new CellHandle<string>(makeRuntime(), ref);
+    const calls: Array<[string | undefined, unknown]> = [];
+    cell.subscribe((value, cfcLabel) => {
+      calls.push([value, cfcLabel]);
+    }, { includeCfcLabel: true });
+
+    // Immediate call on subscribe with the current (empty) state.
+    expect(calls).toEqual([[undefined, undefined]]);
+
+    cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+    expect(calls.at(-1)).toEqual(["v1", labelA]);
+    expect(cell.cfcLabel).toEqual(labelA);
+
+    // Same VALUE, different LABEL → still fires (the reactivity that value
+    // subscriptions miss).
+    cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+    expect(calls.at(-1)).toEqual(["v1", labelB]);
+    expect(cell.cfcLabel).toEqual(labelB);
+
+    // Same value AND same label → deduped, no extra call.
+    const before = calls.length;
+    cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+    expect(calls.length).toBe(before);
+  });
+
+  it("does not fire a non-label subscriber on a label-only change", () => {
+    const cell = new CellHandle<string>(makeRuntime(), ref);
+    const calls: Array<string | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    }); // no includeCfcLabel
+
+    expect(cell.wantsCfcLabel).toBe(false);
+    cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+    const afterValue = calls.length; // fired once for the value change
+    // Label-only change must be invisible to a value-only subscriber.
+    cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+    expect(calls.length).toBe(afterValue);
+  });
+
+  it("a value-only notification leaves the cached label untouched", () => {
+    const cell = new CellHandle<string>(makeRuntime(), ref);
+    cell.subscribe(() => {}, { includeCfcLabel: true });
+    cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+    expect(cell.cfcLabel).toEqual(labelA);
+    // No `labelUpdate` arg = value-only update; label stays.
+    cell[$onCellUpdate]("v2");
+    expect(cell.get()).toBe("v2");
+    expect(cell.cfcLabel).toEqual(labelA);
+  });
+
+  it("re-establishes the backend subscription when a label-aware subscriber is added later", async () => {
+    const events: string[] = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => {
+          events.push("subscribe");
+          return Promise.resolve();
+        },
+        unsubscribe: () => {
+          events.push("unsubscribe");
+          return Promise.resolve();
+        },
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<string>(runtime, ref);
+
+    cell.subscribe(() => {}); // value-only first
+    expect(cell.wantsCfcLabel).toBe(false);
+    expect(events).toEqual(["subscribe"]);
+
+    // A label-aware subscription on the SAME handle re-opens the backend sub so
+    // it carries labels (the old one was label-less and would be deduped away).
+    cell.subscribe(() => {}, { includeCfcLabel: true });
+    expect(cell.wantsCfcLabel).toBe(true);
+    await Promise.resolve(); // let the unsubscribe().finally(subscribe) settle
+    expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
+  });
+});

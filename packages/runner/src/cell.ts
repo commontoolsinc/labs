@@ -142,6 +142,14 @@ const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+  /**
+   * Read the cell's display CFC label as part of the sink's tracked read set
+   * and pass it to the callback as a second argument. Reading it on the sink's
+   * transaction makes the cfc-metadata path a reactive dependency, so a
+   * label-only write (value unchanged) re-fires the sink — the basis for
+   * reactive label delivery over a subscription. Off by default.
+   */
+  includeCfcLabel?: boolean;
 };
 
 export type RawCellReadOptions = IReadOptions & {
@@ -295,7 +303,10 @@ declare module "@commonfabric/api" {
     asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(
-      callback: (value: Readonly<T>) => Cancel | undefined | void,
+      callback: (
+        value: Readonly<T>,
+        cfcLabel?: CfcLabelView | undefined,
+      ) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
     sinkMeta(
@@ -1599,7 +1610,10 @@ export class CellImpl<T extends FabricValue>
   }
 
   sink(
-    callback: (value: Readonly<T>) => Cancel | undefined | void,
+    callback: (
+      value: Readonly<T>,
+      cfcLabel?: CfcLabelView | undefined,
+    ) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
     // Check if this is a stream
@@ -2244,7 +2258,10 @@ function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
 }
 
 function subscribeToReferencedDocs<T>(
-  callback: (value: T) => Cancel | undefined | void,
+  callback: (
+    value: T,
+    cfcLabel?: CfcLabelView | undefined,
+  ) => Cancel | undefined | void,
   runtime: Runtime,
   ref: CellViewRef,
   options: SinkOptions = {},
@@ -2268,7 +2285,15 @@ function subscribeToReferencedDocs<T>(
       if (needsTraversal && newValue !== undefined && newValue !== null) {
         deepTraverse(newValue);
       }
-      sink.cleanup = callback(newValue);
+      // Read the label on the SINK's transaction (`tx`), not the child `extraTx`,
+      // so the cfc-metadata read joins this sink's reactive dependency set: a
+      // later label-only write re-fires the sink. `cfcLabelViewForCell` is a
+      // pure store read (no sync); `internalVerifierRead` keeps it reactive but
+      // out of CFC taint. Raw here — the worker redacts before it leaves.
+      const cfcLabel = options.includeCfcLabel
+        ? cfcLabelViewForCell(createCell(runtime, link, tx))
+        : undefined;
+      sink.cleanup = callback(newValue, cfcLabel);
 
       // no async await here, but that also means no retry. TODO(seefeld): Should
       // we add a retry? So far all sinks are read-only, so they get re-triggered

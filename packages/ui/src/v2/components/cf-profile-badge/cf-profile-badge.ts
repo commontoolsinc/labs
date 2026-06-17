@@ -6,6 +6,7 @@ import "../cf-avatar/cf-avatar.ts";
 import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
 import {
   type CellHandle,
+  type CfcLabelView,
   NAME,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
@@ -17,10 +18,7 @@ import {
   urlToAppView,
 } from "@commonfabric/shell/shared";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import {
-  ownerPrincipalFromLabel,
-  readCfcLabelView,
-} from "../../core/cfc-label.ts";
+import { ownerPrincipalFromLabel } from "../../core/cfc-label.ts";
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
 import {
   registerSeal,
@@ -497,9 +495,16 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           avatar: { type: "string" },
         },
       });
-      this._unsubscribe = named.subscribe((val) => this._applyValue(val));
-
-      void this._refreshVerification(resolved);
+      // The runtime-attested label rides each subscription update
+      // (`includeCfcLabel`), read on the sink's tracked tx — so verification
+      // re-derives whenever the profile's label changes (re-labeling, or the
+      // doc first loading), not just on name/avatar edits, with no separate
+      // getCfcLabel round-trip. The `generation` guard drops a callback that
+      // fires after a re-bind/detach.
+      this._unsubscribe = named.subscribe((val, cfcLabel) => {
+        this._applyValue(val);
+        this._deriveVerification(cfcLabel, generation);
+      }, { includeCfcLabel: true });
     } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
       console.error("cf-profile-badge: failed to resolve profile cell", e);
@@ -561,33 +566,24 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    * attestation → the badge stays in the plain "presented" state (a pattern can
    * mimic the chrome but cannot mint the label that unlocks the seal).
    *
-   * LIFECYCLE: this awaits a label read, so after the await it MUST re-check
-   * `generation === this._resolveGeneration && this.isConnected` before writing
-   * `_state`/`_seal` — `disconnectedCallback` bumps the generation, so a badge
-   * detached (or re-bound) mid-read won't leak a state write onto a stale /
-   * detached instance (same hazard guarded in `_resolve`).
+   * `generation` is captured by the subscription callback in `_resolve`; a
+   * callback that fires after a re-bind/detach (which bumps the generation)
+   * bails before writing `_state`/`_seal`, so it can't leak onto a stale or
+   * detached instance.
    */
-  private async _refreshVerification(cell: CellHandle): Promise<void> {
-    const generation = this._resolveGeneration;
-    try {
-      const view = await readCfcLabelView(cell);
-      if (generation !== this._resolveGeneration || !this.isConnected) return;
-      const owner = ownerPrincipalFromLabel(view);
-      if (owner) {
-        this._seal = identitySeal(owner);
-        this._state = "verified";
-      } else {
-        this._seal = undefined;
-        this._state = "presented";
-      }
-    } catch (e) {
-      if (generation !== this._resolveGeneration || !this.isConnected) return;
-      // Surface the IPC/label-read failure (mirrors `_resolve`'s catch) rather
-      // than silently collapsing every failure to the unverified state.
-      console.error(
-        "cf-profile-badge: failed to read CFC label for verification",
-        e,
-      );
+  private _deriveVerification(
+    cfcLabel: CfcLabelView | undefined,
+    generation: number,
+  ): void {
+    if (generation !== this._resolveGeneration || !this.isConnected) return;
+    // The label is the runtime-attested, display-redacted view delivered over
+    // the subscription; redaction strips Caveat.source but keeps the
+    // `represents-principal` integrity atom that unlocks the seal.
+    const owner = ownerPrincipalFromLabel(cfcLabel);
+    if (owner) {
+      this._seal = identitySeal(owner);
+      this._state = "verified";
+    } else {
       this._seal = undefined;
       this._state = "presented";
     }

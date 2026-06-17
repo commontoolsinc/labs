@@ -5,6 +5,7 @@ import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
+  getLogger,
   getLoggerCountsBreakdown,
   getLoggerFlagsBreakdown,
   getTimingStatsBreakdown,
@@ -42,6 +43,7 @@ import {
   BooleanResponse,
   type CellGetCfcLabelRequest,
   type CellGetRequest,
+  type CellGetResponse,
   type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
@@ -65,7 +67,6 @@ import {
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
-  JSONValueResponse,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -132,6 +133,13 @@ import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
+
+// Split-timing for the CFC label IPC path. Counts/timing are readable via
+// getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
+const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
+  enabled: true,
+  level: "error",
+});
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
@@ -628,7 +636,7 @@ export class RuntimeProcessor {
 
   handleCellGet(
     request: CellGetRequest,
-  ): JSONValueResponse {
+  ): CellGetResponse {
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
@@ -658,7 +666,18 @@ export class RuntimeProcessor {
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
     });
-    return { value: converted };
+    if (!request.includeCfcLabel) {
+      return { value: converted };
+    }
+    // Same display-label read as handleCellGetCfcLabel: pure store read, then
+    // redact Caveat.source for display (audit 28b). One round-trip for both.
+    const cfcLabel = cfcLabelViewForCell(cell);
+    return {
+      value: converted,
+      cfcLabel: cfcLabel === undefined
+        ? undefined
+        : redactCaveatSourcesForDisplay(cfcLabel),
+    };
   }
 
   handleCellSet(request: CellSetRequest): void {
@@ -691,7 +710,7 @@ export class RuntimeProcessor {
 
     const cell = getCell(this.runtime, request.cell);
 
-    const cancel = cell.sink((value) => {
+    const cancel = cell.sink((value, cfcLabel) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
       // These are the call sites that need real schemas added.
       const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
@@ -711,6 +730,13 @@ export class RuntimeProcessor {
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       });
+      // The sink read the raw label on its tracked tx (so cfc writes re-fire
+      // it); redact Caveat.source here before it crosses to the main thread.
+      const redactedLabel = request.includeCfcLabel
+        ? (cfcLabel === undefined
+          ? undefined
+          : redactCaveatSourcesForDisplay(cfcLabel))
+        : undefined;
 
       // `.sink` fires synchronously on invocation. Trigger the notification
       // in a microtask so that the subscription response returns
@@ -720,9 +746,10 @@ export class RuntimeProcessor {
           type: NotificationType.CellUpdate,
           cell: request.cell,
           value: converted,
+          ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
-    });
+    }, { includeCfcLabel: request.includeCfcLabel === true });
 
     this.subscriptions.set(key, cancel);
     return { value: true };
@@ -747,31 +774,33 @@ export class RuntimeProcessor {
     };
   }
 
-  async handleCellGetCfcLabel(
+  handleCellGetCfcLabel(
     request: CellGetCfcLabelRequest,
-  ): Promise<CfcLabelViewResponse> {
+  ): CfcLabelViewResponse {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
     const { schema: _schema, ...cellRef } = request.cell;
     const cell = getCell(this.runtime, cellRef);
-    const rootCell = this.runtime.getCellFromLink({
-      ...cell.getAsNormalizedFullLink(),
-      path: [],
-    });
-    await syncMetaLinkedDocs(rootCell);
-    await cell.sync();
-    // `getCfcLabel()` is the pattern-facing INTROSPECTION surface: the response
-    // is returned to the caller, not round-tripped back into a cell. Redact
-    // `Caveat.source` identities here so a pattern can't learn which principal
-    // introduced a caveat (audit item 28b, inv-12). Observation labeling, the
-    // dereference-trace enforcement path, and the carried-label view all read
-    // the label through other seams and keep `source`.
+    // Pure, non-blocking read of the CURRENT local store — no sync. getCfcLabel
+    // is the display-label seam, and its only callers are reactive UI components
+    // (cf-cfc-label, cf-cfc-authorship, cf-profile-badge) that subscribe to the
+    // cell and re-read the label whenever it changes. They own liveness: a
+    // not-yet-loaded doc is also not rendered, so an empty label is the correct
+    // deferred answer and self-heals when the subscription delivers the doc
+    // (which carries its `cfc` metadata). The earlier per-call source-chain sync
+    // re-loaded already-present docs and, under multi-writer churn, blocked on
+    // in-flight watch refreshes — ~99.97% of this IPC's cost, p95 >1s at 4
+    // browsers. The enforcement path reads labels through other seams; here we
+    // only redact `Caveat.source` for display (audit item 28b, inv-12).
+    const totalStart = performance.now();
     const cfcLabel = cfcLabelViewForCell(cell);
-    return {
+    const response = {
       cfcLabel: cfcLabel === undefined
         ? undefined
         : redactCaveatSourcesForDisplay(cfcLabel),
     };
+    cfcLabelLogger.time(totalStart, "total");
+    return response;
   }
 
   handleGetCell(request: GetCellRequest): CellResponse {
@@ -1446,32 +1475,5 @@ export class RuntimeProcessor {
       return;
     }
     mount.reconciler.acknowledgeBatchApplied(request.batchId);
-  }
-}
-
-/**
- * Sync a root cell and each direct metadata-linked cell reachable from it.
- *
- * `internal` is raw manifest metadata, not a direct metadata link. Callers that
- * need a transactional root cell can create it first and pass it.
- */
-async function syncMetaLinkedDocs(
-  cell: Cell<any>,
-  cycleCheck: Set<string> = new Set<string>(),
-) {
-  const pendingCells = [cell];
-  cycleCheck.add(cell.sourceURI);
-  while (pendingCells.length > 0) {
-    const currentCell = pendingCells.shift()!;
-    await currentCell.sync();
-    for (const meta of ["pattern", "argument"] as const) {
-      const link = getMetaLink(currentCell, meta);
-      if (link === undefined) continue;
-      const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);
-      if (linkedCell === undefined) continue;
-      if (cycleCheck.has(linkedCell.sourceURI)) continue;
-      cycleCheck.add(linkedCell.sourceURI);
-      pendingCells.push(linkedCell);
-    }
   }
 }
