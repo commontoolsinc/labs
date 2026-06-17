@@ -165,15 +165,23 @@ type ProfileDefaultPattern = {
   [UI]: VNode;
   name: string;
   avatar: string;
+  bio: string;
   elements: ProfileElement[];
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
+  setBio: Stream<SetProfileBioEvent>;
   initialNameApplied: string;
 };
 ```
 
 `avatar` starts as a string. The first implementation can use a URL, data URL,
 or emoji-like text. Binary/blob avatar upload is out of scope.
+
+`bio` (CT-1648) is a short, owner-authored free-text description, the canonical
+shared-profile bio — distinct from Home's legacy `learned.summary`. Like `name`
+and `avatar` it is owner-protected (written only through `setBio`), readable
+from the profile result, and exposed as the well-known wish target
+`#profileBio`.
 
 `elements` is the profile-space analog of favorites and mentionables. Each
 entry points at a piece that lives in the profile space. `tag` stores the
@@ -359,6 +367,7 @@ wish({ query: "#profile" })            // homeDefault.profile
 wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
 wish({ query: "#profileName" })        // homeDefault.profileName, then profile.initialNameApplied
 wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
+wish({ query: "#profileBio" })         // homeDefault.profile.bio (CT-1648)
 ```
 
 The optional `[UI]` for `wish({ query: "#profile" })` is persona-aware:

@@ -94,14 +94,27 @@ export type SetProfileAvatarEvent = {
   target?: { value?: string };
 };
 
+export type SetProfileBioEvent = {
+  bio?: string;
+  detail?: { message?: string };
+  key?: string;
+  target?: { value?: string };
+};
+
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
   name: OwnerProtectedProfileWrite<string, typeof setName>;
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
+  // A short, human-authored free-text description of the profile owner
+  // (CT-1648). Owner-protected like name/avatar; the canonical shared-profile
+  // bio (distinct from Home's legacy `learned.summary`). Readable from the
+  // profile result and via `wish({ query: "#profileBio" })`.
+  bio: OwnerProtectedProfileWrite<string, typeof setBio>;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
+  setBio: Stream<SetProfileBioEvent>;
   // Both element streams accept the full mutation event (the union shape of
   // the one authorized writer); `AddProfileElementEvent` /
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
@@ -329,6 +342,26 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
   },
 );
 
+// THE authorized writer for the owner-protected `bio` field (CT-1648). Bio is
+// multi-line free text, so — unlike setName — it is NOT Enter-gated and is
+// driven by a Save button reading the bound (unprotected) draft cell: a direct
+// `$value` two-way binding onto the protected `bio` cell would bypass this
+// handler and be rejected by CFC. Falls back through event fields so a future
+// "set bio" event path (or a test) can pass the value directly.
+const setBio = handler<
+  SetProfileBioEvent,
+  { bio: Writable<string>; draft?: Writable<string> }
+>(
+  (event, state) => {
+    const bio = (event.bio ?? event.detail?.message ??
+      event.target?.value ?? state.draft?.get() ?? "").trim();
+    state.bio.set(bio);
+    // Clear the draft after a successful save (mirrors the form handlers
+    // elsewhere in this file).
+    state.draft?.set("");
+  },
+);
+
 // View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)
 // UI state: visiting a profile shows the read-only presentation; this flips to
 // the edit form. The flag itself is not owner-protected — anyone can flip their
@@ -355,6 +388,12 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");
+    const bio = new Writable<
+      OwnerProtectedProfileWrite<string, typeof setBio>
+    >("").for("bio");
+    // Unprotected draft backing the bio textarea; saved into the protected
+    // `bio` cell through `setBio` (CT-1648).
+    const bioDraft = new Writable("").for("bioDraft");
     const elements = new Writable<
       OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>
     >([]).for("elements");
@@ -371,6 +410,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // presentation by default; the owner flips this to reveal the edit form.
     const editing = new Writable<boolean>(false).for("editing");
     const isEditing = computed(() => editing.get() === true);
+    // Whether a non-empty bio has been authored — drives the presentation-mode
+    // bio block (CT-1648).
+    const hasBio = computed(() => (bio.get() ?? "").trim().length > 0);
     // Self-view cell for <cf-profile-badge>: the badge resolves name/avatar from
     // a bound profile cell. Bound to this DERIVED self-cell (a computed
     // projection, not the profile's own root piece), so the badge is marked
@@ -405,9 +447,11 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       [NAME]: displayName,
       name,
       avatar,
+      bio,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
+      setBio: setBio({ bio, draft: bioDraft }),
       // Both exported streams are instances of the one authorized writer,
       // pinned to their declared purpose via the bound mode.
       addElement: mutateElements({ elements, mode: "add" }),
@@ -451,6 +495,21 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   size="xl"
                   noNavigate
                 />
+
+                {ifElse(
+                  hasBio,
+                  <p
+                    data-ui-region="profile-bio"
+                    style={{
+                      margin: 0,
+                      whiteSpace: "pre-wrap",
+                      color: "var(--cf-theme-color-text-secondary)",
+                    }}
+                  >
+                    {bio}
+                  </p>,
+                  null,
+                )}
 
                 <cf-vstack gap="2">
                   {elements.map((element) => (
@@ -516,6 +575,20 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                     appearance="rounded"
                     oncf-send={setAvatar({ avatar })}
                   />
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  <label>Bio</label>
+                  <span style={{ whiteSpace: "pre-wrap" }}>{bio}</span>
+                  <cf-textarea
+                    data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
+                    $value={bioDraft}
+                    placeholder="A short bio…"
+                    style="width: 100%;"
+                  />
+                  <cf-button onClick={setBio({ bio, draft: bioDraft })}>
+                    Save bio
+                  </cf-button>
                 </cf-vstack>
 
                 <cf-vstack gap="2">
