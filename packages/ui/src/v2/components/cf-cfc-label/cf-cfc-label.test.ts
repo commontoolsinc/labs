@@ -73,7 +73,7 @@ describe("CFCFCLabel", () => {
     expect(element.cfcLabel).toEqual(cfcLabel);
   });
 
-  it("refreshes the label when a bound cell emits an update", async () => {
+  it("delivers the initial label from a subscribable bound value", async () => {
     const cfcLabel = {
       version: 1 as const,
       entries: [{
@@ -81,51 +81,48 @@ describe("CFCFCLabel", () => {
         label: { confidentiality: ["prompt-influence"] },
       }],
     };
-    let labelCalls = 0;
-    let emitUpdate: (() => void) | undefined;
     const element = new CFCFCLabel();
-
     element.value = {
-      getCfcLabel: () =>
-        Promise.resolve(labelCalls++ < 2 ? undefined : cfcLabel),
-      subscribe: (callback: () => void) => {
-        emitUpdate = () => callback();
-        callback();
+      subscribe: (
+        callback: (value: unknown, label?: unknown) => void,
+      ) => {
+        callback(undefined, cfcLabel);
         return () => {};
       },
     };
     await Promise.resolve();
 
-    expect(element.cfcLabel).toBeUndefined();
-    if (!emitUpdate) {
-      throw new Error("expected cf-cfc-label to subscribe to the bound cell");
-    }
-    emitUpdate();
-    await Promise.resolve();
-
     expect(element.cfcLabel).toEqual(cfcLabel);
   });
 
-  it("loads the initial label for a subscribable bound value", async () => {
-    const cfcLabel = {
+  it("reacts to a later label change delivered over the subscription", async () => {
+    const labelA = {
       version: 1 as const,
-      entries: [{
-        path: [],
-        label: { confidentiality: ["prompt-influence"] },
-      }],
+      entries: [{ path: [], label: { integrity: ["authored-by-alice"] } }],
     };
+    const labelB = {
+      version: 1 as const,
+      entries: [{ path: [], label: { integrity: ["authored-by-bob"] } }],
+    };
+    let emit: ((label: unknown) => void) | undefined;
     const element = new CFCFCLabel();
-
     element.value = {
-      getCfcLabel: () => Promise.resolve(cfcLabel),
-      subscribe: () => () => {},
+      subscribe: (callback: (value: unknown, label?: unknown) => void) => {
+        emit = (label) => callback(undefined, label);
+        callback(undefined, labelA);
+        return () => {};
+      },
     };
     await Promise.resolve();
+    expect(element.cfcLabel).toEqual(labelA);
 
-    expect(element.cfcLabel).toEqual(cfcLabel);
+    // A label-only change (same value) arrives over the same subscription.
+    emit!(labelB);
+    await Promise.resolve();
+    expect(element.cfcLabel).toEqual(labelB);
   });
 
-  it("retries when label metadata arrives after the first value query", async () => {
+  it("uses subscription delivery, not getCfcLabel, for subscribable values", async () => {
     const cfcLabel = {
       version: 1 as const,
       entries: [{
@@ -133,114 +130,29 @@ describe("CFCFCLabel", () => {
         label: { confidentiality: ["prompt-influence"] },
       }],
     };
-    let labelAvailable = false;
-    const element = new CFCFCLabel();
-    Object.defineProperty(element, "isConnected", {
-      value: true,
-      configurable: true,
-    });
-
-    try {
-      element.value = {
-        getCfcLabel: () =>
-          Promise.resolve(labelAvailable ? cfcLabel : undefined),
-        subscribe: () => () => {},
-      };
-      await Promise.resolve();
-      expect(element.cfcLabel).toBeUndefined();
-
-      labelAvailable = true;
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      expect(element.cfcLabel).toEqual(cfcLabel);
-    } finally {
-      element.disconnectedCallback();
-    }
-  });
-
-  it("replaces stale pending retries after a newer refresh", async () => {
-    const cfcLabel = {
-      version: 1 as const,
-      entries: [{
-        path: [],
-        label: { confidentiality: ["prompt-influence"] },
-      }],
-    };
-    let labelAvailable = false;
-    const element = new CFCFCLabel();
-    Object.defineProperty(element, "isConnected", {
-      value: true,
-      configurable: true,
-    });
-
-    try {
-      element.value = {
-        getCfcLabel: () =>
-          Promise.resolve(labelAvailable ? cfcLabel : undefined),
-        subscribe: () => () => {},
-      };
-      await Promise.resolve();
-      expect(element.cfcLabel).toBeUndefined();
-
-      await element.refreshLabel();
-      labelAvailable = true;
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      expect(element.cfcLabel).toEqual(cfcLabel);
-    } finally {
-      element.disconnectedCallback();
-    }
-  });
-
-  it("does not duplicate label refreshes for the same bound value", async () => {
-    const cfcLabel = {
-      version: 1 as const,
-      entries: [{
-        path: [],
-        label: { confidentiality: ["prompt-influence"] },
-      }],
-    };
-    let labelCalls = 0;
-    const requestedProperties: (PropertyKey | undefined)[] = [];
+    let getCfcLabelCalls = 0;
+    let requestedIncludeCfcLabel: boolean | undefined;
     const element = new CFCFCLabel();
     element.value = {
       getCfcLabel: () => {
-        labelCalls += 1;
+        getCfcLabelCalls += 1;
         return Promise.resolve(cfcLabel);
       },
-      subscribe: () => () => {},
+      subscribe: (
+        callback: (value: unknown, label?: unknown) => void,
+        options?: { includeCfcLabel?: boolean },
+      ) => {
+        requestedIncludeCfcLabel = options?.includeCfcLabel;
+        callback(undefined, cfcLabel);
+        return () => {};
+      },
     };
-    const lifecycle = element as unknown as {
-      firstUpdated(changedProperties: Map<PropertyKey, unknown>): void;
-      updated(changedProperties: Map<PropertyKey, unknown>): void;
-    };
-    const updateHost = element as unknown as {
-      requestUpdate(
-        name?: PropertyKey,
-        oldValue?: unknown,
-        options?: unknown,
-      ): void;
-    };
-    const requestUpdate = updateHost.requestUpdate.bind(updateHost);
-
-    lifecycle.firstUpdated(new Map());
-    await Promise.resolve();
-    updateHost.requestUpdate = ((
-      name?: PropertyKey,
-      oldValue?: unknown,
-      options?: unknown,
-    ) => {
-      requestedProperties.push(name);
-      requestUpdate(name, oldValue, options);
-    }) as typeof updateHost.requestUpdate;
-    lifecycle.updated(
-      new Map<PropertyKey, unknown>([["value", element.value]]),
-    );
     await Promise.resolve();
 
-    expect(labelCalls).toBe(1);
+    expect(requestedIncludeCfcLabel).toBe(true);
     expect(element.cfcLabel).toEqual(cfcLabel);
-    expect(requestedProperties).toContain("cfcLabel");
+    // The label rides the subscription; no separate getCfcLabel round-trip.
+    expect(getCfcLabelCalls).toBe(0);
   });
 });
 

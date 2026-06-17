@@ -14,7 +14,10 @@ type CfcLabelResolvableValue = {
 };
 
 type CfcLabelSubscribableValue = {
-  subscribe(callback: (value: unknown) => void): () => void;
+  subscribe(
+    callback: (value: unknown, cfcLabel?: CfcLabelView | undefined) => void,
+    options?: { includeCfcLabel?: boolean },
+  ): () => void;
 };
 
 type CfcReadableClaimValue = {
@@ -673,9 +676,13 @@ export class CFCFCAuthorship extends BaseElement {
       return false;
     }
 
+    // includeCfcLabel makes the worker read this cell's label (and its
+    // one-hop link target's) on the sink's tracked tx, so a label-only change
+    // re-fires this subscription and refreshLabel re-reads the new label — the
+    // resolved-cell label is now reactive, not just polled.
     this._unsubscribeValue = value.subscribe(() => {
       void this.refreshLabel();
-    });
+    }, { includeCfcLabel: true });
     return true;
   }
 
@@ -707,7 +714,7 @@ export class CFCFCAuthorship extends BaseElement {
       const previous = this._authorClaim;
       this._authorClaim = claim;
       this.requestUpdate("author", previous);
-    });
+    }, { includeCfcLabel: true });
     return true;
   }
 

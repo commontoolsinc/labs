@@ -14,16 +14,16 @@ type CfcLabelQueryableValue = {
 };
 
 type CfcLabelSubscribableValue = {
-  subscribe(callback: (value: unknown) => void): () => void;
+  subscribe(
+    callback: (value: unknown, cfcLabel?: CfcLabelView | undefined) => void,
+    options?: { includeCfcLabel?: boolean },
+  ): () => void;
 };
 
 const LABEL_KEYS = [
   "confidentiality",
   "integrity",
 ] as const satisfies readonly LabelKey[];
-
-const LABEL_RETRY_INTERVAL_MS = 100;
-const MAX_LABEL_RETRY_COUNT = 100;
 
 const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
   typeof value === "object" && value !== null &&
@@ -208,8 +208,6 @@ export class CFCFCLabel extends BaseElement {
   private _value: unknown = undefined;
   private _observedValue: unknown = undefined;
   private _unsubscribeValue: (() => void) | undefined;
-  private _labelRetryTimeout: ReturnType<typeof setTimeout> | undefined;
-  private _labelRetryCount = 0;
 
   constructor() {
     super();
@@ -235,7 +233,6 @@ export class CFCFCLabel extends BaseElement {
   }
 
   override disconnectedCallback() {
-    this.clearLabelRetry();
     this.clearValueSubscription();
     super.disconnectedCallback();
   }
@@ -270,17 +267,18 @@ export class CFCFCLabel extends BaseElement {
     }
 
     this.clearValueSubscription();
-    this.clearLabelRetry();
-    this._labelRetryCount = 0;
     this._observedValue = value;
 
     if (!hasLabelSubscription(value)) {
       return false;
     }
 
-    this._unsubscribeValue = value.subscribe(() => {
-      void this.refreshLabel();
-    });
+    // Reactive label delivery: the label rides each subscription update and the
+    // worker reads it on the sink's tracked tx, so a label-only change re-fires
+    // here too — no poll, no separate getCfcLabel round-trip.
+    this._unsubscribeValue = value.subscribe((_value, cfcLabel) => {
+      this.applyLabel(cfcLabel);
+    }, { includeCfcLabel: true });
     return true;
   }
 
@@ -290,57 +288,23 @@ export class CFCFCLabel extends BaseElement {
     this._observedValue = undefined;
   }
 
-  private clearLabelRetry(): void {
-    if (this._labelRetryTimeout === undefined) {
-      return;
-    }
-    clearTimeout(this._labelRetryTimeout);
-    this._labelRetryTimeout = undefined;
+  private applyLabel(cfcLabel: CfcLabelView | undefined): void {
+    const previous = this.cfcLabel;
+    this.cfcLabel = cfcLabel;
+    this.requestUpdate("cfcLabel", previous);
   }
 
-  private scheduleLabelRetry(requestId: number): void {
-    if (
-      !this.isConnected ||
-      this._labelRetryCount >= MAX_LABEL_RETRY_COUNT
-    ) {
-      return;
-    }
-
-    this.clearLabelRetry();
-    this._labelRetryTimeout = setTimeout(() => {
-      this._labelRetryTimeout = undefined;
-      if (
-        requestId === this._labelRequestId &&
-        this.cfcLabel === undefined &&
-        hasLabelQuery(this.value)
-      ) {
-        this._labelRetryCount += 1;
-        void this.refreshLabel();
-      }
-    }, LABEL_RETRY_INTERVAL_MS);
-  }
-
+  // Fallback for a value that exposes getCfcLabel but not subscribe (no live
+  // channel). Subscribable values get their label reactively via observeValue.
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
-    if (!hasLabelQuery(this.value)) {
-      this.clearLabelRetry();
-      const previous = this.cfcLabel;
-      this.cfcLabel = undefined;
-      this.requestUpdate("cfcLabel", previous);
+    if (hasLabelSubscription(this.value) || !hasLabelQuery(this.value)) {
+      if (!hasLabelSubscription(this.value)) this.applyLabel(undefined);
       return;
     }
-
     const cfcLabel = await this.value.getCfcLabel();
     if (requestId === this._labelRequestId) {
-      const previous = this.cfcLabel;
-      this.cfcLabel = cfcLabel;
-      this.requestUpdate("cfcLabel", previous);
-      if (cfcLabel === undefined) {
-        this.scheduleLabelRetry(requestId);
-      } else {
-        this.clearLabelRetry();
-        this._labelRetryCount = 0;
-      }
+      this.applyLabel(cfcLabel);
     }
   }
 

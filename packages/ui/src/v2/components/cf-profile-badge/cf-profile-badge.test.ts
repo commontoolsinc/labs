@@ -6,11 +6,6 @@ import { identitySeal } from "./identity-seal.ts";
 
 const OWNER_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
-/** A resolved-cell stub that answers `getCfcLabel()` with the given label. */
-function labelCell(label: unknown) {
-  return { getCfcLabel: () => Promise.resolve(label) };
-}
-
 function representsPrincipalLabel(subject: string) {
   return {
     version: 1,
@@ -152,12 +147,13 @@ describe("CFProfileBadge", () => {
   });
 
   describe("verification seal", () => {
-    it("enters the verified state and derives the seal from the owner DID", async () => {
+    it("enters the verified state and derives the seal from the owner DID", () => {
       const el = new CFProfileBadge() as any;
       markConnected(el, true);
 
-      await el._refreshVerification(
-        labelCell(representsPrincipalLabel(OWNER_DID)),
+      el._deriveVerification(
+        representsPrincipalLabel(OWNER_DID),
+        el._resolveGeneration,
       );
 
       expect(el._state).toBe("verified");
@@ -166,55 +162,47 @@ describe("CFProfileBadge", () => {
       expect(el._seal?.hue).toBe(identitySeal(OWNER_DID).hue);
     });
 
-    it("re-derives verification when the value subscription fires (cold profile self-heals)", async () => {
+    it("re-derives verification when the label arrives over the subscription (cold self-heals)", async () => {
       const el = new CFProfileBadge() as any;
       markConnected(el, true);
 
-      // `getCfcLabel` is a pure store read: cold first (no label), then the
-      // attestation appears once the doc loads.
-      let labelReady = false;
-      let subscriptionCallback: ((val: unknown) => void) | undefined;
+      // The subscription delivers (value, cfcLabel). Cold first: value but no
+      // label; then the label appears once the profile doc loads — over the
+      // SAME subscription, no separate getCfcLabel read.
+      let deliver: ((val: unknown, label?: unknown) => void) | undefined;
       const resolved = {
         ref: () => ({ path: [] }),
         space: () => "did:key:zSpace",
         id: () => "fid1:piece",
         asSchema: () => ({
-          subscribe: (cb: (val: unknown) => void) => {
-            subscriptionCallback = cb;
+          subscribe: (cb: (val: unknown, label?: unknown) => void) => {
+            deliver = cb;
             return () => {};
           },
         }),
-        getCfcLabel: () =>
-          Promise.resolve(
-            labelReady ? representsPrincipalLabel(OWNER_DID) : undefined,
-          ),
       };
       el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
 
       await el._resolve();
-      // Let the initial (cold) verification read settle: no label yet.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      deliver?.({ name: "Ada" }, undefined);
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
 
-      // The doc loads: the label is now present and the value subscription
-      // fires, re-deriving verification.
-      labelReady = true;
-      subscriptionCallback?.({ name: "Ada" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
+      // The label-only change (doc loaded) re-fires the subscription.
+      deliver?.({ name: "Ada" }, representsPrincipalLabel(OWNER_DID));
       expect(el._state).toBe("verified");
       expect(el._seal?.did).toBe(OWNER_DID);
     });
 
-    it("stays presented (no seal) when the label has no represents-principal atom", async () => {
+    it("stays presented (no seal) when the label has no represents-principal atom", () => {
       const el = new CFProfileBadge() as any;
       markConnected(el, true);
 
-      await el._refreshVerification(labelCell({
+      el._deriveVerification({
         version: 1,
         entries: [{ path: [], label: { integrity: ["profile-link"] } }],
-      }));
+      }, el._resolveGeneration);
 
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
@@ -237,47 +225,21 @@ describe("CFProfileBadge", () => {
       expect(el._seal).toBeUndefined();
     });
 
-    it("discards a label read superseded mid-flight (no stale seal write)", async () => {
+    it("ignores a label delivered after a re-bind (stale generation)", () => {
       const el = new CFProfileBadge() as any;
       markConnected(el, true);
 
-      // A label read whose timing we control.
-      const gate = deferred<unknown>();
-      const verify = el._refreshVerification({
-        getCfcLabel: () => gate.promise,
-      });
-
-      // Simulate a re-bind / disconnect superseding this read: both `_resolve`
-      // and `disconnectedCallback` bump `_resolveGeneration`.
+      const staleGeneration = el._resolveGeneration;
+      // A re-bind / disconnect bumps the generation.
       el._resolveGeneration++;
 
-      // The read now resolves with a valid attestation — but it is stale.
-      gate.resolve(representsPrincipalLabel(OWNER_DID));
-      await verify;
+      // A subscription callback from the prior binding fires late with a valid
+      // attestation — it must NOT flip the badge to verified.
+      el._deriveVerification(
+        representsPrincipalLabel(OWNER_DID),
+        staleGeneration,
+      );
 
-      // The superseded read must NOT have flipped the badge to verified.
-      expect(el._state).toBe("presented");
-      expect(el._seal).toBeUndefined();
-    });
-
-    it("logs and stays presented when the label read fails", async () => {
-      const el = new CFProfileBadge() as any;
-      markConnected(el, true);
-
-      const originalError = console.error;
-      let logged = 0;
-      console.error = () => {
-        logged++;
-      };
-      try {
-        await el._refreshVerification({
-          getCfcLabel: () => Promise.reject(new Error("ipc boom")),
-        });
-      } finally {
-        console.error = originalError;
-      }
-
-      expect(logged).toBe(1);
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
     });
