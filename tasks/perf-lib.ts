@@ -17,6 +17,8 @@ export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
 export const PERF_METRICS_FILE = "perf-metrics.json";
 export const PERF_METRICS_BACKFILL_ARTIFACT_NAME = "perf-metrics-backfill";
 export const PERF_METRICS_BACKFILL_FILE = "perf-metrics-backfill.json";
+export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
+export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
 
 /** Minimum number of historical samples before we compute a baseline. */
 export const MIN_SAMPLES = 5;
@@ -83,6 +85,11 @@ export interface Artifact {
   name: string;
   size_in_bytes: number;
   expired: boolean;
+}
+
+interface ArtifactsResponse {
+  total_count?: number;
+  artifacts: Artifact[];
 }
 
 export interface TimingSample {
@@ -173,6 +180,10 @@ export interface PRInfo {
   merged_at: string | null;
 }
 
+export interface PRFile {
+  filename: string;
+}
+
 export interface CurrentPRBody {
   body: string;
   source: "live" | "event-fallback" | "empty-fallback";
@@ -180,8 +191,10 @@ export interface CurrentPRBody {
 }
 
 export interface BaselineOverrides {
-  /** Metric name -> value in the metric's native unit (seconds or nanoseconds). */
+  /** Metric name -> value in the metric's native unit. */
   metrics: Map<string, number>;
+  /** Reset all coverage-debt metrics at the commit carrying this marker. */
+  coverageBaselineReset: boolean;
 }
 
 export type CiWallTimeRevisitSignalKind =
@@ -211,6 +224,11 @@ const GITHUB_GET_MAX_ATTEMPTS = 4;
 const GITHUB_GET_RETRY_BASE_DELAY_MS = 250;
 const GITHUB_GET_RETRY_MAX_DELAY_MS = 5_000;
 const RETRYABLE_GITHUB_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES = new Set([
+  ...RETRYABLE_GITHUB_STATUSES,
+  403,
+  404,
+]);
 
 function retryAfterDelayMs(value: string | null): number | undefined {
   if (value == null) return undefined;
@@ -239,6 +257,15 @@ function githubRetryDelayMs(resp: Response, attempt: number): number {
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function responseBodySnippet(resp: Response): Promise<string> {
+  try {
+    const body = await resp.text();
+    return body.length > 1_000 ? `${body.slice(0, 1_000)}...` : body;
+  } catch (error) {
+    return `Could not read response body: ${error}`;
+  }
 }
 
 export async function githubGet<T>(path: string): Promise<T> {
@@ -350,10 +377,30 @@ export async function fetchJobsForRun(runId: number): Promise<Job[]> {
 export async function fetchArtifactsForRun(
   runId: number,
 ): Promise<Artifact[]> {
-  const data = await githubGet<{ artifacts: Artifact[] }>(
-    `/repos/${REPO}/actions/runs/${runId}/artifacts`,
-  );
-  return data.artifacts;
+  const artifacts: Artifact[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<ArtifactsResponse>(
+      `/repos/${REPO}/actions/runs/${runId}/artifacts?per_page=${perPage}&page=${page}`,
+    );
+    artifacts.push(...data.artifacts);
+
+    if (data.artifacts.length === 0) break;
+    if (
+      typeof data.total_count === "number" &&
+      artifacts.length >= data.total_count
+    ) {
+      break;
+    }
+    if (
+      typeof data.total_count !== "number" && data.artifacts.length < perPage
+    ) {
+      break;
+    }
+  }
+
+  return artifacts;
 }
 
 /**
@@ -379,27 +426,9 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
 export async function downloadAndParseJUnit(
   artifactId: number,
 ): Promise<JUnitTestSuite[]> {
-  const resp = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
-    { headers: apiHeaders() },
-  );
-  if (!resp.ok) return [];
-
-  const tmpDir = await Deno.makeTempDir({ prefix: "perf-junit-" });
-  const zipPath = `${tmpDir}/artifact.zip`;
-
+  const tmpDir = await downloadAndExtractArtifact(artifactId, "perf-junit-");
+  if (!tmpDir) return [];
   try {
-    const data = new Uint8Array(await resp.arrayBuffer());
-    await Deno.writeFile(zipPath, data);
-
-    const unzip = new Deno.Command("unzip", {
-      args: ["-o", zipPath, "-d", tmpDir],
-      stdout: "null",
-      stderr: "null",
-    });
-    const result = await unzip.output();
-    if (!result.success) return [];
-
     const suites: JUnitTestSuite[] = [];
     for await (const entry of walkFiles(tmpDir)) {
       if (entry.endsWith(".xml")) {
@@ -528,30 +557,107 @@ export async function writePerfMetricsBackfillFile(
   );
 }
 
+export async function downloadAndExtractArtifact(
+  artifactId: number,
+  tmpPrefix: string,
+): Promise<string | null> {
+  const artifactPath = `/repos/${REPO}/actions/artifacts/${artifactId}/zip`;
+  const url = `https://api.github.com${artifactPath}`;
+  let lastError = "unknown error";
+  const attemptErrors: string[] = [];
+
+  for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { headers: apiHeaders() });
+    } catch (error) {
+      lastError = `fetch failed: ${error}`;
+      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
+        await sleep(
+          Math.min(
+            GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+            GITHUB_GET_RETRY_MAX_DELAY_MS,
+          ),
+        );
+        continue;
+      }
+      break;
+    }
+
+    if (!resp.ok) {
+      const body = await responseBodySnippet(resp);
+      lastError =
+        `GitHub artifact download ${resp.status} ${resp.statusText}: ${body}`;
+      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      if (
+        attempt < GITHUB_GET_MAX_ATTEMPTS &&
+        RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
+      ) {
+        await sleep(githubRetryDelayMs(resp, attempt));
+        continue;
+      }
+      break;
+    }
+
+    const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
+    const zipPath = `${tmpDir}/artifact.zip`;
+
+    try {
+      const data = new Uint8Array(await resp.arrayBuffer());
+      await Deno.writeFile(zipPath, data);
+
+      const unzip = new Deno.Command("unzip", {
+        args: ["-o", zipPath, "-d", tmpDir],
+        stdout: "null",
+        stderr: "piped",
+      });
+      const result = await unzip.output();
+      if (result.success) {
+        return tmpDir;
+      }
+
+      const stderr = new TextDecoder().decode(result.stderr).trim();
+      lastError = `unzip failed with exit code ${result.code}${
+        stderr ? `: ${stderr}` : ""
+      }`;
+    } catch (error) {
+      lastError = `${error}`;
+    }
+    attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+
+    if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
+      await sleep(
+        Math.min(
+          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+          GITHUB_GET_RETRY_MAX_DELAY_MS,
+        ),
+      );
+    }
+  }
+
+  console.warn(
+    `  Warning: could not download/extract artifact ${artifactId} (${artifactPath}) after ${GITHUB_GET_MAX_ATTEMPTS} attempt(s): ${lastError}`,
+  );
+  console.warn(
+    `  Artifact download attempts: ${attemptErrors.join(" | ")}`,
+  );
+  return null;
+}
+
 export async function downloadAndParsePerfMetrics(
   artifactId: number,
 ): Promise<Map<string, TimingSample> | null> {
-  const resp = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
-    { headers: apiHeaders() },
+  const tmpDir = await downloadAndExtractArtifact(
+    artifactId,
+    "perf-metrics-",
   );
-  if (!resp.ok) return null;
-
-  const tmpDir = await Deno.makeTempDir({ prefix: "perf-metrics-" });
-  const zipPath = `${tmpDir}/artifact.zip`;
-
+  if (!tmpDir) return null;
   try {
-    const data = new Uint8Array(await resp.arrayBuffer());
-    await Deno.writeFile(zipPath, data);
-
-    const unzip = new Deno.Command("unzip", {
-      args: ["-o", zipPath, "-d", tmpDir],
-      stdout: "null",
-      stderr: "null",
-    });
-    const result = await unzip.output();
-    if (!result.success) return null;
-
     const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
     const content = await Deno.readTextFile(jsonPath);
     return parsePerfMetricsFile(content);
@@ -567,27 +673,12 @@ export async function downloadAndParsePerfMetrics(
 export async function downloadAndParsePerfMetricsBackfill(
   artifactId: number,
 ): Promise<Map<number, Map<string, TimingSample>> | null> {
-  const resp = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
-    { headers: apiHeaders() },
+  const tmpDir = await downloadAndExtractArtifact(
+    artifactId,
+    "perf-metrics-backfill-",
   );
-  if (!resp.ok) return null;
-
-  const tmpDir = await Deno.makeTempDir({ prefix: "perf-metrics-backfill-" });
-  const zipPath = `${tmpDir}/artifact.zip`;
-
+  if (!tmpDir) return null;
   try {
-    const data = new Uint8Array(await resp.arrayBuffer());
-    await Deno.writeFile(zipPath, data);
-
-    const unzip = new Deno.Command("unzip", {
-      args: ["-o", zipPath, "-d", tmpDir],
-      stdout: "null",
-      stderr: "null",
-    });
-    const result = await unzip.output();
-    if (!result.success) return null;
-
     const jsonPath = `${tmpDir}/${PERF_METRICS_BACKFILL_FILE}`;
     const content = await Deno.readTextFile(jsonPath);
     return parsePerfMetricsBackfillFile(content);
@@ -1274,6 +1365,57 @@ export function computeBaseline(
 // Formatting
 // ---------------------------------------------------------------------------
 
+export function isCoverageDebtMetric(name: string): boolean {
+  return name.startsWith(COVERAGE_METRIC_PREFIX);
+}
+
+export function coverageMetricGroupName(metric: string): string | null {
+  if (!isCoverageDebtMetric(metric)) return null;
+
+  const prefix = `${COVERAGE_METRIC_PREFIX} `;
+  const suffix = " uncovered lines";
+  if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
+
+  return metric.slice(prefix.length, -suffix.length);
+}
+
+export function coverageGroupForChangedFile(filename: string): string | null {
+  const normalized = filename.replaceAll("\\", "/");
+  if (!/\.[jt]sx?$/.test(normalized)) return null;
+
+  const parts = normalized.split("/");
+  if (parts[0] === "packages" && parts[1]) {
+    return `packages/${parts[1]}`;
+  }
+  if (parts[0] === "tasks" || parts[0] === "scripts") {
+    return parts[0];
+  }
+  return null;
+}
+
+export function coverageGroupsForChangedFiles(
+  filenames: Iterable<string>,
+): Set<string> {
+  const groups = new Set<string>();
+  for (const filename of filenames) {
+    const group = coverageGroupForChangedFile(filename);
+    if (group) groups.add(group);
+  }
+  return groups;
+}
+
+export function shouldGateCoverageDebtMetric(
+  metric: string,
+  changedCoverageGroups: Set<string> | undefined,
+): boolean {
+  if (!isCoverageDebtMetric(metric)) return true;
+  if (!changedCoverageGroups) return true;
+
+  const group = coverageMetricGroupName(metric);
+  if (!group || group === "workspace") return false;
+  return changedCoverageGroups.has(group);
+}
+
 /** Escape a string for use inside a Markdown table cell. */
 export function escapeTableCell(s: string): string {
   return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -1294,6 +1436,10 @@ export function formatNanos(ns: number): string {
 }
 
 export function formatMetricValue(name: string, value: number): string {
+  if (isCoverageDebtMetric(name)) {
+    const rounded = Math.round(value);
+    return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
+  }
   return name.startsWith("bench:") ? formatNanos(value) : formatDuration(value);
 }
 
@@ -1350,6 +1496,21 @@ export async function fetchPRBody(prNumber: number): Promise<string> {
   return pr.body ?? "";
 }
 
+export async function fetchPRFiles(prNumber: number): Promise<PRFile[]> {
+  const files: PRFile[] = [];
+  const perPage = 100;
+
+  for (let page = 1;; page++) {
+    const data = await githubGet<PRFile[]>(
+      `/repos/${REPO}/pulls/${prNumber}/files?per_page=${perPage}&page=${page}`,
+    );
+    files.push(...data);
+    if (data.length < perPage) break;
+  }
+
+  return files;
+}
+
 export function pullRequestBodyFromEvent(
   event: object | undefined,
 ): string | undefined {
@@ -1386,23 +1547,50 @@ export async function fetchCurrentPRBody(
  * Format (visible markdown, one per line):
  *   NEW_PERF_BASELINE: job: Package Integration Tests = 300s
  *   NEW_PERF_BASELINE: bench: foo > bar = 500us
+ *   NEW_COVERAGE_BASELINE
  *
- * Values require a unit suffix: s, ms, us/µs, ns.
- * The value is stored in the metric's native unit (seconds for
- * job/step/test, nanoseconds for bench).
+ * Values require a unit suffix: s, ms, us/µs, ns, line, or lines.
+ * The value is stored in the metric's native unit.
+ * Coverage-debt metrics must use line units; non-coverage metrics must use
+ * time units.
+ * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
+ * value and lets the PR's/main run's coverage metrics become the next baseline.
  */
 export function parseBaselineOverrides(body: string): BaselineOverrides {
-  const result: BaselineOverrides = { metrics: new Map() };
+  const result: BaselineOverrides = {
+    metrics: new Map(),
+    coverageBaselineReset: new RegExp(
+      `^\\s*${COVERAGE_BASELINE_RESET_MARKER}(?::\\s*.*)?\\s*$`,
+      "m",
+    ).test(body),
+  };
 
   const re =
-    /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(ns|µs|us|ms|s)/g;
+    /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(ns|µs|us|ms|s|lines?)/g;
   let match;
   while ((match = re.exec(body)) !== null) {
     const metric = match[1].trim();
     let value = parseFloat(match[2]);
     const unit = match[3];
+    const isLineUnit = unit === "line" || unit === "lines";
+    const isCoverageMetric = isCoverageDebtMetric(metric);
 
-    // Convert to seconds first
+    if (isLineUnit && !isCoverageMetric) {
+      throw new Error(
+        `Invalid NEW_PERF_BASELINE override for "${metric}": line units are only valid for coverage-debt metrics.`,
+      );
+    }
+    if (!isLineUnit && isCoverageMetric) {
+      throw new Error(
+        `Invalid NEW_PERF_BASELINE override for "${metric}": coverage-debt metrics must use line units.`,
+      );
+    }
+
+    if (isLineUnit) {
+      result.metrics.set(metric, value);
+      continue;
+    }
+
     switch (unit) {
       case "ns":
         value /= 1e9;
@@ -1418,7 +1606,6 @@ export function parseBaselineOverrides(body: string): BaselineOverrides {
         break;
     }
 
-    // For bench metrics, convert seconds to nanoseconds (native unit)
     if (metric.startsWith("bench:")) {
       value *= 1e9;
     }
@@ -1437,6 +1624,10 @@ export function formatOverrideSuggestion(
   metric: string,
   value: number,
 ): string {
+  if (isCoverageDebtMetric(metric)) {
+    const rounded = Math.ceil(value);
+    return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
+  }
   if (metric.startsWith("bench:")) {
     // value is in nanoseconds
     if (value < 1_000) return `${value.toFixed(0)}ns`;
@@ -1471,9 +1662,10 @@ export function addSample(
  * latest override point.
  *
  * `overridesBySha` maps commit SHA -> BaselineOverrides parsed from the
- * merged PR for that commit.  When a commit has a per-metric override, we
- * discard all samples for the affected metrics that precede that commit
- * (keeping the override commit's sample and everything after).
+ * merged PR for that commit.  When a commit has a per-metric override, or a
+ * whole-coverage reset for coverage-debt metrics, we discard all samples for
+ * the affected metrics that precede that commit (keeping the override commit's
+ * sample and everything after).
  */
 export function applyBaselineOverrides(
   timelines: Map<string, MetricTimeline>,
@@ -1488,7 +1680,11 @@ export function applyBaselineOverrides(
       const overrides = overridesBySha.get(sha);
       if (!overrides) continue;
 
-      if (overrides.metrics.has(metricName)) {
+      if (
+        overrides.metrics.has(metricName) ||
+        (overrides.coverageBaselineReset &&
+          isCoverageDebtMetric(metricName))
+      ) {
         latestOverrideIdx = i;
       }
     }

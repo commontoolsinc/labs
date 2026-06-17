@@ -38,14 +38,14 @@ deno task cf check main.tsx
 
 ## Tests
 
-Write a test when:
-- State transitions are complex and hard to verify by clicking
-- You keep breaking the same behavior
+When writing patterns for the commontoolsinc/labs repository, all new code must be
+covered by tests. Therefore, before the work is done, add automated tests for new
+or changed behavior:
 
-Don't write tests for:
-- Code that's still being sketched
-- Behavior obvious from types
-- Things easily verified by running
+- New handlers, streams, and state transitions
+- New branches, validation paths, and error paths
+- User-visible flows that the PR changes
+- Regressions fixed by the PR
 
 ## Updating Existing Code
 
@@ -57,4 +57,5 @@ Don't write tests for:
 
 - Pattern runs without errors
 - Core behavior works (verified by running it)
+- New code and behavior has automated test coverage
 - Ready for user to try

@@ -23,6 +23,10 @@ import {
   type BaselineOverrides,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
+  COVERAGE_BASELINE_RESET_MARKER,
+  coverageGroupsForChangedFiles,
+  coverageMetricGroupName,
+  downloadAndExtractArtifact,
   downloadAndParseJUnit,
   downloadAndParsePerfMetrics,
   downloadAndParsePerfMetricsBackfill,
@@ -31,10 +35,12 @@ import {
   fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchJobsForRun,
+  fetchPRFiles,
   fetchPRForCommit,
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  isCoverageDebtMetric,
   mapConcurrent,
   type MetricTimeline,
   MIN_ABSOLUTE_DELTA,
@@ -49,15 +55,23 @@ import {
   type PRInfo,
   readAndParseEvent,
   REPO,
+  shouldGateCoverageDebtMetric,
   STDDEV_FACTOR,
   timingArtifactLabel,
   type TimingSample,
   TOKEN,
+  walkFiles,
   WORKFLOW_FILE,
   type WorkflowRun,
   writePerfMetricsBackfillFile,
   writePerfMetricsFile,
 } from "./perf-lib.ts";
+import * as path from "@std/path";
+import {
+  collectCoverageDebtMetrics,
+  collectCoverageDebtMetricsFromLcov,
+  COVERAGE_PROFILE_ARTIFACT_PREFIX,
+} from "./coverage-metrics.ts";
 
 /** How many recent main-branch runs to use for baseline. */
 const BASELINE_RUNS = 20;
@@ -121,6 +135,20 @@ async function githubApiOrSkip<T>(
   }
 }
 
+export function parseMergedBaselineOverrides(
+  pr: Pick<PRInfo, "number" | "body">,
+  warn: (message: string) => void = console.warn,
+): BaselineOverrides | null {
+  try {
+    return parseBaselineOverrides(pr.body ?? "");
+  } catch (error) {
+    warn(
+      `  Warning: ignoring invalid baseline override in merged PR #${pr.number}: ${error}`,
+    );
+    return null;
+  }
+}
+
 /**
  * Metrics to exclude from regression checks because their aggregate values
  * naturally grow as new tests are added.  Per-test timings from JUnit
@@ -130,6 +158,296 @@ const EXCLUDED_METRIC_PATTERNS = [
   /^job: Pattern Unit Tests/,
   /^step: pattern unit tests$/,
 ];
+
+const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
+  "coverage-profile-workspace",
+  ...[1, 2, 3, 4].map((shard) => `coverage-profile-runner-${shard}`),
+  ...[1, 2, 3, 4].map((shard) =>
+    `coverage-profile-generated-patterns-${shard}`
+  ),
+  "coverage-profile-package-runner",
+  "coverage-profile-package-runtime-client",
+  "coverage-profile-package-shell",
+  ...[1, 2, 3, 4].map((shard) =>
+    `coverage-profile-pattern-integration-${shard}`
+  ),
+  "coverage-profile-pattern-reload",
+  ...[1, 2, 3, 4, 5].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
+];
+
+function sampleForRun(run: WorkflowRun, value: number): TimingSample {
+  return {
+    runId: run.id,
+    runUrl: run.html_url,
+    sha: run.head_sha,
+    createdAt: run.created_at,
+    durationSeconds: value,
+  };
+}
+
+async function copyCoverageArtifactFiles(
+  artifact: Artifact,
+  profileDir: string,
+  lcovDir: string,
+): Promise<{ profileFiles: number; lcovFiles: number }> {
+  const extractedDir = await downloadAndExtractArtifact(
+    artifact.id,
+    "coverage-profile-",
+  );
+  if (!extractedDir) {
+    throw new Error(
+      `Failed to download or extract coverage profile artifact ${artifact.name} (${artifact.id}).`,
+    );
+  }
+
+  let profileFiles = 0;
+  let lcovFiles = 0;
+  try {
+    for await (const file of walkFiles(extractedDir)) {
+      const isProfile = file.endsWith(".json");
+      const isLcov = file.endsWith(".lcov");
+      if (!isProfile && !isLcov) continue;
+      const count = isLcov ? lcovFiles : profileFiles;
+      const destDir = isLcov ? lcovDir : profileDir;
+      const dest = path.join(
+        destDir,
+        `${artifact.id}-${count}-${path.basename(file)}`,
+      );
+      await Deno.copyFile(file, dest);
+      if (isLcov) lcovFiles++;
+      else profileFiles++;
+    }
+
+    if (profileFiles === 0 && lcovFiles === 0) {
+      throw new Error(
+        `Coverage profile artifact ${artifact.name} (${artifact.id}) contained no profile or LCOV files.`,
+      );
+    }
+  } finally {
+    try {
+      await Deno.remove(extractedDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+
+  return { profileFiles, lcovFiles };
+}
+
+async function readCombinedLcov(lcovDir: string): Promise<string> {
+  const chunks: string[] = [];
+  for await (const file of walkFiles(lcovDir)) {
+    if (!file.endsWith(".lcov")) continue;
+    chunks.push(await Deno.readTextFile(file));
+  }
+  return chunks.join("\n");
+}
+
+type TableAlign = "left" | "right";
+type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+
+function printTextTable(
+  headers: string[],
+  rows: string[][],
+  align: TableAlign[] = [],
+): void {
+  const widths = headers.map((header, column) =>
+    Math.max(
+      header.length,
+      ...rows.map((row) => row[column]?.length ?? 0),
+    )
+  );
+
+  const formatCell = (cell: string, column: number) =>
+    align[column] === "right"
+      ? cell.padStart(widths[column])
+      : cell.padEnd(widths[column]);
+  const formatRow = (cells: string[]) =>
+    cells.map((cell, column) => formatCell(cell, column)).join("  ");
+
+  console.log(formatRow(headers));
+  console.log(widths.map((width) => "-".repeat(width)).join("  "));
+  for (const row of rows) {
+    console.log(formatRow(row));
+  }
+}
+
+function trimTrailingZero(value: string): string {
+  return value.replace(/\.0(?=[a-z])/g, "");
+}
+
+function formatMetricValueForTable(
+  metric: string,
+  value: number | undefined,
+): string {
+  if (value === undefined) return "-";
+  if (isCoverageDebtMetric(metric)) return `${Math.round(value)}`;
+  return trimTrailingZero(formatMetricValue(metric, value));
+}
+
+function formatMetricDelta(metric: string, row: Row): string {
+  if (row.median === undefined || row.pctIncrease === undefined) return "-";
+
+  const delta = row.current - row.median;
+  const sign = delta >= 0 ? "+" : "-";
+  const absolute = Math.abs(delta);
+  const formattedAbsolute = isCoverageDebtMetric(metric)
+    ? `${Math.round(absolute)}`
+    : trimTrailingZero(formatMetricValue(metric, absolute));
+  const pctSign = row.pctIncrease >= 0 ? "+" : "";
+  const pctDigits = row.pctIncrease !== 0 && Math.abs(row.pctIncrease) < 1
+    ? 1
+    : 0;
+  return `${sign}${formattedAbsolute} (${pctSign}${
+    row.pctIncrease.toFixed(pctDigits)
+  }%)`;
+}
+
+function metricDisplayParts(metric: string): { task: string; metric: string } {
+  const colon = metric.indexOf(":");
+  if (colon < 0) return { task: "other", metric };
+
+  const kind = metric.slice(0, colon);
+  const rest = metric.slice(colon + 1).trim();
+  const subtaskSeparator = " > ";
+
+  if (
+    (kind === "test" || kind === "subtest") &&
+    rest.includes(subtaskSeparator)
+  ) {
+    const [task, ...metricParts] = rest.split(subtaskSeparator);
+    return { task, metric: metricParts.join(subtaskSeparator) };
+  }
+
+  if (kind === "coverage-debt") {
+    return {
+      task: kind,
+      metric: coverageMetricGroupName(metric) ?? rest,
+    };
+  }
+
+  return { task: kind, metric: rest };
+}
+
+interface Row {
+  metric: string;
+  status: Status;
+  current: number;
+  median?: number;
+  variance?: number;
+  stddev?: number;
+  threshold?: number;
+  n: number;
+  pctIncrease?: number;
+  /**
+   * How much of the median-to-threshold margin the current value has consumed,
+   * as a percentage. 0 percent means the current value is at the median.
+   * 100 percent means the current value is at the threshold.
+   */
+  headroomPct?: number;
+}
+
+function metricTableRows(rows: Row[], includeStatus: boolean): string[][] {
+  return rows.map((row) => {
+    const display = metricDisplayParts(row.metric);
+    const cells = [
+      formatMetricValueForTable(row.metric, row.median),
+      formatMetricValueForTable(row.metric, row.current),
+      formatMetricDelta(row.metric, row),
+      display.task,
+      display.metric,
+    ];
+    return includeStatus ? [row.status, ...cells] : cells;
+  });
+}
+
+function printMetricTable(rows: Row[], includeStatus = false): void {
+  const headers = includeStatus
+    ? ["Status", "Baseline", "Current", "Change", "Task", "Metric"]
+    : ["Baseline", "Current", "Change", "Task", "Metric"];
+  const align = includeStatus
+    ? ["left", "right", "right", "right", "left", "left"] as TableAlign[]
+    : ["right", "right", "right", "left", "left"] as TableAlign[];
+  printTextTable(headers, metricTableRows(rows, includeStatus), align);
+}
+
+async function extractCoverageDebtSamples(
+  run: WorkflowRun,
+  artifacts: Artifact[],
+): Promise<Map<string, TimingSample>> {
+  const metrics = new Map<string, TimingSample>();
+  const coverageArtifacts = newestArtifactsByName(artifacts.filter(
+    (artifact) =>
+      artifact.name.startsWith(COVERAGE_PROFILE_ARTIFACT_PREFIX) &&
+      !artifact.expired,
+  ));
+  const coverageArtifactNames = new Set(
+    coverageArtifacts.map((artifact) => artifact.name),
+  );
+  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
+    !coverageArtifactNames.has(name)
+  );
+
+  if (missingArtifacts.length > 0) {
+    throw new Error(
+      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
+    );
+  }
+
+  const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
+  const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
+  try {
+    let profileFileCount = 0;
+    let lcovFileCount = 0;
+    for (const artifact of coverageArtifacts) {
+      const copied = await copyCoverageArtifactFiles(
+        artifact,
+        profileDir,
+        lcovDir,
+      );
+      profileFileCount += copied.profileFiles;
+      lcovFileCount += copied.lcovFiles;
+    }
+
+    if (profileFileCount === 0 && lcovFileCount === 0) {
+      throw new Error(
+        "Coverage profile artifacts contained no profile or LCOV files.",
+      );
+    }
+
+    const coverageMetrics = lcovFileCount > 0
+      ? await collectCoverageDebtMetricsFromLcov({
+        rootDir: Deno.cwd(),
+        lcov: await readCombinedLcov(lcovDir),
+      })
+      : await collectCoverageDebtMetrics({
+        rootDir: Deno.cwd(),
+        coverageProfileDir: profileDir,
+      });
+
+    for (const metric of coverageMetrics) {
+      metrics.set(
+        metric.name,
+        sampleForRun(run, metric.uncoveredLines),
+      );
+    }
+
+    console.log(
+      `Extracted ${coverageMetrics.length} coverage debt metrics from ${
+        lcovFileCount > 0
+          ? `${lcovFileCount} LCOV report files`
+          : `${profileFileCount} coverage profile files`
+      }.`,
+    );
+  } finally {
+    try {
+      await Deno.remove(profileDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+    try {
+      await Deno.remove(lcovDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+
+  return metrics;
+}
 
 // ---------------------------------------------------------------------------
 // Main
@@ -169,14 +487,26 @@ async function main() {
         `  Warning: could not fetch live PR body and no pull_request event body was available: ${prBody.errorMessage}`,
       );
     }
-    prOverrides = parseBaselineOverrides(prBody.body);
+    try {
+      prOverrides = parseBaselineOverrides(prBody.body);
+    } catch (error) {
+      console.error(
+        `Invalid performance baseline override in PR description: ${error}`,
+      );
+      Deno.exit(1);
+    }
   } else {
-    prOverrides = { metrics: new Map() };
+    prOverrides = { metrics: new Map(), coverageBaselineReset: false };
   }
 
   if (prOverrides.metrics.size > 0) {
     console.log(
       `PR description contains ${prOverrides.metrics.size} NEW_PERF_BASELINE override(s).`,
+    );
+  }
+  if (prOverrides.coverageBaselineReset) {
+    console.log(
+      `PR description contains ${COVERAGE_BASELINE_RESET_MARKER}; coverage debt ratchet failures will be treated as an intentional baseline reset.`,
     );
   }
 
@@ -193,17 +523,57 @@ async function main() {
   // The event payload has the metadata needed for samples, so avoid spending
   // another API request on the current workflow run.
   const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
+  let changedCoverageGroups: Set<string> | undefined;
+
+  if (prNumber) {
+    try {
+      const prFiles = await fetchPRFiles(parseInt(prNumber));
+      changedCoverageGroups = coverageGroupsForChangedFiles(
+        prFiles.map((file) => file.filename),
+      );
+      const groups = [...changedCoverageGroups].sort();
+      if (groups.length > 0) {
+        console.log(
+          `Coverage debt gating applies to changed source group(s): ${
+            groups.join(", ")
+          }.`,
+        );
+      } else {
+        console.log(
+          "PR changes no coverage source groups; coverage debt metrics will be reported but not blocking.",
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `  Warning: could not fetch PR changed files; coverage debt metrics will use strict gating: ${error}`,
+      );
+    }
+  }
 
   // Extract job/step metrics
   for (const [name, sample] of extractMetrics(currentRunInfo, currentJobs)) {
     currentMetrics.set(name, sample);
   }
 
+  let currentArtifacts: Artifact[] = [];
+  let currentArtifactsError: unknown;
+
+  // Fetch artifacts once; coverage extraction depends on this, while timing
+  // artifact parsing below is best-effort.
+  try {
+    currentArtifacts = await fetchArtifactsForRun(runIdNum);
+    console.log(
+      `Fetched ${currentArtifacts.length} artifacts for current run.`,
+    );
+  } catch (e) {
+    currentArtifactsError = e;
+    console.warn(`  Warning: could not fetch artifacts for current run: ${e}`);
+  }
+
   // Extract per-test metrics from JUnit artifacts
   try {
-    const artifacts = await fetchArtifactsForRun(runIdNum);
     // Newest per name: a re-run of a flagged test job must refresh its metric.
-    const timingArtifacts = newestArtifactsByName(artifacts.filter(
+    const timingArtifacts = newestArtifactsByName(currentArtifacts.filter(
       (a) => a.name.startsWith("test-timing-") && !a.expired,
     ));
     for (const artifact of timingArtifacts) {
@@ -218,13 +588,44 @@ async function main() {
       }
     }
   } catch (e) {
-    console.warn(`  Warning: could not fetch artifacts for current run: ${e}`);
+    console.warn(
+      `  Warning: could not extract timing metrics from current run artifacts: ${e}`,
+    );
+  }
+
+  // Extract coverage debt metrics from coverage profile artifacts.
+  let coverageDataError: unknown;
+  try {
+    if (currentArtifactsError) {
+      throw new Error(
+        `Could not fetch current run artifacts: ${currentArtifactsError}`,
+      );
+    }
+    const coverageMetrics = await extractCoverageDebtSamples(
+      currentRunInfo,
+      currentArtifacts,
+    );
+    for (const [name, sample] of coverageMetrics) {
+      currentMetrics.set(name, sample);
+    }
+  } catch (e) {
+    coverageDataError = e;
+    console.error(
+      `  Error: could not extract coverage debt metrics for current run: ${e}`,
+    );
   }
 
   await writePerfMetricsFile(PERF_METRICS_FILE, currentMetrics);
   console.log(
     `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
   );
+
+  if (coverageDataError && !informationalOnly) {
+    console.error(
+      "Failing because coverage debt data is required for pull request checks.",
+    );
+    Deno.exit(1);
+  }
 
   if (currentMetrics.size === 0) {
     console.log("No metrics extracted from current run. Nothing to check.");
@@ -373,8 +774,11 @@ async function main() {
 
         if (pr) {
           prInfoBySha.set(run.head_sha, pr);
-          const overrides = parseBaselineOverrides(pr.body ?? "");
-          if (overrides.metrics.size > 0) {
+          const overrides = parseMergedBaselineOverrides(pr);
+          if (
+            overrides &&
+            (overrides.metrics.size > 0 || overrides.coverageBaselineReset)
+          ) {
             overridesBySha.set(run.head_sha, overrides);
           }
         }
@@ -457,6 +861,10 @@ async function main() {
     timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  const coverageBaselineAvailable = [...timelines.keys()].some(
+    isCoverageDebtMetric,
+  );
+
   // Apply baseline overrides from merged PRs
   if (overridesBySha.size > 0) {
     console.log(
@@ -466,24 +874,6 @@ async function main() {
   }
 
   // 5. Compare current metrics against baseline
-  type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
-  interface Row {
-    metric: string;
-    status: Status;
-    current: number;
-    median?: number;
-    variance?: number;
-    stddev?: number;
-    threshold?: number;
-    n: number;
-    pctIncrease?: number;
-    /**
-     * How much of the median→threshold margin the current value has consumed,
-     * as a percentage. 0% = at median; 100% = at threshold; >100% = over.
-     */
-    headroomPct?: number;
-  }
-
   const rows: Row[] = [];
   const failures: Row[] = [];
 
@@ -491,6 +881,80 @@ async function main() {
     const current = currentSample.durationSeconds;
     const timeline = timelines.get(metric);
     const n = timeline?.samples.length ?? 0;
+    const isCoverageMetric = isCoverageDebtMetric(metric);
+
+    if (isCoverageMetric) {
+      const latestBaseline = timeline?.samples.at(-1)?.durationSeconds;
+      const override = prOverrides.metrics.get(metric);
+      const coverageReset = prOverrides.coverageBaselineReset;
+      const shouldGateCoverage = shouldGateCoverageDebtMetric(
+        metric,
+        changedCoverageGroups,
+      );
+
+      if (latestBaseline === undefined) {
+        if (
+          coverageReset || (override !== undefined && current <= override)
+        ) {
+          rows.push({ metric, status: "ovrd", current, n });
+        } else if (!shouldGateCoverage) {
+          rows.push({ metric, status: "excl", current, n });
+        } else if (current > 0) {
+          const row: Row = {
+            metric,
+            status: "OVER",
+            current,
+            median: 0,
+            variance: 0,
+            stddev: 0,
+            threshold: 0,
+            n,
+            pctIncrease: 100,
+          };
+          rows.push(row);
+          failures.push(row);
+        } else {
+          rows.push({ metric, status: "n/a", current, n });
+        }
+        continue;
+      }
+
+      const pctIncrease = latestBaseline === 0
+        ? current > 0 ? 100 : 0
+        : ((current - latestBaseline) / latestBaseline) * 100;
+      const stats = {
+        median: latestBaseline,
+        variance: 0,
+        stddev: 0,
+        threshold: latestBaseline,
+        pctIncrease,
+      };
+
+      if (coverageReset) {
+        rows.push({ metric, status: "ovrd", current, n, ...stats });
+        continue;
+      }
+
+      if (override !== undefined && current <= override) {
+        rows.push({ metric, status: "ovrd", current, n, ...stats });
+        continue;
+      }
+
+      if (!shouldGateCoverage) {
+        rows.push({ metric, status: "excl", current, n, ...stats });
+        continue;
+      }
+
+      if (current > latestBaseline) {
+        const row: Row = { metric, status: "OVER", current, n, ...stats };
+        rows.push(row);
+        failures.push(row);
+      } else {
+        rows.push({ metric, status: "OK", current, n, ...stats });
+      }
+      continue;
+    }
+
     const baseline = timeline && n >= MIN_SAMPLES
       ? computeBaseline(
         timeline.samples.map((s) => s.durationSeconds),
@@ -561,11 +1025,10 @@ async function main() {
     console.log(
       "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
     );
-    console.log("| signal | detail |");
-    console.log("|:--|:--|");
-    for (const signal of wallTimeSignals) {
-      console.log(`| ${signal.title} | ${signal.detail} |`);
-    }
+    printTextTable(
+      ["Signal", "Detail"],
+      wallTimeSignals.map((signal) => [signal.title, signal.detail]),
+    );
   }
 
   // 6c. Full metric table — always emitted, grouped by metric kind.
@@ -576,10 +1039,13 @@ async function main() {
       }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
   console.log(
+    "Coverage debt metrics use a latest-main ratchet for changed source groups.",
+  );
+  console.log(
     "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
   );
   console.log(
-    "  OK = <50% consumed; ovrd = saved by a PR override; excl = metric excluded from the check;",
+    "  OK = <50% consumed; ovrd = saved by a PR override/reset; excl = metric excluded from the check;",
   );
   console.log(
     `  n/a = fewer than ${MIN_SAMPLES} baseline samples.`,
@@ -603,11 +1069,20 @@ async function main() {
         return "Subtests";
       case "bench":
         return "Benchmarks";
+      case "coverage-debt":
+        return "Coverage Debt";
       default:
         return prefix;
     }
   };
-  const KIND_ORDER = ["Jobs", "Steps", "Test files", "Subtests", "Benchmarks"];
+  const KIND_ORDER = [
+    "Jobs",
+    "Steps",
+    "Test files",
+    "Subtests",
+    "Benchmarks",
+    "Coverage Debt",
+  ];
   // Sort order within each kind: most at-risk of failing the check first.
   // `ovrd` sits below `OK` because an override-protected metric is at strictly
   // lower risk of tripping the check than an unguarded OK metric — the author
@@ -656,25 +1131,7 @@ async function main() {
       return (b.headroomPct ?? -Infinity) - (a.headroomPct ?? -Infinity);
     });
     console.log(`\n### ${kind}  (${rs.length})`);
-    console.log(
-      "| status | head% | Δ% | current | baseline median | threshold | n | metric |",
-    );
-    console.log("|:---|---:|---:|---:|---:|---:|---:|:--|");
-    for (const r of rs) {
-      const fmt = (v: number | undefined) =>
-        v === undefined ? "—" : formatMetricValue(r.metric, v);
-      const pct = r.pctIncrease === undefined
-        ? "—"
-        : `${r.pctIncrease >= 0 ? "+" : ""}${r.pctIncrease.toFixed(1)}%`;
-      const head = r.headroomPct === undefined
-        ? "—"
-        : `${r.headroomPct.toFixed(0)}%`;
-      console.log(
-        `| ${r.status} | ${head} | ${pct} | ${fmt(r.current)} | ${
-          fmt(r.median)
-        } | ${fmt(r.threshold)} | ${r.n} | ${r.metric} |`,
-      );
-    }
+    printMetricTable(rs, true);
   }
 
   console.log("::endgroup::");
@@ -683,21 +1140,8 @@ async function main() {
   if (failures.length > 0) {
     failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
 
-    console.log(
-      "\n## Performance regression details:\n" +
-        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
-    );
-    console.log(
-      "|--------|---------|-------------------|-----------|--------|",
-    );
-    for (const f of failures) {
-      const fmt = (v: number) => formatMetricValue(f.metric, v);
-      console.log(
-        `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
-          fmt(f.threshold!)
-        } | +${f.pctIncrease!.toFixed(0)}% |`,
-      );
-    }
+    console.log("\n## Performance regression details:\n");
+    printMetricTable(failures);
 
     console.log("\n::group::Baseline sample breakdown:\n");
     for (const f of failures) {
@@ -738,17 +1182,51 @@ async function main() {
     Deno.exit(0);
   }
 
+  const coverageFailures = failures.filter((f) =>
+    isCoverageDebtMetric(f.metric)
+  );
+  const perMetricFailures = failures.filter((f) =>
+    !isCoverageDebtMetric(f.metric)
+  );
+
+  if (coverageFailures.length > 0) {
+    const verb = coverageBaselineAvailable ? "reset" : "bootstrap";
+    console.log(
+      `\nTo ${verb} the coverage ratchet for one cycle, add the coverage reset marker to your PR description.`,
+    );
+    console.log(
+      "Coverage debt can still be accepted one metric at a time with NEW_PERF_BASELINE when that is the narrower change.",
+    );
+  }
+
   console.log(
     "\nTo accept these regressions, add the following to your PR description:\n",
   );
   console.log("---BEGIN COPY-PASTE---");
-  for (const f of failures) {
+  if (coverageFailures.length > 0) {
+    console.log(COVERAGE_BASELINE_RESET_MARKER);
+  }
+  for (const f of perMetricFailures) {
     const suggested = formatOverrideSuggestion(f.metric, f.current);
     console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
   }
   console.log("---END COPY-PASTE---");
 
+  if (coverageFailures.length > 0) {
+    console.log(
+      "\nIndividual coverage override alternatives:",
+    );
+    console.log("---BEGIN COPY-PASTE---");
+    for (const f of coverageFailures) {
+      const suggested = formatOverrideSuggestion(f.metric, f.current);
+      console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
+    }
+    console.log("---END COPY-PASTE---");
+  }
+
   Deno.exit(1);
 }
 
-main();
+if (import.meta.main) {
+  main();
+}
