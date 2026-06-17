@@ -269,26 +269,20 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
 
     // Host persists the generated image returned by the image route as a data
     // URL. Other viewers render the stored value without running image-gen.
-    const storedArtSyncState = computed(() =>
-      safeImageUrl(option.imageUrl) ? "stored" : ""
-    );
-    const generatedArtSyncState = computed(() => {
-      const url = safeImageUrl(generatedArt.result);
-      if (url) {
+    const artSyncState = computed(() => {
+      if (safeImageUrl(option.imageUrl)) return "stored";
+      if (!isAdmin) return "";
+      const generatedUrl = safeImageUrl(generatedArt.result ?? "");
+      if (generatedUrl) {
         setOptionImage.send({
           optionId: oid,
-          imageUrl: url,
+          imageUrl: generatedUrl,
         });
         return "stored";
       }
       if (generatedArt.pending) return "pending";
       return generatedArt.error ? "error" : "requested";
     });
-    const artSyncState = storedArtSyncState
-      ? "stored"
-      : isAdmin
-      ? generatedArtSyncState
-      : "";
 
     const homePageSearch = fetchData<WebSearchResponse>({
       url: computed(() =>
