@@ -118,8 +118,8 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           only renders for a runtime-attested profile (a “represents-principal”
           CFC label), which this story can’t mint, so these badges stay in the
           plain “presented” state. Hover or focus a badge to see its tooltip
-          (CT-1648): Ada has a bio + 3 pinned patterns, Grace has a bio only,
-          and Alan — with neither — shows no tooltip.
+          (CT-1648): Ada has a bio + 3 pinned pieces, Grace has a bio only, and
+          Alan — with neither — shows no tooltip.
         </span>
       </div>
     ),

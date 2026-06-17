@@ -742,8 +742,8 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // (bio + pinned-pattern count). Only rendered when there's something extra
     // to show beyond the name already on the badge.
     const pinnedLabel = this._pinnedCount === 1
-      ? "1 pinned pattern"
-      : `${this._pinnedCount} pinned patterns`;
+      ? "1 pinned piece"
+      : `${this._pinnedCount} pinned pieces`;
     const hasTooltip = this._bio !== undefined || this._pinnedCount > 0;
 
     return html`
