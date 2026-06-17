@@ -319,4 +319,33 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(cell.get()).toBe("v2");
     expect(cell.cfcLabel).toEqual(labelA);
   });
+
+  it("re-establishes the backend subscription when a label-aware subscriber is added later", async () => {
+    const events: string[] = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => {
+          events.push("subscribe");
+          return Promise.resolve();
+        },
+        unsubscribe: () => {
+          events.push("unsubscribe");
+          return Promise.resolve();
+        },
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<string>(runtime, ref);
+
+    cell.subscribe(() => {}); // value-only first
+    expect(cell.wantsCfcLabel).toBe(false);
+    expect(events).toEqual(["subscribe"]);
+
+    // A label-aware subscription on the SAME handle re-opens the backend sub so
+    // it carries labels (the old one was label-less and would be deduped away).
+    cell.subscribe(() => {}, { includeCfcLabel: true });
+    expect(cell.wantsCfcLabel).toBe(true);
+    await Promise.resolve(); // let the unsubscribe().finally(subscribe) settle
+    expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
+  });
 });

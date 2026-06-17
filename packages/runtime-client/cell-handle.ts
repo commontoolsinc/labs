@@ -202,6 +202,14 @@ export class CellHandle<T = unknown> {
     options: { includeCfcLabel?: boolean } = {},
   ): Cancel {
     this.#requireSchema("subscribe");
+    // If a label-aware subscription is added AFTER a value-only one already
+    // opened the backend subscription, that backend sub carries no label and
+    // the connection would dedup this one away. Re-establish it so it delivers
+    // labels (the worker recreates its sink with includeCfcLabel). This works
+    // when this handle is the sole subscriber of its ref; a value-only handle
+    // sharing the exact same ref would keep the backend sub label-less.
+    const upgradeToCfcLabel = options.includeCfcLabel === true &&
+      !this.#wantsCfcLabel && this.#callbacks.size > 0;
     if (options.includeCfcLabel) {
       this.#wantsCfcLabel = true;
     }
@@ -228,7 +236,14 @@ export class CellHandle<T = unknown> {
     };
 
     this.#callbacks.set(callbackId, wrappedCallback);
-    this.#conn.subscribe(this);
+    if (upgradeToCfcLabel) {
+      // Tear down the label-less backend sub, then re-open it label-aware.
+      void this.#conn.unsubscribe(this).finally(() => {
+        this.#conn.subscribe(this);
+      });
+    } else {
+      this.#conn.subscribe(this);
+    }
 
     // Always call callback immediately with current value
     // This matches Cell behavior - callback is always called, even if value is undefined
