@@ -4473,3 +4473,52 @@ The OTHER #4103 changes stand: the rebase-interaction idle-wait fix
 (`futureRunWaitsForIdle` for first-run demanded debounced computations,
 machine-independent, restores main's behavior) and the scheduledEffects
 cross-package consumer cleanup.
+
+## PERF FIX — event-preflight O(N²) over a hub (decision 15)
+
+The `Pattern Integration (2/4)` + `Pattern Reload` rapid-notebook timeouts
+(`runtime:idle/dispose`) were a real 3c regression: deleting the upstream-
+stale machinery turned the event-preflight consistency gate into an O(graph)
+upstream walk (`collectInvalidUpstreamForLog`) that, against the note-list
+hub, visited all N notes per preflight → O(N²) under rapid creation
+(measured 564 ms/create). The inventory's "no consumer for transitive
+staleness" was false — the I4 gate is the consumer. Design adjudication and
+decision 15 captured in the spec (README §7.5/§14/§15, inventory row flipped
+Delete→Subsume).
+
+Implemented in two steps + guards:
+
+1. `refactor(runner): invalid-node index in NodeRegistry` — a `Set<Action>`
+   of active invalid/never-ran nodes, maintained through a single
+   `setStatus()` choke point (+ activate/remove). All node-status writes
+   routed through it; the three O(N) full-node scans
+   (`collectPullIterationSeeds`, `hasRunnablePullWork`, `hasDirtyPullWork`)
+   now iterate the index (every runnable seed is invalid). Correctness-
+   neutral; full runner suite green.
+
+2. `fix(runner): invert the event-preflight upstream-invalid walk` — seed
+   from `getInvalidNodes()` and walk DOWN to the closure via `dependents`
+   (exact inverse of `reverseDependencies`), with materializer→reader edges
+   mirrored from `collectMaterializerWritersForLog`. Cost is bounded by the
+   invalid set × its downstream cone, not the closure fan-out. Re-adds no
+   per-data-change transitive marking (dormancy stays zero-cost, D5/I2).
+
+Red→green / guards (all in `scheduler-pull.test.ts`):
+
+- `should keep event handlers behind invalid dependencies` (the transitive
+  consistency semantics) — still green.
+- `should dispatch clean broad event preflight dependencies` — the 32-wide
+  clean fan-out now reports `visitCount < 10` (was the full ~33 cone under
+  the upstream walk).
+- `defers an event handler behind an invalid upstream materializer` — NEW,
+  exercises the materializer arm of the inverted walk through the gate.
+- `bounds event preflight cost over a wide fan-in hub` — NEW, the faithful
+  notebook shape: 200 writers → one hub the handler reads; invalidating one
+  writer keeps `visitCount < 20` (the old upstream walk visited ~200) while
+  still dispatching on the re-settled hub.
+
+Full runner suite green (618 → 620 with the two new tests). The
+`scheduler-event-preflight.bench.ts` wall-clock is unchanged because it is
+dominated by per-iteration graph setup (512-node build + pull), not the
+preflight; the walk reduction is proven by the visitCount guards above.
+Deviations: none.

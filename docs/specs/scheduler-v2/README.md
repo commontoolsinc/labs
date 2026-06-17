@@ -572,7 +572,10 @@ Per pass, for each lane's head event:
    cache is proven.
 2. **Consistency gate.** Treat the closure as a transient demand root: any
    invalid upstream nodes of the closure join the pass's work set (they are
-   demanded *by the event*, live or not). If any are ineligible (time-gated),
+   demanded *by the event*, live or not). The invalid-upstream set is computed
+   by **inverted reachability** from the maintained invalid-node set into the
+   closure — not an upstream walk of the closure's cone, which is O(graph)
+   against a hub (decision 15). If any are ineligible (time-gated),
    park the lane's head with `notBefore = min eligibleAt` and set the wake
    gate; the lane stays FIFO.
 3. **Dispatch** once the closure is clean: presync handler inputs
@@ -1006,7 +1009,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2: reachability never decides runs, so transitive marking has no decision left to make. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); the incremental refcount is the spec'd escalation. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |
@@ -1102,6 +1105,25 @@ Summary table; the full per-mechanism walkthrough with file references is in
     machinery for now. UI-local events cannot race (the precondition is
     inert for them; the cost is one small create per handling). Future
     layering stays open as open question 2.
+15. **Preflight upstream-invalid reachability.** The event-preflight
+    consistency gate (§7.5 step 2, I4) is the one surviving consumer of
+    transitive-staleness reachability — P2's "reachability never decides
+    runs" holds for the run decision but not for this gate. Deleting v1's
+    `upstreamStaleCount` turned the gate's query into an O(graph) upstream
+    walk (`collectInvalidUpstreamForLog`), O(N²) under rapid creation against
+    a hub (measured: rapid-notebook, 564 ms/create). Resolution: **invert the
+    walk** — reachability from the maintained invalid-node set (a
+    `Set<Action>` in `NodeRegistry` updated through `setStatus`) downstream
+    into the closure — cost bounded by invalid-set × observed downstream cone,
+    re-adding no per-data-change transitive marking (dormancy stays zero-cost,
+    D5/I2). Orthogonal to decision 3 (closure caching), which addresses
+    read-closure *discovery*, a different cost. **Escalation (spec'd, not
+    adopted):** if a read-side-fan-out workload (one invalid node feeding many
+    closure writers) makes the inverted walk O(graph), adopt an incremental
+    `hasInvalidUpstream` signal maintained the way §5.2 maintains liveness,
+    scoped to live nodes — feeding only this gate, never the run decision, so
+    push mode / conditional effects / watermarks stay deleted. Adopt only
+    behind the preflight benchmark.
 
 ### Open
 
