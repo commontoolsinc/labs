@@ -166,6 +166,47 @@ describe("CFProfileBadge", () => {
       expect(el._seal?.hue).toBe(identitySeal(OWNER_DID).hue);
     });
 
+    it("re-derives verification when the value subscription fires (cold profile self-heals)", async () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+
+      // `getCfcLabel` is a pure store read: cold first (no label), then the
+      // attestation appears once the doc loads.
+      let labelReady = false;
+      let subscriptionCallback: ((val: unknown) => void) | undefined;
+      const resolved = {
+        ref: () => ({ path: [] }),
+        space: () => "did:key:zSpace",
+        id: () => "fid1:piece",
+        asSchema: () => ({
+          subscribe: (cb: (val: unknown) => void) => {
+            subscriptionCallback = cb;
+            return () => {};
+          },
+        }),
+        getCfcLabel: () =>
+          Promise.resolve(
+            labelReady ? representsPrincipalLabel(OWNER_DID) : undefined,
+          ),
+      };
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+
+      await el._resolve();
+      // Let the initial (cold) verification read settle: no label yet.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(el._state).toBe("presented");
+      expect(el._seal).toBeUndefined();
+
+      // The doc loads: the label is now present and the value subscription
+      // fires, re-deriving verification.
+      labelReady = true;
+      subscriptionCallback?.({ name: "Ada" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(el._state).toBe("verified");
+      expect(el._seal?.did).toBe(OWNER_DID);
+    });
+
     it("stays presented (no seal) when the label has no represents-principal atom", async () => {
       const el = new CFProfileBadge() as any;
       markConnected(el, true);

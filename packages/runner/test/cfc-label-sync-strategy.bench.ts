@@ -1,5 +1,6 @@
 /**
- * Guards the `getCfcLabel` sync strategy (runtime-processor `syncMetaLinkedDocs`).
+ * Documents why the `getCfcLabel` per-call sync (runtime-processor's former
+ * `syncMetaLinkedDocs`) was removed — and guards against reintroducing it.
  *
  * `getCfcLabel` is a DISPLAY-label read on the render hot path. It used to
  * re-sync the cell's whole root meta-graph on every call with a SERIAL
@@ -9,20 +10,21 @@
  * the cost the SUM of those round-trips along the whole graph. End-to-end the
  * `getCfcLabel` IPC p95 ran 0.5–4.2s at 4 concurrent browser profiles.
  *
- * The fix: skip docs already in the local replica (the renderer is already
- * subscribed to the cells it renders, so they are present — read the current
- * display state without awaiting a refresh), and sync any genuinely cold docs in
- * one parallel batch. End-to-end that dropped the `getCfcLabel` IPC p95 to
- * ~5–11ms.
+ * The resolution: `getCfcLabel` does NOT sync at all — it is a pure, non-blocking
+ * read of the current store. Its only callers are reactive UI components that
+ * subscribe to the cell and re-read the label on change, so a not-yet-loaded doc
+ * yields an empty label that self-heals when the subscription delivers it. The
+ * caller owns liveness. End-to-end the `getCfcLabel` IPC p95 dropped to <1ms.
  *
- * A storage emulator can't reproduce this — it has no network latency and a
- * single replica holds its own writes, so nothing is ever "cold" or mid-refresh.
- * This instead models the cost STRUCTURE the change addresses: each genuine sync
- * is one awaited round-trip (`ROUND_TRIP_MS`); an already-present doc is a Set
- * lookup. The three strategies then show their true asymptotics:
+ * A storage emulator can't reproduce the real cost — it has no network latency
+ * and a single replica holds its own writes, so nothing is ever "cold" or
+ * mid-refresh. This instead models the cost STRUCTURE: each genuine sync is one
+ * awaited round-trip (`ROUND_TRIP_MS`); an already-present doc is a Set lookup.
+ * The strategies then show their true asymptotics, ending at the pure read:
  *   - serial-await     [old] — SUM of round-trips (one per node).
  *   - parallel-batch          — ~one round-trip (all coalesced).
- *   - skip-when-present [new] — zero round-trips when warm; one batch when cold.
+ *   - skip-when-present       — zero round-trips when warm; one batch when cold.
+ *   - pure-read        [new] — no sync at all (caller owns liveness).
  */
 
 import { sleep } from "@commonfabric/utils/sleep";
@@ -78,6 +80,10 @@ const ensureSkipWhenPresent = async (replica: Replica) => {
   }
 };
 
+// The shipped behavior: getCfcLabel never syncs — the reactive caller owns
+// liveness, so the read does no graph work at all.
+const ensurePureRead = (_replica: Replica): void => {};
+
 Deno.bench(
   "syncMetaLinkedDocs (warm) - serial await per node [old]",
   { group: "cfc-label-sync-warm", baseline: true },
@@ -101,12 +107,23 @@ Deno.bench(
 );
 
 Deno.bench(
-  "syncMetaLinkedDocs (warm) - skip when present [new]",
+  "syncMetaLinkedDocs (warm) - skip when present",
   { group: "cfc-label-sync-warm" },
   async (b) => {
     const replica = warmReplica();
     b.start();
     await ensureSkipWhenPresent(replica);
+    b.end();
+  },
+);
+
+Deno.bench(
+  "getCfcLabel (warm) - pure read, no sync [new]",
+  { group: "cfc-label-sync-warm" },
+  async (b) => {
+    const replica = warmReplica();
+    b.start();
+    await ensurePureRead(replica);
     b.end();
   },
 );
