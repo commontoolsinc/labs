@@ -64,15 +64,6 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     Object.freeze(this);
   }
 
-  /**
-   * CID-link-style accessor, returns the raw hash bytes. Present to satisfy
-   * the `EntityId` structural type (`{ "/": string | Uint8Array }`).
-   * TODO(danfuzz): Remove now that legacy hashing is gone.
-   */
-  get "/"(): Uint8Array {
-    return new Uint8Array(this.#hash);
-  }
-
   /** Defensive copy of the raw hash bytes. */
   get bytes(): Uint8Array {
     return new Uint8Array(this.#hash);

@@ -3,6 +3,7 @@ import {
   Cell,
   type ConsoleHandler,
   type ConsoleMessage,
+  entityIdFrom,
   type ErrorHandler,
   type ErrorWithContext,
   isStream,
@@ -151,9 +152,16 @@ async function runCharm(data: RunData): Promise<void> {
     latestError = null;
 
     // Get the charm cell from the pieceId
-    const charmCell = manager.runtime.getCellFromEntityId(spaceId, {
-      "/": pieceId,
-    });
+    let charmEntityId;
+    try {
+      charmEntityId = entityIdFrom(pieceId);
+    } catch {
+      throw new Error(`Charm pieceId is not a valid entity id: ${pieceId}`);
+    }
+    const charmCell = manager.runtime.getCellFromEntityId(
+      spaceId,
+      charmEntityId,
+    );
 
     // Check whether the charm is still active (in charms or pinned-charms)
     const charmsEntryCell = await manager.getActivePiece(charmCell);

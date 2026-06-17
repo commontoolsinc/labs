@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseFabricRef } from "../src/sandbox/fabric-import-specifier.ts";
 import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
+import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("fabric ref resolution test");
@@ -44,9 +45,10 @@ describe("fabric ref resolution", () => {
   }
 
   async function writeSlug(slug: string, target: Cell<unknown>): Promise<void> {
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, slug),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, slug)),
+    );
     await runtime.editWithRetry((tx) => {
       const slugWithTx = slugCell.withTx(tx);
       slugWithTx.setRawUntyped(

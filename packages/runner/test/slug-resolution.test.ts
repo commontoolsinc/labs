@@ -5,6 +5,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
+import { entityIdFrom } from "../src/create-ref.ts";
 import {
   parseSlugRedirect,
   resolveSlugTargetCell,
@@ -35,9 +36,10 @@ describe("slug resolution", () => {
       space,
       { space, random: "slug-cell-target" },
     );
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, "value-link"),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, "value-link")),
+    );
 
     await runtime.editWithRetry((tx) => {
       const targetWithTx = target.withTx(tx);
@@ -65,9 +67,10 @@ describe("slug resolution", () => {
       resolveSlugTargetCell(runtime, space, "missing"),
     ).rejects.toThrow(/Slug "missing" not found/);
 
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, "malformed"),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, "malformed")),
+    );
     await runtime.editWithRetry((tx) => {
       slugCell.withTx(tx).setRawUntyped("not a redirect");
     });
@@ -84,9 +87,10 @@ describe("slug resolution", () => {
     // memory protocol — the resolver must fold the throw into the typed
     // "malformed" outcome (SlugResolutionError) instead of leaking a bare
     // TypeError past callers like the fabric chase's chain wrapping.
-    const base = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, "poisoned"),
-    });
+    const base = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, "poisoned")),
+    );
     const poisoned = {
       "/": {
         "link@1": { id: "of:abc", path: "not-an-array", overwrite: "redirect" },

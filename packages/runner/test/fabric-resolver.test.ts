@@ -20,6 +20,7 @@ import {
 import { FabricAwareResolver } from "../src/harness/fabric-resolver.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
+import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("fabric resolver test");
@@ -118,9 +119,10 @@ describe("FabricAwareResolver", () => {
     target: Cell<unknown>,
     targetSpace = space,
   ): Promise<void> {
-    const slugCell = runtime.getCellFromEntityId(targetSpace, {
-      "/": slugIdForSpace(targetSpace, slug),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      targetSpace,
+      entityIdFrom(slugIdForSpace(targetSpace, slug)),
+    );
     await runtime.editWithRetry((tx) => {
       const slugWithTx = slugCell.withTx(tx);
       slugWithTx.setRawUntyped(

@@ -50,12 +50,8 @@ export function deriveDiskHandleId(space: string, absPath: string): string {
     space,
     scheme: "sqlite",
   });
-  // The canonical id STRING is the `toJSON()` form (the raw `["/"]` may be a
-  // Uint8Array). This matches `handle.entityId["/"]`, the form the runtime uses
-  // for a db handle's `value.id`.
-  const id = ref.toJSON?.()["/"] ?? ref["/"];
-  if (typeof id !== "string") {
-    throw new Error("deriveDiskHandleId: createRef did not yield a string id");
-  }
-  return id;
+  // The canonical id string is the tagged-hash form, matching
+  // `handle.entityId["/"]` — the form the runtime uses for a db handle's
+  // `value.id`.
+  return ref.taggedHashString;
 }

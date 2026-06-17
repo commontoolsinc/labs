@@ -9,6 +9,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { writeSourceDocs } from "../src/compilation-cache/cell-cache.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
+import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
@@ -97,9 +98,10 @@ describe("Engine fabric imports", () => {
   }
 
   async function writeSlug(slug: string, target: Cell<unknown>): Promise<void> {
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, slug),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, slug)),
+    );
     await runtime.editWithRetry((tx) => {
       const slugWithTx = slugCell.withTx(tx);
       slugWithTx.setRawUntyped(
@@ -109,9 +111,10 @@ describe("Engine fabric imports", () => {
   }
 
   async function poisonSlug(slug: string): Promise<void> {
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, slug),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, slug)),
+    );
     await runtime.editWithRetry((tx) => {
       slugCell.withTx(tx).setRawUntyped("not a redirect");
     });

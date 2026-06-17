@@ -1,5 +1,6 @@
 import {
   type Cell,
+  entityIdFrom,
   type JSONSchema,
   Runtime,
   RuntimeProgram,
@@ -111,7 +112,7 @@ export class PiecesController<T = unknown> {
     this.disposeCheck();
     const piece = this.#manager.runtime.getCellFromEntityId(
       this.#manager.getSpace(),
-      { "/": pieceId },
+      entityIdFrom(pieceId),
     );
     const removed = await this.#manager.remove(piece);
     // Ensure full synchronization

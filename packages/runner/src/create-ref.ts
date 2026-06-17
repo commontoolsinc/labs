@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {
@@ -9,10 +10,24 @@ import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
 
-export type EntityId = {
-  "/": string | Uint8Array;
-  toJSON?: () => { "/": string };
-};
+declare const ENTITY_ID_BRAND: unique symbol;
+
+/**
+ * An entity id: a {@link FabricHash} that specifically names a cell/document
+ * within a space (as produced by {@link createRef}), as opposed to an arbitrary
+ * content/value/schema hash. The brand is type-only — at runtime an `EntityId`
+ * is just a `FabricHash` — and exists to keep "this hash is an entity id" a
+ * distinct, intentional thing in the type system. Construct via
+ * {@link entityIdFrom} (or {@link createRef}).
+ */
+export type EntityId = FabricHash & { readonly [ENTITY_ID_BRAND]: true };
+
+/** Brands a content-hash string (or `FabricHash`) as an {@link EntityId}. */
+export function entityIdFrom(hash: string | FabricHash): EntityId {
+  return (typeof hash === "string"
+    ? FabricHash.fromString(hash)
+    : hash) as EntityId;
+}
 
 /**
  * Generates an entity ID.
@@ -52,7 +67,9 @@ export function createRef(
       seen.add(obj);
     }
 
-    // Don't traverse into ids.
+    // Don't traverse into ids (a `FabricHash` is an entity id; a `{ "/": ... }`
+    // object is a serialized one).
+    if (obj instanceof FabricHash) return obj;
     if (isRecord(obj) && "/" in obj) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
@@ -105,7 +122,7 @@ export function createRef(
     else return obj;
   }
 
-  return hashOf(traverse({ ...source, causal: cause }));
+  return entityIdFrom(hashOf(traverse({ ...source, causal: cause })));
 }
 
 /**

@@ -3,7 +3,9 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  entityIdFrom,
   getPatternIdentityRef,
+  isSlugAddress,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -368,7 +370,12 @@ export async function resolveLinkEndpointAddress(
     if (
       options?.allowMissingSlugFallback &&
       error instanceof SlugResolutionError &&
-      error.code === "missing"
+      error.code === "missing" &&
+      // Only fall back for an id-shaped token (one with a scheme/colon, e.g.
+      // `fid1:…`). A bare slug-shaped token that didn't resolve is genuinely
+      // missing — surface the clean SlugResolutionError rather than letting a
+      // non-hash string reach `entityIdFrom`.
+      !isSlugAddress(token)
     ) {
       return token;
     }
@@ -467,7 +474,7 @@ export async function setPieceSlug(
   const source = sourcePath.length === 0
     ? manager.runtime.getCellFromEntityId(
       manager.getSpace(),
-      { "/": resolvedSourcePieceId },
+      entityIdFrom(resolvedSourcePieceId),
       [],
       undefined,
       undefined,
@@ -937,7 +944,7 @@ export async function linkSqliteDiskSource(
   //    schema); the server skips ensureTables for a registered source.
   const handle = manager.runtime.getCellFromEntityId(
     space,
-    { "/": id },
+    entityIdFrom(id),
     [],
     undefined,
   );

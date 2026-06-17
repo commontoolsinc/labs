@@ -1,5 +1,6 @@
 import type { Cell } from "@commonfabric/runner";
 import {
+  entityIdFrom,
   getPatternIdentityRef,
   isSlugAddress,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
@@ -41,7 +42,7 @@ export async function setSlugLink(
 
   const slugCell = manager.runtime.getCellFromEntityId(
     manager.getSpace(),
-    { "/": slugIdForSpace(manager.getSpace(), validSlug) },
+    entityIdFrom(slugIdForSpace(manager.getSpace(), validSlug)),
   );
 
   await manager.runtime.editWithRetry((tx) => {

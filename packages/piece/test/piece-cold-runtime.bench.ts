@@ -1,5 +1,5 @@
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
@@ -190,9 +190,10 @@ Deno.bench({
       await manager.synced();
 
       try {
-        const piece = runtime.getCellFromEntityId(manager.getSpace(), {
-          "/": pieceId(persistedPiece)!,
-        });
+        const piece = runtime.getCellFromEntityId(
+          manager.getSpace(),
+          entityIdFrom(pieceId(persistedPiece)!),
+        );
         b.start();
         try {
           await manager.add([piece]);

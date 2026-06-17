@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { PieceManager } from "../src/manager.ts";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 
 describe("noop", () => {
 });
@@ -33,7 +34,7 @@ describe("PieceManager.get", () => {
       space: "did:key:test-space" as never,
     }, runtime as never);
 
-    await manager.get("piece-id", true, { type: "object" });
+    await manager.get(taggedHashStringOf("piece-id"), true, { type: "object" });
 
     expect(startSawSyncedPiece).toBe(true);
   });
