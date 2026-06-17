@@ -288,17 +288,22 @@ export default pattern(() => {
   });
 
   // After deleting rows[0] (Thai, the most recent), only Chipotle remains.
-  const assert_one_history_after_remove = computed(() => {
-    const rows = poll.recentVisits.result ?? [];
-    return rows.length === 1 &&
-      rows[0]?.title === "Chipotle" &&
-      poll.historyCount === 1;
-  });
+  // DIAGNOSTIC: split into atomic conditions so CI reports which value lags.
+  const dbg_remove_rows_len1 = computed(() =>
+    (poll.recentVisits.result ?? []).length === 1
+  );
+  const dbg_remove_row0_chipotle = computed(() =>
+    (poll.recentVisits.result ?? [])[0]?.title === "Chipotle"
+  );
+  const dbg_remove_historyCount1 = computed(() => poll.historyCount === 1);
 
   // Clearing visits also clears the vote_history snapshots.
-  const assert_history_cleared = computed(() =>
-    (poll.recentVisits.result ?? []).length === 0 &&
-    poll.historyCount === 0 &&
+  // DIAGNOSTIC: split into atomic conditions.
+  const dbg_clear_rows_len0 = computed(() =>
+    (poll.recentVisits.result ?? []).length === 0
+  );
+  const dbg_clear_historyCount0 = computed(() => poll.historyCount === 0);
+  const dbg_clear_voteHistoryCount0 = computed(() =>
     poll.voteHistoryCount === 0
   );
 
@@ -377,10 +382,14 @@ export default pattern(() => {
       { assertion: assert_two_history },
       // Delete a single entry (host) → the other remains.
       { action: action_remove_first_history },
-      { assertion: assert_one_history_after_remove },
+      { assertion: dbg_remove_rows_len1 },
+      { assertion: dbg_remove_row0_chipotle },
+      { assertion: dbg_remove_historyCount1 },
       // Clear all → empty (visits AND vote_history).
       { action: action_clear_history },
-      { assertion: assert_history_cleared },
+      { assertion: dbg_clear_rows_len0 },
+      { assertion: dbg_clear_historyCount0 },
+      { assertion: dbg_clear_voteHistoryCount0 },
     ],
     poll,
   };
