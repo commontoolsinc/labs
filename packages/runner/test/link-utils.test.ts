@@ -1520,20 +1520,20 @@ describe("link-utils", () => {
 
     it("should throw if target does not start with slash", () => {
       expect(() => parseLLMFriendlyLink(`${longId}/path`, space)).toThrow(
-        'Target must include a piece handle',
+        "Target must include a piece handle",
       );
     });
 
     it("should throw if target does not include handle", () => {
       expect(() => parseLLMFriendlyLink("/path/only", space)).toThrow(
-        'Target must include a piece handle',
+        "Target must include a piece handle",
       );
     });
 
     it("should throw a controlled error if cross-space target omits handle", () => {
       expect(() => parseLLMFriendlyLink("/@did:key:z6MkrX123abc", space))
         .toThrow(
-          'Target must include a piece handle',
+          "Target must include a piece handle",
         );
     });
 
