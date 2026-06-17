@@ -118,22 +118,23 @@ describe("json-encoding", () => {
 
   describe("slash-prefixed keys and legacy markers", () => {
     it('`{ "/": value }` round-trips via `/object` escaping', () => {
-      // Write path wraps in /object, read path unwraps it.
-      const sigilLink = {
-        "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
+      // Arbitrary object-valued `/` key (not a link). Write path wraps in
+      // /object, read path unwraps it.
+      const slashObject = {
+        "/": { kind: "widget", tags: ["a", "b"], size: 3 },
       } as FabricValue;
-      expect(roundTrip(sigilLink)).toEqual(sigilLink);
+      expect(roundTrip(slashObject)).toEqual(slashObject);
     });
 
     it('nested `{ "/": value }` within object round-trips', () => {
       const value = {
         name: "test",
-        ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+        slashKeyed: { "/": { inner: { flag: true }, count: 0 } },
       } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
-      expect(decoded.ref).toEqual(
-        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      expect(decoded.slashKeyed).toEqual(
+        { "/": { inner: { flag: true }, count: 0 } },
       );
     });
 
@@ -176,13 +177,13 @@ describe("json-encoding", () => {
     it("mixed value with fabric types and slash-keys round-trips", () => {
       const value = {
         count: 42n,
-        ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+        slashKeyed: { "/": { values: [1, 2, 3], note: "hello" } },
         items: [1, { "/": "another arbitrary string" }, undefined],
       } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.count).toBe(42n);
-      expect(decoded.ref).toEqual(
-        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      expect(decoded.slashKeyed).toEqual(
+        { "/": { values: [1, 2, 3], note: "hello" } },
       );
       expect((decoded.items as unknown[])[0]).toBe(1);
       expect((decoded.items as unknown[])[1]).toEqual({
@@ -193,8 +194,8 @@ describe("json-encoding", () => {
 
     it('`{ "/": value }` inside array round-trips', () => {
       const value = [
-        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
-        { "/": { "link@1": { id: "of:bafydef", path: ["x"] } } },
+        { "/": { count: 1 } },
+        { "/": { labels: ["x"], ready: true } },
       ] as FabricValue;
       expect(roundTrip(value)).toEqual(value);
     });
