@@ -11,6 +11,7 @@ import type {
   RuntimeClient,
   RuntimeConnection,
   VDomBatchNotification,
+  VDomConnection,
 } from "@commonfabric/runtime-client";
 import type { DomEventMessage } from "./events.ts";
 import { DomApplicator } from "./applicator.ts";
@@ -61,7 +62,7 @@ export class VDomRenderer {
   private static nextMountId = 1;
 
   private readonly applicator: DomApplicator;
-  private readonly connection: RuntimeConnection;
+  private readonly session: VDomConnection;
   private readonly onError?: (error: Error) => void;
 
   private mountId: number | null = null;
@@ -70,7 +71,6 @@ export class VDomRenderer {
   private disposed = false;
 
   constructor(options: VDomRendererOptions) {
-    this.connection = options.connection;
     this.onError = options.onError;
 
     // Create the DOM applicator
@@ -82,8 +82,13 @@ export class VDomRenderer {
       setProp: options.setProp,
     });
 
-    // Subscribe to VDomBatch notifications
-    this.connection.on("vdombatch", this.handleVDomBatch);
+    // Attach as a VDOM consumer. attachVDom requires the teardown, which runs
+    // synchronously when the connection is disposed (dropping local listeners
+    // and DOM without a per-mount unmount round-trip), and is the only way to
+    // obtain VDOM capability — so a renderer cannot exist without being torn
+    // down on disposal.
+    this.session = options.connection.attachVDom(() => this.disposeLocal());
+    this.session.onBatch(this.handleVDomBatch);
   }
 
   /**
@@ -112,7 +117,7 @@ export class VDomRenderer {
     // Request the worker to start rendering
     logger.timeStart("mount", String(this.mountId));
     try {
-      const response = await this.connection.mountVDom(this.mountId, cellRef);
+      const response = await this.session.mount(this.mountId, cellRef);
       this.rootNodeId = response.rootId > 0 ? response.rootId : null;
 
       const elapsed = logger.timeEnd("mount", String(this.mountId));
@@ -147,7 +152,7 @@ export class VDomRenderer {
     this.mountId = null;
 
     // Request the worker to stop rendering
-    await this.connection.unmountVDom(mountId);
+    await this.session.unmount(mountId);
 
     // Remove the root node from DOM
     if (this.rootNodeId !== null) {
@@ -171,16 +176,36 @@ export class VDomRenderer {
   }
 
   /**
-   * Dispose of the renderer and clean up all resources.
+   * Dispose of the renderer and clean up all resources. Used when this render
+   * is cancelled while the connection is still alive (e.g. a cell or variant
+   * change), so it unmounts the worker-side mount before tearing down locally.
    */
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    this.disposed = true;
-
-    await this.stopRendering();
-    this.connection.off("vdombatch", this.handleVDomBatch);
-    this.applicator.dispose();
+    // We are tearing ourselves down, so detach from the connection's disposal.
+    this.session.detach();
+    try {
+      await this.stopRendering();
+    } finally {
+      // Detach listeners and drop DOM even if the unmount round-trip failed.
+      this.disposeLocal();
+    }
   }
+
+  /**
+   * Synchronous local teardown: detach listeners and drop DOM. Does not issue
+   * an unmount round-trip. Safe to call during connection disposal, and run
+   * directly from the connection's disposal hook.
+   */
+  private disposeLocal = (): void => {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.mountId = null;
+    this.rootNodeId = null;
+    this.containerElement = null;
+    this.session.offBatch(this.handleVDomBatch);
+    this.applicator.dispose();
+  };
 
   /**
    * Get the root DOM node if available.
@@ -234,7 +259,7 @@ export class VDomRenderer {
       }
 
       if (notification.mountId !== undefined) {
-        this.connection.ackVDomBatch(
+        this.session.ackBatch(
           notification.mountId,
           notification.batchId,
         );
@@ -257,8 +282,8 @@ export class VDomRenderer {
   private handleDomEvent(message: DomEventMessage): void {
     if (this.disposed || this.mountId === null) return;
 
-    // Send the event to the worker via the connection
-    this.connection.sendVDomEvent(
+    // Send the event to the worker via the VDOM session
+    this.session.sendEvent(
       this.mountId,
       message.handlerId,
       message.event,

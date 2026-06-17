@@ -3,6 +3,7 @@ import { isDeno } from "@commonfabric/utils/env";
 import {
   ErrorNotification,
   IPCClientMessage,
+  IPCClientNotification,
   NotificationType,
 } from "../../../protocol/mod.ts";
 import { RuntimeTransport, RuntimeTransportEvents } from "../../transport.ts";
@@ -41,7 +42,7 @@ export class WebWorkerRuntimeTransport
     this._worker.addEventListener("error", this._handleError);
   }
 
-  send(data: IPCClientMessage): void {
+  send(data: IPCClientMessage | IPCClientNotification): void {
     this._worker.postMessage(data);
   }
 

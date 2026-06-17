@@ -86,9 +86,15 @@ export enum RequestType {
   PageSynced = "page:synced",
 
   // VDOM operations (main -> worker)
-  VDomEvent = "vdom:event",
   VDomMount = "vdom:mount",
   VDomUnmount = "vdom:unmount",
+}
+
+// One-way main -> worker notifications. Unlike requests, these carry no
+// msgId and the worker sends no response. Used for fire-and-forget signals
+// where the main thread does not depend on a reply.
+export enum ClientNotificationType {
+  VDomEvent = "vdom:event",
   VDomBatchApplied = "vdom:batch-applied",
 }
 
@@ -555,11 +561,16 @@ export interface PageSyncedRequest extends BaseRequest {
   space: DID;
 }
 
+/** Common shape for one-way main -> worker notifications. */
+export interface BaseClientNotification {
+  type: ClientNotificationType;
+}
+
 /**
  * VDOM event message sent from main thread to worker when a DOM event fires.
  */
-export interface VDomEventRequest extends BaseRequest {
-  type: RequestType.VDomEvent;
+export interface VDomEventNotification extends BaseClientNotification {
+  type: ClientNotificationType.VDomEvent;
   /** The mount ID that this event belongs to */
   mountId: number;
   /** The handler ID that should process this event */
@@ -634,15 +645,20 @@ export interface VDomUnmountRequest extends BaseRequest {
 }
 
 /**
- * Request sent after the main thread applies a VDOM batch.
+ * Notification sent after the main thread applies a VDOM batch.
  */
-export interface VDomBatchAppliedRequest extends BaseRequest {
-  type: RequestType.VDomBatchApplied;
+export interface VDomBatchAppliedNotification extends BaseClientNotification {
+  type: ClientNotificationType.VDomBatchApplied;
   /** The mount ID that received the batch */
   mountId: number;
   /** The applied batch ID */
   batchId: number;
 }
+
+/** Union of all one-way main -> worker notifications. */
+export type IPCClientNotification =
+  | VDomEventNotification
+  | VDomBatchAppliedNotification;
 
 /**
  * Response to VDomMount with the root node ID.
@@ -694,10 +710,8 @@ export type IPCClientRequest =
   | PageSyncedRequest
   | RuntimeSyncedRequest
   | RegisterSpaceHostRequest
-  | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
-  | VDomBatchAppliedRequest
   | DetectNonIdempotentRequest
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
@@ -1042,20 +1056,12 @@ export type Commands = {
     response: UploadBlobResponse;
   };
   // VDOM requests
-  [RequestType.VDomEvent]: {
-    request: VDomEventRequest;
-    response: EmptyResponse;
-  };
   [RequestType.VDomMount]: {
     request: VDomMountRequest;
     response: VDomMountResponse;
   };
   [RequestType.VDomUnmount]: {
     request: VDomUnmountRequest;
-    response: EmptyResponse;
-  };
-  [RequestType.VDomBatchApplied]: {
-    request: VDomBatchAppliedRequest;
     response: EmptyResponse;
   };
 };

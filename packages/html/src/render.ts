@@ -120,6 +120,15 @@ function renderViaWorker(
   };
   activeRenders.set(parent, entry);
 
+  // When the connection is disposed, drop this render's registry entry. The
+  // renderer tears itself down through its own disposal hook; this frees the
+  // activeRenders bookkeeping, which the synchronous cancel path otherwise owns.
+  const unregisterOnDispose = connection.onDispose(() => {
+    if (activeRenders.get(parent) === entry) {
+      activeRenders.delete(parent);
+    }
+  });
+
   // Start rendering asynchronously
   let cancelAsync: (() => Promise<void>) | null = null;
   let disposed = false;
@@ -135,15 +144,17 @@ function renderViaWorker(
       }
     })
     .catch((error) => {
-      if (!disposed) {
+      // Swallow errors caused by teardown: this render being cancelled, or the
+      // connection being disposed (which cancels an in-flight mount).
+      if (!disposed && !connection.signal.aborted) {
         options.onError?.(error);
       }
-      // Swallow errors after disposal — the connection may already be gone
     });
 
   // Return synchronous cancel function
   return () => {
     disposed = true;
+    unregisterOnDispose();
     // Only remove if we're still the active render for this parent
     if (activeRenders.get(parent) === entry) {
       activeRenders.delete(parent);

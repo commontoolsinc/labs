@@ -190,6 +190,9 @@ export class CFCellLink extends BaseElement {
         this._setResolvedCell(resolvedCell);
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
+        // A disposal race (logout, runtime swap) cancels the resolve; that is
+        // cancellation, not a failure to surface.
+        if (this.runtime?.signal.aborted) return;
         console.error("Failed to resolve cell:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
@@ -213,6 +216,9 @@ export class CFCellLink extends BaseElement {
         this._setResolvedCell(resolvedCell);
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
+        // A disposal race (logout, runtime swap) cancels the resolve; that is
+        // cancellation, not a failure to surface.
+        if (this.runtime?.signal.aborted) return;
         console.error("Failed to resolve link:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);

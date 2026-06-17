@@ -3,10 +3,12 @@ import { isRecord } from "@commonfabric/utils/types";
 import {
   CellRef,
   CellUpdateNotification,
+  ClientNotificationType,
   ConsoleNotification,
   ErrorNotification,
   InitializationData,
   IPCClientMessage,
+  IPCClientNotification,
   IPCClientRequest,
   IPCRemoteMessage,
   IPCRemoteNotification,
@@ -50,6 +52,18 @@ export function isIPCClientMessage(value: unknown): value is IPCClientMessage {
     isRecord(value) &&
     typeof value.msgId === "number" &&
     isIPCClientRequest(value.data)
+  );
+}
+
+export function isIPCClientNotification(
+  value: unknown,
+): value is IPCClientNotification {
+  return (
+    isRecord(value) &&
+    typeof value.type === "string" &&
+    Object.values(ClientNotificationType).includes(
+      value.type as ClientNotificationType,
+    )
   );
 }
 

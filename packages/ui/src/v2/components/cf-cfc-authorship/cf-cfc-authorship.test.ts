@@ -679,3 +679,54 @@ describe("CFCFCAuthorship integrity matching", () => {
     )).toBe("unknown");
   });
 });
+
+describe("CFCFCAuthorship disposal handling", () => {
+  // refreshLabel is fired as `void this.refreshLabel()`; on a disposal race its
+  // readLabelView IPC rejects with AbortError, which must be swallowed rather
+  // than left as an unhandled rejection.
+  function authorshipThis(getCfcLabel: () => Promise<unknown>): {
+    value: unknown;
+    kind: undefined;
+    _labelRequestId: number;
+    cfcLabel: unknown;
+    _valueResolutionPending: boolean;
+    requestUpdate: () => void;
+    reconcileLabelRetry: () => void;
+  } {
+    return {
+      value: { getCfcLabel },
+      kind: undefined,
+      _labelRequestId: 0,
+      cfcLabel: undefined,
+      _valueResolutionPending: false,
+      requestUpdate: () => {},
+      reconcileLabelRetry: () => {},
+    };
+  }
+
+  function refreshLabel(fakeThis: unknown): Promise<void> {
+    return (CFCFCAuthorship.prototype as unknown as {
+      refreshLabel(this: unknown): Promise<void>;
+    }).refreshLabel.call(fakeThis);
+  }
+
+  it("does not leak an unhandled rejection when the label read is cancelled", async () => {
+    const fakeThis = authorshipThis(() =>
+      Promise.reject(new DOMException("aborted", "AbortError"))
+    );
+    // Resolves (does not reject) — the fix swallows the disposal-raced read.
+    await refreshLabel(fakeThis);
+    // The label was left untouched.
+    expect(fakeThis.cfcLabel).toBeUndefined();
+  });
+
+  it("applies the label when the read succeeds", async () => {
+    const label = {
+      version: 1,
+      entries: [{ path: [], label: { integrity: ["x"] } }],
+    };
+    const fakeThis = authorshipThis(() => Promise.resolve(label));
+    await refreshLabel(fakeThis);
+    expect(fakeThis.cfcLabel).toEqual(label);
+  });
+});

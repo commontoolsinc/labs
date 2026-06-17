@@ -654,6 +654,9 @@ export class CFCodeEditor extends BaseElement {
         navigate,
       });
     } catch (error) {
+      // A disposal race (logout, runtime swap) cancels the create; that is
+      // cancellation, not a failure to surface.
+      if (this.runtime?.signal.aborted) return;
       console.error("Error creating backlink:", error);
     }
   }

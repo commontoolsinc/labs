@@ -13,6 +13,7 @@ import {
 import {
   type CellRef,
   type CfcLabelView,
+  ClientNotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -1920,7 +1921,7 @@ describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
     const state = makeState(false, calls);
     const warnings = captureWarn(() =>
       handleVDomEvent.call(state, {
-        type: RequestType.VDomEvent,
+        type: ClientNotificationType.VDomEvent,
         mountId: 7,
         handlerId: 42,
         event: { type: "click" },
@@ -1938,7 +1939,7 @@ describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
     const state = makeState(true, calls);
     const warnings = captureWarn(() =>
       handleVDomEvent.call(state, {
-        type: RequestType.VDomEvent,
+        type: ClientNotificationType.VDomEvent,
         mountId: 7,
         handlerId: 99,
         event: { type: "input" },
@@ -1954,7 +1955,7 @@ describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
     const state = makeState(true, calls);
     const warnings = captureWarn(() =>
       handleVDomEvent.call(state, {
-        type: RequestType.VDomEvent,
+        type: ClientNotificationType.VDomEvent,
         mountId: 404,
         handlerId: 1,
         event: { type: "click" },
@@ -1964,5 +1965,66 @@ describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
     expect(calls).toEqual([]);
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain("No mount found for mountId: 404");
+  });
+});
+
+describe("RuntimeProcessor.handleNotification", () => {
+  // Base the fake on the real prototype so handleNotification's delegation to
+  // handleVDomEvent / handleVDomBatchApplied resolves, while vdomMounts is a
+  // stub that records what the reconciler is asked to do.
+  function fakeProcessor() {
+    const events: Array<{ handlerId: number; event: unknown }> = [];
+    const acks: number[] = [];
+    const processor = Object.create(
+      RuntimeProcessor.prototype,
+    ) as RuntimeProcessor;
+    (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([[
+      1,
+      {
+        reconciler: {
+          dispatchEvent: (handlerId: number, event: unknown) =>
+            events.push({ handlerId, event }),
+          acknowledgeBatchApplied: (batchId: number) => acks.push(batchId),
+        },
+      },
+    ]]);
+    return { processor, events, acks };
+  }
+
+  it("routes a VDomEvent notification to the mount's reconciler", () => {
+    const { processor, events } = fakeProcessor();
+    processor.handleNotification({
+      type: ClientNotificationType.VDomEvent,
+      mountId: 1,
+      handlerId: 7,
+      event: { type: "click" } as never,
+      nodeId: 3,
+    });
+    expect(events).toEqual([{ handlerId: 7, event: { type: "click" } }]);
+  });
+
+  it("routes a VDomBatchApplied notification to the mount's reconciler", () => {
+    const { processor, acks } = fakeProcessor();
+    processor.handleNotification({
+      type: ClientNotificationType.VDomBatchApplied,
+      mountId: 1,
+      batchId: 42,
+    });
+    expect(acks).toEqual([42]);
+  });
+
+  it("warns on an unknown notification type without throwing", () => {
+    const { processor, events, acks } = fakeProcessor();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    try {
+      processor.handleNotification({ type: "vdom:bogus", mountId: 1 } as never);
+    } finally {
+      console.warn = original;
+    }
+    expect(warnings.length).toBe(1);
+    expect(events).toEqual([]);
+    expect(acks).toEqual([]);
   });
 });

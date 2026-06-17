@@ -383,6 +383,9 @@ export class CFRender extends BaseElement {
   }
 
   private _handleRenderError(error: unknown) {
+    // A disposal race (runtime swap, logout) cancels an in-flight cell sync;
+    // that is cancellation, not a render failure to surface.
+    if (this.cell?.runtime().signal?.aborted) return;
     console.error("[cf-render] Error rendering cell:", error);
 
     const container = this._containerRef.value;

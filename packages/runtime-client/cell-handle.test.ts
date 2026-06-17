@@ -411,3 +411,77 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
   });
 });
+
+describe("CellHandle disposal-raced writes", () => {
+  const ref: CellRef = {
+    id: "of:write-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  // A connection whose request always rejects (as it does for an in-flight
+  // write settled by disposal), reporting `aborted` per the test.
+  function runtimeWith(aborted: boolean): RuntimeClient {
+    return {
+      [$conn]: () => ({
+        request: () =>
+          Promise.reject(new DOMException("aborted", "AbortError")),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted },
+      }),
+    } as unknown as RuntimeClient;
+  }
+
+  function captureError(): { calls: unknown[][]; restore(): void } {
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    return { calls, restore: () => (console.error = original) };
+  }
+
+  it("logs a send() failure while the connection is alive", async () => {
+    const cell = new CellHandle(runtimeWith(false), ref);
+    const spy = captureError();
+    try {
+      await cell.send({ n: 1 });
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(1);
+  });
+
+  it("suppresses send() logging when the connection is aborted", async () => {
+    const cell = new CellHandle(runtimeWith(true), ref);
+    const spy = captureError();
+    try {
+      await cell.send({ n: 1 });
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(0);
+  });
+
+  it("logs a set() failure while the connection is alive", async () => {
+    const cell = new CellHandle(runtimeWith(false), ref);
+    const spy = captureError();
+    try {
+      await cell.set({ n: 1 });
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(1);
+  });
+
+  it("suppresses set() logging when the connection is aborted", async () => {
+    const cell = new CellHandle(runtimeWith(true), ref);
+    const spy = captureError();
+    try {
+      await cell.set({ n: 1 });
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(0);
+  });
+});

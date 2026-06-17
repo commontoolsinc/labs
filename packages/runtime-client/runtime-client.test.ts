@@ -32,3 +32,16 @@ describe("RuntimeClient.initialize option validation", () => {
     ).rejects.toThrow("Invalid renderDeclassificationPolicy");
   });
 });
+
+describe("RuntimeClient.signal", () => {
+  it("exposes the connection's lifetime signal", () => {
+    const signal = new AbortController().signal;
+    // The constructor only wires event listeners and stores the connection, so
+    // a connection stub with on()/signal is enough to read the getter through.
+    const conn = { on: () => {}, signal } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    expect(client.signal).toBe(signal);
+  });
+});
