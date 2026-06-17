@@ -1921,6 +1921,137 @@ describe("pull-based scheduling", () => {
     expect(result.get()).toBe(105 + 7);
   });
 
+  it("bounds event preflight cost over a wide fan-in hub", async () => {
+    // The notebook regression shape (decision 15): N independent writers feed
+    // one aggregating hub that the handler reads. Invalidating ONE writer must
+    // cost O(1) preflight work — its downstream cone is just the hub — not an
+    // O(N) walk over the whole fan-in. The old upstream walk visited ~N; the
+    // inverted walk seeds from the (size-1) invalid set.
+    runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+    const preflights: EventPreflightMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
+        .detail.marker;
+      if (marker.type === "scheduler.event.preflight") {
+        preflights.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const N = 200;
+      const sources: Cell<number>[] = [];
+      const cells: Cell<number>[] = [];
+      for (let i = 0; i < N; i++) {
+        const s = runtime.getCell<number>(
+          space,
+          `fanin-source-${i}`,
+          undefined,
+          tx,
+        );
+        s.set(0);
+        sources.push(s);
+        const c = runtime.getCell<number>(
+          space,
+          `fanin-cell-${i}`,
+          undefined,
+          tx,
+        );
+        c.set(0);
+        cells.push(c);
+      }
+      const hub = runtime.getCell<number>(space, "fanin-hub", undefined, tx);
+      hub.set(0);
+      const eventStream = runtime.getCell<number>(
+        space,
+        "fanin-event",
+        undefined,
+        tx,
+      );
+      eventStream.set(0);
+      const result = runtime.getCell<number>(
+        space,
+        "fanin-result",
+        undefined,
+        tx,
+      );
+      result.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      for (let i = 0; i < N; i++) {
+        const idx = i;
+        const writer: Action = (actionTx) => {
+          cells[idx].withTx(actionTx).send(
+            (sources[idx].withTx(actionTx).get() ?? 0) + 1,
+          );
+        };
+        runtime.scheduler.subscribe(
+          writer,
+          {
+            reads: [
+              toMemorySpaceAddress(sources[idx].getAsNormalizedFullLink()),
+            ],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(cells[idx].getAsNormalizedFullLink()),
+            ],
+          },
+          {},
+        );
+      }
+      const hubWriter: Action = (actionTx) => {
+        let sum = 0;
+        for (const c of cells) sum += c.withTx(actionTx).get() ?? 0;
+        hub.withTx(actionTx).send(sum);
+      };
+      runtime.scheduler.subscribe(
+        hubWriter,
+        {
+          reads: cells.map((c) =>
+            toMemorySpaceAddress(c.getAsNormalizedFullLink())
+          ),
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(hub.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+      await hub.pull();
+
+      const handler: EventHandler = (handlerTx, event: number) => {
+        result.withTx(handlerTx).send(
+          (hub.withTx(handlerTx).get() ?? 0) + event,
+        );
+      };
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventStream.getAsNormalizedFullLink(),
+        (depTx) => hub.withTx(depTx).get(),
+      );
+
+      // Invalidate exactly one of the 200 upstream writers.
+      const updateTx = runtime.edit();
+      sources[0].withTx(updateTx).send(1);
+      await updateTx.commit();
+
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 9);
+      await result.pull();
+
+      // Correctness: the handler waited for the invalidated writer + hub to
+      // re-settle before dispatching. All 200 cells start at 1 (source 0 + 1),
+      // so hub starts at 200; bumping source[0] to 1 makes cell[0] = 2, hub =
+      // 201. A stale dispatch would read 200 → 209; the fresh value is 210.
+      expect(result.get()).toBe(201 + 9);
+      // The fix: no preflight walked the 200-wide fan-in. The forward walk
+      // would have visited ~200 per dispatch; the inverted walk visits O(1).
+      expect(preflights.length).toBeGreaterThanOrEqual(1);
+      const maxVisit = Math.max(...preflights.map((p) => p.stats.visitCount));
+      expect(maxVisit).toBeLessThan(20);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
+  });
+
   it("should update invalid status when dynamic dependencies change", async () => {
     const selector = runtime.getCell<number>(
       space,
