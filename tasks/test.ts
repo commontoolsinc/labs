@@ -36,7 +36,6 @@ export async function testPackage(
   memberPath: string,
   packageName: string,
   packagePath: string,
-  coverageRoot: string | undefined,
 ): Promise<{
   memberPath: string;
   packageName: string;
@@ -47,18 +46,10 @@ export async function testPackage(
   const startedAt = Date.now();
   let result: Deno.CommandOutput;
   try {
-    const env: Record<string, string> = { ENV: "test" };
-    if (coverageRoot) {
-      env.DENO_COVERAGE_DIR = path.join(
-        coverageRoot,
-        packageName.replaceAll("/", "__"),
-      );
-    }
-
     result = await new Deno.Command(Deno.execPath(), {
       args: ["task", "test"],
       cwd: packagePath,
-      env,
+      env: { ENV: "test" },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -91,7 +82,6 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const suiteStartedAt = Date.now();
   const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
   const members: string[] = manifest.workspace;
-  const coverageRoot = Deno.env.get("DENO_COVERAGE_DIR");
 
   const tests = [];
   for (const memberPath of members) {
@@ -102,7 +92,7 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
     }
     console.log(`Testing ${packageName}...`);
     const packagePath = path.resolve(workspaceCwd, memberPath);
-    tests.push(testPackage(memberPath, packageName, packagePath, coverageRoot));
+    tests.push(testPackage(memberPath, packageName, packagePath));
   }
 
   const results = await Promise.all(tests);
