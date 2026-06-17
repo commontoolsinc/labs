@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -16,7 +17,7 @@ async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
     apiUrl: new URL(import.meta.url),
     storageManager,
     navigateCallback: (target) => {
-      navigations.push(target.entityId?.["/"] ?? "");
+      navigations.push(entityRefToString(target.entityId));
     },
   });
 
@@ -110,7 +111,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
     apiUrl: new URL(import.meta.url),
     storageManager,
     navigateCallback: (target) => {
-      navigations.push(target.entityId?.["/"] ?? "");
+      navigations.push(entityRefToString(target.entityId));
     },
   });
 
@@ -186,7 +187,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
     await runtime.idle();
 
     assertEquals(navigations.length, 1);
-    assertEquals(navigations[0], targetOne.entityId?.["/"]);
+    assertEquals(navigations[0], entityRefToString(targetOne.entityId));
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -202,7 +203,7 @@ Deno.test(
       apiUrl: new URL(import.meta.url),
       storageManager,
       navigateCallback: (target) => {
-        navigations.push(target.entityId?.["/"] ?? "");
+        navigations.push(entityRefToString(target.entityId));
       },
     });
 
@@ -262,7 +263,7 @@ Deno.test(
       await runtime.idle();
 
       assertEquals(navigations.length, 1);
-      assertEquals(navigations[0], target.entityId?.["/"]);
+      assertEquals(navigations[0], entityRefToString(target.entityId));
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -1,5 +1,10 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import {
+  type EntityRef,
+  entityRefFrom,
+  entityRefFromString,
+} from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {
@@ -128,20 +133,22 @@ export function createRef(
 /**
  * Helper to consistently get an entity ID from various object types
  */
-export function getEntityId(value: any): { "/": string } | undefined {
+export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
     // Handle URI format with "of:" prefix
     if (value.startsWith("of:")) value = fromURI(value);
-    return value.startsWith("{") ? JSON.parse(value) : { "/": value };
+    return value.startsWith("{")
+      ? entityRefFromString(JSON.parse(value)["/"])
+      : entityRefFromString(value);
   }
 
   const link = parseLink(value);
 
   if (!link || !link.id) return undefined;
 
-  const entityId = { "/": fromURI(link.id) };
+  const baseRef = entityRefFromString(fromURI(link.id));
 
   if (link.path && link.path.length > 0) {
-    return { "/": createRef({ path: link.path }, entityId).taggedHashString };
-  } else return entityId;
+    return entityRefFrom(createRef({ path: link.path }, baseRef));
+  } else return baseRef;
 }

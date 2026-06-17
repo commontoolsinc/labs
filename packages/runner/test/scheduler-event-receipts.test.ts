@@ -9,6 +9,7 @@ import {
   Runtime,
   space,
 } from "./scheduler-test-utils.ts";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type {
   Cell,
   IExtendedStorageTransaction,
@@ -554,7 +555,7 @@ Deno.test("navigateTo handler results navigate once and deduplicate redelivery",
     storageManager,
     experimental: { commitPreconditions: true },
     navigateCallback: (target) => {
-      navigations.push(target.entityId?.["/"] ?? "");
+      navigations.push(entityRefToString(target.entityId));
     },
   });
   let tx = runtime.edit();

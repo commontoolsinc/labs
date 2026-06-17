@@ -12,6 +12,10 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
+import {
+  type EntityRef,
+  entityRefFromString,
+} from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
   deepFrozenCloneAndInternSchema,
@@ -379,7 +383,7 @@ declare module "@commonfabric/api" {
     value: T;
     cellLink: SigilLink;
     space: MemorySpace;
-    entityId: { "/": string };
+    entityId: EntityRef;
     sourceURI: URI;
     path: readonly PropertyKey[];
     copyTrap: boolean;
@@ -2211,8 +2215,8 @@ export class CellImpl<T extends FabricValue>
     return createSigilLinkFromParsedLink(this.link);
   }
 
-  get entityId(): { "/": string } {
-    return { "/": fromURI(this.link.id) };
+  get entityId(): EntityRef {
+    return entityRefFromString(fromURI(this.link.id));
   }
 
   get sourceURI(): URI {

@@ -37,6 +37,10 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
@@ -475,7 +479,9 @@ export function sqliteDatabase(
       const options = inputsCell.withTx(tx).get() as
         | { tables?: Record<string, unknown> }
         | undefined;
-      const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
+      const id = (isEntityRef(handle.entityId)
+        ? entityRefToString(handle.entityId)
+        : undefined) ?? JSON.stringify(handle.getAsLink());
       // The db's owner: the principal creating this handle (CFC Phase 3 —
       // resolves the row rule's dbOwner(); a FIXED property of the db, not
       // the acting reader). "creator" would be wrong for linked dbs; the
