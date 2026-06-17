@@ -1,6 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { isRecord } from "@commonfabric/utils/types";
+import {
+  entityRefFromString,
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 
 type MockDoc = {
   get: () => unknown;
@@ -13,8 +18,8 @@ describe("Piece reference detection", () => {
   it("should find all direct references in an argument structure", () => {
     // Create mock data with multiple references
     const mockData = {
-      piece1Id: { "/": "piece-1-id" },
-      piece2Id: { "/": "piece-2-id" },
+      piece1Id: entityRefFromString("piece-1-id"),
+      piece2Id: entityRefFromString("piece-2-id"),
     };
 
     // Create a value that references two different entity IDs
@@ -40,24 +45,19 @@ describe("Piece reference detection", () => {
     };
 
     // Track the references we find
-    const foundRefs: { "/": string }[] = [];
+    const foundRefs: string[] = [];
 
     // Direct manual detection (not using maybeGetCellLink which requires proper Cell implementation)
     const findDirectReferences = (value: unknown): void => {
       if (!value) return;
 
-      // Check if the value has cell and path properties directly
+      // Check if the value is a cell-link reference (EntityRef cell + path)
       if (
-        isRecord(value) && value.cell && isRecord(value.cell) &&
-        value.path !== undefined
+        isRecord(value) && isEntityRef(value.cell) && value.path !== undefined
       ) {
-        const addr = value.cell["/"];
-        if (typeof addr !== "string") {
-          return;
-        }
-        const id = { "/": addr };
-        if (!foundRefs.some((ref) => ref["/"] === id["/"])) {
-          foundRefs.push(id);
+        const addr = entityRefToString(value.cell);
+        if (!foundRefs.includes(addr)) {
+          foundRefs.push(addr);
         }
       }
 
@@ -82,7 +82,7 @@ describe("Piece reference detection", () => {
 
     console.log(
       `Found ${foundRefs.length} direct references:`,
-      foundRefs.map((ref) => ref["/"]).join(", "),
+      foundRefs.join(", "),
     );
 
     // We should find both piece1Id and piece2Id
@@ -93,11 +93,11 @@ describe("Piece reference detection", () => {
     );
 
     // Verify we found both specific references
-    const foundPiece1 = foundRefs.some((ref) =>
-      ref["/"] === mockData.piece1Id["/"]
+    const foundPiece1 = foundRefs.includes(
+      entityRefToString(mockData.piece1Id),
     );
-    const foundPiece2 = foundRefs.some((ref) =>
-      ref["/"] === mockData.piece2Id["/"]
+    const foundPiece2 = foundRefs.includes(
+      entityRefToString(mockData.piece2Id),
     );
 
     assertEquals(foundPiece1, true, "Should find reference to piece1");
@@ -107,8 +107,8 @@ describe("Piece reference detection", () => {
   // Test specifically the issue where only one reference is found when there are multiple
   it("should find multiple references in argument data that matches the reported issue", () => {
     // Mock the scenario where a piece's argument refers to two other pieces
-    const mockPiece1Id = { "/": "piece-1-id" };
-    const mockPiece2Id = { "/": "piece-2-id" };
+    const mockPiece1Id = entityRefFromString("piece-1-id");
+    const mockPiece2Id = entityRefFromString("piece-2-id");
 
     // Create a realistic argument cell structure that might be causing the issue
     // This simulates a more realistic structure based on your description of the problem
@@ -143,30 +143,27 @@ describe("Piece reference detection", () => {
     // Let's implement our own reference finding logic to compare with what the system does
     const findAllReferences = (
       obj: unknown,
-    ): { "/": string }[] => {
-      const refs: { "/": string }[] = [];
+    ): string[] => {
+      const refs: string[] = [];
       const seenIds = new Set<string>();
 
       const traverse = (value: unknown): void => {
         if (!isRecord(value)) return;
 
         // Check for direct cell reference
-        if (value.cell && value.path !== undefined) {
-          // FIXME: types
-          const addr = (value.cell as Record<string, unknown>)["/"] as string;
-
-          if (addr && !seenIds.has(addr)) {
-            refs.push({ "/": addr });
+        if (isEntityRef(value.cell) && value.path !== undefined) {
+          const addr = entityRefToString(value.cell);
+          if (!seenIds.has(addr)) {
+            refs.push(addr);
             seenIds.add(addr);
           }
         }
 
         // Check for $alias reference
-        if (isRecord(value.$alias) && isRecord(value.$alias.cell)) {
-          // FIXME: types
-          const addr = value.$alias.cell["/"] as string;
-          if (addr && !seenIds.has(addr)) {
-            refs.push({ "/": addr });
+        if (isRecord(value.$alias) && isEntityRef(value.$alias.cell)) {
+          const addr = entityRefToString(value.$alias.cell);
+          if (!seenIds.has(addr)) {
+            refs.push(addr);
             seenIds.add(addr);
           }
         }
@@ -193,7 +190,7 @@ describe("Piece reference detection", () => {
     // We should find both piece references
     console.log(
       `Found ${foundReferences.length} references:`,
-      foundReferences.map((ref) => ref["/"]).join(", "),
+      foundReferences.join(", "),
     );
 
     assertEquals(
@@ -203,11 +200,11 @@ describe("Piece reference detection", () => {
     );
 
     // Check that we specifically found both piece IDs
-    const foundPiece1 = foundReferences.some((ref) =>
-      ref["/"] === mockPiece1Id["/"]
+    const foundPiece1 = foundReferences.includes(
+      entityRefToString(mockPiece1Id),
     );
-    const foundPiece2 = foundReferences.some((ref) =>
-      ref["/"] === mockPiece2Id["/"]
+    const foundPiece2 = foundReferences.includes(
+      entityRefToString(mockPiece2Id),
     );
 
     assertEquals(foundPiece1, true, "Should find reference to piece1");
@@ -224,9 +221,9 @@ describe("Piece reference detection", () => {
   // Test for n-depth reference detection
   it("should follow result metadata chains to find deeply nested references", () => {
     // Mock test data
-    const mockPiece1Id = { "/": "piece-1-source" };
-    const mockPiece2Id = { "/": "piece-2-intermediate" };
-    const mockPiece3Id = { "/": "piece-3-target" };
+    const mockPiece1Id = entityRefFromString("piece-1-source");
+    const mockPiece2Id = entityRefFromString("piece-2-intermediate");
+    const mockPiece3Id = entityRefFromString("piece-3-target");
 
     // Create a chain of references where:
     // - piece1 references piece2 via result metadata
@@ -270,14 +267,11 @@ describe("Piece reference detection", () => {
       if (depth > 10) return undefined; // Prevent infinite recursion
 
       // Get the doc ID
-      // FIXME: types
       const docId = (doc as MockDoc).getEntityId?.();
-      if (!isRecord(docId) || !("/" in docId)) return undefined;
+      if (!isEntityRef(docId)) return undefined;
 
       // If we've already seen this doc, stop to prevent cycles
-      const docIdStr = typeof docId["/"] === "string"
-        ? docId["/"]
-        : JSON.stringify(docId["/"]);
+      const docIdStr = entityRefToString(docId);
 
       if (visited.has(docIdStr)) return undefined;
       visited.add(docIdStr);
@@ -301,15 +295,12 @@ describe("Piece reference detection", () => {
     };
 
     // Follow the metadata chain to find the ultimate reference
-    const ultimateRef = followMetadataToResult(mockDoc) as Record<
-      string,
-      unknown
-    >;
+    const ultimateRef = followMetadataToResult(mockDoc);
 
     // Verify we found the final target (piece3)
     assertEquals(
-      ultimateRef["/"],
-      mockPiece3Id["/"],
+      isEntityRef(ultimateRef) ? entityRefToString(ultimateRef) : undefined,
+      entityRefToString(mockPiece3Id),
       "Should find the final reference through the result metadata chain",
     );
   });
