@@ -42,7 +42,14 @@ export class CellHandle<T = unknown> {
   #conn: InitializedRuntimeConnection;
   #ref: CellRef;
   #value: T | undefined;
-  #callbacks = new Map<number, (value: Readonly<T>) => void>();
+  #cfcLabel: CfcLabelView | undefined;
+  // Whether any subscriber asked for the CFC label. Sticky: once a label-aware
+  // subscription exists on this handle, label changes also fire its callbacks.
+  #wantsCfcLabel = false;
+  #callbacks = new Map<
+    number,
+    (value: Readonly<T>, cfcLabel: CfcLabelView | undefined) => void
+  >();
   #nextCallbackId = 0;
   #schemaWarned = false;
 
@@ -109,7 +116,8 @@ export class CellHandle<T = unknown> {
 
     for (const callback of this.#callbacks.values()) {
       try {
-        callback(value as Readonly<T>);
+        // Optimistic local set doesn't change the label; carry the current one.
+        callback(value as Readonly<T>, this.#cfcLabel);
       } catch (error) {
         console.error("[CellHandle] Callback error:", error);
       }
@@ -176,14 +184,34 @@ export class CellHandle<T = unknown> {
    * and whenever the value changes.
    * The callback's return value (if a Cancel function) is called before the next update.
    */
+  /** The cell's current display CFC label, for label-aware subscribers. */
+  get cfcLabel(): CfcLabelView | undefined {
+    return this.#cfcLabel;
+  }
+
+  /** Whether this handle subscribed asking for reactive CFC-label delivery. */
+  get wantsCfcLabel(): boolean {
+    return this.#wantsCfcLabel;
+  }
+
   subscribe(
-    callback: (value: T | undefined) => Cancel | undefined | void,
+    callback: (
+      value: T | undefined,
+      cfcLabel?: CfcLabelView | undefined,
+    ) => Cancel | undefined | void,
+    options: { includeCfcLabel?: boolean } = {},
   ): Cancel {
     this.#requireSchema("subscribe");
+    if (options.includeCfcLabel) {
+      this.#wantsCfcLabel = true;
+    }
     const callbackId = this.#nextCallbackId++;
     let cleanup: Cancel | undefined | void;
 
-    const wrappedCallback = (value: T | undefined) => {
+    const wrappedCallback = (
+      value: T | undefined,
+      cfcLabel: CfcLabelView | undefined,
+    ) => {
       if (typeof cleanup === "function") {
         try {
           cleanup();
@@ -193,7 +221,7 @@ export class CellHandle<T = unknown> {
       }
       cleanup = undefined;
       try {
-        cleanup = callback(value);
+        cleanup = callback(value, cfcLabel);
       } catch (error) {
         console.error("[CellHandle] Callback error:", error);
       }
@@ -204,7 +232,7 @@ export class CellHandle<T = unknown> {
 
     // Always call callback immediately with current value
     // This matches Cell behavior - callback is always called, even if value is undefined
-    wrappedCallback(this.#value);
+    wrappedCallback(this.#value, this.#cfcLabel);
 
     return () => {
       if (typeof cleanup === "function") {
@@ -317,19 +345,29 @@ export class CellHandle<T = unknown> {
 
   // Called when cell has been updated from the backend with
   // a raw value that may contain CellRefs.
-  [$onCellUpdate](value: unknown): void {
+  [$onCellUpdate](
+    value: unknown,
+    labelUpdate?: { cfcLabel: CfcLabelView | undefined },
+  ): void {
     const applied = applyValue(
       value,
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
-    if (valuesEqual(applied, this.#value)) {
+    const valueChanged = !valuesEqual(applied, this.#value);
+    // A label-only change (value identical) still fires label-aware subscribers.
+    // `labelUpdate` is present only on notifications that carried a label, so a
+    // value-only notification never spuriously churns the label.
+    const labelChanged = labelUpdate !== undefined && this.#wantsCfcLabel &&
+      !cfcLabelViewsEqual(labelUpdate.cfcLabel, this.#cfcLabel);
+    if (!valueChanged && !labelChanged) {
       return;
     }
 
-    this.#value = applied;
+    if (valueChanged) this.#value = applied;
+    if (labelUpdate !== undefined) this.#cfcLabel = labelUpdate.cfcLabel;
     for (const callback of this.#callbacks.values()) {
-      callback(this.#value);
+      callback(this.#value as Readonly<T>, this.#cfcLabel);
     }
   }
 

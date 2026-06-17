@@ -159,13 +159,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       if (!instances.has(cell)) {
         this.#recordSubscriptionDiagnostic(key, "localSubscribes");
         instances.add(cell);
-        // Copy the cached value from an existing subscriber to the new one
-        // This ensures late subscribers get the initial value
+        // Copy the cached value (and label) from an existing subscriber to the
+        // new one so late subscribers get the initial value.
         const existingInstance = instances.values().next().value;
         if (existingInstance) {
           const cachedValue = existingInstance.get();
           if (cachedValue !== undefined) {
-            cell[$onCellUpdate](cachedValue);
+            cell[$onCellUpdate](cachedValue, {
+              cfcLabel: existingInstance.cfcLabel,
+            });
           }
         }
       }
@@ -178,6 +180,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     const _ = await this.request<RequestType.CellSubscribe>({
       type: RequestType.CellSubscribe,
       cell: cell.ref(),
+      // First subscriber to a ref key decides label delivery for that backend
+      // subscription (the worker dedups by ref key too). Label-displaying
+      // callers create dedicated handles, so they are that first subscriber.
+      ...(cell.wantsCfcLabel ? { includeCfcLabel: true } : {}),
     }).catch((error) => {
       if (!isRuntimeDisposedError(error)) {
         console.error("[RuntimeClient] Subscription failed:", error);
@@ -347,10 +353,17 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
 
+    // Field presence (not value) signals a label-aware notification, so a
+    // label of `undefined` is still delivered and a value-only update never
+    // touches the cached label.
+    const labelUpdate = "cfcLabel" in message
+      ? { cfcLabel: message.cfcLabel }
+      : undefined;
+
     const subscribed = this.#subscribed.get(cellRefToKey(cellRef));
     if (subscribed && subscribed.size > 0) {
       for (const instance of subscribed) {
-        instance[$onCellUpdate](value);
+        instance[$onCellUpdate](value, labelUpdate);
       }
     }
   }

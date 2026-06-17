@@ -185,6 +185,10 @@ export interface CellGetRequest extends BaseRequest {
   type: RequestType.CellGet;
   cell: CellRef;
   meta?: MetaField;
+  // Opt in to having the cell's display CFC label returned alongside the value,
+  // so a caller that needs both pays one round-trip instead of a separate
+  // CellGetCfcLabel request.
+  includeCfcLabel?: boolean;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -202,6 +206,11 @@ export interface CellSendRequest extends BaseRequest {
 export interface CellSubscribeRequest extends BaseRequest {
   type: RequestType.CellSubscribe;
   cell: CellRef;
+  // Opt in to reactive CFC-label delivery: each CellUpdate then carries the
+  // cell's current display label, and the worker reads that label as a tracked
+  // dependency of the sink, so a label-only write (value unchanged) re-fires
+  // the subscription. Off by default — only label-displaying callers pay it.
+  includeCfcLabel?: boolean;
 }
 
 export interface CellUnsubscribeRequest extends BaseRequest {
@@ -705,6 +714,12 @@ export interface JSONValueResponse {
   value: JSONValue | undefined;
 }
 
+export interface CellGetResponse extends JSONValueResponse {
+  // Present only when the request set `includeCfcLabel`. `undefined` is a valid
+  // value (the cell carries no label); the field is omitted when not requested.
+  cfcLabel?: CfcLabelView | undefined;
+}
+
 export interface CellResponse {
   cell: CellRef;
 }
@@ -736,6 +751,10 @@ export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
   value: JSONValue;
+  // Present only for subscriptions that opted in via `includeCfcLabel`. Carries
+  // the cell's current display label so the client re-renders on label changes
+  // without a separate getCfcLabel round-trip.
+  cfcLabel?: CfcLabelView | undefined;
 }
 
 export interface ConsoleNotification {
@@ -812,6 +831,7 @@ export type RemoteResponse =
   | NullResponse
   | BooleanResponse
   | JSONValueResponse
+  | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse
   | GraphSnapshotResponse
@@ -928,7 +948,7 @@ export type Commands = {
   // Cell requests
   [RequestType.CellGet]: {
     request: CellGetRequest;
-    response: JSONValueResponse;
+    response: CellGetResponse;
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;

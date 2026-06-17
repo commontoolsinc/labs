@@ -1304,4 +1304,72 @@ describe("CFC label view helpers", () => {
 
     expect(cfcLabelViewForCell(resultCell)).toBeUndefined();
   });
+
+  it("re-fires an includeCfcLabel sink on a label-only write (value unchanged)", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view sink reactivity",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const cell = runtime.getCell<{ body: string }>(
+        signer.did(),
+        "cfc-label-sink-reactivity",
+      );
+      const id = parseLink(cell.getAsLink()).id!;
+      const writeDoc = (integrityAtom: string) => {
+        const tx = runtime.edit();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id,
+          type: "application/json",
+          path: [],
+        }, {
+          // SAME value both times — only the label changes.
+          value: { body: "unchanging" },
+          cfc: {
+            version: 1,
+            schemaHash: "sink-reactivity",
+            labelMap: {
+              version: 1,
+              entries: [{ path: [], label: { integrity: [integrityAtom] } }],
+            },
+          },
+        });
+        return tx.commit();
+      };
+
+      await writeDoc("authored-by-alice");
+      await runtime.idle();
+
+      const fires: Array<
+        { value: { body: string } | undefined; label: unknown }
+      > = [];
+      const cancel = cell.sink((value, cfcLabel) => {
+        fires.push({ value, label: cfcLabel });
+      }, { includeCfcLabel: true });
+
+      // The label-only write: value identical, integrity atom changed.
+      await writeDoc("authored-by-bob");
+      await runtime.idle();
+      cancel();
+
+      // Fired on subscribe AND again on the label-only write.
+      expect(fires.length).toBeGreaterThanOrEqual(2);
+      // The value never changed across fires — this was purely a label change.
+      for (const fire of fires) {
+        expect(fire.value).toEqual({ body: "unchanging" });
+      }
+      // The first delivered label carried alice, the last carries bob.
+      expect(JSON.stringify(fires[0].label)).toContain("authored-by-alice");
+      expect(JSON.stringify(fires.at(-1)!.label)).toContain("authored-by-bob");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

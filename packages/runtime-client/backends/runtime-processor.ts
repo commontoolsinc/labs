@@ -42,6 +42,7 @@ import {
   BooleanResponse,
   type CellGetCfcLabelRequest,
   type CellGetRequest,
+  type CellGetResponse,
   type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
@@ -65,7 +66,6 @@ import {
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
-  JSONValueResponse,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -635,7 +635,7 @@ export class RuntimeProcessor {
 
   handleCellGet(
     request: CellGetRequest,
-  ): JSONValueResponse {
+  ): CellGetResponse {
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
@@ -665,7 +665,18 @@ export class RuntimeProcessor {
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
     });
-    return { value: converted };
+    if (!request.includeCfcLabel) {
+      return { value: converted };
+    }
+    // Same display-label read as handleCellGetCfcLabel: pure store read, then
+    // redact Caveat.source for display (audit 28b). One round-trip for both.
+    const cfcLabel = cfcLabelViewForCell(cell);
+    return {
+      value: converted,
+      cfcLabel: cfcLabel === undefined
+        ? undefined
+        : redactCaveatSourcesForDisplay(cfcLabel),
+    };
   }
 
   handleCellSet(request: CellSetRequest): void {
@@ -698,7 +709,7 @@ export class RuntimeProcessor {
 
     const cell = getCell(this.runtime, request.cell);
 
-    const cancel = cell.sink((value) => {
+    const cancel = cell.sink((value, cfcLabel) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
       // These are the call sites that need real schemas added.
       const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
@@ -718,6 +729,13 @@ export class RuntimeProcessor {
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       });
+      // The sink read the raw label on its tracked tx (so cfc writes re-fire
+      // it); redact Caveat.source here before it crosses to the main thread.
+      const redactedLabel = request.includeCfcLabel
+        ? (cfcLabel === undefined
+          ? undefined
+          : redactCaveatSourcesForDisplay(cfcLabel))
+        : undefined;
 
       // `.sink` fires synchronously on invocation. Trigger the notification
       // in a microtask so that the subscription response returns
@@ -727,9 +745,10 @@ export class RuntimeProcessor {
           type: NotificationType.CellUpdate,
           cell: request.cell,
           value: converted,
+          ...(request.includeCfcLabel ? { cfcLabel: redactedLabel } : {}),
         })
       );
-    });
+    }, { includeCfcLabel: request.includeCfcLabel === true });
 
     this.subscriptions.set(key, cancel);
     return { value: true };
