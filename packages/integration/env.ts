@@ -21,6 +21,15 @@ export const PIPE_CONSOLE = envToBool(Deno.env.get("PIPE_CONSOLE"));
 export const SPACE_NAME = Deno.env.get("SPACE_NAME") ??
   globalThis.crypto.randomUUID();
 
+// Number of concurrent browser profiles for multi-browser CFC tests.
+// Defaults to 2 (the minimum that exercises per-user isolation + shared-state
+// liveness). Raise it — e.g. `CFC_BROWSER_PROFILE_COUNT=4` — to amplify
+// cross-browser sync contention when reproducing dual-browser slowness.
+export const CFC_BROWSER_PROFILE_COUNT = (() => {
+  const raw = Number(Deno.env.get("CFC_BROWSER_PROFILE_COUNT"));
+  return Number.isInteger(raw) && raw >= 2 ? raw : 2;
+})();
+
 function ensureTrailing(value: string): string {
   return value.substr(-1) === "/" ? value : `${value}/`;
 }

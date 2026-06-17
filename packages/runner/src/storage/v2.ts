@@ -1803,6 +1803,20 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit);
+      // Counted (even while silent) so multi-writer churn can be read back via
+      // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
+      // drops only the optimistic pending write and re-derives from confirmed
+      // state; a non-falling count under load means conflicts ratchet rather
+      // than storm.
+      logger.debug(
+        rejection.name === "ConflictError"
+          ? "commit-conflict"
+          : "commit-rejected",
+        () => [
+          `commit ${rejection.name ?? "rejected"}: ${rejection.message}`,
+          { localSeq, operations: operations.length },
+        ],
+      );
       const touched = operations.map((operation) => ({
         id: operation.id,
         scope: operation.scope,
@@ -1821,6 +1835,13 @@ class SpaceReplica implements ISpaceReplica {
       this.dropPending(localSeq);
       if (before !== undefined) {
         const changes = before.compare(this);
+        // The revert snapshots CURRENT confirmed state (which already includes
+        // any newer seq received by subscription since this commit started) and
+        // drops only this commit's pending write — so it should not stomp newer
+        // data. Counted to verify reverts stay bounded.
+        logger.debug("commit-revert", () => [
+          `revert after ${rejection.name ?? "rejection"}`,
+        ]);
         this.#subscription.next({
           type: "revert",
           space: this.#space,
