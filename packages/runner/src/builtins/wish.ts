@@ -177,6 +177,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
+    case "#profileBio":
     case "#profileSpace":
       return "home-target";
     default:
@@ -849,6 +850,15 @@ function resolveHomeSpaceTarget(
       return [{
         cell: getDefaultProfileCell(ctx),
         pathPrefix: ["avatar"],
+      }];
+    }
+
+    case "#profileBio": {
+      // The owner-authored free-text bio of the default profile (CT-1648).
+      // Tracks edits made via the profile's setBio handler.
+      return [{
+        cell: getDefaultProfileCell(ctx),
+        pathPrefix: ["bio"],
       }];
     }
 

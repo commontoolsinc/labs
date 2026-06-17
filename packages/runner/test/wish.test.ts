@@ -2267,6 +2267,7 @@ describe("wish built-in", () => {
         name: "Ada Lovelace",
         initialNameApplied: "Ada Lovelace",
         avatar: "ada.png",
+        bio: "Mathematician & first programmer.",
         elements: [],
       });
       profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
@@ -2294,6 +2295,7 @@ describe("wish built-in", () => {
           profile: wish({ query: "#profile" }),
           profileName: wish({ query: "#profileName" }),
           profileAvatar: wish({ query: "#profileAvatar" }),
+          profileBio: wish({ query: "#profileBio" }),
           profileSpace: wish({ query: "#profileSpace" }),
         };
       });
@@ -2313,6 +2315,9 @@ describe("wish built-in", () => {
       expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
       expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
       expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+      expect(result.key("profileBio").get()?.result).toBe(
+        "Mathematician & first programmer.",
+      );
       expect(result.key("profileSpace").get()?.result?.defaultPattern?.name)
         .toBe("Ada Lovelace");
     });
