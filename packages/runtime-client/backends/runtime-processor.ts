@@ -16,6 +16,7 @@ import {
   type Cancel,
   type Cell,
   convertCellsToLinks,
+  entityIdFrom,
   getCellOrThrow,
   isCell,
   isCellResult,
@@ -898,7 +899,7 @@ export class RuntimeProcessor {
     const { pieceManager, cc } = this.getSpaceCtx(request.space);
     const requestedCell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      { "/": request.pageId },
+      entityIdFrom(request.pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -949,7 +950,7 @@ export class RuntimeProcessor {
     const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      { "/": request.pageId },
+      entityIdFrom(request.pageId),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");

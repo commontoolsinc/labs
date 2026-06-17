@@ -1,6 +1,5 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { EntityId } from "@commonfabric/runner";
 import { isRecord } from "@commonfabric/utils/types";
 
 type MockDoc = {
@@ -41,7 +40,7 @@ describe("Piece reference detection", () => {
     };
 
     // Track the references we find
-    const foundRefs: EntityId[] = [];
+    const foundRefs: { "/": string | Uint8Array }[] = [];
 
     // Direct manual detection (not using maybeGetCellLink which requires proper Cell implementation)
     const findDirectReferences = (value: unknown): void => {
@@ -142,8 +141,10 @@ describe("Piece reference detection", () => {
     };
 
     // Let's implement our own reference finding logic to compare with what the system does
-    const findAllReferences = (obj: unknown): EntityId[] => {
-      const refs: EntityId[] = [];
+    const findAllReferences = (
+      obj: unknown,
+    ): { "/": string | Uint8Array }[] => {
+      const refs: { "/": string | Uint8Array }[] = [];
       const seenIds = new Set<string>();
 
       const traverse = (value: unknown): void => {

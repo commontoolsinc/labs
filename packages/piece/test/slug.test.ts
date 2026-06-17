@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime, type URI } from "@commonfabric/runner";
+import { entityIdFrom, Runtime, type URI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -72,9 +72,10 @@ describe("piece slugs", () => {
   it("sets slug redirects to arbitrary cell links", async () => {
     const piece = await createPiece("slug-link-target");
     const slugId = slugIdForSpace(manager.getSpace(), "value-link");
-    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugId,
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugId),
+    );
 
     await setSlugLink(manager, "value-link", piece.key("value"));
 
@@ -113,12 +114,14 @@ describe("piece slugs", () => {
     const piece = await createPiece("slug-resolved-link-target");
     await setSlugLink(manager, "first-link", piece);
 
-    const firstSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugIdForSpace(manager.getSpace(), "first-link"),
-    });
-    const secondSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugIdForSpace(manager.getSpace(), "second-link"),
-    });
+    const firstSlugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugIdForSpace(manager.getSpace(), "first-link")),
+    );
+    const secondSlugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugIdForSpace(manager.getSpace(), "second-link")),
+    );
 
     await setSlugLink(manager, "second-link", firstSlugCell, {
       resolveBeforeLinking: true,
@@ -154,9 +157,10 @@ describe("piece slugs", () => {
       writeTargetMetadata: true,
     });
 
-    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugIdForSpace(manager.getSpace(), "resolved-target"),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugIdForSpace(manager.getSpace(), "resolved-target")),
+    );
     await slugCell.sync();
     const link = parseLink(slugCell.getRaw(), slugCell);
     expect(link?.overwrite).toBe("redirect");
@@ -172,12 +176,14 @@ describe("piece slugs", () => {
     const piece = await createPiece("slug-resolved-path-target");
     await setSlugLink(manager, "first-path-link", piece.key("value"));
 
-    const firstSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugIdForSpace(manager.getSpace(), "first-path-link"),
-    });
-    const secondSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugIdForSpace(manager.getSpace(), "second-path-link"),
-    });
+    const firstSlugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugIdForSpace(manager.getSpace(), "first-path-link")),
+    );
+    const secondSlugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugIdForSpace(manager.getSpace(), "second-path-link")),
+    );
 
     await setSlugLink(manager, "second-path-link", firstSlugCell, {
       resolveBeforeLinking: true,
@@ -217,9 +223,10 @@ describe("piece slugs", () => {
     );
 
     const slugId = slugIdForSpace(manager.getSpace(), "malformed");
-    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
-      "/": slugId,
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      manager.getSpace(),
+      entityIdFrom(slugId),
+    );
     await runtime.editWithRetry((tx) => {
       slugCell.withTx(tx).setRawUntyped("not a redirect");
     });

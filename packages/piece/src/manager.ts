@@ -2,6 +2,7 @@ import {
   type Cell,
   cellEntityIdString,
   EntityId,
+  entityIdFrom,
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
@@ -308,7 +309,7 @@ export class PieceManager {
       ? id
       : this.runtime.getCellFromEntityId(
         this.space,
-        { "/": id },
+        entityIdFrom(id),
         [],
         undefined,
         undefined,
@@ -373,7 +374,7 @@ export class PieceManager {
       }
 
       // Helper function to add a matching piece to the result
-      const addMatchingPiece = (docId: EntityId) => {
+      const addMatchingPiece = (docId: { "/": string }) => {
         if (!docId || !docId["/"]) return;
 
         const entityIdStr = typeof docId["/"] === "string"
@@ -752,9 +753,10 @@ export class PieceManager {
     inputs?: object,
     options?: { start?: boolean },
   ): Promise<Cell<unknown>> {
-    const piece = this.runtime.getCellFromEntityId(this.space, {
-      "/": pieceId,
-    });
+    const piece = this.runtime.getCellFromEntityId(
+      this.space,
+      entityIdFrom(pieceId),
+    );
     await piece.sync();
     const start = options?.start ?? true;
     if (start) {
@@ -907,7 +909,7 @@ export class PieceManager {
     const start = options?.start ?? true;
     let linkCell = this.runtime.getCellFromEntityId(
       this.space,
-      { "/": linkPieceId },
+      entityIdFrom(linkPieceId),
       [],
       undefined,
       undefined,
@@ -994,7 +996,7 @@ async function getCellByIdOrPiece(
     // If manager.get() fails (e.g., "patternId is required"), try as arbitrary cell ID
     try {
       const cell = await manager.getCellById(
-        { "/": cellId },
+        entityIdFrom(cellId),
         [],
         undefined,
         options?.targetScope,

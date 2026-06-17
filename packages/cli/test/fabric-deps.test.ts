@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import { InMemoryProgram } from "@commonfabric/js-compiler";
@@ -45,9 +45,10 @@ describe("cli fabric deps", () => {
         symbol: "default",
       });
     });
-    const slugCell = runtime.getCellFromEntityId(space, {
-      "/": slugIdForSpace(space, slug),
-    });
+    const slugCell = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, slug)),
+    );
     await runtime.editWithRetry((tx) => {
       const slugWithTx = slugCell.withTx(tx);
       slugWithTx.setRawUntyped(

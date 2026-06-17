@@ -7,6 +7,7 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
 import {
@@ -20,7 +21,7 @@ const space = signer.did();
 // Stable entity id used to address the test's "all pieces" cell. The value is
 // opaque to these tests, which set up the cell and the space link to it
 // directly; it's a real content-hash id so it stays well-formed.
-const allPiecesEntityId = hashOf("all-pieces");
+const allPiecesEntityId = entityIdFrom(hashOf("all-pieces"));
 const allPiecesId = allPiecesEntityId.taggedHashString;
 
 describe("wish built-in", () => {

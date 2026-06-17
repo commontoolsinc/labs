@@ -3,6 +3,7 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  entityIdFrom,
   getPatternIdentityRef,
   NAME,
   Runtime,
@@ -467,7 +468,7 @@ export async function setPieceSlug(
   const source = sourcePath.length === 0
     ? manager.runtime.getCellFromEntityId(
       manager.getSpace(),
-      { "/": resolvedSourcePieceId },
+      entityIdFrom(resolvedSourcePieceId),
       [],
       undefined,
       undefined,
@@ -937,7 +938,7 @@ export async function linkSqliteDiskSource(
   //    schema); the server skips ensureTables for a registered source.
   const handle = manager.runtime.getCellFromEntityId(
     space,
-    { "/": id },
+    entityIdFrom(id),
     [],
     undefined,
   );

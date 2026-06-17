@@ -4,6 +4,7 @@ import type { URI } from "./sigil-types.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import { parseLink } from "./link-utils.ts";
 import { slugIdForSpace, validateSlug } from "./slugs.ts";
+import { entityIdFrom } from "./create-ref.ts";
 
 export class SlugResolutionError extends Error {
   constructor(
@@ -29,7 +30,7 @@ export async function resolveSlugTargetCell(
   const slugId = slugIdForSpace(space, slug);
   const slugCell = runtime.getCellFromEntityId(
     space,
-    { "/": slugId },
+    entityIdFrom(slugId),
   );
   await slugCell.sync();
   const raw = slugCell.getRaw();

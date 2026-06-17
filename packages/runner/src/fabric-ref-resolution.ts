@@ -3,6 +3,7 @@ import type { Runtime } from "./runtime.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
+import { entityIdFrom } from "./create-ref.ts";
 import {
   type FabricRef,
   formatFabricRef,
@@ -52,7 +53,7 @@ export async function resolveFabricRefToIdentity(
     chain.push(`of:${patternId}`);
     cell = runtime.getCellFromEntityId(
       refSpace,
-      { "/": fromURI(patternId) },
+      entityIdFrom(fromURI(patternId)),
     );
     await cell.sync();
   }

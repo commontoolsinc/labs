@@ -214,7 +214,7 @@ describe("link-utils", () => {
     it("runtime getCellFromEntityId should accept an explicit scope", () => {
       const cell = runtime.getCellFromEntityId(
         space,
-        { "/": "scoped-entity" },
+        "scoped-entity",
         [],
         undefined,
         undefined,
