@@ -1911,14 +1911,13 @@ class SpaceReplica implements ISpaceReplica {
         });
       }
     }
-    return {
-      confirmed: compactCommitReads(this.#space, confirmed).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-      pending: compactCommitReads(this.#space, pending).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-    };
+    // Keep the nonRecursive flag on the reads sent to the engine (it was
+    // historically stripped here). The engine applies shallow (shape-only)
+    // conflict granularity to nonRecursive reads, matching how the scheduler
+    // already treats them.
+    const confirmedCompacted = compactCommitReads(this.#space, confirmed);
+    const pendingCompacted = compactCommitReads(this.#space, pending);
+    return { confirmed: confirmedCompacted, pending: pendingCompacted };
   }
 
   private applySessionSync(

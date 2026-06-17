@@ -2,7 +2,12 @@ import { Database } from "@db/sqlite";
 import type { FabricValue } from "../interface.ts";
 import { runWrite } from "./sqlite/exec.ts";
 import { applyPatch } from "./patch.ts";
-import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
+import {
+  isPrefixPath,
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "./path.ts";
 import {
   type BranchName,
   type CellScope,
@@ -3506,6 +3511,7 @@ const validateConfirmedReads = (
       scopeKey,
       read.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
@@ -3569,7 +3575,13 @@ const findConflictSeq = (
   scopeKey: string,
   afterSeq: number,
   readPath: readonly string[],
+  // When true, treat `readPath` as a SHALLOW (shape-only) dependency — conflict
+  // only with writes at-or-above it.
+  nonRecursive: boolean = false,
 ): number | null => {
+  // Tier-1 (set/delete) stays path-blind even for a shallow read: a whole-doc
+  // replace/delete changes the container the shape read observed, so it must
+  // still conflict. Only Tier-2 (patch) granularity is refined.
   const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
     branch,
     id,
@@ -3591,12 +3603,11 @@ const findConflictSeq = (
       data: string | null;
     }>
   ) {
-    if (
-      patchOverlapsRead(
-        decodeStoredPatchList(conflict.data),
-        readPath,
-      )
-    ) {
+    const patches = decodeStoredPatchList(conflict.data);
+    const overlaps = nonRecursive
+      ? patchOverlapsNonRecursiveRead(patches, readPath)
+      : patchOverlapsRead(patches, readPath);
+    if (overlaps) {
       return conflict.seq;
     }
   }
@@ -3635,6 +3646,7 @@ const schedulerObservationReadDropReason = (
       scopeKey,
       read.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       return "stale-confirmed-read";
@@ -3872,6 +3884,25 @@ const patchOverlapsRead = (
 ): boolean => {
   return patches.some((patch) =>
     touchedPathsForPatch(patch).some((path) => pathsOverlap(path, readPath))
+  );
+};
+
+// Overlap test for a SHALLOW (nonRecursive)
+// read. Unlike `patchOverlapsRead` (symmetric prefix-containment), a shape read
+// at `readPath` conflicts only with a write touching `readPath` itself or an
+// ANCESTOR of it — i.e. `isPrefixPath(touched, readPath)`. Key add/remove still
+// conflict because `touchedPathsForPatch` injects the patch's parent path
+// (engine.ts touchedPathsForPatch), which equals `readPath` for a direct child
+// mutation. A disjoint deep-value `replace` strictly BELOW `readPath` does not
+// touch an ancestor, so it no longer over-conflicts. This is a strict subset of
+// `patchOverlapsRead`, so it can only remove spurious conflicts, never miss a
+// genuine one (no false-negative).
+const patchOverlapsNonRecursiveRead = (
+  patches: readonly PatchOp[],
+  readPath: readonly string[],
+): boolean => {
+  return patches.some((patch) =>
+    touchedPathsForPatch(patch).some((path) => isPrefixPath(path, readPath))
   );
 };
 

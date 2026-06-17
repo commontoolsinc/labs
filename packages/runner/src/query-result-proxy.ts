@@ -9,7 +9,10 @@ import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IReadOptions,
+} from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type CfcLabelView,
@@ -21,6 +24,13 @@ import {
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
+
+// Container/shape reads (proxy creation, ownKeys, getOwnPropertyDescriptor,
+// has) are recorded as nonRecursive so the engine applies shallow (shape-only)
+// conflict granularity to them — matching how the scheduler already treats
+// nonRecursive reads. Value materialization (leaf scalars via child-proxy
+// creation, array methods that consume elements) stays recursive.
+const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
 // Cache of target objects to their proxies, scoped by ReactivityLog
 type ProxyCache = {
@@ -159,7 +169,7 @@ export function createQueryResultProxy<T>(
       readTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
   ]);
-  const value = readTx.readValueOrThrow(link) as any;
+  const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
@@ -471,7 +481,7 @@ export function createQueryResultProxy<T>(
     },
     ownKeys: () => {
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link);
+      const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
         return Reflect.ownKeys(current);
       }
@@ -500,7 +510,7 @@ export function createQueryResultProxy<T>(
         return Object.getOwnPropertyDescriptor(value, prop);
       }
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link) as typeof value;
+      const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
       if ((isRecord(current) || Array.isArray(current)) && prop in current) {
         return {
           configurable: true,
@@ -523,7 +533,7 @@ export function createQueryResultProxy<T>(
         return prop in value;
       }
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link);
+      const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
         return prop in current;
       }
