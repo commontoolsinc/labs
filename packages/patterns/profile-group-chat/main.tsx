@@ -178,11 +178,22 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
               <span style={headerLabel}>
                 In this room ({participantCount})
               </span>
-              <cf-hstack gap="2" align="center" style={{ flexWrap: "wrap" }}>
+              {
+                /* Plain flex row (not cf-hstack) — cf-hstack's :host clips
+                  overflow:hidden, which cuts the badges' verified glow. */
+              }
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
                 {participants.map((p) => (
                   <cf-profile-badge variant="chip" $profile={p.profile} />
                 ))}
-              </cf-hstack>
+              </div>
             </cf-vstack>
 
             {
@@ -193,7 +204,13 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
             }
             <cf-vstack gap="3" style={{ minHeight: "160px" }}>
               {messages.map((message) => (
-                <cf-hstack gap="2" align="start">
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.5rem",
+                    alignItems: "flex-start",
+                  }}
+                >
                   <cf-profile-badge
                     variant="circle"
                     size="sm"
@@ -209,7 +226,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
                       {message.body}
                     </span>
                   </cf-vstack>
-                </cf-hstack>
+                </div>
               ))}
             </cf-vstack>
 
