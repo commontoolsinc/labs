@@ -52,4 +52,61 @@ describe("Shell cross-origin isolation posture", () => {
     expect(coep).not.toBe("credentialless");
     expect(coep).toBe("unsafe-none");
   });
+
+  it("applies the non-isolating headers to nested paths too", async () => {
+    // The posture must hold for every served path, not just the document root,
+    // because any same-origin response can establish or reuse the page's agent
+    // cluster.
+    const response = await app.request("/assets/app.js");
+    await response.text();
+
+    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe(
+      "same-origin-allow-popups",
+    );
+    expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe(
+      "unsafe-none",
+    );
+  });
+});
+
+// The shell routes serve read-only content to any origin. These pin that
+// permissive CORS keeps working alongside the isolation headers, so a future
+// change to one does not silently disturb the other.
+describe("Shell route CORS", () => {
+  it("allows a cross-origin GET with a wildcard origin", async () => {
+    const response = await app.request("/", {
+      headers: { Origin: "https://example.com" },
+    });
+    await response.text();
+
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  it("answers an OPTIONS preflight", async () => {
+    const response = await app.request("/", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://example.com",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+    await response.text();
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+});
+
+// With no compiled frontend and no SHELL_URL proxy target — the unit-test
+// environment — the shell router answers with a 404 that tells an operator how
+// to bring the shell up. This guards that operator hint and its port.
+describe("Shell dev fallback without a compiled build or proxy", () => {
+  it("returns 404 with a hint naming SHELL_URL and the shell port", async () => {
+    const response = await app.request("/anything");
+    const body = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(/Shell app not available/.test(body)).toBe(true);
+    expect(/SHELL_URL=http:\/\/localhost:\d+/.test(body)).toBe(true);
+  });
 });
