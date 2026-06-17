@@ -1763,6 +1763,9 @@ export class Scheduler {
       hasActiveDebounceTimer: (action) =>
         this.delays.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
+      // backgroundTasks holds exactly the in-flight initial-rehydration tasks
+      // (the only add() site is queueInitialActionRehydration).
+      hasPendingInitialRehydrations: () => this.backgroundTasks.size > 0,
     };
   }
 

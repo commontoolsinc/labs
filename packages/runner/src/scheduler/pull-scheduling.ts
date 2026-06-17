@@ -30,6 +30,15 @@ export interface PullSchedulingState {
   readonly isLiveAction: (action: Action) => boolean;
   readonly hasActiveDebounceTimer: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  // True while ANY initial rehydration is in flight (resume from persisted
+  // state). On this branch the runnable-seed set is status-based, and reload
+  // sync-fills mark resuming never-ran/invalid nodes — so without a barrier the
+  // settle runs them fresh (racing/aborting their resume) and re-renders
+  // downstream effects in waves. Holding ALL pull work until resumes resolve
+  // reproduces main's ordering (rehydrate first, then a single settle): the
+  // race and the render storm both disappear. idle() already awaits the resume
+  // background tasks, so this never reports idle early.
+  readonly hasPendingInitialRehydrations: () => boolean;
 }
 
 /**
@@ -45,6 +54,9 @@ export function collectPullIterationSeeds(
   state: PullSchedulingState,
   workSet: Set<Action>,
 ): void {
+  // Rehydration barrier: hold every pull seed until all in-flight resumes
+  // resolve (see PullSchedulingState.hasPendingInitialRehydrations).
+  if (state.hasPendingInitialRehydrations()) return;
   const initialSize = workSet.size;
   collectPrimaryPullIterationSeeds(state, workSet);
 
@@ -100,6 +112,10 @@ function collectIdleMaterializerSeeds(
 }
 
 export function hasRunnablePullWork(state: PullSchedulingState): boolean {
+  // Rehydration barrier (see collectPullIterationSeeds): no pull work runs
+  // until in-flight resumes resolve. idle() awaits those background tasks
+  // separately, so this does not report idle prematurely.
+  if (state.hasPendingInitialRehydrations()) return false;
   return hasRunnablePrimaryPullWork(state) ||
     hasRunnableIdleMaterializerWork(state);
 }
