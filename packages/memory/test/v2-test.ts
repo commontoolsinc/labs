@@ -1,5 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
@@ -10,7 +10,6 @@ import {
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
-  isSourceLink,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
@@ -95,14 +94,6 @@ describe("memory v2 paths", () => {
         schema: false,
       },
     );
-  });
-});
-
-describe("memory v2 source links", () => {
-  it("recognizes short source links", () => {
-    assert(isSourceLink({ "/": "abc123" }));
-    assertFalse(isSourceLink({ "/": { link: "abc123" } }));
-    assertFalse(isSourceLink({}));
   });
 });
 
