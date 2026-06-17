@@ -214,13 +214,18 @@ exit-code blindness. Data-integrity hazard for any array-variant sweep.
 Structural grounding (multi-agent code read + adversarial verify) + direct
 instrumentation. Full team-facing writeup: **`DROPPED-WRITES-EVIDENCE.md`**.
 
-- **Conflict unit = the entity-DOCUMENT** `(branch, id, scope_key)`, server-side.
-  The governing predicate `SELECT_SET_DELETE_CONFLICT` (`memory/v2/engine.ts:529`)
-  has NO field/path/space column. So: distinct keys in one Record collide (keying
-  doesn't help — `cell.ts:1492-1521`, `data-updating.ts:838-902`); disjoint cells
-  don't (distinct ids; `scope` "space" → constant `DEFAULT_SCOPE_KEY`,
-  `engine.ts:46-53`). Retry budget 5 (`scheduler/constants.ts:5`); commit is
-  fire-and-forget (`events.ts:609-616`) so the drop is **silent to the caller**.
+- **Conflict is TWO-tier** (REFINED 2026-06-16 by #4196's real-server test): tier-1
+  `set`/`delete` is **path-blind** (`SELECT_SET_DELETE_CONFLICT`, `engine.ts:529`,
+  no field column); tier-2 `patch` is **path-overlap-gated** and disjoint patches
+  with FINE reads **merge** — the engine is NOT fundamentally doc-granular. Our
+  handler writes over-conflict because they record COARSE root reads (via
+  `.get()`/`.key()` resolution, `cell.ts:1492-1521`) that overlap every patch — so
+  distinct keys collide *here*, but "keying doesn't help" is a property of the
+  write shape, not the engine. Disjoint cells don't conflict (distinct ids; `scope`
+  "space" → constant `DEFAULT_SCOPE_KEY`, `engine.ts:46-53`). Retry budget 5
+  (`scheduler/constants.ts:5`); commit fire-and-forget (`events.ts:609-616`) →
+  **silent to the caller**. (Full refinement + #4196 cross-link in
+  `DROPPED-WRITES-EVIDENCE.md`.)
 - **The "unlogged residual" (12 missing > 6 exhaustions) is RESOLVED — it is a
   CASCADE of the same bug, NOT a second mechanism.** `joinAs` writes the contended
   `usersByName`/`userOrder` docs AND `myName` (`PerUser`) in one tx

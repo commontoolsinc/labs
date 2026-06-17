@@ -4,9 +4,12 @@
 some writes are **silently lost in canonical storage** — no error to the app, and
 the loss can be **invisible and displaced** from its cause (a dropped *identity*
 write silently voids every later action that depended on it). It is a **general
-runtime behavior, not SQLite-specific**, and **keying does not avoid it** (the
-conflict unit is the whole document, not the field). There is **one** mechanism;
-two earlier "second mechanism" hypotheses were investigated and **refuted**.
+runtime behavior, not SQLite-specific**. The engine is **not** fundamentally
+document-granular (disjoint `patch` writes with fine reads merge); the drops come
+from pattern-handler write shapes that **over-conflict** — coarse, document-wide
+reads plus a path-blind `set`/`delete` path — so **keying *as authored today* does
+not avoid it** (§2). There is **one** mechanism; two earlier "second mechanism"
+hypotheses were investigated and **refuted**.
 
 This is reproducible and grounded in the runtime code. It is **for discussion** —
 we have a root cause but **no chosen fix**.
@@ -39,25 +42,39 @@ Both `cold == live` (no reactive-read lag) and stable across reps.
 
 ## 2. Root cause (code-grounded)
 
-**The write-conflict / serialization unit is the entity-DOCUMENT** — the tuple
-`(branch, id, scope_key)` — decided server-side, **not** per-field and **not**
-per-space. The governing predicate has no field/path/space column:
+**The conflict check is two-tier**, and the distinction is the crux. (Both tiers
+are pinned against a real `MemoryV2Server` in #4196's
+`packages/runner/test/cell-write-conflict-granularity.test.ts`.)
 
-```sql
--- packages/memory/v2/engine.ts:529  SELECT_SET_DELETE_CONFLICT
-WHERE branch=:branch AND id=:id AND scope_key=:scope_key AND seq > :after_seq
-  AND op IN ('set','delete')
-```
+- **tier-1 — `set`/`delete`: path-BLIND.** The predicate carries no field/path
+  column, so any whole-doc `set`/`delete` conflicts with everything on the
+  `(branch, id, scope_key)` document:
+  ```sql
+  -- packages/memory/v2/engine.ts:529  SELECT_SET_DELETE_CONFLICT
+  WHERE branch=:branch AND id=:id AND scope_key=:scope_key AND seq > :after_seq
+    AND op IN ('set','delete')
+  ```
+- **tier-2 — `patch`: path-overlap-gated.** Disjoint `patch` writes with *fine*
+  reads **merge cleanly** — the engine is **NOT** fundamentally document-granular.
+  (#4196 ARM 1: two disjoint sibling bumps both land; server merges to
+  `{nameDraft:"Alice", otherSibling:1}`, neither rejected.)
 
-From that one fact, everything follows and matches every measurement:
+So conflict granularity is decided by the **writer's recorded read-set (plus op
+type)** — not by the engine being doc-locked. The drops we measure come from
+**pattern-handler write shapes that over-conflict:**
 
-- **Coarse *within* a document → keying does not help.** A plain `Record`'s keys
-  live inline in one document; `.key(id)` only extends the link *path* while
-  keeping the same entity `id` (`cell.ts:1492-1521`), and a primitive value is
-  never split into its own entity doc (`data-updating.ts:838-902`). So
-  `map.key(a).set()` and `map.key(b).set()` — **distinct keys** — collide exactly
-  like a shared `list.push()`. Measured: distinct-key 20 vs shared-list 19 of 50
-  missing at 10 users.
+- **Handler writes record COARSE reads → tier-2 overlaps everything.** A handler
+  `.get()` (or resolving `.key(id)`) records a **root `[]` read**, a prefix of
+  every concurrent patch path, so tier-2's overlap check always fires and even
+  **distinct-key** writes collide. (`.key(id)` shares the parent entity `id` and
+  only extends the path — `cell.ts:1492-1521`; primitives stay inline,
+  `data-updating.ts:838-902`.) Measured: distinct-key 20 vs shared-list 19 of 50
+  missing at 10 users. **So keying *as authored today* doesn't help — not because
+  the engine can't discriminate fields, but because these handlers record
+  document-wide reads** (+ the tier-1 blindness above). With fine reads (as a
+  `$value`-bound write records), the same disjoint writes would merge (#4196).
+  *(Exact read-path our handlers record vs `$value` writes is being pinned in the
+  granularity prototype.)*
 - **Bounded *across* documents.** Two distinct cells get distinct `id`s and never
   co-select in the conflict SQL (`scope_key` for `"space"` is the constant
   `DEFAULT_SCOPE_KEY`, `engine.ts:46-53`). Measured: a writer group on cell `list`
@@ -115,17 +132,19 @@ and **both refuted**:
   minimal repro is identically clean (`missing == exhaustions`). The contention
   pattern is not the trigger.
 
-So there is **one** mechanism (per-document conflict → retry exhaustion → silent
-drop), which manifests directly *and* via the cascade. (The earlier
-`main-sqlite-rev.tsx` lost-update line in `PERF-SESSION` is superseded by this.)
+So there is **one** mechanism (over-conflict → retry exhaustion → silent drop),
+which manifests directly *and* via the cascade. (The earlier `main-sqlite-rev.tsx`
+lost-update line in `PERF-SESSION` is superseded by this.)
 
 ---
 
 ## 5. Severity
 
 - **Silent to the app** — `send()` resolves; no exception, no Result error.
-- **Keying does not save you** — the intuitive "give each user their own slot" fix
-  still collides (whole-document conflict unit).
+- **Keying *as authored today* does not save you** — distinct-key writes still
+  collide because the handler records coarse, document-wide reads (not because the
+  engine is doc-locked; with fine reads they'd merge — #4196). "Give each user
+  their own slot" only pays off once the recorded read-set is finer.
 - **Cascading + displaced** — a dropped identity/setup write silently voids
   dependent actions far from the fault.
 - **Threshold scales with contention** — plain cells drop by ~10 concurrent writers
@@ -147,15 +166,28 @@ rather than silently losing the write. Our findings split the space in two:
    (`events.ts:609-616, 661`) — at minimum an observable error the app can
    retry/queue/show. This is the headline ask and covers the cascade (where the
    symptom is otherwise invisible).
-2. **Don't conflict where writes are independent.** For commutative / distinct-key
-   writes (append, per-user slots), finer-grained **per-path** conflict detection
-   (extend the conflict predicate + the read precondition with the write path)
-   would let them commit concurrently — directly removing the coarse-within-doc
-   collisions. Alternatives: split hot collections so each key is its own entity
-   doc; or a CRDT/server-merge for commutative ops.
+2. **Don't conflict where writes are independent.** The engine's tier-2 `patch`
+   path **already** merges disjoint writes when reads are fine (#4196's real-server
+   test proves it) — so the lever is making handler writes record **finer reads**
+   (stop the root `[]` read so the existing path-overlap check discriminates), plus
+   making the tier-1 `set`/`delete` path path-aware. The non-negotiable invariant:
+   never under-record a read the handler actually depended on (that would turn
+   over-conflict into a *silent lost update* — strictly worse). Alternatives: split
+   hot collections so each key is its own entity doc; or CRDT/server-merge for
+   commutative ops. *(Granularity options + a prototype plan are being worked
+   separately.)*
 3. **Mitigations (rate, not structure):** larger retry budget + jittered backoff —
    cheaper, reduces the drop *rate* under bursts, but a hot doc with N > budget
    concurrent writers still drops.
+
+**Related work.** [#4196](https://github.com/commontoolsinc/labs/pull/4196)
+(per-key commit queue + bounded rebase, runtime-client) is the **client-side
+recovery** half: it serializes one client's same-key writes and *re-lands* a
+rejected write instead of clobbering. It deliberately does **not** change engine
+granularity ("that hardening stays with #4178") and ships the
+`cell-write-conflict-granularity.test.ts` real-server harness this doc's two-tier
+model is pinned against. #4196 = recover at the client; #4178 = stop
+over-conflicting at the engine.
 
 ---
 
