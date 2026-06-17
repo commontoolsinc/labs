@@ -104,9 +104,9 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
               alignItems: "flex-start",
             }}
           >
-            <cf-profile-badge $profile={ada} size={size} />
-            <cf-profile-badge $profile={grace} size={size} />
-            <cf-profile-badge $profile={alan} size={size} />
+            <cf-profile-badge $profile={ada} size={size} noNavigate />
+            <cf-profile-badge $profile={grace} size={size} noNavigate />
+            <cf-profile-badge $profile={alan} size={size} noNavigate />
           </div>
         </div>
 
