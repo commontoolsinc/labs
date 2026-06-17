@@ -35,6 +35,7 @@ import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
 import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
@@ -242,25 +243,17 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
-  // TODO(@ubik2): Previously, we checked the cell for an internal link,
-  // and if we found it, we attached the pattern's schema. I think that
-  // should all be handled properly by the new sigil links that include
-  // the schema, but leaving this until I verify.
-
-  // Extract schema from cell, including from resultSchema of associated pattern
+  // Extract schema from cell, following links that carry an embedded schema
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
   if (isNontrivialSchema(schema)) {
     return schema;
   }
 
-  // Try harder: resolve all links, clear the schema, then look up the schema
-  // from the source pattern's resultSchema. This handles cells accessed via
+  // Resolve all links, clear the schema, then look up the schema embedded
+  // in the links along the resolved chain. This handles cells accessed via
   // arrays (e.g., mentionables, recents) where the intermediate cell doesn't
-  // carry a schema but the underlying piece cell's pattern does.
-  // Uses the same trick as addFavorite in home.tsx: clearing the schema with
-  // asSchema(undefined) forces asSchemaFromLinks to look it up fresh from the
-  // source pattern.
+  // carry a schema but a link in the chain does.
   try {
     const resolvedSchema = cell.resolveAsCell().asSchema(undefined)
       .asSchemaFromLinks()?.getAsNormalizedFullLink()?.schema;
@@ -269,6 +262,30 @@ function getCellSchema(
     }
   } catch (e) {
     logger.debug("llm", "getCellSchema fallback failed:", e);
+  }
+
+  // Read the resultSchema stored in a result document's meta "schema" field
+  // (written by updateResultSchemaMeta when a piece runs), projected along
+  // the cell's path. Checked on the cell's own document first (covers paths
+  // into a result document whose links carry no schema), then on the fully
+  // resolved target (covers reference chains that end at a result document).
+  try {
+    const own = getResultCellWithSourceSchema(cell.asSchema(undefined));
+    if (isNontrivialSchema(own.schema)) {
+      return own.schema;
+    }
+  } catch (e) {
+    logger.debug("llm", "getCellSchema meta-schema lookup failed:", e);
+  }
+  try {
+    const resolved = getResultCellWithSourceSchema(
+      cell.resolveAsCell().asSchema(undefined),
+    );
+    if (isNontrivialSchema(resolved.schema)) {
+      return resolved.schema;
+    }
+  } catch (e) {
+    logger.debug("llm", "getCellSchema meta-schema fallback failed:", e);
   }
 
   // Fall back to minimal schema based on current value
@@ -2018,6 +2035,7 @@ function createToolResultMessages(
 }
 
 export const llmDialogTestHelpers = {
+  getCellSchema,
   parseLLMFriendlyLink,
   traverseAndSerialize,
   serializeForLLMObservation,
