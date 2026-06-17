@@ -8,8 +8,10 @@ import {
   NAME,
   pattern,
   RepresentsCurrentUser,
+  SELF,
   Stream,
   UI,
+  wish,
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
@@ -380,7 +382,7 @@ const applyInitialName = lift<
 });
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
-  ({ initialName }) => {
+  ({ initialName, [SELF]: self }) => {
     const initialProfileName = trimInitialName(initialName);
     const name = new Writable<
       OwnerProtectedProfileWrite<string, typeof setName>
@@ -409,7 +411,35 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // Rendered profile view (CT-1748): the cell view shows a read-only
     // presentation by default; the owner flips this to reveal the edit form.
     const editing = new Writable<boolean>(false).for("editing");
+    // Is the current viewer the profile owner? `wish("#profile")` resolves the
+    // VIEWER's own default profile (from their home); `SELF` is THIS profile's
+    // cell. They are the same cell only when the owner is viewing their own
+    // (default) profile — a visitor's `#profile` is a different per-user profile
+    // cell, so this is never a false positive (a non-owner can never be granted
+    // edit). The edit form + button are gated on this so visitors get a
+    // read-only view; the field writes are independently CFC-owner-protected,
+    // so this is a UX gate, not the security boundary. Known limitation: an
+    // owner viewing one of their OWN non-default profiles reads as a visitor
+    // here (safe false-negative — they just don't get the inline edit form).
+    const viewerProfile = wish<{ name?: string }>({ query: "#profile" });
+    const isOwner = computed(() => {
+      const viewer = viewerProfile.result;
+      return viewer !== undefined && equals(self, viewer) === true;
+    });
+    // `isEditing` is the raw view-toggle state (the user's intent), kept
+    // independent of ownership so it stays a clean, testable signal. The edit
+    // FORM is gated separately on `showEditForm` below; a visitor never sees the
+    // toggle button, so for them `editing` stays false in practice anyway.
     const isEditing = computed(() => editing.get() === true);
+    // The edit form is shown only to the owner who has toggled into edit mode;
+    // visitors (and the owner before toggling) see the read-only presentation.
+    // Ownership is re-derived inline rather than referencing `isOwner` so each
+    // computed is self-contained (avoids nested-computed unwrap surprises).
+    const showEditForm = computed(() => {
+      const viewer = viewerProfile.result;
+      const owner = viewer !== undefined && equals(self, viewer) === true;
+      return editing.get() === true && owner;
+    });
     // Whether a non-empty bio has been authored — drives the presentation-mode
     // bio block (CT-1648).
     const hasBio = computed(() => (bio.get() ?? "").trim().length > 0);
@@ -425,6 +455,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       [NAME]: name.get(),
       name: name.get(),
       avatar: avatar.get(),
+      // Surfaced in the badge hover tooltip (CT-1648); the pinned-piece count
+      // populates on roster badges bound to the full profile cell.
+      bio: bio.get(),
     }));
 
     const parsedUserTags = computed(() =>
@@ -486,7 +519,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                 profile cell. The edit form is gated behind the toggle below. */
             }
             {ifElse(
-              isEditing,
+              showEditForm,
               null,
               <cf-vstack gap="4" data-ui-region="profile-presentation">
                 <cf-profile-badge
@@ -539,21 +572,29 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   ))}
                 </cf-vstack>
 
-                <cf-hstack>
-                  <cf-button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleProfileEditing({ editing })}
-                  >
-                    Edit profile
-                  </cf-button>
-                </cf-hstack>
+                {
+                  /* Only the owner gets the edit affordance; a visitor sees a
+                  read-only profile (and CFC would reject their writes anyway). */
+                }
+                {ifElse(
+                  isOwner,
+                  <cf-hstack>
+                    <cf-button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleProfileEditing({ editing })}
+                    >
+                      Edit profile
+                    </cf-button>
+                  </cf-hstack>,
+                  null,
+                )}
               </cf-vstack>,
             )}
 
-            {/* The existing edit form, now revealed only in edit mode. */}
+            {/* The existing edit form, revealed only to the owner in edit mode. */}
             {ifElse(
-              isEditing,
+              showEditForm,
               <cf-vstack gap="4" data-ui-region="profile-edit">
                 <cf-vstack gap="2">
                   <label>Name</label>

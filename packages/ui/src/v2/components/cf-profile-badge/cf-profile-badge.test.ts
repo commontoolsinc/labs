@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { NAME } from "@commonfabric/runtime-client";
-import { CFProfileBadge, profileDisplayFromValue } from "./cf-profile-badge.ts";
+import {
+  CFProfileBadge,
+  profileDisplayFromValue,
+  profileTooltipFromValue,
+} from "./cf-profile-badge.ts";
 import { identitySeal } from "./identity-seal.ts";
 
 const OWNER_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -501,6 +505,46 @@ describe("CFProfileBadge", () => {
       expect(profileDisplayFromValue({})).toEqual({
         name: undefined,
         avatar: undefined,
+      });
+    });
+  });
+
+  describe("profileTooltipFromValue (CT-1648)", () => {
+    it("extracts a trimmed bio and the pinned-element count", () => {
+      const val = {
+        name: "Ada",
+        bio: "  Mathematician & first programmer.  ",
+        elements: [{ title: "Counter" }, { title: "Notes" }],
+      };
+      expect(profileTooltipFromValue(val)).toEqual({
+        bio: "Mathematician & first programmer.",
+        pinnedCount: 2,
+      });
+    });
+
+    it("treats a blank bio as none and a missing elements list as zero", () => {
+      expect(profileTooltipFromValue({ name: "Ada", bio: "   " })).toEqual({
+        bio: undefined,
+        pinnedCount: 0,
+      });
+    });
+
+    it("returns empty details for a projection without bio/elements", () => {
+      // The self-view projection ({name, avatar}) carries no bio/elements.
+      expect(profileTooltipFromValue({ name: "Ada", avatar: "🦊" })).toEqual({
+        bio: undefined,
+        pinnedCount: 0,
+      });
+    });
+
+    it("returns empty details for non-object input", () => {
+      expect(profileTooltipFromValue(undefined)).toEqual({
+        bio: undefined,
+        pinnedCount: 0,
+      });
+      expect(profileTooltipFromValue("nope")).toEqual({
+        bio: undefined,
+        pinnedCount: 0,
       });
     });
   });

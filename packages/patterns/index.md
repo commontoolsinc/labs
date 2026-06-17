@@ -56,8 +56,10 @@ Capability and app demos (root files): `annotation.tsx`,
 `cheeseboard.tsx`, `compiler.tsx`, `deep-research.tsx`, `dice.tsx` (+
 `dice-handlers.ts`), `group-chat-lobby.tsx`, `group-chat-room.tsx`, `image.tsx`,
 `image-analysis.tsx`, `link-preview.tsx`, `map-demo.tsx`, `mobile-app-demo.tsx`,
-`pattern-index.tsx`, `self.tsx`, `self-improving-classifier.tsx`,
-`shopping-list.tsx`, `store-mapper.tsx`, `text-swapper.tsx`.
+`pattern-index.tsx`, `profile-roster-live-demo.tsx` (demo: live multi-user
+profile roster — every participant's cross-space profile badge), `self.tsx`,
+`self-improving-classifier.tsx`, `shopping-list.tsx`, `store-mapper.tsx`,
+`text-swapper.tsx`.
 
 App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,

@@ -15,11 +15,27 @@ const svgAvatar = (rgb: string, label: string): string =>
 
 // A profile cell, as presented to <cf-profile-badge $profile={...} />. The badge
 // reads the cell's [NAME] (person's name under the multi-profile model) and
-// falls back to `name`, plus `avatar`.
-type ProfileValue = { [NAME]: string; name: string; avatar: string };
+// falls back to `name`, plus `avatar`. `bio` + `elements` (pinned pieces) feed
+// the hover/focus tooltip (CT-1648); items only need a `title` for the count.
+type ProfileValue = {
+  [NAME]: string;
+  name: string;
+  avatar: string;
+  bio?: string;
+  elements?: Array<{ title: string }>;
+};
 
-const makeProfile = (display: string, avatar: string) =>
-  new Writable<ProfileValue>({ [NAME]: display, name: display, avatar });
+const makeProfile = (
+  display: string,
+  avatar: string,
+  extra: { bio?: string; elements?: Array<{ title: string }> } = {},
+) =>
+  new Writable<ProfileValue>({
+    [NAME]: display,
+    name: display,
+    avatar,
+    ...extra,
+  });
 
 const sizeItems = [
   { label: "xs", value: "xs" },
@@ -47,9 +63,20 @@ export interface ProfileBadgeStoryOutput {
 }
 
 export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
-  // Three profiles exercising each avatar render path: image, emoji, initials.
-  const ada = makeProfile("Ada Lovelace", svgAvatar("rgb(99,102,241)", "AL"));
-  const grace = makeProfile("Grace Hopper", "🦊");
+  // Three profiles exercising each avatar render path: image, emoji, initials —
+  // and each tooltip state (CT-1648): bio + pins, bio only, and none.
+  const ada = makeProfile("Ada Lovelace", svgAvatar("rgb(99,102,241)", "AL"), {
+    bio:
+      "Mathematician & writer; first to see that a computing engine could go beyond pure calculation.",
+    elements: [
+      { title: "Analytical Engine notes" },
+      { title: "Bernoulli generator" },
+      { title: "Note G" },
+    ],
+  });
+  const grace = makeProfile("Grace Hopper", "🦊", {
+    bio: "Rear admiral and compiler pioneer; popularized the term “debugging.”",
+  });
   const alan = makeProfile("Alan Turing", "");
 
   const size = new Writable<"xs" | "sm" | "md" | "lg" | "xl">("md");
@@ -77,9 +104,9 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
               alignItems: "flex-start",
             }}
           >
-            <cf-profile-badge $profile={ada} size={size} />
-            <cf-profile-badge $profile={grace} size={size} />
-            <cf-profile-badge $profile={alan} size={size} />
+            <cf-profile-badge $profile={ada} size={size} noNavigate />
+            <cf-profile-badge $profile={grace} size={size} noNavigate />
+            <cf-profile-badge $profile={alan} size={size} noNavigate />
           </div>
         </div>
 
@@ -90,7 +117,9 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           (Grace), initials (Alan). The verified seal — a DID-derived aura —
           only renders for a runtime-attested profile (a “represents-principal”
           CFC label), which this story can’t mint, so these badges stay in the
-          plain “presented” state.
+          plain “presented” state. Hover or focus a badge to see its tooltip
+          (CT-1648): Ada has a bio + 3 pinned pieces, Grace has a bio only, and
+          Alan — with neither — shows no tooltip.
         </span>
       </div>
     ),
