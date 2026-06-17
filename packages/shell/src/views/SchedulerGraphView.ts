@@ -1339,7 +1339,7 @@ export class XSchedulerGraph extends LitElement {
    * Format: prefix:...last4/path
    *
    * Examples:
-   * - "sink:did:key:z6Mkk.../of:fid1:abc.../value" → "sink:...i.../value"
+   * - "sink:did:key:z6Mkk.../of:fid1:abc.../value" → "sink:...c.../value"
    * - "parentAction" → "parentAction"
    */
   private truncateLabel(label: string, maxLen = 20): string {
