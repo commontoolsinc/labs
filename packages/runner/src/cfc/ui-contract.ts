@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { isEntityRef } from "@commonfabric/data-model/cell-rep";
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import {
   findAndInlineDataURILinks,
@@ -545,15 +546,8 @@ const eventEnvelopePayloads = (
   return payloads;
 };
 
-const aliasCellId = (cell: unknown): string | undefined => {
-  try {
-    return isRecord(cell) && typeof cell["/"] === "string"
-      ? toURI(cell)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-};
+const aliasCellId = (cell: unknown): string | undefined =>
+  isEntityRef(cell) ? toURI(cell) : undefined;
 
 const contractCandidatesFromEventContext = (
   event: unknown,

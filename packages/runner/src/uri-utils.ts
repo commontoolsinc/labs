@@ -1,7 +1,10 @@
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isRecord } from "@commonfabric/utils/types";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 import type { URI } from "./sigil-types.ts";
 
 /**
@@ -9,9 +12,14 @@ import type { URI } from "./sigil-types.ts";
  */
 export function toURI(value: unknown): URI {
   if (value instanceof FabricHash) {
+    // The live id form (an `EntityId`/`createRef` result) is a `FabricHash` in
+    // either cell-rep regime.
     return `of:${value}`;
-  } else if (isRecord(value) && typeof value["/"] === "string") {
-    return `of:${value["/"]}`;
+  } else if (isEntityRef(value)) {
+    // A serialized entity-ref for the active regime. With the modern cell
+    // representation on, that form is the `FabricHash` handled above; the
+    // `{ "/": … }` object only arises in legacy mode.
+    return `of:${entityRefToString(value)}`;
   } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {

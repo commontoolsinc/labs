@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
@@ -18,6 +22,26 @@ describe("hashOf", () => {
     const ref2 = hashOf({ hello: "world" });
     expect(ref.taggedHashString).toEqual(ref2.taggedHashString);
   });
+});
+
+describe("getEntityId (string forms)", () => {
+  const tagged = hashOf({ test: "get-entity-id" }).taggedHashString;
+
+  afterEach(() => {
+    resetModernCellRepConfig();
+  });
+
+  for (const modernCellRep of [false, true]) {
+    it(`reads a bare id string (modernCellRep=${modernCellRep})`, () => {
+      setModernCellRepConfig(modernCellRep);
+      expect(entityRefToString(getEntityId(tagged)!)).toBe(tagged);
+    });
+
+    it(`reads an \`of:\`-prefixed id string (modernCellRep=${modernCellRep})`, () => {
+      setModernCellRepConfig(modernCellRep);
+      expect(entityRefToString(getEntityId(`of:${tagged}`)!)).toBe(tagged);
+    });
+  }
 });
 
 describe("cell-map", () => {

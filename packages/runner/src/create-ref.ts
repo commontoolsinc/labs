@@ -137,9 +137,7 @@ export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
     // Handle URI format with "of:" prefix
     if (value.startsWith("of:")) value = fromURI(value);
-    return value.startsWith("{")
-      ? entityRefFromString(JSON.parse(value)["/"])
-      : entityRefFromString(value);
+    return entityRefFromString(value);
   }
 
   const link = parseLink(value);

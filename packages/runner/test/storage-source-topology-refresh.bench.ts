@@ -1,21 +1,42 @@
 import { Identity } from "@commonfabric/identity";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
+  entityRefFrom,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+// Select the cell-rep regime from the env flag, mirroring how the product reads
+// EXPERIMENTAL_MODERN_CELL_REP: unset means "accept the default" (a no-op, since
+// `setModernCellRepConfig(undefined)` leaves the default in place), "false"
+// forces legacy, anything else forces modern. The bench then exercises whichever
+// serialized entity-ref form (`FabricHash` vs the `{ "/": … }` object) that
+// regime stores.
+const modernCellRepEnv = Deno.env.get("EXPERIMENTAL_MODERN_CELL_REP");
+setModernCellRepConfig(
+  modernCellRepEnv === undefined ? undefined : modernCellRepEnv !== "false",
+);
 
 const signer = await Identity.fromPassphrase("bench source topology refresh");
 const space = signer.did();
 const SUBSCRIPTION_COUNT = 256;
 const UPDATE_COUNT = 5;
-const PROCESS_URI = "of:source-topology-process" as const;
-const BASE_URIS = [
-  "of:source-topology-base-1",
-  "of:source-topology-base-2",
-] as const;
+
+// Synthetic ids are real `FabricHash`es so they're valid entity references in
+// either cell-rep regime; each `of:` URI and its `source` pointer derive from
+// the same hash so the topology stays consistent.
+const idHash = (name: string) =>
+  hashOf({ causal: { bench: "source-topology", name } });
+
+const PROCESS_HASH = idHash("process");
+const BASE_HASHES = [idHash("base-1"), idHash("base-2")] as const;
+const PROCESS_URI = `of:${PROCESS_HASH.taggedHashString}`;
+const BASE_URIS = BASE_HASHES.map((hash) => `of:${hash.taggedHashString}`);
 const PATTERN_ID = "bench-pattern:source-topology";
 const PATTERN_URI = `of:${
   hashOf({ causal: { patternId: PATTERN_ID, type: "pattern" } })
     .taggedHashString
-}` as const;
+}`;
 
 type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
   open(space: string): infer T;
@@ -23,16 +44,16 @@ type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
   : never;
 
 const pieceUri = (index: number) =>
-  `of:source-topology-piece-${index}` as const;
+  `of:${idHash(`piece-${index}`).taggedHashString}`;
 
 const pieceValue = (withPatternLink: boolean) =>
   withPatternLink
     ? {
-      source: { "/": "source-topology-process" },
+      source: entityRefFrom(PROCESS_HASH),
       value: { $TYPE: PATTERN_ID },
     }
     : {
-      source: { "/": "source-topology-process" },
+      source: entityRefFrom(PROCESS_HASH),
     };
 
 const setup = async (withPatternLink: boolean) => {
@@ -57,7 +78,7 @@ const setup = async (withPatternLink: boolean) => {
     {
       uri: PROCESS_URI,
       value: {
-        source: { "/": "source-topology-base-1" },
+        source: entityRefFrom(BASE_HASHES[0]),
       },
     },
     ...(withPatternLink
@@ -99,11 +120,9 @@ const runRetargetLoop = async (
     await (provider as any).send([{
       uri: PROCESS_URI,
       value: {
-        source: {
-          "/": version % 2 === 0
-            ? "source-topology-base-2"
-            : "source-topology-base-1",
-        },
+        source: entityRefFrom(
+          version % 2 === 0 ? BASE_HASHES[1] : BASE_HASHES[0],
+        ),
       },
     }]);
     await storageManager.synced();
