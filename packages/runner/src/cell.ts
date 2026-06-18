@@ -1564,12 +1564,10 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Follow all links, even beyond write redirects to get final schema.
+   * Follow all links, even beyond write redirects, and adopt the schema
+   * embedded in the resolved link chain, projected along the remaining path.
    *
-   * If there is none look for resultSchema of associated pattern.
-   *
-   * Otherwise the link stays the same, i.e. it does not advance to resolved
-   * link.
+   * The link stays the same, i.e. it does not advance to the resolved link.
    *
    * Note: That means that the schema might change if the link behind it change.
    * The reads are logged though, so should trigger reactive flows.
