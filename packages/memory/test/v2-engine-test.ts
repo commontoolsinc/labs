@@ -836,6 +836,142 @@ Deno.test("memory v2 engine: nonRecursive shape read conflicts with key add but 
   }
 });
 
+Deno.test("memory v2 engine: nonRecursive shape read conflicts with array move and splice patches", async () => {
+  // A non-recursive (keyset / shape) read is matched against a patch via the
+  // parent-injecting `touchedPathsForPatch` (patchOverlapsNonRecursiveRead). The
+  // add/remove arms are covered above; this pins the `move` and `splice` arms —
+  // reordering or splicing an array changes the shape a keyset reader observed,
+  // so it must conflict (the patch's parent path is injected and prefix-matches
+  // the read).
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const id = "entity:array-shape";
+  const scope = "space" as const;
+
+  try {
+    // seq 1: a container holding an array.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          scope,
+          value: toEntityDocument({ arr: ["a", "b", "c"] }),
+        }],
+      },
+    });
+
+    // seq 2: a MOVE within the array (reorders elements).
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{ op: "move", from: "/value/arr/0", path: "/value/arr/2" }],
+        }],
+      },
+    });
+
+    // A shape reader of the array observed at seq 1 MUST conflict with the seq-2
+    // move (covers `touchedPathsForPatch`'s `move` arm via the injected parent).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 3,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value", "arr"]),
+                seq: 1,
+                nonRecursive: true,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkMove",
+              scope,
+              value: toEntityDocument("m"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    // seq 3: a SPLICE on the array (removes an element, adds another).
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{
+            op: "splice",
+            path: "/value/arr",
+            index: 0,
+            remove: 1,
+            add: ["z"],
+          }],
+        }],
+      },
+    });
+
+    // A shape reader observed at seq 2 (after the move, before the splice) MUST
+    // conflict with the seq-3 splice (covers `touchedPathsForPatch`'s `splice`
+    // arm: the spliced array path prefix-matches the keyset read).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value", "arr"]),
+                seq: 2,
+                nonRecursive: true,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkSplice",
+              scope,
+              value: toEntityDocument("s"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
 
