@@ -22,9 +22,10 @@ export function cellRefToIdentityKey(cell: CellRef): string {
 
 /**
  * Subscription key: storage location PLUS schema/cfcLabelView, since a
- * subscription with a different schema/label is a distinct query. Kept in its
- * established form (distinct from the commit-queue identity key above); its
- * own delimiter hardening is a separate, pre-existing concern.
+ * subscription with a different schema/label is a distinct query. Includes
+ * `scope` (different-scope cells are distinct, and collapsing them could
+ * suppress a subscription or unsubscribe the wrong scope). Kept in its
+ * established delimiter form (its `:`/`.` hardening is a separate concern).
  */
 export function cellRefToKey(cell: CellRef): string {
   const id = cell.id.startsWith("of:") ? cell.id.substring(3) : cell.id;
@@ -32,5 +33,7 @@ export function cellRefToKey(cell: CellRef): string {
   const cfcLabelView = cell.cfcLabelView
     ? `:${JSON.stringify(cloneCfcLabelView(cell.cfcLabelView))}`
     : "";
-  return `${cell.space}:${id}:${cell.path.join(".")}${schema}${cfcLabelView}`;
+  return `${cell.space}:${cell.scope ?? ""}:${id}:${
+    cell.path.join(".")
+  }${schema}${cfcLabelView}`;
 }
