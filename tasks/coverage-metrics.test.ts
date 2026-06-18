@@ -3,11 +3,13 @@ import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
   collectSourceFiles,
+  collectUncoveredLinesForFiles,
   countTrackedSourceLines,
   countUncoveredProfileLines,
   metricGroupFor,
   parseLcov,
   shouldTrackSourceFile,
+  trackedSourceLineNumbers,
 } from "./coverage-metrics.ts";
 
 Deno.test("parseLcov accumulates hits per source line", () => {
@@ -38,6 +40,21 @@ Deno.test("countTrackedSourceLines ignores blank and comment-only lines", () => 
       "const inline = 2; // comment",
     ].join("\n")),
     3,
+  );
+});
+
+Deno.test("trackedSourceLineNumbers reports the executable line numbers", () => {
+  assertEquals(
+    trackedSourceLineNumbers([
+      "", // 1
+      "// comment", // 2
+      "const value = 1;", // 3
+      "/* block", // 4
+      "comment */", // 5
+      "export const next = value + 1;", // 6
+      "const inline = 2; // comment", // 7
+    ].join("\n")),
+    [3, 6, 7],
   );
 });
 
@@ -118,6 +135,53 @@ Deno.test("collectCoverageDebtMetricsFromLcov computes debt from compact reports
       )?.uncoveredLines,
       1,
     );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-lines-test-" });
+  try {
+    const coveredPath = path.join(rootDir, "packages/example/src/covered.ts");
+    const untestedPath = path.join(rootDir, "packages/example/src/untested.ts");
+    const otherPath = path.join(rootDir, "packages/example/src/other.ts");
+    await Deno.mkdir(path.dirname(coveredPath), { recursive: true });
+    await Deno.writeTextFile(
+      coveredPath,
+      [
+        "export const covered = 1;",
+        "export const uncovered = 2;",
+      ].join("\n"),
+    );
+    // Never appears in the LCOV report, so every tracked line is uncovered.
+    await Deno.writeTextFile(untestedPath, "export const neverRun = 3;\n");
+    // Not requested, so it should not be read or returned.
+    await Deno.writeTextFile(otherPath, "export const ignored = 4;\n");
+
+    const uncovered = await collectUncoveredLinesForFiles({
+      rootDir,
+      lcov: [
+        `SF:${coveredPath}`,
+        "DA:1,1",
+        "DA:2,0",
+        "end_of_record",
+      ].join("\n"),
+      files: [
+        "packages/example/src/covered.ts",
+        "packages/example/src/untested.ts",
+        // A test file is not tracked source, so it is skipped.
+        "packages/example/src/covered.test.ts",
+      ],
+    });
+
+    // Covered file: only the zero-hit line.
+    assertEquals(uncovered.get("packages/example/src/covered.ts"), [2]);
+    // Absent from the report: every tracked line is uncovered.
+    assertEquals(uncovered.get("packages/example/src/untested.ts"), [1]);
+    // Untracked and unrequested files are absent.
+    assertEquals(uncovered.has("packages/example/src/covered.test.ts"), false);
+    assertEquals(uncovered.has("packages/example/src/other.ts"), false);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
