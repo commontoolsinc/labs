@@ -1,15 +1,6 @@
 export * from "./interface.ts";
 export * as Type from "./interface.ts";
-export * as Subscription from "./subscription.ts";
-export * as Subscriber from "./subscriber.ts";
-export * as Consumer from "./consumer.ts";
-export * as Socket from "./socket.ts";
 export * as Fact from "./fact.ts";
-export * as ChangesBuilder from "./changes.ts";
-export * as SelectionBuilder from "./selection.ts";
-export * as TransactionBuilder from "./transaction.ts";
-export * as CommitBuilder from "./commit.ts";
-export * as Telemetry from "./telemetry.ts";
 export * as V2 from "./v2.ts";
 export * as V2Client from "./v2/client.ts";
 export * as V2Engine from "./v2/engine.ts";

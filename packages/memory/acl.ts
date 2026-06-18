@@ -39,28 +39,6 @@ export function isACL(value: unknown): value is ACL {
   return true;
 }
 
-/**
- * Checks if an issuer has the required capability in the ACL.
- * Returns true if authorized, false otherwise.
- */
-export function checkACL(
-  acl: ACL,
-  issuerDid: DID,
-  command: string,
-): boolean {
-  if (
-    acl[issuerDid] && isCapable(acl[issuerDid], commandRequirement(command))
-  ) {
-    return true;
-  }
-  if (
-    acl[ANYONE_USER] && isCapable(acl[ANYONE_USER], commandRequirement(command))
-  ) {
-    return true;
-  }
-  return false;
-}
-
 const CapabilityMap: Record<Capability, number> = {
   READ: 0,
   WRITE: 1,
@@ -73,22 +51,4 @@ export function isCapable(
 ): boolean {
   return CapabilityMap[capability] >=
     CapabilityMap[requirement];
-}
-
-/**
- * Determines required capability based on the command.
- * - /memory/transact requires WRITE or OWNER
- * - /memory/query requires READ, WRITE, or OWNER
- * - Other commands require OWNER
- */
-function commandRequirement(cmd: string): Capability {
-  if (cmd === "/memory/transact") {
-    return "WRITE";
-  } else if (
-    cmd === "/memory/query" || cmd.startsWith("/memory/query/") ||
-    cmd.startsWith("/memory/graph/")
-  ) {
-    return "READ";
-  }
-  return "OWNER";
 }
