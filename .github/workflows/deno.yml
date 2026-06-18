@@ -84,9 +84,10 @@ jobs:
         run: deno install --frozen=true
 
       - name: 📦 Install Linux FUSE test dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config gcc libfuse3-dev fuse3
+        uses: ./.github/actions/apt-install
+        with:
+          packages: pkg-config gcc libfuse3-dev fuse3
+          cache-key: cfc-pattern-check
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -408,15 +409,14 @@ jobs:
           url: http://localhost:${{ matrix.toolshed_port }}
 
       - name: 📦 Install CLI integration dependencies
-        env:
-          INSTALL_FUSE_DEPS: ${{ matrix.install_fuse_deps }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-          if [ "$INSTALL_FUSE_DEPS" = "true" ]; then
-            sudo apt-get install -y fuse3 libfuse3-dev
-            sudo chmod 666 /dev/fuse
-          fi
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ${{ matrix.install_fuse_deps && 'jq fuse3 libfuse3-dev' || 'jq' }}
+          cache-key: cli-integration
+
+      - name: 🔧 Enable FUSE device access
+        if: ${{ matrix.suite_name == 'fuse' }}
+        run: sudo chmod 666 /dev/fuse
 
       - name: 🧪 Run CLI integration suite
         if: ${{ startsWith(matrix.suite_name, 'core-') }}
