@@ -78,6 +78,13 @@ export class CrossStageState {
    */
   readonly nodeLinks = new WeakMap<ts.Node, NodeTypeLinks>();
 
+  /**
+   * Source-position keys already emitted by `reportDiagnosticOnce`, so a
+   * diagnostic about a value that more than one stage walks (e.g. the inner-lift
+   * revisit) is emitted a single time.
+   */
+  readonly #reportedDiagnosticKeys = new Set<string>();
+
   /** Marker family — keyed by node/symbol identity; cache-coupled via context. */
   readonly mapCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeCallbackRegistry = new WeakSet<ts.Node>();
@@ -188,6 +195,21 @@ export class CrossStageState {
   isSchemaInjected(node: ts.Node): boolean {
     // Plain presence check with NO getOriginalNode fallback (see field doc).
     return this.nodeLinks.get(node)?.schemaInjected === true;
+  }
+
+  // --- diagnostic dedup ---
+
+  /**
+   * Records that a diagnostic with `key` is being emitted. Returns true the
+   * first time a key is seen and false thereafter, so callers can suppress
+   * duplicates of the same diagnostic across stages.
+   */
+  markDiagnosticReported(key: string): boolean {
+    if (this.#reportedDiagnosticKeys.has(key)) {
+      return false;
+    }
+    this.#reportedDiagnosticKeys.add(key);
+    return true;
   }
 
   // --- shared helper: membership check with getOriginalNode fallback ---

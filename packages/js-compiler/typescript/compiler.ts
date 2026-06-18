@@ -21,6 +21,7 @@ import { resolveProgram } from "./resolver.ts";
 import {
   Checker,
   type DiagnosticMessageTransformer,
+  formatTransformerDiagnostic,
   TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";
@@ -33,6 +34,30 @@ const vfsLogger = getLogger("virtualfs", {
   enabled: DEBUG_VIRTUAL_FS,
   level: "debug",
 });
+
+// Surfaces transformer-pipeline warnings. Errors are thrown via
+// TransformerError; warnings have no other channel, so without this they are
+// collected and silently dropped. Emitting them through the logger gates
+// visibility on the host's log level: `cf` defaults the floor to `warn` so
+// authors see them, while server/library compile paths that keep the `error`
+// floor stay quiet.
+const transformerLogger = getLogger("transformer");
+
+function surfaceTransformerWarnings(
+  diagnostics: readonly TransformerDiagnosticInfo[],
+  program: Program,
+): void {
+  const warnings = diagnostics.filter((d) => d.severity === "warning");
+  if (warnings.length === 0) return;
+  const sources = new Map<string, string>();
+  for (const file of program.files) sources.set(file.name, file.contents);
+  for (const warning of warnings) {
+    transformerLogger.warn(
+      "transform-diagnostic",
+      formatTransformerDiagnostic(warning, sources.get(warning.fileName) ?? ""),
+    );
+  }
+}
 
 // Mapping from virtual type path (e.g. `$types/es2023.d.ts`)
 type TypeLibs = Record<string, string>;
@@ -341,7 +366,11 @@ export class TypeScriptCompiler {
     checker.check(diagnostics);
 
     if (getDiagnostics) {
-      const errors = getDiagnostics().filter((d) => d.severity === "error");
+      const transformerDiagnostics = getDiagnostics();
+      surfaceTransformerWarnings(transformerDiagnostics, program);
+      const errors = transformerDiagnostics.filter((d) =>
+        d.severity === "error"
+      );
       if (errors.length > 0) {
         const sources = new Map<string, string>();
         for (const file of program.files) sources.set(file.name, file.contents);
