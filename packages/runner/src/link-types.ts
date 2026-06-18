@@ -13,7 +13,6 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type {
   IMemorySpaceAddress,
@@ -208,19 +207,9 @@ export function parseLinkPrimitive(
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
-    let id: URI | undefined;
-
-    // If cell is provided, convert to URI
-    if (alias.cell) {
-      if (isRecord(alias.cell) && "/" in alias.cell) {
-        id = toURI(alias.cell);
-      }
-    }
-
-    // If no cell provided, use base cell's document
-    if (!id && base) {
-      id = base.id;
-    }
+    // Named-cell ("argument"/"result") and partialCause aliases carry no
+    // absolute id of their own here, so resolve to the base cell's document.
+    const id = base?.id;
 
     return {
       ...(id && { id }),
