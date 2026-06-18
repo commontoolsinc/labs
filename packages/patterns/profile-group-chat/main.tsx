@@ -126,9 +126,15 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
 
     const myName = computed(() => profileNameWish.result ?? "");
     const myAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() => (profileNameWish.result ?? "") !== "");
     // The live profile cell — stored on each message and passed to the badge.
     const myProfile = profileWish.result;
+    // Gate the composer on BOTH the name (for the snapshot/label) AND the live
+    // profile CELL the send handler requires. Keying only on `#profileName`
+    // would enable Send in the window where the name resolves but the `#profile`
+    // cell hasn't, and the handler would then silently drop the message.
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "") !== "" && profileWish.result !== undefined
+    );
 
     const messageCount = messages.length;
 

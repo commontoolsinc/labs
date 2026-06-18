@@ -1659,7 +1659,14 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       board: computed(() => board.get() ?? EMPTY_TILES),
       bag: computed(() => bag.get() ?? EMPTY_LETTERS),
       bagIndex: computed(() => bagIndex.get() ?? 0),
-      players: computed(() => players.list ?? EMPTY_PLAYERS),
+      // Strip the internal live `profile` cell so the outward snapshot matches
+      // the declared `PlayerView` contract (plain name/score/etc.) — external
+      // readers never receive a cross-space profile link.
+      players: computed(() =>
+        (players.list ?? EMPTY_PLAYERS).map(
+          ({ profile: _profile, ...player }) => player,
+        )
+      ),
       gameEvents: computed(() => gameEvents.get() ?? EMPTY_EVENTS),
       rack: computed(() => rack.get() ?? EMPTY_LETTERS),
       placed: computed(() => placed.get() ?? EMPTY_TILES),
