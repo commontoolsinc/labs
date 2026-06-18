@@ -833,6 +833,8 @@ export class RuntimeProcessor {
     // queued through the scheduler (which has its own bounded retry on commit
     // rejection), so a failed commit here is not retried — re-sending would
     // double-fire the event — but it must not fail silently either.
+    // commit() captures errors in its Result (it does not reject) — match the
+    // codebase convention (`tx.commit().then(({ error }) => …)`), no .catch.
     tx.commit().then((result) => {
       if (result.error) {
         console.error(
@@ -840,13 +842,6 @@ export class RuntimeProcessor {
           result.error,
         );
       }
-    }).catch((error) => {
-      // A rejected commit promise (transport/storage throw) must not become an
-      // unhandled rejection — mirror handleCellSet's confirmation.catch.
-      console.error(
-        "[RuntimeProcessor] cell send commit rejected",
-        error,
-      );
     });
   }
 
