@@ -1,9 +1,13 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import {
+  BaseFabricPrimitive,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
   entityRefFrom,
   entityRefFromString,
+  isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
@@ -13,7 +17,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
-import { parseLink } from "./link-utils.ts";
+import { isSigilLink, parseLink } from "./link-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -57,9 +61,8 @@ export function createRef(
 ): EntityId {
   const seen = new Set<any>();
 
-  // Unwrap query result proxies, replace docs with their ids and remove
-  // functions and undefined values, since our data model doesn't support them.
-  // TODO(danfuzz): Revisit this when `undefined` is fully supported.
+  // Unwrap query result proxies and replace docs with their ids; functions are
+  // stringified, since our data model doesn't support them as values.
   function traverse(obj: any): any {
     // Avoid cycles — only track objects/arrays/functions (not primitives).
     // Primitives use value equality in Set, so repeated strings like
@@ -72,10 +75,21 @@ export function createRef(
       seen.add(obj);
     }
 
-    // Don't traverse into ids (a `FabricHash` is an entity id; a `{ "/": ... }`
-    // object is a serialized one).
-    if (obj instanceof FabricHash) return obj;
-    if (isRecord(obj) && "/" in obj) return obj;
+    // Don't traverse into atomic values or already-serialized references. A
+    // `FabricPrimitive` (a `FabricHash` id, `FabricBytes`, a date, …) is an
+    // atomic value and must be hashed via its own codec — descending into one
+    // would decompose it to its (empty) enumerable props and collide distinct
+    // values. A serialized entity-ref or sigil link is a reference to another
+    // cell, recognized through the cell-rep / sigil chokepoint predicates rather
+    // than the raw `{ "/": ... }` shape.
+    //
+    // TODO(danfuzz): the other data-model special-object type, `FabricInstance`
+    // (a container that holds other values), is not handled here. Unlike a
+    // primitive it *does* need descending into — but by its actual contents,
+    // which the generic enumerable-prop traversal below won't do correctly. This
+    // site will need attention once FabricInstances see real use.
+    if (obj instanceof BaseFabricPrimitive) return obj;
+    if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
     // TODO(seefeld): We have to accept functions for now as the pattern factory
@@ -105,7 +119,7 @@ export function createRef(
       obj = getCellOrThrow(obj);
     }
 
-    // If referencing other docs, return their ids (or random as fallback).
+    // If referencing other docs, return their ids.
     if (isCell(obj)) {
       const id = obj.entityId;
       if (id == null) {
@@ -123,7 +137,6 @@ export function createRef(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
     } else if (typeof obj === "function") return obj.toString();
-    else if (obj === undefined) return null;
     else return obj;
   }
 
