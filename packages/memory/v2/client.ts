@@ -396,6 +396,11 @@ export class SpaceSession {
     seq: number;
     pending: PromiseWithResolvers<void>;
   }[] = [];
+  #caughtUpLocalSeq = 0;
+  #caughtUpLocalSeqWaiters: {
+    localSeq: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
 
   constructor(
     private readonly client: Client,
@@ -635,6 +640,7 @@ export class SpaceSession {
       this.#watchView.applySync(effect, true);
     }
     this.scheduleAck(effect.toSeq);
+    this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
   async restore(): Promise<void> {
@@ -671,18 +677,23 @@ export class SpaceSession {
         })
       );
       if (restored.sync) {
+        this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
         } else {
           this.#watchView.applySync(restored.sync, false);
         }
-        if (!isEmptySync(restored.sync)) {
+        if (
+          !isEmptySync(restored.sync) ||
+          restored.sync.caughtUpLocalSeq !== undefined
+        ) {
           this.#watchView.emit(restored.sync);
         }
         this.scheduleAck(restored.serverSeq);
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
         this.scheduleAck(restored.serverSeq);
       }
+      this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
       if (restored.resumed !== true && this.#watchSpecs.length > 0) {
         const { view, sync } = await this.watchSetSync(this.#watchSpecs);
         if (!isEmptySync(sync)) {
@@ -713,6 +724,7 @@ export class SpaceSession {
       pending.pending.reject(new Error("memory session closed"));
     }
     this.rejectServerSeqWaiters(this.#closeError);
+    this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -733,6 +745,7 @@ export class SpaceSession {
       pending.pending.reject(error);
     }
     this.rejectServerSeqWaiters(error);
+    this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -829,6 +842,26 @@ export class SpaceSession {
     }
   }
 
+  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+    if (localSeq === undefined) {
+      return;
+    }
+    this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
+    const ready: PromiseWithResolvers<void>[] = [];
+    this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
+      (waiter) => {
+        if (waiter.localSeq <= this.#caughtUpLocalSeq) {
+          ready.push(waiter.pending);
+          return false;
+        }
+        return true;
+      },
+    );
+    for (const pending of ready) {
+      pending.resolve();
+    }
+  }
+
   private waitForServerSeq(seq: number): Promise<void> {
     if (this.#closed) {
       return Promise.reject(
@@ -843,9 +876,31 @@ export class SpaceSession {
     return pending.promise;
   }
 
+  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(
+        this.#closeError ?? new Error("memory session closed"),
+      );
+    }
+    if (this.#caughtUpLocalSeq >= localSeq) {
+      return Promise.resolve();
+    }
+    const pending = Promise.withResolvers<void>();
+    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    return pending.promise;
+  }
+
   private rejectServerSeqWaiters(error: Error | null): void {
     const waiters = this.#serverSeqWaiters;
     this.#serverSeqWaiters = [];
+    for (const waiter of waiters) {
+      waiter.pending.reject(error ?? new Error("memory session closed"));
+    }
+  }
+
+  private rejectCaughtUpLocalSeqWaiters(error: Error | null): void {
+    const waiters = this.#caughtUpLocalSeqWaiters;
+    this.#caughtUpLocalSeqWaiters = [];
     for (const waiter of waiters) {
       waiter.pending.reject(error ?? new Error("memory session closed"));
     }
@@ -867,6 +922,7 @@ export class SpaceSession {
     this.#sessionId = restored.sessionId;
     this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
     this.noteResult(restored.serverSeq);
+    this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
     if (restored.sessionId !== oldSessionId) {
       for (const pending of this.#outstandingCommits.values()) {
@@ -946,7 +1002,7 @@ export class SpaceSession {
           this.#outstandingCommits.delete(localSeq);
         }
         if (isRetryableConflict(error)) {
-          error.readyToRetry = () => this.waitForServerSeq(error.retryAfterSeq);
+          error.readyToRetry = () => this.waitForCaughtUpLocalSeq(localSeq);
         }
         pendingCommit.pending.reject(
           error instanceof Error ? error : new Error(String(error)),
