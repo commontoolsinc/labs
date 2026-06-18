@@ -196,16 +196,48 @@ remember which entry is theirs. For simpler demos where names are immutable and
 unique enough for the domain, a `PerUser<string>` display name plus shared
 records that carry that name can also be acceptable.
 
-Source the display name and avatar from the viewer's **shared profile** rather
-than a free-text field: `wish({ query: "#profile" })` resolves the current
-viewer's profile, and its built-in `[UI]` covers the whole lifecycle (create
-surface when the user has no profile, a picker with inline create when they
-have several). Snapshot the resolved `#profileName` / `#profileAvatar` strings
-into the shared entry on join. See `docs/specs/shared-profile-rosters.md`;
-worked examples: `packages/patterns/profile-group-chat/main.tsx`,
+Source identity from the viewer's **shared profile** rather than a free-text
+field: `wish({ query: "#profile" })` resolves the current viewer's profile, and
+its built-in `[UI]` covers the whole lifecycle (create surface when the user has
+no profile, a picker with inline create when they have several). On join, store
+a **link to that profile cell** in the shared entry and render every participant
+with a live, visitable `<cf-profile-badge $profile={p.profile} />` — cross-space
+reads resolve for any authorized viewer (CT-1667/1687), so the badge stays
+current, carries the verified-identity seal, and links to each contributor's
+profile. Snapshotting the `#profileName` / `#profileAvatar` strings instead is
+the self-containment fallback (renders with remote profile spaces offline). See
+`docs/specs/shared-profile-rosters.md`; canonical live-link demo:
+`packages/patterns/profile-roster-live-demo.tsx`; worked examples:
+`packages/patterns/profile-group-chat/main.tsx`,
 `packages/patterns/scrabble/scrabble.tsx`,
 `packages/patterns/battleship/multiplayer/lobby.tsx`,
 `packages/patterns/lunch-poll/main.tsx`.
+
+**`<cf-profile-badge>` is the one idiomatic way to render an identity** — avatar +
+name + the runtime-attested generative seal (a DID-derived aura ring + cursor
+glint; there is no shield icon), navigable to the person's profile. Prefer it
+anywhere an identity appears (rosters, message authors, "playing as",
+scoreboards); inline a name into a string only as an explicit fallback. Four
+variants, all carrying the same seal (CT-1761):
+
+| variant | shows | use for |
+| ------- | ----- | ------- |
+| `full` (default) | avatar + name pill | roster rows, "playing as" |
+| `chip` | name + compact seal dot (no avatar) | inline names in dense UI, participant strips |
+| `circle` | avatar + seal ring only (name on hover / for AT) | avatar strips, message gutters |
+| `hero` | large avatar over name | profile page header (pair with `noNavigate`) |
+
+Storing a live profile **cell** in shared state is what lets every viewer render
+the badge. Keep that shared state **object-wrapped** (`{ items: [...] }`, like the
+roster's `Roster` or scrabble's `PlayerRoster`) rather than a bare
+`Writable<T[]>`: a bare array with a nested live cell unwraps to a weak object and
+breaks CTS handler-state / `.get()`-snapshot output typing. Two rules make it
+work (see `scrabble.tsx`): type the **input** value-side — `PerSpace<Roster>`,
+not `PerSpace<Writable<Roster>>` (handlers still take `Writable<Roster>` state, so
+the body uses field access `players.list` while handlers use `.get()`/`.key()`);
+and type the **output** as a profile-less view (`Omit<Player, "profile">`) so the
+flat `.get()` snapshot doesn't try to reconcile the live cell. With both, the
+whole scrabble scoreboard renders `circle` badges for every player.
 
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage

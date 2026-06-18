@@ -443,23 +443,6 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // Whether a non-empty bio has been authored — drives the presentation-mode
     // bio block (CT-1648).
     const hasBio = computed(() => (bio.get() ?? "").trim().length > 0);
-    // Self-view cell for <cf-profile-badge>: the badge resolves name/avatar from
-    // a bound profile cell. Bound to this DERIVED self-cell (a computed
-    // projection, not the profile's own root piece), so the badge is marked
-    // `no-navigate` — a click would otherwise resolve to this non-piece cell id
-    // and route to an invalid URL. TODO(CT-1748 follow-up): bind the actual
-    // profile result cell so the badge can navigate to the canonical profile
-    // page AND the runtime-attested represents-principal label drives the
-    // verified identity seal.
-    const selfProfile = computed(() => ({
-      [NAME]: name.get(),
-      name: name.get(),
-      avatar: avatar.get(),
-      // Surfaced in the badge hover tooltip (CT-1648); the pinned-piece count
-      // populates on roster badges bound to the full profile cell.
-      bio: bio.get(),
-    }));
-
     const parsedUserTags = computed(() =>
       userTagsText.get().split(",").map((tag) => tag.trim()).filter((tag) =>
         tag.length > 0
@@ -522,9 +505,17 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
               showEditForm,
               null,
               <cf-vstack gap="4" data-ui-region="profile-presentation">
+                {
+                  /* Hero identity (CT-1761): bound to the profile's OWN root
+                    cell (`self`), not a derived projection — so the badge reads
+                    the runtime-attested represents-principal label and draws the
+                    real verified seal. `noNavigate` keeps it non-clickable on
+                    the profile's own page. */
+                }
                 <cf-profile-badge
                   id="profile-badge"
-                  $profile={selfProfile}
+                  variant="hero"
+                  $profile={self}
                   size="xl"
                   noNavigate
                 />

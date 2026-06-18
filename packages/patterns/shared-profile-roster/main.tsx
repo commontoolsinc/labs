@@ -24,12 +24,19 @@ import {
  * contributes their OWN entry on join, sourced from their shared profile
  * (`wish({ query: "#profile" })`). See `docs/specs/shared-profile-rosters.md`.
  *
- * Storage model: a **snapshot** (name + avatar copied at join time) is the
- * recommended default — the roster is then fully self-describing inside the
- * shared space and never depends on other users' profile spaces being reachable.
- * Participants render from those snapshot strings via `<cf-avatar>`. The current
- * viewer's OWN live profile is the one case where a live profile cell is
- * reliably resolvable, so it's shown with the trusted `<cf-profile-badge>`.
+ * This pattern demonstrates the **snapshot** (self-containment) variant: name +
+ * avatar are copied at join time, so the roster is fully self-describing inside
+ * the shared space and never depends on other users' profile spaces being
+ * reachable. Participants render from those snapshot strings via `<cf-avatar>`,
+ * and the current viewer's OWN live profile is shown with the trusted
+ * `<cf-profile-badge>`.
+ *
+ * The recommended default is now the **live-link** variant — every participant
+ * rendered with a live, visitable `<cf-profile-badge $profile={p.profile} />`
+ * bound to their real profile cell (cross-space reads resolve for any authorized
+ * viewer, CT-1667/1687). See `profile-roster-live-demo.tsx`. Prefer snapshotting
+ * (this file) only when the roster must stay legible with remote profile spaces
+ * offline, or when you deliberately want no live cross-space dependency.
  */
 
 /**

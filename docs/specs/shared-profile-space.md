@@ -108,6 +108,11 @@ result schema so each viewer sees their own profile projection.
 Add a well-known field to the home default pattern:
 
 ```ts
+// v1 single-profile shape (historical). Superseded by multi-profile support
+// (PR #3830): the home default pattern now carries
+//   profiles: Cell<ProfileDefaultPattern>[]; defaultProfile; mru
+// and there is no `profileName` mirror field — see HOME_SPACE.md for the
+// current shape. The per-profile space behavior described below still holds.
 type HomeDefaultPattern = {
   favorites: Favorite[];
   profile?: Cell<ProfileDefaultPattern>;
@@ -365,7 +370,7 @@ Add these explicit profile targets:
 ```tsx
 wish({ query: "#profile" })            // homeDefault.profile
 wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
-wish({ query: "#profileName" })        // homeDefault.profileName, then profile.initialNameApplied
+wish({ query: "#profileName" })        // default profile's initialNameApplied (no `profileName` mirror field post-#3830)
 wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
 wish({ query: "#profileBio" })         // homeDefault.profile.bio (CT-1648)
 ```

@@ -210,7 +210,14 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         }
       }
 
-      /* CT-1750: navigable badges (bound to a real profile cell) act as links. */
+      /* CT-1750: navigable badges (bound to a real profile cell) act as links.
+        The pointer is set on BOTH the host and the inner badge: the badge fills
+        the host's content box, but a flex/line-box can stretch the host past it,
+        and that uncovered host area would otherwise show the default arrow. */
+      :host([data-navigable]) {
+        cursor: pointer;
+      }
+
       .badge[data-navigable] {
         cursor: pointer;
       }
@@ -227,20 +234,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 16ch;
-      }
-
-      .seal {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--cf-theme-color-muted-foreground, hsl(0, 0%, 55%));
-        flex: 0 0 auto;
-      }
-
-      .seal svg {
-        width: 0.875rem;
-        height: 0.875rem;
-        display: block;
       }
 
       /* The generative aura ring. Transparent until the badge is verified; when
@@ -381,10 +374,59 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         }
       }
 
-      /* When verified the seal mark is tinted with the identity's accent color
-        (also DID-derived), supplied inline. */
-      .badge[data-state="verified"] .seal {
-        color: var(--cf-theme-color-primary, hsl(212, 100%, 47%));
+      /* ---- Variants (CT-1761) -------------------------------------------- */
+
+      /* chip: compact name-first pill. No avatar — a small DID-hued "seal dot"
+        carries the identity treatment, so an inline name still reads as a
+        first-class, verifiable identity rather than plain text. */
+      .badge[data-variant="chip"] {
+        gap: 0.375rem;
+        padding: 0.125rem 0.5rem 0.125rem 0.3125rem;
+      }
+
+      .seal-dot {
+        display: block;
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        background: var(--cf-theme-color-border, hsl(0, 0%, 80%));
+        box-sizing: border-box;
+      }
+
+      /* The verified dot is filled with the identity accent (supplied inline)
+        and sits inside the shared .aura, so it inherits the same ring + glow +
+        cursor-sheen liveness as the full badge — just at dot scale. */
+      .badge[data-variant="chip"][data-state="verified"] .aura .seal-dot {
+        box-shadow: 0 0 0 1.5px var(--cf-theme-color-surface, hsl(0, 0%, 99%));
+      }
+
+      /* circle: avatar + seal ring only. Drop the pill chrome and the name; the
+        ring IS the seal. Used for dense avatar strips and message gutters. */
+      .badge[data-variant="circle"] {
+        gap: 0;
+        padding: 0;
+        border: none;
+        background: transparent;
+      }
+
+      /* hero: large, centered avatar-over-name. For a profile page header — the
+        seal aura is the focal point, so drop the pill chrome and stack the name
+        beneath the avatar at display scale. */
+      .badge[data-variant="hero"] {
+        flex-direction: column;
+        gap: 0.625rem;
+        padding: 0;
+        border: none;
+        background: transparent;
+        align-items: center;
+        text-align: center;
+      }
+
+      .badge[data-variant="hero"] .name {
+        font-size: var(--cf-font-size-xl, 1.5rem);
+        font-weight: var(--cf-font-weight-bold, 700);
+        max-width: min(28ch, 100%);
+        white-space: normal;
       }
     `,
   ];
@@ -395,6 +437,24 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   @property({ type: String, reflect: true })
   accessor size: AvatarSize = "md";
+
+  /**
+   * Badge shape. The verification treatment is ALWAYS the generative seal — the
+   * DID-derived aura ring + the cursor-reactive glint (a pattern can mimic the
+   * chrome but cannot earn the seal for a DID it doesn't control). Variants
+   * differ only in how much chrome they draw around it:
+   *  - `full` (default): avatar + name pill. Roster rows, "playing as", etc.
+   *  - `chip`: name + a compact DID-hued seal dot (no avatar). For inline names
+   *    in dense UI where a full pill is too heavy but the identity treatment
+   *    should still read.
+   *  - `circle`: avatar + seal ring only, no name text (the name rides
+   *    `aria-label` + the hover tooltip). For avatar strips and message gutters.
+   *  - `hero`: large, centered avatar-over-name presentation. For a profile
+   *    page header, where the seal IS the point. Pair with `noNavigate`.
+   * @attr {string} variant - full | chip | circle | hero (default full)
+   */
+  @property({ type: String, reflect: true })
+  accessor variant: "full" | "chip" | "circle" | "hero" = "full";
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -480,6 +540,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   protected override updated(changed: PropertyValues): void {
     super.updated(changed);
+    // Reflect navigability to the host so `:host([data-navigable])` can draw the
+    // pointer cursor over the whole host box (not just the inner `.badge`).
+    this.toggleAttribute("data-navigable", this._navigable);
     // Register for cursor sheen only while actually verified + connected. The
     // shared controller manages reduced-motion (it won't run the loop while the
     // user prefers reduced motion, and tears it down live if they enable it).
@@ -726,31 +789,47 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         this._seal!.ringGradient
       }; box-shadow: 0 0 0 1px hsl(${hue} 80% 58% / 0.3), 0 0 10px -1px hsl(${hue} 85% 60% / 0.7);`
       : "";
-    const sealStyle = verified ? `color: ${this._seal!.accent};` : "";
-    const sealTitle = verified
-      ? "Identity verified by the system"
-      : "System-rendered identity";
+    // The chip's seal-dot is filled with the same DID-derived accent when
+    // verified (supplied inline), so an inline name still carries the identity's
+    // color even without an avatar.
+    const dotStyle = verified ? `background: ${this._seal!.accent};` : "";
     // Per-identity hue, supplied inline so the hover shimmer is tinted to match
     // this identity's palette.
     const auraStyle = verified ? `--seal-hue: ${hue};` : "";
 
+    // CT-1761: variant shape. The verification signal is ALWAYS the generative
+    // seal (aura ring + cursor glint) — there is no separate shield icon. `full`
+    // is an avatar+name pill; `chip` drops the avatar for a compact name + seal
+    // dot; `circle` drops the name for an avatar + seal ring (name rides
+    // aria-label/tooltip); `hero` is a large avatar-over-name presentation.
+    const variant = this.variant;
+    const showAvatar = variant !== "chip";
+    const showName = variant !== "circle";
+    const displayName = this._name ?? "Unknown profile";
+
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
-    // (bio + pinned-piece count). Only rendered when there's something extra
-    // to show beyond the name already on the badge.
+    // (bio + pinned-piece count). Always shown for `circle` (whose name is
+    // otherwise invisible); otherwise only when there's something beyond the
+    // already-visible name.
     const pinnedLabel = this._pinnedCount === 1
       ? "1 pinned piece"
       : `${this._pinnedCount} pinned pieces`;
-    const hasTooltip = this._bio !== undefined || this._pinnedCount > 0;
+    const hasTooltip = this._bio !== undefined || this._pinnedCount > 0 ||
+      variant === "circle";
 
     return html`
       <span
         class="badge"
         part="root"
         data-cf-profile-badge
+        data-variant="${variant}"
         data-state="${this._state}"
         ?data-navigable="${this._navigable}"
         ?data-has-tooltip="${hasTooltip}"
-        role="${this._navigable ? "link" : nothing}"
+        role="${this._navigable
+          ? "link"
+          : (variant === "circle" ? "img" : nothing)}"
+        aria-label="${variant === "circle" ? displayName : nothing}"
         tabindex="${this._navigable ? "0" : (hasTooltip ? "0" : nothing)}"
         @click="${this._handleClick}"
         @keydown="${this._handleKeydown}"
@@ -760,48 +839,30 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
             ? html`
               <span class="aura-ring" part="aura-ring" style="${ringStyle}"> </span>
             `
-            : null}
-          <cf-avatar
-            part="avatar"
-            exportparts="avatar"
-            .src="${this._avatar}"
-            .name="${this._name}"
-            size="${this.size}"
-          ></cf-avatar>
-          ${verified
+            : null} ${showAvatar
+            ? html`
+              <cf-avatar
+                part="avatar"
+                exportparts="avatar"
+                .src="${this._avatar}"
+                .name="${this._name}"
+                size="${this.size}"
+              ></cf-avatar>
+            `
+            : html`
+              <span class="seal-dot" part="seal-dot" style="${dotStyle}"></span>
+            `} ${verified
             ? html`
               <span class="aura-glow" part="aura-glow" aria-hidden="true"></span>
               <span class="aura-sheen" part="aura-sheen" aria-hidden="true"></span>
             `
             : null}
         </span>
-        <span class="name" part="name">
-          ${this._name ?? "Unknown profile"}
-        </span>
-        <span
-          class="seal"
-          part="seal"
-          aria-hidden="true"
-          title="${sealTitle}"
-          style="${sealStyle}"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            ${verified
-              ? html`
-                <path d="M9 12l2 2 4-4" />
-              `
-              : null}
-          </svg>
-        </span>
-        ${hasTooltip
+        ${showName
+          ? html`
+            <span class="name" part="name">${displayName}</span>
+          `
+          : null} ${hasTooltip
           ? html`
             <span class="tooltip" part="tooltip" role="tooltip">
               <span class="tooltip-name">${this._name ?? "Profile"}</span>

@@ -74,6 +74,29 @@ describe("CFProfileBadge", () => {
     expect(el.size).toBe("md");
   });
 
+  describe("variants (CT-1761)", () => {
+    it("defaults to the full variant", () => {
+      const el = new CFProfileBadge();
+      expect(el.variant).toBe("full");
+    });
+
+    it("renders without throwing for every variant in presented + verified states", () => {
+      // The render branches (avatar vs seal-dot, name on/off, shield on/off,
+      // circle aria-label, inline accent styles) must all be reachable without a
+      // DOM. The real visual check is the browser pass; this guards the wiring.
+      for (const variant of ["full", "chip", "circle", "hero"] as const) {
+        const el = new CFProfileBadge() as any;
+        el.variant = variant;
+        el._name = "Ada";
+        expect(el.render()).toBeTruthy(); // presented
+
+        el._state = "verified";
+        el._seal = identitySeal(OWNER_DID);
+        expect(el.render()).toBeTruthy(); // verified
+      }
+    });
+  });
+
   describe("async resolve lifecycle", () => {
     it("does not subscribe when the element disconnects during resolve", async () => {
       const slowResolution = deferred<any>();

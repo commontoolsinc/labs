@@ -10,9 +10,11 @@
  */
 
 import {
+  type Cell,
   computed,
   Default,
   handler,
+  ifElse,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -39,13 +41,35 @@ export interface PlacedTile {
   col: number;
 }
 
+/** Live link to a player's profile cell — rendered first-class via the badge. */
+export type ScrabbleProfileCell = Cell<{ name?: string; avatar?: string }>;
+
 export interface Player {
   name: string;
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
+  /**
+   * Live profile cell — present for profile-joined players (the scoreboard
+   * renders it via `<cf-profile-badge>`), absent for headless name-only joins
+   * (test seam), which fall back to `<cf-avatar>`.
+   */
+  profile?: ScrabbleProfileCell;
   color: string;
   score: number;
   joinedAt: number;
+}
+
+/** Outward snapshot of a player (no live profile cell — that stays internal). */
+export type PlayerView = Omit<Player, "profile">;
+
+/**
+ * Shared player roster. Object-wrapped (not a bare `Writable<Player[]>`) so each
+ * Player can carry a live `profile` cell: a bare array with a nested cell
+ * unwraps to a weak object and breaks CTS handler-state / output typing — see
+ * the profile-roster pattern + docs/common/patterns/multi-user-patterns.md.
+ */
+export interface PlayerRoster {
+  list: Player[];
 }
 
 export interface GameEvent {
@@ -308,7 +332,10 @@ const EXAMPLE_WORDS = new Set([
 type BoardCell = Writable<PlacedTile[] | Default<[]>>;
 type BagCell = Writable<Letter[] | Default<[]>>;
 type BagIndexCell = Writable<number | Default<0>>;
-type PlayersCell = Writable<Player[] | Default<[]>>;
+const DEFAULT_PLAYER_ROSTER: PlayerRoster = { list: [] };
+type PlayersCell = Writable<
+  PlayerRoster | Default<typeof DEFAULT_PLAYER_ROSTER>
+>;
 type EventsCell = Writable<GameEvent[] | Default<[]>>;
 type RackCell = Writable<Letter[] | Default<[]>>;
 type PlacedCell = Writable<PlacedTile[] | Default<[]>>;
@@ -320,7 +347,7 @@ export interface GameInput {
   board?: PerSpace<BoardCell>;
   bag?: PerSpace<BagCell>;
   bagIndex?: PerSpace<BagIndexCell>;
-  players?: PerSpace<PlayersCell>;
+  players?: PerSpace<PlayerRoster | Default<typeof DEFAULT_PLAYER_ROSTER>>;
   gameEvents?: PerSpace<EventsCell>;
   rack?: PerUser<RackCell>;
   placed?: PerUser<PlacedCell>;
@@ -333,7 +360,7 @@ export interface GameOutput {
   board: readonly PlacedTile[];
   bag: readonly Letter[];
   bagIndex: number;
-  players: readonly Player[];
+  players: readonly PlayerView[];
   gameEvents: readonly GameEvent[];
   rack: readonly Letter[];
   placed: readonly PlacedTile[];
@@ -616,6 +643,7 @@ function returnedLetters(tiles: readonly PlacedTile[]): Letter[] {
 function joinPlayerByName(
   nameInput: string | undefined,
   avatar: string,
+  profile: ScrabbleProfileCell | undefined,
   myName: NameCell,
   rack: RackCell,
   placed: PlacedCell,
@@ -633,7 +661,7 @@ function joinPlayerByName(
   }
 
   const currentName = trimmedName(myName.get());
-  const existingPlayers = players.get();
+  const existingPlayers = players.get().list;
   const existingPlayer = existingPlayers.find((player) => player.name === name);
   if (existingPlayer) {
     if (currentName !== name) {
@@ -669,11 +697,12 @@ function joinPlayerByName(
   const player: Player = {
     name,
     avatar: (avatar ?? "").trim(),
+    ...(profile ? { profile } : {}),
     color: getRandomColor(existingPlayers.length),
     score: 0,
     joinedAt: safeDateNow(),
   };
-  players.set([...existingPlayers, player]);
+  players.key("list").set([...existingPlayers, player]);
   myName.set(name);
   rack.set(drawn);
   placed.set([]);
@@ -690,12 +719,15 @@ function joinPlayerByName(
 }
 
 // Join with the viewer's resolved profile. `name`/`avatar` arrive as plain
-// strings (named `computed` values auto-unwrap as handler state).
+// strings (named `computed` values auto-unwrap as handler state); `profile` is
+// the viewer's live profile cell, stored on the Player so the scoreboard
+// renders their identity first-class.
 const joinGameHandler = handler<
   void,
   {
     name: string;
     avatar: string;
+    profile: ScrabbleProfileCell | undefined;
     myName: NameCell;
     rack: RackCell;
     placed: PlacedCell;
@@ -711,6 +743,7 @@ const joinGameHandler = handler<
   {
     name,
     avatar,
+    profile,
     myName,
     rack,
     placed,
@@ -725,6 +758,7 @@ const joinGameHandler = handler<
   joinPlayerByName(
     name,
     avatar,
+    profile,
     myName,
     rack,
     placed,
@@ -757,6 +791,7 @@ const joinWithNameHandler = handler<
   joinPlayerByName(
     name,
     "",
+    undefined, // headless name-only join (test seam) has no profile cell
     myName,
     rack,
     placed,
@@ -788,7 +823,7 @@ const resetGameHandler = handler<
   board.set([]);
   bag.set(createTileBag());
   bagIndex.set(0);
-  players.set([]);
+  players.key("list").set([]);
   gameEvents.set([]);
   rack.set([]);
   placed.set([]);
@@ -1081,8 +1116,8 @@ const submitTurn = handler<
     bagIndex.set(currentIndex + drawn.length);
   }
 
-  players.set(
-    players.get().map((player) =>
+  players.key("list").set(
+    players.get().list.map((player) =>
       player.name === name
         ? { ...player, score: player.score + turnScore.total }
         : player
@@ -1108,7 +1143,7 @@ const submitTurn = handler<
 // recompute would make the computed results non-idempotent.
 const EMPTY_TILES: PlacedTile[] = [];
 const EMPTY_LETTERS: Letter[] = [];
-const EMPTY_PLAYERS: Player[] = [];
+const EMPTY_PLAYERS: PlayerView[] = [];
 const EMPTY_EVENTS: GameEvent[] = [];
 
 const ScrabbleGame = pattern<GameInput, GameOutput>(
@@ -1143,12 +1178,17 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const hasProfile = computed(() =>
       (profileNameWish.result ?? "").trim() !== ""
     );
+    // The button is the JOIN action; the adjacent `#profile` wish UI is the
+    // create/pick surface. Label it as such (a disabled "Join" until the viewer
+    // has a profile) rather than mislabeling the button "Create a profile…".
     const joinLabel = computed(() =>
-      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
+      hasProfile ? `Join as ${profileName}` : "Join"
     );
 
     const joined = computed(() =>
-      players.get().some((player) => player.name === trimmedName(myName.get()))
+      (players.list ?? []).some((player) =>
+        player.name === trimmedName(myName.get())
+      )
     );
     const rackCount = rack.get().length;
     const bagCount = Math.max(0, bag.get().length - bagIndex.get());
@@ -1158,6 +1198,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const joinGame = joinGameHandler({
       name: profileName,
       avatar: profileAvatar,
+      profile: profileWish.result,
       myName,
       rack,
       placed,
@@ -1237,9 +1278,16 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
               <h2 style={{ margin: 0, fontSize: "24px" }}>{gameName}</h2>
               {joined
                 ? (
-                  <span style={{ color: "#d9f99d", fontSize: "14px" }}>
-                    Playing as <strong>{myName}</strong>
-                  </span>
+                  <cf-hstack gap="2" align="center">
+                    <span style={{ color: "#d9f99d", fontSize: "14px" }}>
+                      Playing as
+                    </span>
+                    {/* The viewer's own identity, first-class (CT-1761). */}
+                    <cf-profile-badge
+                      variant="chip"
+                      $profile={profileWish.result}
+                    />
+                  </cf-hstack>
                 )
                 : (
                   <div
@@ -1535,7 +1583,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
             <strong style={{ textAlign: "center", color: "#d9f99d" }}>
               Players
             </strong>
-            {players.map((player) => (
+            {players.list.map((player) => (
               <div
                 style={{
                   padding: "10px",
@@ -1548,11 +1596,24 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  <cf-avatar
-                    src={player.avatar}
-                    name={player.name}
-                    size="sm"
-                  />
+                  {
+                    /* Profile-joined players render first-class via the trusted
+                      `circle` badge (avatar + seal ring, navigable); headless
+                      name-only joins (no profile cell) fall back to cf-avatar. */
+                  }
+                  {ifElse(
+                    computed(() => player.profile !== undefined),
+                    <cf-profile-badge
+                      variant="circle"
+                      size="sm"
+                      $profile={player.profile}
+                    />,
+                    <cf-avatar
+                      src={player.avatar}
+                      name={player.name}
+                      size="sm"
+                    />,
+                  )}
                 </div>
                 <div
                   style={{
@@ -1598,7 +1659,14 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       board: computed(() => board.get() ?? EMPTY_TILES),
       bag: computed(() => bag.get() ?? EMPTY_LETTERS),
       bagIndex: computed(() => bagIndex.get() ?? 0),
-      players: computed(() => players.get() ?? EMPTY_PLAYERS),
+      // Strip the internal live `profile` cell so the outward snapshot matches
+      // the declared `PlayerView` contract (plain name/score/etc.) — external
+      // readers never receive a cross-space profile link.
+      players: computed(() =>
+        (players.list ?? EMPTY_PLAYERS).map(
+          ({ profile: _profile, ...player }) => player,
+        )
+      ),
       gameEvents: computed(() => gameEvents.get() ?? EMPTY_EVENTS),
       rack: computed(() => rack.get() ?? EMPTY_LETTERS),
       placed: computed(() => placed.get() ?? EMPTY_TILES),
