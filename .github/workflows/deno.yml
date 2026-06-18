@@ -85,8 +85,21 @@ jobs:
 
       - name: 📦 Install Linux FUSE test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config gcc libfuse3-dev fuse3
+          # gcc and pkg-config ship on the GitHub-hosted Ubuntu image;
+          # libfuse3-dev and fuse3 do not. Collect only the packages that are
+          # actually missing so the common case installs just the FUSE bits.
+          pkgs=()
+          command -v gcc >/dev/null 2>&1 || pkgs+=(gcc)
+          command -v pkg-config >/dev/null 2>&1 || pkgs+=(pkg-config)
+          pkgs+=(libfuse3-dev fuse3)
+          if [ "${#pkgs[@]}" -gt 0 ]; then
+            # Install against the image's prebaked package lists first. apt-get
+            # update refreshes every mirror index and is the slow, high-variance
+            # part of this step, so only run it as a fallback when the direct
+            # install misses (e.g. stale lists).
+            sudo apt-get install -y "${pkgs[@]}" \
+              || { sudo apt-get update && sudo apt-get install -y "${pkgs[@]}"; }
+          fi
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
