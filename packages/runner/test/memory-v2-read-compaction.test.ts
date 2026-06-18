@@ -1,7 +1,8 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
 
 const DOCUMENT_ADDRESS = {
   id: "bench:read-compaction" as const,
@@ -156,6 +157,63 @@ Deno.test("memory v2 excludes inline data URI reads from tracked commit dependen
   assertEquals(
     reads.confirmed.map((read) => ({ id: read.id, path: read.path })),
     [{ id: DOCUMENT_ADDRESS.id, path: ["value", "live"] }],
+  );
+
+  await runtime.dispose();
+  await storage.close();
+});
+
+Deno.test("memory v2 excludeReadFromConflict drops ONLY marked nonRecursive (reference) reads — by-value reads are kept", async () => {
+  const { signer, storage, runtime } = await createRuntime(
+    "memory-v2-read-compaction-exclude-conflict",
+  );
+  const space = signer.did();
+
+  const seed = runtime.edit();
+  seed.writeValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space },
+    { refShape: { a: 1, b: 2 }, scalar: 5, other: 7 },
+  );
+  assertEquals((await seed.commit()).ok, {});
+
+  const tx = runtime.edit();
+  // (1) marked + nonRecursive: an asCell reference-resolution shape read -> EXCLUDED.
+  tx.readValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space, path: ["refShape"] },
+    { meta: excludeReadFromConflict, nonRecursive: true },
+  );
+  // (2) marked + RECURSIVE: the nonRecursive guard keeps it (defense for value reads).
+  tx.readValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space, path: ["other"] },
+    { meta: excludeReadFromConflict },
+  );
+  // (3) UNMARKED + nonRecursive: a by-value scalar argument read -> KEPT.
+  //     This is the closed hole: the over-broad scoping used to drop this.
+  tx.readValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space, path: ["scalar"] },
+    { nonRecursive: true },
+  );
+
+  const replica = storage.open(space).replica as unknown as {
+    buildReads(source: unknown, localSeq: number): {
+      confirmed: Array<{ path: string[]; seq: number }>;
+      pending: Array<{ path: string[]; localSeq: number }>;
+    };
+  };
+  const reads = replica.buildReads(tx.tx, 1);
+  const paths = reads.confirmed.map((read) => read.path.join("."));
+
+  assert(
+    !paths.includes("value.refShape"),
+    `marked nonRecursive reference read should be excluded; got ${paths}`,
+  );
+  assert(
+    paths.includes("value.other"),
+    `marked RECURSIVE read must be kept (value dependency); got ${paths}`,
+  );
+  assert(
+    paths.includes("value.scalar"),
+    `unmarked nonRecursive by-value read must be kept; got ${paths}`,
   );
 
   await runtime.dispose();
