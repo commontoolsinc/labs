@@ -2,7 +2,12 @@ import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { runWrite } from "./sqlite/exec.ts";
 import { applyPatch } from "./patch.ts";
-import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
+import {
+  isPrefixPath,
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "./path.ts";
 import {
   type BranchName,
   type CellScope,
@@ -3506,6 +3511,7 @@ const validateConfirmedReads = (
       scopeKey,
       read.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
@@ -3551,6 +3557,7 @@ const resolvePendingReads = (
       resolveScopeKey(read.scope, { principal, sessionId }),
       resolution.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
@@ -3569,6 +3576,12 @@ const findConflictSeq = (
   scopeKey: string,
   afterSeq: number,
   readPath: readonly string[],
+  // When true, treat `readPath` as a SHALLOW (shape-only) dependency — conflict
+  // only with writes at-or-above it (patchOverlapsNonRecursiveRead). Tier-1
+  // (set/delete) stays path-blind even for a shallow read: a whole-doc
+  // replace/delete changes the container the shape read observed, so it must
+  // still conflict. Only Tier-2 (patch) granularity is refined.
+  nonRecursive: boolean = false,
 ): number | null => {
   const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
     branch,
@@ -3591,12 +3604,11 @@ const findConflictSeq = (
       data: string | null;
     }>
   ) {
-    if (
-      patchOverlapsRead(
-        decodeStoredPatchList(conflict.data),
-        readPath,
-      )
-    ) {
+    const patches = decodeStoredPatchList(conflict.data);
+    const overlaps = nonRecursive
+      ? patchOverlapsNonRecursiveRead(patches, readPath)
+      : patchOverlapsRead(patches, readPath);
+    if (overlaps) {
       return conflict.seq;
     }
   }
@@ -3635,6 +3647,7 @@ const schedulerObservationReadDropReason = (
       scopeKey,
       read.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       return "stale-confirmed-read";
@@ -3666,6 +3679,7 @@ const schedulerObservationReadDropReason = (
       resolveScopeKey(read.scope, { principal, sessionId }),
       resolution.seq,
       read.path,
+      read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       return "stale-pending-read";
@@ -3866,12 +3880,43 @@ const applySchedulerObservationBatchCommit = (
   };
 };
 
+// The COMMIT conflict matcher uses LEAF-ONLY touched paths (no add/remove/move
+// parent-path injection) — the same discipline `touchedLeafPathsForPatch`
+// applies to the scheduler reader-dirty index (CT-1623), here extended to the
+// commit-conflict path. For a recursive read the injected parent is REDUNDANT
+// (bidirectional `pathsOverlap` already matches a container reader against the
+// leaf write, since the container read is a prefix of the leaf) and HARMFUL (the
+// parent prefix-matches every disjoint SIBLING reader — e.g. a distinct-key
+// writer's own-key/diff and link-resolution reads — manufacturing the
+// write-contention over-conflict). Same-key writes still conflict (the leaf
+// exactly matches an own-key read) and whole-container readers still conflict
+// (their read prefixes the leaf). Keyset/shape readers are matched separately by
+// the nonRecursive path, which keeps the parent injection.
 const patchOverlapsRead = (
   patches: readonly PatchOp[],
   readPath: readonly string[],
 ): boolean => {
   return patches.some((patch) =>
-    touchedPathsForPatch(patch).some((path) => pathsOverlap(path, readPath))
+    touchedLeafPathsForPatch(patch).some((path) => pathsOverlap(path, readPath))
+  );
+};
+
+// Overlap test for a SHALLOW (nonRecursive / shape-only) read. A shape read at
+// `readPath` observed the container's key-set / existence but not its descendants'
+// deep values, so it conflicts only with a write touching `readPath` itself or an
+// ANCESTOR of it — `isPrefixPath(touched, readPath)`. Here we DO use the
+// parent-injecting `touchedPathsForPatch`: a key add/remove injects the patch's
+// parent path, which equals `readPath` for a direct child mutation, so a keyset
+// reader still conflicts with key add/remove (the shape it observed changed). A
+// disjoint deep-value `replace` strictly BELOW `readPath` touches no ancestor, so
+// it no longer over-conflicts. Strict subset of `patchOverlapsRead` ⇒ never a
+// false-negative. (Recursive reads use the leaf-only `patchOverlapsRead` above.)
+const patchOverlapsNonRecursiveRead = (
+  patches: readonly PatchOp[],
+  readPath: readonly string[],
+): boolean => {
+  return patches.some((patch) =>
+    touchedPathsForPatch(patch).some((path) => isPrefixPath(path, readPath))
   );
 };
 
@@ -3894,27 +3939,28 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
   }
 };
 
-// Scheduler reader-dirty propagation uses the EXACT changed leaf paths, not the
-// ancestor/parent paths that `touchedPathsForPatch` adds for add/remove/move.
+// The EXACT changed leaf paths of a patch — without the ancestor/parent paths
+// that `touchedPathsForPatch` adds for add/remove/move. Used by BOTH the
+// scheduler reader-dirty index (`schedulerWriteAddressesForRevisions`) and the
+// commit-conflict matcher (`patchOverlapsRead`).
 //
 // `touchedPathsForPatch` emits a patch's parent path so that whole-container
-// reads are invalidated when a key is added/removed. For the scheduler reader
-// index that parent path is both REDUNDANT and HARMFUL:
-//   - Redundant: `schedulerPathsOverlap` matches a reader of the container
-//     (e.g. read `["value"]`, deep or shallow) against the LEAF write
-//     (e.g. `["value","plusOne"]`) via its bidirectional / length+1 rules, so
-//     shape/whole-object readers are already dirtied by the leaf alone.
+// reads are invalidated when a key is added/removed. For structural-overlap
+// matching that parent path is both REDUNDANT and HARMFUL:
+//   - Redundant: bidirectional prefix overlap already matches a reader of the
+//     container (e.g. read `["value"]`) against the LEAF write
+//     (e.g. `["value","plusOne"]`) — the container read is a prefix of the leaf —
+//     so shape/whole-object readers are caught by the leaf alone.
 //   - Harmful: the parent write (e.g. `["value"]`) ALSO prefix-matches every
-//     SIBLING reader (`["value","doubled"]`, ...), whose value did not change.
-//     Unlike the in-memory `determineTriggeredActions` (which deep-equals each
-//     read path), the server-side match is purely structural, so those siblings
-//     are marked dirty in `scheduler_action_state` even though they are
-//     unchanged. On reload they rehydrate-as-dirty and re-run — the dominant
-//     residual reload re-run for patterns whose computeds write sibling fields
-//     of a shared result cell (CT-1623).
-// Emitting only the leaf paths keeps every correct match and drops the spurious
-// sibling dirtying.
-const schedulerTouchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
+//     disjoint SIBLING reader (`["value","doubled"]`, ...), whose value did not
+//     change. The structural match has no way to tell the sibling is unchanged,
+//     so it over-fires: spurious reload re-runs for the scheduler index
+//     (CT-1623), and spurious commit conflicts for distinct-key writers (the
+//     write-contention drops). Emitting only the leaf paths keeps every correct
+//     match and drops the spurious sibling match. Keyset/shape (nonRecursive)
+//     readers, which DO need to see key add/remove, are matched by a separate
+//     path that retains `touchedPathsForPatch`'s parent injection.
+const touchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
   switch (patch.op) {
     case "replace":
     case "splice":
@@ -3934,7 +3980,7 @@ const schedulerWriteAddressesForRevisions = (
   const writes = new Map<string, SchedulerObservationAddress>();
   for (const revision of revisions) {
     const paths = revision.op === "patch" && revision.patches
-      ? revision.patches.flatMap(schedulerTouchedLeafPathsForPatch)
+      ? revision.patches.flatMap(touchedLeafPathsForPatch)
       : [[]];
     for (const path of paths) {
       const write = normalizeSchedulerAddress({

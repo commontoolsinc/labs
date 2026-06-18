@@ -114,6 +114,16 @@ export interface ConfirmedRead {
   branch?: BranchName;
   path: ReadPath;
   seq: number;
+  /**
+   * When true, this is a SHALLOW (shape-only) read — the reader observed the
+   * container at `path` (its key set / existence) but did NOT depend on the deep
+   * values of its descendants. The engine then conflicts only with writes
+   * AT-OR-ABOVE `path` (including key add/remove, whose patch injects the parent
+   * path), not with disjoint deep-value writes strictly below `path`. Strict
+   * subset of the recursive overlap ⇒ never a false-negative. Absent/false ⇒
+   * recursive read (the historical behavior).
+   */
+  nonRecursive?: boolean;
 }
 
 export interface PendingRead {
@@ -121,6 +131,8 @@ export interface PendingRead {
   scope?: CellScope;
   path: ReadPath;
   localSeq: number;
+  /** See {@link ConfirmedRead.nonRecursive}. */
+  nonRecursive?: boolean;
 }
 
 export interface SchedulerObservationCommit {

@@ -95,6 +95,30 @@ export function isSchedulerDependencyRead(meta?: Metadata): boolean {
   return meta?.[schedulerDependencyReadMarker] === true;
 }
 
+const excludeReadFromConflictMarker: unique symbol = Symbol(
+  "excludeReadFromConflictMarker",
+);
+
+/**
+ * Marks reads that resolve a REFERENCE rather than consume a value, so they must
+ * NOT be recorded as commit-time conflict dependencies. Building an asCell
+ * argument follows its write-redirect link (followPointer reads the target's
+ * shape), but the handler depends on the referent's VALUE only if it reads
+ * THROUGH the cell in its body — those reads are recorded separately and stay
+ * unmarked. The marked materialization reads remain in the journal for
+ * reactivity; only buildReads (the conflict set) excludes them. This is the same
+ * mechanism #4199 applied to Cell.set's link resolution, here applied to the
+ * argument-materialization seam where the probe's over-conflict actually lives.
+ * Orthogonal to schedulerDependencyRead and attemptedWrite.
+ */
+export const excludeReadFromConflict: Metadata = {
+  [excludeReadFromConflictMarker]: true,
+};
+
+export function isReadExcludedFromConflict(meta?: Metadata): boolean {
+  return meta?.[excludeReadFromConflictMarker] === true;
+}
+
 export function reactivityLogFromActivities(
   activities: Iterable<Activity>,
 ): TransactionReactivityLog {

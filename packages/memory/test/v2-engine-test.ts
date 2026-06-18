@@ -553,6 +553,289 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
   }
 });
 
+Deno.test("memory v2 engine: leaf-only commit conflict — disjoint-key writers merge, same-key/container readers still conflict", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const id = "entity:map";
+  const scope = "space" as const;
+
+  try {
+    // seq 1: establish a map with keys a, b.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          scope,
+          value: toEntityDocument({ a: "1", b: "2" }),
+        }],
+      },
+    });
+
+    // seq 2: a concurrent writer ADDS a new key `c`. An add/remove patch is the
+    // case where `touchedPathsForPatch` used to inject the parent ["value"].
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{ op: "add", path: "/value/c", value: "3" }],
+        }],
+      },
+    });
+
+    // DISTINCT-KEY: a writer whose conflict read is only the SIBLING key `a`
+    // (as a keyed `.set()`'s own-key/diff read is) must NOT conflict with the
+    // seq-2 add of `c`. Leaf-only: ["value","c"] does not overlap ["value","a"].
+    // Pre-fix (parent-injected ["value"]) this collided — the write-contention bug.
+    const merged = applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 3,
+        reads: {
+          confirmed: [{
+            id,
+            scope,
+            path: toDocumentPath(["value", "a"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{ op: "add", path: "/value/d", value: "4" }],
+        }],
+      },
+    });
+    assertEquals(merged.seq, 3);
+
+    // SAME-KEY: a writer that read `c` (the key the seq-2 add created) MUST still
+    // conflict — genuine read-modify-write is preserved (leaf exactly matches).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 4,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value", "c"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sink",
+              scope,
+              value: toEntityDocument("x"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    // CONTAINER READER: a writer that read the whole container ["value"] MUST
+    // still conflict with a key add (the container's value changed) — caught via
+    // the bidirectional overlap (the container read is a prefix of the leaf add).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sink2",
+              scope,
+              value: toEntityDocument("y"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine: nonRecursive shape read conflicts with key add but not a disjoint deep-value write", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const id = "entity:shape";
+  const scope = "space" as const;
+
+  try {
+    // seq 1: container with a value at key x.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          scope,
+          value: toEntityDocument({ x: "1" }),
+        }],
+      },
+    });
+    // seq 2: a key ADD (changes the container's key-set).
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{ op: "add", path: "/value/y", value: "3" }],
+        }],
+      },
+    });
+    // seq 3: a disjoint DEEP-VALUE replace strictly below the container.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          scope,
+          patches: [{ op: "replace", path: "/value/x", value: "2" }],
+        }],
+      },
+    });
+
+    // A: a SHAPE (nonRecursive) reader of the container observed at seq 2 must
+    // NOT conflict with the seq-3 deep-value replace — it never depended on x's
+    // value, only the container's shape.
+    const ok = applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 4,
+        reads: {
+          confirmed: [{
+            id,
+            scope,
+            path: toDocumentPath(["value"]),
+            seq: 2,
+            nonRecursive: true,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:sinkA",
+          scope,
+          value: toEntityDocument("ok"),
+        }],
+      },
+    });
+    assertEquals(ok.seq, 4);
+
+    // B: a RECURSIVE reader of the same container observed at seq 2 MUST conflict
+    // with the seq-3 deep-value replace (its read covered x).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value"]),
+                seq: 2,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkB",
+              scope,
+              value: toEntityDocument("x"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    // C: a SHAPE reader observed at seq 1 MUST still conflict with the seq-2 key
+    // ADD — adding a key changes the key-set the shape read observed.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 6,
+            reads: {
+              confirmed: [{
+                id,
+                scope,
+                path: toDocumentPath(["value"]),
+                seq: 1,
+                nonRecursive: true,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkC",
+              scope,
+              value: toEntityDocument("y"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
 
