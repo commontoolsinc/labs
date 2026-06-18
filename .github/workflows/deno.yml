@@ -411,10 +411,23 @@ jobs:
         env:
           INSTALL_FUSE_DEPS: ${{ matrix.install_fuse_deps }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          # jq ships on the GitHub-hosted Ubuntu image; fuse3/libfuse3-dev do
+          # not. Collect only the packages that are actually missing so the
+          # common case installs nothing.
+          pkgs=()
+          command -v jq >/dev/null 2>&1 || pkgs+=(jq)
           if [ "$INSTALL_FUSE_DEPS" = "true" ]; then
-            sudo apt-get install -y fuse3 libfuse3-dev
+            pkgs+=(fuse3 libfuse3-dev)
+          fi
+          if [ "${#pkgs[@]}" -gt 0 ]; then
+            # Install against the image's prebaked package lists first. apt-get
+            # update refreshes every mirror index and is the slow, high-variance
+            # part of this step, so only run it as a fallback when the direct
+            # install misses (e.g. stale lists).
+            sudo apt-get install -y "${pkgs[@]}" \
+              || { sudo apt-get update && sudo apt-get install -y "${pkgs[@]}"; }
+          fi
+          if [ "$INSTALL_FUSE_DEPS" = "true" ]; then
             sudo chmod 666 /dev/fuse
           fi
 
