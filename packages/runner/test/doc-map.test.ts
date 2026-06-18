@@ -8,6 +8,7 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -73,6 +74,34 @@ describe("cell-map", () => {
       const ref = createRef(source, cause);
       const ref2 = createRef(source);
       expect(ref.taggedHashString).not.toEqual(ref2.taggedHashString);
+    });
+
+    it("hashes FabricPrimitive values atomically (distinct values → distinct ids)", () => {
+      // Regression: a FabricPrimitive has no enumerable own props, so descending
+      // into one collapsed it to `{}` and collided otherwise-distinct values.
+      // (A fixed cause keeps the id determined by the source, not random.)
+      const a = createRef(
+        { data: new FabricBytes(new Uint8Array([1, 2, 3])) },
+        "c",
+      );
+      const b = createRef(
+        { data: new FabricBytes(new Uint8Array([4, 5, 6])) },
+        "c",
+      );
+      expect(a.taggedHashString).not.toEqual(b.taggedHashString);
+    });
+
+    it("treats a sigil link in the source as an atomic reference", () => {
+      const link = (id: string) => ({
+        "/": { [LINK_V1_TAG]: { id, path: [] } },
+      });
+      // Distinct links → distinct ids; the same link → a stable id.
+      expect(createRef({ ref: link("of:fid1:aaa") }, "c").taggedHashString)
+        .not.toEqual(
+          createRef({ ref: link("of:fid1:bbb") }, "c").taggedHashString,
+        );
+      expect(createRef({ ref: link("of:fid1:aaa") }, "c").taggedHashString)
+        .toEqual(createRef({ ref: link("of:fid1:aaa") }, "c").taggedHashString);
     });
   });
 
