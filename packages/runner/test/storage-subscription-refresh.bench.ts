@@ -1,11 +1,27 @@
 import { Identity } from "@commonfabric/identity";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
+  entityRefFrom,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+// Run with the modern cell representation when the env flag is set, so the
+// bench exercises whichever serialized entity-ref form (`FabricHash` vs the
+// `{ "/": … }` object) the active regime would actually store.
+setModernCellRepConfig(
+  Deno.env.get("EXPERIMENTAL_MODERN_CELL_REP") === "true",
+);
 
 const signer = await Identity.fromPassphrase("bench subscription refresh");
 const space = signer.did();
 const SUBSCRIPTION_COUNT = 256;
 const UPDATE_COUNT = 5;
-const SOURCE_LINK = { "/": "bench:source" } as const;
+// A real `FabricHash` so the source pointer is a valid entity reference in
+// either cell-rep regime.
+const SOURCE_LINK = entityRefFrom(
+  hashOf({ causal: { bench: "subscription-refresh", source: true } }),
+);
 
 type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
   open(space: string): infer T;

@@ -1,14 +1,30 @@
 import { Identity } from "@commonfabric/identity";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
+  entityRefFrom,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+// Run with the modern cell representation when the env flag is set, so the
+// bench exercises whichever serialized entity-ref form (`FabricHash` vs the
+// `{ "/": … }` object) the active regime would actually store.
+setModernCellRepConfig(
+  Deno.env.get("EXPERIMENTAL_MODERN_CELL_REP") === "true",
+);
 
 const signer = await Identity.fromPassphrase("bench mixed query refresh");
 const space = signer.did();
 const DOC_COUNT = 96;
 const UPDATE_COUNT = 5;
-const BASE_SOURCES = [
-  "of:mixed-query-source-1",
-  "of:mixed-query-source-2",
-] as const;
+
+// Synthetic source ids are real `FabricHash`es (valid entity references in
+// either cell-rep regime); each `of:` URI and the `source` pointer that
+// targets it derive from the same hash so the topology stays consistent.
+const BASE_HASHES = [0, 1].map((index) =>
+  hashOf({ causal: { bench: "mixed-query", source: index } })
+);
+const BASE_SOURCES = BASE_HASHES.map((hash) => `of:${hash.taggedHashString}`);
 
 type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
   open(space: string): infer T;
@@ -88,7 +104,7 @@ const buildDoc = (
   version: number,
   sourceIndex: number,
 ) => ({
-  source: { "/": BASE_SOURCES[sourceIndex]!.replace("of:", "") },
+  source: entityRefFrom(BASE_HASHES[sourceIndex]!),
   value: {
     $UI: {
       kind: "mixed-query-refresh",
