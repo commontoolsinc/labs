@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
+  type EntityRef,
+  entityRefFromString,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -10,7 +12,6 @@ import {
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
-  isSourceLink,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
@@ -22,11 +23,9 @@ import {
   toValuePath,
 } from "../v2.ts";
 
-const toSourceLink = (id: string) => ({ "/": id } as const);
-
 const toEntityDocument = (
   value: unknown,
-  source?: { "/": string },
+  source?: EntityRef,
   metadata: Record<string, unknown> = {},
 ) => {
   const document: Record<string, unknown> = {
@@ -52,7 +51,7 @@ describe("memory v2 protocol constants", () => {
 
 describe("memory v2 documents", () => {
   it("builds explicit in-memory documents", () => {
-    const source = toSourceLink("abc123");
+    const source = entityRefFromString("abc123");
     assertEquals(
       toEntityDocument({ hello: "world" }, source),
       {
@@ -95,14 +94,6 @@ describe("memory v2 paths", () => {
         schema: false,
       },
     );
-  });
-});
-
-describe("memory v2 source links", () => {
-  it("recognizes short source links", () => {
-    assert(isSourceLink({ "/": "abc123" }));
-    assertFalse(isSourceLink({ "/": { link: "abc123" } }));
-    assertFalse(isSourceLink({}));
   });
 });
 

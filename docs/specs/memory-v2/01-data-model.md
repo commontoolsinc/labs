@@ -48,10 +48,6 @@ Key properties:
 Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
-interface SourceLink {
-  "/": string; // Short source id; runtime resolves to of:<short-id>
-}
-
 interface SigilLink {
   "/": {
     "link@1": {
@@ -67,20 +63,24 @@ interface InternalManifestEntry {
   link: SigilLink;
 }
 
-type EntityDocumentField = FabricValue | SourceLink | SigilLink | undefined;
-
 interface EntityDocument {
   value?: FabricValue; // The cell's data when present.
-  source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
+  source?: EntityRef; // Serialized short-link form {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   pattern?: SigilLink; // Well-known metadata link to a pattern cell.
   argument?: SigilLink; // Well-known metadata link to an argument cell.
   internal?: InternalManifestEntry[]; // Manifest of derived internal cells.
   result?: SigilLink; // Well-known metadata link back to a result cell.
   schema?: FabricValue; // Optional schema metadata.
   slug?: string; // Optional URL/address metadata.
-  [key: string]: EntityDocumentField;
+  [key: string]: FabricValue;
 }
 ```
+
+The implementation no longer defines separate `SourceLink` or
+`EntityDocumentField` types: `source` is an `EntityRef` (whose serialized
+short-link form is `{"/":"<short-id>"}`), and an arbitrary document field is
+just a `FabricValue` (which already subsumes the short-link, sigil-link, and
+`undefined` cases above).
 
 The `value` property holds the cell's actual data. Storing it under a key
 (rather than as the top-level value) lets the envelope carry sibling metadata

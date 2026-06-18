@@ -1,4 +1,7 @@
-import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
+import {
+  type EntityRef,
+  getModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
   valueFromJson,
@@ -34,16 +37,16 @@ export type ValueSchemaPathSelector =
   & Omit<SchemaPathSelector, "path">
   & { path: ValuePath };
 
-export interface SourceLink {
-  "/": string;
-}
-
-export type EntityDocumentField = FabricValue | SourceLink | undefined;
-
+/**
+ * A logical stored document. Today the system only produces and consumes the
+ * `value` field; `source` and any additional metadata fields are reserved for
+ * future use and carried as opaque payload (a document is validated merely as
+ * "an object" — see {@link isEntityDocument}).
+ */
 export interface EntityDocument {
   value?: FabricValue;
-  source?: SourceLink;
-  [key: string]: EntityDocumentField;
+  source?: EntityRef;
+  [key: string]: FabricValue;
 }
 
 export interface Blob {
@@ -693,23 +696,13 @@ export const toDocumentSelector = (
     path: toDocumentPath(["value", ...selector.path]),
   }) as DocumentSchemaPathSelector;
 
-export const isSourceLink = (value: unknown): value is SourceLink => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return Object.keys(candidate).length === 1 &&
-    typeof candidate["/"] === "string";
-};
-
 export const isEntityDocument = (
   value: unknown,
 ): value is EntityDocument => isObject(value);
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,
-): Record<string, EntityDocumentField> => {
+): Record<string, FabricValue> => {
   const {
     value: _value,
     ...metadata

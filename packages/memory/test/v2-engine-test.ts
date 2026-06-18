@@ -1,5 +1,9 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type EntityRef,
+  entityRefFromString,
+} from "@commonfabric/data-model/cell-rep";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
@@ -61,11 +65,9 @@ const decodeStored = <Value extends FabricValue>(
   source: string | null | undefined,
 ): Value => decodeMemoryBoundary<Value>(source ?? "null");
 
-const toSourceLink = (id: string) => ({ "/": id } as const);
-
 const toEntityDocument = (
   value: unknown,
-  source?: { "/": string },
+  source?: EntityRef,
   metadata: Record<string, unknown> = {},
 ): EntityDocument => {
   const document: Record<string, unknown> = {
@@ -557,7 +559,7 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
   try {
     const document = toEntityDocument(
       { hello: "world" },
-      toSourceLink("origin"),
+      entityRefFromString("origin"),
     );
 
     const setResult = applyCommit(engine, {
@@ -714,14 +716,14 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
         operations: [{
           op: "set",
           id: "of:piece:1",
-          value: toEntityDocument(undefined, toSourceLink("process:1")),
+          value: toEntityDocument(undefined, entityRefFromString("process:1")),
         }],
       },
     });
 
     assertEquals(
       read(engine, { id: "of:piece:1" }),
-      toEntityDocument(undefined, toSourceLink("process:1")),
+      toEntityDocument(undefined, entityRefFromString("process:1")),
     );
   } finally {
     close(engine);
@@ -829,7 +831,7 @@ Deno.test("memory v2 engine replays patch revisions for current and point-in-tim
         profile: { name: "Alice" },
         tags: ["one"],
       },
-      toSourceLink("origin"),
+      entityRefFromString("origin"),
     );
 
     applyCommit(engine, {
@@ -879,7 +881,7 @@ Deno.test("memory v2 engine replays patch revisions for current and point-in-tim
           profile: { name: "Bob", title: "Dr" },
           tags: ["one", "two", "three"],
         },
-        toSourceLink("origin"),
+        entityRefFromString("origin"),
       ),
     );
     assertEquals(read(engine, { id: "entity:patch", seq: 1 }), original);

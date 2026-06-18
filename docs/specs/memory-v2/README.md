@@ -205,26 +205,23 @@ interface Commit {
   createdAt: string;
 }
 
-interface SourceLink {
-  "/": string;
-}
-
 interface SigilLink {
   "/": { "link@1": { id?: string; path?: string[]; space?: string } };
 }
 
-type EntityDocumentField = FabricValue | SourceLink | SigilLink | undefined;
-
+// `source` is an `EntityRef` (serialized short-link form `{"/":"<short-id>"}`);
+// an arbitrary document field is a `FabricValue`. The former `SourceLink` /
+// `EntityDocumentField` aliases are no longer separate types.
 interface EntityDocument {
   value?: FabricValue;
-  source?: SourceLink;
+  source?: EntityRef;
   pattern?: SigilLink;
   argument?: SigilLink;
   internal?: SigilLink;
   result?: SigilLink;
   schema?: FabricValue;
   slug?: string;
-  [key: string]: EntityDocumentField;
+  [key: string]: FabricValue;
 }
 
 interface WatchSpec {
