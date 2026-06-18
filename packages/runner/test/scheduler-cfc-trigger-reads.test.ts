@@ -208,6 +208,9 @@ describe("trigger reads survive failed runs", () => {
     retries?: WeakMap<Action, number>;
     error?: unknown;
     onRestore: () => void;
+    onResubscribe?: () => void;
+    onMarkDirectDirty?: () => void;
+    onQueueExecution?: () => void;
   }): Promise<void> {
     const action: Action = () => {};
     const tx = { tx: {} } as IExtendedStorageTransaction;
@@ -223,21 +226,62 @@ describe("trigger reads survive failed runs", () => {
       retries: args.retries ?? new WeakMap(),
       pending: new Set(),
       commitPromise,
-      resubscribe: () => {},
-      markDirectDirty: () => {},
-      queueExecution: () => {},
+      resubscribe: () => args.onResubscribe?.(),
+      markDirectDirty: () => args.onMarkDirectDirty?.(),
+      queueExecution: () => args.onQueueExecution?.(),
       restoreCfcTriggerReads: args.onRestore,
     });
-    return commitPromise.then(() => undefined);
+    return commitPromise.then(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   }
 
   it("restores consumed trigger reads when a commit conflict re-runs", async () => {
     let restored = 0;
+    let queued = 0;
     await watchWith({
       error: new Error("conflict"),
       onRestore: () => restored++,
+      onQueueExecution: () => queued++,
     });
     expect(restored).toBe(1);
+    expect(queued).toBe(1);
+  });
+
+  it("waits for conflict readyToRetry before requeueing a reactive action", async () => {
+    let releaseReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      readyToRetry: () => ready,
+    });
+    const calls: string[] = [];
+    let resolveQueued!: () => void;
+    const queued = new Promise<void>((resolve) => {
+      resolveQueued = resolve;
+    });
+    const watched = watchWith({
+      error,
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => {
+        calls.push("queue");
+        resolveQueued();
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+
+    releaseReady();
+    await queued;
+    await watched;
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
   it("does not restore on successful commit", async () => {

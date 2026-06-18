@@ -110,7 +110,7 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
-  state.commitPromise.then(({ error }) => {
+  state.commitPromise.then(async ({ error }) => {
     // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
     // on every attempt we still call the re-subscribe below, so that
     // even after we run out of retries, this will be re-triggered when
@@ -127,6 +127,10 @@ export function watchReactiveActionCommit(state: {
       if (
         retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
       ) {
+        const readyToRetry = readyToRetryPromise(error);
+        if (readyToRetry !== undefined) {
+          await readyToRetry;
+        }
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
         // then mark as dirty/pending to ensure it runs again.
@@ -152,6 +156,18 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
+  if (typeof candidate !== "function") {
+    return undefined;
+  }
+  const result = candidate.call(error);
+  return Promise.resolve(result);
 }
 
 export function appendActionRunTrace(state: {
