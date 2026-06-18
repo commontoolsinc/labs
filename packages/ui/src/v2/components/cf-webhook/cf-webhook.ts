@@ -162,8 +162,7 @@ export class CFWebhook extends BaseElement {
     try {
       // Extract space DID from inbox cell link for ownership verification
       const inboxLink = this.inbox?.toJSON?.() as any;
-      const linkData = inboxLink?.["/"]?.["link@1"] ??
-        inboxLink?.["/"]?.["link-v0.1"];
+      const linkData = inboxLink?.["/"]?.["link@1"];
       const space = linkData?.space ?? "";
       const params = new URLSearchParams({ space });
 
