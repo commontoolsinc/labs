@@ -959,6 +959,8 @@ export interface ConflictError extends Error {
 
   transaction: Transaction;
   conflict: Conflict;
+  retryAfterSeq?: number;
+  readyToRetry?: () => Promise<void>;
 }
 
 export interface SystemError extends Error {

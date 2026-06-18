@@ -522,6 +522,7 @@ export interface V2Error {
   name: string;
   message: string;
   precondition?: string;
+  retryAfterSeq?: number;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
