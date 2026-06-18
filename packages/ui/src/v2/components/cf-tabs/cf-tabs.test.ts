@@ -416,6 +416,23 @@ describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
     expect(writes()).toBe(0); // pure read throughout — no cell write
   });
 
+  it("clears the selection when the bound value is explicitly set to empty", () => {
+    // Empty is not only the mount transient — a consumer can clear the bound
+    // cell ("" / unset) to mean "no tab active". The early-return form held the
+    // prior selection (stale tab + panel stuck visible); selection-sync must
+    // instead drop it. (Still write-free — clearing is a pure read.)
+    const { cell, writes } = countingCell("progress");
+    const h = makeTabs(cell, ["active", "progress", "pending"]);
+    expect(h.selectedTab()).toBe("progress"); // initially selected
+    expect(h.visiblePanel()).toBe("progress");
+
+    pushUpdate(cell, ""); // explicit clear
+
+    expect(h.selectedTab()).toBe(undefined); // selection dropped, not stale
+    expect(h.visiblePanel()).toBe(undefined);
+    expect(writes()).toBe(0);
+  });
+
   it("a cell-driven change to an unmatched value does not write back", () => {
     const { cell, writes } = countingCell("active");
     const h = makeTabs(cell, ["active", "progress"]);
