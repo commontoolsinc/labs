@@ -385,7 +385,8 @@ export the requested variant key, `cf-render` substitutes a per-variant platform
 default:
 
 - `chip` → a `cf-cell-link` bound to the piece (renders it by its `[NAME]`).
-- `tile` → the full `[UI]` rendered small at ~0.5 scale.
+- `tile` → the full `[UI]` rendered small at ~0.5 scale, clipped to a static
+  preview and clickable to navigate to the piece (like `cf-cell-link`).
 
 Because `full`/`[UI]` is the universal floor, a piece that exports only `[UI]`
 still renders correctly at `chip` and `tile`.

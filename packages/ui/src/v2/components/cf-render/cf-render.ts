@@ -5,6 +5,12 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { CHIP_UI, TILE_UI, type VNode } from "@commonfabric/runtime-client";
+import {
+  appViewToUrlPath,
+  navigate,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/shell/shared";
 import "../cf-loader/cf-loader.ts";
 import "../cf-cell-link/cf-cell-link.ts";
 
@@ -66,13 +72,23 @@ export class CFRender extends BaseElement {
       overflow: auto;
     }
 
-    /* Tile default: the full [UI] laid out at 2x then scaled to 0.5 so it
-      fills the tile box while showing a compact, glanceable rendering. */
+    /* Tile default: a fixed, clickable preview that navigates to the piece.
+      The clip box pins the viewport (no panning/scrolling); the inner box is
+      laid out at 2x then scaled to 0.5 so the full [UI] fills the tile. */
+    .tile-clip {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
     .tile-default {
       width: 200%;
       height: 200%;
       transform: scale(0.5);
       transform-origin: top left;
+      /* Clicks fall through to .tile-clip so the whole tile navigates,
+        rather than activating controls inside the embedded UI. */
       pointer-events: none;
     }
 
@@ -263,16 +279,51 @@ export class CFRender extends BaseElement {
     return () => link.remove();
   }
 
-  /** Tile default: the full [UI] rendered small at ~0.5 scale. */
+  /**
+   * Tile default: the full [UI] rendered small at ~0.5 scale, clipped to a
+   * fixed preview (no panning) and clickable to navigate to the piece —
+   * mirroring cf-cell-link's navigation.
+   */
   private _renderTileDefault(container: HTMLElement): () => void {
+    const clip = globalThis.document.createElement("div");
+    clip.className = "tile-clip";
     const scaler = globalThis.document.createElement("div");
     scaler.className = "tile-default";
-    container.appendChild(scaler);
+    clip.appendChild(scaler);
+    container.appendChild(clip);
     const inner = render(scaler, this.cell as CellHandle<VNode>);
+    const onClick = (e: MouseEvent) => this._navigateToPiece(e);
+    clip.addEventListener("click", onClick);
     return () => {
+      clip.removeEventListener("click", onClick);
       inner?.();
-      scaler.remove();
+      clip.remove();
     };
+  }
+
+  /** Navigate to the rendered piece (same behavior as cf-cell-link). */
+  private _navigateToPiece(e: MouseEvent) {
+    e.stopPropagation();
+    try {
+      const view = {
+        spaceDid: this.cell.space(),
+        pieceId: this.cell.id(),
+      };
+      // Cmd (Mac) / Ctrl (Win/Linux) opens in a new tab.
+      if (e.metaKey || e.ctrlKey) {
+        const url = appViewToUrlPath(
+          preserveAppViewMode(
+            urlToAppView(new URL(globalThis.location.href)),
+            view,
+          ),
+        );
+        globalThis.open(url, "_blank");
+      } else {
+        navigate(view);
+      }
+    } catch (error) {
+      console.error("[cf-render] tile navigation failed:", error);
+    }
   }
 
   private _cleanupRender() {
