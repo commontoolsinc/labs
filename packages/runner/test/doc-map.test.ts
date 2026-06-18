@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
@@ -17,6 +21,41 @@ describe("hashOf", () => {
     const ref = hashOf({ hello: "world" });
     const ref2 = hashOf({ hello: "world" });
     expect(ref.taggedHashString).toEqual(ref2.taggedHashString);
+  });
+});
+
+describe("getEntityId (string forms)", () => {
+  const tagged = hashOf({ test: "get-entity-id" }).taggedHashString;
+
+  afterEach(() => {
+    resetModernCellRepConfig();
+  });
+
+  it("reads a bare id string", () => {
+    setModernCellRepConfig(false);
+    expect(entityRefToString(getEntityId(tagged)!)).toBe(tagged);
+  });
+
+  it("reads an `of:`-prefixed id string", () => {
+    setModernCellRepConfig(false);
+    expect(entityRefToString(getEntityId(`of:${tagged}`)!)).toBe(tagged);
+  });
+
+  it("reads a JSON-serialized legacy ref in legacy mode", () => {
+    setModernCellRepConfig(false);
+    const json = JSON.stringify({ "/": tagged });
+    expect(getEntityId(json)).toEqual(getEntityId(tagged));
+    expect(entityRefToString(getEntityId(json)!)).toBe(tagged);
+  });
+
+  it('returns undefined for a JSON `{ "/": … }` ref in modern mode', () => {
+    setModernCellRepConfig(true);
+    expect(getEntityId(JSON.stringify({ "/": tagged }))).toBeUndefined();
+  });
+
+  it("returns undefined for a JSON object that isn't a ref", () => {
+    setModernCellRepConfig(false);
+    expect(getEntityId(JSON.stringify({ not: "a ref" }))).toBeUndefined();
   });
 });
 

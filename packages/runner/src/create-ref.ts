@@ -4,6 +4,8 @@ import {
   type EntityRef,
   entityRefFrom,
   entityRefFromString,
+  entityRefToString,
+  isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
@@ -137,9 +139,16 @@ export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
     // Handle URI format with "of:" prefix
     if (value.startsWith("of:")) value = fromURI(value);
-    return value.startsWith("{")
-      ? entityRefFromString(JSON.parse(value)["/"])
-      : entityRefFromString(value);
+    if (value.startsWith("{")) {
+      // A JSON-serialized serialized entity-ref; recognize and extract its
+      // tagged-hash string through the cell-rep chokepoint. (Only the legacy
+      // `{ "/": … }` object serializes this way; a modern `FabricHash` does
+      // not survive JSON as a ref, hence the `undefined` fall-through.)
+      const parsed = JSON.parse(value);
+      if (!isEntityRef(parsed)) return undefined;
+      value = entityRefToString(parsed);
+    }
+    return entityRefFromString(value);
   }
 
   const link = parseLink(value);
