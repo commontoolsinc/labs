@@ -7,6 +7,7 @@ import {
   clickTrustedAction,
   fillCfInput,
   waitForRuntimeIdle,
+  waitForRuntimeSynced,
   waitForText,
 } from "./cfc-browser-helpers.ts";
 
@@ -63,8 +64,16 @@ async function ensureProfileTabActive(page: any) {
 // deno-lint-ignore no-explicit-any
 async function createProfile(page: any, name: string) {
   await ensureProfileTabActive(page);
+  // Each profile lives in its own `inSpace` child space, so appending one is a
+  // cross-space commit. `waitForRuntimeIdle` returns once the scheduler queue
+  // drains; `waitForRuntimeSynced` additionally awaits every opened space to
+  // reconcile. Settle fully before submitting so the append does not interleave
+  // with commits still in flight from a prior navigation's rehydration, and
+  // again after so it reconciles before the caller navigates or appends again.
+  await waitForRuntimeSynced(page);
   await fillCfInput(page, "#wish-profile-picker-name-input", name);
   await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+  await waitForRuntimeSynced(page);
 }
 
 // Regression coverage for creating a profile directly from the home space's
