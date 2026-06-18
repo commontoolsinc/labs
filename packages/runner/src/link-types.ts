@@ -106,16 +106,6 @@ export function isSigilLink(value: any): value is SigilLink {
   return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
 }
 
-/**
- * Check if value is a sigil alias (link with overwrite field).
- */
-export function isSigilWriteRedirectLink(
-  value: any,
-): value is SigilWriteRedirectLink {
-  return isSigilLink(value) &&
-    value["/"][LINK_V1_TAG].overwrite === "redirect";
-}
-
 export function isPrimitiveCellLink(
   value: any,
 ): value is PrimitiveCellLink {
