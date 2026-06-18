@@ -1,6 +1,6 @@
 /**
- * Declaration-only mirror of `packages/api/cfc.ts` for the in-memory pattern
- * compiler. This file must not emit runtime JavaScript.
+ * Declaration-only mirror of the public `commonfabric/cfc` module for the
+ * in-memory pattern compiler. This file must not emit runtime JavaScript.
  */
 
 export type Cfc<T, Meta> = T & {
@@ -27,10 +27,13 @@ export declare const CFC_ATOM_TYPE: {
   readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
   readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
   readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
+  readonly PolicyCertified:
+    "https://commonfabric.org/cfc/atom/PolicyCertified";
   readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
   readonly PromptSlotInfluence:
     "https://commonfabric.org/cfc/atom/PromptSlotInfluence";
   readonly Resource: "https://commonfabric.org/cfc/atom/Resource";
+  readonly TransformedBy: "https://commonfabric.org/cfc/atom/TransformedBy";
   readonly UserSurfaceInput:
     "https://commonfabric.org/cfc/atom/UserSurfaceInput";
 };

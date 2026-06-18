@@ -6,6 +6,7 @@
   "exports": {
     ".": "./index.ts",
     "./cfc-atoms": "./cfc-atoms.ts",
+    "./cfc-authoring": "./cfc-authoring.ts",
     "./cfc": "./cfc.ts",
     "./schema": "./schema.ts"
   }

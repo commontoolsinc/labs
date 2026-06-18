@@ -132,9 +132,9 @@ const trustedPromptMessage = promptInputMessage(event);
 const requiredIntegrity = [kernel, userInput, slot, INJECTION_SAFE_ATOM];
 ```
 
-The prompt helpers use the shared CFC atom vocabulary from `api-cfc.ts`, which
-is a temporary local symlink to `packages/api/cfc.ts`. Use these builders
-instead of spelling atom `type` URLs by hand in shared helpers.
+The prompt helpers use the shared CFC atom vocabulary from `commonfabric/cfc`.
+Use these builders instead of spelling atom `type` URLs by hand in shared
+helpers.
 
 Call shared builders from inside the pattern body unless the value is plain
 static data. CFC-authored pattern code cannot use arbitrary top-level call

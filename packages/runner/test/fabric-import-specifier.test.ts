@@ -11,7 +11,10 @@ import {
   pinnedIdentity,
   withPin,
 } from "../src/sandbox/fabric-import-specifier.ts";
-import { isAllowedAuthoredImportSpecifier } from "../src/sandbox/runtime-module-policy.ts";
+import {
+  isAllowedAuthoredImportSpecifier,
+  isRuntimeModuleIdentifier,
+} from "../src/sandbox/runtime-module-policy.ts";
 import { toURI } from "../src/uri-utils.ts";
 
 const HASH = "Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
@@ -24,6 +27,12 @@ describe("fabric import specifiers", () => {
       expect(parseFabricRef(specifier)).toBeUndefined();
       expect(isFabricImportSpecifier(specifier)).toBe(false);
     }
+  });
+
+  it("allows the public CFC authoring runtime module", () => {
+    expect(parseFabricRef("commonfabric/cfc")).toBeUndefined();
+    expect(isRuntimeModuleIdentifier("commonfabric/cfc")).toBe(true);
+    expect(isAllowedAuthoredImportSpecifier("commonfabric/cfc")).toBe(true);
   });
 
   it("parses valid specifiers and formats canonically", () => {

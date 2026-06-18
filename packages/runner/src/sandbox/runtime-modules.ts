@@ -2,6 +2,14 @@ import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commonfabric/static";
 import turndown from "turndown";
 import { freezeSandboxValue } from "./hardening.ts";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+  CFC_CONCEPT_KIND,
+  CFC_FUSE_ATOM_CLASS,
+  CFC_RUNTIME_SUBJECT,
+  cfcAtom,
+} from "@commonfabric/api/cfc-authoring";
 export type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
 export {
   isRuntimeModuleIdentifier,
@@ -21,6 +29,7 @@ export const getRuntimeModuleTypes = (() => {
     const schemaTypes = await cache.getText("types/commonfabric-schema.d.ts");
     depTypes = {
       "commonfabric": builderTypes,
+      "commonfabric/cfc": cfcTypes,
       "commonfabric/schema": schemaTypes,
       "commontools": builderTypes,
       "commontools/schema": schemaTypes,
@@ -37,8 +46,17 @@ export const getRuntimeModuleTypes = (() => {
 export function getRuntimeModuleExports() {
   const { commonfabric, exportsCallback } = createBuilder();
   const commontools = commonfabric;
+  const cfc = {
+    CFC_ATOM_TYPE,
+    CFC_CANONICAL_ALIAS_NAMES,
+    CFC_CONCEPT_KIND,
+    CFC_FUSE_ATOM_CLASS,
+    CFC_RUNTIME_SUBJECT,
+    cfcAtom,
+  };
   const runtimeExports = freezeSandboxValue({
     "commonfabric": commonfabric,
+    "commonfabric/cfc": cfc,
     // commonfabric/schema only exports types, no runtime values needed
     "commonfabric/schema": {},
     "commontools": commontools,

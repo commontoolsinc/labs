@@ -132,6 +132,7 @@
   },
   "imports": {
     "commonfabric": "./packages/api/index.ts",
+    "commonfabric/cfc": "./packages/api/cfc-authoring.ts",
     "commonfabric/schema": "./packages/api/schema.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",

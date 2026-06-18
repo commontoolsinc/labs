@@ -119,4 +119,33 @@ describe("Engine module evaluation", () => {
     expect(exportMap!["/utils/foo.ts"]["add"]).toBeInstanceOf(Function);
     expect(exportMap!["/utils/foo.ts"]["sub"]).toBeInstanceOf(Function);
   });
+
+  it("compiles and executes the public CFC authoring runtime module", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { CFC_ATOM_TYPE, CFC_CONCEPT_KIND, cfcAtom } from 'commonfabric/cfc';",
+            "export function buildCfcEvidence() {",
+            "  return {",
+            "    concept: CFC_CONCEPT_KIND.PromptInfluence,",
+            "    safeType: cfcAtom.injectionSafe().type,",
+            "    certifiedType: CFC_ATOM_TYPE.PolicyCertified,",
+            "  };",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { main } = await runtime.harness.compileAndEvaluateModules(program);
+
+    expect((main!.buildCfcEvidence as () => unknown)()).toEqual({
+      concept: "https://commonfabric.org/cfc/concepts/prompt-influence",
+      safeType: "https://commonfabric.org/cfc/atom/InjectionSafe",
+      certifiedType: "https://commonfabric.org/cfc/atom/PolicyCertified",
+    });
+  });
 });
