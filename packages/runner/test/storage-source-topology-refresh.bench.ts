@@ -6,11 +6,15 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-// Run with the modern cell representation when the env flag is set, so the
-// bench exercises whichever serialized entity-ref form (`FabricHash` vs the
-// `{ "/": … }` object) the active regime would actually store.
+// Select the cell-rep regime from the env flag, mirroring how the product reads
+// EXPERIMENTAL_MODERN_CELL_REP: unset means "accept the default" (a no-op, since
+// `setModernCellRepConfig(undefined)` leaves the default in place), "false"
+// forces legacy, anything else forces modern. The bench then exercises whichever
+// serialized entity-ref form (`FabricHash` vs the `{ "/": … }` object) that
+// regime stores.
+const modernCellRepEnv = Deno.env.get("EXPERIMENTAL_MODERN_CELL_REP");
 setModernCellRepConfig(
-  Deno.env.get("EXPERIMENTAL_MODERN_CELL_REP") === "true",
+  modernCellRepEnv === undefined ? undefined : modernCellRepEnv !== "false",
 );
 
 const signer = await Identity.fromPassphrase("bench source topology refresh");
