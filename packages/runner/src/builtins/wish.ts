@@ -1142,6 +1142,11 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
 // can change the apiUrl while a fetch is in flight, so a launch for a
 // different URL starts a fresh fetch, and a superseded fetch leaves the cache
 // untouched and resolves to undefined when it settles.
+//
+// The cache is keyed only on the URL, not the user identity, even with
+// `compileInUserSpace`. A same-apiUrl identity switch reuses the prior user's
+// compiled pattern, which is intended: these system patterns are
+// space-independent and run against the current runtime.
 export function createSidecarPatternCache(options: {
   // File name under `api/patterns/system/`. Also labels errors.
   name: string;

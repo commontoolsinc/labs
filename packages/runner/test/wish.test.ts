@@ -3216,23 +3216,24 @@ describe("tagMatchesHashtag", () => {
 });
 
 describe("createSidecarPatternCache", () => {
-  it("resolves a superseded fetch to undefined and keeps the newer fetch's pattern", async () => {
-    const originalFetch = globalThis.fetch;
-    const originalEnvironment = getPatternEnvironment();
+  let originalFetch: typeof globalThis.fetch;
+  let originalEnvironment: ReturnType<typeof getPatternEnvironment>;
 
-    // The fetch for env-a.test stays pending until released, so the fetch for
-    // env-b.test supersedes it and settles first.
-    let releaseFirstFetch = () => {};
-    const firstFetchGate = new Promise<void>((resolve) => {
-      releaseFirstFetch = resolve;
-    });
-    globalThis.fetch = (async (input: Request | URL | string) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      if (url.host === "env-a.test") await firstFetchGate;
-      return new Response(`source from ${url.host}`, { status: 200 });
-    }) as typeof fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalEnvironment = getPatternEnvironment();
+  });
 
-    const fakeRuntime = {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    setPatternEnvironment(originalEnvironment);
+  });
+
+  // Fake runtime whose harness.resolve hands back the resolver's main() source
+  // and whose compilePattern echoes that source, so the compiled result names
+  // the URL it came from.
+  const makeFakeRuntime = () =>
+    ({
       harness: {
         resolve: (resolver: { main(): Promise<{ contents: string }> }) =>
           resolver.main(),
@@ -3242,29 +3243,112 @@ describe("createSidecarPatternCache", () => {
           Promise.resolve({ source: program.contents }),
       },
       userIdentityDID: "did:key:sidecar-cache-test",
-    } as unknown as Runtime;
+    }) as unknown as Runtime;
 
-    try {
-      const cache = createSidecarPatternCache({
-        name: "profile-create.tsx",
-        retryOnFailure: true,
-      });
+  // fetch mock that 200s with a body naming the host. Hosts in `failFirst` 404
+  // on their first request and succeed afterward. The `gate` host's requests
+  // stay pending until the returned `release` is called.
+  const installFetchMock = (
+    options: { gate?: string; failFirst?: string[] } = {},
+  ) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const failFirst = new Set(options.failFirst ?? []);
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: Request | URL | string) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      calls.push(url.host);
+      if (url.host === options.gate) await gate;
+      // delete returns true once per host, so only the first request 404s.
+      return failFirst.delete(url.host)
+        ? new Response("not found", { status: 404 })
+        : new Response(`source from ${url.host}`, { status: 200 });
+    }) as typeof fetch;
+    return { release, calls };
+  };
 
-      setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-      const firstFetch = cache.fetch(fakeRuntime);
+  it("resolves a superseded fetch to undefined and keeps the newer fetch's pattern", async () => {
+    // The fetch for env-a.test stays pending until released, so the fetch for
+    // env-b.test supersedes it and settles first.
+    const { release } = installFetchMock({ gate: "env-a.test" });
+    const fakeRuntime = makeFakeRuntime();
+    const cache = createSidecarPatternCache({
+      name: "profile-create.tsx",
+      retryOnFailure: true,
+    });
 
-      setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
-      const secondFetch = cache.fetch(fakeRuntime);
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const firstFetch = cache.fetch(fakeRuntime);
 
-      expect(await secondFetch).toEqual({ source: "source from env-b.test" });
-      expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
+    const secondFetch = cache.fetch(fakeRuntime);
 
-      releaseFirstFetch();
-      expect(await firstFetch).toBeUndefined();
-      expect(cache.cached()).toEqual({ source: "source from env-b.test" });
-    } finally {
-      globalThis.fetch = originalFetch;
-      setPatternEnvironment(originalEnvironment);
-    }
+    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
+    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+
+    release();
+    expect(await firstFetch).toBeUndefined();
+    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+  });
+
+  it("retries after a failed fetch when retryOnFailure is set", async () => {
+    // First fetch 404s, the rest succeed.
+    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const cache = createSidecarPatternCache({
+      name: "profile-create.tsx",
+      retryOnFailure: true,
+    });
+
+    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
+    expect(cache.cached()).toBeUndefined();
+    // The cleared memoization lets a later launch re-fetch the same URL.
+    expect(await cache.fetch(fakeRuntime)).toEqual({
+      source: "source from env-a.test",
+    });
+    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+  });
+
+  it("keeps a failed fetch without retrying when retryOnFailure is not set", async () => {
+    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
+    const fakeRuntime = makeFakeRuntime();
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    // suggestion.tsx's policy: a failed fetch is kept, not retried.
+    const cache = createSidecarPatternCache({ name: "suggestion.tsx" });
+
+    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
+    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
+    expect(cache.cached()).toBeUndefined();
+    expect(calls).toEqual(["env-a.test"]);
+  });
+
+  it("invokes onSuccess only for the fetch that records its pattern", async () => {
+    const { release } = installFetchMock({ gate: "env-a.test" });
+    const fakeRuntime = makeFakeRuntime();
+    const cache = createSidecarPatternCache({
+      name: "profile-create.tsx",
+      retryOnFailure: true,
+    });
+
+    const recorded: unknown[] = [];
+    const record = (pattern: unknown) => recorded.push(pattern);
+
+    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
+    const firstFetch = cache.fetch(fakeRuntime, record);
+
+    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
+    const secondFetch = cache.fetch(fakeRuntime, record);
+
+    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
+
+    release();
+    await firstFetch;
+
+    // The winning env-b fetch reports through onSuccess; the superseded env-a
+    // fetch does not.
+    expect(recorded).toEqual([{ source: "source from env-b.test" }]);
   });
 });
