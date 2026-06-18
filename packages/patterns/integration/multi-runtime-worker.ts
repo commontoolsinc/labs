@@ -8,6 +8,7 @@
 
 import type { Cell } from "@commonfabric/runner";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
+import { markUiInputBlindWriteTx } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
@@ -162,6 +163,39 @@ const handlers: Record<
     }
     await idle();
     return {};
+  },
+
+  // Faithful mirror of RuntimeProcessor.handleCellSet — the path a UI `$value`
+  // binding takes: ONE fresh edit tx, a single un-retried commit. We additionally
+  // await the commit so the test can observe the outcome (a conflict surfaces as
+  // a Result error). Pass `idle: false` to leave this runtime un-settled, so its
+  // local replica stays stale (needed for own-write-race / no-op repros).
+  async set({ path, value, idle: doIdle }) {
+    const runtime = controller().manager().runtime;
+    const tx = runtime.edit();
+    // Mirror the FIXED RuntimeProcessor.handleCellSet: a `$value` UI input is a
+    // precondition-free LWW leaf write. Set CELLSET_NOFIX=1 to disable the fix
+    // and observe the pre-fix own-write-race conflict + lost-edit behavior.
+    let noFix = false;
+    try {
+      noFix = typeof Deno !== "undefined" &&
+        Deno.env?.get?.("CELLSET_NOFIX") === "1";
+    } catch { /* env not permitted; treat as fix-on */ }
+    if (!noFix) markUiInputBlindWriteTx(tx);
+    let cell = result();
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    cell.withTx(tx).set(value as never);
+    runtime.prepareTxForCommit(tx);
+    const res = await tx.commit() as { error?: { name?: string; message?: string } };
+    if (doIdle !== false) await idle();
+    return sanitizeForTransfer({
+      ok: !res?.error,
+      error: res?.error
+        ? { name: res.error.name, message: res.error.message }
+        : undefined,
+    });
   },
 
   async read({ path }) {

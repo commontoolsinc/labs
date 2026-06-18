@@ -74,6 +74,32 @@ const diffLogger = getLogger("normalizeAndDiff", {
   level: "debug",
 });
 
+// --- TEMP cellset-conflict instrumentation (scratch/cellset-conflict-probe).
+// Env-gated and browser-safe (Deno may be undefined in the browser bundle).
+// Set CELLSET_PROBE=1 in the multi-runtime harness to enable. REMOVE before
+// merge. ---
+const CSPROBE: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env?.get?.("CELLSET_PROBE") === "1";
+  } catch {
+    return false;
+  }
+})();
+const csv = (v: unknown): string => {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+};
+
+// PROTOTYPE (scratch/cellset-conflict-probe): UI-input precondition-free write
+// mode lives in storage/reactivity-log.ts (markUiInputBlindWriteTx /
+// isUiInputBlindWriteTx). `handleCellSet` marks the tx; the storage layer
+// (v2-transaction read()/buildReads) then drops the write-target read-dependency
+// so a `$value` set carries no concurrency precondition. Nothing to consume here.
+
 // Sentinel value to distinguish "no precomputed value" from "precomputed value is undefined"
 const NO_PRECOMPUTED = Symbol("no-precomputed");
 
@@ -675,6 +701,15 @@ export function normalizeAndDiff(
     ? tx.readValueOrThrow(link, options)
     : precomputedCurrent;
 
+  if (CSPROBE) {
+    console.error(
+      `[CSPROBE][diff] read-target id=${link.id} scope=${link.scope} ` +
+        `path=${csv(link.path)} current=${csv(currentValue)} ` +
+        `new=${csv(newValue)} ` +
+        `readSkipped=${precomputedCurrent !== NO_PRECOMPUTED}`,
+    );
+  }
+
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
     const carriedCfcLabelView = cfcLabelViewForPrimitiveLink(newValue);
@@ -1230,6 +1265,16 @@ export function normalizeAndDiff(
   }
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)
+  // PROTOTYPE: a UI-input blind LWW write emits the leaf even when it equals the
+  // (possibly stale) local value, so a deliberate `$value` set is never dropped
+  // as a no-op; `force` then defeats the storage-layer same-value short-circuit.
+  if (CSPROBE && Object.is(currentValue, newValue)) {
+    console.error(
+      `[CSPROBE][diff] NOOP-SUPPRESS leaf id=${link.id} ` +
+        `path=${csv(link.path)} value=${csv(newValue)} ` +
+        `(no change emitted: current === new)`,
+    );
+  }
   if (!Object.is(currentValue, newValue)) {
     changes.push({ location: link, value: newValue as FabricValue });
   }

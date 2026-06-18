@@ -10,6 +10,17 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
+// PROTOTYPE (scratch/cellset-conflict-probe): a read tagged with this marker is
+// recorded for CFC/scheduling as usual, but is EXCLUDED from the commit's
+// concurrency preconditions — it does not become a `reads.confirmed` entry in
+// buildReads, and it does not mark its document `validated` (so the client
+// validate()/claim() pass skips it too). Used by the UI-input blind-leaf-write
+// mode so a `$value` set is a precondition-free LWW overwrite (kills the
+// own-write-race "stale confirmed read" conflict). Orthogonal to scheduling.
+const ignoreReadForCommitMarker: unique symbol = Symbol(
+  "ignoreReadForCommitMarker",
+);
+
 const markReadAsAttemptedWriteMarker: unique symbol = Symbol(
   "markReadAsAttemptedWriteMarker",
 );
@@ -28,6 +39,10 @@ const linkResolutionProbeMarker: unique symbol = Symbol(
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
+};
+
+export const ignoreReadForCommit: Metadata = {
+  [ignoreReadForCommitMarker]: true,
 };
 
 export const markReadAsAttemptedWrite: Metadata = {
@@ -57,6 +72,30 @@ export const linkResolutionProbe: Metadata = {
 
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
+}
+
+export function isReadIgnoredForCommit(meta?: Metadata): boolean {
+  return meta?.[ignoreReadForCommitMarker] === true;
+}
+
+// PROTOTYPE (scratch/cellset-conflict-probe): transaction-level UI-input "blind
+// LWW leaf overwrite" mode. `handleCellSet` marks its transaction; thereafter
+// `read()` tags EVERY read in that tx with `ignoreReadForCommit` (so no read —
+// not the write-target leaf, not the link-resolution/schema-policy reads —
+// becomes a commit precondition) and skips marking docs `validated`;
+// `writeWithinBranch` skips the same-value short-circuit; `normalizeAndDiff`
+// skips no-op suppression. Marking the wrapper also marks the inner storage tx,
+// since read()/writeWithinBranch run on the inner one.
+const uiInputBlindWriteTxs = new WeakSet<object>();
+export function markUiInputBlindWriteTx(tx: object): void {
+  uiInputBlindWriteTxs.add(tx);
+  const inner = (tx as { tx?: object }).tx;
+  if (inner && inner !== tx) {
+    uiInputBlindWriteTxs.add(inner);
+  }
+}
+export function isUiInputBlindWriteTx(tx: object): boolean {
+  return uiInputBlindWriteTxs.has(tx);
 }
 
 export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {

@@ -77,6 +77,7 @@ import type {
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
+import { isReadIgnoredForCommit } from "./reactivity-log.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
@@ -1883,6 +1884,13 @@ class SpaceReplica implements ISpaceReplica {
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
+        continue;
+      }
+      // PROTOTYPE (scratch/cellset-conflict-probe): a read tagged
+      // `ignoreReadForCommit` (UI-input blind LWW write) is NOT a concurrency
+      // precondition — exclude it from confirmed/pending so a `$value` set
+      // cannot lose the own-write race on its own write-target read.
+      if (isReadIgnoredForCommit(read.meta)) {
         continue;
       }
 

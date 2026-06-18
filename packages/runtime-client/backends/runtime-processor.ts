@@ -21,6 +21,7 @@ import {
   getCellOrThrow,
   isCell,
   isCellResult,
+  markUiInputBlindWriteTx,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -682,6 +683,10 @@ export class RuntimeProcessor {
 
   handleCellSet(request: CellSetRequest): void {
     const tx = this.runtime.edit();
+    // PROTOTYPE (scratch/cellset-conflict-probe): a `$value` UI input is a
+    // blind LWW leaf overwrite — drop the write-target read-dependency (no
+    // own-write-race conflict) and the no-op suppression (no LWW lost-write).
+    markUiInputBlindWriteTx(tx);
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
     cell.withTx(tx).set(value);

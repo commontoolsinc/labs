@@ -66,9 +66,11 @@ import {
   WriteIsolationError,
 } from "./transaction.ts";
 import {
+  ignoreReadForCommit,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
+  isUiInputBlindWriteTx,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
@@ -1112,6 +1114,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     const { doc } = this.document(branch, address);
     const current = currentDocument(doc);
     const readMeta = options?.meta ?? EMPTY_META;
+    // PROTOTYPE (scratch/cellset-conflict-probe): in a UI-input blind LWW write
+    // tx, EVERY read (write-target leaf, link-resolution, schema-policy, cfc…)
+    // must be recorded for CFC/scheduling but excluded from commit
+    // preconditions. Tag each recorded activity with `ignoreReadForCommit` (so
+    // buildReads drops it from `reads.confirmed`) and skip marking the doc
+    // `validated` (so validate()/claim() skips it client-side too).
+    const skipCommitPrecondition = isUiInputBlindWriteTx(this);
     const { space: _, ...memoryAddress } = address;
 
     if (!address.id.startsWith("data:")) {
@@ -1120,14 +1129,16 @@ export class V2StorageTransaction implements IStorageTransaction {
         scope: normalizeCellScope(address.scope),
         id: address.id,
         path: address.path,
-        meta: readMeta,
+        meta: skipCommitPrecondition
+          ? { ...readMeta, ...ignoreReadForCommit }
+          : readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
       };
       this.#readActivities.push(readActivity);
       this.invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
-      if (!address.id.startsWith("data:")) {
+      if (!address.id.startsWith("data:") && !skipCommitPrecondition) {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
@@ -1136,7 +1147,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
         !address.id.startsWith("data:") &&
-        !doc.validated
+        !doc.validated &&
+        !skipCommitPrecondition
       ) {
         doc.validated = true;
       }
@@ -1162,7 +1174,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     const result = readAttestation(current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
-      !doc.validated
+      !doc.validated &&
+      !skipCommitPrecondition
     ) {
       doc.validated = true;
     }

@@ -29,6 +29,17 @@ import { createReadOnlyTransactionError } from "./interface.ts";
 import * as Journal from "./transaction/journal.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
+// --- TEMP cellset-conflict instrumentation (scratch/cellset-conflict-probe).
+// Env-gated, browser-safe. CELLSET_PROBE=1 to enable. REMOVE before merge. ---
+const CSPROBE: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env?.get?.("CELLSET_PROBE") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 const logger = getLogger("storage-transaction", {
   enabled: false,
   level: "debug",
@@ -338,6 +349,13 @@ export const commit = async (
       const replica = writer ? storage.open(writer.did()).replica : null;
       const changes = replica ? archive.get(replica.did()) : null;
       const hasWrites = changes && changes.facts.length > 0;
+      if (CSPROBE) {
+        console.error(
+          `[CSPROBE][commit] hasWrites=${!!hasWrites} ` +
+            `facts=${changes?.facts.length ?? 0}` +
+            (hasWrites ? "" : " (nothing sent to replica — suppressed)"),
+        );
+      }
       if (hasWrites) {
         logger.debug("storage-commit-writes", () => [
           `Committing ${changes.facts.length} writes to replica`,

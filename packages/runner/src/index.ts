@@ -59,6 +59,7 @@ export {
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
+export { markUiInputBlindWriteTx } from "./storage/reactivity-log.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,

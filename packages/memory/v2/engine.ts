@@ -21,6 +21,28 @@ import {
   type SqliteOperation,
 } from "../v2.ts";
 
+// --- TEMP cellset-conflict instrumentation (scratch/cellset-conflict-probe).
+// Env-gated, server-side only. CELLSET_PROBE=1 to enable. REMOVE before merge.
+const CSPROBE: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env?.get?.("CELLSET_PROBE") === "1";
+  } catch {
+    return false;
+  }
+})();
+const csv = (v: unknown): string => {
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+};
+const csvCap = (v: unknown, max = 300): string => {
+  const s = csv(v);
+  return s.length > max ? s.slice(0, max) + "…" : s;
+};
+
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
 const DEFAULT_SCHEDULER_SNAPSHOT_LIST_LIMIT = 500;
@@ -3495,6 +3517,19 @@ const validateConfirmedReads = (
   // Every confirmed read in the commit resolves declared user/session scope
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
+  if (CSPROBE) {
+    console.error(
+      `[CSPROBE][engine] commit principal=${scopeContext.principal ?? "?"} ` +
+        `confirmedReads=${commit.reads.confirmed.length} ` +
+        `ops=${csvCap(commit.operations)}`,
+    );
+    for (const r of commit.reads.confirmed) {
+      console.error(
+        `[CSPROBE][engine]   confirmed-read id=${r.id} scope=${r.scope} ` +
+          `path=${csv(r.path)} seq=${r.seq}`,
+      );
+    }
+  }
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
@@ -3508,6 +3543,13 @@ const validateConfirmedReads = (
       read.path,
     );
     if (conflictSeq !== null) {
+      if (CSPROBE) {
+        console.error(
+          `[CSPROBE][engine] >>> CONFLICT confirmed-read id=${read.id} ` +
+            `scope=${read.scope} path=${csv(read.path)} readSeq=${read.seq} ` +
+            `conflictSeq=${conflictSeq}`,
+        );
+      }
       throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
       );
@@ -3577,6 +3619,13 @@ const findConflictSeq = (
     after_seq: afterSeq,
   }) as { seq: number } | undefined;
   if (setOrDeleteConflict !== undefined) {
+    if (CSPROBE) {
+      console.error(
+        `[CSPROBE][engine]   findConflict TIER1(set/delete, PATH-BLIND) ` +
+          `id=${id} readPath=${csv(readPath)} afterSeq=${afterSeq} ` +
+          `conflictSeq=${setOrDeleteConflict.seq}`,
+      );
+    }
     return setOrDeleteConflict.seq;
   }
 
@@ -3597,6 +3646,12 @@ const findConflictSeq = (
         readPath,
       )
     ) {
+      if (CSPROBE) {
+        console.error(
+          `[CSPROBE][engine]   findConflict TIER2(patch path-overlap) ` +
+            `id=${id} readPath=${csv(readPath)} conflictSeq=${conflict.seq}`,
+        );
+      }
       return conflict.seq;
     }
   }
