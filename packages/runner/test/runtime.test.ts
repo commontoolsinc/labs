@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { SESRuntime } from "../src/sandbox/mod.ts";
+import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -45,6 +46,17 @@ describe("SESRuntime", () => {
         callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
       }).callbackEvaluator.callbackCreatorCache.size,
     ).toBe(0);
+  });
+});
+
+describe("runtime module exports", () => {
+  it("freezes the public CFC authoring module", () => {
+    const { runtimeExports } = getRuntimeModuleExports();
+    const cfc = runtimeExports["commonfabric/cfc"];
+
+    expect(Object.isFrozen(cfc)).toBe(true);
+    expect(Object.isFrozen(cfc.CFC_ATOM_TYPE)).toBe(true);
+    expect(Object.isFrozen(cfc.cfcAtom)).toBe(true);
   });
 });
 
