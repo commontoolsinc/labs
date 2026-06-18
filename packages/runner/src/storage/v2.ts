@@ -6,11 +6,13 @@ import {
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
+  type Entity,
   type FabricValue,
   type MemorySpace,
   type MIME,
   type SchemaPathSelector,
   type Signer,
+  type Transaction,
   type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
@@ -2260,17 +2262,29 @@ const toRejectedError = (
     message.includes("stale confirmed read") ||
     message.includes("pending dependency")
   ) {
-    return {
+    const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
+    const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
+    const rejected: IConflictError = {
       name: "ConflictError",
       message,
-      transaction: commit as any,
+      transaction: commit as Transaction,
       conflict: {
+        space: "" as MemorySpace,
+        the: DOCUMENT_MIME,
+        of: conflictEntity(commit),
         expected: null,
         actual: null,
         existsInHistory: false,
         history: [],
       },
-    } as unknown as IConflictError;
+    };
+    if (typeof retryAfterSeq === "number") {
+      rejected.retryAfterSeq = retryAfterSeq;
+    }
+    if (typeof readyToRetry === "function") {
+      rejected.readyToRetry = () => Promise.resolve(readyToRetry.call(error));
+    }
+    return rejected;
   }
 
   return {
@@ -2281,6 +2295,20 @@ const toRejectedError = (
       message,
       code: 500,
     },
-    transaction: commit as any,
+    transaction: commit as Transaction,
   } as unknown as TransactionError;
+};
+
+const conflictEntity = (commit: unknown): Entity => {
+  if (
+    typeof commit === "object" &&
+    commit !== null &&
+    Array.isArray((commit as Partial<NativeStorageCommit>).operations)
+  ) {
+    const first = (commit as Partial<NativeStorageCommit>).operations?.[0];
+    if (first !== undefined) {
+      return first.id;
+    }
+  }
+  return "of:unknown";
 };

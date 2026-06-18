@@ -386,7 +386,13 @@ describe("Memory v2 storage notifications", () => {
       space,
       source,
     });
-    expect(subscription.reverts.at(-1)?.reason.name).toBe("ConflictError");
+    const reason = subscription.reverts.at(-1)?.reason;
+    if (reason?.name !== "ConflictError") {
+      throw new Error(`Expected ConflictError, got ${reason?.name}`);
+    }
+    expect(reason.retryAfterSeq).toBe(2);
+    expect(typeof reason.readyToRetry).toBe("function");
+    await reason.readyToRetry?.();
   });
 
   it("does not emit duplicate pull notifications for unchanged v2 sync results", async () => {
