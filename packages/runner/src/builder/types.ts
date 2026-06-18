@@ -80,6 +80,11 @@ export const ID_FIELD: typeof IDFieldSymbol = Symbol(
 export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
+// UI variants (CT-1321): optional sibling renderings addressed alongside [UI].
+// chip = inline, tile = gallery/grid card; absent variants fail over to a
+// per-variant default (see uiVariant()), with [UI] as the universal floor.
+export const TILE_UI = "$TILE_UI";
+export const CHIP_UI = "$CHIP_UI";
 export const FS = "$FS";
 
 // Symbol for accessing self-reference in patterns
@@ -358,6 +363,8 @@ export interface BuilderFunctionsAndConstants {
   TYPE: typeof TYPE;
   NAME: typeof NAME;
   UI: typeof UI;
+  TILE_UI: typeof TILE_UI;
+  CHIP_UI: typeof CHIP_UI;
   FS: typeof FS;
 
   // Schema utilities

@@ -44,6 +44,7 @@ import TabBarStory from "../stories/cf-tab-bar-story.tsx";
 import TabsStory from "../stories/cf-tabs-story.tsx";
 import ChartStory from "../stories/cf-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
+import RenderStory from "../stories/cf-render-story.tsx";
 import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
 import ChatStory from "../stories/cf-chat-story.tsx";
 import CalendarStory from "../stories/cf-calendar-story.tsx";
@@ -169,6 +170,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChartStory({});
         case "note":
           return NoteStory({});
+        case "render":
+          return RenderStory({});
         case "kitchen-sink":
           return KitchenSinkStory({});
         case "chat":

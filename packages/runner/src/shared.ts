@@ -12,11 +12,13 @@ export {
 } from "./link-types.ts";
 export { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 export {
+  CHIP_UI,
   ID,
   type JSONSchema,
   type JSONValue,
   NAME,
   type Schema,
+  TILE_UI,
   TYPE,
   UI,
 } from "./builder/types.ts";

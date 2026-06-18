@@ -4,54 +4,51 @@ import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { type VNode } from "@commonfabric/runtime-client";
+import { CHIP_UI, TILE_UI, type VNode } from "@commonfabric/runtime-client";
+import {
+  appViewToUrlPath,
+  navigate,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/shell/shared";
 import "../cf-loader/cf-loader.ts";
+import "../cf-cell-link/cf-cell-link.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
 
 /**
- * UI variant types for rendering different representations of a piece.
- * Each variant maps to a property name that patterns can export.
+ * UI variants (CT-1321): the size/representation spectrum a piece can expose.
+ * Each variant is an optional sibling key on the piece output, addressed by a
+ * vended symbol; absent variants fail over to a per-variant platform default,
+ * with the full [UI] as the universal floor. Patterns that export only [UI]
+ * still render correctly at every variant.
  *
- * - `default`: The main [UI] export. Full standalone rendering.
- * - `preview`: Compact preview for pickers/lists (e.g., cf-picker). Maps to `previewUI`.
- * - `thumbnail`: Icon/thumbnail view for grid displays. Maps to `thumbnailUI`.
- * - `sidebar`: Optimized layout for sidebar/navigation contexts. Maps to `sidebarUI`.
- * - `fab`: Floating action button UI. Maps to `fabUI`.
- * - `embedded`: Minimal UI without chrome for embedding in containers. Maps to `embeddedUI`.
- *              Used when a pattern is rendered as a module inside another pattern (e.g., Note in Record).
+ * - `full`   — the main [UI] export; standalone rendering (default).
+ * - `chip`   — inline-block in text/lists. Key: [CHIP_UI].
+ *              Default: a `cf-cell-link` bound to the piece (renders by [NAME]).
+ * - `tile`   — gallery/grid card. Key: [TILE_UI].
+ *              Default: the full [UI] rendered small at ~0.5 scale.
  */
-export type UIVariant =
-  | "default"
-  | "preview"
-  | "thumbnail"
-  | "sidebar"
-  | "fab"
-  | "embedded"
-  | "settings";
+export type UIVariant = "full" | "chip" | "tile";
 
 /**
- * Maps variant names to the property key to look for on the piece.
- * null means use the default [UI] rendering via render().
+ * Normalize the `variant` attribute to the size spectrum. Anything unrecognized
+ * (undefined, legacy values) resolves to "full", the universal floor.
  */
-const _VARIANT_TO_KEY: Record<UIVariant, VariantCellKey | null> = {
-  default: null,
-  preview: "previewUI",
-  thumbnail: "thumbnailUI",
-  sidebar: "sidebarUI",
-  fab: "fabUI",
-  embedded: "embeddedUI",
-  settings: "settingsUI",
-};
+export function normalizeVariant(variant: string | undefined): UIVariant {
+  return variant === "chip" ? "chip" : variant === "tile" ? "tile" : "full";
+}
 
-type VariantCellKey =
-  | "previewUI"
-  | "thumbnailUI"
-  | "sidebarUI"
-  | "fabUI"
-  | "embeddedUI"
-  | "settingsUI";
+/**
+ * True when a piece output value carries a renderable variant at `key` (e.g.
+ * `"$CHIP_UI"`). Used to decide whether to render the exported variant or fall
+ * over to the platform default.
+ */
+export function hasVariantValue(value: unknown, key: string): boolean {
+  return !!(value && typeof value === "object" &&
+    (value as Record<string, unknown>)[key]);
+}
 
 /**
  * CFRender - Renders a cell that contains a piece pattern with UI
@@ -59,21 +56,22 @@ type VariantCellKey =
  * @element cf-render
  *
  * @property {CellHandle} cell - The cell containing the piece to render
- * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab" | "settings" | "embedded"
- *   Each variant maps to a property on the piece (e.g., "preview" -> "previewUI", "embedded" -> "embeddedUI").
- *   Falls back to default [UI] if the variant property doesn't exist.
+ * @property {UIVariant} variant - UI variant to render: "full" | "chip" | "tile"
+ *   (default "full"). Renders the piece's matching variant key ([CHIP_UI] /
+ *   [TILE_UI]) when exported, otherwise the per-variant platform default. The
+ *   full [UI] is the universal floor, so every piece renders at every variant.
  *
  * @example
- * // Default rendering
+ * // Full standalone rendering (default)
  * <cf-render .cell=${myPieceCell}></cf-render>
  *
  * @example
- * // Render preview variant (uses previewUI if available, falls back to [UI])
- * <cf-render .cell=${myPieceCell} variant="preview"></cf-render>
+ * // Chip: inline, renders [CHIP_UI] or a cf-cell-link default
+ * <cf-render .cell=${myPieceCell} variant="chip"></cf-render>
  *
  * @example
- * // Render embedded variant (uses embeddedUI - minimal UI without chrome)
- * <cf-render .cell=${notePiece} variant="embedded"></cf-render>
+ * // Tile: gallery card, renders [TILE_UI] or the full [UI] at ~0.5 scale
+ * <cf-render .cell=${myPieceCell} variant="tile"></cf-render>
  */
 export class CFRender extends BaseElement {
   static override styles = css`
@@ -90,6 +88,26 @@ export class CFRender extends BaseElement {
       width: 100%;
       height: 100%;
       overflow: auto;
+    }
+
+    /* Tile default: a fixed, clickable preview that navigates to the piece.
+      The clip box pins the viewport (no panning/scrolling); the inner box is
+      laid out at 2x then scaled to 0.5 so the full [UI] fills the tile. */
+    .tile-clip {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .tile-default {
+      width: 200%;
+      height: 200%;
+      transform: scale(0.5);
+      transform-origin: top left;
+      /* Clicks fall through to .tile-clip so the whole tile navigates,
+        rather than activating controls inside the embedded UI. */
+      pointer-events: none;
     }
 
     .loading-spinner {
@@ -212,24 +230,111 @@ export class CFRender extends BaseElement {
         return;
       }
 
-      // only await when using variants
-      if (this.variant && this.variant !== "default") {
-        await this._startPromise;
-        await this.cell.sync();
+      // Normalize to the size spectrum; anything unknown renders full.
+      const kind = normalizeVariant(this.variant);
+
+      // Full is the universal floor: render the piece's [UI] chain directly.
+      if (kind === "full") {
+        this._log("rendering full [UI] into container");
+        this._cleanup = render(container, this.cell as CellHandle<VNode>);
+        this._hasRendered = true;
+        return;
       }
 
-      // @TODO(runtime-worker-refactor): We must type all renderable cells
-      // as potentially having these variant keys?
-      const variantKey = undefined; //VARIANT_TO_KEY[this.variant ?? "default"];
-      const renderCell = variantKey ? this.cell.key(variantKey) : this.cell;
-      this._log("rendering UI into container");
-      this._cleanup = render(container, renderCell as CellHandle<VNode>);
+      // chip/tile: the variant key may materialize asynchronously
+      // (cross-space), so sync before probing for it.
+      await this._startPromise;
+      await this.cell.sync();
+      if (this._renderingCellId !== cellId) return;
+
+      const variantKey = kind === "chip" ? CHIP_UI : TILE_UI;
+      if (this._cellHasKey(variantKey)) {
+        this._log(`rendering exported ${variantKey}`);
+        this._cleanup = render(
+          container,
+          (this.cell as CellHandle<Record<string, VNode>>)
+            .key(variantKey) as CellHandle<VNode>,
+        );
+        this._hasRendered = true;
+        return;
+      }
+
+      // Failover to the per-variant platform default.
+      this._cleanup = kind === "chip"
+        ? this._renderChipDefault(container)
+        : this._renderTileDefault(container);
       this._hasRendered = true;
     } catch (error) {
       // Only show error if we're still rendering this cell
       if (this._renderingCellId === cellId) {
         this._handleRenderError(error);
       }
+    }
+  }
+
+  /** True when the piece output exports a value at `key` (e.g. a variant UI). */
+  private _cellHasKey(key: string): boolean {
+    try {
+      return hasVariantValue(this.cell.get(), key);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Chip default: a cf-cell-link bound to the piece (renders by [NAME]). */
+  private _renderChipDefault(container: HTMLElement): () => void {
+    const link = globalThis.document.createElement(
+      "cf-cell-link",
+    ) as HTMLElement & { cell?: CellHandle };
+    link.cell = this.cell;
+    container.appendChild(link);
+    return () => link.remove();
+  }
+
+  /**
+   * Tile default: the full [UI] rendered small at ~0.5 scale, clipped to a
+   * fixed preview (no panning) and clickable to navigate to the piece —
+   * mirroring cf-cell-link's navigation.
+   */
+  private _renderTileDefault(container: HTMLElement): () => void {
+    const clip = globalThis.document.createElement("div");
+    clip.className = "tile-clip";
+    const scaler = globalThis.document.createElement("div");
+    scaler.className = "tile-default";
+    clip.appendChild(scaler);
+    container.appendChild(clip);
+    const inner = render(scaler, this.cell as CellHandle<VNode>);
+    const onClick = (e: MouseEvent) => this._navigateToPiece(e);
+    clip.addEventListener("click", onClick);
+    return () => {
+      clip.removeEventListener("click", onClick);
+      inner?.();
+      clip.remove();
+    };
+  }
+
+  /** Navigate to the rendered piece (same behavior as cf-cell-link). */
+  private _navigateToPiece(e: MouseEvent) {
+    e.stopPropagation();
+    try {
+      const view = {
+        spaceDid: this.cell.space(),
+        pieceId: this.cell.id(),
+      };
+      // Cmd (Mac) / Ctrl (Win/Linux) opens in a new tab.
+      if (e.metaKey || e.ctrlKey) {
+        const url = appViewToUrlPath(
+          preserveAppViewMode(
+            urlToAppView(new URL(globalThis.location.href)),
+            view,
+          ),
+        );
+        globalThis.open(url, "_blank");
+      } else {
+        navigate(view);
+      }
+    } catch (error) {
+      console.error("[cf-render] tile navigation failed:", error);
     }
   }
 

@@ -13,12 +13,14 @@ import {
   AsStream,
   AsWriteonlyCell,
   AuthSchema,
+  CHIP_UI,
   FS,
   ID,
   ID_FIELD,
   NAME,
   schema as schemaIdentity,
   SELF,
+  TILE_UI,
   TYPE,
   UI,
   WebhookConfigSchema,
@@ -238,6 +240,8 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     TYPE,
     NAME,
     UI,
+    TILE_UI,
+    CHIP_UI,
     FS,
 
     // Schema utilities

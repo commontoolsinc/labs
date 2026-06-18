@@ -3561,14 +3561,8 @@ interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
-  "variant"?:
-    | "default"
-    | "preview"
-    | "thumbnail"
-    | "sidebar"
-    | "fab"
-    | "settings"
-    | "embedded";
+  // CT-1321 UI-variant spectrum (see cf-render.ts UIVariant).
+  "variant"?: "full" | "chip" | "tile";
 }
 
 interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {

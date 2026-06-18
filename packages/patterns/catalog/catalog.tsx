@@ -125,6 +125,7 @@ interface CatalogInput {
         name: "Patterns";
         items: [
           { id: "note"; label: "Note" },
+          { id: "render"; label: "Render (UI Variants)" },
           { id: "vignette-recipe"; label: "Vignette: Recipe" },
           { id: "vignette-finance"; label: "Vignette: Finance" },
           { id: "vignette-mobile-app"; label: "Vignette: Mobile App" },

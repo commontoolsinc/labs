@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFRender } from "./cf-render.ts";
+import { CFRender, hasVariantValue, normalizeVariant } from "./cf-render.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
 // management, render-into-container) require a real DOM with document.body
@@ -46,27 +46,19 @@ describe("CFRender", () => {
 describe("CFRender variant handling", () => {
   it("should accept variant property", () => {
     const element = new CFRender();
-    element.variant = "preview";
-    expect(element.variant).toBe("preview");
+    element.variant = "chip";
+    expect(element.variant).toBe("chip");
   });
 
-  it("should accept embedded variant", () => {
+  it("should accept tile variant", () => {
     const element = new CFRender();
-    element.variant = "embedded";
-    expect(element.variant).toBe("embedded");
+    element.variant = "tile";
+    expect(element.variant).toBe("tile");
   });
 
   it("should accept all valid variants", () => {
     const element = new CFRender();
-    const variants = [
-      "default",
-      "preview",
-      "thumbnail",
-      "sidebar",
-      "fab",
-      "embedded",
-      "settings",
-    ] as const;
+    const variants = ["full", "chip", "tile"] as const;
 
     for (const variant of variants) {
       element.variant = variant;
@@ -75,12 +67,45 @@ describe("CFRender variant handling", () => {
   });
 });
 
+describe("normalizeVariant", () => {
+  it("passes through the known spectrum", () => {
+    expect(normalizeVariant("full")).toBe("full");
+    expect(normalizeVariant("chip")).toBe("chip");
+    expect(normalizeVariant("tile")).toBe("tile");
+  });
+
+  it("falls back to full for undefined and unknown/legacy values", () => {
+    expect(normalizeVariant(undefined)).toBe("full");
+    expect(normalizeVariant("")).toBe("full");
+    expect(normalizeVariant("default")).toBe("full");
+    expect(normalizeVariant("preview")).toBe("full");
+    expect(normalizeVariant("embedded")).toBe("full");
+  });
+});
+
+describe("hasVariantValue", () => {
+  it("is true only when the key holds a renderable value", () => {
+    expect(hasVariantValue({ "$CHIP_UI": { type: "vnode" } }, "$CHIP_UI"))
+      .toBe(true);
+    expect(hasVariantValue({ "$UI": {} }, "$TILE_UI")).toBe(false);
+    expect(hasVariantValue({ "$TILE_UI": undefined }, "$TILE_UI")).toBe(false);
+    expect(hasVariantValue({ "$TILE_UI": null }, "$TILE_UI")).toBe(false);
+  });
+
+  it("is false for non-object / empty values (failover to default)", () => {
+    expect(hasVariantValue(undefined, "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue(null, "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue("nope", "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue({}, "$CHIP_UI")).toBe(false);
+  });
+});
+
 describe("CFRender disconnectedCallback", () => {
   it("should reset state on disconnect", () => {
     const element = new CFRender();
     const cell = createMockCellHandle({ name: "test" });
     element.cell = cell as CellHandle;
-    element.variant = "preview";
+    element.variant = "chip";
 
     // disconnectedCallback should clean up internal state without throwing
     element.disconnectedCallback();
@@ -90,7 +115,7 @@ describe("CFRender disconnectedCallback", () => {
     // The internal _renderingCellId and _hasRendered are reset though.
     // We verify it doesn't throw and the element is still usable.
     expect(element.cell).toBe(cell);
-    expect(element.variant).toBe("preview");
+    expect(element.variant).toBe("chip");
   });
 
   it("should handle disconnect when no cell was set", () => {

@@ -332,7 +332,7 @@ export class CFPicker extends BaseElement {
               >
                 <cf-render
                   .cell="${this._getItemAt(currentIndex)}"
-                  variant="preview"
+                  variant="tile"
                 ></cf-render>
               </div>
               ${hasMultipleItems
