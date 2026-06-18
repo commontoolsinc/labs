@@ -227,9 +227,24 @@ export class CFTabs extends BaseElement {
       return;
     }
 
-    // Decide which tab to show. If the bound value matches no tab (an empty or
-    // stale initial value), fall back to the first enabled tab — but VISUALLY
-    // ONLY. We must NOT write the cell from here.
+    // An empty / unresolved value means the bound cell has not delivered its
+    // value YET — the common case being a durable `$value` cell whose stored
+    // value (e.g. "delta") hasn't been synced when the synchronous mount syncs
+    // (firstUpdated + slotchange) run. getValue() coerces that to "". Do NOT
+    // treat this as a no-match and snap to the first tab: the cell controller's
+    // subscription will fire updateTabSelection again with the real value a
+    // beat later, so falling back here makes the selection show the FIRST tab
+    // and then jump to the real one — the "flickers between two tabs" on every
+    // (re)mount. Hold the current selection until a concrete value arrives.
+    // (An intentionally-empty binding shows no selection until set; consumers
+    // that want a default must initialize the cell, e.g. `Writable.of("a")`.)
+    if (currentValue === undefined || currentValue === "") {
+      return;
+    }
+
+    // Decide which tab to show. If a NON-empty bound value matches no tab (a
+    // stale / invalid selection), fall back to the first enabled tab — but
+    // VISUALLY ONLY. We must NOT write the cell from here.
     //
     // cf-tabs is bound through `$value` and may be instantiated inside a render
     // `computed()` that reads the same cell. Writing the cell during

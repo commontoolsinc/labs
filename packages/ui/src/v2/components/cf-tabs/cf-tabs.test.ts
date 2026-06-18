@@ -106,7 +106,10 @@ class FakeTab {
 
 class FakeTabPanel {
   value: string;
-  hidden = false;
+  // Mirror the real CFTabPanel constructor default (hidden = true). cf-tab-panel
+  // starts hidden and is revealed only when updateTabSelection() matches it; a
+  // `false` default would make panels look visible before any sync runs.
+  hidden = true;
   attributes = new Map<string, string>();
   constructor(value: string) {
     this.value = value;
@@ -342,7 +345,10 @@ describe("CFTabs cf-change emission contract (CT-1746)", () => {
  * computed: a "Too many iterations" CPU-spin (the CT-1677 settle class).
  *
  * These tests pin the contract: mount and cell-driven sync produce ZERO cell
- * writes, while the no-match fallback still selects the first tab VISUALLY.
+ * writes. The no-match fallback selects the first tab VISUALLY only for a
+ * NON-empty stale value; an empty / unresolved value (the durable-$value
+ * mount transient) holds the current selection rather than flashing the first
+ * tab — see the mount-flicker regression test below.
  */
 describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
   // Count writes to the bound cell by wrapping `.set` before binding.
@@ -357,8 +363,8 @@ describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
     return { cell, writes: () => writes };
   }
 
-  it("does NOT write the bound cell on mount when the value matches no tab", () => {
-    // Empty cell matches none of the tabs — the no-match path.
+  it("does NOT write the bound cell on mount when the value is empty / unresolved", () => {
+    // Empty cell — the durable-$value mount transient (value not delivered yet).
     const { cell, writes } = countingCell("");
 
     // makeTabs() binds the controller and runs updateTabSelection() — i.e. the
@@ -367,12 +373,14 @@ describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
 
     expect(writes()).toBe(0); // FAILS pre-fix: selectFirst() writes "active"
     expect(cell.get()).toBe(""); // cell stays untouched until a real gesture
-    // ...but the first tab is still selected VISUALLY (the fallback survives).
-    expect(h.selectedTab()).toBe("active");
-    expect(h.visiblePanel()).toBe("active");
+    // ...and NO tab is flashed: an empty/unresolved value holds the selection
+    // rather than snapping to the first tab (which would flicker once the cell
+    // resolves to a non-first value).
+    expect(h.selectedTab()).toBe(undefined);
+    expect(h.visiblePanel()).toBe(undefined);
   });
 
-  it("a re-mount (recompute) over an unmatched cell stays write-free and idempotent", () => {
+  it("a re-mount (recompute) over an empty cell stays write-free and idempotent", () => {
     const { cell, writes } = countingCell("");
     const h = makeTabs(cell, ["active", "progress", "pending"]);
 
@@ -386,7 +394,26 @@ describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
 
     expect(writes()).toBe(0);
     expect(cell.get()).toBe("");
-    expect(h.selectedTab()).toBe("active"); // still visually defaulted
+    expect(h.selectedTab()).toBe(undefined); // held — no first-tab flash
+  });
+
+  it("does not flash the first tab while the bound value is unresolved, then selects the resolved value (mount-flicker regression)", () => {
+    // Reproduces the durable-$value mount race that produces "flickers between
+    // two tabs": the synchronous mount sync sees an empty (not-yet-delivered)
+    // value, then the cell resolves to a NON-first tab. The selection must go
+    // straight to the resolved tab — never transiently snapping to the first.
+    const { cell, writes } = countingCell(""); // unresolved at mount
+    const h = makeTabs(cell, ["active", "progress", "pending", "feed"]);
+
+    // While unresolved: nothing is flashed (NOT the first tab "active").
+    expect(h.selectedTab()).toBe(undefined);
+    expect(h.visiblePanel()).toBe(undefined);
+
+    // Cell resolves to a non-first tab — selection jumps straight to it.
+    pushUpdate(cell, "pending");
+    expect(h.selectedTab()).toBe("pending");
+    expect(h.visiblePanel()).toBe("pending");
+    expect(writes()).toBe(0); // pure read throughout — no cell write
   });
 
   it("a cell-driven change to an unmatched value does not write back", () => {
