@@ -2001,6 +2001,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     assertEquals(rejected.error, {
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      retryAfterSeq: 2,
     });
     assertEquals(messages.length, 0);
   } finally {
@@ -2145,6 +2146,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     assertEquals(rejected.error, {
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      retryAfterSeq: 2,
     });
     assertEquals(messages.length, 0);
   } finally {

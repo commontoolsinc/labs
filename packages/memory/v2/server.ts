@@ -1548,24 +1548,30 @@ export class Server {
         ok: commit,
       };
     } catch (error) {
+      let retryAfterSeq: number | undefined;
       if (error instanceof Engine.ConflictError) {
         this.stageConflictRefreshDirtyIds(message.space, message.commit);
         await this.flushSessions([message.space]);
+        retryAfterSeq = session.lastSyncedSeq;
       }
       const messageText = error instanceof Error
         ? error.message
         : String(error);
       const preconditionError = toPreconditionFailedError(error, messageText);
+      const responseError = preconditionError ? preconditionError : toError(
+        error instanceof Engine.ConflictError
+          ? "ConflictError"
+          : error instanceof Engine.ProtocolError
+          ? "ProtocolError"
+          : "TransactionError",
+        messageText,
+      );
+      if (retryAfterSeq !== undefined) {
+        responseError.retryAfterSeq = retryAfterSeq;
+      }
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
-        preconditionError ? preconditionError : toError(
-          error instanceof Engine.ConflictError
-            ? "ConflictError"
-            : error instanceof Engine.ProtocolError
-            ? "ProtocolError"
-            : "TransactionError",
-          messageText,
-        ),
+        responseError,
       );
     }
   }
