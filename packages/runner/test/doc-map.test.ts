@@ -77,9 +77,9 @@ describe("cell-map", () => {
     });
 
     it("hashes FabricPrimitive values atomically (distinct values → distinct ids)", () => {
-      // Regression: a FabricPrimitive has no enumerable own props, so descending
-      // into one collapsed it to `{}` and collided otherwise-distinct values.
-      // (A fixed cause keeps the id determined by the source, not random.)
+      // A FabricPrimitive has no enumerable own props, so it must be hashed
+      // atomically via its codec rather than descended into. A fixed cause keeps
+      // the id determined by the source rather than random.
       const a = createRef(
         { data: new FabricBytes(new Uint8Array([1, 2, 3])) },
         "c",
@@ -102,6 +102,13 @@ describe("cell-map", () => {
         );
       expect(createRef({ ref: link("of:fid1:aaa") }, "c").taggedHashString)
         .toEqual(createRef({ ref: link("of:fid1:aaa") }, "c").taggedHashString);
+    });
+
+    it("distinguishes `null` from `undefined` in the source", () => {
+      const id = (x: unknown) => createRef({ x }, "c").taggedHashString;
+      expect(id(null)).not.toEqual(id(undefined));
+      expect(id([null])).not.toEqual(id([undefined]));
+      expect(id({ y: null })).not.toEqual(id({ y: undefined }));
     });
   });
 

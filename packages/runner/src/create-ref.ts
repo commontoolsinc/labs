@@ -61,9 +61,8 @@ export function createRef(
 ): EntityId {
   const seen = new Set<any>();
 
-  // Unwrap query result proxies, replace docs with their ids and remove
-  // functions and undefined values, since our data model doesn't support them.
-  // TODO(danfuzz): Revisit this when `undefined` is fully supported.
+  // Unwrap query result proxies and replace docs with their ids; functions are
+  // stringified, since our data model doesn't support them as values.
   function traverse(obj: any): any {
     // Avoid cycles — only track objects/arrays/functions (not primitives).
     // Primitives use value equality in Set, so repeated strings like
@@ -138,7 +137,6 @@ export function createRef(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
     } else if (typeof obj === "function") return obj.toString();
-    else if (obj === undefined) return null;
     else return obj;
   }
 
