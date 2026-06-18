@@ -65,7 +65,7 @@ interface LcovFileCoverage {
 export async function collectCoverageDebtMetrics(
   options: CoverageDebtMetricsOptions,
 ): Promise<CoverageDebtMetric[]> {
-  const lcov = await denoCoverageLcov(options.coverageProfileDir);
+  const lcov = await lcovFromCoverageProfile(options.coverageProfileDir);
   return await collectCoverageDebtMetricsFromLcov({
     rootDir: options.rootDir,
     lcov,
@@ -84,6 +84,8 @@ export async function collectCoverageDebtMetricsFromLcov(
 
   for (const source of sourceFiles) {
     const coverage = lcovCoverage.get(source.absolutePath);
+    // A file the tests never loaded has no coverage record; every tracked
+    // line counts as uncovered, matching how the debt metric scores it.
     const uncovered = coverage
       ? countUncoveredProfileLines(coverage)
       : source.trackedLineCount;
@@ -110,6 +112,54 @@ export async function collectCoverageDebtMetricsFromLcov(
   }
 
   return metrics;
+}
+
+/**
+ * Return the uncovered source line numbers for specific files, keyed by their
+ * repository-relative POSIX path. Only the requested files are inspected, so a
+ * caller that needs per-line detail for a handful of files (e.g. a PR's changed
+ * files) does not pay to materialize line arrays for the whole workspace.
+ */
+export async function collectUncoveredLinesForFiles(
+  options: CoverageDebtMetricsFromLcovOptions & { files: Iterable<string> },
+): Promise<Map<string, number[]>> {
+  const lcovCoverage = parseLcov(options.lcov);
+  const result = new Map<string, number[]>();
+
+  for (const requested of options.files) {
+    const relativePath = toPosix(requested);
+    if (result.has(relativePath) || !shouldTrackSourceFile(relativePath)) {
+      continue;
+    }
+
+    const absolutePath = path.normalize(
+      path.join(options.rootDir, relativePath),
+    );
+    const coverage = lcovCoverage.get(absolutePath);
+
+    let uncoveredLines: number[];
+    if (coverage) {
+      uncoveredLines = uncoveredProfileLineNumbers(coverage);
+    } else {
+      // No coverage record: the file was never loaded by any test, so every
+      // tracked line is uncovered.
+      let content: string;
+      try {
+        content = await Deno.readTextFile(absolutePath);
+      } catch (error) {
+        // A file the PR deletes is in the changed list but absent from the
+        // checkout; skip it. Surface any other read failure rather than
+        // silently under-reporting coverage.
+        if (error instanceof Deno.errors.NotFound) continue;
+        throw error;
+      }
+      uncoveredLines = trackedSourceLineNumbers(content);
+    }
+
+    if (uncoveredLines.length > 0) result.set(relativePath, uncoveredLines);
+  }
+
+  return result;
 }
 
 export async function collectSourceFiles(
@@ -165,11 +215,16 @@ export function metricGroupFor(relativePath: string): string {
 }
 
 export function countTrackedSourceLines(content: string): number {
-  let count = 0;
+  return trackedSourceLineNumbers(content).length;
+}
+
+export function trackedSourceLineNumbers(content: string): number[] {
+  const lineNumbers: number[] = [];
   let inBlockComment = false;
 
-  for (const line of content.split(/\r?\n/)) {
-    let text = line.trim();
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    let text = lines[index].trim();
     if (text.length === 0) continue;
 
     while (text.length > 0) {
@@ -200,12 +255,12 @@ export function countTrackedSourceLines(content: string): number {
         continue;
       }
 
-      count++;
+      lineNumbers.push(index + 1);
       break;
     }
   }
 
-  return count;
+  return lineNumbers;
 }
 
 export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
@@ -244,14 +299,21 @@ export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
 }
 
 export function countUncoveredProfileLines(coverage: LcovFileCoverage): number {
-  let uncovered = 0;
-  for (const hits of coverage.lineHits.values()) {
-    if (hits === 0) uncovered++;
-  }
-  return uncovered;
+  return uncoveredProfileLineNumbers(coverage).length;
 }
 
-async function denoCoverageLcov(coverageProfileDir: string): Promise<string> {
+function uncoveredProfileLineNumbers(coverage: LcovFileCoverage): number[] {
+  const lineNumbers: number[] = [];
+  for (const [lineNumber, hits] of coverage.lineHits) {
+    if (hits === 0) lineNumbers.push(lineNumber);
+  }
+  return lineNumbers.sort((a, b) => a - b);
+}
+
+/** Run `deno coverage --lcov` over a profile directory and return the report. */
+export async function lcovFromCoverageProfile(
+  coverageProfileDir: string,
+): Promise<string> {
   const tmpDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
   const outputPath = path.join(tmpDir, "coverage.lcov");
   try {

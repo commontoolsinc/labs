@@ -21,11 +21,17 @@ import {
   applyBaselineOverrides,
   type Artifact,
   type BaselineOverrides,
+  buildCoverageDebtSuggestionComment,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
+  COVERAGE_COMMENT_FILE,
+  type CoverageCommentPayload,
+  coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
+  type CoverageSuggestionFileLines,
+  type CoverageSuggestionGroup,
   downloadAndExtractArtifact,
   downloadAndParseJUnit,
   downloadAndParsePerfMetrics,
@@ -47,11 +53,13 @@ import {
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   newestArtifactsByName,
+  parseAddedLinesFromPatch,
   parseBaselineOverrides,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_FILE,
   PERF_METRICS_FILE,
+  type PRFile,
   type PRInfo,
   readAndParseEvent,
   REPO,
@@ -68,9 +76,10 @@ import {
 } from "./perf-lib.ts";
 import * as path from "@std/path";
 import {
-  collectCoverageDebtMetrics,
   collectCoverageDebtMetricsFromLcov,
+  collectUncoveredLinesForFiles,
   COVERAGE_PROFILE_ARTIFACT_PREFIX,
+  lcovFromCoverageProfile,
 } from "./coverage-metrics.ts";
 
 /** How many recent main-branch runs to use for baseline. */
@@ -372,7 +381,7 @@ function printMetricTable(rows: Row[], includeStatus = false): void {
 async function extractCoverageDebtSamples(
   run: WorkflowRun,
   artifacts: Artifact[],
-): Promise<Map<string, TimingSample>> {
+): Promise<{ samples: Map<string, TimingSample>; lcov: string }> {
   const metrics = new Map<string, TimingSample>();
   const coverageArtifacts = newestArtifactsByName(artifacts.filter(
     (artifact) =>
@@ -394,6 +403,7 @@ async function extractCoverageDebtSamples(
 
   const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
   const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
+  let lcov = "";
   try {
     let profileFileCount = 0;
     let lcovFileCount = 0;
@@ -413,21 +423,16 @@ async function extractCoverageDebtSamples(
       );
     }
 
-    const coverageMetrics = lcovFileCount > 0
-      ? await collectCoverageDebtMetricsFromLcov({
-        rootDir: Deno.cwd(),
-        lcov: await readCombinedLcov(lcovDir),
-      })
-      : await collectCoverageDebtMetrics({
-        rootDir: Deno.cwd(),
-        coverageProfileDir: profileDir,
-      });
+    lcov = lcovFileCount > 0
+      ? await readCombinedLcov(lcovDir)
+      : await lcovFromCoverageProfile(profileDir);
 
+    const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
+      rootDir: Deno.cwd(),
+      lcov,
+    });
     for (const metric of coverageMetrics) {
-      metrics.set(
-        metric.name,
-        sampleForRun(run, metric.uncoveredLines),
-      );
+      metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
     }
 
     console.log(
@@ -446,7 +451,81 @@ async function extractCoverageDebtSamples(
     } catch { /* ignore cleanup errors */ }
   }
 
-  return metrics;
+  return { samples: metrics, lcov };
+}
+
+/**
+ * Write the once-per-PR coverage-debt comment to a file for a later workflow to
+ * post. The gate runs on `pull_request`, where fork PRs get a read-only token
+ * and cannot comment, so the `coverage-comment` workflow_run job posts this from
+ * the base-repo context instead. Never throws — this is best-effort so it cannot
+ * mask the regression failure itself.
+ */
+async function writeCoverageDebtSuggestion(
+  prNumber: number,
+  coverageFailures: Row[],
+  prFiles: PRFile[],
+  lcov: string,
+): Promise<void> {
+  const groups = coverageFailures
+    .map((failure) => ({
+      group: coverageMetricGroupName(failure.metric),
+      target: Math.round(failure.median ?? 0),
+      current: Math.round(failure.current),
+    }))
+    .filter((group): group is CoverageSuggestionGroup => group.group !== null);
+
+  if (groups.length === 0) return;
+
+  const failingGroups = new Set(groups.map((group) => group.group));
+
+  // Resolve uncovered line numbers only for changed files in the regressed
+  // groups, so we never materialize per-line data for the whole workspace.
+  const changedInFailingGroups = prFiles
+    .map((prFile) => prFile.filename.replaceAll("\\", "/"))
+    .filter((relativePath) => {
+      const group = coverageGroupForChangedFile(relativePath);
+      return group !== null && failingGroups.has(group);
+    });
+  const uncoveredByPath = await collectUncoveredLinesForFiles({
+    rootDir: Deno.cwd(),
+    lcov,
+    files: changedInFailingGroups,
+  });
+
+  // Count, per changed file, the lines this PR added that coverage marks
+  // uncovered.
+  const files: CoverageSuggestionFileLines[] = [];
+  for (const prFile of prFiles) {
+    const relativePath = prFile.filename.replaceAll("\\", "/");
+    const group = coverageGroupForChangedFile(relativePath);
+    if (!group || !failingGroups.has(group)) continue;
+
+    const uncoveredLines = uncoveredByPath.get(relativePath);
+    if (!uncoveredLines || !prFile.patch) continue;
+
+    const addedLines = parseAddedLinesFromPatch(prFile.patch);
+    const uncoveredCount = uncoveredLines.filter((line) =>
+      addedLines.has(line)
+    ).length;
+    if (uncoveredCount > 0) files.push({ relativePath, group, uncoveredCount });
+  }
+
+  try {
+    const body = buildCoverageDebtSuggestionComment({ groups, files });
+    const payload: CoverageCommentPayload = { prNumber, body };
+    await Deno.writeTextFile(
+      COVERAGE_COMMENT_FILE,
+      JSON.stringify(payload, null, 2),
+    );
+    console.log(
+      `Wrote ${COVERAGE_COMMENT_FILE} for PR #${prNumber}; the coverage-comment workflow will post it.`,
+    );
+  } catch (error) {
+    console.warn(
+      `  Warning: could not write coverage suggestion comment for PR #${prNumber}: ${error}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +603,11 @@ async function main() {
   // another API request on the current workflow run.
   const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
   let changedCoverageGroups: Set<string> | undefined;
+  let prFiles: PRFile[] = [];
 
   if (prNumber) {
     try {
-      const prFiles = await fetchPRFiles(parseInt(prNumber));
+      prFiles = await fetchPRFiles(parseInt(prNumber));
       changedCoverageGroups = coverageGroupsForChangedFiles(
         prFiles.map((file) => file.filename),
       );
@@ -595,19 +675,21 @@ async function main() {
 
   // Extract coverage debt metrics from coverage profile artifacts.
   let coverageDataError: unknown;
+  let coverageLcov = "";
   try {
     if (currentArtifactsError) {
       throw new Error(
         `Could not fetch current run artifacts: ${currentArtifactsError}`,
       );
     }
-    const coverageMetrics = await extractCoverageDebtSamples(
+    const coverage = await extractCoverageDebtSamples(
       currentRunInfo,
       currentArtifacts,
     );
-    for (const [name, sample] of coverageMetrics) {
+    for (const [name, sample] of coverage.samples) {
       currentMetrics.set(name, sample);
     }
+    coverageLcov = coverage.lcov;
   } catch (e) {
     coverageDataError = e;
     console.error(
@@ -1222,6 +1304,19 @@ async function main() {
       console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
     }
     console.log("---END COPY-PASTE---");
+  }
+
+  // A coverage regression on a real PR earns a once-per-PR comment pointing the
+  // author at the uncovered lines and how to cover them. The gate only writes
+  // the comment here; the coverage-comment workflow posts it (fork PRs get a
+  // read-only token on pull_request and cannot comment directly).
+  if (coverageFailures.length > 0 && prNumber) {
+    await writeCoverageDebtSuggestion(
+      parseInt(prNumber),
+      coverageFailures,
+      prFiles,
+      coverageLcov,
+    );
   }
 
   Deno.exit(1);
