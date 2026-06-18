@@ -227,22 +227,36 @@ export class CFTabs extends BaseElement {
       return;
     }
 
-    // Decide which tab to show. If the bound value matches no tab (an empty or
-    // stale initial value), fall back to the first enabled tab — but VISUALLY
-    // ONLY. We must NOT write the cell from here.
+    // Decide which value the selection should reflect.
     //
-    // cf-tabs is bound through `$value` and may be instantiated inside a render
-    // `computed()` that reads the same cell. Writing the cell during
-    // mount/selection-sync would re-trigger that computed, which re-mounts
-    // cf-tabs, which writes again — a non-settling "Too many iterations" spin
-    // (the CT-1677 settle class). So selection-sync stays a pure read: the cell
-    // is committed only on a genuine user gesture (handleTabClick /
-    // handleKeydown via emitUserChange). This mirrors cf-input, which writes
-    // only on input events and never on bind. A consumer that needs the cell to
-    // carry the default should initialize it (e.g. `Writable.of("active")`).
+    // An empty / undefined value means the bound cell either hasn't delivered
+    // its value yet (the durable `$value` mount transient — getValue() coerces
+    // the not-yet-synced value to "") OR was explicitly cleared. In NEITHER
+    // case do we snap to the first tab: doing so makes the selection briefly
+    // show the FIRST tab and then jump to the real value once the cell resolves
+    // — the "flickers between two tabs" on every (re)mount. We leave
+    // effectiveValue empty, so the apply loop below matches no tab and thus
+    // deselects every tab / hides every panel. On a fresh mount nothing was
+    // selected, so that is a no-op and the real value re-syncs a beat later via
+    // the controller's onChange; on an explicit clear it correctly drops the
+    // (now stale) prior selection rather than leaving it stuck.
+    //
+    // A NON-empty value that matches no tab is a genuinely stale/invalid
+    // selection: fall back to the first enabled tab — but VISUALLY ONLY. We
+    // must NOT write the cell from here. cf-tabs is bound through `$value` and
+    // may be instantiated inside a render `computed()` that reads the same
+    // cell; writing the cell during mount/selection-sync would re-trigger that
+    // computed, re-mount cf-tabs, and write again — a non-settling "Too many
+    // iterations" spin (the CT-1677 settle class). So selection-sync stays a
+    // pure read: the cell is committed only on a genuine user gesture
+    // (handleTabClick / handleKeydown via emitUserChange). This mirrors
+    // cf-input, which writes only on input events and never on bind. A consumer
+    // that needs the cell to carry a default should initialize it (e.g.
+    // `Writable.of("active")`).
+    const isEmpty = currentValue === undefined || currentValue === "";
     const tabValues = Array.from(tabs, (tab) => (tab as CFTab).value);
     let effectiveValue = currentValue;
-    if (!tabValues.includes(currentValue) && tabs.length > 0) {
+    if (!isEmpty && !tabValues.includes(currentValue) && tabs.length > 0) {
       const firstEnabled = Array.from(tabs).find(
         (tab) => !(tab as CFTab).disabled,
       ) as CFTab | undefined;
