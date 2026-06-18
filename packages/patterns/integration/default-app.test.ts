@@ -1,4 +1,5 @@
 import {
+  awaitViewSettled,
   CdpWorkerProfiler,
   env,
   Page,
@@ -696,10 +697,19 @@ describe("default-app flow test", () => {
         throw error;
       }
 
+      // Wait until the notebook toolbar is mounted and interactive before
+      // clicking. viewSettled resolves once the worker is idle and the
+      // rendered view has caught up (vdom applied, Lit updates drained), so the
+      // New Note button's handler is bound and a single click is not dropped.
+      await waitFor(async () => await awaitViewSettled(page));
+      assert(
+        await clickButtonWithTitle(page, "New Note"),
+        "Expected New Note click to succeed",
+      );
+      // The click is delivered; wait until its effect — the open modal with its
+      // "Create Another" button — has rendered and become interactive.
       await waitFor(async () => {
-        return !!(await clickButtonWithTitle(page, "New Note"));
-      });
-      await waitFor(async () => {
+        await awaitViewSettled(page);
         return !!(await findButtonWithText(page, "Create Another"));
       });
       await waitFor(async () => await resetEventInvocationTrace(page));

@@ -21,6 +21,23 @@ import type {
 import type { DID } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
+import { viewSettled } from "@commonfabric/html/debug";
+
+/**
+ * Build the `commonfabric.viewSettled` helper for a runtime. The returned
+ * function resolves once the rendered view is interactive — the worker is idle
+ * and the resulting vdom and Lit updates have drained. getRt is read on each
+ * call so the helper tracks runtime replacement; with no runtime the idle step
+ * is skipped.
+ */
+export function createViewSettled(
+  getRt: () => RuntimeClient | undefined,
+): () => Promise<void> {
+  return () =>
+    viewSettled(async () => {
+      await getRt()?.idle();
+    });
+}
 
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */

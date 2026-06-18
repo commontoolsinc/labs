@@ -4,6 +4,7 @@ declare global {
   var app: App;
   var commonfabric: {
     rt?: RuntimeClient;
+    viewSettled?: () => Promise<void>;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
     watchWrites?: (
       options?:

@@ -18,7 +18,7 @@ import { type DID } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
-import { createDebugUtils } from "../lib/debug-utils.ts";
+import { createDebugUtils, createViewSettled } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
 import {
@@ -29,6 +29,7 @@ import { EXPERIMENTAL } from "../lib/env.ts";
 
 type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
+  viewSettled?: () => Promise<void>;
   vdom?: ReturnType<typeof createVDomDebugHelpers>;
   detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
 };
@@ -105,6 +106,7 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
+            global.commonfabric.viewSettled = undefined;
           }
           return undefined;
         }
@@ -126,6 +128,7 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
+            global.commonfabric.viewSettled = undefined;
           }
           return;
         }
@@ -139,6 +142,7 @@ export class XRootView extends BaseView {
         const global = getCommonfabricGlobal();
         global.commonfabric ??= {};
         global.commonfabric.rt = this.runtime;
+        global.commonfabric.viewSettled = createViewSettled(() => this.runtime);
         global.commonfabric.vdom = createVDomDebugHelpers();
         global.commonfabric.detectNonIdempotent = async (
           durationMs = 5000,

@@ -140,6 +140,100 @@ function formatTree(node: unknown, indent = 0): string {
 }
 
 /**
+ * Walk every active render's DOM subtree, descending through shadow roots, and
+ * await `updateComplete` on each Lit element. Returns true if any element was
+ * mid-update — pending when scanned, or resolving its `updateComplete` to a
+ * re-triggered or thrown update during the drain — which signals the view was
+ * not yet settled and the caller should drain again.
+ *
+ * This closes the gap between "the worker is reactively idle" and "the DOM is
+ * interactive": custom elements such as cf-modal enable pointer events and bind
+ * handlers in their Lit `updated()` callback, one update cycle after the
+ * property that drives them is set.
+ *
+ * `roots` defaults to every active render's container; pass explicit roots to
+ * scope the drain (used by tests).
+ */
+export async function drainViewUpdates(
+  roots: Iterable<Element> = activeRenderRoots(),
+): Promise<boolean> {
+  const pending: Promise<unknown>[] = [];
+  let sawPending = false;
+
+  const visit = (node: Element) => {
+    const el = node as Element & {
+      updateComplete?: Promise<unknown>;
+      isUpdatePending?: boolean;
+    };
+    if (el.updateComplete && typeof el.updateComplete.then === "function") {
+      if (el.isUpdatePending) sawPending = true;
+      pending.push(el.updateComplete);
+    }
+    for (const child of node.children) visit(child);
+    if (node.shadowRoot) {
+      for (const child of node.shadowRoot.children) visit(child);
+    }
+  };
+
+  for (const root of roots) {
+    visit(root);
+  }
+
+  // updateComplete resolves true once the element settles, false when the
+  // element re-triggered its own update during the cycle (a property set in
+  // updated(), as cf-modal does when toggling open), and rejects when the
+  // update threw. Treat false and rejected as still-churning so the loop drains
+  // again instead of exiting a cycle early; allSettled keeps a thrown update
+  // from aborting the check. An element that never stops churning trips
+  // viewSettled's maxPasses warning rather than spinning forever.
+  const results = await Promise.allSettled(pending);
+  const churned = results.some(
+    (r) => r.status === "rejected" || r.value === false,
+  );
+  return sawPending || churned;
+}
+
+function activeRenderRoots(): Element[] {
+  return Array.from(getActiveRenders().values(), ({ parent }) => parent);
+}
+
+/**
+ * Resolve once the worker is reactively idle AND the rendered view has caught
+ * up to that state: vdom batches applied to the DOM and Lit elements finished
+ * updating, so event handlers are bound and modal/overlay interactivity is on.
+ *
+ * Each pass waits for worker idle, yields a macrotask so any in-flight
+ * worker-to-main vdom batch messages are delivered and applied, then drains
+ * pending Lit updates. When a full pass finds nothing pending the view is
+ * settled. The loop converges because draining cannot, on a quiet runtime,
+ * produce new work indefinitely.
+ *
+ * A view that re-renders on every cycle (an animation that requests Lit updates
+ * on a timer) never reports settled. Rather than fail such a view, the loop
+ * gives up after maxPasses and warns: by then the view is interactive even
+ * though it is still updating.
+ *
+ * `roots` is forwarded to drainViewUpdates to scope the drain (used by tests);
+ * it defaults to every active render's container.
+ */
+export async function viewSettled(
+  idle: () => Promise<void>,
+  options: { maxPasses?: number; roots?: Iterable<Element> } = {},
+): Promise<void> {
+  const maxPasses = options.maxPasses ?? 50;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    await idle();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const pending = await drainViewUpdates(options.roots);
+    if (!pending) return;
+  }
+  console.warn(
+    `viewSettled: view still reported pending updates after ${maxPasses} ` +
+      `passes; proceeding. A perpetually re-rendering element can cause this.`,
+  );
+}
+
+/**
  * Create the debug helpers object to register on globalThis.commonfabric.vdom.
  */
 export function createVDomDebugHelpers() {

@@ -1,10 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  createViewSettled,
   summarizeDebugValue,
   summarizeTriggerTraceEntries,
 } from "../src/lib/debug-utils.ts";
-import type { TriggerTraceEntry } from "@commonfabric/runtime-client";
+import type {
+  RuntimeClient,
+  TriggerTraceEntry,
+} from "@commonfabric/runtime-client";
 
 describe("debug utils", () => {
   it("summarizeDebugValue classifies common metadata/result shapes", () => {
@@ -144,5 +148,44 @@ describe("debug utils", () => {
     expect(rootOnly.traceEntries).toBe(2);
     expect(rootOnly.nestedEntries).toBe(0);
     expect(rootOnly.topChanges).toHaveLength(1);
+  });
+});
+
+describe("createViewSettled", () => {
+  const asRuntime = (rt: { idle: () => Promise<void> } | undefined) =>
+    rt as unknown as RuntimeClient | undefined;
+
+  it("idles the runtime, then settles the view", async () => {
+    let idleCalls = 0;
+    const rt = {
+      idle: () => {
+        idleCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    await createViewSettled(() => asRuntime(rt))();
+    expect(idleCalls).toBeGreaterThan(0);
+  });
+
+  it("resolves without throwing when there is no runtime", async () => {
+    await createViewSettled(() => undefined)();
+  });
+
+  it("reads the runtime on each call so it tracks replacement", async () => {
+    const holder: { rt?: { idle: () => Promise<void> } } = {};
+    let idleCalls = 0;
+    const settled = createViewSettled(() => asRuntime(holder.rt));
+
+    await settled();
+    expect(idleCalls).toBe(0);
+
+    holder.rt = {
+      idle: () => {
+        idleCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    await settled();
+    expect(idleCalls).toBeGreaterThan(0);
   });
 });
