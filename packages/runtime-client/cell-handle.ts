@@ -9,7 +9,6 @@ import {
   type JSONSchema,
   LINK_V1_TAG,
   type SigilLink,
-  type URI,
 } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewsEqual,
@@ -591,16 +590,10 @@ function parseAsCellRef(
     const alias = value.$alias;
     const aliasPath = alias.path.map((p) => String(p));
 
-    let entityId: URI;
-    if (alias.cell && typeof alias.cell === "object" && "/" in alias.cell) {
-      const rawId = (alias.cell as { "/": string })["/"];
-      entityId = (rawId.startsWith("of:") ? rawId : `of:${rawId}`) as URI;
-    } else {
-      entityId = from.id;
-    }
-
+    // Named-cell/partialCause aliases carry no absolute id of their own;
+    // resolve to the base cell's document.
     return {
-      id: entityId,
+      id: from.id,
       space: from.space,
       scope: from.scope,
       path: aliasPath,

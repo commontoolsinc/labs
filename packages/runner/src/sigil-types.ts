@@ -67,12 +67,6 @@ type LegacyAliasNamedCell = LegacyAliasBase & {
   defer?: number;
 };
 
-type LegacyAliasAbsoluteCell = LegacyAliasBase & {
-  cell: { "/": string };
-  partialCause?: never;
-  defer?: never;
-};
-
 /**
  * These are partial bindings that may not be applicable to the current
  * pattern. We track the defer count, and each time we unwrap bindings,
@@ -89,6 +83,5 @@ type LegacyAliasPartialCause = LegacyAliasBase & {
 export type LegacyAlias = {
   $alias:
     | LegacyAliasNamedCell
-    | LegacyAliasAbsoluteCell
     | LegacyAliasPartialCause;
 };

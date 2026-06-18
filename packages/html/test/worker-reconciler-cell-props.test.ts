@@ -1100,71 +1100,6 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     );
 
     await t.step(
-      "renderer VDOM schema preserves legacy alias child render nodes",
-      async () => {
-        const collector = createOpsCollector();
-        const reconciler = new WorkerReconciler({
-          onOps: collector.onOps,
-        });
-
-        const tx = runtime.edit();
-        const linkedChild = runtime.getCell(
-          signer.did(),
-          "renderer-schema-legacy-alias-child",
-          undefined,
-          tx,
-        );
-        linkedChild.setRawUntyped({
-          type: "vnode",
-          name: "cf-card",
-          props: { id: "legacy-alias-child-card" },
-          children: ["Legacy alias child"],
-        });
-        const rootCell = runtime.getCell(
-          signer.did(),
-          "renderer-schema-legacy-alias-child-root",
-          undefined,
-          tx,
-        );
-        rootCell.setRawUntyped({
-          type: "vnode",
-          name: "cf-vstack",
-          props: {},
-          children: [{
-            $alias: {
-              cell: {
-                "/": linkedChild.getAsNormalizedFullLink().id.replace(
-                  /^of:/,
-                  "",
-                ),
-              },
-              path: [],
-            },
-          }],
-        });
-        const commitResult = await tx.commit();
-        assertEquals(commitResult.ok !== undefined, true);
-
-        const rootVDOMCell = runtime.getCell(
-          signer.did(),
-          "renderer-schema-legacy-alias-child-root",
-        ).asSchema(rendererVDOMSchema);
-        const cancel = reconciler.mount(rootVDOMCell as never);
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-
-          const createdTags = collector.getOpsOfType("create-element").map(
-            (op) => (op as Extract<VDomOp, { op: "create-element" }>).tagName,
-          );
-          assertEquals(createdTags.includes("cf-vstack"), true);
-          assertEquals(createdTags.includes("cf-card"), true);
-        } finally {
-          cancel();
-        }
-      },
-    );
-
-    await t.step(
       "renderer VDOM schema preserves nested render node children",
       async () => {
         const collector = createOpsCollector();
@@ -1206,17 +1141,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
                 props: { id: "nested-inline-card" },
                 children: ["Nested inline child"],
               },
-              {
-                $alias: {
-                  cell: {
-                    "/": linkedChild.getAsNormalizedFullLink().id.replace(
-                      /^of:/,
-                      "",
-                    ),
-                  },
-                  path: [],
-                },
-              },
+              linkedChild.getAsLink({ keepAsCell: true }),
             ],
           }],
         });

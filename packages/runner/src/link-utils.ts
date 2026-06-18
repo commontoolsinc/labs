@@ -30,6 +30,7 @@ import {
 } from "./storage/interface.ts";
 import type { Runtime } from "./runtime.ts";
 import {
+  isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
   NormalizedFullLink,
@@ -62,27 +63,6 @@ export function isCellLink(
     isCellResultForDereferencing(value) ||
     isPrimitiveCellLink(value) ||
     isCell(value)
-  );
-}
-
-/**
- * Check if value is a normalized link.
- *
- * Beware: Unlike all the other types that `isLink` is checking for, this could
- * appear in regular data and not actually be meant as a link. So only use this
- * if you know for sure that the value is a link.
- *
- * We don't verify that the id and space are URI or MemorySpace, but we do
- * verify that they are strings.
- */
-export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.space === "string" &&
-    (value.scope === "space" || value.scope === "user" ||
-      value.scope === "session") &&
-    Array.isArray(value.path)
   );
 }
 

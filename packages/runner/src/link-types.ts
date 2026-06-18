@@ -13,7 +13,6 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type {
   IMemorySpaceAddress,
@@ -91,11 +90,11 @@ export type PrimitiveCellLink =
   | LegacyAlias; // @deprecated
 
 /**
- * Check if value is a sigil value with any type
- *
- * Any object that is strictly `{ "/": Record<string, any> }`, no other props
+ * Check if value is a sigil value with any type: an object that is strictly
+ * `{ "/": Record<string, any> }`, no other props. Internal helper for
+ * {@link isSigilLink}.
  */
-export function isSigilValue(value: any): value is SigilValue<any> {
+function isSigilValue(value: any): value is SigilValue<any> {
   return isRecord(value) &&
     "/" in value &&
     Object.keys(value).length === 1 &&
@@ -104,16 +103,6 @@ export function isSigilValue(value: any): value is SigilValue<any> {
 
 export function isSigilLink(value: any): value is SigilLink {
   return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
-}
-
-/**
- * Check if value is a sigil alias (link with overwrite field).
- */
-export function isSigilWriteRedirectLink(
-  value: any,
-): value is SigilWriteRedirectLink {
-  return isSigilLink(value) &&
-    value["/"][LINK_V1_TAG].overwrite === "redirect";
 }
 
 export function isPrimitiveCellLink(
@@ -134,11 +123,14 @@ export function isNormalizedLink(value: any): value is NormalizedLink {
 }
 
 /**
- * Check if value is a normalized link.
+ * Check if value is a normalized full link.
  *
  * Beware: Unlike all the other types that `isLink` is checking for, this could
  * appear in regular data and not actually be meant as a link. So only use this
  * if you know for sure that the value is a link.
+ *
+ * We don't verify that the id and space are URI or MemorySpace, but we do
+ * verify that they are strings.
  */
 export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
   return (
@@ -218,19 +210,9 @@ export function parseLinkPrimitive(
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
-    let id: URI | undefined;
-
-    // If cell is provided, convert to URI
-    if (alias.cell) {
-      if (isRecord(alias.cell) && "/" in alias.cell) {
-        id = toURI(alias.cell);
-      }
-    }
-
-    // If no cell provided, use base cell's document
-    if (!id && base) {
-      id = base.id;
-    }
+    // Named-cell ("argument"/"result") and partialCause aliases carry no
+    // absolute id of their own here, so resolve to the base cell's document.
+    const id = base?.id;
 
     return {
       ...(id && { id }),
