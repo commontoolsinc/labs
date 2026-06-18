@@ -1068,6 +1068,12 @@ class SpaceReplica implements ISpaceReplica {
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+  #closed = false;
+  #caughtUpLocalSeq = 0;
+  #caughtUpLocalSeqWaiters: {
+    localSeq: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
 
@@ -1172,6 +1178,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     await this.synced();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -1200,11 +1207,53 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     await Promise.allSettled([...this.#updatePromises]);
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
+  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+    if (localSeq === undefined) {
+      return;
+    }
+    this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
+    const ready: PromiseWithResolvers<void>[] = [];
+    this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
+      (waiter) => {
+        if (waiter.localSeq <= this.#caughtUpLocalSeq) {
+          ready.push(waiter.pending);
+          return false;
+        }
+        return true;
+      },
+    );
+    for (const pending of ready) {
+      pending.resolve();
+    }
+  }
+
+  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(new Error("memory replica closed"));
+    }
+    if (this.#caughtUpLocalSeq >= localSeq) {
+      return Promise.resolve();
+    }
+    const pending = Promise.withResolvers<void>();
+    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    return pending.promise;
+  }
+
+  private rejectCaughtUpLocalSeqWaiters(error: Error): void {
+    const waiters = this.#caughtUpLocalSeqWaiters;
+    this.#caughtUpLocalSeqWaiters = [];
+    for (const waiter of waiters) {
+      waiter.pending.reject(error);
+    }
+  }
+
   closeNow(): void {
+    this.#closed = true;
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
@@ -1218,6 +1267,7 @@ class SpaceReplica implements ISpaceReplica {
       });
     }
     void Promise.allSettled([...this.#updatePromises]);
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
@@ -1805,6 +1855,7 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit);
+      this.attachProviderReadyToRetry(rejection, localSeq);
       // Counted (even while silent) so multi-writer churn can be read back via
       // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
       // drops only the optimistic pending write and re-derives from confirmed
@@ -1928,6 +1979,7 @@ class SpaceReplica implements ISpaceReplica {
     type: "pull" | "integrate",
   ): void {
     if (sync.upserts.length === 0 && sync.removes.length === 0) {
+      this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
 
@@ -1988,6 +2040,24 @@ class SpaceReplica implements ISpaceReplica {
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
     }
+    this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+  }
+
+  private attachProviderReadyToRetry(
+    rejection: StorageTransactionRejected,
+    localSeq: number,
+  ): void {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const readyToRetry = rejection.readyToRetry;
+    if (readyToRetry === undefined) {
+      return;
+    }
+    rejection.readyToRetry = async () => {
+      await readyToRetry();
+      await this.waitForCaughtUpLocalSeq(localSeq);
+    };
   }
 
   private record(id: URI, scope?: CellScope): DocumentRecord {

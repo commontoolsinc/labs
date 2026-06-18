@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -312,7 +313,7 @@ describe("Memory v2 storage notifications", () => {
     });
   });
 
-  it("refreshes subscribed state before a conflict revert resolves", async () => {
+  it("refreshes subscribed state before conflict readyToRetry resolves", async () => {
     const subscription = new Subscription();
     storageManager.subscribe(subscription);
 
@@ -380,7 +381,6 @@ describe("Memory v2 storage notifications", () => {
 
     const result = await commitPromise;
     expect(result.ok).toBeFalsy();
-    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
     expect(subscription.reverts.at(-1)).toMatchObject({
       type: "revert",
       space,
@@ -393,6 +393,13 @@ describe("Memory v2 storage notifications", () => {
     expect(reason.retryAfterSeq).toBe(2);
     expect(typeof reason.readyToRetry).toBe("function");
     await reason.readyToRetry?.();
+    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
+
+    await storageManager.close();
+    await assertRejects(
+      () => reason.readyToRetry?.() ?? Promise.resolve(),
+      Error,
+    );
   });
 
   it("does not emit duplicate pull notifications for unchanged v2 sync results", async () => {
