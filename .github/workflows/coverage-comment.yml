@@ -1,0 +1,51 @@
+name: Coverage Comment
+
+# Posts the coverage-debt suggestion comment produced by the Performance Check
+# gate in the Deno Workflow. That gate runs on `pull_request`, where fork PRs
+# only get a read-only token, so it cannot comment directly — it uploads the
+# comment as the `coverage-comment` artifact instead. This workflow runs in the
+# base-repo context (trusted, default-branch code) with a write token and posts
+# it, which is why it works for forks too.
+
+on:
+  workflow_run:
+    workflows: ["Deno Workflow"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  post-coverage-comment:
+    name: "Post Coverage Comment"
+    # Only PR runs that failed can carry a coverage regression (the gate exits
+    # non-zero), so skip the all-green and push runs.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 📥 Download coverage comment artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 💬 Post coverage comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: deno run --allow-net --allow-env --allow-read tasks/post-coverage-comment.ts

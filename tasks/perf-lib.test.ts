@@ -1,10 +1,18 @@
-import { assertAlmostEquals, assertEquals, assertThrows } from "@std/assert";
+import {
+  assertAlmostEquals,
+  assertEquals,
+  assertFalse,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   applyBaselineOverrides,
   type Artifact,
+  buildCoverageDebtSuggestionComment,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
+  COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
   downloadAndExtractArtifact,
@@ -18,6 +26,7 @@ import {
   githubGet,
   type Job,
   newestArtifactsByName,
+  parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
@@ -760,6 +769,126 @@ Deno.test("coverage debt gating follows changed source groups", () => {
       undefined,
     ),
     true,
+  );
+});
+
+Deno.test("parseAddedLinesFromPatch maps added lines to their new line numbers", () => {
+  const patch = [
+    "@@ -1,3 +1,5 @@",
+    " const a = 1;",
+    "-const b = 2;",
+    "+const b = 20;",
+    "+const c = 3;",
+    " const d = 4;",
+    "+const e = 5;",
+    "\\ No newline at end of file",
+  ].join("\n");
+
+  const added = parseAddedLinesFromPatch(patch);
+
+  assertEquals([...added.entries()], [
+    [2, "const b = 20;"],
+    [3, "const c = 3;"],
+    [5, "const e = 5;"],
+  ]);
+});
+
+Deno.test("parseAddedLinesFromPatch tracks line numbers across multiple hunks", () => {
+  const patch = [
+    "@@ -10,2 +10,3 @@",
+    " keep;",
+    "+added at 11;",
+    " keep;",
+    "@@ -40,1 +41,2 @@",
+    " keep;",
+    "+added at 42;",
+  ].join("\n");
+
+  const added = parseAddedLinesFromPatch(patch);
+
+  assertEquals(added.get(11), "added at 11;");
+  assertEquals(added.get(42), "added at 42;");
+  assertEquals(added.size, 2);
+});
+
+Deno.test("parseAddedLinesFromPatch keeps added lines whose content starts with +", () => {
+  const patch = [
+    "@@ -1,1 +1,4 @@",
+    " context;",
+    "+++count;", // added source line "++count;"
+    "+ leading-space kept;",
+    "+normal;",
+  ].join("\n");
+
+  const added = parseAddedLinesFromPatch(patch);
+
+  assertEquals([...added.entries()], [
+    [2, "++count;"],
+    [3, " leading-space kept;"],
+    [4, "normal;"],
+  ]);
+});
+
+Deno.test("parseAddedLinesFromPatch ignores file headers before the first hunk", () => {
+  const patch = [
+    "diff --git a/f.ts b/f.ts",
+    "index 1111111..2222222 100644",
+    "--- a/f.ts",
+    "+++ b/f.ts",
+    "@@ -1,1 +1,2 @@",
+    " keep;",
+    "+added;",
+  ].join("\n");
+
+  const added = parseAddedLinesFromPatch(patch);
+
+  assertEquals([...added.entries()], [[2, "added;"]]);
+});
+
+Deno.test("buildCoverageDebtSuggestionComment lists files (not lines), command, and targets", () => {
+  const comment = buildCoverageDebtSuggestionComment({
+    groups: [
+      { group: "packages/runner", target: 12, current: 15 },
+    ],
+    files: [
+      {
+        relativePath: "packages/runner/src/cell.ts",
+        group: "packages/runner",
+        uncoveredCount: 2,
+      },
+    ],
+  });
+
+  // Posted-once marker so a later run can detect it.
+  assertStringIncludes(comment, COVERAGE_SUGGESTION_MARKER);
+  // The regressed group with its target and current value.
+  assertStringIncludes(comment, "`packages/runner`");
+  assertStringIncludes(comment, "| 12 | 15 | +3 |");
+  // The affected file with its uncovered-line count, but no per-line code dump.
+  assertStringIncludes(comment, "`packages/runner/src/cell.ts` — 2 lines");
+  // The prompt block still carries the command and the metric target.
+  assertStringIncludes(comment, "tasks/coverage-metrics.ts");
+  assertStringIncludes(
+    comment,
+    "coverage-debt: packages/runner uncovered lines  <=  12",
+  );
+  // The comment ends at the prompt block — no verify/footer sections.
+  assertFalse(comment.includes("### Verify locally"));
+});
+
+Deno.test("buildCoverageDebtSuggestionComment handles a regression with no pinned lines", () => {
+  const comment = buildCoverageDebtSuggestionComment({
+    groups: [
+      { group: "tasks", target: 0, current: 4 },
+    ],
+    files: [],
+  });
+
+  assertStringIncludes(comment, COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(comment, "Could not tie the regression");
+  assertStringIncludes(
+    comment,
+    "coverage-debt: tasks uncovered lines  <=  0",
   );
 });
 

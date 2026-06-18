@@ -91,7 +91,13 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const suiteStartedAt = Date.now();
   const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
   const members: string[] = manifest.workspace;
-  const coverageRoot = Deno.env.get("DENO_COVERAGE_DIR");
+  // Resolve to an absolute path: each package's test subprocess runs with its
+  // own cwd, so a relative DENO_COVERAGE_DIR would land under
+  // packages/<pkg>/... instead of the shared workspace coverage directory.
+  const coverageRootRaw = Deno.env.get("DENO_COVERAGE_DIR");
+  const coverageRoot = coverageRootRaw
+    ? path.resolve(workspaceCwd, coverageRootRaw)
+    : undefined;
 
   const tests = [];
   for (const memberPath of members) {

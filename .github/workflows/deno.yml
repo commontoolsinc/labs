@@ -667,6 +667,9 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # Read-only: fork PRs get a read-only token here regardless, so the gate
+      # only writes the comment to an artifact. The coverage-comment workflow
+      # posts it from the base-repo context with a write token.
       pull-requests: read
     steps:
       - name: 📥 Checkout repository
@@ -683,6 +686,15 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
+
+      - name: 📤 Upload coverage regression comment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-comment
+          path: coverage-comment.json
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: 📤 Upload performance metrics
         if: always()

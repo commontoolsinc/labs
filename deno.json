@@ -34,7 +34,9 @@
     "./packages/vendor-astral",
     "./packages/leb128",
     "./packages/fuse",
-    "./packages/fs-sync-example"
+    "./packages/fs-sync-example",
+    "./tasks",
+    "./scripts"
   ],
   "tasks": {
     "check": "./tasks/check.sh",
