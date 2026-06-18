@@ -2,6 +2,7 @@ import {
   action,
   computed,
   type Default,
+  entityRefToString,
   equals,
   FS,
   type FsProjection,
@@ -293,7 +294,8 @@ const Note = pattern<NoteInput, NoteOutput>(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any).resolveAsCell();
-        const entityId = resolved?.entityId?.["/"];
+        const ref = resolved?.entityId;
+        const entityId = ref ? entityRefToString(ref) : undefined;
         if (!name || !entityId) return;
 
         const link = `[[${name} (${entityId})]]`;

@@ -2683,6 +2683,16 @@ export type GetEntityIdFunction = (
 ) => { "/": string } | FabricHash | undefined;
 export declare const getEntityId: GetEntityIdFunction;
 
+/**
+ * Convert an entity-id reference — as produced by {@link getEntityId} or a
+ * cell's `entityId` — to its tagged-hash string, in whichever form the active
+ * cell representation uses (a `{ "/": "id-string" }` object or a `FabricHash`).
+ */
+export type EntityRefToStringFunction = (
+  value: { "/": string } | FabricHash,
+) => string;
+export declare const entityRefToString: EntityRefToStringFunction;
+
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
 export declare const __cf_data: CfDataFunction;
