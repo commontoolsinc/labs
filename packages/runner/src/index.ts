@@ -101,6 +101,7 @@ export {
 export {
   AuthSchema,
   type Cell as BuilderCell,
+  CHIP_UI,
   type Frame,
   FS,
   type FsProjection,
@@ -130,6 +131,7 @@ export {
   schema,
   type SchemaWithoutCell,
   type StreamValue,
+  TILE_UI,
   type toJSON,
   TYPE,
   UI,

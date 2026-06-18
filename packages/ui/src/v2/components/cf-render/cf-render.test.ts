@@ -46,27 +46,19 @@ describe("CFRender", () => {
 describe("CFRender variant handling", () => {
   it("should accept variant property", () => {
     const element = new CFRender();
-    element.variant = "preview";
-    expect(element.variant).toBe("preview");
+    element.variant = "chip";
+    expect(element.variant).toBe("chip");
   });
 
-  it("should accept embedded variant", () => {
+  it("should accept tile variant", () => {
     const element = new CFRender();
-    element.variant = "embedded";
-    expect(element.variant).toBe("embedded");
+    element.variant = "tile";
+    expect(element.variant).toBe("tile");
   });
 
   it("should accept all valid variants", () => {
     const element = new CFRender();
-    const variants = [
-      "default",
-      "preview",
-      "thumbnail",
-      "sidebar",
-      "fab",
-      "embedded",
-      "settings",
-    ] as const;
+    const variants = ["full", "chip", "tile"] as const;
 
     for (const variant of variants) {
       element.variant = variant;
@@ -80,7 +72,7 @@ describe("CFRender disconnectedCallback", () => {
     const element = new CFRender();
     const cell = createMockCellHandle({ name: "test" });
     element.cell = cell as CellHandle;
-    element.variant = "preview";
+    element.variant = "chip";
 
     // disconnectedCallback should clean up internal state without throwing
     element.disconnectedCallback();
@@ -90,7 +82,7 @@ describe("CFRender disconnectedCallback", () => {
     // The internal _renderingCellId and _hasRendered are reset though.
     // We verify it doesn't throw and the element is still usable.
     expect(element.cell).toBe(cell);
-    expect(element.variant).toBe("preview");
+    expect(element.variant).toBe("chip");
   });
 
   it("should handle disconnect when no cell was set", () => {

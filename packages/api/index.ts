@@ -149,6 +149,9 @@ export declare const ID_FIELD: unique symbol;
 export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
+// UI variants (CT-1321): optional sibling renderings addressed alongside [UI].
+export declare const TILE_UI: "$TILE_UI";
+export declare const CHIP_UI: "$CHIP_UI";
 export declare const FS: "$FS";
 
 // Symbol for accessing self-reference in patterns

@@ -146,7 +146,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-question` | Asks a single question and collects the answer | |
 | `cf-radio` | Single radio button used within `cf-radio-group` | |
 | `cf-radio-group` | Radio group; declarative `items` or slotted `cf-radio` | `$value` |
-| `cf-render` | Renders a cell containing a piece pattern (see [cf-render](#cf-render)) | `$cell` |
+| `cf-render` | Renders a cell containing a piece pattern at a UI variant — `full`/`chip`/`tile` (see [cf-render](#cf-render)) | `$cell`, `variant` |
 | `cf-resizable-handle` | Drag handle between resizable panels | |
 | `cf-resizable-panel` | Individual panel within a resizable panel group | |
 | `cf-resizable-panel-group` | Container managing resizable panels and handles | |
@@ -360,6 +360,54 @@ const gridView = GridView({ items });
 ```
 
 See [composition](../patterns/composition.md) for more on pattern composition.
+
+### UI variants (CT-1321)
+
+A piece can expose a **size spectrum** of renderings as optional sibling output
+keys, addressed by symbols vended from `commonfabric`:
+
+| Variant | Output key | Symbol | Use |
+| --- | --- | --- | --- |
+| `full` | `"$UI"` | `UI` | Standalone rendering — the default, and the universal floor. |
+| `chip` | `"$CHIP_UI"` | `CHIP_UI` | Inline rendering for text and lists. |
+| `tile` | `"$TILE_UI"` | `TILE_UI` | Gallery/grid card. |
+
+Pick a variant with the `variant` attribute (default `"full"`):
+
+```tsx
+<cf-render $cell={piece} variant="full" />   // default — standalone
+<cf-render $cell={piece} variant="chip" />   // inline
+<cf-render $cell={piece} variant="tile" />   // gallery/grid tile
+```
+
+**Failover — every piece renders at every variant.** When a piece doesn't
+export the requested variant key, `cf-render` substitutes a per-variant platform
+default:
+
+- `chip` → a `cf-cell-link` bound to the piece (renders it by its `[NAME]`).
+- `tile` → the full `[UI]` rendered small at ~0.5 scale.
+
+Because `full`/`[UI]` is the universal floor, a piece that exports only `[UI]`
+still renders correctly at `chip` and `tile`.
+
+A pattern exports the spectrum by returning the sibling keys:
+
+```tsx
+import { CHIP_UI, NAME, pattern, TILE_UI, UI } from "commonfabric";
+
+export default pattern(({ title }) => ({
+  [NAME]: title,
+  [UI]: <FullView title={title} />,      // standalone (always provide this)
+  [CHIP_UI]: <InlineChip title={title} />, // optional inline
+  [TILE_UI]: <GridTile title={title} />,   // optional gallery tile
+}));
+```
+
+See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
+
+> Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
+> separate concept — not size variants. A vended `uiVariant()` helper for
+> render paths outside `cf-render` is a planned follow-up and does not exist yet.
 
 ---
 
