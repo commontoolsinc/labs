@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import {
+  clearRuntimeDebugGlobals,
+  type CommonfabricDebugState,
   createViewSettled,
+  exposeCommonfabricGlobals,
   summarizeDebugValue,
   summarizeTriggerTraceEntries,
 } from "../src/lib/debug-utils.ts";
@@ -187,5 +191,62 @@ describe("createViewSettled", () => {
     };
     await settled();
     expect(idleCalls).toBeGreaterThan(0);
+  });
+});
+
+describe("runtime debug globals", () => {
+  type Globals = { commonfabric?: CommonfabricDebugState };
+
+  it("exposeCommonfabricGlobals installs the console globals", async () => {
+    let idleCalls = 0;
+    const detectResult = { nonIdempotent: [], cycles: 0 };
+    const runtime = {
+      idle: () => {
+        idleCalls += 1;
+        return Promise.resolve();
+      },
+      detectNonIdempotent: () => Promise.resolve(detectResult),
+    } as unknown as RuntimeClient;
+    const global: Globals = {};
+
+    exposeCommonfabricGlobals(global, runtime, () => runtime, () => undefined);
+
+    const cf = global.commonfabric!;
+    expect(cf.rt).toBe(runtime);
+    expect(typeof cf.viewSettled).toBe("function");
+    expect(typeof cf.vdom).toBe("object");
+    expect(typeof cf.detectNonIdempotent).toBe("function");
+    expect(typeof cf.readCell).toBe("function");
+    expect(typeof cf.watchWrites).toBe("function");
+
+    await cf.viewSettled!();
+    expect(idleCalls).toBeGreaterThan(0);
+
+    const table = stub(console, "table", () => {});
+    const log = stub(console, "log", () => {});
+    try {
+      expect(await cf.detectNonIdempotent!()).toBe(detectResult);
+    } finally {
+      table.restore();
+      log.restore();
+    }
+  });
+
+  it("clearRuntimeDebugGlobals clears rt and viewSettled", () => {
+    const global: Globals = {
+      commonfabric: {
+        rt: {} as RuntimeClient,
+        viewSettled: () => Promise.resolve(),
+      },
+    };
+    clearRuntimeDebugGlobals(global);
+    expect(global.commonfabric!.rt).toBeUndefined();
+    expect(global.commonfabric!.viewSettled).toBeUndefined();
+  });
+
+  it("clearRuntimeDebugGlobals is a no-op without a commonfabric global", () => {
+    const global: Globals = {};
+    clearRuntimeDebugGlobals(global);
+    expect(global.commonfabric).toBeUndefined();
   });
 });
