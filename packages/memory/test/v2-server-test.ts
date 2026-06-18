@@ -1876,7 +1876,7 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
   }
 });
 
-Deno.test("memory v2 server flushes session sync before returning conflicts", async () => {
+Deno.test("memory v2 server returns conflicts before deferred caught-up session sync", async () => {
   const server = createServer("memory://memory-v2-server-conflict-flush", 20);
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -1984,7 +1984,19 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
       },
     }));
 
+    const rejected = assertResponse<any>(shiftMessage(messages));
+    assertEquals(rejected.requestId, "tx-3");
+    assertEquals(rejected.error, {
+      name: "ConflictError",
+      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      retryAfterSeq: 2,
+    });
+    assertEquals(messages.length, 0);
+
+    await server.flushSessions([space]);
+
     const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect.caughtUpLocalSeq, 3);
     assertEquals(effect.effect.toSeq, 2);
     assertEquals(effect.effect.upserts, [{
       branch: "",
@@ -1995,14 +2007,6 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
         value: { version: 3 },
       },
     }]);
-
-    const rejected = assertResponse<any>(shiftMessage(messages));
-    assertEquals(rejected.requestId, "tx-3");
-    assertEquals(rejected.error, {
-      name: "ConflictError",
-      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
-      retryAfterSeq: 2,
-    });
     assertEquals(messages.length, 0);
   } finally {
     await server.close();
@@ -2129,7 +2133,19 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
 
+    const rejected = assertResponse<any>(shiftMessage(messages));
+    assertEquals(rejected.requestId, "tx-3");
+    assertEquals(rejected.error, {
+      name: "ConflictError",
+      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      retryAfterSeq: 2,
+    });
+    assertEquals(messages.length, 0);
+
+    await server.flushSessions([space]);
+
     const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect.caughtUpLocalSeq, 3);
     assertEquals(effect.effect.toSeq, 2);
     assertEquals(effect.effect.upserts, [{
       branch: "",
@@ -2140,14 +2156,6 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
         value: { version: 3 },
       },
     }]);
-
-    const rejected = assertResponse<any>(shiftMessage(messages));
-    assertEquals(rejected.requestId, "tx-3");
-    assertEquals(rejected.error, {
-      name: "ConflictError",
-      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
-      retryAfterSeq: 2,
-    });
     assertEquals(messages.length, 0);
   } finally {
     await server.close();
