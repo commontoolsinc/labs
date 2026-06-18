@@ -91,11 +91,11 @@ export type PrimitiveCellLink =
   | LegacyAlias; // @deprecated
 
 /**
- * Check if value is a sigil value with any type
- *
- * Any object that is strictly `{ "/": Record<string, any> }`, no other props
+ * Check if value is a sigil value with any type: an object that is strictly
+ * `{ "/": Record<string, any> }`, no other props. Internal helper for
+ * {@link isSigilLink}.
  */
-export function isSigilValue(value: any): value is SigilValue<any> {
+function isSigilValue(value: any): value is SigilValue<any> {
   return isRecord(value) &&
     "/" in value &&
     Object.keys(value).length === 1 &&
