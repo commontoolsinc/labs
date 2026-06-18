@@ -907,7 +907,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
+      favoritesCell.set([{ cell: favoriteItem, tags: ["test-tag"] }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -1001,7 +1001,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
+      favoritesCell.set([{ cell: favoriteItem, tags: ["test-tag"] }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -1120,53 +1120,6 @@ describe("wish built-in", () => {
       expect(data?.type).toBe("favorite");
     });
 
-    it("falls back to the legacy tag when tags is empty", async () => {
-      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      const homeDefaultPatternCell = runtime.getCell(
-        userIdentity.did(),
-        "default-pattern-legacy",
-        undefined,
-        tx,
-      );
-      const favoritesCell = homeDefaultPatternCell.key("favorites");
-      const favoriteItem = runtime.getCell(
-        userIdentity.did(),
-        "favorite-item-legacy",
-        undefined,
-        tx,
-      );
-      favoriteItem.set({ type: "favorite" });
-      // An empty tags array must not mask the legacy serialized-schema tag.
-      favoritesCell.set([
-        { cell: favoriteItem, tags: [], tag: "#legacy-fallback" },
-      ]);
-      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
-
-      await tx.commit();
-      await runtime.idle();
-      tx = runtime.edit();
-
-      const wishPattern = pattern(() => {
-        return { result: wish({ query: "#legacy-fallback", scope: ["~"] }) };
-      });
-      const resultCell = runtime.getCell<{ result?: { result?: unknown } }>(
-        patternSpace.did(),
-        "legacy-fallback-result",
-        undefined,
-        tx,
-      );
-      const result = runtime.run(tx, wishPattern, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
-      await result.pull();
-
-      const data = (() => {
-        const r = result.key("result").get()?.result;
-        return (r as any)?.get?.() ?? r;
-      })();
-      expect(data?.type).toBe("favorite");
-    });
-
     it('searches both favorites and mentionables with scope: ["~", "."]', async () => {
       // Setup: Add favorites to home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
@@ -1184,7 +1137,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "#fav-tag" }]);
+      favoritesCell.set([{ cell: favoriteItem, tags: ["fav-tag"] }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -1298,7 +1251,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
+      favoritesCell.set([{ cell: favoriteItem, tags: ["test-tag"] }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -1449,7 +1402,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
+      favoritesCell.set([{ cell: favoriteItem, tags: ["test-tag"] }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -1791,7 +1744,7 @@ describe("wish built-in", () => {
           tx,
         );
         favoriteItem.set({ type: "from-favorites" });
-        favoritesCell.set([{ cell: favoriteItem, tag: "#combo-tag" }]);
+        favoritesCell.set([{ cell: favoriteItem, tags: ["combo-tag"] }]);
         (homeSpaceCell as any).key("defaultPattern").set(
           homeDefaultPatternCell,
         );
@@ -2099,7 +2052,10 @@ describe("wish built-in", () => {
         tx,
       );
       const favoritesCell = homeDefaultPatternCell.key("favorites");
-      favoritesCell.set([{ cell: sharedPiece.withTx(tx), tag: "#shared-tag" }]);
+      favoritesCell.set([{
+        cell: sharedPiece.withTx(tx),
+        tags: ["shared-tag"],
+      }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
       await tx.commit();
@@ -3052,7 +3008,7 @@ describe("wish built-in", () => {
       });
 
       favoritesCell.set([
-        { cell: authItem, tag: "#googleAuth" },
+        { cell: authItem, tags: ["googleauth"] },
       ]);
       (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -3116,8 +3072,8 @@ describe("wish built-in", () => {
       favoriteItem2.set({ name: "Different item" });
 
       favoritesCell.set([
-        { cell: favoriteItem1, tag: "#myTag #awesome" },
-        { cell: favoriteItem2, tag: "no hashtag here" },
+        { cell: favoriteItem1, tags: ["mytag", "awesome"] },
+        { cell: favoriteItem2, tags: [] },
       ]);
       (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -3178,7 +3134,7 @@ describe("wish built-in", () => {
       );
       const favoritesCell = defaultPatternCell.key("favorites");
       favoritesCell.set([
-        { cell: pieceCell, tag: "#counterPiece test piece" },
+        { cell: pieceCell, tags: ["counterpiece"] },
       ]);
       (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 

@@ -2691,7 +2691,7 @@ Deno.test("wish home-space output is at least user scoped", async () => {
     );
     favoriteItem.set({ name: "Favorite" });
     defaultPatternCell.key("favorites").set([
-      { cell: favoriteItem, tag: "#favorite" },
+      { cell: favoriteItem, tags: ["favorite"] },
     ]);
     homeSpaceCell.key("defaultPattern").set(defaultPatternCell);
 
@@ -2720,7 +2720,7 @@ Deno.test("wish home-space output is at least user scoped", async () => {
     assertEquals(favoritesLink?.scope, "user");
     assertEquals(
       result.key("favorites").key("result").get() as unknown,
-      [{ cell: favoriteItem.get(), tag: "#favorite" }],
+      [{ cell: favoriteItem.get(), tags: ["favorite"] }],
     );
   } finally {
     await runtime.dispose();

@@ -54,12 +54,6 @@ const RECORD_VALUED_KEYWORDS = new Set<string>([
  * Reads the structured `tags` fields emitted by the schema generator,
  * aggregated across the schema tree (root and nested schemas), lowercased
  * and deduplicated.
- *
- * Schemas generated before structured tags carry hashtags only in
- * description text. When no structured `tags` field is present anywhere in
- * the tree, falls back to extracting hashtags from the serialized schema.
- * TODO(remove-legacy-tags): drop the serialized-text fallback once stored
- * schemas predating structured tags have been regenerated.
  */
 export function tagsFromSchema(
   schema: JSONSchema | undefined | null,
@@ -99,11 +93,5 @@ export function tagsFromSchema(
   };
 
   visit(schema);
-  if (tags.length > 0) return tags;
-
-  // Legacy fallback: hashtags embedded in description text of schemas that
-  // predate the structured `tags` field.
-  // TODO(remove-legacy-tags): remove once stored schemas have been
-  // regenerated with structured tags.
-  return extractHashtags(JSON.stringify(schema));
+  return tags;
 }

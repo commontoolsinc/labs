@@ -7,7 +7,6 @@ import {
 } from "@commonfabric/api";
 import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
-import { extractHashtags } from "@commonfabric/data-model/schema-tags";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
@@ -461,13 +460,7 @@ function searchFavoritesForHashtag(
           if (t.toLowerCase() === searchTermWithoutHash) return true;
         }
         // Match the discovery tags snapshotted when favorited.
-        // TODO(remove-legacy-tags): favorites created before `tags` carry
-        // only the serialized-schema `tag`; extract hashtags from it until
-        // stored favorites have been rewritten.
-        const entryTags = entry.tags?.length
-          ? entry.tags
-          : extractHashtags(entry.tag ?? "");
-        return entryTags.includes(searchTermWithoutHash);
+        return (entry.tags ?? []).includes(searchTermWithoutHash);
       }),
   );
 
@@ -756,13 +749,7 @@ function resolveHomeSpaceTarget(
         }
 
         // Match the discovery tags snapshotted when favorited.
-        // TODO(remove-legacy-tags): favorites created before `tags` carry
-        // only the serialized-schema `tag`; extract hashtags from it until
-        // stored favorites have been rewritten.
-        const entryTags = entry.tags?.length
-          ? entry.tags
-          : extractHashtags(entry.tag ?? "");
-        return entryTags.some((t) => t.includes(searchTerm));
+        return (entry.tags ?? []).some((t) => t.includes(searchTerm));
       });
 
       if (!match) {

@@ -25,9 +25,6 @@ type Favorite = {
   cell: { [NAME]?: string };
   // Discovery tags snapshotted from the piece's schema when favorited.
   tags: string[];
-  // Serialized schema of the piece; replaced by `tags`.
-  // TODO(remove-legacy-tags): drop once stored favorites carry `tags`.
-  tag?: string;
   userTags: string[];
   spaceName?: string;
 };

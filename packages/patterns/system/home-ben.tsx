@@ -17,9 +17,6 @@ type Favorite = {
   cell: { [NAME]?: string };
   // Discovery tags snapshotted from the piece's schema when favorited.
   tags: string[];
-  // Serialized schema of the piece; replaced by `tags`.
-  // TODO(remove-legacy-tags): drop once stored favorites carry `tags`.
-  tag?: string;
   userTags: string[];
   spaceName?: string;
 };
@@ -93,19 +90,6 @@ function captureSnapshot(
   return { name, schemaTag: schemaTag || "", valueExcerpt };
 }
 
-/**
- * Extract hashtags from a legacy serialized-schema tag string.
- * TODO(remove-legacy-tags): drop once stored favorites carry `tags`.
- */
-function extractTags(schemaTag: string): string[] {
-  const tags: string[] = [];
-  const hashtagMatches = schemaTag.match(/#([a-z0-9-]+)/gi);
-  if (hashtagMatches) {
-    tags.push(...hashtagMatches.map((t) => t.toLowerCase()));
-  }
-  return tags;
-}
-
 // Handler to add a favorite
 const addFavorite = handler<
   { piece: Writable<{ [NAME]?: string }>; tags?: string[]; spaceName?: string },
@@ -147,12 +131,7 @@ const removeFavorite = handler<
 >(({ piece }, { favorites, journal }) => {
   const favorite = favorites.get().find((f) => f && equals(f.cell, piece));
   if (favorite) {
-    // TODO(remove-legacy-tags): favorites created before `tags` carry only
-    // the serialized-schema `tag`; extract hashtags from it until stored
-    // favorites have been rewritten.
-    const hashTags = favorite.tags?.length
-      ? favorite.tags.map((t) => `#${t}`)
-      : extractTags(favorite.tag || "");
+    const hashTags = (favorite.tags ?? []).map((t) => `#${t}`);
 
     // Capture snapshot before removing
     const snapshot = captureSnapshot(

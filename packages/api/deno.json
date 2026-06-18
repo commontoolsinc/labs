@@ -1,7 +1,7 @@
 {
   "name": "@commonfabric/api",
   "tasks": {
-    "test": "echo 'No tests to run.'"
+    "test": "deno test --allow-read"
   },
   "exports": {
     ".": "./index.ts",
