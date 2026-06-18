@@ -160,6 +160,10 @@ export class Client {
         (error as Error & { precondition?: string }).precondition =
           result.error.precondition;
       }
+      if (result.error.retryAfterSeq !== undefined) {
+        (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
+          result.error.retryAfterSeq;
+      }
       throw error;
     }
     return result.ok as Result;
@@ -388,6 +392,10 @@ export class SpaceSession {
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
+  #serverSeqWaiters: {
+    seq: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
 
   constructor(
     private readonly client: Client,
@@ -704,6 +712,7 @@ export class SpaceSession {
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(new Error("memory session closed"));
     }
+    this.rejectServerSeqWaiters(this.#closeError);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -723,6 +732,7 @@ export class SpaceSession {
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
     }
+    this.rejectServerSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -806,6 +816,39 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
+    const ready: PromiseWithResolvers<void>[] = [];
+    this.#serverSeqWaiters = this.#serverSeqWaiters.filter((waiter) => {
+      if (waiter.seq <= this.#serverSeq) {
+        ready.push(waiter.pending);
+        return false;
+      }
+      return true;
+    });
+    for (const pending of ready) {
+      pending.resolve();
+    }
+  }
+
+  private waitForServerSeq(seq: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(
+        this.#closeError ?? new Error("memory session closed"),
+      );
+    }
+    if (this.#serverSeq >= seq) {
+      return Promise.resolve();
+    }
+    const pending = Promise.withResolvers<void>();
+    this.#serverSeqWaiters.push({ seq, pending });
+    return pending.promise;
+  }
+
+  private rejectServerSeqWaiters(error: Error | null): void {
+    const waiters = this.#serverSeqWaiters;
+    this.#serverSeqWaiters = [];
+    for (const waiter of waiters) {
+      waiter.pending.reject(error ?? new Error("memory session closed"));
+    }
   }
 
   private async reopen(): Promise<SessionOpenResult> {
@@ -902,6 +945,9 @@ export class SpaceSession {
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
           this.#outstandingCommits.delete(localSeq);
         }
+        if (isRetryableConflict(error)) {
+          error.readyToRetry = () => this.waitForServerSeq(error.retryAfterSeq);
+        }
         pendingCommit.pending.reject(
           error instanceof Error ? error : new Error(String(error)),
         );
@@ -910,6 +956,17 @@ export class SpaceSession {
     this.queueBackground(task);
     return task;
   }
+}
+
+type RetryableConflictError = Error & {
+  name: "ConflictError";
+  retryAfterSeq: number;
+  readyToRetry?: () => Promise<void>;
+};
+
+function isRetryableConflict(error: unknown): error is RetryableConflictError {
+  return error instanceof Error && error.name === "ConflictError" &&
+    typeof (error as { retryAfterSeq?: unknown }).retryAfterSeq === "number";
 }
 
 export class WatchView {

@@ -248,6 +248,163 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
   }
 });
 
+Deno.test("memory v2 client conflict errors expose readiness after caught-up sync", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-conflict-ready-to-retry"),
+    subscriptionRefreshDelayMs: 20,
+  });
+  const client = await connect({
+    transport: loopback(server),
+  });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-client-conflict-ready-to-retry",
+  );
+
+  try {
+    await session.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: { value: { version: 1 } },
+      }],
+    });
+    await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: { value: { version: 3 } },
+      }],
+    });
+
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 3,
+          reads: {
+            confirmed: [{
+              id: "of:doc:1",
+              path: toDocumentPath([]),
+              seq: 1,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:doc:1",
+            value: { value: { version: 2 } },
+          }],
+        }),
+      Error,
+      "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+    );
+
+    assertEquals(error.name, "ConflictError");
+    assertEquals(
+      (error as Error & { retryAfterSeq?: number }).retryAfterSeq,
+      2,
+    );
+    const readyToRetry = (error as Error & {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    await readyToRetry();
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 client readyToRetry waits for caught-up session effect", async () => {
+  const transport = new ConflictReadyTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-memory-v2-ready-delay");
+
+  try {
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:doc:1",
+            value: { value: { version: 2 } },
+          }],
+        }),
+      Error,
+      "conflict",
+    );
+    const readyToRetry = (error as Error & {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+
+    let ready = false;
+    const readyPromise = readyToRetry().then(() => {
+      ready = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    assertEquals(ready, false);
+
+    transport.emitCatchUp();
+    await readyPromise;
+    assertEquals(ready, true);
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client readyToRetry rejects after session close", async () => {
+  const transport = new ConflictReadyTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-memory-v2-ready-close");
+
+  const error = await assertRejects(
+    () =>
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 2 } },
+        }],
+      }),
+    Error,
+    "conflict",
+  );
+  const readyToRetry = (error as Error & {
+    readyToRetry?: () => Promise<void>;
+  }).readyToRetry;
+  assertExists(readyToRetry);
+
+  await client.close();
+  await assertRejects(
+    () => readyToRetry(),
+    Error,
+    "memory session closed",
+  );
+});
+
 Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   const transport = new AckCountingTransport();
   const client = await connect({ transport });
@@ -719,6 +876,89 @@ class DelayedTransactTransport implements Transport {
   releaseNext(): void {
     const next = this.#heldResponses.shift();
     next?.();
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+class ConflictReadyTransport implements Transport {
+  #receiver: (payload: string) => void = () => {};
+  #space = "";
+  #sessionId = "session:conflict-ready";
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(): void {}
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+      space?: string;
+    };
+    if (message.space !== undefined) {
+      this.#space = message.space;
+    }
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: this.#sessionId,
+            sessionToken: "token:conflict-ready",
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { serverSeq: 2 },
+        });
+        return Promise.resolve();
+      case "transact":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          error: {
+            name: "ConflictError",
+            message: "conflict",
+            retryAfterSeq: 2,
+          },
+        });
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled conflict-ready message: ${message.type}`);
+    }
+  }
+
+  emitCatchUp(): void {
+    this.#respond({
+      type: "session/effect",
+      space: this.#space,
+      sessionId: this.#sessionId,
+      effect: {
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 2,
+        upserts: [],
+        removes: [],
+      },
+    });
   }
 
   close(): Promise<void> {
