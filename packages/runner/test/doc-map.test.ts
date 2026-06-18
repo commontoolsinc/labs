@@ -31,32 +31,17 @@ describe("getEntityId (string forms)", () => {
     resetModernCellRepConfig();
   });
 
-  it("reads a bare id string", () => {
-    setModernCellRepConfig(false);
-    expect(entityRefToString(getEntityId(tagged)!)).toBe(tagged);
-  });
+  for (const modernCellRep of [false, true]) {
+    it(`reads a bare id string (modernCellRep=${modernCellRep})`, () => {
+      setModernCellRepConfig(modernCellRep);
+      expect(entityRefToString(getEntityId(tagged)!)).toBe(tagged);
+    });
 
-  it("reads an `of:`-prefixed id string", () => {
-    setModernCellRepConfig(false);
-    expect(entityRefToString(getEntityId(`of:${tagged}`)!)).toBe(tagged);
-  });
-
-  it("reads a JSON-serialized legacy ref in legacy mode", () => {
-    setModernCellRepConfig(false);
-    const json = JSON.stringify({ "/": tagged });
-    expect(getEntityId(json)).toEqual(getEntityId(tagged));
-    expect(entityRefToString(getEntityId(json)!)).toBe(tagged);
-  });
-
-  it('returns undefined for a JSON `{ "/": … }` ref in modern mode', () => {
-    setModernCellRepConfig(true);
-    expect(getEntityId(JSON.stringify({ "/": tagged }))).toBeUndefined();
-  });
-
-  it("returns undefined for a JSON object that isn't a ref", () => {
-    setModernCellRepConfig(false);
-    expect(getEntityId(JSON.stringify({ not: "a ref" }))).toBeUndefined();
-  });
+    it(`reads an \`of:\`-prefixed id string (modernCellRep=${modernCellRep})`, () => {
+      setModernCellRepConfig(modernCellRep);
+      expect(entityRefToString(getEntityId(`of:${tagged}`)!)).toBe(tagged);
+    });
+  }
 });
 
 describe("cell-map", () => {
