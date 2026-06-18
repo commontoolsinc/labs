@@ -1,4 +1,4 @@
-import { CFC_CONCEPT_KIND, type CfcAtom, cfcAtom } from "../api-cfc.ts";
+import { CFC_CONCEPT_KIND, type CfcAtom, cfcAtom } from "commonfabric/cfc";
 
 export const DEFAULT_PROMPT_INJECTION_RISK_KIND =
   CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened;

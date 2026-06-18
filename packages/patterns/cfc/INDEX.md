@@ -36,7 +36,7 @@ trusted UI action.
 
 ## Shared Atom Vocabulary
 
-From `api-cfc.ts`:
+From `commonfabric/cfc`:
 
 - `CFC_ATOM_TYPE`
 - `CFC_CONCEPT_KIND`

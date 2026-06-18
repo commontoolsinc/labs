@@ -299,10 +299,9 @@ When adding a new atom helper, mirror the atom registry name and parameters.
 Prefer required parameters over optional defaults unless the default is an
 official concept URI or a stable shared profile value.
 
-Common atom type URLs and generic builders live in `packages/api/cfc.ts`. Shared
-helpers under `packages/patterns/cfc/` should import them through the local
-`api-cfc.ts` symlink until pattern imports can address the API CFC module
-directly.
+Common atom type URLs and generic builders live in the public
+`commonfabric/cfc` module. Shared helpers under `packages/patterns/cfc/` should
+import that module instead of spelling atom `type` URLs by hand.
 
 ### Schema Builders
 

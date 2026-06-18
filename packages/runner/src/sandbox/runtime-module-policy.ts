@@ -2,11 +2,13 @@ import { parseFabricRef } from "./fabric-import-specifier.ts";
 
 export type RuntimeModuleIdentifier =
   | "commonfabric"
+  | "commonfabric/cfc"
   | "commonfabric/schema"
   | "turndown";
 
 export const RuntimeModuleIdentifiers = [
   "commonfabric",
+  "commonfabric/cfc",
   "commonfabric/schema",
   "turndown",
 ] as const satisfies readonly RuntimeModuleIdentifier[];
