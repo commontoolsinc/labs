@@ -32,7 +32,7 @@ export function createOAuth2Routes(providerName: string) {
               .openapi({
                 example: {
                   authCellId:
-                    '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
+                    '{"/" : {"link@1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
                   integrationPieceId: "integration-piece-123",
                 },
               }),
@@ -194,7 +194,7 @@ export function createOAuth2Routes(providerName: string) {
               .openapi({
                 example: {
                   authCellId:
-                    '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
+                    '{"/" : {"link@1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
                 },
               }),
           },
