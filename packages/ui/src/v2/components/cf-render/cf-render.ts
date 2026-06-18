@@ -33,6 +33,24 @@ const DEBUG_LOGGING = false;
 export type UIVariant = "full" | "chip" | "tile";
 
 /**
+ * Normalize the `variant` attribute to the size spectrum. Anything unrecognized
+ * (undefined, legacy values) resolves to "full", the universal floor.
+ */
+export function normalizeVariant(variant: string | undefined): UIVariant {
+  return variant === "chip" ? "chip" : variant === "tile" ? "tile" : "full";
+}
+
+/**
+ * True when a piece output value carries a renderable variant at `key` (e.g.
+ * `"$CHIP_UI"`). Used to decide whether to render the exported variant or fall
+ * over to the platform default.
+ */
+export function hasVariantValue(value: unknown, key: string): boolean {
+  return !!(value && typeof value === "object" &&
+    (value as Record<string, unknown>)[key]);
+}
+
+/**
  * CFRender - Renders a cell that contains a piece pattern with UI
  *
  * @element cf-render
@@ -213,11 +231,7 @@ export class CFRender extends BaseElement {
       }
 
       // Normalize to the size spectrum; anything unknown renders full.
-      const kind: UIVariant = this.variant === "chip"
-        ? "chip"
-        : this.variant === "tile"
-        ? "tile"
-        : "full";
+      const kind = normalizeVariant(this.variant);
 
       // Full is the universal floor: render the piece's [UI] chain directly.
       if (kind === "full") {
@@ -261,9 +275,7 @@ export class CFRender extends BaseElement {
   /** True when the piece output exports a value at `key` (e.g. a variant UI). */
   private _cellHasKey(key: string): boolean {
     try {
-      const value = (this.cell as unknown as { get?: () => unknown }).get?.();
-      return !!(value && typeof value === "object" &&
-        (value as Record<string, unknown>)[key]);
+      return hasVariantValue(this.cell.get(), key);
     } catch {
       return false;
     }

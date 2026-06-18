@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFRender } from "./cf-render.ts";
+import { CFRender, hasVariantValue, normalizeVariant } from "./cf-render.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
 // management, render-into-container) require a real DOM with document.body
@@ -64,6 +64,39 @@ describe("CFRender variant handling", () => {
       element.variant = variant;
       expect(element.variant).toBe(variant);
     }
+  });
+});
+
+describe("normalizeVariant", () => {
+  it("passes through the known spectrum", () => {
+    expect(normalizeVariant("full")).toBe("full");
+    expect(normalizeVariant("chip")).toBe("chip");
+    expect(normalizeVariant("tile")).toBe("tile");
+  });
+
+  it("falls back to full for undefined and unknown/legacy values", () => {
+    expect(normalizeVariant(undefined)).toBe("full");
+    expect(normalizeVariant("")).toBe("full");
+    expect(normalizeVariant("default")).toBe("full");
+    expect(normalizeVariant("preview")).toBe("full");
+    expect(normalizeVariant("embedded")).toBe("full");
+  });
+});
+
+describe("hasVariantValue", () => {
+  it("is true only when the key holds a renderable value", () => {
+    expect(hasVariantValue({ "$CHIP_UI": { type: "vnode" } }, "$CHIP_UI"))
+      .toBe(true);
+    expect(hasVariantValue({ "$UI": {} }, "$TILE_UI")).toBe(false);
+    expect(hasVariantValue({ "$TILE_UI": undefined }, "$TILE_UI")).toBe(false);
+    expect(hasVariantValue({ "$TILE_UI": null }, "$TILE_UI")).toBe(false);
+  });
+
+  it("is false for non-object / empty values (failover to default)", () => {
+    expect(hasVariantValue(undefined, "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue(null, "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue("nope", "$CHIP_UI")).toBe(false);
+    expect(hasVariantValue({}, "$CHIP_UI")).toBe(false);
   });
 });
 

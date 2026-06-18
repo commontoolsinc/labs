@@ -52,7 +52,7 @@ export interface NoteOutput extends NotePiece {
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
-  /** Minimal UI for embedding in containers like Record. Use via cf-render variant="embedded". */
+  /** Minimal UI for embedding in containers like Record (read directly as `.embeddedUI`). */
   embeddedUI: VNode;
   // Test-accessible state
   menuOpen: boolean;
