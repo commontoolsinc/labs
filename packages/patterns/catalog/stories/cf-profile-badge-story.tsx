@@ -173,7 +173,7 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           carry the same seal: <code>full</code> is an avatar + name pill;{" "}
           <code>chip</code> is a compact name + seal dot for inline use;{" "}
           <code>circle</code>{" "}
-          is avatar + seal ring only (name on hover / for screen readers);
+          is avatar + seal ring only (name on hover / for screen readers);{" "}
           <code>hero</code>{" "}
           is a large avatar-over-name for a profile page header.
         </span>
