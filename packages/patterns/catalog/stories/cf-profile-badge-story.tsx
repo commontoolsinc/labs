@@ -164,16 +164,18 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
         >
           Avatar paths shown: image (Ada), emoji (Grace), initials (Alan). The
           verification signal is the generative seal — a DID-derived aura ring
-          plus a cursor-reactive glint (there is no shield icon). It only renders
-          for a runtime-attested profile (a “represents-principal” CFC label),
-          which this story can’t mint, so these badges stay in the plain
-          “presented” state. Hover or focus a badge to see its tooltip (CT-1648):
-          Ada has a bio + 3 pinned pieces, Grace has a bio only, and Alan — with
-          neither — shows no tooltip. The variants (CT-1761) all carry the same
-          seal: <code>full</code> is an avatar + name pill; <code>chip</code> is a
-          compact name + seal dot for inline use; <code>circle</code> is
-          avatar + seal ring only (name on hover / for screen readers);
-          <code>hero</code> is a large avatar-over-name for a profile page header.
+          plus a cursor-reactive glint (there is no shield icon). It only
+          renders for a runtime-attested profile (a “represents-principal” CFC
+          label), which this story can’t mint, so these badges stay in the plain
+          “presented” state. Hover or focus a badge to see its tooltip
+          (CT-1648): Ada has a bio + 3 pinned pieces, Grace has a bio only, and
+          Alan — with neither — shows no tooltip. The variants (CT-1761) all
+          carry the same seal: <code>full</code> is an avatar + name pill;{" "}
+          <code>chip</code> is a compact name + seal dot for inline use;{" "}
+          <code>circle</code>{" "}
+          is avatar + seal ring only (name on hover / for screen readers);
+          <code>hero</code>{" "}
+          is a large avatar-over-name for a profile page header.
         </span>
       </div>
     ),
