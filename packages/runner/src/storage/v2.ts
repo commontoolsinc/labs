@@ -1885,6 +1885,7 @@ class SpaceReplica implements ISpaceReplica {
           touched.map(({ id, scope }) => snapshotState(this, id, scope)),
         )
         : undefined;
+      await this.waitForConflictReadRepair(rejection);
       this.dropPending(localSeq);
       if (before !== undefined) {
         const changes = before.compare(this);
@@ -2058,6 +2059,26 @@ class SpaceReplica implements ISpaceReplica {
       await readyToRetry();
       await this.waitForCaughtUpLocalSeq(localSeq);
     };
+  }
+
+  private async waitForConflictReadRepair(
+    rejection: StorageTransactionRejected,
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const readyToRetry = rejection.readyToRetry;
+    if (readyToRetry === undefined) {
+      return;
+    }
+    try {
+      await readyToRetry();
+    } catch (error) {
+      logger.warn("conflict-read-repair", () => [
+        "readyToRetry rejected while preserving original conflict result",
+        error,
+      ]);
+    }
   }
 
   private record(id: URI, scope?: CellScope): DocumentRecord {
