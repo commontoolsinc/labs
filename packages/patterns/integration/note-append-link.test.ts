@@ -1,3 +1,16 @@
+/**
+ * Verifies that a piece id seen from *inside* a pattern corresponds to the same
+ * piece id seen from *outside* it.
+ *
+ * The note pattern's `appendLink` builds a `[[name (id)]]` wiki-link whose id is
+ * derived internally — `entityRefToString` over a cell's `entityId`. This test
+ * invokes `appendLink` from outside the pattern and asserts the embedded id is
+ * exactly `target.id`, the same piece's id as reported by `create` (the
+ * runtime's external-facing identity). It thus guards against the in-pattern id
+ * being self-consistent yet disagreeing with the external view — a mismatch an
+ * in-pattern assertion can't catch, since it only has the same internal
+ * machinery to recompute the id with.
+ */
 import { env } from "@commonfabric/integration";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
