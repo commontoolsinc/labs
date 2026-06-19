@@ -103,17 +103,15 @@ export class CFWebhook extends BaseElement {
     this._error = "";
 
     try {
-      const inboxJson = this.inbox?.toJSON?.() as Record<string, unknown>;
-      if (!inboxJson?.["/"]) {
+      if (!this.inbox) {
         throw new Error("inbox is not a valid cell link");
       }
-      const cellLink = JSON.stringify(inboxJson);
+      const cellLink = this.inbox.toWireString();
 
-      const configJson = this.config?.toJSON?.() as Record<string, unknown>;
-      if (!configJson?.["/"]) {
+      if (!this.config) {
         throw new Error("config is not a valid cell link");
       }
-      const confidentialCellLink = JSON.stringify(configJson);
+      const confidentialCellLink = this.config.toWireString();
 
       const response = await fetch("/api/webhooks", {
         method: "POST",
@@ -160,10 +158,8 @@ export class CFWebhook extends BaseElement {
     this._error = "";
 
     try {
-      // Extract space DID from inbox cell link for ownership verification
-      const inboxLink = this.inbox?.toJSON?.() as any;
-      const linkData = inboxLink?.["/"]?.["link@1"];
-      const space = linkData?.space ?? "";
+      // Space DID from the inbox handle, for ownership verification.
+      const space = this.inbox?.space() ?? "";
       const params = new URLSearchParams({ space });
 
       const response = await fetch(

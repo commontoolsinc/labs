@@ -9,6 +9,10 @@ import {
   type RuntimeClient,
 } from "./mod.ts";
 import { cellRefToKey } from "./shared/utils.ts";
+import {
+  seemsLikeJsonEncodedFabricValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {
@@ -138,6 +142,28 @@ describe("CellHandle CFC label IPC", () => {
         },
       },
     });
+  });
+
+  it("encodes its link to a codec wire string that round-trips", () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle(runtime, {
+      id: "of:wire-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+    } as CellRef);
+
+    const wire = cell.toWireString();
+    // It's the codec form, not raw JSON.
+    expect(seemsLikeJsonEncodedFabricValue(wire)).toBe(true);
+    // ...and decodes back to the same link toJSON() produces.
+    expect(valueFromJson(wire)).toEqual(cell.toJSON());
   });
 
   it("uses carried label views in subscription keys", () => {
