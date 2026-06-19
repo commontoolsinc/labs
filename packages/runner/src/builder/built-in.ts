@@ -329,7 +329,7 @@ export function uiVariant(
   piece: Opaque<unknown>,
   kind: UIVariantKind = "full",
 ): VNode {
-  return h("cf-render", { variant: kind, $cell: piece }) as VNode;
+  return h("cf-render", { variant: kind, $cell: piece });
 }
 
 export const navigateTo = createNodeFactory({
