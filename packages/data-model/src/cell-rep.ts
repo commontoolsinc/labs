@@ -6,6 +6,7 @@
 
 import { isRecord } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
+import type { FabricValue } from "@/interface.ts";
 
 //
 // Configuration flags
@@ -120,14 +121,19 @@ export const LINK_V1_TAG = "link@1" as const;
  * localized edit here rather than a tree-wide change.
  *
  * When that dispatch lands, this type becomes a union (`FabricLink | { "/": …
- * }`) mirroring {@link EntityRef}. `Inner` is left open so this layer needn't
- * know the link payload's field types (URI / MemorySpace / JSONSchema — those
- * stay in `runner`).
+ * }`) mirroring {@link EntityRef}. `Inner` is bounded by {@link FabricValue}
+ * (the payload is stored/serialized fabric data) but otherwise open, so this
+ * layer needn't know the exact field types (URI / MemorySpace / JSONSchema —
+ * those stay in `runner`).
  */
-export type LinkRef<Inner = unknown> = { "/": { [LINK_V1_TAG]: Inner } };
+export type LinkRef<Inner extends FabricValue> = {
+  "/": { [LINK_V1_TAG]: Inner };
+};
 
 /** Wraps a link payload in the link-ref envelope. */
-export function linkRefFrom<Inner>(inner: Inner): LinkRef<Inner> {
+export function linkRefFrom<Inner extends FabricValue>(
+  inner: Inner,
+): LinkRef<Inner> {
   return { "/": { [LINK_V1_TAG]: inner } };
 }
 
@@ -135,7 +141,7 @@ export function linkRefFrom<Inner>(inner: Inner): LinkRef<Inner> {
  * Recognizes a {@link LinkRef}: the `{ "/": { "link@1": … } }` envelope, no
  * other props.
  */
-export function isLinkRef(value: unknown): value is LinkRef {
+export function isLinkRef(value: unknown): value is LinkRef<FabricValue> {
   return isRecord(value) &&
     Object.keys(value).length === 1 &&
     isRecord(value["/"]) &&
@@ -146,7 +152,9 @@ export function isLinkRef(value: unknown): value is LinkRef {
  * Extracts the inner link payload from a {@link LinkRef}. Throws if the value
  * is not a link reference.
  */
-export function linkRefInner<Inner = unknown>(value: LinkRef<Inner>): Inner {
+export function linkRefInner<Inner extends FabricValue>(
+  value: LinkRef<Inner>,
+): Inner {
   if (isLinkRef(value)) return value["/"][LINK_V1_TAG] as Inner;
   throw new Error("Not a link reference.");
 }
