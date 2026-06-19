@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { cellRefInner, isCellRef } from "@commonfabric/data-model/cell-rep";
+import { isLinkRef, linkRefInner } from "@commonfabric/data-model/cell-rep";
 import {
   type CellScope,
   type JSONSchema,
@@ -89,7 +89,7 @@ export type PrimitiveCellLink =
   | LegacyAlias; // @deprecated
 
 export function isSigilLink(value: any): value is SigilLink {
-  return isCellRef(value);
+  return isLinkRef(value);
 }
 
 export function isPrimitiveCellLink(
@@ -143,7 +143,7 @@ export function isWriteRedirectLink(
 
   // Check new sigil format (link@1 with overwrite field)
   if (isSigilLink(value)) {
-    return cellRefInner(value).overwrite === "redirect";
+    return linkRefInner(value).overwrite === "redirect";
   }
 
   return false;
@@ -172,7 +172,7 @@ export function parseLinkPrimitive(
   base?: NormalizedLink,
 ): NormalizedLink {
   if (isSigilLink(value)) {
-    const link = cellRefInner(value);
+    const link = linkRefInner(value);
 
     // Resolve relative references
     let id = link.id;

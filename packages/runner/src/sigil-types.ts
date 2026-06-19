@@ -1,7 +1,7 @@
 import type { JSONSchema, JSONValue, LinkScope } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "@commonfabric/memory/interface";
-import { type CellRef, LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
+import { LINK_V1_TAG, type LinkRef } from "@commonfabric/data-model/cell-rep";
 
 export type { URI } from "@commonfabric/memory/interface";
 
@@ -14,7 +14,7 @@ export type SigilValue<T> = { "/": T };
  * Link sigil value v1
  */
 
-// The cell-ref envelope (`{ "/": { "link@1": … } }`) and its tag are owned by
+// The link-ref envelope (`{ "/": { "link@1": … } }`) and its tag are owned by
 // `data-model/cell-rep`, the chokepoint that will later flag-dispatch the form.
 // Re-exported here (the historical home) for existing importers.
 export { LINK_V1_TAG };
@@ -41,13 +41,13 @@ export type WriteRedirectV1 = LinkV1 & {
 /**
  * Sigil link type.
  *
- * Transitional alias for {@link CellRef}: structurally the same envelope, but
+ * Transitional alias for {@link LinkRef}: structurally the same envelope, but
  * named through the chokepoint that will later flag-dispatch the form. Once a
  * modern (non-envelope) representation exists, `SigilLink` (which _is_ the
- * envelope) and `CellRef` (which spans both forms) diverge and this alias gets
+ * envelope) and `LinkRef` (which spans both forms) diverge and this alias gets
  * cleaned up.
  */
-export type SigilLink = CellRef<LinkV1Inner>;
+export type SigilLink = LinkRef<LinkV1Inner>;
 /**
  * Sigil alias type - uses LinkV1 with overwrite field
  */

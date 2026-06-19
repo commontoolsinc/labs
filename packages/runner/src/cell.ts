@@ -13,10 +13,10 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
-  cellRefFrom,
-  cellRefInner,
   type EntityRef,
   entityRefFromString,
+  linkRefFrom,
+  linkRefInner,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
@@ -2741,7 +2741,7 @@ export function convertCellsToLinks(
   seen: Map<any, string[]> = new Map(),
 ): any {
   if (seen.has(value)) {
-    return cellRefFrom({ path: seen.get(value) });
+    return linkRefFrom({ path: seen.get(value) });
   }
 
   // Early-return cases
@@ -2751,7 +2751,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(cell);
       if (cfcLabelView) {
-        (cellRefInner(link) as { cfcLabelView?: CfcLabelView })
+        (linkRefInner(link) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView = cfcLabelView;
       }
     }
@@ -2761,7 +2761,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(value);
       if (cfcLabelView) {
-        (cellRefInner(link) as { cfcLabelView?: CfcLabelView })
+        (linkRefInner(link) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView = cfcLabelView;
       }
     }

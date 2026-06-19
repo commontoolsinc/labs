@@ -15,8 +15,8 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  cellRefInner,
   getModernCellRepConfig,
+  linkRefInner,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -934,7 +934,7 @@ export class Runtime {
   ): Cell<any> {
     const carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
-        ? (cellRefInner(cellLink) as { cfcLabelView?: CfcLabelView })
+        ? (linkRefInner(cellLink) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView
         : isNormalizedFullLink(cellLink)
         ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })

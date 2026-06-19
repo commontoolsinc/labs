@@ -2,7 +2,7 @@ import {
   type FabricValue,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
-import { cellRefFrom } from "@commonfabric/data-model/cell-rep";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -35,7 +35,7 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
 }
 
 export function getSigilLink(id: URI): SigilLink {
-  return cellRefFrom({ id });
+  return linkRefFrom({ id });
 }
 
 export function describePatternOrModule(
