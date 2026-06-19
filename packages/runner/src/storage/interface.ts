@@ -1,5 +1,9 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { CellScope } from "@commonfabric/api";
+import type {
+  CellScope,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import type {
   CommitPrecondition,
   EntityDocument,
@@ -13,7 +17,6 @@ import type {
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   type Assertion,
   type AuthorizationError as IAuthorizationError,
