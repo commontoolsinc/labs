@@ -22,6 +22,7 @@ import {
 } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
+import { hasIncompleteUpload, toSendAttachment } from "./send-attachments.ts";
 import "../cf-button/cf-button.ts";
 import "../cf-chip/cf-chip.ts";
 import "../cf-voice-input/cf-voice-input.ts";
@@ -541,22 +542,33 @@ export class CFPromptInput extends BaseElement {
       }
     }
 
-    // Emit a lightweight, serializable view of each attachment. The raw
-    // File/Blob `data` and the local `previewUrl` (a blob: URL) must NOT cross
-    // to a consumer — and a non-cloneable File in the event detail can drop the
-    // whole attachment when it's structured-cloned into a sandboxed handler,
-    // which is exactly what silently lost the uploaded `url`. The blob `url` is
-    // what the consumer needs.
-    const attachments = Array.from(this.attachments.values()).map((a) => ({
-      id: a.id,
-      name: a.name,
-      type: a.type,
-      url: a.url,
-      mediaType: a.mediaType,
-      size: a.size,
-      uploading: a.uploading,
-      error: a.error,
-    }));
+    // Block the send if any opted-in upload failed or never produced a `url`.
+    // Emitting it would hand the consumer an attachment with neither a usable
+    // `url` nor the raw bytes (the upload consumed them) — silent data loss. We
+    // keep the textarea + attachments intact so the user can retry or remove;
+    // the failing pill already shows a ⚠️ with the error and a remove button.
+    const hasContext = !!(this.runtime && this.space);
+    if (
+      hasIncompleteUpload(this.attachments.values(), {
+        uploadAttachments: this.uploadAttachments,
+        hasContext,
+      })
+    ) {
+      this.requestUpdate();
+      return;
+    }
+
+    // Emit a serializable view of each attachment (see toSendAttachment): the
+    // raw `data` is dropped ONLY for a successfully-uploaded blob (the consumer
+    // uses its `url`; a non-cloneable File would be dropped by structured-clone
+    // into a sandboxed handler, which silently lost the uploaded `url`). For
+    // non-uploaded attachments — upload off, no runtime/space, or string
+    // clipboard content — `data` is preserved so default-off consumers are
+    // unaffected (backward compatible). `previewUrl` (a local blob: URL) is
+    // never emitted.
+    const attachments = Array.from(this.attachments.values()).map(
+      toSendAttachment,
+    );
 
     // Clear the textarea and attachments
     textarea.value = "";
