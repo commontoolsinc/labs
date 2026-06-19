@@ -1961,6 +1961,11 @@
           "npm:@lit/task@^1.0.2"
         ]
       },
+      "packages/static": {
+        "dependencies": [
+          "npm:typescript@*"
+        ]
+      },
       "packages/test-support": {
         "dependencies": [
           "npm:typescript@*"
