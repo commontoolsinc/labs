@@ -392,10 +392,6 @@ export class SpaceSession {
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
-  #serverSeqWaiters: {
-    seq: number;
-    pending: PromiseWithResolvers<void>;
-  }[] = [];
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -723,7 +719,6 @@ export class SpaceSession {
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(new Error("memory session closed"));
     }
-    this.rejectServerSeqWaiters(this.#closeError);
     this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
@@ -744,7 +739,6 @@ export class SpaceSession {
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
     }
-    this.rejectServerSeqWaiters(error);
     this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
@@ -829,17 +823,6 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
-    const ready: PromiseWithResolvers<void>[] = [];
-    this.#serverSeqWaiters = this.#serverSeqWaiters.filter((waiter) => {
-      if (waiter.seq <= this.#serverSeq) {
-        ready.push(waiter.pending);
-        return false;
-      }
-      return true;
-    });
-    for (const pending of ready) {
-      pending.resolve();
-    }
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -862,20 +845,6 @@ export class SpaceSession {
     }
   }
 
-  private waitForServerSeq(seq: number): Promise<void> {
-    if (this.#closed) {
-      return Promise.reject(
-        this.#closeError ?? new Error("memory session closed"),
-      );
-    }
-    if (this.#serverSeq >= seq) {
-      return Promise.resolve();
-    }
-    const pending = Promise.withResolvers<void>();
-    this.#serverSeqWaiters.push({ seq, pending });
-    return pending.promise;
-  }
-
   private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
     if (this.#closed) {
       return Promise.reject(
@@ -888,14 +857,6 @@ export class SpaceSession {
     const pending = Promise.withResolvers<void>();
     this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
     return pending.promise;
-  }
-
-  private rejectServerSeqWaiters(error: Error | null): void {
-    const waiters = this.#serverSeqWaiters;
-    this.#serverSeqWaiters = [];
-    for (const waiter of waiters) {
-      waiter.pending.reject(error ?? new Error("memory session closed"));
-    }
   }
 
   private rejectCaughtUpLocalSeqWaiters(error: Error | null): void {

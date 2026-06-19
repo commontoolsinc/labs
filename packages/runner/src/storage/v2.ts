@@ -6,7 +6,6 @@ import {
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
-  type Entity,
   type FabricValue,
   type MemorySpace,
   type MIME,
@@ -2355,6 +2354,8 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
+    const firstOperation = (commit as Partial<NativeStorageCommit>)
+      .operations?.[0];
     const rejected: IConflictError = {
       name: "ConflictError",
       message,
@@ -2362,7 +2363,7 @@ const toRejectedError = (
       conflict: {
         space: "" as MemorySpace,
         the: DOCUMENT_MIME,
-        of: conflictEntity(commit),
+        of: firstOperation?.id ?? "of:unknown",
         expected: null,
         actual: null,
         existsInHistory: false,
@@ -2388,18 +2389,4 @@ const toRejectedError = (
     },
     transaction: commit as Transaction,
   } as unknown as TransactionError;
-};
-
-const conflictEntity = (commit: unknown): Entity => {
-  if (
-    typeof commit === "object" &&
-    commit !== null &&
-    Array.isArray((commit as Partial<NativeStorageCommit>).operations)
-  ) {
-    const first = (commit as Partial<NativeStorageCommit>).operations?.[0];
-    if (first !== undefined) {
-      return first.id;
-    }
-  }
-  return "of:unknown";
 };
