@@ -16,6 +16,7 @@ import {
   rebaseCfcLabelView,
 } from "@commonfabric/runner/cfc/label-view-core";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 import {
@@ -353,6 +354,15 @@ export class CellHandle<T = unknown> {
         cfcLabelView: this.#ref.cfcLabelView,
       }),
     });
+  }
+
+  /**
+   * Encodes this cell's link to a wire string, in the `data-model/codec-json`
+   * (`fvj1:…`) form, for transport across a string boundary (e.g. an HTTP body)
+   * from which it will be decoded back to a link.
+   */
+  toWireString(): string {
+    return jsonFromValue(this.toJSON());
   }
 
   // Called when cell has been updated from the backend with
