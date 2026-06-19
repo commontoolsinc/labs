@@ -1,18 +1,5 @@
-import * as Path from "@std/path";
 import { AsyncResult, DID, DIDKey } from "./interface.ts";
 import { VerifierIdentity } from "@commonfabric/identity";
-
-/**
- * Returns file URL for the current working directory.
- */
-export const baseURL = () => asDirectory(Path.toFileUrl(Deno.cwd()));
-
-export const createTemporaryDirectory = async () =>
-  asDirectory(Path.toFileUrl(await Deno.makeTempDir()));
-
-export const asDirectory = (
-  url: URL,
-) => (url.href.endsWith("/") ? url : new URL(`${url.href}/`));
 
 const DID_PREFIX = "did:";
 const DID_KEY_PREFIX = `did:key:`;

@@ -4,21 +4,9 @@ import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
-// Backward-compat aliases for branches that still import the older storage
-// naming from the memory package surface.
-export type StorableDatum = FabricValue;
-export type StorableValue = FabricValue;
 export type { FabricValue };
 
 export type { JSONValue };
-export interface Clock {
-  now(): UTCUnixTimestampInSeconds;
-}
-
-export type SubscriberCommand = {
-  watch?: Query;
-  unwatch?: Query;
-};
 
 /**
  * Some principal identified via DID identifier.
@@ -86,17 +74,6 @@ export interface AuthorizationError extends Error {
   name: "AuthorizationError";
 }
 
-export type Call<
-  Ability extends string = The,
-  Of extends DID = DID,
-  Args extends NonNullable<unknown> = NonNullable<unknown>,
-> = {
-  cmd: Ability;
-  sub: Of;
-  args: Command;
-  nonce?: Uint8Array;
-};
-
 export type Command<
   Ability extends string = The,
   Of extends DID = DID,
@@ -134,7 +111,6 @@ export type Invocation<
 export type Delegation = never;
 
 export type UTCUnixTimestampInSeconds = number;
-export type Seconds = number;
 
 export type Protocol<Space extends MemorySpace = MemorySpace> = {
   [Subject in Space]: {
@@ -266,30 +242,6 @@ type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends
   (k: infer I) => void ? I
   : never;
 
-export type Provider<Protocol extends NonNullable<unknown>> = {
-  perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
-};
-
-export interface ConsumerSession<TheProtocol extends Proto>
-  extends
-    TransformStream<
-      ProviderCommand<Protocol>,
-      UCAN<ConsumerCommandInvocation<Protocol>>
-    > {
-}
-
-export interface ProviderChannel<Protocol extends Proto>
-  extends
-    TransformStream<
-      UCAN<ConsumerCommandInvocation<Protocol>>,
-      ProviderCommand<Protocol>
-    > {
-}
-export interface ProviderSession<Protocol extends Proto>
-  extends ProviderChannel<Protocol> {
-  close(): CloseResult;
-}
-
 export type ProviderCommand<Protocol extends Proto> =
   ProtocolMethod<Protocol> extends {
     ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
@@ -314,54 +266,6 @@ export type ConsumerCommandInvocation<
 } ? Method["ConsumerInvocation"]
   : never;
 
-export type ConsumerCommandFor<Ability, Protocol extends Proto> =
-  & MethodFor<
-    Ability,
-    Protocol
-  >["ConsumerCommand"]
-  & { cmd: Ability };
-
-export type ProviderCommandFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["ProviderCommand"];
-
-export type ConsumerInvocationFor<Ability, Protocol extends Proto> =
-  & MethodFor<
-    Ability,
-    Protocol
-  >["ConsumerInvocation"]
-  & { cmd: Ability };
-
-export type ConsumerInputFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["In"];
-
-export type ConsumerEffectFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["Effect"];
-
-export type ConsumerSpaceFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["Of"];
-
-export type MethodFor<
-  Ability,
-  Protocol extends Proto,
-  Case = ProtocolMethod<Protocol>,
-> = Case extends
-  Method<Protocol, Ability & The, infer In, infer Out, infer Effect>
-  ? Method<Protocol, Ability & The, In, Out, Effect>
-  : never;
-
-export type ConsumerResultFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["Out"];
-
 export interface InvocationView<
   Source extends Invocation,
   Return extends NonNullable<unknown>,
@@ -375,32 +279,6 @@ export interface InvocationView<
 }
 
 export type Task<Return, Command = never> = Iterable<Command, Return>;
-
-export type Job<
-  Command extends NonNullable<unknown> = NonNullable<unknown>,
-  Return extends FabricValue = FabricValue,
-  Effect = unknown,
-> = {
-  invoke: Command;
-  return: Return;
-  effect: Effect;
-};
-
-export type WatchTask<Space extends MemorySpace> = Job<
-  { watch: Query<Space>; unwatch?: undefined },
-  QueryResult<Space>,
-  Transaction<Space>
->;
-
-export type UnwatchTask<Space extends MemorySpace> = Job<
-  { unwatch: Query<Space>; watch?: undefined },
-  Unit,
-  never
->;
-
-export type SessionTask<Space extends MemorySpace> =
-  | UnwatchTask<Space>
-  | WatchTask<Space>;
 
 export type Receipt<
   Command extends NonNullable<unknown>,
@@ -434,90 +312,6 @@ export type Return<
   run?: undefined;
 };
 
-export type SubscriptionCommand<Space extends MemorySpace = MemorySpace> = {
-  transact?: Transaction<Space>;
-  brief?: Brief<Space>;
-};
-
-export type Brief<Space extends MemorySpace = MemorySpace> = {
-  sub: Space;
-  args: {
-    selector: Selector;
-    selection: Selection<Space>;
-  };
-  meta?: Meta;
-};
-
-export interface Session<Space extends MemorySpace = MemorySpace> {
-  /**
-   * Transacts can be used to assert or retract a document from the repository.
-   * If `version` asserted / retracted does not match version of the document
-   * transaction fails with `ConflictError`. Otherwise document is updated to
-   * the new value.
-   */
-  transact(transact: Transaction<Space>): TransactionResult<Space>;
-
-  /**
-   * Queries space for matching entities based on provided selector.
-   */
-  query(source: Query<Space>): QueryResult<Space>;
-
-  /**
-   * Queries space for matching entities based on provided selector.
-   */
-  querySchema(source: SchemaQuery<Space>): QueryResult<Space>;
-
-  close(): CloseResult;
-}
-
-export interface SpaceSession<Space extends MemorySpace = MemorySpace>
-  extends Session {
-  subject: Space;
-
-  transact(
-    transact: Transaction<Space>,
-  ): Result<Commit<Space>, ConflictError | TransactionError>;
-  query(source: Query<Space>): Result<Selection<Space>, QueryError>;
-  close(): Result<Unit, SystemError>;
-}
-
-export interface MemorySession<Space extends MemorySpace = MemorySpace>
-  extends Session<Space> {
-  subscribe(subscriber: Subscriber<Space>): SubscribeResult;
-  unsubscribe(subscriber: Subscriber<Space>): SubscribeResult;
-  serviceDid(): DID;
-}
-
-export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  /**
-   * Notifies a subscriber of a commit that has been applied.
-   *
-   * @param commit - The commit data to be processed and broadcast to listeners.
-   * @param labels - Label facts associated with documents in this commit. Used
-   *   to redact classified content before broadcasting to listeners who lack the
-   *   appropriate claims.
-   */
-  commit(
-    commit: Commit<Space>,
-    labels?: FactSelection,
-  ): AwaitResult<Unit, SystemError>;
-
-  close(): AwaitResult<Unit, SystemError>;
-}
-
-export type SubscribeResult = AwaitResult<Unit, SystemError>;
-
-/**
- * Represents a subscription controller that can be used to publish commands or
- * to close subscription.
- */
-export interface SubscriptionController {
-  open: boolean;
-  close(): void;
-  transact(source: Transaction): void;
-  brief(source: Brief): void;
-}
-
 /**
  * Unique identifier for the memory space.
  */
@@ -538,11 +332,6 @@ export type The = MIME;
 export type InvocationURL<T> = `job:${string}` & {
   toString(): InvocationURL<T>;
 };
-
-export interface FactAddress {
-  the: MIME;
-  of: URI;
-}
 
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
@@ -631,24 +420,6 @@ export type State = Fact | Unclaimed;
 
 export type Revision<T = Unit> = T & { since: number };
 
-export type Assert = {
-  assert: Assertion;
-  retract?: undefined;
-  claim?: undefined;
-};
-
-export type Retract = {
-  retract: Retraction;
-  assert?: undefined;
-  claim?: undefined;
-};
-
-export type Claim = {
-  claim: Invariant;
-  assert?: undefined;
-  retract?: undefined;
-};
-
 // This is essentially an OfTheCause tree with one special record whose value is another OfTheCause tree.
 export type Commit<Subject extends string = MemorySpace> = {
   [of in Subject]: {
@@ -670,12 +441,6 @@ export type CommitData = {
   transaction: Transaction;
 };
 
-export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
-  "application/commit+json",
-  Subject,
-  CommitData
->;
-
 // This allows a consumer to check that their entities match the current cause
 // state before making local changes that would be discarded on conflict.
 export type ClaimFact = true;
@@ -685,14 +450,6 @@ export type ClaimFact = true;
 // and previously defaulted to `JSONValue`).
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends FabricValue = FabricValue> = { is: Is };
-// This is the structure of a bunch of our objects
-export type OfTheCause<T> = {
-  [of in URI]: {
-    [the in MIME]: {
-      [cause in CauseString]: T;
-    };
-  };
-};
 
 export type Changes<
   T extends string = MIME,
@@ -758,12 +515,6 @@ export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   Space,
   { changes: Changes }
 >;
-
-export type TransactionResult<Space extends MemorySpace = MemorySpace> =
-  AwaitResult<
-    Commit<Space>,
-    ConflictError | TransactionError | ConnectionError | AuthorizationError
-  >;
 
 export type QueryArgs = { select: Selector; since?: number };
 
@@ -837,26 +588,6 @@ export type Operation =
   | Subscribe
   | Unsubscribe;
 
-export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
-  Selection<Space>,
-  AuthorizationError | QueryError | ConnectionError
->;
-
-export type CloseResult = AwaitResult<Unit, SystemError>;
-
-export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
-
-export type SubscriptionQuery = {
-  iss: DID;
-  sub: MemorySpace;
-  cmd: "/memory/query";
-  args: {
-    select: Selector;
-    since?: number;
-  };
-};
-
-export type SelectAll = "_";
 export type Select<Key extends string, Match> =
   & {
     [key in Key]: Match;
@@ -948,10 +679,6 @@ export type Conflict = {
    * Actual history
    */
   history: Revision<Fact>[];
-};
-
-export type ToJSON<T> = T & {
-  toJSON(): T;
 };
 
 export interface ConflictError extends Error {

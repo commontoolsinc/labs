@@ -4,11 +4,9 @@ import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   Assertion,
   Fact,
-  FactSelection,
   Invariant,
   MIME,
   Retraction,
-  Revision,
   State,
   Unclaimed,
 } from "./interface.ts";
@@ -85,37 +83,11 @@ export const retract = (assertion: Assertion): Retraction => ({
   cause: hashOf(normalizeFact(assertion)),
 });
 
-export const claim = (fact: Fact): Invariant => ({
-  the: fact.the,
-  of: fact.of,
-  fact: hashOf(normalizeFact(fact)),
-});
-
 export const claimState = (state: State): Invariant => ({
   the: state.the,
   of: state.of,
   fact: hashOf(state.cause ? normalizeFact(state) : unclaimed(state)),
 });
-
-export const iterate = function* (
-  selection: FactSelection,
-): Iterable<Revision<Fact>> {
-  for (const [of, attributes] of Object.entries(selection)) {
-    for (const [the, changes] of Object.entries(attributes)) {
-      const [change] = Object.entries(changes);
-      if (change) {
-        const [cause, { is, since }] = change;
-        yield {
-          the: the as MIME,
-          of: of as URI,
-          cause: FabricHash.fromString(cause),
-          since,
-          ...(is ? { is } : undefined),
-        };
-      }
-    }
-  }
-};
 
 // Take an object that is loosely a fact (specifically, its cause might not
 // conform), and convert it to a proper fact.
@@ -193,7 +165,3 @@ export function normalizeFact<
     }) as Retraction<T, Of, Is>;
   }
 }
-
-export const factReference = (fact: Fact): FabricHash => {
-  return hashOf(normalizeFact(fact));
-};
