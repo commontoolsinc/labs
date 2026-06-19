@@ -1,14 +1,63 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import * as path from "@std/path";
+import { cors } from "@hono/hono/cors";
 import env from "@/env.ts";
-import createApp from "@/lib/create-app.ts";
+import createApp, { createRouter } from "@/lib/create-app.ts";
 import router from "@/routes/shell/shell.index.ts";
+import {
+  createShellStaticRouter,
+  StaticResponse,
+} from "@/routes/shell/shell-static.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
 const app = createApp().route("/", router);
+
+const INDEX_HTML = "<!doctype html><title>shell</title><body>index</body>";
+const APP_JS = "globalThis.__shell = true;\n";
+const APP_CSS = "body { color: rebeccapurple; }\n";
+const SENTINEL = "TOP_SECRET_OUTSIDE_ROOT";
+
+let tempDir: string;
+let sentinelPath: string;
+
+// A static router mounted directly, used for the serving-behavior assertions.
+let staticApp: ReturnType<typeof createApp>;
+// The static router behind the same CORS middleware the shell wires up, mounted
+// on a fully composed app, used to assert middleware applies to a 200 document.
+let composedApp: ReturnType<typeof createApp>;
+
+// Global hooks must be registered before any global describe() below, so the
+// fixture setup for the static-router suites lives here at the top of the file.
+beforeAll(async () => {
+  tempDir = await Deno.makeTempDir();
+  await Deno.writeTextFile(path.join(tempDir, "index.html"), INDEX_HTML);
+  await Deno.writeTextFile(path.join(tempDir, "app.js"), APP_JS);
+  await Deno.writeTextFile(path.join(tempDir, "app.css"), APP_CSS);
+
+  // Sentinel lives outside the static root, in the temp dir's parent, so a
+  // traversal request that escaped the root would expose it.
+  sentinelPath = path.join(path.dirname(tempDir), "shell-sentinel.txt");
+  await Deno.writeTextFile(sentinelPath, SENTINEL);
+
+  staticApp = createApp().route("/", createShellStaticRouter(tempDir));
+
+  const corsRouter = createRouter();
+  corsRouter.use(
+    "/*",
+    cors({ origin: "*", allowMethods: ["GET", "OPTIONS"] }),
+  );
+  corsRouter.route("/", createShellStaticRouter(tempDir));
+  composedApp = createApp().route("/", corsRouter);
+});
+
+afterAll(async () => {
+  await Deno.remove(tempDir, { recursive: true });
+  await Deno.remove(sentinelPath);
+});
 
 // The shell document must stay NON-cross-origin-isolated so that untrusted
 // patterns are never handed SharedArrayBuffer / Atomics or a high-resolution
@@ -108,5 +157,131 @@ describe("Shell dev fallback without a compiled build or proxy", () => {
     expect(response.status).toBe(404);
     expect(/Shell app not available/.test(body)).toBe(true);
     expect(/SHELL_URL=http:\/\/localhost:\d+/.test(body)).toBe(true);
+  });
+});
+
+describe("createShellStaticRouter", () => {
+  it("serves index.html at the root with status 200, text/html, and an ETag", async () => {
+    const response = await staticApp.request("/");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/html");
+    expect(response.headers.get("ETag")).toBeTruthy();
+    expect(await response.text()).toBe(INDEX_HTML);
+  });
+
+  it("serves an asset with a JS MIME type and its own ETag", async () => {
+    const response = await staticApp.request("/app.js");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript");
+    expect(response.headers.get("ETag")).toBeTruthy();
+    expect(await response.text()).toBe(APP_JS);
+
+    // The asset's ETag differs from index.html's (different content).
+    const indexResponse = await staticApp.request("/");
+    expect(response.headers.get("ETag")).not.toBe(
+      indexResponse.headers.get("ETag"),
+    );
+  });
+
+  it("serves a CSS asset with the text/css MIME type", async () => {
+    const response = await staticApp.request("/app.css");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/css");
+    expect(await response.text()).toBe(APP_CSS);
+  });
+
+  it("returns 304 with empty body and the same ETag for If-None-Match", async () => {
+    const first = await staticApp.request("/app.js");
+    const etag = first.headers.get("ETag");
+    expect(etag).toBeTruthy();
+
+    const second = await staticApp.request("/app.js", {
+      headers: { "If-None-Match": etag! },
+    });
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+    expect(second.headers.get("ETag")).toBe(etag);
+  });
+
+  it("falls back to index.html for a path with no matching file", async () => {
+    const response = await staticApp.request("/notes/42");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/html");
+    expect(await response.text()).toBe(INDEX_HTML);
+  });
+
+  it("does not serve files outside the static root via traversal", async () => {
+    // The request resolves outside the static root; the traversal guard (and
+    // URL normalization) keep it from reaching the sentinel, so the client-side
+    // routing fallback serves index.html instead.
+    const response = await staticApp.request("/../shell-sentinel.txt");
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toBe(INDEX_HTML);
+    expect(body).not.toContain(SENTINEL);
+  });
+
+  it("returns a stable ETag across repeated requests for the same file", async () => {
+    const first = await staticApp.request("/app.js");
+    const second = await staticApp.request("/app.js");
+    expect(first.headers.get("ETag")).toBe(second.headers.get("ETag"));
+  });
+});
+
+describe("createShellStaticRouter behind composed app middleware", () => {
+  it("applies the cross-origin middleware to a served 200 document", async () => {
+    // Exercises middleware ordering on a real 200 document rather than only on
+    // the dev 404 fallback: the served index.html must still carry the
+    // cross-origin header the shell wires up ahead of the static router.
+    const response = await composedApp.request("/");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(INDEX_HTML);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+});
+
+describe("StaticResponse", () => {
+  const encoder = new TextEncoder();
+
+  // In-memory file set so StaticResponse can be exercised without touching disk.
+  const files: Record<string, Uint8Array> = {
+    "/root/index.html": encoder.encode(INDEX_HTML),
+    "/root/app.js": encoder.encode(APP_JS),
+  };
+  const deps = {
+    readFile: (filePath: string) => {
+      const content = files[filePath];
+      if (!content) return Promise.reject(new Deno.errors.NotFound(filePath));
+      return Promise.resolve(content);
+    },
+    generateETag: (content: Uint8Array) =>
+      Promise.resolve(`"len-${content.byteLength}"`),
+  };
+
+  it("derives MIME type and ETag from the file via injected deps", async () => {
+    const res = await StaticResponse.fromFile("/root/app.js", deps);
+    expect(res.mimeType).toBe("text/javascript");
+    expect(res.etag).toBe(`"len-${files["/root/app.js"].byteLength}"`);
+
+    const response = res.response();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript");
+    expect(response.headers.get("ETag")).toBe(res.etag);
+    expect(await response.text()).toBe(APP_JS);
+  });
+
+  it("returns 304 with no body when the ETag matches If-None-Match", async () => {
+    const res = await StaticResponse.fromFile("/root/index.html", deps);
+    const response = res.response(res.etag);
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe(res.etag);
+    expect(await response.text()).toBe("");
+  });
+
+  it("returns 200 when the If-None-Match ETag does not match", async () => {
+    const res = await StaticResponse.fromFile("/root/index.html", deps);
+    const response = res.response('"some-other-etag"');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(INDEX_HTML);
   });
 });
