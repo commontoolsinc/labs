@@ -5,7 +5,7 @@
  * (docs/development/performance/default-app-note-create.md): in steady-state
  * note creation, ~29% of runtime-worker busy CPU is value hashing
  * (`feedPlainObject` + wasm SHA-256) and ~12% is deep-freeze walks
- * (`deepFreezeInProgress`/`checkValue`).
+ * (`deepFreeze()`/`isDeepFrozen()`).
  *
  * Both subsystems cache by OBJECT IDENTITY (`WeakMap`/`WeakSet`), so any
  * fresh-identity but structurally-equal value — e.g. query results, specs, or
