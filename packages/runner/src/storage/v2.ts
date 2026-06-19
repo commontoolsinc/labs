@@ -2073,10 +2073,11 @@ class SpaceReplica implements ISpaceReplica {
     try {
       await readyToRetry();
     } catch (error) {
-      logger.warn("conflict-read-repair", () => [
+      logger.warn(
+        "conflict-read-repair",
         "readyToRetry rejected while preserving original conflict result",
         error,
-      ]);
+      );
     }
   }
 

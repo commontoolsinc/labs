@@ -8,8 +8,10 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
+  IReadActivity,
   IStorageNotification,
   StorageNotification,
+  StorageTransactionRejected,
 } from "../src/storage/interface.ts";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
@@ -65,6 +67,56 @@ const visibleIds = (
   provider: { get(uri: URI): { value?: unknown } | undefined },
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
+
+const staleReadSource = (uri: URI, seq: number) => ({
+  getReadActivities(): Iterable<IReadActivity> {
+    return [{
+      space,
+      id: uri,
+      type: "application/json",
+      path: [],
+      meta: { seq },
+    }];
+  },
+});
+
+type RetryRepairHarness = {
+  noteCaughtUpLocalSeq(localSeq: number | undefined): void;
+  waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+  rejectCaughtUpLocalSeqWaiters(error: Error): void;
+  closeNow(): void;
+  waitForConflictReadRepair(
+    rejection: StorageTransactionRejected,
+  ): Promise<void>;
+};
+
+const retryRepairHarness = (replica: unknown): RetryRepairHarness =>
+  replica as RetryRepairHarness;
+
+const syntheticConflict = (
+  uri: URI,
+  readyToRetry: () => Promise<void>,
+): StorageTransactionRejected => ({
+  name: "ConflictError",
+  message: "synthetic conflict",
+  transaction: {
+    iss: space,
+    cmd: "/memory/transact",
+    sub: space,
+    args: { changes: {} },
+    prf: [],
+  },
+  conflict: {
+    space,
+    the: "application/json",
+    of: uri,
+    expected: null,
+    actual: null,
+    existsInHistory: false,
+    history: [],
+  },
+  readyToRetry,
+});
 
 describe("Memory v2 storage notifications", () => {
   let runtime: Runtime;
@@ -264,17 +316,7 @@ describe("Memory v2 storage notifications", () => {
         JSON.stringify({ value: { version: 3 } })
     );
 
-    const source = {
-      getReadActivities() {
-        return [{
-          space,
-          id: uri,
-          type: "application/json",
-          path: [],
-          meta: { seq: 1 },
-        }];
-      },
-    } as any;
+    const source = staleReadSource(uri, 1);
 
     const factAddress = { id: uri, type: "application/json" as MIME };
     if (!replica.commitNative) {
@@ -353,17 +395,7 @@ describe("Memory v2 storage notifications", () => {
       }],
     });
 
-    const source = {
-      getReadActivities() {
-        return [{
-          space,
-          id: uri,
-          type: "application/json",
-          path: [],
-          meta: { seq: 1 },
-        }];
-      },
-    } as any;
+    const source = staleReadSource(uri, 1);
 
     const factAddress = { id: uri, type: "application/json" as MIME };
     if (!replica.commitNative) {
@@ -399,6 +431,104 @@ describe("Memory v2 storage notifications", () => {
     await assertRejects(
       () => reason.readyToRetry?.() ?? Promise.resolve(),
       Error,
+    );
+  });
+
+  it("returns the original conflict when closing during retry read repair", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const provider = storageManager.open(space);
+    const replica = provider.replica as typeof provider.replica & {
+      commitNative: (
+        transaction: unknown,
+        source?: unknown,
+      ) => Promise<{ ok?: unknown; error?: unknown }>;
+    };
+    const firstUri = `of:memory-v2-close-retry-a-${Date.now()}` as URI;
+    const secondUri = `of:memory-v2-close-retry-b-${Date.now()}` as URI;
+    const factAddress = { id: firstUri, type: "application/json" as MIME };
+
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: firstUri, value: { value: { version: 1 } } },
+        { op: "set", id: secondUri, value: { value: { version: 1 } } },
+      ],
+    });
+    await provider.sync(firstUri);
+    await provider.sync(secondUri);
+
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: firstUri, value: { value: { version: 2 } } },
+      ],
+    });
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: secondUri, value: { value: { version: 2 } } },
+      ],
+    });
+
+    const commitPromise = replica.commitNative({
+      operations: [{
+        op: "set",
+        id: firstUri,
+        type: "application/json",
+        value: { value: { version: 3 } },
+      }],
+    }, staleReadSource(firstUri, 1));
+    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
+
+    await storageManager.close();
+    const result = await commitPromise;
+    expect(result.ok).toBeFalsy();
+    const reason = subscription.reverts.at(-1)?.reason;
+    if (reason?.name !== "ConflictError") {
+      throw new Error(`Expected ConflictError, got ${reason?.name}`);
+    }
+    expect(result.error).toBe(reason);
+    await assertRejects(
+      () => reason?.readyToRetry?.() ?? Promise.resolve(),
+      Error,
+    );
+  });
+
+  it("rejects pending caught-up waiters when storage closes", async () => {
+    const provider = storageManager.open(space);
+    const harness = retryRepairHarness(provider.replica);
+
+    const readyAtTwo = harness.waitForCaughtUpLocalSeq(2);
+    const readyAtThree = harness.waitForCaughtUpLocalSeq(3);
+    const rejectsAtThree = assertRejects(() => readyAtThree, Error);
+
+    harness.noteCaughtUpLocalSeq(2);
+    await readyAtTwo;
+    harness.closeNow();
+    await rejectsAtThree;
+
+    await assertRejects(
+      () => harness.waitForCaughtUpLocalSeq(1),
+      Error,
+      "memory replica closed",
+    );
+  });
+
+  it("preserves the original conflict when retry read repair rejects", async () => {
+    const provider = storageManager.open(space);
+    const harness = retryRepairHarness(provider.replica);
+    const retryError = new Error("retry unavailable");
+
+    await harness.waitForConflictReadRepair(
+      syntheticConflict(
+        `of:memory-v2-retry-reject-${Date.now()}` as URI,
+        () => Promise.reject(retryError),
+      ),
     );
   });
 
