@@ -36,6 +36,11 @@ const PROGRAM_PATH = join(
 const ROOT_PATH = join(import.meta.dirname!, "..");
 const DRAFT: (string | number)[] = ["profileDraft"];
 
+// Trusted surface/action for the profile save (inlined from
+// cfc-group-chat-demo/trusted.tsx, as the multi-runtime demo test does).
+const PROFILE_SURFACE = "TrustedGroupChatProfileSurface";
+const SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";
+
 const isConflict = (error?: { name?: string; message?: string }): boolean =>
   error?.name === "ConflictError" ||
   (error?.message?.includes("stale confirmed read") ?? false);
@@ -127,5 +132,34 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
       "concurrent structured writes must still hit compare-and-set conflicts " +
         "(blind-leaf-write must not apply to non-scalar values)",
     );
+  });
+
+  it("end-to-end: a typed name survives the own-write race through save", async () => {
+    // The original cfc-group-chat-demo "Name not set" flake, end to end: a user
+    // types a profile name (a scalar `$value` write to the PerUser draft), then
+    // saves. The save handler (commitTrustedProfileSave) reads draftText(nameDraft).
+    // Pre-fix, the draft `$value` write loses the own-write race, is rejected and
+    // rolled back to its prior (empty) value, so the save reads the wrong/empty
+    // draft and the profile name is not the one the user typed. With the fix the
+    // scalar write is precondition-free, lands, and the save reads it.
+    for (let i = 0; i < 5; i++) {
+      await harness.settle();
+      // Another concurrent write bumps the shared PerUser draft's seq…
+      await aliceTab2.set([...DRAFT], `tab2-${i}`, { idle: false });
+      // …so alice's later typed name commits against a stale baseline.
+      const typed = `alice-typed-${i}`;
+      await alice.set([...DRAFT], typed, { idle: false });
+      // Save the profile via the trusted action (reads draftText(nameDraft)).
+      await alice.send("saveProfile", {}, {
+        surface: PROFILE_SURFACE,
+        action: SAVE_PROFILE_ACTION,
+      });
+      await harness.settle();
+      assertEquals(
+        await alice.read(["currentProfileName"]),
+        typed,
+        `the name alice typed must be the saved profile name (iter ${i})`,
+      );
+    }
   });
 });
