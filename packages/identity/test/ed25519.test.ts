@@ -6,8 +6,8 @@ import {
   NobleEd25519Signer,
   NobleEd25519Verifier,
 } from "../src/ed25519/noble.ts";
-import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
-import { assert } from "@std/assert";
+import { didToBytes, isNativeEd25519Supported } from "../src/ed25519/utils.ts";
+import { assert, assertThrows } from "@std/assert";
 import { bytesEqual } from "./utils.ts";
 import { DIDKey } from "../src/interface.ts";
 import * as ed25519 from "@noble/ed25519";
@@ -68,6 +68,17 @@ const TEST_DID = "did:key:z6MkjosLwWEobyT9T6RqLTdaEhFrXAZUNkRZJuUae2ukgfEa";
 
 Deno.test("ed25519 is supported in this environment", async () => {
   assert(await isNativeEd25519Supported());
+});
+
+Deno.test("rejects did:key values with unsupported multicodec tags", () => {
+  const unsupportedDid =
+    "did:key:z6DtMrg4Kv51UMAM8vJcCLcRywJfEB4dpHVxPCR6qm6hSV3N" as DIDKey;
+
+  assertThrows(
+    () => didToBytes(unsupportedDid),
+    RangeError,
+    "Unsupported key algorithm expected 0xed, instead of 0xe7",
+  );
 });
 
 Deno.test("has same results in both impls when generating from noble", async () => {
