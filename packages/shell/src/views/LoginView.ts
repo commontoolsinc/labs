@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
 import { Identity, KeyStore, PassKey } from "@commonfabric/identity";
 
@@ -199,7 +199,7 @@ export class XLoginView extends BaseView {
     getStoredCredential();
   @state()
   private accessor copied = false;
-  @state()
+  @property({ attribute: false })
   private accessor keyStore: KeyStore | undefined = undefined;
 
   private availableMethods: AuthMethod[] = [];
@@ -783,6 +783,44 @@ export class XLoginView extends BaseView {
   }
 
   override render() {
+    const content = !this.keyStore
+      ? html`
+        <div class="loading">
+          <p>Preparing secure storage...</p>
+        </div>
+      `
+      : this.error
+      ? html`
+        <div class="error">
+          ${this.error}
+        </div>
+      `
+      : this.isProcessing
+      ? html`
+        <div class="loading">
+          <p>Please follow the browser's prompts to continue...</p>
+        </div>
+      `
+      : this.mnemonic
+      ? this.renderMnemonicDisplay()
+      : this.registrationSuccess
+      ? this.renderSuccess()
+      : this.flow === null
+      ? this.renderInitial()
+      : this.method === null
+      ? this.renderMethodSelection()
+      : this.method === AUTH_METHOD_PASSPHRASE
+      ? this.renderPassphraseAuth()
+      : this.method === AUTH_METHOD_KEYFILE
+      ? this.renderKeyFileImport()
+      : this.method === AUTH_METHOD_PASSKEY
+      ? html`
+        <div class="loading">
+          <p>Please follow the browser's prompts to continue...</p>
+        </div>
+      `
+      : "";
+
     return html`
       <div class="login-container">
         <div class="logo-container">
@@ -795,37 +833,7 @@ export class XLoginView extends BaseView {
         </div>
 
         <div class="auth-action-container">
-          ${this.error
-            ? html`
-              <div class="error">
-                ${this.error}
-              </div>
-            `
-            : ""} ${this.isProcessing
-            ? html`
-              <div class="loading">
-                <p>Please follow the browser's prompts to continue...</p>
-              </div>
-            `
-            : this.mnemonic
-            ? this.renderMnemonicDisplay()
-            : this.registrationSuccess
-            ? this.renderSuccess()
-            : this.flow === null
-            ? this.renderInitial()
-            : this.method === null
-            ? this.renderMethodSelection()
-            : this.method === AUTH_METHOD_PASSPHRASE
-            ? this.renderPassphraseAuth()
-            : this.method === AUTH_METHOD_KEYFILE
-            ? this.renderKeyFileImport()
-            : this.method === AUTH_METHOD_PASSKEY
-            ? html`
-              <div class="loading">
-                <p>Please follow the browser's prompts to continue...</p>
-              </div>
-            `
-            : ""}
+          ${content}
         </div>
       </div>
     `;
