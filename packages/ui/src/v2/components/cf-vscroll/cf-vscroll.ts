@@ -346,5 +346,3 @@ export class CFVScroll extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-vscroll", CFVScroll);

@@ -214,5 +214,3 @@ export class CFKeybind extends BaseElement {
     };
   }
 }
-
-globalThis.customElements.define("cf-keybind", CFKeybind);

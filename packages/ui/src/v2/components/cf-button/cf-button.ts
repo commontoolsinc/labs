@@ -270,5 +270,3 @@ export class CFButton extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-button", CFButton);

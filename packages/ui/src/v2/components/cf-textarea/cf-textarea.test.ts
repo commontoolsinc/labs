@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
-import { CFTextarea } from "./cf-textarea.ts";
+import { CFTextarea } from "./index.ts";
 
 // NOTE: Full DOM interaction tests (input events, Cell two-way binding,
 // auto-resize, timing strategy integration) require Lit's rendering

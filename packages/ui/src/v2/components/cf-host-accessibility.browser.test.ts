@@ -1,8 +1,8 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
-import { CFButton } from "./cf-button/cf-button.ts";
-import { CFInput } from "./cf-input/cf-input.ts";
-import { CFSelect } from "./cf-select/cf-select.ts";
-import { CFTextarea } from "./cf-textarea/cf-textarea.ts";
+import { CFButton } from "./cf-button/index.ts";
+import { CFInput } from "./cf-input/index.ts";
+import { CFSelect } from "./cf-select/index.ts";
+import { CFTextarea } from "./cf-textarea/index.ts";
 
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

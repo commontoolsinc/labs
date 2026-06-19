@@ -460,5 +460,3 @@ export class CFTags extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-tags", CFTags);

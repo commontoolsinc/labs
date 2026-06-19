@@ -352,5 +352,3 @@ export class CFAlert extends BaseElement {
     this.emit("cf-alert-dismiss", detail);
   };
 }
-
-globalThis.customElements.define("cf-alert", CFAlert);

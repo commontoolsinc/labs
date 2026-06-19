@@ -679,5 +679,3 @@ export class CFAutoLayout extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-autolayout", CFAutoLayout);

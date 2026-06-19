@@ -23,9 +23,9 @@ import {
 import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import { hasIncompleteUpload, toSendAttachment } from "./send-attachments.ts";
-import "../cf-button/cf-button.ts";
-import "../cf-chip/cf-chip.ts";
-import "../cf-voice-input/cf-voice-input.ts";
+import "../cf-button/index.ts";
+import "../cf-chip/index.ts";
+import "../cf-voice-input/index.ts";
 
 /**
  * Attachment data structure
@@ -1452,5 +1452,3 @@ export class CFPromptInput extends BaseElement {
     return !!this.value?.trim();
   }
 }
-
-globalThis.customElements.define("cf-prompt-input", CFPromptInput);

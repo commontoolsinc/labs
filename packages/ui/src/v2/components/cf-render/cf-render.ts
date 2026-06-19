@@ -11,8 +11,8 @@ import {
   preserveAppViewMode,
   urlToAppView,
 } from "@commonfabric/shell/shared";
-import "../cf-loader/cf-loader.ts";
-import "../cf-cell-link/cf-cell-link.ts";
+import "../cf-loader/index.ts";
+import "../cf-cell-link/index.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -403,5 +403,3 @@ export class CFRender extends BaseElement {
     this._cleanupRender();
   }
 }
-
-globalThis.customElements.define("cf-render", CFRender);

@@ -63,5 +63,3 @@ export class CFPiece extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-piece", CFPiece);

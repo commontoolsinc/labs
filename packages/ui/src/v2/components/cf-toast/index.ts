@@ -9,4 +9,7 @@ if (!customElements.get("cf-toast-provider")) {
   customElements.define("cf-toast-provider", CFToastProvider);
 }
 
+export type { CFToast as CFToastElement } from "./cf-toast.ts";
+export type { CFToastProvider as CFToastProviderElement } from "./cf-toast-provider.ts";
+
 export { CFToast, CFToastProvider };

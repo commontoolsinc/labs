@@ -332,5 +332,3 @@ export class CFBadge extends BaseElement {
     });
   }
 }
-
-globalThis.customElements.define("cf-badge", CFBadge);

@@ -1,8 +1,7 @@
 import { css, html } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
-@customElement("cf-draggable")
 export class CFDraggable extends BaseElement {
   @property({ type: Number })
   accessor x = 0;

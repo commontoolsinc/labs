@@ -5,7 +5,7 @@ import {
   initialsForName,
   isAvatarImageUrl,
   isRemoteLikeSource,
-} from "./cf-avatar.ts";
+} from "./index.ts";
 
 describe("CFAvatar", () => {
   it("registers the custom element", () => {

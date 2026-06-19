@@ -49,12 +49,6 @@ import {
   type NearestResult,
 } from "./lib/interaction.ts";
 
-// Import mark elements to ensure they're registered
-import "./marks/cf-line-mark.ts";
-import "./marks/cf-area-mark.ts";
-import "./marks/cf-bar-mark.ts";
-import "./marks/cf-dot-mark.ts";
-
 const RESIZE_DEBOUNCE_MS = 100;
 const DEFAULT_HEIGHT = 200;
 
@@ -434,8 +428,6 @@ export class CFChart extends BaseElement {
     }
   }
 }
-
-customElements.define("cf-chart", CFChart);
 
 declare global {
   interface HTMLElementTagNameMap {

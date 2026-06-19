@@ -185,5 +185,3 @@ export class CFProgress extends BaseElement {
     this.indeterminate = false;
   }
 }
-
-globalThis.customElements.define("cf-progress", CFProgress);

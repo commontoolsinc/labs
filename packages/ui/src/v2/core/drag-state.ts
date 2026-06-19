@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/runtime-client";
 import { render } from "@commonfabric/html/client";
 import { mayContainCfcRenderBoundary } from "./cfc-render-boundary-scan.ts";
-import "../components/cf-cell-link/cf-cell-link.ts";
+import "../components/cf-cell-link/index.ts";
 
 /**
  * State information for an active drag operation.

@@ -18,7 +18,7 @@ import {
   type StoreFileOptions,
   uploadFile,
 } from "../../utils/file-cell-storage.ts";
-import "../cf-button/cf-button.ts";
+import "../cf-button/index.ts";
 
 export type FileData = StoredFile;
 
@@ -519,5 +519,3 @@ export class CFFileInput extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-file-input", CFFileInput);

@@ -197,8 +197,6 @@ export class CFDropZone extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-drop-zone", CFDropZone);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-drop-zone": CFDropZone;

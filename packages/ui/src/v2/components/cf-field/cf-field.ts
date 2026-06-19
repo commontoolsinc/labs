@@ -179,5 +179,3 @@ export class CFField extends BaseElement {
     return (assigned[0] as HTMLElement) ?? null;
   }
 }
-
-globalThis.customElements.define("cf-field", CFField);

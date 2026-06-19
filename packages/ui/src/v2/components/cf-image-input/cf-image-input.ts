@@ -1,7 +1,7 @@
 import { html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
-import { CFFileInput } from "../cf-file-input/cf-file-input.ts";
+import { CFFileInput } from "../cf-file-input/index.ts";
 import type { StoredFile } from "../../utils/file-cell-storage.ts";
 import {
   compressImage,
@@ -226,5 +226,3 @@ function readImageDimensions(
     img.src = objectUrl;
   });
 }
-
-customElements.define("cf-image-input", CFImageInput);

@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-button/cf-button.ts";
-import "../cf-copy-button/cf-copy-button.ts";
+import "../cf-button/index.ts";
+import "../cf-copy-button/index.ts";
 
 const AUTO_HIDE_MS = 30_000;
 
@@ -166,8 +166,4 @@ export class CFSecretViewer extends BaseElement {
       </div>
     `;
   }
-}
-
-if (!globalThis.customElements.get("cf-secret-viewer")) {
-  globalThis.customElements.define("cf-secret-viewer", CFSecretViewer);
 }

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFCellLink } from "./cf-cell-link.ts";
+import { CFCellLink } from "./index.ts";
 import type { CellRef } from "@commonfabric/runtime-client";
 
 function deferred<T>() {

@@ -6,7 +6,7 @@ import { isCellHandle } from "@commonfabric/runtime-client";
 import { fabAnimations } from "./styles.ts";
 import { stringSchema } from "@commonfabric/runner/schemas";
 // Side-effect import to ensure cf-message-beads is registered
-import "../cf-message-beads/cf-message-beads.ts";
+import "../cf-message-beads/index.ts";
 
 /**
  * A morphing floating action button that expands into a panel.
@@ -690,8 +690,4 @@ export class CFFab extends BaseElement {
         : nothing}
     `;
   }
-}
-
-if (!globalThis.customElements.get("cf-fab")) {
-  globalThis.customElements.define("cf-fab", CFFab);
 }

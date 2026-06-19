@@ -4,7 +4,7 @@ import {
   authorshipStateForLabel,
   CFCFCAuthorship,
   integrityAtomMatchesAuthor,
-} from "./cf-cfc-authorship.ts";
+} from "./index.ts";
 
 describe("CFCFCAuthorship", () => {
   it("registers the custom element", () => {

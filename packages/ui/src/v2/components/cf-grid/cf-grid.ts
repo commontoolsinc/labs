@@ -266,5 +266,3 @@ export class CFGrid extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-grid", CFGrid);

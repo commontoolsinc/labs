@@ -341,5 +341,3 @@ export class CFLinkPreview extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-link-preview", CFLinkPreview);

@@ -146,5 +146,3 @@ export class CFResizablePanel extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-resizable-panel", CFResizablePanel);

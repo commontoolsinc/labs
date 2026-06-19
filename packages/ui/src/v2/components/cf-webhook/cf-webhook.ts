@@ -1,8 +1,8 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
-import "../cf-button/cf-button.ts";
-import "../cf-secret-viewer/cf-secret-viewer.ts";
+import "../cf-button/index.ts";
+import "../cf-secret-viewer/index.ts";
 
 // Design spec: docs/specs/webhook-ingress/README.md
 
@@ -284,8 +284,4 @@ export class CFWebhook extends BaseElement {
       }
     `,
   ];
-}
-
-if (!globalThis.customElements.get("cf-webhook")) {
-  globalThis.customElements.define("cf-webhook", CFWebhook);
 }

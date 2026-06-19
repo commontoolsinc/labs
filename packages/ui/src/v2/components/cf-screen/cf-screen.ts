@@ -112,5 +112,3 @@ export class CFScreen extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-screen", CFScreen);

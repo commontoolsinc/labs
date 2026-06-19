@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { customElement, property, query } from "lit/decorators.js";
+import { property, query } from "lit/decorators.js";
 import { provide } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import {
@@ -45,7 +45,6 @@ import {
  * </cf-form>
  * ```
  */
-@customElement("cf-form")
 export class CFForm extends BaseElement {
   static override styles = css`
     :host {

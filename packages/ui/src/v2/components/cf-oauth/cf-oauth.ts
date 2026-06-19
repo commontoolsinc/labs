@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFPiece } from "../cf-piece/cf-piece.ts";
+import { CFPiece } from "../cf-piece/index.ts";
 
 export interface OAuthData {
   accessToken?: string;
@@ -373,5 +373,3 @@ export class CFOAuth extends BaseElement {
     `,
   ];
 }
-
-globalThis.customElements.define("cf-oauth", CFOAuth);

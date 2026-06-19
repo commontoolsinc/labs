@@ -111,5 +111,3 @@ export class CFSvg extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-svg", CFSvg);

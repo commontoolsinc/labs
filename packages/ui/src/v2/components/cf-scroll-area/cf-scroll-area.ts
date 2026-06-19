@@ -496,5 +496,3 @@ export class CFScrollArea extends BaseElement {
     );
   };
 }
-
-globalThis.customElements.define("cf-scroll-area", CFScrollArea);

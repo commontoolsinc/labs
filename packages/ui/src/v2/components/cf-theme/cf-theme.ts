@@ -191,5 +191,3 @@ export class CFThemeProvider extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-theme", CFThemeProvider);

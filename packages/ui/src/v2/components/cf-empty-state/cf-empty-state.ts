@@ -146,5 +146,3 @@ export class CFEmptyState extends BaseElement {
     this._hasAction = slot.assignedElements().length > 0;
   };
 }
-
-globalThis.customElements.define("cf-empty-state", CFEmptyState);
