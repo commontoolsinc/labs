@@ -204,13 +204,13 @@ describe("deep-freeze", () => {
 
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
-    // reference. `isDeepFrozen` delegates to `isDeepFrozenInProgress` (which
-    // threads `inProgress: Set<object>` for cycle-safety) and answers a
-    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member -- inspecting
-    // its logical contents, not its enumerable own-props -- so values held in
-    // non-enumerable slots (such as `FabricError`'s private extras `Map`) are
-    // checked too. (`isDeepFrozenFabricValue` uses the same protocol dispatch
-    // but additionally type-guards the value as a `FabricValue`; it has its own
+    // reference. `isDeepFrozen`'s recursion threads an `inProgress: Set<object>`
+    // for cycle-safety and answers a `FabricInstance` via its `[IS_DEEP_FROZEN]`
+    // protocol member -- inspecting its logical contents, not its enumerable
+    // own-props -- so values held in non-enumerable slots (such as
+    // `FabricError`'s private extras `Map`) are checked too.
+    // (`isDeepFrozenFabricValue` uses the same protocol dispatch but
+    // additionally type-guards the value as a `FabricValue`; it has its own
     // coverage in the sibling describe below.)
     describe("`FabricInstance` and `FabricPrimitive`", () => {
       it("returns `true` for a `FabricPrimitive` (self-frozen at construction)", () => {
@@ -269,8 +269,8 @@ describe("deep-freeze", () => {
         const fe = FabricError.fromNativeError(err);
         wrapper.fe = fe;
         deepFreeze(wrapper);
-        // `isDeepFrozen` must terminate (its own `inProgress`-threading in
-        // `isDeepFrozenInProgress` handles the cycle) and report true.
+        // `isDeepFrozen` must terminate (its own `inProgress`-threading
+        // recursion handles the cycle) and report true.
         expect(() => isDeepFrozen(wrapper)).not.toThrow();
         expect(isDeepFrozen(wrapper)).toBe(true);
         expect(isDeepFrozen(fe)).toBe(true);

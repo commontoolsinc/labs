@@ -59,75 +59,73 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  return isDeepFrozenInProgress(value);
-}
-
-/**
- * Performs the recursive deep-frozen check with cycle detection.
- */
-function isDeepFrozenInProgress(
-  value: unknown,
-  inProgress?: Set<object>,
-): boolean {
+  // Fast leaf paths first, so a primitive or already-cached value answers
+  // without allocating the cycle-tracking set or the recursion closure below.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
   } else if (!Object.isFrozen(value)) {
     return false;
   }
 
-  const obj = value as object;
+  // We have non-leaf structure to walk. Allocate the cycle-tracking set and
+  // build the recursion callback ONCE here, reusing the same closure at every
+  // layer rather than allocating an equivalent `(v) => …` per descent.
+  const inProgress = new Set<object>();
+  const check = (value: unknown): boolean => {
+    if (isNecessarilyOrKnownDeepFrozen(value)) {
+      return true;
+    } else if (!Object.isFrozen(value)) {
+      return false;
+    }
 
-  if (inProgress) {
-    // We're in a recursive call, so notice if we're in fact already checking
-    // `value`. If so, treat it as frozen for the sake of the rest of the check.
-    // It will only end up getting marked as actually deep-frozen if the rest
-    // of the call actually confirms.
+    const obj = value as object;
+
+    // If we're already checking `obj` higher in the recursion, treat it as
+    // frozen for the rest of this check: it only ends up marked actually
+    // deep-frozen if the outer check confirms.
     if (inProgress.has(obj)) return true;
-  } else {
-    // This is the base non-recursive call, and we have to set up the
-    // `inProgress` set. This isn't done by default exactly so that the quick
-    // checks at the top of this function don't incur object-creation overhead.
-    inProgress = new Set<object>();
-  }
+    inProgress.add(obj);
 
-  inProgress.add(obj);
+    let result = true;
 
-  let result = true;
-
-  if (obj instanceof FabricInstance) {
-    // A `FabricInstance`'s logical contents are not its enumerable own-props
-    // (e.g. a `FabricError` keeps its custom properties in a private extras
-    // `Map`), so it answers the deep-frozen question via its `[IS_DEEP_FROZEN]`
-    // protocol member -- the side-effect-free sibling of `[DEEP_FREEZE]` --
-    // recursing into each nested `FabricValue` through the callback so this
-    // call's cycle state is shared. Gating on `instanceof` against the abstract
-    // base keeps this generic; the member is abstract on `FabricInstance`, so
-    // every instance implements it. (A `FabricPrimitive` is necessarily frozen
-    // with no outbound references, so the `Object.values` arm below answers it
-    // correctly by accident -- its empty enumerable props yield `true`.)
-    result = obj[IS_DEEP_FROZEN]((v) => isDeepFrozenInProgress(v, inProgress));
-  } else if (Array.isArray(obj)) {
-    for (let i = 0; i < obj.length; i++) {
-      if (!(i in obj)) continue; // sparse hole
-      if (!isDeepFrozenInProgress(obj[i], inProgress)) {
-        result = false;
-        break;
+    if (obj instanceof FabricInstance) {
+      // A `FabricInstance`'s logical contents are not its enumerable own-props
+      // (e.g. a `FabricError` keeps its custom properties in a private extras
+      // `Map`), so it answers the deep-frozen question via its
+      // `[IS_DEEP_FROZEN]` protocol member -- the side-effect-free sibling of
+      // `[DEEP_FREEZE]` -- recursing into each nested `FabricValue` through
+      // `check`, which shares this call's cycle state. Gating on `instanceof`
+      // against the abstract base keeps this generic; the member is abstract on
+      // `FabricInstance`, so every instance implements it. (A `FabricPrimitive`
+      // is necessarily frozen with no outbound references, so the
+      // `Object.values` arm below answers it correctly by accident -- its empty
+      // enumerable props yield `true`.)
+      result = obj[IS_DEEP_FROZEN](check);
+    } else if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        if (!(i in obj)) continue; // sparse hole
+        if (!check(obj[i])) {
+          result = false;
+          break;
+        }
+      }
+    } else {
+      for (const v of Object.values(obj)) {
+        if (!check(v)) {
+          result = false;
+          break;
+        }
       }
     }
-  } else {
-    for (const v of Object.values(obj)) {
-      if (!isDeepFrozenInProgress(v, inProgress)) {
-        result = false;
-        break;
-      }
-    }
-  }
 
-  inProgress.delete(obj);
-  if (result) {
-    addToDeepFrozenCache(obj);
-  }
-  return result;
+    inProgress.delete(obj);
+    if (result) {
+      addToDeepFrozenCache(obj);
+    }
+    return result;
+  };
+
+  return check(value);
 }
 
 /**
@@ -158,48 +156,41 @@ function isDeepFrozenInProgress(
  * recursing infinitely.
  */
 export function deepFreeze<T>(value: T): T {
-  return deepFreezeInProgress(value);
-}
-
-/**
- * Performs the recursive deep-freeze with shared cycle-detection state. When
- * `inProgress` is omitted (the top-level entry) a fresh set is allocated;
- * recursive calls (both arm 4 children and the arm 3 protocol callback)
- * thread the same set through so a cycle back to a value already being
- * deep-frozen by an outer call short-circuits.
- *
- * The arm 3 callback `(v) => deepFreezeInProgress(v, inProgress)` threads
- * the shared cycle state into participating `FabricInstance`s: each impl
- * invokes `subFreeze` on its nested `FabricValue`s, and that closure
- * carries the shared `inProgress` so the impl's recursion is cycle-safe by
- * construction. This mirrors the `subIsDeepFrozen`/`checkValue`-closure
- * pattern already used by `isDeepFrozenFabricValue` for the
- * `[IS_DEEP_FROZEN]` side.
- *
- * Unlike `isDeepFrozenInProgress` (which removes values from its
- * `inProgress` set after sub-checks complete -- because the question
- * "deep-frozen?" is local to each subtree), this function does NOT remove
- * values from `inProgress`. A value being deep-frozen stays-the-course: the
- * outer call owns the freeze, every cycle-arrival defers to it.
- */
-function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
   // Arm 1: necessarily- or already-known-deep-frozen.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return value;
   }
 
   // Arm 2: `FabricPrimitive`s are by definition frozen (they self-freeze at
-  // construction) and have no outbound references.
+  // construction) and have no outbound references. Handling arms 1 and 2 here,
+  // before allocating the cycle-tracking set or the recursion closure below,
+  // keeps primitives and `FabricPrimitive`s off the heavyweight path.
   if (value instanceof FabricPrimitive) {
     return value;
   }
 
-  const obj = value as object;
+  // We have non-leaf structure to freeze. Allocate the shared cycle-detection
+  // set and build the recursion callback ONCE here, reusing the same closure
+  // at every layer -- including as the `subFreeze` passed into participating
+  // `FabricInstance`s' `[DEEP_FREEZE]` impls -- rather than allocating an
+  // equivalent `(v) => …` per descent.
+  //
+  // The closure does NOT remove values from `inProgress` (unlike the
+  // deep-frozen *check*, whose answer is local to each subtree): a value being
+  // deep-frozen stays-the-course, so the outer call owns the freeze and every
+  // cycle-arrival defers to it.
+  const inProgress = new Set<object>();
+  const freeze = <U>(value: U): U => {
+    // Leaf short-circuits, repeated for nested values reached by recursion.
+    if (isNecessarilyOrKnownDeepFrozen(value)) {
+      return value;
+    }
+    if (value instanceof FabricPrimitive) {
+      return value;
+    }
 
-  // Cycle check / set up the shared in-progress set. Done after the leaf
-  // short-circuits (arms 1 and 2) so primitives and FabricPrimitives don't
-  // incur set-membership overhead.
-  if (inProgress) {
+    const obj = value as object;
+
     if (inProgress.has(obj)) {
       // A cycle back to a value the outer call is already deep-freezing.
       // Short-circuit: the outer call owns the freeze; recursing here would
@@ -207,44 +198,41 @@ function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
       // children.
       return value;
     }
-  } else {
-    inProgress = new Set<object>();
-  }
-  inProgress.add(obj);
+    inProgress.add(obj);
 
-  // Arm 3: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
-  // protocol member. The `subFreeze` callback closes over `inProgress` so the
-  // impl's recursion into nested `FabricValue`s shares cycle state with this
-  // call: the participating `FabricInstance` doesn't need to be
-  // `inProgress`-aware in its own signature; the callback carries the shared
-  // state transparently.
-  if (value instanceof FabricInstance) {
-    const result = value[DEEP_FREEZE](
-      (v) => deepFreezeInProgress(v, inProgress),
-    ) as T;
-    // Cache the now-deep-frozen result so subsequent `isDeepFrozen()` checks
-    // short-circuit in O(1), mirroring arm 4's cache-write below.
-    addToDeepFrozenCache(result as object);
-    return result;
-  }
-
-  // Arm 4: plain object or array -- recurse into children, then freeze.
-  const alreadyFrozen = Object.isFrozen(value);
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) deepFreezeInProgress(value[i], inProgress);
+    // Arm 3: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
+    // protocol member. `freeze` is handed in as the `subFreeze` callback: it
+    // closes over `inProgress`, so the impl's recursion into nested
+    // `FabricValue`s shares cycle state with this call -- the participating
+    // instance doesn't need to be `inProgress`-aware in its own signature.
+    if (value instanceof FabricInstance) {
+      const result = value[DEEP_FREEZE](freeze) as U;
+      // Cache the now-deep-frozen result so subsequent `isDeepFrozen()` checks
+      // short-circuit in O(1), mirroring arm 4's cache-write below.
+      addToDeepFrozenCache(result as object);
+      return result;
     }
-  } else {
-    const o = value as Record<string, unknown>;
-    for (const key of Object.keys(o)) {
-      deepFreezeInProgress(o[key], inProgress);
-    }
-  }
 
-  if (!alreadyFrozen) Object.freeze(value);
-  addToDeepFrozenCache(value as object);
-  return value;
+    // Arm 4: plain object or array -- recurse into children, then freeze.
+    const alreadyFrozen = Object.isFrozen(value);
+
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        if (i in value) freeze(value[i]);
+      }
+    } else {
+      const o = value as Record<string, unknown>;
+      for (const key of Object.keys(o)) {
+        freeze(o[key]);
+      }
+    }
+
+    if (!alreadyFrozen) Object.freeze(value);
+    addToDeepFrozenCache(value as object);
+    return value;
+  };
+
+  return freeze(value);
 }
 
 /**
@@ -304,7 +292,7 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       // `instanceof` against the abstract base keeps this guard generic; the
       // `[IS_DEEP_FROZEN]` member is abstract on `FabricInstance`, so every
       // instance is guaranteed to implement it.
-      return item[IS_DEEP_FROZEN]((v) => checkValue(v));
+      return item[IS_DEEP_FROZEN](checkValue);
     } else if (Array.isArray(item)) {
       // Arrays with enumerable named properties have no fabric representation.
       if (!isArrayWithOnlyIndexProperties(item)) return false;
