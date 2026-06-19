@@ -20,9 +20,11 @@ export type SigilValue<T> = { "/": T };
 export { LINK_V1_TAG };
 
 /**
- * Inner value of a LinkV1 sigil (the object at the LINK_V1_TAG key)
+ * The payload of a cell-link {@link LinkRef} — the object at the
+ * {@link LINK_V1_TAG} key. (The `link@1` tag versions the wire envelope; this
+ * payload shape is version-agnostic and expected to outlive it.)
  */
-export type LinkV1Inner = {
+export type CellLinkRefPayload = {
   id?: URI;
   path?: readonly string[];
   space?: MemorySpace;
@@ -32,7 +34,7 @@ export type LinkV1Inner = {
 };
 
 export type LinkV1 = {
-  [LINK_V1_TAG]: LinkV1Inner;
+  [LINK_V1_TAG]: CellLinkRefPayload;
 };
 
 export type WriteRedirectV1 = LinkV1 & {
@@ -47,7 +49,7 @@ export type WriteRedirectV1 = LinkV1 & {
  * envelope) and `LinkRef` (which spans both forms) diverge and this alias gets
  * cleaned up.
  */
-export type SigilLink = LinkRef<LinkV1Inner>;
+export type SigilLink = LinkRef<CellLinkRefPayload>;
 /**
  * Sigil alias type - uses LinkV1 with overwrite field
  */

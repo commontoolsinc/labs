@@ -14,7 +14,11 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type LinkV1Inner, type SigilLink, type URI } from "./sigil-types.ts";
+import {
+  type CellLinkRefPayload,
+  type SigilLink,
+  type URI,
+} from "./sigil-types.ts";
 import { linkRefFrom, linkRefInner } from "@commonfabric/data-model/cell-rep";
 import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
@@ -210,7 +214,7 @@ export function createSigilLinkFromParsedLink(
   } & SanitizeSchemaForLinksOptions = {},
 ): SigilLink {
   // Create the base structure
-  const sigil: SigilLink = linkRefFrom<LinkV1Inner>({
+  const sigil: SigilLink = linkRefFrom<CellLinkRefPayload>({
     path: link.path.map((p) => p.toString()),
   });
 

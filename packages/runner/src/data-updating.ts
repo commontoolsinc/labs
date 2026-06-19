@@ -37,7 +37,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { type LinkV1Inner } from "./sigil-types.ts";
+import { type CellLinkRefPayload } from "./sigil-types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -263,7 +263,7 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
     return value;
   }
   const inner = linkRefInner(value) as
-    & LinkV1Inner
+    & CellLinkRefPayload
     & { cfcLabelView?: CfcLabelView };
   if (inner.cfcLabelView === undefined) {
     return value;
