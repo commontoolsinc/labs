@@ -1127,6 +1127,10 @@ export function generateObject<T extends Record<string, unknown>>(
       return;
     }
 
+    // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+    // `.get()`-path today, but will in the not-too-distant future; at that point
+    // this JSON round-trip silently loses any `FabricPrimitive`/`FabricInstance`
+    // (class instances don't survive JSON). Mark ahead of that.
     const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
 
     // Convert prompt to messages if provided, otherwise use messages directly
@@ -1295,6 +1299,11 @@ export function generateObject<T extends Record<string, unknown>>(
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+      // `.get()`-path today, but will in the not-too-distant future; at that
+      // point this JSON round-trip silently loses any `FabricPrimitive`/
+      // `FabricInstance` (class instances don't survive JSON). Mark ahead of
+      // that.
       messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
@@ -1515,6 +1524,11 @@ export function generateObject<T extends Record<string, unknown>>(
                     objectResponse.resultSchema,
                   );
                 resultTarget.withTx(tx).set(objectResponse.object);
+                // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values
+                // on this `.get()`-path today, but will in the not-too-distant
+                // future; at that point this JSON round-trip silently loses any
+                // `FabricPrimitive`/`FabricInstance` (class instances don't
+                // survive JSON). Mark ahead of that.
                 resultCell.key("messages").withTx(tx).set(
                   JSON.parse(JSON.stringify(objectResponse.messages)) as any,
                 );
@@ -1631,6 +1645,11 @@ export function generateObject<T extends Record<string, unknown>>(
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
+      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+      // `.get()`-path today, but will in the not-too-distant future; at that
+      // point this JSON round-trip silently loses any `FabricPrimitive`/
+      // `FabricInstance` (class instances don't survive JSON). Mark ahead of
+      // that.
       messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
       pendingWithLog.set(true);
 
@@ -1746,6 +1765,11 @@ export function generateObject<T extends Record<string, unknown>>(
                   ? resultCell.key("result")
                   : resultCell.key("result").asSchema(response.resultSchema);
                 resultTarget.withTx(tx).set(response.object);
+                // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values
+                // on this `.get()`-path today, but will in the not-too-distant
+                // future; at that point these JSON round-trips silently lose any
+                // `FabricPrimitive`/`FabricInstance` (class instances don't
+                // survive JSON). Mark ahead of that.
                 resultCell.key("messages").withTx(tx).set([
                   ...JSON.parse(JSON.stringify(requestMessages)),
                   JSON.parse(JSON.stringify(assistantMessage)),

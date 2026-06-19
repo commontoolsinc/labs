@@ -1413,6 +1413,10 @@ export function addCommonIDfromObjectID(
       obj[ID_FIELD] = fieldName;
     }
 
+    // TODO(danfuzz): This `Object.values` recursion guards only `isCell`/
+    // `isPrimitiveCellLink`, not `FabricSpecialObject`, so a `FabricPrimitive`/
+    // `FabricInstance` reaching here is walked by own-props rather than
+    // recognized as a leaf / descended by codec contents.
     if (isRecord(obj) && !isCell(obj) && !isPrimitiveCellLink(obj)) {
       Object.values(obj).forEach((v) => traverse(v));
     }

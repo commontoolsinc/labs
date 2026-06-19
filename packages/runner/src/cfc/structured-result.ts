@@ -279,6 +279,10 @@ const itemSchemaForIndex = (
   return combineAllOf(itemSchemas);
 };
 
+// TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
+// today, but will in the not-too-distant future; at that point this guard-less
+// `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
+// is walked by internal slots rather than codec contents). Mark ahead of that.
 const sanitizeValueWithOpaqueLinks = (
   value: unknown,
   schema: JSONSchema,

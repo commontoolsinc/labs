@@ -48,6 +48,11 @@ export function render(value: unknown, { json }: { json?: boolean } = {}) {
 export function safeStringify(obj: unknown, maxDepth = 8): string {
   const seen = new WeakSet();
 
+  // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+  // `.get()`-path today, but will in the not-too-distant future; at that point
+  // this `Object.entries` pre-walk plus `JSON.stringify` silently loses any
+  // `FabricPrimitive`/`FabricInstance` (class instances don't survive JSON).
+  // Mark ahead of that.
   const stringify = (value: unknown, depth = 0): unknown => {
     if (depth > maxDepth) {
       return "<max depth reached>";
