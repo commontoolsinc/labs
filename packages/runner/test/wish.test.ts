@@ -1120,6 +1120,49 @@ describe("wish built-in", () => {
       expect(data?.type).toBe("favorite");
     });
 
+    it("matches favorites by user tags", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern-usertags",
+        undefined,
+        tx,
+      );
+      const favoritesCell = homeDefaultPatternCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        "favorite-item-usertags",
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ type: "favorite" });
+      // No schema-derived tags; only a user-applied tag should match.
+      favoritesCell.set([{ cell: favoriteItem, tags: [], userTags: ["mine"] }]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { result: wish({ query: "#mine", scope: ["~"] }) };
+      });
+      const resultCell = runtime.getCell<{ result?: { result?: unknown } }>(
+        patternSpace.did(),
+        "favorites-usertags-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      const r = result.key("result").get()?.result;
+      const data = (r as any)?.get?.() ?? r;
+      expect(data?.type).toBe("favorite");
+    });
+
     it('searches both favorites and mentionables with scope: ["~", "."]', async () => {
       // Setup: Add favorites to home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
@@ -2298,6 +2341,153 @@ describe("wish built-in", () => {
       expect(favorites).toBeDefined();
       expect(Array.isArray(favorites)).toBe(true);
       expect((favorites as any[])[0].tag).toEqual("test favorite");
+    });
+
+    // Helper: stand up the home space with a single favorite carrying the given
+    // discovery/user tags, then resolve `#favorites/<term>` against it.
+    async function resolveFavoritesTerm(
+      label: string,
+      entry: { tags?: string[]; userTags?: string[] },
+      term: string,
+    ) {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        `default-pattern-${label}`,
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        `favorite-item-${label}`,
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ name: "My Favorite", value: 42 });
+      favoritesCell.set([
+        {
+          cell: favoriteItem,
+          tags: entry.tags ?? [],
+          userTags: entry.userTags ?? [],
+        },
+      ]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { result: wish({ query: `#favorites/${term}` }) };
+      });
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown; error?: string };
+      }>(
+        patternSpace.did(),
+        `favorites-term-${label}-result`,
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+      return result.key("result").get();
+    }
+
+    // A `#favorites/<term>` query finds a favorite whose discovery tag or user
+    // tag matches `term`. These tests assert the match decision (no "No favorite
+    // found" error when one matches; the error when none do) — that is the code
+    // path the favorite matchers own.
+    it("matches a #favorites/<term> query by a structured discovery tag", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "tag",
+        { tags: ["weather"] },
+        "weather",
+      );
+      expect(resolved?.error).toBeUndefined();
+    });
+
+    it("matches a #favorites/<term> query by a user tag substring", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "usertag",
+        { userTags: ["mynotebook"] },
+        "note",
+      );
+      expect(resolved?.error).toBeUndefined();
+    });
+
+    it("reports an error for #favorites/<term> when nothing matches", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "nomatch",
+        { tags: ["weather"], userTags: ["mine"] },
+        "missing",
+      );
+      expect(resolved?.result).toBeUndefined();
+      expect(resolved?.error).toMatch(/No favorite found matching/);
+    });
+
+    // Other well-known home-space targets resolve to fixed paths under the home
+    // default pattern.
+    async function resolveHomeTarget(
+      label: string,
+      key: string,
+      value: unknown,
+      query: string,
+    ) {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        `default-pattern-${label}`,
+        undefined,
+        tx,
+      );
+      defaultPatternCell.key(key).set(value);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { result: wish({ query }) };
+      });
+      const resultCell = runtime.getCell<{ result?: { result?: unknown } }>(
+        patternSpace.did(),
+        `home-target-${label}-result`,
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+      return result.key("result").get();
+    }
+
+    it("resolves #journal to the home journal list", async () => {
+      const resolved = await resolveHomeTarget(
+        "journal",
+        "journal",
+        [{ narrative: "first entry" }],
+        "#journal",
+      );
+      expect(resolved?.error).toBeUndefined();
+      const journal = resolved?.result;
+      expect(Array.isArray(journal)).toBe(true);
+      expect((journal as any[])[0].narrative).toBe("first entry");
+    });
+
+    it("resolves #learned to the home learned object", async () => {
+      const resolved = await resolveHomeTarget(
+        "learned",
+        "learned",
+        { summary: "a learned summary" },
+        "#learned",
+      );
+      expect(resolved?.error).toBeUndefined();
+      expect((resolved?.result as any)?.summary).toBe("a learned summary");
     });
 
     it("resolves well-known profile targets from the home default profile link", async () => {
