@@ -26,7 +26,7 @@ import {
   safeGetNodeText,
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
-import { extractDocFromType } from "./doc-utils.ts";
+import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -671,6 +671,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     const docInfo = extractDocFromType(type, context.typeChecker);
     if (docInfo.firstDoc && isRecord(schema) && !("description" in schema)) {
       (schema as Record<string, unknown>).description = docInfo.firstDoc;
+    }
+    if (isRecord(schema) && typeof schema.description === "string") {
+      attachDocTags(schema as Record<string, unknown>, schema.description);
     }
     return schema;
   }

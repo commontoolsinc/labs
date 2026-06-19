@@ -23,7 +23,8 @@ import type { ProfileHomeOutput } from "./profile-home.tsx";
 // Types from favorites-manager.tsx
 type Favorite = {
   cell: { [NAME]?: string };
-  tag: string;
+  // Discovery tags snapshotted from the piece's schema when favorited.
+  tags: string[];
   userTags: string[];
   spaceName?: string;
 };
@@ -59,22 +60,16 @@ export type HomeOutput = {
 
 // Handler to add a favorite
 const addFavorite = handler<
-  { piece: Writable<{ [NAME]?: string }>; tag?: string; spaceName?: string },
+  { piece: Writable<{ [NAME]?: string }>; tags?: string[]; spaceName?: string },
   { favorites: Writable<Favorite[]> }
->(({ piece, tag, spaceName }, { favorites }) => {
+>(({ piece, tags, spaceName }, { favorites }) => {
   const current = favorites.get();
   if (!current.some((f) => f && equals(f.cell, piece))) {
-    // HACK(seefeld): Access internal API to get schema.
-    // Once we sandbox, we need proper reflection
-    let schema = (piece as any)?.resolveAsCell()?.asSchema(undefined)
-      .asSchemaFromLinks?.()?.schema;
-    if (typeof schema !== "object") schema = "";
-
-    const schemaTag = tag || JSON.stringify(schema) || "";
-
+    // Discovery tags are derived by the client (which can see the piece's
+    // schema) and passed in; the handler just stores them.
     favorites.push({
       cell: piece,
-      tag: schemaTag,
+      tags: tags ?? [],
       userTags: [],
       spaceName,
     });

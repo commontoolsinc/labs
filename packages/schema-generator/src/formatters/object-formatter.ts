@@ -20,7 +20,11 @@ import {
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
-import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
+import {
+  attachDocTags,
+  extractDocFromSymbolAndDecls,
+  getDeclDocs,
+} from "../doc-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 
@@ -320,6 +324,7 @@ export class ObjectFormatter implements TypeFormatter {
       if (text && isRecord(generated)) {
         const conflicts = all.filter((s) => s && s !== text);
         (generated as Record<string, unknown>).description = text;
+        attachDocTags(generated as Record<string, unknown>, text);
         if (conflicts.length > 0) {
           const comment = typeof generated.$comment === "string"
             ? (generated.$comment as string)
@@ -375,6 +380,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
       if (foundDocs.length > 0 && isRecord(apSchema)) {
         (apSchema as Record<string, unknown>).description = foundDocs[0]!;
+        attachDocTags(apSchema as Record<string, unknown>, foundDocs[0]!);
         if (foundDocs.length > 1) {
           const comment = typeof apSchema.$comment === "string"
             ? (apSchema.$comment as string)

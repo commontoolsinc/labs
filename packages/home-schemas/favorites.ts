@@ -11,7 +11,9 @@ export const favoriteEntrySchema = {
   properties: {
     // we use type unknown to validate, but avoid including children
     cell: { type: "unknown", asCell: ["cell"] },
-    tag: { type: "string", default: "" },
+    // Discovery tags snapshotted from the piece's schema when favorited
+    // (lowercased, without the leading `#`). Matched by wish() tag search.
+    tags: { type: "array", items: { type: "string" }, default: [] },
     userTags: { type: "array", items: { type: "string" }, default: [] },
     spaceName: { type: "string" },
   },

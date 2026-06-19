@@ -459,8 +459,8 @@ function searchFavoritesForHashtag(
         for (const t of userTags) {
           if (t.toLowerCase() === searchTermWithoutHash) return true;
         }
-        // Search schema tag for hashtags
-        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+        // Match the discovery tags snapshotted when favorited.
+        return (entry.tags ?? []).includes(searchTermWithoutHash);
       }),
   );
 
@@ -748,19 +748,8 @@ function resolveHomeSpaceTarget(
           if (t.toLowerCase().includes(searchTerm)) return true;
         }
 
-        let tag = entry.tag;
-        if (!tag) {
-          try {
-            const { schema } = entry.cell.asSchemaFromLinks()
-              .getAsNormalizedFullLink();
-            if (schema !== undefined) {
-              tag = JSON.stringify(schema);
-            }
-          } catch {
-            // Schema not available yet
-          }
-        }
-        return tag?.toLowerCase().includes(searchTerm);
+        // Match the discovery tags snapshotted when favorited.
+        return (entry.tags ?? []).some((t) => t.includes(searchTerm));
       });
 
       if (!match) {

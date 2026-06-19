@@ -1514,6 +1514,9 @@ export type JSONSchemaObj = {
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
   readonly scope?: SchemaScope;
+  // Discovery hashtags from the doc comment (lowercased, without the leading
+  // `#`). Populated by the schema generator; mirrors the description text.
+  readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"

@@ -15,7 +15,8 @@ import Journal from "./journal.tsx";
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
   cell: { [NAME]?: string };
-  tag: string;
+  // Discovery tags snapshotted from the piece's schema when favorited.
+  tags: string[];
   userTags: string[];
   spaceName?: string;
 };
@@ -89,45 +90,27 @@ function captureSnapshot(
   return { name, schemaTag: schemaTag || "", valueExcerpt };
 }
 
-/**
- * Extract hashtags from schema tag string for searchability
- */
-function extractTags(schemaTag: string): string[] {
-  const tags: string[] = [];
-  const hashtagMatches = schemaTag.match(/#([a-z0-9-]+)/gi);
-  if (hashtagMatches) {
-    tags.push(...hashtagMatches.map((t) => t.toLowerCase()));
-  }
-  return tags;
-}
-
 // Handler to add a favorite
 const addFavorite = handler<
-  { piece: Writable<{ [NAME]?: string }>; tag?: string; spaceName?: string },
+  { piece: Writable<{ [NAME]?: string }>; tags?: string[]; spaceName?: string },
   { favorites: Writable<Favorite[]>; journal: Writable<JournalEntry[]> }
->(({ piece, tag, spaceName }, { favorites, journal }) => {
+>(({ piece, tags, spaceName }, { favorites, journal }) => {
   const current = favorites.get();
   if (!current.some((f) => f && equals(f.cell, piece))) {
-    // HACK(seefeld): Access internal API to get schema.
-    // Once we sandbox, we need proper reflection
-    //
-    // This first resolves all links, then clears the schema, so it's forced to
-    // read the schema defined in the pattern, then reconstructs that schema.
-    let schema = (piece as any)?.resolveAsCell()?.asSchema(undefined)
-      .asSchemaFromLinks?.()?.schema;
-    if (typeof schema !== "object") schema = ""; // schema can be true or false
-
-    const schemaTag = tag || JSON.stringify(schema) || "";
+    // Discovery tags are derived by the client and passed in; the handler
+    // just stores them.
+    const finalTags = tags ?? [];
+    const hashTags = finalTags.map((t) => `#${t}`);
 
     favorites.push({
       cell: piece,
-      tag: schemaTag,
+      tags: finalTags,
       userTags: [],
       spaceName,
     });
 
     // Add journal entry for the favorite action
-    const snapshot = captureSnapshot(piece, schemaTag);
+    const snapshot = captureSnapshot(piece, hashTags.join(" "));
     journal.push({
       timestamp: safeDateNow(),
       eventType: "piece:favorited",
@@ -135,7 +118,7 @@ const addFavorite = handler<
       snapshot,
       narrative: "",
       narrativePending: true,
-      tags: extractTags(schemaTag),
+      tags: hashTags,
       space: spaceName || "",
     });
   }
@@ -148,10 +131,12 @@ const removeFavorite = handler<
 >(({ piece }, { favorites, journal }) => {
   const favorite = favorites.get().find((f) => f && equals(f.cell, piece));
   if (favorite) {
+    const hashTags = (favorite.tags ?? []).map((t) => `#${t}`);
+
     // Capture snapshot before removing
     const snapshot = captureSnapshot(
       piece as Writable<{ [NAME]?: string }>,
-      favorite.tag,
+      hashTags.join(" "),
     );
 
     favorites.remove(favorite);
@@ -164,7 +149,7 @@ const removeFavorite = handler<
       snapshot,
       narrative: "",
       narrativePending: true,
-      tags: extractTags(favorite.tag || ""),
+      tags: hashTags,
       space: favorite.spaceName || "",
     });
   }

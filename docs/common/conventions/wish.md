@@ -139,13 +139,20 @@ any space. You can wish for the favorites list directly (see
 `system/favorites-manager.tsx` for a full example):
 
 ```tsx
-type Favorite = { cell: { [NAME]?: string }; tag: string };
+type Favorite = { cell: { [NAME]?: string }; tags: string[] };
 const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 ```
 
-The `tag` field contains the serialized `resultSchema` of the piece pointed to
-by `cell`. It is populated automatically when a favorite is added and is used
-for tag-based searching in the wish system.
+The `tags` field holds the discovery tags of the piece pointed to by `cell` —
+the hashtags from its schema's doc comment, lowercased and without the leading
+`#`. The favorites client derives them from the piece's schema when the
+favorite is added (the schema is not reachable from inside the home pattern's
+handler), and the wish system matches against them.
+
+Favorites created before the `tags` field instead carry a `tag` field holding
+the piece's serialized result schema; the wish system still reads it,
+extracting hashtags from the serialized text. The `tag` field is deprecated;
+do not write it.
 
 ### When to Use Each Scope
 
