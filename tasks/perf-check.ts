@@ -66,7 +66,6 @@ import {
   STDDEV_FACTOR,
   timingArtifactLabel,
   type TimingSample,
-  TOKEN,
   walkFiles,
   WORKFLOW_FILE,
   type WorkflowRun,
@@ -87,7 +86,7 @@ const BASELINE_RUNS = 20;
 /** Recent completed workflow runs to scan for fallback backfill artifacts. */
 const BACKFILL_SOURCE_RUNS = 20;
 
-function currentWorkflowRunFromEvent(
+export function currentWorkflowRunFromEvent(
   event: object | undefined,
   runId: number,
 ): WorkflowRun {
@@ -119,7 +118,7 @@ function isGitHubRateLimitError(error: unknown): boolean {
   return /\b(rate limit|rate-limited|ratelimit)\b/i.test(message);
 }
 
-async function githubApiOrSkip<T>(
+export async function githubApiOrSkip<T>(
   description: string,
   operation: () => Promise<T>,
   metricsForArtifact: Map<string, TimingSample>,
@@ -200,7 +199,7 @@ export function validateBaselineRunsForMainHead(
   return { ok: issues.length === 0, issues };
 }
 
-async function fetchMainHeadSha(): Promise<string> {
+export async function fetchMainHeadSha(): Promise<string> {
   const branch = await githubGet<{ commit: { sha: string } }>(
     `/repos/${REPO}/branches/main`,
   );
@@ -265,7 +264,7 @@ interface GitHubCompareResponse {
   ahead_by?: unknown;
 }
 
-async function fetchCommitsBehindMain(
+export async function fetchCommitsBehindMain(
   baselineSha: string,
   mainHeadSha: string,
 ): Promise<number | null> {
@@ -293,12 +292,12 @@ export function selectMergedPRForCommit(prs: PRInfo[]): PRInfo | null {
   return prs.find((pr) => pr.merged_at !== null) ?? prs[0] ?? null;
 }
 
-interface PRLookupResult {
+export interface PRLookupResult {
   pr: PRInfo | null;
   error: unknown | null;
 }
 
-interface BaselineRunContext {
+export interface BaselineRunContext {
   run: WorkflowRun;
   artifacts: Artifact[];
   pr: PRInfo | null;
@@ -306,7 +305,7 @@ interface BaselineRunContext {
   commitsBehindMain: number | null;
 }
 
-async function fetchPRForCommitWithError(
+export async function fetchPRForCommitWithError(
   sha: string,
 ): Promise<PRLookupResult> {
   try {
@@ -319,7 +318,7 @@ async function fetchPRForCommitWithError(
   }
 }
 
-function newestArtifactNamed(
+export function newestArtifactNamed(
   artifacts: Artifact[],
   name: string,
 ): Artifact | null {
@@ -328,12 +327,12 @@ function newestArtifactNamed(
   )[0] ?? null;
 }
 
-function formatErrorForLog(error: unknown): string {
+export function formatErrorForLog(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split("\n")[0];
 }
 
-function logBaselineSourceRuns(
+export function logBaselineSourceRuns(
   contexts: BaselineRunContext[],
   currentRunCreatedAt: string,
 ): void {
@@ -383,7 +382,7 @@ export function summarizeBaselinePRLookups(
   };
 }
 
-function reportPRLookupResults(
+export function reportPRLookupResults(
   contexts: BaselineRunContext[],
 ): number {
   const summary = summarizeBaselinePRLookups(contexts);
@@ -408,6 +407,193 @@ function reportPRLookupResults(
   }
 
   return summary.failed;
+}
+
+export async function fetchArtifactsForRunBestEffort(
+  run: WorkflowRun,
+  fetchArtifacts: (runId: number) => Promise<Artifact[]> = fetchArtifactsForRun,
+  warn: (message: string) => void = console.warn,
+): Promise<Artifact[]> {
+  try {
+    return await fetchArtifacts(run.id);
+  } catch (error) {
+    warn(`  Warning: could not fetch artifacts for run ${run.id}: ${error}`);
+    return [];
+  }
+}
+
+export async function fetchBaselineRunsForCheck(
+  metricsForArtifact: Map<string, TimingSample>,
+  baselineRunCount = BASELINE_RUNS,
+  log: (message: string) => void = console.log,
+): Promise<{ mainHeadSha: string; baselineRuns: WorkflowRun[] }> {
+  log("Fetching current main branch head...");
+  const mainHeadSha = await githubApiOrSkip(
+    "fetching current main branch head",
+    () => fetchMainHeadSha(),
+    metricsForArtifact,
+  );
+  log(`Current main head is ${mainHeadSha}.`);
+  log("Fetching recent main-branch runs for baseline...");
+  const baselineData = await githubApiOrSkip(
+    "fetching recent main-branch runs for baseline",
+    () =>
+      githubGet<{ workflow_runs: WorkflowRun[] }>(
+        workflowRunsPathForBaseline(baselineRunCount),
+      ),
+    metricsForArtifact,
+  );
+  return { mainHeadSha, baselineRuns: baselineData.workflow_runs };
+}
+
+export function reportBaselineRunAvailability(
+  baselineRuns: WorkflowRun[],
+  mainHeadSha: string,
+  minSamples = MIN_SAMPLES,
+  warn: (message: string) => void = console.warn,
+): BaselineMainHeadValidation {
+  const baselineMainHead = validateBaselineRunsForMainHead(
+    baselineRuns,
+    mainHeadSha,
+  );
+  if (!baselineMainHead.ok) {
+    warn(
+      "Warning: newest successful baseline run is not for the current main head.",
+    );
+    for (const issue of baselineMainHead.issues) {
+      warn(`  Warning: ${issue}`);
+    }
+  }
+
+  if (baselineRuns.length < minSamples) {
+    warn(
+      `  Warning: only ${baselineRuns.length} baseline runs available (need ${minSamples}). Metrics with too few samples will be reported as n/a.`,
+    );
+  }
+
+  return baselineMainHead;
+}
+
+export interface BuildBaselineRunContextsOptions {
+  baselineRuns: WorkflowRun[];
+  mainHeadSha: string;
+  fetchArtifactsForRun?: (run: WorkflowRun) => Promise<Artifact[]>;
+  fetchPRForCommit?: (sha: string) => Promise<PRLookupResult>;
+  fetchCommitsBehindMain?: (
+    baselineSha: string,
+    mainHeadSha: string,
+  ) => Promise<number | null>;
+  concurrency?: number;
+}
+
+export async function buildBaselineRunContexts(
+  options: BuildBaselineRunContextsOptions,
+): Promise<BaselineRunContext[]> {
+  const fetchArtifacts = options.fetchArtifactsForRun ??
+    fetchArtifactsForRunBestEffort;
+  const fetchPR = options.fetchPRForCommit ?? fetchPRForCommitWithError;
+  const fetchCommitDistance = options.fetchCommitsBehindMain ??
+    fetchCommitsBehindMain;
+
+  return await mapConcurrent(
+    options.baselineRuns,
+    options.concurrency ?? API_CONCURRENCY,
+    async (run): Promise<BaselineRunContext> => {
+      const [artifacts, prLookup, commitsBehindMain] = await Promise.all([
+        fetchArtifacts(run),
+        fetchPR(run.head_sha),
+        fetchCommitDistance(run.head_sha, options.mainHeadSha),
+      ]);
+      return {
+        run,
+        artifacts,
+        pr: prLookup.pr,
+        prLookupError: prLookup.error,
+        commitsBehindMain,
+      };
+    },
+  );
+}
+
+export async function buildExtraBackfillContexts(
+  runs: WorkflowRun[],
+  fetchArtifactsForRun: (run: WorkflowRun) => Promise<Artifact[]> =
+    fetchArtifactsForRunBestEffort,
+  concurrency = API_CONCURRENCY,
+): Promise<BaselineRunContext[]> {
+  return await mapConcurrent(
+    runs,
+    concurrency,
+    async (run): Promise<BaselineRunContext> => ({
+      run,
+      artifacts: await fetchArtifactsForRun(run),
+      pr: null,
+      prLookupError: null,
+      commitsBehindMain: null,
+    }),
+  );
+}
+
+export function reportBaselineContextResults(
+  contexts: BaselineRunContext[],
+  currentRunCreatedAt: string,
+): number {
+  logBaselineSourceRuns(contexts, currentRunCreatedAt);
+  const prLookupFailures = reportPRLookupResults(contexts);
+  if (prLookupFailures > 0) {
+    console.warn(
+      "  Warning: running performance regression check with incomplete PR metadata. Some merged baseline overrides may be missing.",
+    );
+  }
+  return prLookupFailures;
+}
+
+export async function parsePerfMetricBackfillFromArtifacts(
+  artifacts: Artifact[],
+  parseBackfill: (
+    artifactId: number,
+  ) => Promise<Map<number, Map<string, TimingSample>> | null> =
+    downloadAndParsePerfMetricsBackfill,
+): Promise<Map<number, Map<string, TimingSample>> | null> {
+  const artifact = newestArtifactNamed(
+    artifacts,
+    PERF_METRICS_BACKFILL_ARTIFACT_NAME,
+  );
+  if (!artifact) return null;
+
+  return await parseBackfill(artifact.id);
+}
+
+export async function parsePerfMetricsFromArtifacts(
+  artifacts: Artifact[],
+  parseMetrics: (
+    artifactId: number,
+  ) => Promise<Map<string, TimingSample> | null> = downloadAndParsePerfMetrics,
+): Promise<Map<string, TimingSample> | null> {
+  const artifact = newestArtifactNamed(
+    artifacts,
+    PERF_METRICS_ARTIFACT_NAME,
+  );
+  if (!artifact) return null;
+
+  return await parseMetrics(artifact.id);
+}
+
+export async function addPerfMetricsFromArtifacts(
+  timelines: Map<string, MetricTimeline>,
+  artifacts: Artifact[],
+  parseMetrics: (
+    artifacts: Artifact[],
+  ) => Promise<Map<string, TimingSample> | null> =
+    parsePerfMetricsFromArtifacts,
+): Promise<boolean> {
+  const artifactMetrics = await parseMetrics(artifacts);
+  if (!artifactMetrics) return false;
+
+  for (const [name, sample] of artifactMetrics) {
+    addSample(timelines, name, sample);
+  }
+  return true;
 }
 
 /**
@@ -535,7 +721,7 @@ function trimTrailingZero(value: string): string {
   return value.replace(/\.0(?=[a-z])/g, "");
 }
 
-function formatMetricValueForTable(
+export function formatMetricValueForTable(
   metric: string,
   value: number | undefined,
 ): string {
@@ -544,7 +730,7 @@ function formatMetricValueForTable(
   return trimTrailingZero(formatMetricValue(metric, value));
 }
 
-function formatMetricDelta(metric: string, row: Row): string {
+export function formatMetricDelta(metric: string, row: Row): string {
   if (row.median === undefined || row.pctIncrease === undefined) return "-";
 
   const delta = row.current - row.median;
@@ -562,7 +748,9 @@ function formatMetricDelta(metric: string, row: Row): string {
   }%)`;
 }
 
-function metricDisplayParts(metric: string): { task: string; metric: string } {
+export function metricDisplayParts(
+  metric: string,
+): { task: string; metric: string } {
   const colon = metric.indexOf(":");
   if (colon < 0) return { task: "other", metric };
 
@@ -606,7 +794,10 @@ export interface Row {
   headroomPct?: number;
 }
 
-function metricTableRows(rows: Row[], includeStatus: boolean): string[][] {
+export function metricTableRows(
+  rows: Row[],
+  includeStatus: boolean,
+): string[][] {
   return rows.map((row) => {
     const display = metricDisplayParts(row.metric);
     const cells = [
@@ -620,7 +811,7 @@ function metricTableRows(rows: Row[], includeStatus: boolean): string[][] {
   });
 }
 
-function printMetricTable(rows: Row[], includeStatus = false): void {
+export function printMetricTable(rows: Row[], includeStatus = false): void {
   const headers = includeStatus
     ? ["Status", "Baseline", "Current", "Change", "Task", "Metric"]
     : ["Baseline", "Current", "Change", "Task", "Metric"];
@@ -857,13 +1048,13 @@ export async function writeCoverageResolved(
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");
   const rawPrNumber = Deno.env.get("PR_NUMBER");
   const prNumber = (rawPrNumber === "") ? null : rawPrNumber;
   const informationalOnly = prNumber === null;
 
-  if (!TOKEN) {
+  if (!Deno.env.get("GITHUB_TOKEN")) {
     console.error("GITHUB_TOKEN is required.");
     Deno.exit(1);
   }
@@ -1043,42 +1234,10 @@ async function main() {
   const wallTimeSignals = computeCiWallTimeRevisitSignals(currentJobs);
 
   // 3. Fetch recent main-branch push runs for baseline
-  console.log("Fetching current main branch head...");
-  const mainHeadSha = await githubApiOrSkip(
-    "fetching current main branch head",
-    () => fetchMainHeadSha(),
+  const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
     currentMetrics,
   );
-  console.log(`Current main head is ${mainHeadSha}.`);
-  console.log("Fetching recent main-branch runs for baseline...");
-  const baselineData = await githubApiOrSkip(
-    "fetching recent main-branch runs for baseline",
-    () =>
-      githubGet<{ workflow_runs: WorkflowRun[] }>(
-        workflowRunsPathForBaseline(BASELINE_RUNS),
-      ),
-    currentMetrics,
-  );
-  const baselineRuns = baselineData.workflow_runs;
-
-  const baselineMainHead = validateBaselineRunsForMainHead(
-    baselineRuns,
-    mainHeadSha,
-  );
-  if (!baselineMainHead.ok) {
-    console.warn(
-      "Warning: newest successful baseline run is not for the current main head.",
-    );
-    for (const issue of baselineMainHead.issues) {
-      console.warn(`  Warning: ${issue}`);
-    }
-  }
-
-  if (baselineRuns.length < MIN_SAMPLES) {
-    console.warn(
-      `  Warning: only ${baselineRuns.length} baseline runs available (need ${MIN_SAMPLES}). Metrics with too few samples will be reported as n/a.`,
-    );
-  }
+  reportBaselineRunAvailability(baselineRuns, mainHeadSha);
 
   console.log(`Using ${baselineRuns.length} main-branch runs as baseline.`);
 
@@ -1088,50 +1247,13 @@ async function main() {
   const prInfoBySha = new Map<string, PRInfo>();
   const newBackfills = new Map<number, Map<string, TimingSample>>();
 
-  async function fetchArtifactsForRunBestEffort(
-    run: WorkflowRun,
-  ): Promise<Artifact[]> {
-    try {
-      return await fetchArtifactsForRun(run.id);
-    } catch (error) {
-      console.warn(
-        `  Warning: could not fetch artifacts for run ${run.id}: ${error}`,
-      );
-      return [];
-    }
-  }
-
   const baselineContexts = await githubApiOrSkip(
     "fetching baseline run context",
-    () =>
-      mapConcurrent(
-        baselineRuns,
-        API_CONCURRENCY,
-        async (run): Promise<BaselineRunContext> => {
-          const [artifacts, prLookup, commitsBehindMain] = await Promise.all([
-            fetchArtifactsForRunBestEffort(run),
-            fetchPRForCommitWithError(run.head_sha),
-            fetchCommitsBehindMain(run.head_sha, mainHeadSha),
-          ]);
-          return {
-            run,
-            artifacts,
-            pr: prLookup.pr,
-            prLookupError: prLookup.error,
-            commitsBehindMain,
-          };
-        },
-      ),
+    () => buildBaselineRunContexts({ baselineRuns, mainHeadSha }),
     currentMetrics,
   );
 
-  logBaselineSourceRuns(baselineContexts, currentRunInfo.created_at);
-  const prLookupFailures = reportPRLookupResults(baselineContexts);
-  if (prLookupFailures > 0) {
-    console.warn(
-      "  Warning: running performance regression check with incomplete PR metadata. Some merged baseline overrides may be missing.",
-    );
-  }
+  reportBaselineContextResults(baselineContexts, currentRunInfo.created_at);
 
   console.log("Fetching recent perf metric backfills...");
   const backfillSourceData = await githubApiOrSkip(
@@ -1148,18 +1270,7 @@ async function main() {
   );
   const extraBackfillContexts = await githubApiOrSkip(
     "fetching extra perf metric backfill context",
-    () =>
-      mapConcurrent(
-        backfillSourceRuns,
-        API_CONCURRENCY,
-        async (run): Promise<BaselineRunContext> => ({
-          run,
-          artifacts: await fetchArtifactsForRunBestEffort(run),
-          pr: null,
-          prLookupError: null,
-          commitsBehindMain: null,
-        }),
-      ),
+    () => buildExtraBackfillContexts(backfillSourceRuns),
     currentMetrics,
   );
 
@@ -1176,15 +1287,7 @@ async function main() {
       mapConcurrent(
         backfillSourceContexts,
         API_CONCURRENCY,
-        async ({ artifacts }) => {
-          const artifact = newestArtifactNamed(
-            artifacts,
-            PERF_METRICS_BACKFILL_ARTIFACT_NAME,
-          );
-          if (!artifact) return null;
-
-          return await downloadAndParsePerfMetricsBackfill(artifact.id);
-        },
+        ({ artifacts }) => parsePerfMetricBackfillFromArtifacts(artifacts),
       ),
     currentMetrics,
   );
@@ -1221,20 +1324,8 @@ async function main() {
           }
         }
 
-        const perfMetricsArtifact = newestArtifactNamed(
-          artifacts,
-          PERF_METRICS_ARTIFACT_NAME,
-        );
-        if (perfMetricsArtifact) {
-          const metrics = await downloadAndParsePerfMetrics(
-            perfMetricsArtifact.id,
-          );
-          if (metrics) {
-            for (const [name, sample] of metrics) {
-              addSample(timelines, name, sample);
-            }
-            return;
-          }
+        if (await addPerfMetricsFromArtifacts(timelines, artifacts)) {
+          return;
         }
 
         const backfilledMetrics = backfilledMetricsByRunId.get(run.id);

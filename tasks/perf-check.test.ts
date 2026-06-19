@@ -1,12 +1,44 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
-import type { PRInfo } from "./perf-lib.ts";
 import {
+  type Artifact,
+  PERF_METRICS_ARTIFACT_NAME,
+  PERF_METRICS_BACKFILL_ARTIFACT_NAME,
+  type PRInfo,
+  type TimingSample,
+  type WorkflowRun,
+} from "./perf-lib.ts";
+import {
+  addPerfMetricsFromArtifacts,
+  type BaselineRunContext,
+  buildBaselineRunContexts,
+  buildExtraBackfillContexts,
+  currentWorkflowRunFromEvent,
+  fetchArtifactsForRunBestEffort,
+  fetchBaselineRunsForCheck,
+  fetchCommitsBehindMain,
+  fetchMainHeadSha,
+  fetchPRForCommitWithError,
   formatBaselineSourceRunAge,
   formatCommitDistance,
+  formatErrorForLog,
+  formatMetricDelta,
+  formatMetricValueForTable,
   formatRelativeAge,
   formatRelativeDuration,
+  githubApiOrSkip,
+  logBaselineSourceRuns,
+  main,
+  metricDisplayParts,
+  metricTableRows,
+  newestArtifactNamed,
   parseMergedBaselineOverrides,
+  parsePerfMetricBackfillFromArtifacts,
+  parsePerfMetricsFromArtifacts,
+  printMetricTable,
+  reportBaselineContextResults,
+  reportBaselineRunAvailability,
+  reportPRLookupResults,
   type Row,
   selectMergedPRForCommit,
   summarizeBaselinePRLookups,
@@ -20,6 +52,176 @@ import {
   COVERAGE_SUGGESTION_MARKER,
   type CoverageCommentPayload,
 } from "./perf-lib.ts";
+
+const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const SHA_C = "cccccccccccccccccccccccccccccccccccccccc";
+
+function makeRun(
+  id: number,
+  headSha = SHA_A,
+  createdAt = "2026-06-18T10:00:00Z",
+): WorkflowRun {
+  return {
+    id,
+    html_url: `https://github.com/commontoolsinc/labs/actions/runs/${id}`,
+    head_sha: headSha,
+    created_at: createdAt,
+    conclusion: "success",
+    event: "push",
+  };
+}
+
+function makeArtifact(
+  id: number,
+  name: string,
+  expired = false,
+): Artifact {
+  return {
+    id,
+    name,
+    size_in_bytes: 12,
+    expired,
+  };
+}
+
+function makeSample(run = makeRun(1)): TimingSample {
+  return {
+    runId: run.id,
+    runUrl: run.html_url,
+    sha: run.head_sha,
+    createdAt: run.created_at,
+    durationSeconds: 1.5,
+  };
+}
+
+function makePR(number: number, mergedAt: string | null = null): PRInfo {
+  return {
+    number,
+    title: `PR ${number}`,
+    html_url: `https://github.com/commontoolsinc/labs/pull/${number}`,
+    body: null,
+    merged_at: mergedAt,
+  };
+}
+
+type FetchInput = Parameters<typeof fetch>[0];
+type FetchInit = Parameters<typeof fetch>[1];
+
+async function withMockFetch<T>(
+  handler: (input: FetchInput, init: FetchInit) => Response | Promise<Response>,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch =
+    ((input: FetchInput, init?: FetchInit) =>
+      Promise.resolve(handler(input, init))) as typeof fetch;
+  try {
+    return await callback();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function captureConsole<T>(
+  callback: () => T,
+): { result: T; logs: string[]; warnings: string[]; errors: string[] } {
+  const logs: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+  console.warn = (...args: unknown[]) =>
+    warnings.push(args.map(String).join(" "));
+  console.error = (...args: unknown[]) =>
+    errors.push(args.map(String).join(" "));
+  try {
+    return { result: callback(), logs, warnings, errors };
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+}
+
+async function captureConsoleAsync<T>(
+  callback: () => Promise<T>,
+): Promise<
+  { result: T; logs: string[]; warnings: string[]; errors: string[] }
+> {
+  const logs: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+  console.warn = (...args: unknown[]) =>
+    warnings.push(args.map(String).join(" "));
+  console.error = (...args: unknown[]) =>
+    errors.push(args.map(String).join(" "));
+  try {
+    return { result: await callback(), logs, warnings, errors };
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+}
+
+async function withEnv<T>(
+  values: Record<string, string | undefined>,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(values)) {
+    previous.set(key, Deno.env.get(key));
+    const value = values[key];
+    if (value === undefined) Deno.env.delete(key);
+    else Deno.env.set(key, value);
+  }
+
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) Deno.env.delete(key);
+      else Deno.env.set(key, value);
+    }
+  }
+}
+
+class ExitError extends Error {
+  constructor(readonly code: number) {
+    super(`Deno.exit(${code})`);
+  }
+}
+
+async function withMockExit(
+  callback: () => Promise<void>,
+): Promise<number | null> {
+  const originalExit = Deno.exit;
+  Deno.exit = ((code?: number): never => {
+    throw new ExitError(code ?? 0);
+  }) as typeof Deno.exit;
+  try {
+    await callback();
+    return null;
+  } catch (error) {
+    if (error instanceof ExitError) return error.code;
+    throw error;
+  } finally {
+    Deno.exit = originalExit;
+  }
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json" },
+  });
+}
 
 Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const warnings: string[] = [];
@@ -144,6 +346,50 @@ Deno.test("baseline workflow path fetches successful main push runs", () => {
   assertEquals(query.get("created"), null);
 });
 
+Deno.test("fetchMainHeadSha reads the main branch commit", async () => {
+  const result = await withMockFetch(
+    (input) => {
+      assertStringIncludes(
+        String(input),
+        "/repos/commontoolsinc/labs/branches/main",
+      );
+      return new Response(JSON.stringify({ commit: { sha: SHA_A } }));
+    },
+    () => fetchMainHeadSha(),
+  );
+
+  assertEquals(result, SHA_A);
+});
+
+Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async () => {
+  const logs: string[] = [];
+  const requests: string[] = [];
+  const run = makeRun(101, SHA_A);
+  const result = await withMockFetch(
+    (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/branches/main")) {
+        return new Response(JSON.stringify({ commit: { sha: SHA_A } }));
+      }
+      if (url.includes("/actions/workflows/deno.yml/runs?")) {
+        return new Response(JSON.stringify({ workflow_runs: [run] }));
+      }
+      return new Response("unexpected request", { status: 404 });
+    },
+    () =>
+      fetchBaselineRunsForCheck(new Map(), 1, (message) => logs.push(message)),
+  );
+
+  assertEquals(result, { mainHeadSha: SHA_A, baselineRuns: [run] });
+  assertEquals(requests.length, 2);
+  assertStringIncludes(requests[1], "branch=main");
+  assertStringIncludes(requests[1], "status=success");
+  assertStringIncludes(requests[1], "event=push");
+  assertStringIncludes(requests[1], "per_page=1");
+  assertStringIncludes(logs.join("\n"), "Current main head");
+});
+
 Deno.test("relative duration formatting uses two readable parts", () => {
   assertEquals(formatRelativeDuration(45), "45 seconds");
   assertEquals(formatRelativeDuration(65), "1 minute 5 seconds");
@@ -155,6 +401,7 @@ Deno.test("relative duration formatting uses two readable parts", () => {
     formatRelativeDuration(3 * 24 * 60 * 60 + 2 * 60 * 60),
     "3 days 2 hours",
   );
+  assertEquals(formatRelativeDuration(Number.NaN), "unknown");
 });
 
 Deno.test("relative age formatting compares two timestamps", () => {
@@ -187,6 +434,334 @@ Deno.test("baseline source run age combines time and commit distance", () => {
     ),
     "created 2 hours 3 minutes ago; 7 commits behind current main",
   );
+  assertEquals(
+    formatBaselineSourceRunAge("not a date", "2026-06-18T12:03:04Z", null),
+    "age unknown; an unknown number of commits behind current main",
+  );
+});
+
+Deno.test("fetchCommitsBehindMain reports zero for the current main commit", async () => {
+  assertEquals(await fetchCommitsBehindMain(SHA_A, SHA_A), 0);
+});
+
+Deno.test("fetchCommitsBehindMain reads GitHub compare distance", async () => {
+  const result = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/compare/${SHA_A}...${SHA_B}`);
+      return new Response(JSON.stringify({ ahead_by: 3 }));
+    },
+    () => fetchCommitsBehindMain(SHA_A, SHA_B),
+  );
+
+  assertEquals(result, 3);
+});
+
+Deno.test("fetchCommitsBehindMain treats malformed compare data as unknown", async () => {
+  const result = await withMockFetch(
+    () => new Response(JSON.stringify({ ahead_by: "3" })),
+    () => fetchCommitsBehindMain(SHA_A, SHA_B),
+  );
+
+  assertEquals(result, null);
+});
+
+Deno.test("fetchCommitsBehindMain warns and continues after compare failure", async () => {
+  const captured = await captureConsoleAsync(() =>
+    withMockFetch(
+      () => new Response("missing", { status: 404 }),
+      () => fetchCommitsBehindMain(SHA_A, SHA_B),
+    )
+  );
+
+  assertEquals(captured.result, null);
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not compare baseline",
+  );
+  assertStringIncludes(captured.warnings.join("\n"), SHA_A.slice(0, 8));
+});
+
+Deno.test("fetchPRForCommitWithError returns selected PR metadata", async () => {
+  const pr = makePR(42, "2026-06-18T00:00:00Z");
+  const result = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/commits/${SHA_A}/pulls`);
+      return new Response(JSON.stringify([pr]));
+    },
+    () => fetchPRForCommitWithError(SHA_A),
+  );
+
+  assertEquals(result, { pr, error: null });
+});
+
+Deno.test("fetchPRForCommitWithError captures lookup errors", async () => {
+  const result = await withMockFetch(
+    () => new Response("missing", { status: 404 }),
+    () => fetchPRForCommitWithError(SHA_A),
+  );
+
+  assertEquals(result.pr, null);
+  assertStringIncludes(String(result.error), "GitHub API 404");
+});
+
+Deno.test("newestArtifactNamed filters expired artifacts and keeps newest id", () => {
+  assertEquals(
+    newestArtifactNamed(
+      [
+        makeArtifact(1, PERF_METRICS_ARTIFACT_NAME),
+        makeArtifact(3, PERF_METRICS_ARTIFACT_NAME, true),
+        makeArtifact(2, PERF_METRICS_ARTIFACT_NAME),
+        makeArtifact(4, "other"),
+      ],
+      PERF_METRICS_ARTIFACT_NAME,
+    )?.id,
+    2,
+  );
+  assertEquals(newestArtifactNamed([], PERF_METRICS_ARTIFACT_NAME), null);
+});
+
+Deno.test("formatErrorForLog keeps the first line only", () => {
+  assertEquals(formatErrorForLog(new Error("first\nsecond")), "first");
+  assertEquals(formatErrorForLog("plain\nsecond"), "plain");
+});
+
+Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () => {
+  const metrics = new Map<string, TimingSample>([["job: Check", makeSample()]]);
+
+  try {
+    const captured = await captureConsoleAsync(() =>
+      withMockExit(() =>
+        githubApiOrSkip(
+          "collecting test data",
+          () => Promise.reject(new Error("rate limit exceeded")),
+          metrics,
+        ).then(() => {})
+      )
+    );
+
+    assertEquals(captured.result, 0);
+    assertStringIncludes(captured.warnings.join("\n"), "rate limit");
+    assertStringIncludes(captured.logs.join("\n"), "Wrote perf-metrics.json");
+    const file = JSON.parse(await Deno.readTextFile("perf-metrics.json"));
+    assertEquals(file.metrics[0].name, "job: Check");
+  } finally {
+    await Deno.remove("perf-metrics.json").catch(() => {});
+  }
+});
+
+Deno.test("githubApiOrSkip rethrows non-rate-limit errors", async () => {
+  await assertRejects(
+    () =>
+      githubApiOrSkip(
+        "collecting test data",
+        () => Promise.reject(new Error("plain failure")),
+        new Map(),
+      ),
+    Error,
+    "plain failure",
+  );
+});
+
+Deno.test("metric table helpers format task and metric details", () => {
+  const coverageRow = {
+    metric: "coverage-debt: tasks uncovered lines",
+    status: "OK" as const,
+    current: 12.4,
+    median: 10,
+    variance: 0,
+    stddev: 0,
+    threshold: 10,
+    n: 5,
+    pctIncrease: 24,
+  };
+  const pendingRow = {
+    metric: "job: Check",
+    status: "n/a" as const,
+    current: 9,
+    n: 0,
+  };
+
+  assertEquals(
+    formatMetricValueForTable(coverageRow.metric, coverageRow.current),
+    "12",
+  );
+  assertEquals(formatMetricValueForTable("job: Check", undefined), "-");
+  assertEquals(formatMetricDelta("job: Check", pendingRow), "-");
+  assertEquals(
+    formatMetricDelta(coverageRow.metric, coverageRow),
+    "+2 (+24%)",
+  );
+  assertEquals(metricDisplayParts("test: runner > file.test.ts"), {
+    task: "runner",
+    metric: "file.test.ts",
+  });
+  assertEquals(metricDisplayParts("coverage-debt: tasks uncovered lines"), {
+    task: "coverage-debt",
+    metric: "tasks",
+  });
+  assertEquals(metricDisplayParts("coverage-debt: custom metric"), {
+    task: "coverage-debt",
+    metric: "custom metric",
+  });
+  assertEquals(metricDisplayParts("uncategorized"), {
+    task: "other",
+    metric: "uncategorized",
+  });
+  assertEquals(metricDisplayParts("job: Check"), {
+    task: "job",
+    metric: "Check",
+  });
+  assertEquals(metricTableRows([coverageRow], true)[0][0], "OK");
+  assertEquals(metricTableRows([coverageRow], false)[0][0], "10");
+});
+
+Deno.test("printMetricTable renders status and non-status tables", () => {
+  const row = {
+    metric: "job: Check",
+    status: "OK" as const,
+    current: 9,
+    median: 8,
+    variance: 0,
+    stddev: 0,
+    threshold: 10,
+    n: 5,
+    pctIncrease: 12.5,
+  };
+
+  const withStatus = captureConsole(() => printMetricTable([row], true));
+  assertStringIncludes(withStatus.logs.join("\n"), "Status");
+  assertStringIncludes(withStatus.logs.join("\n"), "OK");
+
+  const withoutStatus = captureConsole(() => printMetricTable([row], false));
+  assertStringIncludes(withoutStatus.logs.join("\n"), "Baseline");
+  assertEquals(withoutStatus.logs.join("\n").includes("Status"), false);
+});
+
+Deno.test("currentWorkflowRunFromEvent reads event and environment metadata", () => {
+  const previousSha = Deno.env.get("GITHUB_SHA");
+  const previousEventName = Deno.env.get("GITHUB_EVENT_NAME");
+  try {
+    Deno.env.set("GITHUB_SHA", SHA_B);
+    Deno.env.set("GITHUB_EVENT_NAME", "push");
+    assertEquals(
+      currentWorkflowRunFromEvent(
+        { pull_request: { head: { sha: SHA_A } } },
+        7,
+      ).head_sha,
+      SHA_A,
+    );
+    const fallback = currentWorkflowRunFromEvent(undefined, 8);
+    assertEquals(fallback.head_sha, SHA_B);
+    assertEquals(fallback.event, "push");
+    Deno.env.delete("GITHUB_EVENT_NAME");
+    assertEquals(currentWorkflowRunFromEvent(undefined, 9).event, "");
+  } finally {
+    if (previousSha === undefined) Deno.env.delete("GITHUB_SHA");
+    else Deno.env.set("GITHUB_SHA", previousSha);
+    if (previousEventName === undefined) Deno.env.delete("GITHUB_EVENT_NAME");
+    else Deno.env.set("GITHUB_EVENT_NAME", previousEventName);
+  }
+});
+
+Deno.test("logBaselineSourceRuns prints age, PR, lookup, and artifact details", () => {
+  const contexts: BaselineRunContext[] = [
+    {
+      run: makeRun(1, SHA_A, "2026-06-18T10:00:00Z"),
+      artifacts: [
+        makeArtifact(1, PERF_METRICS_ARTIFACT_NAME),
+        makeArtifact(3, PERF_METRICS_ARTIFACT_NAME, true),
+        makeArtifact(2, PERF_METRICS_ARTIFACT_NAME),
+      ],
+      pr: makePR(10, "2026-06-18T00:00:00Z"),
+      prLookupError: null,
+      commitsBehindMain: 0,
+    },
+    {
+      run: makeRun(2, SHA_B, "2026-06-18T11:00:00Z"),
+      artifacts: [],
+      pr: null,
+      prLookupError: new Error("lookup failed\nsecond line"),
+      commitsBehindMain: null,
+    },
+    {
+      run: makeRun(3, SHA_C, "2026-06-18T11:30:00Z"),
+      artifacts: [],
+      pr: null,
+      prLookupError: null,
+      commitsBehindMain: 5,
+    },
+  ];
+
+  const captured = captureConsole(() =>
+    logBaselineSourceRuns(contexts, "2026-06-18T12:00:00Z")
+  );
+  const output = captured.logs.join("\n");
+
+  assertStringIncludes(output, "Baseline source runs:");
+  assertStringIncludes(
+    output,
+    "created 2 hours ago; 0 commits behind current main",
+  );
+  assertStringIncludes(output, "PR #10");
+  assertStringIncludes(output, "perf-metrics artifact 2");
+  assertStringIncludes(output, "PR lookup failed");
+  assertStringIncludes(
+    output,
+    "an unknown number of commits behind current main",
+  );
+  assertStringIncludes(output, "no PR found");
+  assertStringIncludes(output, "no perf-metrics artifact");
+});
+
+Deno.test("reportPRLookupResults logs clean and failed lookup summaries", () => {
+  const clean = captureConsole(() =>
+    reportPRLookupResults([
+      {
+        run: makeRun(1),
+        artifacts: [],
+        pr: makePR(1),
+        prLookupError: null,
+        commitsBehindMain: 0,
+      },
+    ])
+  );
+  assertEquals(clean.result, 0);
+  assertStringIncludes(clean.logs.join("\n"), "0 failed");
+
+  const failed = captureConsole(() =>
+    reportPRLookupResults([
+      {
+        run: makeRun(2, SHA_B),
+        artifacts: [],
+        pr: null,
+        prLookupError: new Error("boom\nsecond line"),
+        commitsBehindMain: null,
+      },
+    ])
+  );
+  assertEquals(failed.result, 1);
+  assertStringIncludes(
+    failed.warnings.join("\n"),
+    "failed to fetch PR metadata",
+  );
+  assertStringIncludes(failed.warnings.join("\n"), "boom");
+});
+
+Deno.test("reportBaselineContextResults logs incomplete PR metadata warning", () => {
+  const context: BaselineRunContext = {
+    run: makeRun(1),
+    artifacts: [],
+    pr: null,
+    prLookupError: new Error("lookup failed"),
+    commitsBehindMain: null,
+  };
+
+  const captured = captureConsole(() =>
+    reportBaselineContextResults([context], "2026-06-18T12:00:00Z")
+  );
+
+  assertEquals(captured.result, 1);
+  assertStringIncludes(captured.warnings.join("\n"), "incomplete PR metadata");
 });
 
 Deno.test("baseline main validation reports stale newest run", () => {
@@ -212,6 +787,22 @@ Deno.test("baseline main validation reports stale newest run", () => {
     result.issues.join("\n"),
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   );
+});
+
+Deno.test("baseline main validation reports invalid main head SHA", () => {
+  const result = validateBaselineRunsForMainHead(
+    [
+      {
+        id: 1,
+        head_sha: SHA_A,
+        created_at: "2026-06-18T00:00:00Z",
+      },
+    ],
+    "not-a-sha",
+  );
+
+  assertEquals(result.ok, false);
+  assertStringIncludes(result.issues.join("\n"), "invalid");
 });
 
 Deno.test("baseline main validation reports empty run data", () => {
@@ -242,6 +833,279 @@ Deno.test("baseline main validation accepts current main as newest run", () => {
   );
 
   assertEquals(result, { ok: true, issues: [] });
+});
+
+Deno.test("reportBaselineRunAvailability warns for stale and sparse baselines", () => {
+  const warnings: string[] = [];
+  const result = reportBaselineRunAvailability(
+    [makeRun(1, SHA_A)],
+    SHA_B,
+    5,
+    (message) => warnings.push(message),
+  );
+
+  assertEquals(result.ok, false);
+  assertStringIncludes(warnings.join("\n"), "current main head");
+  assertStringIncludes(warnings.join("\n"), "only 1 baseline runs available");
+});
+
+Deno.test("fetchArtifactsForRunBestEffort returns artifacts or an empty fallback", async () => {
+  const run = makeRun(99);
+  const artifact = makeArtifact(1, PERF_METRICS_ARTIFACT_NAME);
+  const warnings: string[] = [];
+
+  assertEquals(
+    await fetchArtifactsForRunBestEffort(run, (runId) => {
+      assertEquals(runId, 99);
+      return Promise.resolve([artifact]);
+    }, (message) => warnings.push(message)),
+    [artifact],
+  );
+  assertEquals(warnings, []);
+
+  assertEquals(
+    await fetchArtifactsForRunBestEffort(
+      run,
+      () => {
+        throw new Error("artifact API failed");
+      },
+      (message) => warnings.push(message),
+    ),
+    [],
+  );
+  assertStringIncludes(warnings.join("\n"), "artifact API failed");
+});
+
+Deno.test("buildBaselineRunContexts collects artifacts, PRs, and commit distance", async () => {
+  const run = makeRun(11, SHA_A);
+  const artifact = makeArtifact(5, PERF_METRICS_ARTIFACT_NAME);
+  const pr = makePR(11, "2026-06-18T00:00:00Z");
+
+  const contexts = await buildBaselineRunContexts({
+    baselineRuns: [run],
+    mainHeadSha: SHA_B,
+    concurrency: 1,
+    fetchArtifactsForRun: (requestedRun) => {
+      assertEquals(requestedRun, run);
+      return Promise.resolve([artifact]);
+    },
+    fetchPRForCommit: (sha) => {
+      assertEquals(sha, SHA_A);
+      return Promise.resolve({ pr, error: null });
+    },
+    fetchCommitsBehindMain: (baselineSha, mainHeadSha) => {
+      assertEquals(baselineSha, SHA_A);
+      assertEquals(mainHeadSha, SHA_B);
+      return Promise.resolve(4);
+    },
+  });
+
+  assertEquals(contexts, [
+    {
+      run,
+      artifacts: [artifact],
+      pr,
+      prLookupError: null,
+      commitsBehindMain: 4,
+    },
+  ]);
+});
+
+Deno.test("buildExtraBackfillContexts creates context shells", async () => {
+  const run = makeRun(12, SHA_B);
+  const artifact = makeArtifact(6, PERF_METRICS_BACKFILL_ARTIFACT_NAME);
+
+  const contexts = await buildExtraBackfillContexts(
+    [run],
+    (requestedRun) => {
+      assertEquals(requestedRun, run);
+      return Promise.resolve([artifact]);
+    },
+    1,
+  );
+
+  assertEquals(contexts, [
+    {
+      run,
+      artifacts: [artifact],
+      pr: null,
+      prLookupError: null,
+      commitsBehindMain: null,
+    },
+  ]);
+});
+
+Deno.test("parsePerfMetricBackfillFromArtifacts uses newest backfill artifact", async () => {
+  const parsed = new Map<number, Map<string, TimingSample>>([[1, new Map()]]);
+  let parsedArtifactId = 0;
+
+  const result = await parsePerfMetricBackfillFromArtifacts(
+    [
+      makeArtifact(1, PERF_METRICS_BACKFILL_ARTIFACT_NAME),
+      makeArtifact(3, PERF_METRICS_BACKFILL_ARTIFACT_NAME),
+      makeArtifact(4, PERF_METRICS_BACKFILL_ARTIFACT_NAME, true),
+    ],
+    (artifactId) => {
+      parsedArtifactId = artifactId;
+      return Promise.resolve(parsed);
+    },
+  );
+
+  assertEquals(result, parsed);
+  assertEquals(parsedArtifactId, 3);
+  assertEquals(
+    await parsePerfMetricBackfillFromArtifacts([], () => {
+      throw new Error("should not parse without an artifact");
+    }),
+    null,
+  );
+});
+
+Deno.test("parsePerfMetricsFromArtifacts uses newest perf metrics artifact", async () => {
+  const parsed = new Map<string, TimingSample>([["job: Check", makeSample()]]);
+  let parsedArtifactId = 0;
+
+  const result = await parsePerfMetricsFromArtifacts(
+    [
+      makeArtifact(1, PERF_METRICS_ARTIFACT_NAME),
+      makeArtifact(3, PERF_METRICS_ARTIFACT_NAME),
+      makeArtifact(4, PERF_METRICS_ARTIFACT_NAME, true),
+    ],
+    (artifactId) => {
+      parsedArtifactId = artifactId;
+      return Promise.resolve(parsed);
+    },
+  );
+
+  assertEquals(result, parsed);
+  assertEquals(parsedArtifactId, 3);
+  assertEquals(
+    await parsePerfMetricsFromArtifacts([], () => {
+      throw new Error("should not parse without an artifact");
+    }),
+    null,
+  );
+});
+
+Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async () => {
+  const artifacts = [makeArtifact(1, PERF_METRICS_ARTIFACT_NAME)];
+  const sample = makeSample();
+  const timelines = new Map();
+
+  assertEquals(
+    await addPerfMetricsFromArtifacts(timelines, artifacts, (requested) => {
+      assertEquals(requested, artifacts);
+      return Promise.resolve(new Map([["job: Check", sample]]));
+    }),
+    true,
+  );
+  assertEquals(timelines.get("job: Check")?.samples, [sample]);
+
+  assertEquals(
+    await addPerfMetricsFromArtifacts(
+      timelines,
+      [],
+      () => Promise.resolve(null),
+    ),
+    false,
+  );
+});
+
+Deno.test("main runs informational check with mocked latest baseline data", async () => {
+  const eventPath = await Deno.makeTempFile({ suffix: ".json" });
+  await Deno.writeTextFile(eventPath, JSON.stringify({ after: SHA_C }));
+
+  const currentRunId = 123;
+  const baselineRuns = [
+    makeRun(201, SHA_A, "2026-06-18T10:00:00Z"),
+    makeRun(202, SHA_B, "2026-06-18T09:00:00Z"),
+    makeRun(203, SHA_C, "2026-06-18T08:00:00Z"),
+    makeRun(
+      204,
+      "dddddddddddddddddddddddddddddddddddddddd",
+      "2026-06-18T07:00:00Z",
+    ),
+    makeRun(
+      205,
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "2026-06-18T06:00:00Z",
+    ),
+  ];
+  const jobsForRun = (runId: number) => ({
+    jobs: [
+      {
+        id: runId * 10,
+        name: "Check",
+        started_at: "2026-06-18T12:00:00Z",
+        completed_at: "2026-06-18T12:00:10Z",
+        steps: [
+          {
+            name: "Run checks",
+            started_at: "2026-06-18T12:00:01Z",
+            completed_at: "2026-06-18T12:00:09Z",
+          },
+        ],
+      },
+    ],
+  });
+
+  try {
+    const captured = await captureConsoleAsync(() =>
+      withEnv(
+        {
+          GITHUB_TOKEN: "test-token",
+          GITHUB_RUN_ID: String(currentRunId),
+          GITHUB_EVENT_PATH: eventPath,
+          GITHUB_EVENT_NAME: "workflow_run",
+          GITHUB_SHA: SHA_C,
+          PR_NUMBER: "",
+        },
+        () =>
+          withMockFetch(
+            (input) => {
+              const url = String(input);
+              if (url.endsWith("/branches/main")) {
+                return jsonResponse({ commit: { sha: SHA_A } });
+              }
+              if (url.includes("/actions/workflows/deno.yml/runs?")) {
+                return jsonResponse({ workflow_runs: baselineRuns });
+              }
+              if (url.includes(`/actions/runs/${currentRunId}/jobs`)) {
+                return jsonResponse(jobsForRun(currentRunId));
+              }
+              const baselineRun = baselineRuns.find((run) =>
+                url.includes(`/actions/runs/${run.id}/jobs`)
+              );
+              if (baselineRun) return jsonResponse(jobsForRun(baselineRun.id));
+              if (url.includes("/artifacts?")) {
+                return jsonResponse({ total_count: 0, artifacts: [] });
+              }
+              if (url.includes("/commits/") && url.endsWith("/pulls")) {
+                return jsonResponse([]);
+              }
+              if (url.includes("/compare/")) {
+                return jsonResponse({ ahead_by: 1 });
+              }
+              return new Response(`unexpected request: ${url}`, {
+                status: 404,
+              });
+            },
+            () => withMockExit(() => main()),
+          ),
+      )
+    );
+    const output = captured.logs.join("\n");
+
+    assertEquals(captured.result, 0);
+    assertStringIncludes(output, "Current main head is");
+    assertStringIncludes(output, "Using 5 main-branch runs as baseline.");
+    assertStringIncludes(output, "Baseline source runs:");
+    assertStringIncludes(output, "All metrics within normal range.");
+  } finally {
+    await Deno.remove(eventPath).catch(() => {});
+    await Deno.remove("perf-metrics.json").catch(() => {});
+    await Deno.remove("perf-metrics-backfill.json").catch(() => {});
+  }
 });
 
 Deno.test("selectMergedPRForCommit prefers the merged PR", () => {
