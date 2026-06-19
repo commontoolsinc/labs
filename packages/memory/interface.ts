@@ -1,12 +1,10 @@
-import type { FabricValue, JSONValue } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/api";
 import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
 export type { FabricValue };
-
-export type { JSONValue };
 
 /**
  * Some principal identified via DID identifier.
@@ -428,8 +426,7 @@ export type CommitData = {
 export type ClaimFact = true;
 
 // ⚠️ Note we use `void` as opposed to `undefined` because the latter makes it
-// incompatible with the `Is` type parameter (which defaults to `FabricValue`
-// and previously defaulted to `JSONValue`).
+// incompatible with the `Is` type parameter (which defaults to `FabricValue`).
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends FabricValue = FabricValue> = { is: Is };
 
