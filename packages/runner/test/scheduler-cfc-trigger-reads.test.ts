@@ -284,6 +284,18 @@ describe("trigger reads survive failed runs", () => {
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
+  it("requeues primitive retryable errors without retry readiness", async () => {
+    let restored = 0;
+    let queued = 0;
+    await watchWith({
+      error: "conflict",
+      onRestore: () => restored++,
+      onQueueExecution: () => queued++,
+    });
+    expect(restored).toBe(1);
+    expect(queued).toBe(1);
+  });
+
   it("does not restore on successful commit", async () => {
     let restored = 0;
     await watchWith({ onRestore: () => restored++ });
@@ -321,9 +333,10 @@ describe("unsubscribe clears pending trigger reads", () => {
       );
       await runtime.idle();
 
-      const cfcTriggerReads =
-        // deno-lint-ignore no-explicit-any
-        (runtime.scheduler as any).cfcTriggerReads as CfcTriggerReads;
+      const scheduler = runtime.scheduler as unknown as {
+        cfcTriggerReads: CfcTriggerReads;
+      };
+      const cfcTriggerReads = scheduler.cfcTriggerReads;
       cfcTriggerReads.set(action, {
         addresses: [{
           space,
