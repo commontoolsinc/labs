@@ -1,5 +1,5 @@
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 
 /**
  * Produces a detached, deep-frozen snapshot of a request `value`, for use as a

@@ -1,5 +1,5 @@
 import { Database } from "@db/sqlite";
-import type { FabricValue } from "../interface.ts";
+import type { FabricValue } from "@commonfabric/api";
 import { runWrite } from "./sqlite/exec.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";

@@ -1,5 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
 import type { CfcPrepareState, WritePolicyInput } from "./types.ts";

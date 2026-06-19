@@ -7,7 +7,7 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "./interface.ts";
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 

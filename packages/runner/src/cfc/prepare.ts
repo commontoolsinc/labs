@@ -13,11 +13,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type {
-  FabricValue,
-  MemorySpace,
-  URI,
-} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { normalizeCellScope } from "../scope.ts";

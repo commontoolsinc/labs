@@ -1,5 +1,5 @@
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {

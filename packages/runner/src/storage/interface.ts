@@ -13,19 +13,18 @@ import type {
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   type Assertion,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type DID,
-  type FabricValue,
   type Fact,
   type Invariant as IClaim,
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
-  type SchemaPathSelector,
   type Signer,
   type State,
   type The as MediaType,

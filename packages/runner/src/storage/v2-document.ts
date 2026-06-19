@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 
 export const toTransactionDocumentValue = (

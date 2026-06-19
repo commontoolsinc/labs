@@ -7,7 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";

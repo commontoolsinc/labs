@@ -2,12 +2,9 @@ import { LRUCache } from "@commonfabric/utils/cache";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue } from "@commonfabric/memory/interface";
-import type {
-  Result,
-  SchemaPathSelector,
-  Unit,
-} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
+import type { SchemaPathSelector } from "@commonfabric/api";
+import type { Result, Unit } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";

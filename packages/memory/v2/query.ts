@@ -18,7 +18,8 @@ import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commonfabric/utils/types";
-import type { FabricValue, MemorySpace, MIME, URI } from "../interface.ts";
+import type { FabricValue } from "@commonfabric/api";
+import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   type CellScope,

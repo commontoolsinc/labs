@@ -2,11 +2,8 @@ import { assertEquals, assertStrictEquals } from "@std/assert";
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type {
-  FabricValue,
-  MemorySpace,
-  URI,
-} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type {
   IExtendedStorageTransaction,
   TransactionWriteDetail,
