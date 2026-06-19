@@ -59,6 +59,14 @@ export default pattern(() => {
     isHidden: false,
   });
 
+  // A piece to link to via appendLink.
+  const linkTarget = Note({
+    title: "Link Target",
+    content: "I am linkable",
+
+    isHidden: false,
+  });
+
   // ==========================================================================
   // Actions - Content Editing
   // ==========================================================================
@@ -119,6 +127,14 @@ export default pattern(() => {
 
   const action_create_from_parented = action(() => {
     noteWithParent.createNewNote.send();
+  });
+
+  // ==========================================================================
+  // Actions - Append wiki-link
+  // ==========================================================================
+
+  const action_append_link = action(() => {
+    note.appendLink.send({ piece: linkTarget });
   });
 
   // ==========================================================================
@@ -258,6 +274,20 @@ export default pattern(() => {
   );
 
   // ==========================================================================
+  // Assertions - Append wiki-link
+  // ==========================================================================
+
+  // appendLink appends `[[<NAME> (<entityId>)]]` to the content, with the
+  // target's entityId stringified via the cell-rep chokepoint, and pushes the
+  // target onto `mentioned`.
+  const assert_link_appended = computed(() =>
+    /\[\[📝 Link Target \([^)]+\)\]\]/.test(note.content)
+  );
+  const assert_mentioned_after_link = computed(
+    () => note.mentioned.length === 1,
+  );
+
+  // ==========================================================================
   // Test Sequence
   // ==========================================================================
   return {
@@ -321,10 +351,16 @@ export default pattern(() => {
       { assertion: assert_note_unchanged_after_create },
       { action: action_create_from_parented },
       { assertion: assert_parented_note_unchanged },
+
+      // === Append wiki-link ===
+      { action: action_append_link },
+      { assertion: assert_link_appended },
+      { assertion: assert_mentioned_after_link },
     ],
     note,
     noteWithParent,
     noteInNotebookB,
     noteNoParent,
+    linkTarget,
   };
 });

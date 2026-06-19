@@ -18,6 +18,7 @@ import type {
   CfSqliteHelpers,
   CompileAndRunFunction,
   ComputedFunction,
+  EntityRefToStringFunction,
   EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
@@ -355,6 +356,7 @@ export interface BuilderFunctionsAndConstants {
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;
+  entityRefToString: EntityRefToStringFunction;
 
   // Constants
   ID: typeof ID;

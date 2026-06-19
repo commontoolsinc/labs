@@ -62,6 +62,7 @@ import {
 } from "@commonfabric/memory/sqlite/row-label";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
@@ -232,6 +233,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Entity utilities
     getEntityId,
+    entityRefToString,
 
     // Constants
     ID,
