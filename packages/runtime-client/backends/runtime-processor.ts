@@ -27,7 +27,7 @@ import {
   setPatternEnvironment,
   type SigilLink,
 } from "@commonfabric/runner";
-import { linkRefInner } from "@commonfabric/runner/shared";
+import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   redactCaveatSourcesForDisplay,
@@ -174,7 +174,7 @@ export function runtimeOptionsFromInitializationData(
 function formatCellLink(cell: Cell<unknown>): string {
   try {
     const link: SigilLink = cell.getAsLink();
-    const inner = linkRefInner(link);
+    const inner = linkRefPayload(link);
     const pathStr = inner.path?.length ? `/${inner.path.join("/")}` : "";
     return `[Cell: ${inner.id ?? "?"}${pathStr}]`;
   } catch {

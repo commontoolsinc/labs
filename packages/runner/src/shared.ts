@@ -14,7 +14,7 @@ export {
   isLinkRef,
   type LinkRef,
   linkRefFrom,
-  linkRefInner,
+  linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
 export { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 export {

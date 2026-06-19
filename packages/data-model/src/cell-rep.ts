@@ -103,7 +103,7 @@ export function entityRefToString(value: EntityRef): string {
 /**
  * The link-sigil tag. This module is the sole place that names the literal;
  * everything else routes through {@link linkRefFrom} / {@link isLinkRef} /
- * {@link linkRefInner}.
+ * {@link linkRefPayload}.
  */
 export const LINK_V1_TAG = "link@1" as const;
 
@@ -112,7 +112,7 @@ export const LINK_V1_TAG = "link@1" as const;
  * link payload.
  *
  * Construction ({@link linkRefFrom}), recognition ({@link isLinkRef}) and
- * extraction ({@link linkRefInner}) are gathered here so that this chokepoint
+ * extraction ({@link linkRefPayload}) are gathered here so that this chokepoint
  * can later become the seam at which the modern cell representation dispatches
  * the envelope to a Fabric primitive (provisionally `FabricLink`) — the link
  * analog of {@link EntityRef}'s `{ "/": string }` → {@link FabricHash}. That
@@ -121,20 +121,20 @@ export const LINK_V1_TAG = "link@1" as const;
  * localized edit here rather than a tree-wide change.
  *
  * When that dispatch lands, this type becomes a union (`FabricLink | { "/": …
- * }`) mirroring {@link EntityRef}. `Inner` is bounded by {@link FabricObject}
+ * }`) mirroring {@link EntityRef}. `Payload` is bounded by {@link FabricObject}
  * (the payload is always a stored/serialized fabric record) but otherwise open,
  * so this layer needn't know the exact field types (URI / MemorySpace /
  * JSONSchema — those stay in `runner`).
  */
-export type LinkRef<Inner extends FabricObject> = {
-  "/": { [LINK_V1_TAG]: Inner };
+export type LinkRef<Payload extends FabricObject> = {
+  "/": { [LINK_V1_TAG]: Payload };
 };
 
 /** Wraps a link payload in the link-ref envelope. */
-export function linkRefFrom<Inner extends FabricObject>(
-  inner: Inner,
-): LinkRef<Inner> {
-  return { "/": { [LINK_V1_TAG]: inner } };
+export function linkRefFrom<Payload extends FabricObject>(
+  payload: Payload,
+): LinkRef<Payload> {
+  return { "/": { [LINK_V1_TAG]: payload } };
 }
 
 /**
@@ -149,12 +149,12 @@ export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
 }
 
 /**
- * Extracts the inner link payload from a {@link LinkRef}. Throws if the value
- * is not a link reference.
+ * Extracts the link payload from a {@link LinkRef}. Throws if the value is not
+ * a link reference.
  */
-export function linkRefInner<Inner extends FabricObject>(
-  value: LinkRef<Inner>,
-): Inner {
-  if (isLinkRef(value)) return value["/"][LINK_V1_TAG] as Inner;
+export function linkRefPayload<Payload extends FabricObject>(
+  value: LinkRef<Payload>,
+): Payload {
+  if (isLinkRef(value)) return value["/"][LINK_V1_TAG] as Payload;
   throw new Error("Not a link reference.");
 }

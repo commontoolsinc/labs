@@ -8,7 +8,7 @@ import {
   isSigilLink,
   type JSONSchema,
   linkRefFrom,
-  linkRefInner,
+  linkRefPayload,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -567,7 +567,7 @@ function parseAsCellRef(
   from: CellRef,
 ): CellRef | undefined {
   if (isSigilLink(value)) {
-    const linkData = linkRefInner(value);
+    const linkData = linkRefPayload(value);
 
     return {
       id: linkData.id ?? from.id,

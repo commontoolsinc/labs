@@ -1,4 +1,4 @@
-import { linkRefInner } from "@commonfabric/data-model/cell-rep";
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
 
@@ -16,7 +16,7 @@ export type CfcCellLinkRefPayload = CellLinkRefPayload & {
 
 /** Reads the CFC label view carried on a sigil link, if any. */
 export function linkCfcLabelView(link: SigilLink): CfcLabelView | undefined {
-  return (linkRefInner(link) as CfcCellLinkRefPayload).cfcLabelView;
+  return (linkRefPayload(link) as CfcCellLinkRefPayload).cfcLabelView;
 }
 
 /** Attaches a CFC label view to a sigil link's inner, in place. */
@@ -24,5 +24,5 @@ export function setLinkCfcLabelView(
   link: SigilLink,
   view: CfcLabelView,
 ): void {
-  (linkRefInner(link) as CfcCellLinkRefPayload).cfcLabelView = view;
+  (linkRefPayload(link) as CfcCellLinkRefPayload).cfcLabelView = view;
 }

@@ -19,7 +19,7 @@ import {
   type SigilLink,
   type URI,
 } from "./sigil-types.ts";
-import { linkRefFrom, linkRefInner } from "@commonfabric/data-model/cell-rep";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
@@ -218,7 +218,7 @@ export function createSigilLinkFromParsedLink(
     path: link.path.map((p) => p.toString()),
   });
 
-  const reference = linkRefInner(sigil);
+  const reference = linkRefPayload(sigil);
 
   // Handle base cell for relative references
   if (options.base) {

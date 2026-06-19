@@ -71,7 +71,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   type CfcAddress,
 } from "./cfc/types.ts";
-import { linkRefFrom, linkRefInner } from "@commonfabric/data-model/cell-rep";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -253,7 +253,7 @@ const attachCfcLabelViewToSigilLink = (
     return value;
   }
   return linkRefFrom<CfcCellLinkRefPayload>({
-    ...linkRefInner(value),
+    ...linkRefPayload(value),
     cfcLabelView: clonedView,
   });
 };
@@ -262,7 +262,7 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
   if (!isSigilLink(value)) {
     return value;
   }
-  const inner = linkRefInner(value) as CfcCellLinkRefPayload;
+  const inner = linkRefPayload(value) as CfcCellLinkRefPayload;
   if (inner.cfcLabelView === undefined) {
     return value;
   }
