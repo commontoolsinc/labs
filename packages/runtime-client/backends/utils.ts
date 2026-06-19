@@ -2,7 +2,7 @@ import { Cell, JSONSchema, parseLink, SigilLink } from "@commonfabric/runner";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
 import { Runtime } from "@commonfabric/runner";
-import { LINK_V1_TAG } from "@commonfabric/runner/shared";
+import { linkRefFrom } from "@commonfabric/runner/shared";
 import { isCellRef } from "../protocol/mod.ts";
 
 export function mapCellRefsToSigilLinks(value: unknown): any {
@@ -26,21 +26,17 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
-  return {
-    "/": {
-      [LINK_V1_TAG]: {
-        id: cell.id,
-        space: cell.space,
-        scope: cell.scope,
-        path: cell.path,
-        ...(cell.schema !== undefined && { schema: cell.schema }),
-        ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
-        ...(cell.cfcLabelView !== undefined && {
-          cfcLabelView: cell.cfcLabelView,
-        }),
-      } as never,
-    },
-  };
+  return linkRefFrom({
+    id: cell.id,
+    space: cell.space,
+    scope: cell.scope,
+    path: cell.path,
+    ...(cell.schema !== undefined && { schema: cell.schema }),
+    ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
+    ...(cell.cfcLabelView !== undefined && {
+      cfcLabelView: cell.cfcLabelView,
+    }),
+  } as never);
 }
 
 export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {

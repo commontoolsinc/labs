@@ -10,6 +10,12 @@ export {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "./link-types.ts";
+export {
+  isLinkRef,
+  type LinkRef,
+  linkRefFrom,
+  linkRefInner,
+} from "@commonfabric/data-model/cell-rep";
 export { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 export {
   CHIP_UI,

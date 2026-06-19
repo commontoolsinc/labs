@@ -7,7 +7,8 @@ import {
   isLegacyAlias,
   isSigilLink,
   type JSONSchema,
-  LINK_V1_TAG,
+  linkRefFrom,
+  linkRefInner,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -339,22 +340,18 @@ export class CellHandle<T = unknown> {
   toJSON(): SigilLink {
     // Wrap in sigil link format so the runtime recognizes this as a link
     // and dereferences it (e.g., when passed through event.detail.sourceCell)
-    return {
-      "/": {
-        [LINK_V1_TAG]: {
-          id: this.#ref.id,
-          space: this.#ref.space,
-          scope: this.#ref.scope,
-          path: this.#ref.path,
-          ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
-          ...(this.#ref.overwrite !== undefined &&
-            { overwrite: this.#ref.overwrite }),
-          ...(this.#ref.cfcLabelView !== undefined && {
-            cfcLabelView: this.#ref.cfcLabelView,
-          }),
-        } as never,
-      },
-    };
+    return linkRefFrom({
+      id: this.#ref.id,
+      space: this.#ref.space,
+      scope: this.#ref.scope,
+      path: this.#ref.path,
+      ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
+      ...(this.#ref.overwrite !== undefined &&
+        { overwrite: this.#ref.overwrite }),
+      ...(this.#ref.cfcLabelView !== undefined && {
+        cfcLabelView: this.#ref.cfcLabelView,
+      }),
+    } as never);
   }
 
   // Called when cell has been updated from the backend with
@@ -569,7 +566,7 @@ function parseAsCellRef(
   from: CellRef,
 ): CellRef | undefined {
   if (isSigilLink(value)) {
-    const linkData = value["/"][LINK_V1_TAG];
+    const linkData = linkRefInner(value);
 
     return {
       id: linkData.id ?? from.id,
