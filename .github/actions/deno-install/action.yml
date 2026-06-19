@@ -1,0 +1,45 @@
+name: "Cached Deno install"
+description: >
+  Install Deno project dependencies from the restored cache when it is complete.
+  Fetch dependencies with retries when the cache is incomplete.
+inputs:
+  frozen:
+    description: "Pass --frozen to deno install."
+    required: false
+    default: "true"
+runs:
+  using: "composite"
+  steps:
+    - name: 📦 Install Deno dependencies
+      shell: bash
+      env:
+        FROZEN: ${{ inputs.frozen }}
+      run: |
+        set -euo pipefail
+
+        frozen_arg=()
+        if [ "$FROZEN" = "true" ]; then
+          frozen_arg=(--frozen=true)
+        elif [ "$FROZEN" = "false" ]; then
+          frozen_arg=(--frozen=false)
+        else
+          echo "::error::frozen must be true or false"
+          exit 1
+        fi
+
+        if deno install --cached-only "${frozen_arg[@]}"; then
+          echo "Deno dependencies are available in the local cache."
+          exit 0
+        fi
+
+        echo "Deno cache is incomplete; fetching dependencies."
+        delays=(10 30 60)
+        for delay in "${delays[@]}"; do
+          if deno install "${frozen_arg[@]}"; then
+            exit 0
+          fi
+          echo "::warning::deno install failed; retrying in ${delay}s."
+          sleep "$delay"
+        done
+
+        deno install "${frozen_arg[@]}"
