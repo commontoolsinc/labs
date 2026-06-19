@@ -219,6 +219,16 @@ export interface PollOptionCardOutput {
   /** Admin-side generated art persistence state. */
   artSyncState: PollOptionArtSyncState;
 
+  /**
+   * The art-generation request URL the host-only gate produces: the
+   * `/api/ai/img` endpoint when a host views an option with no stored image,
+   * and `""` otherwise (non-host, or a stored image already present). Unlike
+   * `artSyncState` this does not depend on the `fetchData` result, so it is the
+   * directly-observable signal that the `isAdmin` gate opened — exposed so tests
+   * can guard the dependency-capture fix without a live image endpoint.
+   */
+  generatedArtRequestUrl: string;
+
   /** Display homepage URL after stored, edited, or verified lookup resolution. */
   homePageUrl: string;
 }
@@ -704,6 +714,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
         </div>
       ),
       artSyncState,
+      generatedArtRequestUrl,
       homePageUrl: displayHomePageUrl,
     };
   },
