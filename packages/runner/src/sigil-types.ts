@@ -5,15 +5,6 @@ import { LINK_V1_TAG, type LinkRef } from "@commonfabric/data-model/cell-rep";
 
 export type { URI } from "@commonfabric/memory/interface";
 
-/**
- * Generic sigil value type for future extensions
- */
-export type SigilValue<T> = { "/": T };
-
-/**
- * Link sigil value v1
- */
-
 // The link-ref envelope (`{ "/": { "link@1": … } }`) and its tag are owned by
 // `data-model/cell-rep`, the chokepoint that will later flag-dispatch the form.
 // Re-exported here (the historical home) for existing importers.
@@ -33,13 +24,6 @@ export type CellLinkRefPayload = {
   overwrite?: "redirect" | "this"; // default is "this"
 };
 
-export type LinkV1 = {
-  [LINK_V1_TAG]: CellLinkRefPayload;
-};
-
-export type WriteRedirectV1 = LinkV1 & {
-  [LINK_V1_TAG]: { overwrite: "redirect" };
-};
 /**
  * Sigil link type.
  *
@@ -56,10 +40,12 @@ export type WriteRedirectV1 = LinkV1 & {
 export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
   LinkRef<P>;
 /**
- * Sigil alias type - uses LinkV1 with overwrite field
+ * A {@link SigilLink} whose payload is a write redirect (an alias) — its
+ * `overwrite` is fixed to `"redirect"`.
  */
-
-export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
+export type SigilWriteRedirectLink = LinkRef<
+  CellLinkRefPayload & { overwrite: "redirect" }
+>;
 
 /****************
  * Legacy types *
