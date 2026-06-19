@@ -94,9 +94,8 @@ describe("Webhook Utilities", () => {
     });
 
     it("extracts space from a codec-encoded (fvj1:) cell link", () => {
-      // Expand-acceptor: the same link, but emitted in the codec wire form a
-      // future sender will use. Round-trips losslessly and extracts the same
-      // space as the legacy raw-JSON form above.
+      // The same link emitted in the codec wire form: it round-trips losslessly
+      // and extracts the same space as the legacy raw-JSON form above.
       const cellLink = jsonFromValue({
         "/": {
           "link@1": {

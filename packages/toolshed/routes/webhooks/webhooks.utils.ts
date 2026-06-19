@@ -101,15 +101,13 @@ function serviceCellLink(entityId: string) {
   });
 }
 
-// Parse a cell-link wire string. Accepts either the codec-encoded (`fvj1:…`)
-// form or the legacy raw `{ "/": { "link@1": … } }` JSON form. This is the
-// expand-acceptor stage of the webhook cell-link wire migration: senders still
-// emit the legacy form today; once they all emit the codec form, the legacy
-// branch (and the dependence on the envelope being plain JSON) is dropped.
+// Parse a cell-link wire string. Accepts both the codec-encoded (`fvj1:…`) form
+// and the legacy raw `{ "/": { "link@1": … } }` JSON form, discriminated by
+// `seemsLikeJsonEncodedFabricValue`. The legacy branch exists only so links
+// serialized the old way still resolve.
 //
-// TODO(danfuzz): Stage 3 (narrow acceptor) — once every deployed server is
-// sending the codec form, ratchet this back down to `valueFromJson(cellLink)`
-// only and drop the `JSON.parse` / `seemsLikeJsonEncodedFabricValue` branch.
+// TODO(danfuzz): once every deployed server emits the codec form, drop the
+// legacy branch and decode with `valueFromJson(cellLink)` only.
 function parseCellLink(cellLink: string) {
   return seemsLikeJsonEncodedFabricValue(cellLink)
     ? valueFromJson(cellLink)
