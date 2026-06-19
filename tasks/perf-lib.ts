@@ -35,10 +35,23 @@ export const COVERAGE_SUGGESTION_MARKER = "<!-- coverage-debt-suggestion -->";
 export const COVERAGE_COMMENT_ARTIFACT_NAME = "coverage-comment";
 export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
 
-/** Pending PR comment handed from the gate to the posting workflow. */
+/**
+ * Pending coverage-debt comment handed from the gate to the posting workflow.
+ *
+ * - `state: "regressed"` carries the full comment `body`. The poster posts it as
+ *   a new comment, or updates an existing coverage comment in place.
+ * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
+ *   lines versus baseline across the changed, gated coverage groups. The poster
+ *   collapses an existing comment's `<details>` and rewrites its `<summary>`; it
+ *   does nothing when there is no existing comment to update.
+ */
 export interface CoverageCommentPayload {
   prNumber: number;
-  body: string;
+  state: "regressed" | "resolved";
+  /** Present when `state` is "regressed". */
+  body?: string;
+  /** Present when `state` is "resolved". */
+  improvedLines?: number;
 }
 
 /**
@@ -1547,6 +1560,14 @@ function uncoveredLineCount(count: number): string {
   return `${count} ${count === 1 ? "line" : "lines"}`;
 }
 
+/**
+ * Render the disclosure `<summary>`. An `<h3>` makes the line a little larger
+ * and bold so it stands out when collapsed; the detective emoji leads it.
+ */
+function coverageSummary(text: string): string {
+  return `<summary><h3>🕵🏻‍♀️ ${text}</h3></summary>`;
+}
+
 function formatTargetList(groups: CoverageSuggestionGroup[]): string[] {
   return groups.map((group) =>
     `  ${COVERAGE_METRIC_PREFIX} ${group.group} uncovered lines  <=  ${group.target}   (this PR: ${group.current})`
@@ -1619,9 +1640,16 @@ export function buildCoverageDebtSuggestionComment(
   input: CoverageDebtSuggestionInput,
 ): string {
   const { files, omitted } = limitSuggestionFiles(input.files);
+  const overBy = input.groups.reduce(
+    (sum, group) => sum + (group.current - group.target),
+    0,
+  );
   const out: string[] = [COVERAGE_SUGGESTION_MARKER];
 
-  out.push("## 🧪 Test coverage regressed");
+  out.push("<details open>");
+  out.push(
+    coverageSummary(`Test coverage regressed by ${uncoveredLineCount(overBy)}`),
+  );
   out.push("");
   out.push(
     "This PR adds source lines that no test exercises, so the coverage gate in " +
@@ -1673,8 +1701,29 @@ export function buildCoverageDebtSuggestionComment(
   out.push("````text");
   out.push(...buildCoverageSuggestionPrompt(input, files, omitted));
   out.push("````");
+  out.push("");
+  out.push("</details>");
 
   return out.join("\n");
+}
+
+/**
+ * Update a previously-posted coverage-debt comment to reflect that the gate now
+ * passes. Drops the `open` attribute from its `<details>` so the body collapses,
+ * and rewrites the `<summary>`. `improvedLines` is the net reduction in
+ * uncovered lines versus baseline: when positive, the summary reports the
+ * reduction; when zero, it just notes the regression is resolved.
+ */
+export function resolveCoverageDebtComment(
+  body: string,
+  improvedLines: number,
+): string {
+  const summary = improvedLines > 0
+    ? `Code coverage debt reduced by ${uncoveredLineCount(improvedLines)}!`
+    : "Code coverage regression resolved.";
+  return body
+    .replace("<details open>", "<details>")
+    .replace(/<summary>[\s\S]*?<\/summary>/, () => coverageSummary(summary));
 }
 
 /** Escape a string for use inside a Markdown table cell. */

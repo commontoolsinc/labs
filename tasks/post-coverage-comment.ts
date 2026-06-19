@@ -9,9 +9,11 @@
  * `coverage-comment` workflow_run workflow runs this script from the base-repo
  * context with a write token to actually post it.
  *
- * No-ops when the file is absent (no regression). Posts at most once per PR by
- * skipping when a comment carrying the marker already exists. Best-effort: a
- * posting failure is logged, not fatal, so the workflow stays green.
+ * No-ops when the file is absent. Keeps a single comment per PR: posts when none
+ * exists, otherwise updates the existing one in place. When the payload says
+ * coverage is resolved, it collapses and rewrites the existing comment (and does
+ * nothing if there is none). Best-effort: a failure is logged, not fatal, so the
+ * workflow stays green.
  *
  * Environment:
  *   GITHUB_TOKEN           - Required.
@@ -24,15 +26,17 @@ import {
   COVERAGE_SUGGESTION_MARKER,
   type CoverageCommentPayload,
   fetchIssueComments,
+  githubPatch,
   githubPost,
   REPO,
+  resolveCoverageDebtComment,
   TOKEN,
 } from "./perf-lib.ts";
 
 /**
- * Read the pending comment payload and post it, skipping when the file is
- * absent or a marked comment already exists. Best-effort: a posting failure is
- * logged, not thrown, so the workflow stays green.
+ * Read the pending comment payload and post or update the PR's coverage
+ * comment. No-ops when the file is absent. Best-effort: a failure is logged, not
+ * thrown, so the workflow stays green.
  */
 export async function postCoverageComment(): Promise<void> {
   const file = Deno.env.get("COVERAGE_COMMENT_FILE") ?? COVERAGE_COMMENT_FILE;
@@ -53,22 +57,61 @@ export async function postCoverageComment(): Promise<void> {
     return;
   }
 
-  const { prNumber, body } = payload;
-  if (typeof prNumber !== "number" || typeof body !== "string" || !body) {
+  const { prNumber } = payload;
+  // Tolerate older payloads that carried only `body` (no explicit state).
+  const state = payload.state ?? (payload.body ? "regressed" : undefined);
+  if (typeof prNumber !== "number" || !state) {
     console.error(`Invalid coverage comment payload in ${file}.`);
     return;
   }
 
   try {
     const existing = await fetchIssueComments(prNumber);
-    if (
-      existing.some((comment) =>
-        comment.body.includes(COVERAGE_SUGGESTION_MARKER)
-      )
-    ) {
-      console.log(
-        `Coverage suggestion comment already present on PR #${prNumber}; not posting again.`,
+    const marked = existing.find((comment) =>
+      comment.body.includes(COVERAGE_SUGGESTION_MARKER)
+    );
+
+    if (state === "resolved") {
+      if (!marked) {
+        console.log(
+          `No coverage comment on PR #${prNumber}; nothing to resolve.`,
+        );
+        return;
+      }
+      const updated = resolveCoverageDebtComment(
+        marked.body,
+        payload.improvedLines ?? 0,
       );
+      if (updated === marked.body) {
+        console.log(
+          `Coverage comment on PR #${prNumber} already reflects resolution.`,
+        );
+        return;
+      }
+      await githubPatch(`/repos/${REPO}/issues/comments/${marked.id}`, {
+        body: updated,
+      });
+      console.log(`Updated coverage comment on PR #${prNumber} to resolved.`);
+      return;
+    }
+
+    const { body } = payload;
+    if (typeof body !== "string" || !body) {
+      console.error(`Invalid coverage comment payload in ${file}.`);
+      return;
+    }
+
+    if (marked) {
+      if (marked.body === body) {
+        console.log(
+          `Coverage comment on PR #${prNumber} already up to date.`,
+        );
+        return;
+      }
+      await githubPatch(`/repos/${REPO}/issues/comments/${marked.id}`, {
+        body,
+      });
+      console.log(`Updated coverage suggestion comment on PR #${prNumber}.`);
       return;
     }
 
@@ -76,7 +119,7 @@ export async function postCoverageComment(): Promise<void> {
     console.log(`Posted coverage suggestion comment to PR #${prNumber}.`);
   } catch (error) {
     console.warn(
-      `  Warning: could not post coverage suggestion comment to PR #${prNumber}: ${error}`,
+      `  Warning: could not post or update coverage comment on PR #${prNumber}: ${error}`,
     );
   }
 }
