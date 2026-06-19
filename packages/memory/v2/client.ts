@@ -919,21 +919,23 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
     }, auth);
+    const sessionChanged = restored.sessionId !== oldSessionId;
     this.#sessionId = restored.sessionId;
     this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
     this.noteResult(restored.serverSeq);
-    this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
-    if (restored.sessionId !== oldSessionId) {
+    if (sessionChanged) {
+      const sessionChangedError = new Error(
+        `session changed: ${oldSessionId} -> ${restored.sessionId}`,
+      );
       for (const pending of this.#outstandingCommits.values()) {
-        pending.pending.reject(
-          new Error(
-            `session changed: ${oldSessionId} -> ${restored.sessionId}`,
-          ),
-        );
+        pending.pending.reject(sessionChangedError);
       }
       this.#outstandingCommits.clear();
+      this.#caughtUpLocalSeq = 0;
+      this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
     }
+    this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
     return restored;
   }

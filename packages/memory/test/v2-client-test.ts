@@ -415,6 +415,56 @@ Deno.test("memory v2 client readyToRetry rejects after session close", async () 
   );
 });
 
+Deno.test("memory v2 client readyToRetry rejects when session ID changes on restore", async () => {
+  const transport = new ConflictReadySessionChangingTransport();
+  const client = await connect({ transport });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-ready-session-change",
+  );
+
+  try {
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:doc:1",
+            value: { value: { version: 2 } },
+          }],
+        }),
+      Error,
+      "conflict",
+    );
+    const readyToRetry = (error as Error & {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+
+    let settled = false;
+    const readyPromise = readyToRetry().then(
+      () => "resolved",
+      (error) => error instanceof Error ? error.message : String(error),
+    ).finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    assertEquals(settled, false);
+
+    await session.restore();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assertEquals(settled, true);
+    assertEquals(await readyPromise, "session changed: session-A -> session-B");
+    assertEquals(session.sessionId, "session-B");
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   const transport = new AckCountingTransport();
   const client = await connect({ transport });
@@ -970,6 +1020,67 @@ class ConflictReadyTransport implements Transport {
         removes: [],
       },
     });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+class ConflictReadySessionChangingTransport implements Transport {
+  #receiver: (payload: string) => void = () => {};
+  #openCount = 0;
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(): void {}
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open": {
+        this.#openCount += 1;
+        const sessionId = this.#openCount === 1 ? "session-A" : "session-B";
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId,
+            sessionToken: `token:${sessionId}`,
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      }
+      case "transact":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          error: {
+            name: "ConflictError",
+            message: "conflict",
+            retryAfterSeq: 2,
+          },
+        });
+        return Promise.resolve();
+      default:
+        throw new Error(
+          `Unhandled conflict-ready session-changing message: ${message.type}`,
+        );
+    }
   }
 
   close(): Promise<void> {
