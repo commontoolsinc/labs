@@ -867,7 +867,7 @@ Deno.test("buildCoverageDebtSuggestionComment lists files (not lines), command, 
   assertStringIncludes(comment, "<details open>");
   assertStringIncludes(
     comment,
-    "<summary>Test coverage regressed by 3 lines</summary>",
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 3 lines</h3></summary>",
   );
   assertStringIncludes(comment, "</details>");
   assertFalse(comment.includes("## 🧪 Test coverage regressed"));
@@ -914,7 +914,7 @@ Deno.test("buildCoverageDebtSuggestionComment sums Over by across groups in the 
   // 3 + 4 = 7 over baseline.
   assertStringIncludes(
     comment,
-    "<summary>Test coverage regressed by 7 lines</summary>",
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 7 lines</h3></summary>",
   );
 });
 
@@ -928,7 +928,7 @@ Deno.test("buildCoverageDebtSuggestionComment uses the singular for a one-line r
 
   assertStringIncludes(
     comment,
-    "<summary>Test coverage regressed by 1 line</summary>",
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 1 line</h3></summary>",
   );
 });
 
@@ -945,7 +945,7 @@ Deno.test("resolveCoverageDebtComment collapses the details and reports the redu
   assertStringIncludes(resolved, "<details>");
   assertStringIncludes(
     resolved,
-    "<summary>Code coverage debt reduced by 5 lines!</summary>",
+    "<summary><h3>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</h3></summary>",
   );
   assertFalse(resolved.includes("Test coverage regressed by"));
   // The body (marker, table) is preserved for context.
@@ -964,7 +964,7 @@ Deno.test("resolveCoverageDebtComment notes resolution when there is no net redu
   assertFalse(resolved.includes("<details open>"));
   assertStringIncludes(
     resolved,
-    "<summary>Code coverage regression resolved.</summary>",
+    "<summary><h3>🕵🏻‍♀️ Code coverage regression resolved.</h3></summary>",
   );
 });
 

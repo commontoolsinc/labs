@@ -115,7 +115,7 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   const existing = [
     COVERAGE_SUGGESTION_MARKER,
     "<details open>",
-    "<summary>Test coverage regressed by 3 lines</summary>",
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 3 lines</h3></summary>",
     "",
     "table goes here",
     "",
@@ -136,7 +136,7 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   assertStringIncludes(requests[0].body, "<details>");
   assertStringIncludes(
     requests[0].body,
-    "<summary>Code coverage debt reduced by 5 lines!</summary>",
+    "<summary><h3>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</h3></summary>",
   );
 });
 
@@ -153,7 +153,7 @@ Deno.test("postCoverageComment leaves an already-resolved comment untouched", as
   const existing = [
     COVERAGE_SUGGESTION_MARKER,
     "<details>",
-    "<summary>Code coverage regression resolved.</summary>",
+    "<summary><h3>🕵🏻‍♀️ Code coverage regression resolved.</h3></summary>",
     "",
     "</details>",
   ].join("\n");

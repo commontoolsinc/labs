@@ -86,7 +86,7 @@ Deno.test("writeCoverageComment writes a regression payload when coverage fails"
   // Over by 8 - 4 = 4 lines.
   assertStringIncludes(
     payload?.body ?? "",
-    "<summary>Test coverage regressed by 4 lines</summary>",
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 4 lines</h3></summary>",
   );
 });
 

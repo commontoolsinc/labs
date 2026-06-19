@@ -1560,6 +1560,14 @@ function uncoveredLineCount(count: number): string {
   return `${count} ${count === 1 ? "line" : "lines"}`;
 }
 
+/**
+ * Render the disclosure `<summary>`. An `<h3>` makes the line a little larger
+ * and bold so it stands out when collapsed; the detective emoji leads it.
+ */
+function coverageSummary(text: string): string {
+  return `<summary><h3>🕵🏻‍♀️ ${text}</h3></summary>`;
+}
+
 function formatTargetList(groups: CoverageSuggestionGroup[]): string[] {
   return groups.map((group) =>
     `  ${COVERAGE_METRIC_PREFIX} ${group.group} uncovered lines  <=  ${group.target}   (this PR: ${group.current})`
@@ -1640,9 +1648,7 @@ export function buildCoverageDebtSuggestionComment(
 
   out.push("<details open>");
   out.push(
-    `<summary>Test coverage regressed by ${
-      uncoveredLineCount(overBy)
-    }</summary>`,
+    coverageSummary(`Test coverage regressed by ${uncoveredLineCount(overBy)}`),
   );
   out.push("");
   out.push(
@@ -1717,7 +1723,7 @@ export function resolveCoverageDebtComment(
     : "Code coverage regression resolved.";
   return body
     .replace("<details open>", "<details>")
-    .replace(/<summary>[\s\S]*?<\/summary>/, `<summary>${summary}</summary>`);
+    .replace(/<summary>[\s\S]*?<\/summary>/, () => coverageSummary(summary));
 }
 
 /** Escape a string for use inside a Markdown table cell. */
