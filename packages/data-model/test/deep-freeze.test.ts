@@ -205,11 +205,13 @@ describe("deep-freeze", () => {
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
     // reference. `isDeepFrozen` delegates to `isDeepFrozenInProgress` (which
-    // threads `inProgress: Set<object>` for cycle-safety) and treats a
-    // `FabricInstance` as a plain JS object whose enumerable values are
-    // recursively inspected; this is distinct from `isDeepFrozenFabricValue`'s
-    // protocol-aware type-guard semantics, which has its own coverage in the
-    // sibling `isDeepFrozenFabricValue with FabricInstance` describe below.
+    // threads `inProgress: Set<object>` for cycle-safety) and answers a
+    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member -- inspecting
+    // its logical contents, not its enumerable own-props -- so values held in
+    // non-enumerable slots (such as `FabricError`'s private extras `Map`) are
+    // checked too. (`isDeepFrozenFabricValue` uses the same protocol dispatch
+    // but additionally type-guards the value as a `FabricValue`; it has its own
+    // coverage in the sibling describe below.)
     describe("`FabricInstance` and `FabricPrimitive`", () => {
       it("returns `true` for a `FabricPrimitive` (self-frozen at construction)", () => {
         const epoch = new FabricEpochNsec(1234567890n);
@@ -237,6 +239,20 @@ describe("deep-freeze", () => {
         const fe = FabricError.fromNativeError(err);
         Object.freeze(fe);
         // Cause is not frozen -> recursive walk discovers an unfrozen child.
+        expect(isDeepFrozen(fe)).toBe(false);
+      });
+
+      it("returns `false` when an unfrozen value lives in a non-enumerable slot (extras bag)", () => {
+        // A `FabricInstance`'s logical contents are not all enumerable
+        // own-props: `FabricError` keeps its custom properties in a private
+        // extras `Map`. A generic `Object.values` walk can't see them, so the
+        // frozen-status must be answered via the instance's `[IS_DEEP_FROZEN]`
+        // protocol member, which inspects the extras bag. Here the wrapper is
+        // frozen and every enumerable slot is a frozen primitive, but the
+        // extras bag holds a mutable array -> not deep-frozen.
+        const fe = FabricError.fromNativeError(new Error("has-extras"));
+        fe.setExtra("payload", [1, 2, 3] as unknown as FabricValue);
+        Object.freeze(fe);
         expect(isDeepFrozen(fe)).toBe(false);
       });
 

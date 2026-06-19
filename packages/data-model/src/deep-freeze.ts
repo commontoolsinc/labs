@@ -94,7 +94,19 @@ function isDeepFrozenInProgress(
 
   let result = true;
 
-  if (Array.isArray(obj)) {
+  if (obj instanceof FabricInstance) {
+    // A `FabricInstance`'s logical contents are not its enumerable own-props
+    // (e.g. a `FabricError` keeps its custom properties in a private extras
+    // `Map`), so it answers the deep-frozen question via its `[IS_DEEP_FROZEN]`
+    // protocol member -- the side-effect-free sibling of `[DEEP_FREEZE]` --
+    // recursing into each nested `FabricValue` through the callback so this
+    // call's cycle state is shared. Gating on `instanceof` against the abstract
+    // base keeps this generic; the member is abstract on `FabricInstance`, so
+    // every instance implements it. (A `FabricPrimitive` is necessarily frozen
+    // with no outbound references, so the `Object.values` arm below answers it
+    // correctly by accident -- its empty enumerable props yield `true`.)
+    result = obj[IS_DEEP_FROZEN]((v) => isDeepFrozenInProgress(v, inProgress));
+  } else if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
       if (!(i in obj)) continue; // sparse hole
       if (!isDeepFrozenInProgress(obj[i], inProgress)) {
@@ -103,12 +115,6 @@ function isDeepFrozenInProgress(
       }
     }
   } else {
-    // TODO(danfuzz): Unlike its siblings `deepFreezeInProgress` and
-    // `isDeepFrozenFabricValue`, this checker has no `instanceof FabricInstance`
-    // arm delegating to `[IS_DEEP_FROZEN]`; a frozen-in-place `FabricInstance`
-    // is checked by its native/internal own-props instead of its logical
-    // contents, so it can return a wrong frozen-status (reached via
-    // `FabricError.deepClone`'s `isDeepFrozen(this)` fast path).
     for (const v of Object.values(obj)) {
       if (!isDeepFrozenInProgress(v, inProgress)) {
         result = false;
