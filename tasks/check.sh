@@ -100,8 +100,8 @@ fi
 echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
 
 reloadArg=()
-if [[ "${GITHUB_ACTION}" != '' ]]; then
-    echo 'Running in a CI environment; rechecking from scratch...'
+if [[ "${DENO_CHECK_RELOAD:-}" != '' ]]; then
+    echo 'Reloading Deno dependencies before checking...'
     reloadArg=(--reload)
 fi
 

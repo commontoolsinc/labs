@@ -32,7 +32,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 🔎 Check codebase formatting
         run: deno fmt --check
@@ -66,7 +66,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 🔎 Check Common Fabric patterns
         env:
@@ -85,7 +85,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 📦 Install Linux FUSE test dependencies
         uses: ./.github/actions/apt-install
@@ -136,7 +136,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -186,7 +186,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 🏗️ Build application binaries
         run: deno task build-binaries
@@ -219,7 +219,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -296,6 +296,9 @@ jobs:
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -391,6 +394,9 @@ jobs:
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -494,6 +500,9 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
 
@@ -561,6 +570,9 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
@@ -613,7 +625,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -681,8 +693,9 @@ jobs:
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
-        with:
-          cache: false
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
 
       - name: 📊 Run performance check
         env:
@@ -982,6 +995,9 @@ jobs:
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
 
       - name: 🏗️ Build shell with staging API URL
         working-directory: packages/shell

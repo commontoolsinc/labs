@@ -19,7 +19,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
+        uses: ./.github/actions/deno-install
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
