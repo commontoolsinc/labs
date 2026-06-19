@@ -1,5 +1,8 @@
 import { unclaimed } from "@commonfabric/memory/fact";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
@@ -72,7 +75,21 @@ const collectChangedPaths = (
   }
 
   if (isRecord(before) && isRecord(after)) {
-    if (deepEqual(before, after)) {
+    if (valueEqual(before, after)) {
+      return;
+    }
+
+    // A `FabricSpecialObject` (`FabricPrimitive` leaf / `FabricInstance`
+    // wrapper) is atomic: its state is private, so the key-walk below sees
+    // zero own-keys and would wrongly report "no change". `valueEqual` above
+    // already established they differ, so record a change at this path and
+    // don't decompose. (CT-1770: a `FabricBytes` value updated in place
+    // otherwise never reaches reactive consumers.)
+    if (
+      before instanceof FabricSpecialObject ||
+      after instanceof FabricSpecialObject
+    ) {
+      pushChangedPath(paths, currentPath, depth);
       return;
     }
 
@@ -173,7 +190,7 @@ const collectChangedPaths = (
     return;
   }
 
-  if (!deepEqual(before, after)) {
+  if (!valueEqual(before, after)) {
     pushChangedPath(paths, currentPath, depth);
   }
 };
@@ -184,7 +201,7 @@ const addStateChange = (
   before: State["is"] | undefined,
   after: State["is"] | undefined,
 ): void => {
-  if (deepEqual(before, after)) {
+  if (valueEqual(before, after)) {
     return;
   }
 

@@ -1,6 +1,8 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
@@ -192,7 +194,7 @@ export function determineTriggeredActions(
         // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
         // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so
         // migrate to a `Fabric`-aware equality once available.
-        hasChanged = !deepEqual(
+        hasChanged = !valueEqual(
           beforeValues[targetPath.length],
           afterValues[targetPath.length],
         );
@@ -281,7 +283,7 @@ function shallowEqual(
   // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
   // `Fabric`-aware equality once available.
   if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
-    return deepEqual(before, after);
+    return valueEqual(before, after);
   }
 
   if (isRecord(before) && isRecord(after)) {
@@ -299,7 +301,7 @@ function shallowEqual(
   // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
   // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
   // `Fabric`-aware equality once available.
-  return deepEqual(before, after);
+  return valueEqual(before, after);
 }
 
 function comparePaths(

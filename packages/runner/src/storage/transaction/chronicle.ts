@@ -1,5 +1,7 @@
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  fabricFromNativeValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
 import type {
   Assertion,
@@ -365,7 +367,7 @@ export class Chronicle {
           },
         );
 
-        if (deepEqual(alignedMerged, normalizedLoaded)) {
+        if (valueEqual(alignedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.
           edit.claim(loaded);
         } else if (alignedMerged === undefined) {
