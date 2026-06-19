@@ -24,9 +24,12 @@ import type {
   PatternToolResult,
   SqliteDatabaseFunction,
   SqliteQueryFunction,
+  UIVariantKind,
+  VNode,
   WishParams,
   WishState,
 } from "commonfabric";
+import { h } from "@commonfabric/html";
 import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
@@ -306,6 +309,28 @@ let unlessFactory:
     fallback: unknown;
   }, any>
   | undefined;
+
+/**
+ * uiVariant(piece, kind) — render a piece at a UI variant (`full` | `chip` |
+ * `tile`) from render paths that aren't already `<cf-render>` JSX (CT-1321
+ * Phase B / CT-1766).
+ *
+ * Returns a `cf-render` VNode bound to the piece, i.e. it is exactly equivalent
+ * to writing `<cf-render variant={kind} $cell={piece} />`. cf-render owns the
+ * actual rendering: it resolves the piece link to its root cell, renders the
+ * exported variant key ([CHIP_UI] / [TILE_UI] / [UI]) when the piece exports
+ * one, and otherwise fails over to the per-variant platform default (chip →
+ * cf-cell-link; tile → the full [UI] scaled, clipped, click-to-navigate; full
+ * is the universal floor). This helper is the blessed way to reach that failover
+ * from inline code that previously indexed a variant key directly (e.g.
+ * `piece[TILE_UI]`), which yields `undefined` and renders nothing when absent.
+ */
+export function uiVariant(
+  piece: Opaque<unknown>,
+  kind: UIVariantKind = "full",
+): VNode {
+  return h("cf-render", { variant: kind, $cell: piece }) as VNode;
+}
 
 export const navigateTo = createNodeFactory({
   type: "ref",

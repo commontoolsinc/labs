@@ -9,14 +9,14 @@
  * - Embeds gmail-importer directly for schedule-change emails
  * - Extracts change information using LLM from email markdown content
  * - Calculates urgency based on how soon the event is/was
- * - Conditional previewUI that only shows when there are relevant changes
+ * - Conditional tile preview ([TILE_UI]) that only shows when there are relevant changes
  *
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
  * 3. Link: cf piece link google-auth/auth calendar-change-detector/overrideAuth
  */
-import { computed, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import { computed, JSONSchema, NAME, pattern, TILE_UI, UI } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
@@ -225,7 +225,7 @@ export interface PatternOutput {
   urgentChanges: ScheduleChange[];
   normalChanges: ScheduleChange[];
   hasChanges: boolean;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -445,7 +445,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     urgentChanges,
     normalChanges,
     hasChanges,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>

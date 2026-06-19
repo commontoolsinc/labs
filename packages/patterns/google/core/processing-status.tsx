@@ -1,12 +1,12 @@
 /**
- * ProcessingStatus - Reusable loading/progress indicator for previewUI
+ * ProcessingStatus - Reusable loading/progress indicator for tile previews
  *
  * Shows:
  * - Nothing when processing is complete (totalCount > 0 && pendingCount === 0)
  * - Indeterminate spinner with "Loading..." when fetching items (totalCount === 0)
  * - Progress bar with "X/Y analyzing..." when processing (totalCount > 0 && pendingCount > 0)
  *
- * Usage in previewUI:
+ * Usage in a tile preview ([TILE_UI]):
  * ```tsx
  * <ProcessingStatus
  *   totalCount={emailCount}

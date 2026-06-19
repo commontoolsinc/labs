@@ -6,6 +6,7 @@ import {
   pattern,
   safeDateNow,
   Stream,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -36,7 +37,7 @@ const SCOPE_MAP = {
   "webhook:manage": "Manage webhooks",
 } as const;
 
-// Short names for scope summary in previewUI
+// Short names for scope summary in the tile preview
 const SCOPE_SHORT_NAMES: Record<string, string> = {
   "data.records:read": "Records (R)",
   "data.records:write": "Records (W)",
@@ -218,7 +219,7 @@ export interface Output {
   /** Compact user display */
   userChip: unknown;
   /** Minimal preview for picker display */
-  previewUI: unknown;
+  [TILE_UI]: unknown;
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh */
@@ -380,7 +381,7 @@ export default pattern<Input, Output>(
     const hasEmail = computed(() => !!auth?.user?.email);
     const hasUserName = computed(() => !!auth?.user?.name);
 
-    // Data-only computed for previewUI — resolves reactive values to plain scalars
+    // Data-only computed for the tile preview — resolves reactive values to plain scalars
     const previewState = computed(() => {
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
@@ -815,7 +816,7 @@ export default pattern<Input, Output>(
             <span style={{ color: "#6b7280" }}>Not signed in</span>
           </div>
         ),
-      previewUI: (
+      [TILE_UI]: (
         <div
           style={{
             display: "flex",

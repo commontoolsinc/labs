@@ -29,6 +29,7 @@ import {
   NAME,
   pattern,
   Stream,
+  TILE_UI,
   toIndentedDebugString,
   UI,
   Writable,
@@ -556,7 +557,7 @@ export interface PatternOutput {
   overdueCount: number;
   checkedOutCount: number;
   holdsReadyCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
   // Omnibot actions
   markAsReturned: Stream<{ title: string }>;
   dismissHold: Stream<{ title: string }>;
@@ -957,7 +958,7 @@ export default pattern<PatternInput, PatternOutput>(
       overdueCount,
       checkedOutCount,
       holdsReadyCount,
-      previewUI,
+      [TILE_UI]: previewUI,
 
       // Omnibot actions - bind handlers with current state
       markAsReturned: markAsReturnedHandler({

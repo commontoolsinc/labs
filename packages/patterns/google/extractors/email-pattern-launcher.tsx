@@ -25,8 +25,10 @@ import {
   NAME,
   navigateTo,
   pattern,
+  TILE_UI,
   toIndentedDebugString,
   UI,
+  uiVariant,
   when,
 } from "commonfabric";
 import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
@@ -125,7 +127,7 @@ export interface PatternOutput {
   matchedPatterns: unknown[];
   emailCount: number;
   matchCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -307,7 +309,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     matchedPatterns: launchedPatterns,
     emailCount,
     matchCount,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>
@@ -548,14 +550,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             borderRadius: "8px",
                           }}
                         >
-                          {/* Render the pattern's previewUI if available */}
                           {
-                            /*<cf-render
-                            $cell={patternInfo.result}
-                            variant="preview"
-                          />*/
+                            /* Tile variant of the launched pattern (its
+                            [TILE_UI] export, or the platform default). */
                           }
-                          {patternInfo.result.previewUI}
+                          {uiVariant(patternInfo.result, "tile")}
                         </div>
                       )}
                     </div>

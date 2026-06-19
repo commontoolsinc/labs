@@ -55,6 +55,7 @@ import type {
   UiActionProps,
   UiDisclosureProps,
   UiPromptSlotProps,
+  UIVariantFunction,
   UnlessFunction,
   WhenFunction,
   WishFunction,
@@ -316,6 +317,7 @@ export interface BuilderFunctionsAndConstants {
   ifElse: IfElseFunction;
   when: WhenFunction;
   unless: UnlessFunction;
+  uiVariant: UIVariantFunction;
   llm: LLMFunction;
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;

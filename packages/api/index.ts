@@ -154,6 +154,25 @@ export declare const TILE_UI: "$TILE_UI";
 export declare const CHIP_UI: "$CHIP_UI";
 export declare const FS: "$FS";
 
+/**
+ * The size/representation spectrum a piece can be rendered at (CT-1321):
+ * `full` = the standalone [UI]; `chip` = inline; `tile` = gallery/grid card.
+ */
+export type UIVariantKind = "full" | "chip" | "tile";
+
+/**
+ * Render a piece at a UI variant, for render paths that aren't already
+ * `<cf-render>` JSX (CT-1321 Phase B / CT-1766). Returns a `cf-render` VNode
+ * bound to the piece — equivalent to `<cf-render variant={kind} $cell={piece} />`.
+ * cf-render resolves the exported variant key ([CHIP_UI] / [TILE_UI] / [UI]) when
+ * present and otherwise fails over to the per-variant platform default, including
+ * link resolution and click-to-navigate.
+ */
+export type UIVariantFunction = (
+  piece: Opaque<unknown>,
+  kind?: UIVariantKind,
+) => VNode;
+
 // Symbol for accessing self-reference in patterns
 export declare const SELF: unique symbol;
 export type SELF = typeof SELF;
@@ -2617,6 +2636,7 @@ export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 export declare const when: WhenFunction;
 export declare const unless: UnlessFunction;
+export declare const uiVariant: UIVariantFunction;
 /** @deprecated Use generateText() or generateObject() instead */
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;

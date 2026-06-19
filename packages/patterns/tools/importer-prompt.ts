@@ -65,6 +65,7 @@ const AIRTABLE_AUTH_SOURCE = `import {
   pattern,
   safeDateNow,
   Stream,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -95,7 +96,7 @@ const SCOPE_MAP = {
   "webhook:manage": "Manage webhooks",
 } as const;
 
-// Short names for scope summary in previewUI
+// Short names for scope summary in the tile preview
 const SCOPE_SHORT_NAMES: Record<string, string> = {
   "data.records:read": "Records (R)",
   "data.records:write": "Records (W)",
@@ -272,8 +273,8 @@ interface Output {
   selectedScopes: SelectedScopes;
   /** Compact user display */
   userChip: unknown;
-  /** Minimal preview for picker display */
-  previewUI: unknown;
+  /** Minimal tile preview for picker/gallery display (CT-1321 variant) */
+  [TILE_UI]: unknown;
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh */
@@ -421,7 +422,7 @@ export default pattern<Input, Output>(
     const hasEmail = computed(() => !!auth?.user?.email);
     const hasUserName = computed(() => !!auth?.user?.name);
 
-    // Data-only computed for previewUI — resolves reactive values to plain scalars
+    // Data-only computed for the tile preview — resolves reactive values to plain scalars
     const previewState = computed(() => {
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
@@ -840,7 +841,7 @@ export default pattern<Input, Output>(
           <span style={{ color: "#6b7280" }}>Not signed in</span>
         </div>,
       ),
-      previewUI: (
+      [TILE_UI]: (
         <div
           style={{
             display: "flex",
@@ -2107,7 +2108,7 @@ All patterns start with:
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-  safeDateNow, nonPrivateRandom,
+  safeDateNow, nonPrivateRandom, TILE_UI, CHIP_UI, uiVariant,
 } from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
