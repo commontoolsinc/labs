@@ -3,6 +3,15 @@ import { sha256 } from "@/lib/sha2.ts";
 import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
 import { WebhookConfigSchema } from "@commonfabric/runner";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/runner/shared";
+import {
+  seemsLikeJsonEncodedFabricValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
 
 const _logger = getLogger("webhooks.utils");
 
@@ -85,15 +94,24 @@ async function spaceIndexEntityId(space: string): Promise<string> {
 
 // Build a cell link targeting toolshed's own service space
 function serviceCellLink(entityId: string) {
-  return {
-    "/": {
-      "link@1": {
-        id: entityId,
-        space: identity.did(),
-        path: ["webhooks"],
-      },
-    },
-  };
+  return linkRefFrom({
+    id: entityId,
+    space: identity.did(),
+    path: ["webhooks"],
+  });
+}
+
+// Parse a cell-link wire string. Accepts both the codec-encoded (`fvj1:…`) form
+// and the legacy raw `{ "/": { "link@1": … } }` JSON form, discriminated by
+// `seemsLikeJsonEncodedFabricValue`. The legacy branch exists only so links
+// serialized the old way still resolve.
+//
+// TODO(danfuzz): once every deployed server emits the codec form, drop the
+// legacy branch and decode with `valueFromJson(cellLink)` only.
+function parseCellLink(cellLink: string) {
+  return seemsLikeJsonEncodedFabricValue(cellLink)
+    ? valueFromJson(cellLink)
+    : JSON.parse(cellLink);
 }
 
 // Read a cell from toolshed's service space, returning its value.
@@ -151,7 +169,7 @@ export async function writeConfidentialConfig(
   url: string,
   secret: string,
 ): Promise<void> {
-  const parsedCellLink = JSON.parse(cellLink);
+  const parsedCellLink = parseCellLink(cellLink);
   let cell = runtime.getCellFromLink(parsedCellLink);
   if (!cell.schema) cell = cell.asSchema(WebhookConfigSchema);
   await cell.sync();
@@ -216,7 +234,7 @@ export async function sendToStream(
   cellLink: string,
   payload: unknown,
 ): Promise<void> {
-  const parsedCellLink = JSON.parse(cellLink);
+  const parsedCellLink = parseCellLink(cellLink);
   const cell = runtime.getCellFromLink(parsedCellLink);
   const streamCell = cell.asSchema({ asCell: ["stream"] });
   await streamCell.sync();
@@ -230,12 +248,11 @@ export async function sendToStream(
 
 // Extract space DID from a serialized cell link
 export function extractSpaceFromCellLink(cellLink: string): string {
-  const parsed = JSON.parse(cellLink);
-  const link = parsed["/"];
-  if (!link) throw new Error("Invalid cell link format");
+  const parsed = parseCellLink(cellLink);
+  if (!isLinkRef(parsed)) throw new Error("Invalid cell link format");
 
-  const linkData = link["link@1"];
-  if (!linkData?.space) throw new Error("Cell link missing space");
+  const space = linkRefPayload(parsed).space;
+  if (!space) throw new Error("Cell link missing space");
 
-  return linkData.space;
+  return space as string;
 }
