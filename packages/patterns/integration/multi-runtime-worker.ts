@@ -8,6 +8,10 @@
 
 import type { Cell } from "@commonfabric/runner";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
+import {
+  markUiInputBlindWriteTx,
+  unmarkUiInputBlindWriteTx,
+} from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
@@ -164,6 +168,38 @@ const handlers: Record<
     }
     await idle();
     return {};
+  },
+
+  // Faithful mirror of RuntimeProcessor.handleCellSet — the path a UI `$value`
+  // binding takes: ONE fresh edit tx, a single un-retried commit, with the
+  // blind-leaf-write mark applied (around the set only) for scalar values and
+  // withheld for structured/RMW values, exactly as handleCellSet does. We
+  // additionally await the commit so the test can observe the outcome (a
+  // conflict surfaces as a Result error). Pass `idle: false` to leave this
+  // runtime un-settled, so its local replica stays stale (own-write-race repro).
+  async set({ path, value, idle: doIdle }) {
+    const runtime = controller().manager().runtime;
+    const tx = runtime.edit();
+    let cell = result();
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    const blindLeafWrite = typeof value === "string" ||
+      typeof value === "number" || typeof value === "boolean";
+    if (blindLeafWrite) markUiInputBlindWriteTx(tx);
+    cell.withTx(tx).set(value as never);
+    if (blindLeafWrite) unmarkUiInputBlindWriteTx(tx);
+    runtime.prepareTxForCommit(tx);
+    const res = await tx.commit() as {
+      error?: { name?: string; message?: string };
+    };
+    if (doIdle !== false) await idle();
+    return sanitizeForTransfer({
+      ok: !res?.error,
+      error: res?.error
+        ? { name: res.error.name, message: res.error.message }
+        : undefined,
+    });
   },
 
   async read({ path }) {

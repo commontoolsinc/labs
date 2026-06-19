@@ -87,6 +87,7 @@ import {
 import {
   isMergeableOpRead,
   isReadExcludedFromConflict,
+  isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
 
@@ -2232,6 +2233,14 @@ class SpaceReplica implements ISpaceReplica {
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
+        continue;
+      }
+      // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is
+      // not a concurrency precondition — exclude it from confirmed/pending so a
+      // scalar `$value` set cannot lose the own-write race on its own
+      // write-target read. (Done before compaction; in a blind tx all reads are
+      // tagged, so confirmed/pending are simply empty.)
+      if (isReadIgnoredForCommit(read.meta)) {
         continue;
       }
 

@@ -72,9 +72,11 @@ import {
   WriteIsolationError,
 } from "./transaction.ts";
 import {
+  ignoreReadForCommit,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
+  isUiInputBlindWriteTx,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
@@ -1323,6 +1325,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     const { doc } = this.document(branch, address);
     const current = currentDocument(doc);
     const readMeta = options?.meta ?? EMPTY_META;
+    // In a UI-input blind-leaf-write tx (a scalar `$value` overwrite), every read
+    // is recorded for CFC/scheduling but excluded from commit preconditions: tag
+    // each activity with `ignoreReadForCommit` (so buildReads drops it from
+    // `reads.confirmed`) and skip marking the doc `validated` (so the client
+    // validate()/claim() pass skips it too). The mode is scoped to the user
+    // `set()` call only — CFC boundary-commit reads run after the tx is unmarked
+    // and keep their preconditions.
+    const skipCommitPrecondition = isUiInputBlindWriteTx(this);
     const { space: _, ...memoryAddress } = address;
 
     if (!address.id.startsWith("data:")) {
@@ -1331,14 +1341,16 @@ export class V2StorageTransaction implements IStorageTransaction {
         scope: normalizeCellScope(address.scope),
         id: address.id,
         path: address.path,
-        meta: readMeta,
+        meta: skipCommitPrecondition
+          ? { ...readMeta, ...ignoreReadForCommit }
+          : readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
       };
       this.#readActivities.push(readActivity);
       this.invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
-      if (!address.id.startsWith("data:")) {
+      if (!address.id.startsWith("data:") && !skipCommitPrecondition) {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
@@ -1347,7 +1359,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
         !address.id.startsWith("data:") &&
-        !doc.validated
+        !doc.validated &&
+        !skipCommitPrecondition
       ) {
         doc.validated = true;
       }
@@ -1373,7 +1386,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     const result = readAttestation(current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
-      !doc.validated
+      !doc.validated &&
+      !skipCommitPrecondition
     ) {
       doc.validated = true;
     }

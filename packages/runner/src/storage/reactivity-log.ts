@@ -10,6 +10,19 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
+// A read tagged with this marker is still recorded for CFC/scheduling, but is
+// EXCLUDED from the commit's concurrency preconditions: buildReads omits it from
+// `reads.confirmed`, and read() does not mark its document `validated` (so the
+// client validate()/claim() pass skips it too). Set transaction-wide by the
+// UI-input blind-leaf-write mode (see markUiInputBlindWriteTx) so a scalar
+// `$value` overwrite is a precondition-free last-write-wins write — removing the
+// own-write-race "stale confirmed read" conflict. Orthogonal to scheduling:
+// reactivity/subscriptions are unaffected (only ignoreReadForScheduling gates
+// those).
+const ignoreReadForCommitMarker: unique symbol = Symbol(
+  "ignoreReadForCommitMarker",
+);
+
 const markReadAsAttemptedWriteMarker: unique symbol = Symbol(
   "markReadAsAttemptedWriteMarker",
 );
@@ -32,6 +45,10 @@ const mergeableOpReadMarker: unique symbol = Symbol(
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
+};
+
+export const ignoreReadForCommit: Metadata = {
+  [ignoreReadForCommitMarker]: true,
 };
 
 export const markReadAsAttemptedWrite: Metadata = {
@@ -74,6 +91,42 @@ export const mergeableOpRead: Metadata = {
 
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
+}
+
+export function isReadIgnoredForCommit(meta?: Metadata): boolean {
+  return meta?.[ignoreReadForCommitMarker] === true;
+}
+
+// Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
+// the transaction around a scalar `$value` set (and unmarks before
+// prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
+// preconditions); while marked, read() tags every read with `ignoreReadForCommit`
+// and skips `validated`, so the write carries no concurrency precondition
+// (last-write-wins, which is correct for raw scalar UI input). Read-modify-write
+// and structured (array/object) writes are NOT marked and retain compare-and-set.
+// Both the wrapper and the inner storage transaction(s) are marked, since
+// read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
+// layers.
+const uiInputBlindWriteTxs = new WeakSet<object>();
+
+function* blindWriteTxChain(tx: object): Generator<object> {
+  let current: object | undefined = tx;
+  const seen = new Set<object>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    yield current;
+    current = (current as { tx?: object }).tx;
+  }
+}
+
+export function markUiInputBlindWriteTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.add(layer);
+}
+export function unmarkUiInputBlindWriteTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.delete(layer);
+}
+export function isUiInputBlindWriteTx(tx: object): boolean {
+  return uiInputBlindWriteTxs.has(tx);
 }
 
 export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {

@@ -22,11 +22,13 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markUiInputBlindWriteTx,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   setPatternEnvironment,
   type SigilLink,
+  unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -689,7 +691,21 @@ export class RuntimeProcessor {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
+    // A scalar `$value`/`$checked` overwrite (string/number/boolean) is a
+    // last-write-wins leaf write: mark the tx so the set's reads carry no
+    // concurrency precondition, removing the own-write-race "stale confirmed
+    // read" conflict (and the rolled-back, silently-dropped edit it caused).
+    // Structured (array/object) values are excluded — they are often
+    // read-modify-write (CellHandle.push, multi-select, list edits) and must
+    // keep compare-and-set to avoid lost updates. The mark is cleared before
+    // prepareTxForCommit so CFC boundary-commit read-then-writes retain their
+    // preconditions.
+    const raw = request.value;
+    const blindLeafWrite = typeof raw === "string" ||
+      typeof raw === "number" || typeof raw === "boolean";
+    if (blindLeafWrite) markUiInputBlindWriteTx(tx);
     cell.withTx(tx).set(value);
+    if (blindLeafWrite) unmarkUiInputBlindWriteTx(tx);
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC.
