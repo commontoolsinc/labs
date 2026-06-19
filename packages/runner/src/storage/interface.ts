@@ -1,5 +1,9 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { CellScope } from "@commonfabric/api";
+import type {
+  CellScope,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import type {
   CommitPrecondition,
   EntityDocument,
@@ -19,13 +23,11 @@ import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type DID,
-  type FabricValue,
   type Fact,
   type Invariant as IClaim,
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
-  type SchemaPathSelector,
   type Signer,
   type State,
   type The as MediaType,
@@ -56,7 +58,6 @@ export type {
   MediaType,
   MemorySpace,
   Result,
-  SchemaPathSelector,
   Signer,
   State,
   Unit,

@@ -13,7 +13,7 @@ import {
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { type EntityDocument, toDocumentPath } from "../v2.ts";
-import type { FabricValue } from "../interface.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 const createEngine = async (): Promise<{
   engine: Engine;

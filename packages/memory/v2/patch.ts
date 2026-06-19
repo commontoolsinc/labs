@@ -1,4 +1,4 @@
-import type { FabricValue } from "../interface.ts";
+import type { FabricValue } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneForMutation,

@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import type {
   Entity,
   Revision,
-  SchemaPathSelector,
   State,
   URI,
 } from "@commonfabric/memory/interface";

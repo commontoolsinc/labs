@@ -14,10 +14,10 @@ import {
 } from "../src/traverse.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import type {
   MIME,
   Revision,
-  SchemaPathSelector,
   State,
   URI,
 } from "@commonfabric/memory/interface";

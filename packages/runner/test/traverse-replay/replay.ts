@@ -15,7 +15,7 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { SchemaPathSelector } from "../../src/storage/interface.ts";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,

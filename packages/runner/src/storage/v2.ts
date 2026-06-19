@@ -3,13 +3,12 @@ import {
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
 } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
-  type FabricValue,
   type MemorySpace,
   type MIME,
-  type SchemaPathSelector,
   type Signer,
   type TransactionError,
   type URI,

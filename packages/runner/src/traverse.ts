@@ -7,13 +7,8 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
-import type { JSONSchemaObj } from "@commonfabric/api";
-import type {
-  MemorySpace,
-  Result,
-  SchemaPathSelector,
-  Unit,
-} from "@commonfabric/memory/interface";
+import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
+import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import { type FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";

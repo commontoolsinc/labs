@@ -10,7 +10,8 @@ import {
 } from "@commonfabric/data-model/codec-json";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue, MIME, URI } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
+import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   type EntityDocument,
   getMemoryProtocolFlags,

@@ -1,5 +1,6 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
-import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
 import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";

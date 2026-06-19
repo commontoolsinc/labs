@@ -1,6 +1,6 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import type { SchemaPathSelector } from "@commonfabric/memory/interface";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";

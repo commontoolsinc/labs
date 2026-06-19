@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/api";
 import { hasValueAtPath, readValueAtPath } from "../src/storage/v2-path.ts";
 
 // `cloneWithValueAtPath` / `cloneWithoutValueAtPath` now live in

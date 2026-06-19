@@ -1,9 +1,6 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
-import type {
-  MIME,
-  SchemaPathSelector,
-  URI,
-} from "@commonfabric/memory/interface";
+import type { SchemaPathSelector } from "@commonfabric/api";
+import type { MIME, URI } from "@commonfabric/memory/interface";
 import { watchIdForEntry } from "../src/storage/v2.ts";
 
 Deno.test("memory v2 watch ids include branch in the stable key", () => {

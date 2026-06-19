@@ -20,7 +20,7 @@
  *     --allow-env --no-check test/selector-tracker.bench.ts
  */
 
-import type { SchemaPathSelector } from "@commonfabric/memory/interface";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import { SelectorTracker } from "../src/storage/selector-tracker.ts";
