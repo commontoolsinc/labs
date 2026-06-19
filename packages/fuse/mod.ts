@@ -65,6 +65,7 @@ import {
   O_WRONLY,
   readCString,
 } from "./platform.ts";
+import { linkRefFrom } from "@commonfabric/runner/shared";
 import { FsTree } from "./tree.ts";
 import {
   handleHasBufferedContent,
@@ -3096,7 +3097,7 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       // Construct sigil link value and write to cell
-      const sigilValue = { "/": { "link@1": sigil } };
+      const sigilValue = linkRefFrom(sigil);
       const writePath = {
         ...parentPath,
         jsonPath: appendDecodedJsonPath(parentPath.jsonPath, name),

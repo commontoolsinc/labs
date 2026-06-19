@@ -9,6 +9,7 @@ import {
 import type { CfcJsonAnnotationContext } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
+import { isLinkRef, type SigilLink } from "@commonfabric/runner/shared";
 
 type JsonPropName = "input" | "result";
 type PendingJsonRootName = ".input.pending" | ".result.pending";
@@ -70,17 +71,12 @@ export function transformStreamValues(value: unknown): unknown {
 /**
  * Detect sigil link values: { "/": { "link@1": { ... } } }
  *
- * Inline implementation to avoid importing @commonfabric/runner.
+ * Routes through the data-model cell-rep chokepoint so fuse recognizes links
+ * the same way the runtime does (and follows it through the eventual
+ * flag-dispatched representation).
  */
-export function isSigilLink(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const obj = v as Record<string, unknown>;
-  if (!("/" in obj) || Object.keys(obj).length !== 1) return false;
-  const inner = obj["/"];
-  if (typeof inner !== "object" || inner === null || Array.isArray(inner)) {
-    return false;
-  }
-  return "link@1" in (inner as Record<string, unknown>);
+export function isSigilLink(v: unknown): v is SigilLink {
+  return isLinkRef(v);
 }
 
 export { isHandlerCell, isStreamValue } from "./callables.ts";
