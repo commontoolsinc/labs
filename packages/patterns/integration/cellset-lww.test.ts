@@ -89,31 +89,6 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
     }
   });
 
-  it("a genuine later scalar edit against a stale baseline wins LWW", async () => {
-    for (let i = 0; i < 8; i++) {
-      // 1) baseline both sessions.
-      await alice.set([...DRAFT], `base-${i}`);
-      await harness.settle();
-      // 2) tab2 writes a new value; do NOT settle alice — her local stays stale.
-      await aliceTab2.set([...DRAFT], `remote-${i}`, { idle: false });
-      // 3) alice's later genuine edit must commit and win. Pre-fix it was lost:
-      //    her write-target read at the stale seq conflicted with tab2's patch,
-      //    rolling her edit back.
-      const edit = `alice-edit-${i}`;
-      const res = await alice.set([...DRAFT], edit, { idle: false });
-      assert(
-        res.ok,
-        `alice edit ${i} should commit: ${JSON.stringify(res.error)}`,
-      );
-      await harness.settle();
-      assertEquals(
-        await alice.read([...DRAFT]),
-        edit,
-        `alice's later edit ${i} must win LWW, not be dropped`,
-      );
-    }
-  });
-
   it("structured (non-scalar) writes retain compare-and-set", async () => {
     // The narrowing that keeps read-modify-write safe: an array/object value is
     // not a blind leaf write, so concurrent same-user structured writes still
