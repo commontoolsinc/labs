@@ -26,6 +26,14 @@ export interface CapabilityAnalysisOptions {
   readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
+  /**
+   * Transformer-known types for nodes the checker can't resolve. Required for
+   * synthetic callbacks (e.g. the destructure-lowered lift-applied param, whose
+   * bindings type as `any`): without it, type-based heuristics like
+   * `isPrimitiveLikeExpression` answer wrong in a fixed direction and the
+   * capability summary mis-shapes or drops inputs. Consulted before the checker.
+   */
+  readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
 }
 
 interface MutableCapabilityState {
@@ -1087,6 +1095,7 @@ export function analyzeFunctionCapabilities(
   inProgress.add(fn);
   try {
     const checker = options?.checker;
+    const typeRegistry = options?.typeRegistry;
     const interprocedural = !!options?.interprocedural && !!checker;
     const includeNestedCallbacks = !!options?.includeNestedCallbacks;
     const summarySourceFile = fn.getSourceFile();
@@ -1248,10 +1257,16 @@ export function analyzeFunctionCapabilities(
     };
 
     const isPrimitiveLikeExpression = (expr: ts.Expression): boolean => {
-      if (!checker) {
+      // Prefer the transformer-known type: on synthetic callbacks (e.g. the
+      // destructure-lowered lift-applied param) the checker resolves bindings
+      // to `any`, whose flags match none of the primitive families below — so
+      // relying on the checker alone would mis-classify a real primitive as
+      // non-primitive and let the presence-only skip drop it from the schema.
+      const type = typeRegistry?.get(expr) ??
+        (checker ? checker.getTypeAtLocation(expr) : undefined);
+      if (!type) {
         return false;
       }
-      const type = checker.getTypeAtLocation(expr);
       const flags = type.flags;
       return !!(
         flags &
@@ -1924,6 +1939,7 @@ export function analyzeFunctionCapabilities(
 
       return analyzeFunctionCapabilities(declaration, {
         checker,
+        typeRegistry,
         interprocedural: true,
         summaryCache,
         inProgress,
@@ -2155,8 +2171,18 @@ export function analyzeFunctionCapabilities(
                 !isPrimitiveLikeExpression(usage)) &&
               isBooleanConditionUsage(usage)
             ) {
-              // Truthiness checks on local aliases of source properties only
-              // require presence, not the aliased payload shape.
+              // Truthiness checks on a non-primitive source property only
+              // require presence, not the aliased payload shape. Recording
+              // nothing keeps such a (typically nullable, possibly
+              // transiently-undefined) reactive value out of the required input
+              // set, so an action/lift gated on it still runs when it is absent.
+              //
+              // Primitives are handled differently: their value *is* their
+              // presence and a required primitive is never legitimately
+              // `undefined`, so dropping it would be a real bug (lunch-poll
+              // `isAdmin`). `isPrimitiveLikeExpression` — now type-registry
+              // aware so it sees through synthetic `any` params — routes
+              // primitives to the full read above instead of into this skip.
             } else if (
               !(
                 parent &&

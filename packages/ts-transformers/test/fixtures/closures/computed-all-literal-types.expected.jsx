@@ -15,6 +15,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     numLiteral: number;
     floatLiteral: number;
+    boolLiteral: boolean;
     strLiteral: string;
 }, string>(({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
     // Use all captured literals to ensure they're all widened
@@ -33,11 +34,14 @@ const __cfLift_1 = __cfHelpers.lift<{
         floatLiteral: {
             type: "number"
         },
+        boolLiteral: {
+            type: "boolean"
+        },
         strLiteral: {
             type: "string"
         }
     },
-    required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
+    required: ["value", "numLiteral", "floatLiteral", "boolLiteral", "strLiteral"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
