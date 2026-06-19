@@ -178,7 +178,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
                         )
                         : null}
                       {event.pieceRef
-                        ? <cf-cell-link $cell={event.pieceRef} />
+                        ? <cf-render variant="chip" $cell={event.pieceRef} />
                         : null}
                     </cf-hstack>
                     {event.note

@@ -82,12 +82,28 @@ export class CFRender extends BaseElement {
       overflow: hidden;
     }
 
+    /* Chip is an inline, content-sized rendering for text/list/row contexts —
+      not a full-size block. */
+    :host([variant="chip"]) {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      overflow: visible;
+    }
+
     .render-container {
       display: flex;
       flex-direction: column;
       width: 100%;
       height: 100%;
       overflow: auto;
+    }
+
+    :host([variant="chip"]) .render-container {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      overflow: visible;
     }
 
     /* Tile default: a fixed, clickable preview that navigates to the piece.
@@ -128,7 +144,8 @@ export class CFRender extends BaseElement {
 
   static override properties = {
     cell: { attribute: false },
-    variant: { type: String },
+    // Reflected so the host can size itself per variant (chip is inline).
+    variant: { type: String, reflect: true },
   };
 
   declare cell: CellHandle;
@@ -140,6 +157,9 @@ export class CFRender extends BaseElement {
   private _cleanup?: () => void;
   // Track the cell ID we're currently rendering to detect stale renders
   private _renderingCellId?: string;
+  // The root piece cell after resolving the (possibly link) `cell` — used for
+  // chip/tile rendering and navigation. Reset whenever `cell` changes.
+  private _resolvedCell?: CellHandle;
 
   @state()
   private accessor _hasRendered = false;
@@ -158,8 +178,10 @@ export class CFRender extends BaseElement {
   protected override render() {
     // Note: cf-cell-context is now auto-injected by the renderer when
     // traversing [UI] with a CellHandle, so we don't need to wrap here
+    // Chip is inline and resolves to a lightweight default fast — a full-size
+    // spinner would reserve the wrong space, so skip it for chip.
     return html`
-      ${!this._hasRendered
+      ${!this._hasRendered && this.variant !== "chip"
         ? html`
           <div class="loading-spinner">
             <cf-loader size="lg"></cf-loader>
@@ -191,6 +213,7 @@ export class CFRender extends BaseElement {
         if (shouldRerender) {
           // Reset render state when cell changes - ensures we'll render the new cell
           this._hasRendered = false;
+          this._resolvedCell = undefined;
         }
       }
 
@@ -241,18 +264,24 @@ export class CFRender extends BaseElement {
         return;
       }
 
-      // chip/tile: the variant key may materialize asynchronously
-      // (cross-space), so sync before probing for it.
+      // Pieces passed through patterns (e.g. piece-grid) arrive as LINKS, not
+      // the root piece cell. Rendering or navigating the raw link yields a
+      // blank tile and a dead click, and hides the exported variant key.
+      // Resolve to the root cell first — exactly as cf-cell-link does — then
+      // sync so we can read the variant key.
       await this._startPromise;
-      await this.cell.sync();
+      const resolved = await this.cell.resolveAsCell();
+      if (this._renderingCellId !== cellId) return;
+      this._resolvedCell = resolved;
+      await resolved.sync();
       if (this._renderingCellId !== cellId) return;
 
       const variantKey = kind === "chip" ? CHIP_UI : TILE_UI;
-      if (this._cellHasKey(variantKey)) {
+      if (this._cellHasKey(resolved, variantKey)) {
         this._log(`rendering exported ${variantKey}`);
         this._cleanup = render(
           container,
-          (this.cell as CellHandle<Record<string, VNode>>)
+          (resolved as CellHandle<Record<string, VNode>>)
             .key(variantKey) as CellHandle<VNode>,
         );
         this._hasRendered = true;
@@ -261,8 +290,8 @@ export class CFRender extends BaseElement {
 
       // Failover to the per-variant platform default.
       this._cleanup = kind === "chip"
-        ? this._renderChipDefault(container)
-        : this._renderTileDefault(container);
+        ? this._renderChipDefault(container, resolved)
+        : this._renderTileDefault(container, resolved);
       this._hasRendered = true;
     } catch (error) {
       // Only show error if we're still rendering this cell
@@ -273,20 +302,23 @@ export class CFRender extends BaseElement {
   }
 
   /** True when the piece output exports a value at `key` (e.g. a variant UI). */
-  private _cellHasKey(key: string): boolean {
+  private _cellHasKey(cell: CellHandle, key: string): boolean {
     try {
-      return hasVariantValue(this.cell.get(), key);
+      return hasVariantValue(cell.get(), key);
     } catch {
       return false;
     }
   }
 
   /** Chip default: a cf-cell-link bound to the piece (renders by [NAME]). */
-  private _renderChipDefault(container: HTMLElement): () => void {
+  private _renderChipDefault(
+    container: HTMLElement,
+    cell: CellHandle,
+  ): () => void {
     const link = globalThis.document.createElement(
       "cf-cell-link",
     ) as HTMLElement & { cell?: CellHandle };
-    link.cell = this.cell;
+    link.cell = cell;
     container.appendChild(link);
     return () => link.remove();
   }
@@ -296,14 +328,17 @@ export class CFRender extends BaseElement {
    * fixed preview (no panning) and clickable to navigate to the piece —
    * mirroring cf-cell-link's navigation.
    */
-  private _renderTileDefault(container: HTMLElement): () => void {
+  private _renderTileDefault(
+    container: HTMLElement,
+    cell: CellHandle,
+  ): () => void {
     const clip = globalThis.document.createElement("div");
     clip.className = "tile-clip";
     const scaler = globalThis.document.createElement("div");
     scaler.className = "tile-default";
     clip.appendChild(scaler);
     container.appendChild(clip);
-    const inner = render(scaler, this.cell as CellHandle<VNode>);
+    const inner = render(scaler, cell as CellHandle<VNode>);
     const onClick = (e: MouseEvent) => this._navigateToPiece(e);
     clip.addEventListener("click", onClick);
     return () => {
@@ -317,9 +352,10 @@ export class CFRender extends BaseElement {
   private _navigateToPiece(e: MouseEvent) {
     e.stopPropagation();
     try {
+      const target = this._resolvedCell ?? this.cell;
       const view = {
-        spaceDid: this.cell.space(),
-        pieceId: this.cell.id(),
+        spaceDid: target.space(),
+        pieceId: target.id(),
       };
       // Cmd (Mac) / Ctrl (Win/Linux) opens in a new tab.
       if (e.metaKey || e.ctrlKey) {
@@ -362,6 +398,7 @@ export class CFRender extends BaseElement {
     this._log("disconnectedCallback called");
     super.disconnectedCallback();
     this._renderingCellId = undefined;
+    this._resolvedCell = undefined;
     this._hasRendered = false;
     this._cleanupRender();
   }

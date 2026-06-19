@@ -285,7 +285,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                         <tr>
                           <td>
                             <cf-cell-context $cell={piece}>
-                              <cf-cell-link $cell={piece} />
+                              <cf-render variant="chip" $cell={piece} />
                             </cf-cell-context>
                           </td>
                         </tr>
@@ -315,7 +315,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     const link = (
                       <cf-drag-source $cell={piece} type="note">
                         <cf-cell-context $cell={piece}>
-                          <cf-cell-link $cell={piece} />
+                          <cf-render variant="chip" $cell={piece} />
                         </cf-cell-context>
                       </cf-drag-source>
                     );

@@ -137,7 +137,7 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
     [UI]: (
       <cf-card>
         <cf-vstack gap="1">
-          <cf-cell-link $cell={piece} />
+          <cf-render variant="chip" $cell={piece} />
           <cf-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
             {backlinks.map((link) => (
               <cf-cell-link

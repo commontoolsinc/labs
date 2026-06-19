@@ -95,6 +95,11 @@ export default pattern<
         {profiles.map((p) => (
           <cf-hstack gap="2" align="center">
             <div style={{ flex: "1" }}>
+              {
+                /* Profiles are identities — rendered via cf-cell-link (the
+                  identity idiom is cf-profile-badge), not the generic piece
+                  chip variant. */
+              }
               <cf-cell-link $cell={p as any} />
             </div>
             {ifElse(

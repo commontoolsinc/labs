@@ -122,7 +122,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
               {filtered.map((entry) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <cf-cell-link $cell={entry.piece} />
+                    <cf-render variant="chip" $cell={entry.piece} />
                   </td>
                   <td
                     style={{
