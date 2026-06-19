@@ -398,6 +398,7 @@ export class CFRender extends BaseElement {
     this._log("disconnectedCallback called");
     super.disconnectedCallback();
     this._renderingCellId = undefined;
+    this._resolvedCell = undefined;
     this._hasRendered = false;
     this._cleanupRender();
   }
