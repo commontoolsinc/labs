@@ -15,15 +15,6 @@ export interface Principal<ID extends DID = DID> {
   did(): ID;
 }
 
-/**
- * Principal capable of issuing an {@link Authorization}.
- */
-export interface Authority extends Principal {
-  authorize<T extends FabricValue>(
-    access: Iterable<FabricHash | T>,
-  ): AwaitResult<Authorization<T>, AuthorizationError>;
-}
-
 export interface Verifier<ID extends DID = DID> extends Principal<ID> {
   verify(authorization: {
     payload: Uint8Array;
@@ -354,11 +345,8 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 }
 
 /**
- * `Assertion` is just like a {@link Statement} except the value MUST be inline
- * {@link FabricValue} as opposed to reference to one. {@link Assertion}s are
- * used to assert facts, while {@link Statement}s are used to retract them. This
- * allows retracting over the wire without having to send JSON values back and
- * forth.
+ * Asserts a fact: the value MUST be an inline {@link FabricValue} as opposed to
+ * a reference to one.
  */
 export interface Assertion<
   T extends string = MIME,
@@ -409,12 +397,6 @@ export type Fact<
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
-
-export type Statement<
-  T extends string = MIME,
-  Of extends string = URI,
-  Is extends FabricValue = FabricValue,
-> = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
 
@@ -580,13 +562,6 @@ export type SchemaSelector = Select<
   URI,
   Select<MIME, Select<CauseString, SchemaPathSelector>>
 >;
-
-export type Operation =
-  | Transaction
-  | Query
-  | SchemaQuery
-  | Subscribe
-  | Unsubscribe;
 
 export type Select<Key extends string, Match> =
   & {
