@@ -17,23 +17,3 @@ export function parseShard(raw: string): Shard {
 
   return { index, total };
 }
-
-export function stableShardForName(name: string, total: number): number {
-  let hash = 2166136261;
-  for (const char of name) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) % total + 1;
-}
-
-export function shardForFile(
-  name: string,
-  total: number,
-  fourShardAssignments: Record<string, number>,
-): number {
-  if (total === 4 && fourShardAssignments[name]) {
-    return fourShardAssignments[name];
-  }
-  return stableShardForName(name, total);
-}

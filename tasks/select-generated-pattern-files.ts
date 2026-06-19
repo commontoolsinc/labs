@@ -1,24 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read
 
-type Shard = {
-  index: number;
-  total: number;
-};
-
-export function parseShard(raw: string): Shard {
-  const match = raw.match(/^([1-9][0-9]*)\/([1-9][0-9]*)$/);
-  if (!match) {
-    throw new Error(`Expected shard argument like 1/4, got: ${raw}`);
-  }
-
-  const index = Number(match[1]);
-  const total = Number(match[2]);
-  if (index > total) {
-    throw new Error(`Shard index ${index} exceeds total shard count ${total}`);
-  }
-
-  return { index, total };
-}
+import { parseShard, type Shard } from "./shard-utils.ts";
+export { parseShard };
 
 export function selectGeneratedPatternFiles(
   names: string[],
@@ -29,7 +12,7 @@ export function selectGeneratedPatternFiles(
     .filter((_, index) => index % shard.total === shard.index - 1);
 }
 
-async function listGeneratedPatternTests(): Promise<string[]> {
+export async function listGeneratedPatternTests(): Promise<string[]> {
   const integrationDir = new URL(
     "../packages/generated-patterns/integration/patterns/",
     import.meta.url,

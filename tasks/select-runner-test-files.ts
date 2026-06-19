@@ -1,49 +1,24 @@
 #!/usr/bin/env -S deno run --allow-read
 
-import { parseShard, shardForFile, stableShardForName } from "./shard-utils.ts";
-export { parseShard, stableShardForName };
+import { parseShard } from "./shard-utils.ts";
+export { parseShard };
 
-// Explicit assignments balance the four runner-test shards by wall-time.
-// The heaviest files are spread across shards so no single shard dominates.
-// Files not listed here fall through to a stable hash of their filename.
-const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
-  "engine.test.ts": 1, // ~700k weight, heaviest — runs with hash-assigned small files
-
-  "piece-helpers.test.ts": 2, // ~320k
-  "memory-v2-watch-refresh-race.test.ts": 2, // ~95k
-  "pattern-scope.test.ts": 2, // ~75k
-
-  "json-utils.test.ts": 3, // ~210k
-  "runner.test.ts": 3, // ~100k
-  "wish.test.ts": 3, // ~95k
-  "navigate-handler.test.ts": 3, // ~80k
-
-  "reactive-dependencies.test.ts": 4, // ~180k
-  "pattern-manager.test.ts": 4, // ~145k
-  "data-updating.test.ts": 4, // ~80k
-  "scheduler-ordering.test.ts": 4, // ~80k
-};
-
-export function shardForRunnerTestFile(
-  name: string,
-  total: number,
-): number {
-  return shardForFile(name, total, FOUR_SHARD_ASSIGNMENTS);
-}
-
+// Runner test files are split across shards by round-robin over the sorted file
+// list. There is no per-file weighting: a byte-size table used to live here, but
+// file size does not track run time, so it balanced no better than plain
+// round-robin. A time-weighted split would do better and can be added if the
+// imbalance starts to matter on the critical path.
 export function selectRunnerTestFiles(
   files: { name: string }[],
   shard: { index: number; total: number },
 ): string[] {
   return files
-    .filter((file) =>
-      shardForRunnerTestFile(file.name, shard.total) === shard.index
-    )
     .map((file) => file.name)
-    .sort();
+    .sort()
+    .filter((_, i) => i % shard.total === shard.index - 1);
 }
 
-async function listRunnerTests(): Promise<{ name: string }[]> {
+export async function listRunnerTests(): Promise<{ name: string }[]> {
   const testDir = new URL("../packages/runner/test/", import.meta.url);
   const files: { name: string }[] = [];
 
