@@ -3214,6 +3214,8 @@ interface CFPromptInputAttributes<T> extends CFHTMLAttributes<T> {
   "autoResize"?: boolean;
   "pending"?: boolean;
   "voice"?: boolean;
+  /** Upload File/Blob attachments to the blob store on add (default off). */
+  "uploadAttachments"?: boolean;
   "oncf-send"?: EventHandler<{
     text: string;
     attachments: Array<{
@@ -3221,6 +3223,12 @@ interface CFPromptInputAttributes<T> extends CFHTMLAttributes<T> {
       name: string;
       type: "file" | "clipboard";
       data?: unknown;
+      /** Blob-store URL once uploaded (when uploadAttachments is set). */
+      url?: string;
+      mediaType?: string;
+      size?: number;
+      uploading?: boolean;
+      error?: string;
     }>;
     mentions: any[];
     message: string;
