@@ -6,6 +6,7 @@
 
 import type { Cell } from "@commonfabric/runner";
 import { schemaToTypeString } from "@commonfabric/runner";
+import { linkRefPayload } from "@commonfabric/runner/shared";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import {
@@ -3052,11 +3053,7 @@ export class CellBridge {
       // Stream cells are rendered as .handler files, not symlinks.
       if (isHandlerCell(value)) return null;
 
-      const inner = (value as Record<string, unknown>)["/"] as Record<
-        string,
-        unknown
-      >;
-      const rawLinkData = inner["link@1"];
+      const rawLinkData: unknown = linkRefPayload(value);
       if (
         typeof rawLinkData !== "object" || rawLinkData === null ||
         Array.isArray(rawLinkData)

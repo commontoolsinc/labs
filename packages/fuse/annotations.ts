@@ -1,5 +1,6 @@
 import { CFC_FUSE_ATOM_CLASS, cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
+import { isLinkRef } from "@commonfabric/runner/shared";
 import { encodeHex } from "@std/encoding/hex";
 import type { CallableKind } from "./callables.ts";
 
@@ -424,15 +425,9 @@ function labelViewEntriesAt(
     .map((entry) => cloneLabel(entry.label));
 }
 
-function isSigilLinkValue(value: unknown): boolean {
-  if (!isRecord(value) || Object.keys(value).length !== 1) return false;
-  const inner = value["/"];
-  return isRecord(inner) && "link@1" in inner;
-}
-
 function isLeafValue(value: unknown): boolean {
   return value === null || value === undefined ||
-    typeof value !== "object" || isSigilLinkValue(value);
+    typeof value !== "object" || isLinkRef(value);
 }
 
 export function cfcDirectoryEntryKind(
@@ -584,7 +579,7 @@ export class CfcProjectionAnnotator {
       );
     }
 
-    if (isRecord(value) && !isSigilLinkValue(value)) {
+    if (isRecord(value) && !isLinkRef(value)) {
       const keys = Object.keys(value);
       if (keys.length === 0) return this.labelAt(path);
       return joinLabels(...keys.map((key) => this.labelAt([...path, key])));
