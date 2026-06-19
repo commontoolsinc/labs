@@ -16,7 +16,6 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   getModernCellRepConfig,
-  linkRefInner,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -66,6 +65,7 @@ import {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   flowLabelWorkExists,
   gatedSinkRequestExists,
+  linkCfcLabelView,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -934,8 +934,7 @@ export class Runtime {
   ): Cell<any> {
     const carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
-        ? (linkRefInner(cellLink) as { cfcLabelView?: CfcLabelView })
-          .cfcLabelView
+        ? linkCfcLabelView(cellLink)
         : isNormalizedFullLink(cellLink)
         ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })
           .cfcLabelView

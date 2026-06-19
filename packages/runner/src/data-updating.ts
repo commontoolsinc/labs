@@ -37,7 +37,10 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { type CellLinkRefPayload } from "./sigil-types.ts";
+import {
+  type CfcCellLinkRefPayload,
+  linkCfcLabelView,
+} from "./cfc/link-label-view.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -238,10 +241,7 @@ const cfcLabelViewForPrimitiveLink = (
   if (!isSigilLink(value)) {
     return undefined;
   }
-  return cloneCfcLabelView(
-    (linkRefInner(value) as { cfcLabelView?: CfcLabelView })
-      .cfcLabelView,
-  );
+  return cloneCfcLabelView(linkCfcLabelView(value));
 };
 
 const attachCfcLabelViewToSigilLink = (
@@ -252,7 +252,7 @@ const attachCfcLabelViewToSigilLink = (
   if (!clonedView || !isSigilLink(value)) {
     return value;
   }
-  return linkRefFrom({
+  return linkRefFrom<CfcCellLinkRefPayload>({
     ...linkRefInner(value),
     cfcLabelView: clonedView,
   });
@@ -262,9 +262,7 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
   if (!isSigilLink(value)) {
     return value;
   }
-  const inner = linkRefInner(value) as
-    & CellLinkRefPayload
-    & { cfcLabelView?: CfcLabelView };
+  const inner = linkRefInner(value) as CfcCellLinkRefPayload;
   if (inner.cfcLabelView === undefined) {
     return value;
   }

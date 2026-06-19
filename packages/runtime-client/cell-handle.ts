@@ -15,6 +15,7 @@ import {
   cfcLabelViewsEqual,
   rebaseCfcLabelView,
 } from "@commonfabric/runner/cfc/label-view-core";
+import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 import {
@@ -340,7 +341,7 @@ export class CellHandle<T = unknown> {
   toJSON(): SigilLink {
     // Wrap in sigil link format so the runtime recognizes this as a link
     // and dereferences it (e.g., when passed through event.detail.sourceCell)
-    return linkRefFrom({
+    return linkRefFrom<CfcCellLinkRefPayload>({
       id: this.#ref.id,
       space: this.#ref.space,
       scope: this.#ref.scope,
@@ -351,7 +352,7 @@ export class CellHandle<T = unknown> {
       ...(this.#ref.cfcLabelView !== undefined && {
         cfcLabelView: this.#ref.cfcLabelView,
       }),
-    } as never);
+    });
   }
 
   // Called when cell has been updated from the backend with

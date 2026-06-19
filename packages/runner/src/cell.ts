@@ -16,7 +16,6 @@ import {
   type EntityRef,
   entityRefFromString,
   linkRefFrom,
-  linkRefInner,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
@@ -136,6 +135,7 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -2756,8 +2756,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(cell);
       if (cfcLabelView) {
-        (linkRefInner(link) as { cfcLabelView?: CfcLabelView })
-          .cfcLabelView = cfcLabelView;
+        setLinkCfcLabelView(link, cfcLabelView);
       }
     }
     return link;
@@ -2766,8 +2765,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(value);
       if (cfcLabelView) {
-        (linkRefInner(link) as { cfcLabelView?: CfcLabelView })
-          .cfcLabelView = cfcLabelView;
+        setLinkCfcLabelView(link, cfcLabelView);
       }
     }
     return link;

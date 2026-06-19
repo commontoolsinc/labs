@@ -48,8 +48,13 @@ export type WriteRedirectV1 = LinkV1 & {
  * modern (non-envelope) representation exists, `SigilLink` (which _is_ the
  * envelope) and `LinkRef` (which spans both forms) diverge and this alias gets
  * cleaned up.
+ *
+ * Parameterized on the payload so a producer can advertise a richer payload
+ * (e.g. cfc's `CfcCellLinkRefPayload`); defaults to the base
+ * {@link CellLinkRefPayload}, so bare `SigilLink` is unchanged.
  */
-export type SigilLink = LinkRef<CellLinkRefPayload>;
+export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
+  LinkRef<P>;
 /**
  * Sigil alias type - uses LinkV1 with overwrite field
  */

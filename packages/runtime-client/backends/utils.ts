@@ -3,6 +3,7 @@ import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
 import { Runtime } from "@commonfabric/runner";
 import { linkRefFrom } from "@commonfabric/runner/shared";
+import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import { isCellRef } from "../protocol/mod.ts";
 
 export function mapCellRefsToSigilLinks(value: unknown): any {
@@ -26,7 +27,7 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
-  return linkRefFrom({
+  return linkRefFrom<CfcCellLinkRefPayload>({
     id: cell.id,
     space: cell.space,
     scope: cell.scope,
@@ -36,7 +37,7 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
     ...(cell.cfcLabelView !== undefined && {
       cfcLabelView: cell.cfcLabelView,
     }),
-  } as never);
+  });
 }
 
 export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
