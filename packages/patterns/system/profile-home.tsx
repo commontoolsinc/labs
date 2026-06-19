@@ -535,33 +535,38 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   null,
                 )}
 
-                <cf-vstack gap="2">
+                {
+                  /* Pinned patterns render as tile variants (clickable,
+                    navigate to the piece); the user's title/tags annotate the
+                    footer. The old bespoke card + cf-cell-link "Open" is gone. */
+                }
+                <cf-grid columns="2" gap="3">
                   {elements.map((element) => (
                     <div
                       style={{
                         border:
                           "0.5px solid var(--cf-theme-color-border, #e5e5e7)",
                         borderRadius: "12px",
-                        padding: "12px 14px",
+                        overflow: "hidden",
                       }}
                     >
-                      <cf-hstack justify="between" align="center" gap="2">
-                        <cf-vstack gap="1">
-                          <strong>{element.title ?? element.tag}</strong>
-                          <div
-                            style={{
-                              color: "var(--cf-theme-color-text-secondary)",
-                              fontSize: "13px",
-                            }}
-                          >
-                            {element.userTags.map((tag) => `#${tag}`).join(" ")}
-                          </div>
-                        </cf-vstack>
-                        <cf-cell-link $cell={element.cell}>Open</cf-cell-link>
-                      </cf-hstack>
+                      <div style={{ width: "100%", height: "160px" }}>
+                        <cf-render variant="tile" $cell={element.cell} />
+                      </div>
+                      <div style={{ padding: "10px 14px" }}>
+                        <strong>{element.title ?? element.tag}</strong>
+                        <div
+                          style={{
+                            color: "var(--cf-theme-color-text-secondary)",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {element.userTags.map((tag) => `#${tag}`).join(" ")}
+                        </div>
+                      </div>
                     </div>
                   ))}
-                </cf-vstack>
+                </cf-grid>
 
                 {
                   /* Only the owner gets the edit affordance; a visitor sees a

@@ -82,12 +82,28 @@ export class CFRender extends BaseElement {
       overflow: hidden;
     }
 
+    /* Chip is an inline, content-sized rendering for text/list/row contexts —
+      not a full-size block. */
+    :host([variant="chip"]) {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      overflow: visible;
+    }
+
     .render-container {
       display: flex;
       flex-direction: column;
       width: 100%;
       height: 100%;
       overflow: auto;
+    }
+
+    :host([variant="chip"]) .render-container {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      overflow: visible;
     }
 
     /* Tile default: a fixed, clickable preview that navigates to the piece.
@@ -128,7 +144,8 @@ export class CFRender extends BaseElement {
 
   static override properties = {
     cell: { attribute: false },
-    variant: { type: String },
+    // Reflected so the host can size itself per variant (chip is inline).
+    variant: { type: String, reflect: true },
   };
 
   declare cell: CellHandle;
@@ -158,8 +175,10 @@ export class CFRender extends BaseElement {
   protected override render() {
     // Note: cf-cell-context is now auto-injected by the renderer when
     // traversing [UI] with a CellHandle, so we don't need to wrap here
+    // Chip is inline and resolves to a lightweight default fast — a full-size
+    // spinner would reserve the wrong space, so skip it for chip.
     return html`
-      ${!this._hasRendered
+      ${!this._hasRendered && this.variant !== "chip"
         ? html`
           <div class="loading-spinner">
             <cf-loader size="lg"></cf-loader>

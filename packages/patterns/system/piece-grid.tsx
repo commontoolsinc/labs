@@ -33,28 +33,15 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
               overflow: "hidden",
             }}
           >
-            <div
-              style={{
-                width: "100%",
-                height: "200px",
-                overflow: "hidden",
-                position: "relative",
-              }}
-            >
-              <div
-                style={{
-                  transform: "scale(0.4)",
-                  transformOrigin: "top left",
-                  width: "250%",
-                  height: "250%",
-                  pointerEvents: "none",
-                }}
-              >
-                <cf-render $cell={piece} />
-              </div>
+            {
+              /* Tile variant: cf-render owns the scaled, clipped,
+                click-to-navigate preview (no hand-rolled scaling). */
+            }
+            <div style={{ width: "100%", height: "200px" }}>
+              <cf-render variant="tile" $cell={piece} />
             </div>
             <div style={{ padding: "8px" }}>
-              <cf-cell-link $cell={piece} />
+              <cf-render variant="chip" $cell={piece} />
             </div>
           </div>
         ))}
