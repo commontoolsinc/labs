@@ -1,7 +1,12 @@
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type CellHandle, NAME } from "@commonfabric/runtime-client";
+import {
+  type CellHandle,
+  NAME,
+  type RuntimeClient,
+} from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
@@ -9,12 +14,15 @@ import {
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import { uploadFile } from "../../utils/file-cell-storage.ts";
 import {
   type Mentionable,
   type MentionableArray,
 } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
+import { hasIncompleteUpload, toSendAttachment } from "./send-attachments.ts";
 import "../cf-button/cf-button.ts";
 import "../cf-chip/cf-chip.ts";
 import "../cf-voice-input/cf-voice-input.ts";
@@ -27,6 +35,17 @@ export interface PromptAttachment {
   name: string; // Display name
   type: "file" | "clipboard";
   data?: File | Blob | string;
+  // Populated when `uploadAttachments` is enabled and a runtime + space
+  // context are present: the file's bytes are uploaded to the content-addressed
+  // blob store and the lightweight result is carried here, so a consumer can
+  // persist/reference the blob instead of shipping the raw bytes. (cf-file-input
+  // does the same upload via the shared uploadFile() util.)
+  url?: string; // Blob-store URL once uploaded
+  mediaType?: string; // Resolved media type, e.g. "image/png"
+  size?: number; // Size in bytes
+  uploading?: boolean; // True while the upload is in flight
+  error?: string; // Upload error message, if it failed
+  previewUrl?: string; // Local object URL for an instant image thumbnail
 }
 
 /**
@@ -222,6 +241,15 @@ export class CFPromptInput extends BaseElement {
         gap: var(--cf-theme-spacing-tight, var(--cf-spacing-1, 0.25rem));
       }
 
+      /* Image attachment thumbnail in a chip's icon slot */
+      .attachment-thumb {
+        width: 1.5rem;
+        height: 1.5rem;
+        object-fit: cover;
+        border-radius: 4px;
+        display: block;
+      }
+
       /* File upload styles */
       .upload-button {
         display: flex;
@@ -320,6 +348,7 @@ export class CFPromptInput extends BaseElement {
     modelItems: { type: Array, attribute: false },
     model: { type: Object, attribute: false },
     voice: { type: Boolean, reflect: true },
+    uploadAttachments: { type: Boolean, attribute: "upload-attachments" },
   };
 
   declare placeholder: string;
@@ -336,16 +365,34 @@ export class CFPromptInput extends BaseElement {
   declare modelItems: Array<ModelItem | undefined>;
   declare model: CellHandle<string> | string | null;
   declare voice: boolean;
+  // Opt-in: upload File/Blob attachments to the blob store on add (default off,
+  // so existing consumers keep the raw-File pass-through behavior).
+  declare uploadAttachments: boolean;
 
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
+
+  // Runtime + space context, consumed the same way cf-file-input does, so the
+  // component can upload attachment bytes itself when uploadAttachments is set.
+  @consume({ context: runtimeContext, subscribe: true })
+  @property({ attribute: false })
+  accessor runtime: RuntimeClient | undefined = undefined;
+
+  @consume({ context: spaceContext, subscribe: true })
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
 
   private _textareaElement?: HTMLElement;
   private _modelSelectElement?: HTMLSelectElement;
 
   // Attachment management
   private attachments: Map<string, PromptAttachment> = new Map();
+  // In-flight upload promises, keyed by attachment id, so a submit can wait for
+  // them before emitting (see _handleSend).
+  private _uploadPromises: Map<string, Promise<void>> = new Map();
+  // True while a submit is awaiting in-flight uploads (disables the send btn).
+  private _sending = false;
 
   // Mention controller
   private mentionController = new MentionController(this, {
@@ -381,6 +428,7 @@ export class CFPromptInput extends BaseElement {
     this.modelItems = [];
     this.model = null;
     this.voice = false;
+    this.uploadAttachments = false;
   }
 
   override connectedCallback(): void {
@@ -397,6 +445,7 @@ export class CFPromptInput extends BaseElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    for (const att of this.attachments.values()) this._revokePreview(att);
     this._resizeObs?.disconnect();
     this._resizeObs = undefined;
     globalThis.removeEventListener("resize", this._onWindowChange);
@@ -466,25 +515,71 @@ export class CFPromptInput extends BaseElement {
     applyThemeToElement(this, currentTheme);
   }
 
-  private _handleSend(event?: Event) {
+  private async _handleSend(event?: Event) {
     event?.preventDefault();
 
-    if (this.disabled || this.pending) return;
+    if (this.disabled || this.pending || this._sending) return;
 
     const textarea = this._textareaElement as any;
     if (!textarea || !textarea.value?.trim()) return;
 
     const text = textarea.value;
 
-    // Get all attachments (file uploads, clipboard)
-    const attachments = Array.from(this.attachments.values());
+    // Wait for any in-flight attachment uploads so each attachment carries its
+    // blob `url` before we emit. Without this, a quick submit races the async
+    // upload and the consumer receives a ref-less attachment (the bug that made
+    // a captured image silently vanish). The send button is disabled while
+    // _sending so the user sees the brief wait.
+    const pending = Array.from(this._uploadPromises.values());
+    if (pending.length > 0) {
+      this._sending = true;
+      this.requestUpdate();
+      try {
+        await Promise.allSettled(pending);
+      } finally {
+        this._sending = false;
+        this.requestUpdate();
+      }
+    }
+
+    // Block the send if any opted-in upload failed or never produced a `url`.
+    // Emitting it would hand the consumer an attachment with neither a usable
+    // `url` nor the raw bytes (the upload consumed them) — silent data loss. We
+    // keep the textarea + attachments intact so the user can retry or remove;
+    // the failing pill already shows a ⚠️ with the error and a remove button.
+    const hasContext = !!(this.runtime && this.space);
+    if (
+      hasIncompleteUpload(this.attachments.values(), {
+        uploadAttachments: this.uploadAttachments,
+        hasContext,
+      })
+    ) {
+      this.requestUpdate();
+      return;
+    }
+
+    // Emit a serializable view of each attachment (see toSendAttachment): the
+    // raw `data` is dropped ONLY for a successfully-uploaded blob (the consumer
+    // uses its `url`; a non-cloneable File would be dropped by structured-clone
+    // into a sandboxed handler, which silently lost the uploaded `url`). For
+    // non-uploaded attachments — upload off, no runtime/space, or string
+    // clipboard content — `data` is preserved so default-off consumers are
+    // unaffected (backward compatible). `previewUrl` (a local blob: URL) is
+    // never emitted.
+    const attachments = Array.from(this.attachments.values()).map(
+      toSendAttachment,
+    );
 
     // Clear the textarea and attachments
     textarea.value = "";
     this.value = "";
+    for (const att of this.attachments.values()) this._revokePreview(att);
     this.attachments.clear();
+    this._uploadPromises.clear();
 
-    // Emit the send event
+    // Emit the send event. `attachments` is the lightweight (File-free) view
+    // built above, which serializes cleanly into a sandboxed handler — a raw
+    // File in the detail silently dropped the whole attachment.
     this.emit("cf-send", {
       text,
       attachments,
@@ -564,24 +659,56 @@ export class CFPromptInput extends BaseElement {
     const clipboardData = event.clipboardData;
     if (!clipboardData) return;
 
-    // Check for files in clipboard
-    const files = Array.from(clipboardData.files);
-    if (files.length > 0) {
+    // Collect attachment files from BOTH `files` and `items`. A web-copied
+    // image frequently lands only in `items` (not `files`) — that asymmetry is
+    // why a native screenshot attached but a copied web image did not.
+    const collected: File[] = [];
+    const seen = new Set<string>();
+    const add = (f: File | null) => {
+      if (!f) return;
+      const key = `${f.name}|${f.size}|${f.type}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      collected.push(f);
+    };
+    for (const f of Array.from(clipboardData.files)) add(f);
+    for (const item of Array.from(clipboardData.items)) {
+      if (item.kind === "file") add(item.getAsFile());
+    }
+    if (collected.length > 0) {
       event.preventDefault();
-
-      for (const file of files) {
-        const id = this._generateAttachmentId();
-        const attachment: PromptAttachment = {
-          id,
-          name: file.name || "Pasted file",
+      for (const file of collected) {
+        this.addAttachment({
+          id: this._generateAttachmentId(),
+          name: file.name ||
+            (file.type.startsWith("image/") ? "Pasted image" : "Pasted file"),
           type: "clipboard",
           data: file,
-        };
-
-        this.addAttachment(attachment);
+        });
       }
-
       return;
+    }
+
+    // Web-copied image with no bytes on the clipboard — only an <img> in the
+    // HTML flavor. Fetch it (handles data: URIs and CORS-permitting remotes).
+    // We must preventDefault synchronously (the event is consumed the moment
+    // this handler returns) but the fetch is async, so capture the plain-text
+    // flavor NOW and restore it if the fetch fails — otherwise a CORS/network
+    // failure would silently swallow the paste entirely.
+    if (this.uploadAttachments) {
+      const html = clipboardData.getData("text/html");
+      const src = html ? this._firstImgSrc(html) : null;
+      if (src) {
+        const plain = clipboardData.getData("text");
+        // Don't fall back to a giant base64 data: URI as text; only a real
+        // text flavor (or an http(s) src) is worth restoring.
+        const fallbackText = plain || (src.startsWith("data:") ? "" : src);
+        event.preventDefault();
+        void this._attachRemoteImage(src).then((ok) => {
+          if (!ok) this._insertTextAtCursor(fallbackText);
+        });
+        return;
+      }
     }
 
     // Check for large text content (>1000 chars)
@@ -657,6 +784,74 @@ export class CFPromptInput extends BaseElement {
     this.requestUpdate();
   }
 
+  /** Extract the first <img src> from pasted HTML (data: or http(s) only). */
+  private _firstImgSrc(html: string): string | null {
+    const m = html.match(/<img[^>]+\bsrc=["']([^"']+)["']/i);
+    if (!m) return null;
+    const src = m[1].trim();
+    if (src.startsWith("data:image/") || /^https?:\/\//i.test(src)) return src;
+    return null;
+  }
+
+  /**
+   * Fetch a remote/data image URL and attach it as an uploadable blob. Returns
+   * true if an attachment was added, false on any failure (non-ok response,
+   * non-image content, CORS/network error) so the caller can restore the
+   * plain-text flavor it suppressed with preventDefault().
+   */
+  private async _attachRemoteImage(src: string): Promise<boolean> {
+    try {
+      const resp = await fetch(src);
+      if (!resp.ok) return false;
+      const blob = await resp.blob();
+      if (!blob.type.startsWith("image/")) return false;
+      this.addAttachment({
+        id: this._generateAttachmentId(),
+        name: this._imageNameFromUrl(src, blob.type),
+        type: "clipboard",
+        data: blob,
+      });
+      return true;
+    } catch {
+      // CORS or network failure — caller restores the suppressed text paste.
+      return false;
+    }
+  }
+
+  /** Insert text at the current cursor (or append if the textarea is absent). */
+  private _insertTextAtCursor(text: string): void {
+    if (!text) return;
+    const textarea = this._textareaElement as HTMLTextAreaElement | null;
+    if (!textarea) {
+      this.value = this.value + text;
+      this.requestUpdate();
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = this.value.substring(0, start);
+    const after = this.value.substring(end);
+    this.value = before + text + after;
+    textarea.value = this.value;
+    const pos = before.length + text.length;
+    textarea.setSelectionRange(pos, pos);
+    this.requestUpdate();
+  }
+
+  private _imageNameFromUrl(src: string, mimeType: string): string {
+    const ext = mimeType.split("/")[1]?.split("+")[0] || "png";
+    if (src.startsWith("data:")) return `pasted-image.${ext}`;
+    try {
+      const path = new URL(src).pathname;
+      const base = path.substring(path.lastIndexOf("/") + 1);
+      if (base && base.includes(".")) return base;
+      if (base) return `${base}.${ext}`;
+    } catch {
+      // not a parseable URL — fall through
+    }
+    return `pasted-image.${ext}`;
+  }
+
   override render() {
     return html`
       <div style="position: relative;">
@@ -708,7 +903,8 @@ export class CFPromptInput extends BaseElement {
                         : this.size === "lg"
                         ? "lg"
                         : "md"}"
-                      ?disabled="${this.disabled || !this.value?.trim()}"
+                      ?disabled="${this.disabled || !this.value?.trim() ||
+                        this._sending}"
                       @click="${this._handleSend}"
                       part="send-button"
                     >
@@ -796,18 +992,100 @@ export class CFPromptInput extends BaseElement {
    * Add an attachment
    */
   addAttachment(attachment: PromptAttachment): void {
+    this._makeImagePreview(attachment);
     this.attachments.set(attachment.id, attachment);
     this.emit("cf-attachment-add", { attachment });
     this.requestUpdate();
+    // Track the upload promise so a submit can await it (see _handleSend); it
+    // mutates the attachment + requestUpdate()s as its state changes, and
+    // re-emits cf-attachment-add when the url is ready.
+    const p = this._maybeUploadAttachment(attachment).finally(() => {
+      this._uploadPromises.delete(attachment.id);
+    });
+    this._uploadPromises.set(attachment.id, p);
   }
 
   /**
    * Remove an attachment by ID
    */
   removeAttachment(id: string): void {
+    const existing = this.attachments.get(id);
+    this._revokePreview(existing);
     this.attachments.delete(id);
+    // Drop the tracked upload promise too, so a still-in-flight upload for an
+    // attachment the user already removed cannot delay the next send (_handleSend
+    // awaits _uploadPromises before emitting).
+    this._uploadPromises.delete(id);
     this.emit("cf-attachment-remove", { id });
     this.requestUpdate();
+  }
+
+  /**
+   * Give image attachments an instant local thumbnail (revoked on remove/send).
+   */
+  private _makeImagePreview(attachment: PromptAttachment): void {
+    const data = attachment.data;
+    if (
+      (data instanceof File || data instanceof Blob) &&
+      (data.type || "").startsWith("image/")
+    ) {
+      try {
+        attachment.previewUrl = URL.createObjectURL(data);
+      } catch {
+        // No object URL available (non-browser env) — fall back to the icon.
+      }
+    }
+  }
+
+  private _revokePreview(attachment: PromptAttachment | undefined): void {
+    if (attachment?.previewUrl) {
+      try {
+        URL.revokeObjectURL(attachment.previewUrl);
+      } catch {
+        // ignore
+      }
+      attachment.previewUrl = undefined;
+    }
+  }
+
+  /**
+   * Upload a File/Blob attachment to the blob store when opted in. We own this
+   * component and it's bound to our runtime, so it can upload directly rather
+   * than handing the consumer raw bytes it can't persist. Mutates the
+   * attachment in place (uploading/url/error) and requestUpdate()s.
+   */
+  private async _maybeUploadAttachment(
+    attachment: PromptAttachment,
+  ): Promise<void> {
+    const data = attachment.data;
+    if (!this.uploadAttachments) return;
+    if (!(data instanceof File) && !(data instanceof Blob)) return;
+    // No runtime/space context — leave the raw data for the consumer.
+    if (!this.runtime || !this.space) return;
+
+    attachment.uploading = true;
+    this.requestUpdate();
+    try {
+      const file = data instanceof File
+        ? data
+        : new File([data], attachment.name || "file", { type: data.type });
+      const stored = await uploadFile({
+        file,
+        runtime: this.runtime,
+        space: this.space,
+      });
+      attachment.url = stored.url;
+      attachment.mediaType = stored.mediaType;
+      attachment.size = stored.size;
+      attachment.error = undefined;
+    } catch (err) {
+      attachment.error = err instanceof Error ? err.message : String(err);
+    } finally {
+      attachment.uploading = false;
+      this.requestUpdate();
+      // Re-emit so consumers listening on cf-attachment-add receive the url.
+      this.emit("cf-attachment-add", { attachment });
+    }
   }
 
   /**
@@ -848,20 +1126,49 @@ export class CFPromptInput extends BaseElement {
 
     return html`
       <div class="pills-list">
-        ${attachmentsArray.map((attachment) =>
-          html`
+        ${attachmentsArray.map((attachment) => {
+          // Prefer a local object URL for an instant preview, then the uploaded
+          // blob URL once it lands; only images get a thumbnail.
+          const dataType =
+            (attachment.data instanceof File || attachment.data instanceof Blob)
+              ? attachment.data.type
+              : "";
+          const isImage = (attachment.mediaType || dataType || "")
+            .startsWith("image/");
+          const thumb = attachment.previewUrl ??
+            (isImage ? attachment.url : undefined);
+          return html`
             <cf-chip
               variant="${this._getAttachmentVariant(attachment.type)}"
               removable
               @cf-remove="${() => this.removeAttachment(attachment.id)}"
             >
-              ${attachment.name}
-              <span slot="icon">${this._getAttachmentIcon(
-                attachment.type,
-              )}</span>
+              ${attachment.uploading
+                ? html`
+                  <span>⏳ </span>
+                `
+                : ""}${attachment
+                  .error
+                ? html`
+                  <span title="${attachment.error}">⚠️ </span>
+                `
+                : ""}${attachment.name} ${thumb
+                ? html`
+                  <img
+                    slot="icon"
+                    class="attachment-thumb"
+                    src="${thumb}"
+                    alt="${attachment.name}"
+                  />
+                `
+                : html`
+                  <span slot="icon">${this._getAttachmentIcon(
+                    attachment.type,
+                  )}</span>
+                `}
             </cf-chip>
-          `
-        )}
+          `;
+        })}
       </div>
     `;
   }
