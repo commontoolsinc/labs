@@ -2,6 +2,7 @@ import {
   type FabricValue,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -11,7 +12,7 @@ import {
   type Pattern,
 } from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
-import { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
+import { type SigilLink, type URI } from "./sigil-types.ts";
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -34,7 +35,7 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
 }
 
 export function getSigilLink(id: URI): SigilLink {
-  return { "/": { [LINK_V1_TAG]: { id } } };
+  return linkRefFrom({ id });
 }
 
 export function describePatternOrModule(

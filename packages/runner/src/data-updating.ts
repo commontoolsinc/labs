@@ -38,6 +38,10 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import {
+  type CfcCellLinkRefPayload,
+  linkCfcLabelView,
+} from "./cfc/link-label-view.ts";
+import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
@@ -67,7 +71,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   type CfcAddress,
 } from "./cfc/types.ts";
-import { LINK_V1_TAG } from "./sigil-types.ts";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -237,10 +241,7 @@ const cfcLabelViewForPrimitiveLink = (
   if (!isSigilLink(value)) {
     return undefined;
   }
-  return cloneCfcLabelView(
-    (value["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
-      .cfcLabelView,
-  );
+  return cloneCfcLabelView(linkCfcLabelView(value));
 };
 
 const attachCfcLabelViewToSigilLink = (
@@ -251,32 +252,22 @@ const attachCfcLabelViewToSigilLink = (
   if (!clonedView || !isSigilLink(value)) {
     return value;
   }
-  return {
-    "/": {
-      [LINK_V1_TAG]: {
-        ...value["/"][LINK_V1_TAG],
-        cfcLabelView: clonedView,
-      },
-    },
-  };
+  return linkRefFrom<CfcCellLinkRefPayload>({
+    ...linkRefPayload(value),
+    cfcLabelView: clonedView,
+  });
 };
 
 const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
   if (!isSigilLink(value)) {
     return value;
   }
-  const inner = value["/"][LINK_V1_TAG] as
-    & Record<string, unknown>
-    & { cfcLabelView?: CfcLabelView };
+  const inner = linkRefPayload(value) as CfcCellLinkRefPayload;
   if (inner.cfcLabelView === undefined) {
     return value;
   }
   const { cfcLabelView: _cfcLabelView, ...cleanInner } = inner;
-  return {
-    "/": {
-      [LINK_V1_TAG]: cleanInner,
-    },
-  };
+  return linkRefFrom(cleanInner);
 };
 
 /**

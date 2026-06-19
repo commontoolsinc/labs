@@ -2,7 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
+import { type CellLinkRefPayload, LINK_V1_TAG } from "./sigil-types.ts";
 import {
   type CellLink,
   createDataCellURI,
@@ -173,7 +173,7 @@ export function resolveLink(
       isRecord(sigilProbe.ok.value) &&
       lastNode !== "top" &&
       (lastNode !== "writeRedirect" ||
-        (sigilProbe.ok.value as LinkV1Inner).overwrite === "redirect")
+        (sigilProbe.ok.value as CellLinkRefPayload).overwrite === "redirect")
     ) {
       // Read the full value at this path to ensure correct reactivity logging
       // (we need to be reactive to siblings that could invalidate the link)

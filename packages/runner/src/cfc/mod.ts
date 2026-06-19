@@ -1,5 +1,10 @@
 export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
+  type CfcCellLinkRefPayload,
+  linkCfcLabelView,
+  setLinkCfcLabelView,
+} from "./link-label-view.ts";
+export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,

@@ -1,6 +1,7 @@
 import type { JSONSchema, JSONValue, LinkScope } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "@commonfabric/memory/interface";
+import { LINK_V1_TAG, type LinkRef } from "@commonfabric/data-model/cell-rep";
 
 export type { URI } from "@commonfabric/memory/interface";
 
@@ -13,12 +14,17 @@ export type SigilValue<T> = { "/": T };
  * Link sigil value v1
  */
 
-export const LINK_V1_TAG = "link@1" as const;
+// The link-ref envelope (`{ "/": { "link@1": … } }`) and its tag are owned by
+// `data-model/cell-rep`, the chokepoint that will later flag-dispatch the form.
+// Re-exported here (the historical home) for existing importers.
+export { LINK_V1_TAG };
 
 /**
- * Inner value of a LinkV1 sigil (the object at the LINK_V1_TAG key)
+ * The payload of a cell-link {@link LinkRef} — the object at the
+ * {@link LINK_V1_TAG} key. (The `link@1` tag versions the wire envelope; this
+ * payload shape is version-agnostic and expected to outlive it.)
  */
-export type LinkV1Inner = {
+export type CellLinkRefPayload = {
   id?: URI;
   path?: readonly string[];
   space?: MemorySpace;
@@ -28,17 +34,27 @@ export type LinkV1Inner = {
 };
 
 export type LinkV1 = {
-  [LINK_V1_TAG]: LinkV1Inner;
+  [LINK_V1_TAG]: CellLinkRefPayload;
 };
 
 export type WriteRedirectV1 = LinkV1 & {
   [LINK_V1_TAG]: { overwrite: "redirect" };
 };
 /**
- * Sigil link type
+ * Sigil link type.
+ *
+ * Transitional alias for {@link LinkRef}: structurally the same envelope, but
+ * named through the chokepoint that will later flag-dispatch the form. Once a
+ * modern (non-envelope) representation exists, `SigilLink` (which _is_ the
+ * envelope) and `LinkRef` (which spans both forms) diverge and this alias gets
+ * cleaned up.
+ *
+ * Parameterized on the payload so a producer can advertise a richer payload
+ * (e.g. cfc's `CfcCellLinkRefPayload`); defaults to the base
+ * {@link CellLinkRefPayload}, so bare `SigilLink` is unchanged.
  */
-
-export type SigilLink = SigilValue<LinkV1>;
+export type SigilLink<P extends CellLinkRefPayload = CellLinkRefPayload> =
+  LinkRef<P>;
 /**
  * Sigil alias type - uses LinkV1 with overwrite field
  */

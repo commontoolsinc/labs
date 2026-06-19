@@ -57,7 +57,6 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
@@ -66,6 +65,7 @@ import {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   flowLabelWorkExists,
   gatedSinkRequestExists,
+  linkCfcLabelView,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -934,8 +934,7 @@ export class Runtime {
   ): Cell<any> {
     const carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
-        ? (cellLink["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
-          .cfcLabelView
+        ? linkCfcLabelView(cellLink)
         : isNormalizedFullLink(cellLink)
         ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })
           .cfcLabelView
