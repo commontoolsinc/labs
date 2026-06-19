@@ -10,6 +10,12 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * @param value - The value to traverse
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
+ *
+ * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject` guard
+ * before its `Object.entries`/`Array.map` descent, so it recurses into
+ * `FabricPrimitive` values (decomposing them to their empty enumerable props)
+ * and walks `FabricInstance` values by their internal slots instead of their
+ * codec contents.
  */
 export function traverseValue(
   unprocessedValue: Opaque<any>,

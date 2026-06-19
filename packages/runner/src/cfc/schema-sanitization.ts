@@ -437,6 +437,10 @@ export const validateAgainstSchema = (
     return `value does not match type ${types.join("|")}`;
   }
 
+  // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
+  // today, but will in the not-too-distant future; at that point this guard-less
+  // `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
+  // is walked by internal slots rather than codec contents). Mark ahead of that.
   if (isRecord(value) && !Array.isArray(value)) {
     for (const key of schema.required ?? []) {
       if (!(key in value)) {

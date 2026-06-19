@@ -462,6 +462,9 @@ const buildValuePatchCandidate = (
   valuePresent: boolean = value !== undefined,
   previousPresent: boolean = previousValue !== undefined,
 ): PatchDraftCandidate | null => {
+  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
+  // `Fabric`-aware equality once available.
   if (valuePresent === previousPresent && deepEqual(value, previousValue)) {
     return null;
   }
@@ -510,6 +513,9 @@ const buildArrayPatchCandidates = (
   beforePresent: boolean = before !== undefined,
   afterPresent: boolean = after !== undefined,
 ): PatchDraftCandidate[] => {
+  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
+  // `Fabric`-aware equality once available.
   if (beforePresent === afterPresent && deepEqual(before, after)) {
     return [];
   }
@@ -554,6 +560,9 @@ const buildArrayPatchCandidates = (
 
     const nextValue = after[index] as FabricValue | undefined;
     const previousValue = before[index] as FabricValue | undefined;
+    // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+    // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to
+    // a `Fabric`-aware equality once available.
     if (deepEqual(nextValue, previousValue)) {
       continue;
     }
@@ -648,6 +657,9 @@ const shallowStructureChanged = (
     return !beforeKeys.every((key) => Object.hasOwn(after, key));
   }
 
+  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
+  // `Fabric`-aware equality once available.
   return !deepEqual(before, after);
 };
 
@@ -675,6 +687,9 @@ const buildReactivityPathsForChange = (
   const afterValue = readValueAtPath(afterRoot, path, {
     allowArrayLength: true,
   });
+  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
+  // `Fabric`-aware equality once available.
   if (deepEqual(beforeValue, afterValue)) {
     return [];
   }
@@ -981,6 +996,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (doc.writeDetails.size === 0) {
         continue;
       }
+      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
+      // to a `Fabric`-aware equality once available.
       if (deepEqual(doc.current.value, doc.initial.value)) {
         continue;
       }
@@ -1299,6 +1317,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       const present = hasValueAtPath(current.value, address.path, {
         allowArrayLength: true,
       });
+      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
+      // to a `Fabric`-aware equality once available.
       if (
         isDelete ? !present : (present && deepEqual(previous.value, value))
       ) {
@@ -1439,6 +1460,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       const present = hasValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
+      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
+      // to a `Fabric`-aware equality once available.
       if (
         isDelete
           ? !present
@@ -2119,6 +2143,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         detail.address.path,
         { allowArrayLength: true },
       );
+      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
+      // to a `Fabric`-aware equality once available.
       if (
         valuePresent === previousPresent && deepEqual(value, previousValue)
       ) {
