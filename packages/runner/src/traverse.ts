@@ -3186,6 +3186,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
       });
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
+      // TODO(danfuzz): The value-type dispatch above has no `FabricSpecialObject`
+      // arm: a `FabricPrimitive` (`typeof "object"`) never reaches the leaf
+      // `traversePrimitive` and falls into this record branch (decomposed); a
+      // `FabricInstance` is walked by `Object.entries` over internal slots rather
+      // than descended by its codec contents. The same gap applies to the
+      // schema-`default` fallback path (`traverseDAG`/`applyDefault`), since a
+      // schema `default` can carry a `FabricValue`. A correct fix descends a
+      // `FabricInstance` by codec contents, not own-props.
     } else if (isRecord(doc.value)) {
       if (isSigilLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);

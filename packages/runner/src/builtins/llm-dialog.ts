@@ -469,6 +469,9 @@ function observationLinkForValue(
   return undefined;
 }
 
+// TODO(danfuzz): This `isRecord`-gated walk over cell-resolved values has no
+// `FabricSpecialObject` guard; a `FabricPrimitive` is decomposed and a
+// `FabricInstance` is walked by internal slots rather than codec contents.
 function serializeForLLMObservation(
   {
     value,
@@ -685,6 +688,10 @@ function traverseAndSerialize(
  * @param space - The space to use to get the cells
  * @param value - The value to traverse and cellify
  * @returns The cellified value
+ *
+ * TODO(danfuzz): This `Object.fromEntries(Object.entries(...))` walk has no
+ * `FabricSpecialObject` guard; a `FabricPrimitive` flattens to `{}` (its state
+ * is private) and a `FabricInstance` is walked by internal slots.
  */
 function traverseAndCellify(
   runtime: Runtime,
@@ -1392,6 +1399,10 @@ function materializeDialogRequestSnapshot(
   };
 
   return {
+    // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+    // `.get()`-path today, but will in the not-too-distant future; at that point
+    // this JSON round-trip silently loses any `FabricPrimitive`/`FabricInstance`
+    // (class instances don't survive JSON). Mark ahead of that.
     llmParams: createFrozenRequestSnapshot(
       JSON.parse(JSON.stringify(llmParams)),
     ),

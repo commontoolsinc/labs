@@ -414,6 +414,10 @@ export class PieceManager {
         visited = new Set<unknown>(), // Track objects directly, not string representations
         depth = 0,
       ) => {
+        // TODO(danfuzz): The argument value here is `argumentCell.getRaw()`, a
+        // raw `FabricValue`; this `isRecord`/`Object.keys` walk (guards only
+        // `isLink`) decomposes a `FabricPrimitive` and walks a `FabricInstance`
+        // by internal slots rather than codec contents.
         if (!isRecord(value) || depth > maxDepth) return;
 
         // Prevent cycles in our traversal by tracking object references directly
@@ -544,6 +548,9 @@ export class PieceManager {
       visited = new Set<unknown>(), // Track objects directly, not string representations
       depth = 0,
     ): boolean => {
+      // TODO(danfuzz): Same as `processValue` above — walks a raw `FabricValue`
+      // (`getRaw()`) by enumerable own-props with no `FabricSpecialObject`
+      // guard, mishandling `FabricPrimitive` and `FabricInstance`.
       if (!isRecord(value) || depth > maxDepth) return false;
 
       // Prevent cycles in our traversal by tracking object references directly

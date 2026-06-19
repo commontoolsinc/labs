@@ -295,6 +295,11 @@ export function sendValueToBinding<T>(
         );
       }
     }
+    // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
+    // today, but will in the not-too-distant future; at that point this
+    // guard-less walk keys a live `FabricValue` against the binding shape (a
+    // `FabricPrimitive` is decomposed, a `FabricInstance` is walked by internal
+    // slots rather than codec contents). Mark ahead of that.
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
@@ -511,6 +516,11 @@ export function findAllWriteRedirectCells<T>(
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
+      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+      // path today, but will in the not-too-distant future; at that point this
+      // guard-less `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a
+      // `FabricInstance` is walked by internal slots rather than codec
+      // contents). Mark ahead of that.
     } else if (isRecord(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);

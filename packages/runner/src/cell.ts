@@ -2525,6 +2525,11 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
+    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
+    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
+    // enumerable props instead of treated as a leaf / descended by codec
+    // contents.
+    //
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
