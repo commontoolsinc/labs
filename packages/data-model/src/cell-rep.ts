@@ -94,3 +94,59 @@ export function entityRefToString(value: EntityRef): string {
     "Not an entity-id reference for the active cell-rep regime.",
   );
 }
+
+//
+// Cell reference form (the link sigil envelope)
+//
+
+/**
+ * The link-sigil tag. This module is the sole place that names the literal;
+ * everything else routes through {@link cellRefFrom} / {@link isCellRef} /
+ * {@link cellRefInner}.
+ */
+export const LINK_V1_TAG = "link@1" as const;
+
+/**
+ * A cell reference: today the `{ "/": { "link@1": … } }` envelope wrapping a
+ * link payload.
+ *
+ * Construction ({@link cellRefFrom}), recognition ({@link isCellRef}) and
+ * extraction ({@link cellRefInner}) are gathered here so that this chokepoint
+ * can later become the seam at which the modern cell representation dispatches
+ * the envelope to a Fabric primitive (provisionally `FabricRef`) — the link
+ * analog of {@link EntityRef}'s `{ "/": string }` → {@link FabricHash}. That
+ * dispatch is intentionally NOT wired up yet: this pass only collapses the
+ * scattered envelope sites onto these functions, so the eventual flag flip is a
+ * localized edit here rather than a tree-wide change.
+ *
+ * When that dispatch lands, this type becomes a union (`FabricRef | { "/": …
+ * }`) mirroring {@link EntityRef}. `Inner` is left open so this layer needn't
+ * know the link payload's field types (URI / MemorySpace / JSONSchema — those
+ * stay in `runner`).
+ */
+export type CellRef<Inner = unknown> = { "/": { [LINK_V1_TAG]: Inner } };
+
+/** Wraps a link payload in the cell-ref envelope. */
+export function cellRefFrom<Inner>(inner: Inner): CellRef<Inner> {
+  return { "/": { [LINK_V1_TAG]: inner } };
+}
+
+/**
+ * Recognizes a {@link CellRef}: the `{ "/": { "link@1": … } }` envelope, no
+ * other props.
+ */
+export function isCellRef(value: unknown): value is CellRef {
+  return isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    isRecord(value["/"]) &&
+    LINK_V1_TAG in value["/"];
+}
+
+/**
+ * Extracts the inner link payload from a {@link CellRef}. Throws if the value
+ * is not a cell reference.
+ */
+export function cellRefInner<Inner = unknown>(value: CellRef<Inner>): Inner {
+  if (isCellRef(value)) return value["/"][LINK_V1_TAG] as Inner;
+  throw new Error("Not a cell reference.");
+}
