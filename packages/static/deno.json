@@ -7,9 +7,14 @@
         "browser-test"
       ]
     },
-    "deno-test": "deno test --allow-read",
+    "deno-test": "deno test --allow-read --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV --allow-run=deno --allow-write=/tmp,/var/folders",
     "browser-test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts",
-    "compile-types": "./scripts/compile-type-lib.ts ../../../TypeScript/src/lib ./assets/types/es2023.d.ts"
+    "compile-types": "./scripts/compile-type-lib.ts ../../../TypeScript/src/lib ./assets/types/es2023.d.ts",
+    "gen-cfc-types": "./scripts/generate-cfc-types.ts",
+    "check-cfc-types": "./scripts/generate-cfc-types.ts --check"
+  },
+  "imports": {
+    "typescript": "npm:typescript"
   },
   "exports": {
     ".": "./index.ts",

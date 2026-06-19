@@ -46,6 +46,10 @@ jobs:
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
+      - name: 🔎 Check generated commonfabric/cfc types are up to date
+        working-directory: packages/static
+        run: deno task check-cfc-types
+
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
