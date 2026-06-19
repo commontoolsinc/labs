@@ -2053,16 +2053,18 @@ export class Server {
         effect: sync,
       };
     };
-    const emptyCatchUp = async (): Promise<SessionEffectMessage | null> => {
+    const emptyCatchUp = async (
+      fromSeq = session.lastSyncedSeq,
+      toSeq?: number,
+    ): Promise<SessionEffectMessage | null> => {
       if (!hasPendingCatchUp) {
         return null;
       }
-      const engine = await this.openEngine(space);
-      const serverSeq = Engine.serverSeq(engine);
+      const serverSeq = toSeq ?? Engine.serverSeq(await this.openEngine(space));
       session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
       return finishCatchUp({
         type: "sync",
-        fromSeq: session.lastSyncedSeq,
+        fromSeq,
         toSeq: serverSeq,
         upserts: [],
         removes: [],
@@ -2135,10 +2137,10 @@ export class Server {
         }
       }
       const toSeq = Engine.serverSeq(engine);
-      session.lastSyncedSeq = toSeq;
       if (upserts.length === 0) {
-        return await emptyCatchUp();
+        return await emptyCatchUp(fromSeq, toSeq);
       }
+      session.lastSyncedSeq = toSeq;
       recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
         watches: session.watches.length,
       });
@@ -2174,7 +2176,7 @@ export class Server {
     session.trackedIds = trackedIdsFromEntries(entities.values());
     session.lastSyncedSeq = serverSeq;
     if (isEmptySync(sync)) {
-      return await emptyCatchUp();
+      return await emptyCatchUp(sync.fromSeq, sync.toSeq);
     }
     return finishCatchUp(sync);
   }

@@ -1941,7 +1941,10 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         }],
       },
     }));
-    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+    assertEquals(
+      assertResponse<unknown>(shiftMessage(messages)).requestId,
+      "tx-1",
+    );
 
     await connection.receive(encodeMemoryBoundary({
       type: "transact",
@@ -1984,7 +1987,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       },
     }));
 
-    const rejected = assertResponse<any>(shiftMessage(messages));
+    const rejected = assertResponse<unknown>(shiftMessage(messages));
     assertEquals(rejected.requestId, "tx-3");
     assertEquals(rejected.error, {
       name: "ConflictError",
@@ -2007,6 +2010,90 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         value: { version: 3 },
       },
     }]);
+    assertEquals(messages.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-empty-caught-up-from-seq",
+    20,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-empty-caught-up-from-seq";
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    shiftMessage(messages);
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 1 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{
+            id: "of:doc:1",
+            path: [],
+            seq: 0,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 2 } },
+        }],
+      },
+    }));
+    const rejected = assertResponse<any>(shiftMessage(messages));
+    assertEquals(rejected.requestId, "tx-2");
+    assertEquals(rejected.error?.name, "ConflictError");
+
+    await server.flushSessions([space]);
+
+    const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect, {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 1,
+      upserts: [],
+      removes: [],
+      caughtUpLocalSeq: 2,
+    });
     assertEquals(messages.length, 0);
   } finally {
     await server.close();
