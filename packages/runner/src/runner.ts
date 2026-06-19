@@ -2169,6 +2169,10 @@ export class Runner {
         return;
       }
 
+      // TODO(danfuzz): This descends live `FabricValue` action inputs via
+      // `Object.entries` with no `FabricSpecialObject` guard, decomposing
+      // `FabricPrimitive` values and walking `FabricInstance` values by internal
+      // slots.
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key], [...path, key]);
@@ -2244,6 +2248,10 @@ export class Runner {
       seenValues.add(currentValue);
       seen.set(schema, seenValues);
 
+      // TODO(danfuzz): This descends live `FabricValue` action inputs via
+      // `Object.entries` (guards only `isWriteRedirectLink`/`isCellLink`, not
+      // `FabricSpecialObject`), so `FabricPrimitive`/`FabricInstance` values are
+      // mishandled.
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);

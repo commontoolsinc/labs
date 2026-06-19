@@ -103,6 +103,12 @@ function isDeepFrozenInProgress(
       }
     }
   } else {
+    // TODO(danfuzz): Unlike its siblings `deepFreezeInProgress` and
+    // `isDeepFrozenFabricValue`, this checker has no `instanceof FabricInstance`
+    // arm delegating to `[IS_DEEP_FROZEN]`; a frozen-in-place `FabricInstance`
+    // is checked by its native/internal own-props instead of its logical
+    // contents, so it can return a wrong frozen-status (reached via
+    // `FabricError.deepClone`'s `isDeepFrozen(this)` fast path).
     for (const v of Object.values(obj)) {
       if (!isDeepFrozenInProgress(v, inProgress)) {
         result = false;

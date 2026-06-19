@@ -1909,6 +1909,10 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
+  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
+  // `utils/deep-equal.ts`); `schema.default` can hold a `FabricValue`, so this
+  // CFC write-policy check can compare wrong. Migrate to a `Fabric`-aware
+  // equality once available.
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
     deepEqual(writeValueForTarget(tx, pathTarget), schema.default);
 };

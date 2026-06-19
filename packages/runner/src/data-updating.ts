@@ -1413,6 +1413,12 @@ export function addCommonIDfromObjectID(
       obj[ID_FIELD] = fieldName;
     }
 
+    // TODO(danfuzz): Latent — this is a public entry point (re-exported,
+    // "entire JSON documents" from iframes) walking `obj: unknown` with no
+    // `FabricSpecialObject` guard (only `isCell`/`isPrimitiveCellLink`). A
+    // caller can't be proven to pass only plain JSON, so if a `FabricPrimitive`/
+    // `FabricInstance` ever reaches here it is mishandled (primitive decomposed,
+    // instance walked by internal slots). Mark against that.
     if (isRecord(obj) && !isCell(obj) && !isPrimitiveCellLink(obj)) {
       Object.values(obj).forEach((v) => traverse(v));
     }

@@ -365,6 +365,10 @@ export function createDataCellURI(
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
+  // TODO(danfuzz): This `isRecord`-gated walk guards only `isPrimitiveCellLink`;
+  // a `FabricPrimitive`/`FabricInstance` that is not a link falls through to the
+  // `Object.entries` descent (primitive decomposed, instance walked by internal
+  // slots).
   function traverseAndAddBaseIdToRelativeLinks(
     value: any,
     seen: Set<any>,
