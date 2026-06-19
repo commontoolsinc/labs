@@ -1,4 +1,5 @@
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
+import { cellRefInner, isCellRef } from "@commonfabric/data-model/cell-rep";
 import {
   type CellScope,
   type JSONSchema,
@@ -7,9 +8,7 @@ import {
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
-  LINK_V1_TAG,
   type SigilLink,
-  type SigilValue,
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
@@ -89,20 +88,8 @@ export type PrimitiveCellLink =
   | SigilLink
   | LegacyAlias; // @deprecated
 
-/**
- * Check if value is a sigil value with any type: an object that is strictly
- * `{ "/": Record<string, any> }`, no other props. Internal helper for
- * {@link isSigilLink}.
- */
-function isSigilValue(value: any): value is SigilValue<any> {
-  return isRecord(value) &&
-    "/" in value &&
-    Object.keys(value).length === 1 &&
-    isObject(value["/"]);
-}
-
 export function isSigilLink(value: any): value is SigilLink {
-  return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
+  return isCellRef(value);
 }
 
 export function isPrimitiveCellLink(
@@ -156,7 +143,7 @@ export function isWriteRedirectLink(
 
   // Check new sigil format (link@1 with overwrite field)
   if (isSigilLink(value)) {
-    return value["/"][LINK_V1_TAG].overwrite === "redirect";
+    return cellRefInner(value).overwrite === "redirect";
   }
 
   return false;
@@ -185,7 +172,7 @@ export function parseLinkPrimitive(
   base?: NormalizedLink,
 ): NormalizedLink {
   if (isSigilLink(value)) {
-    const link = value["/"][LINK_V1_TAG];
+    const link = cellRefInner(value);
 
     // Resolve relative references
     let id = link.id;
