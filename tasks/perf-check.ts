@@ -42,7 +42,6 @@ import {
   fetchCurrentPRBody,
   fetchJobsForRun,
   fetchPRFiles,
-  fetchPRForCommit,
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
@@ -156,6 +155,259 @@ export function parseMergedBaselineOverrides(
     );
     return null;
   }
+}
+
+export function workflowRunsPathForBaseline(
+  perPage: number,
+): string {
+  const params = new URLSearchParams({
+    branch: "main",
+    status: "success",
+    event: "push",
+    per_page: String(perPage),
+  });
+  return `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`;
+}
+
+export interface BaselineMainHeadValidation {
+  ok: boolean;
+  issues: string[];
+}
+
+export function validateBaselineRunsForMainHead(
+  runs: Pick<WorkflowRun, "id" | "head_sha" | "created_at">[],
+  mainHeadSha: string,
+): BaselineMainHeadValidation {
+  const issues: string[] = [];
+
+  if (runs.length === 0) {
+    issues.push("No successful main-branch runs were returned.");
+    return { ok: false, issues };
+  }
+
+  if (!/^[0-9a-f]{40}$/i.test(mainHeadSha)) {
+    issues.push(`Current main head SHA is invalid: ${mainHeadSha}`);
+    return { ok: false, issues };
+  }
+
+  const newest = runs[0];
+  if (newest.head_sha !== mainHeadSha) {
+    issues.push(
+      `Newest successful baseline run ${newest.id} (${newest.created_at}) is for ${newest.head_sha}, but current main is ${mainHeadSha}.`,
+    );
+  }
+
+  return { ok: issues.length === 0, issues };
+}
+
+async function fetchMainHeadSha(): Promise<string> {
+  const branch = await githubGet<{ commit: { sha: string } }>(
+    `/repos/${REPO}/branches/main`,
+  );
+  return branch.commit.sha;
+}
+
+function pluralize(value: number, unit: string): string {
+  return `${value} ${unit}${value === 1 ? "" : "s"}`;
+}
+
+export function formatRelativeDuration(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "unknown";
+
+  let remaining = Math.max(0, Math.floor(seconds));
+  const parts: string[] = [];
+  const units = [
+    { seconds: 24 * 60 * 60, unit: "day" },
+    { seconds: 60 * 60, unit: "hour" },
+    { seconds: 60, unit: "minute" },
+    { seconds: 1, unit: "second" },
+  ];
+
+  for (const unit of units) {
+    const value = Math.floor(remaining / unit.seconds);
+    if (value > 0) {
+      parts.push(pluralize(value, unit.unit));
+      remaining -= value * unit.seconds;
+    }
+    if (parts.length === 2) break;
+  }
+
+  return parts.length > 0 ? parts.join(" ") : "0 seconds";
+}
+
+export function formatRelativeAge(fromIso: string, toIso: string): string {
+  const fromMs = Date.parse(fromIso);
+  const toMs = Date.parse(toIso);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return "unknown";
+
+  return formatRelativeDuration((toMs - fromMs) / 1_000);
+}
+
+export function formatCommitDistance(commitsBehindMain: number | null): string {
+  return commitsBehindMain === null
+    ? "an unknown number of commits"
+    : pluralize(commitsBehindMain, "commit");
+}
+
+export function formatBaselineSourceRunAge(
+  runCreatedAt: string,
+  currentCreatedAt: string,
+  commitsBehindMain: number | null,
+): string {
+  const age = formatRelativeAge(runCreatedAt, currentCreatedAt);
+  const timePart = age === "unknown" ? "age unknown" : `created ${age} ago`;
+  return `${timePart}; ${
+    formatCommitDistance(commitsBehindMain)
+  } behind current main`;
+}
+
+interface GitHubCompareResponse {
+  ahead_by?: unknown;
+}
+
+async function fetchCommitsBehindMain(
+  baselineSha: string,
+  mainHeadSha: string,
+): Promise<number | null> {
+  if (baselineSha === mainHeadSha) return 0;
+
+  try {
+    const comparison = await githubGet<GitHubCompareResponse>(
+      `/repos/${REPO}/compare/${encodeURIComponent(baselineSha)}...${
+        encodeURIComponent(mainHeadSha)
+      }`,
+    );
+    return typeof comparison.ahead_by === "number" ? comparison.ahead_by : null;
+  } catch (error) {
+    console.warn(
+      `  Warning: could not compare baseline ${baselineSha.slice(0, 8)} ` +
+        `to current main ${mainHeadSha.slice(0, 8)}: ${
+          formatErrorForLog(error)
+        }`,
+    );
+    return null;
+  }
+}
+
+export function selectMergedPRForCommit(prs: PRInfo[]): PRInfo | null {
+  return prs.find((pr) => pr.merged_at !== null) ?? prs[0] ?? null;
+}
+
+interface PRLookupResult {
+  pr: PRInfo | null;
+  error: unknown | null;
+}
+
+interface BaselineRunContext {
+  run: WorkflowRun;
+  artifacts: Artifact[];
+  pr: PRInfo | null;
+  prLookupError: unknown | null;
+  commitsBehindMain: number | null;
+}
+
+async function fetchPRForCommitWithError(
+  sha: string,
+): Promise<PRLookupResult> {
+  try {
+    const prs = await githubGet<PRInfo[]>(
+      `/repos/${REPO}/commits/${sha}/pulls`,
+    );
+    return { pr: selectMergedPRForCommit(prs), error: null };
+  } catch (error) {
+    return { pr: null, error };
+  }
+}
+
+function newestArtifactNamed(
+  artifacts: Artifact[],
+  name: string,
+): Artifact | null {
+  return newestArtifactsByName(
+    artifacts.filter((artifact) => artifact.name === name && !artifact.expired),
+  )[0] ?? null;
+}
+
+function formatErrorForLog(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split("\n")[0];
+}
+
+function logBaselineSourceRuns(
+  contexts: BaselineRunContext[],
+  currentRunCreatedAt: string,
+): void {
+  console.log("Baseline source runs:");
+  for (
+    const { run, artifacts, pr, prLookupError, commitsBehindMain } of contexts
+  ) {
+    const perfMetricsArtifact = newestArtifactNamed(
+      artifacts,
+      PERF_METRICS_ARTIFACT_NAME,
+    );
+    const prLabel = pr
+      ? `PR #${pr.number}`
+      : prLookupError
+      ? "PR lookup failed"
+      : "no PR found";
+    const artifactLabel = perfMetricsArtifact
+      ? `perf-metrics artifact ${perfMetricsArtifact.id}`
+      : "no perf-metrics artifact";
+    const ageLabel = formatBaselineSourceRunAge(
+      run.created_at,
+      currentRunCreatedAt,
+      commitsBehindMain,
+    );
+    console.log(
+      `  ${run.created_at} run ${run.id} ${run.head_sha.slice(0, 8)} ` +
+        `${ageLabel}; ${prLabel}; ${artifactLabel}`,
+    );
+  }
+}
+
+export interface BaselinePRLookupSummary {
+  found: number;
+  noPR: number;
+  failed: number;
+}
+
+export function summarizeBaselinePRLookups(
+  contexts: { pr: PRInfo | null; prLookupError: unknown | null }[],
+): BaselinePRLookupSummary {
+  const failed = contexts.filter((context) => context.prLookupError).length;
+  const found = contexts.filter((context) => context.pr).length;
+  return {
+    found,
+    noPR: contexts.length - found - failed,
+    failed,
+  };
+}
+
+function reportPRLookupResults(
+  contexts: BaselineRunContext[],
+): number {
+  const summary = summarizeBaselinePRLookups(contexts);
+  const failures = contexts.filter((context) => context.prLookupError);
+
+  console.log(
+    `Baseline PR lookup: found ${summary.found}/${contexts.length}; ` +
+      `${summary.noPR} had no associated PR; ${summary.failed} failed.`,
+  );
+
+  if (summary.failed === 0) return 0;
+
+  console.warn(
+    `  Warning: failed to fetch PR metadata for ${summary.failed} baseline run(s).`,
+  );
+  for (const { run, prLookupError } of failures) {
+    console.warn(
+      `  Warning: run ${run.id} (${
+        run.head_sha.slice(0, 8)
+      }) PR lookup failed: ${formatErrorForLog(prLookupError)}`,
+    );
+  }
+
+  return summary.failed;
 }
 
 /**
@@ -791,22 +1043,41 @@ async function main() {
   const wallTimeSignals = computeCiWallTimeRevisitSignals(currentJobs);
 
   // 3. Fetch recent main-branch push runs for baseline
+  console.log("Fetching current main branch head...");
+  const mainHeadSha = await githubApiOrSkip(
+    "fetching current main branch head",
+    () => fetchMainHeadSha(),
+    currentMetrics,
+  );
+  console.log(`Current main head is ${mainHeadSha}.`);
   console.log("Fetching recent main-branch runs for baseline...");
   const baselineData = await githubApiOrSkip(
     "fetching recent main-branch runs for baseline",
     () =>
       githubGet<{ workflow_runs: WorkflowRun[] }>(
-        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=success&event=push&per_page=${BASELINE_RUNS}`,
+        workflowRunsPathForBaseline(BASELINE_RUNS),
       ),
     currentMetrics,
   );
   const baselineRuns = baselineData.workflow_runs;
 
-  if (baselineRuns.length < MIN_SAMPLES) {
-    console.log(
-      `Only ${baselineRuns.length} baseline runs available (need ${MIN_SAMPLES}). Skipping check.`,
+  const baselineMainHead = validateBaselineRunsForMainHead(
+    baselineRuns,
+    mainHeadSha,
+  );
+  if (!baselineMainHead.ok) {
+    console.warn(
+      "Warning: newest successful baseline run is not for the current main head.",
     );
-    Deno.exit(0);
+    for (const issue of baselineMainHead.issues) {
+      console.warn(`  Warning: ${issue}`);
+    }
+  }
+
+  if (baselineRuns.length < MIN_SAMPLES) {
+    console.warn(
+      `  Warning: only ${baselineRuns.length} baseline runs available (need ${MIN_SAMPLES}). Metrics with too few samples will be reported as n/a.`,
+    );
   }
 
   console.log(`Using ${baselineRuns.length} main-branch runs as baseline.`);
@@ -816,12 +1087,6 @@ async function main() {
   const overridesBySha = new Map<string, BaselineOverrides>();
   const prInfoBySha = new Map<string, PRInfo>();
   const newBackfills = new Map<number, Map<string, TimingSample>>();
-
-  interface BaselineRunContext {
-    run: WorkflowRun;
-    artifacts: Artifact[];
-    pr: PRInfo | null;
-  }
 
   async function fetchArtifactsForRunBestEffort(
     run: WorkflowRun,
@@ -843,22 +1108,37 @@ async function main() {
         baselineRuns,
         API_CONCURRENCY,
         async (run): Promise<BaselineRunContext> => {
-          const [artifacts, pr] = await Promise.all([
+          const [artifacts, prLookup, commitsBehindMain] = await Promise.all([
             fetchArtifactsForRunBestEffort(run),
-            fetchPRForCommit(run.head_sha),
+            fetchPRForCommitWithError(run.head_sha),
+            fetchCommitsBehindMain(run.head_sha, mainHeadSha),
           ]);
-          return { run, artifacts, pr };
+          return {
+            run,
+            artifacts,
+            pr: prLookup.pr,
+            prLookupError: prLookup.error,
+            commitsBehindMain,
+          };
         },
       ),
     currentMetrics,
   );
+
+  logBaselineSourceRuns(baselineContexts, currentRunInfo.created_at);
+  const prLookupFailures = reportPRLookupResults(baselineContexts);
+  if (prLookupFailures > 0) {
+    console.warn(
+      "  Warning: running performance regression check with incomplete PR metadata. Some merged baseline overrides may be missing.",
+    );
+  }
 
   console.log("Fetching recent perf metric backfills...");
   const backfillSourceData = await githubApiOrSkip(
     "fetching recent perf metric backfill sources",
     () =>
       githubGet<{ workflow_runs: WorkflowRun[] }>(
-        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=push&status=success&per_page=${BACKFILL_SOURCE_RUNS}`,
+        workflowRunsPathForBaseline(BACKFILL_SOURCE_RUNS),
       ),
     currentMetrics,
   );
@@ -876,6 +1156,8 @@ async function main() {
           run,
           artifacts: await fetchArtifactsForRunBestEffort(run),
           pr: null,
+          prLookupError: null,
+          commitsBehindMain: null,
         }),
       ),
     currentMetrics,
@@ -895,8 +1177,9 @@ async function main() {
         backfillSourceContexts,
         API_CONCURRENCY,
         async ({ artifacts }) => {
-          const artifact = artifacts.find(
-            (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
+          const artifact = newestArtifactNamed(
+            artifacts,
+            PERF_METRICS_BACKFILL_ARTIFACT_NAME,
           );
           if (!artifact) return null;
 
@@ -938,8 +1221,9 @@ async function main() {
           }
         }
 
-        const perfMetricsArtifact = artifacts.find(
-          (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
+        const perfMetricsArtifact = newestArtifactNamed(
+          artifacts,
+          PERF_METRICS_ARTIFACT_NAME,
         );
         if (perfMetricsArtifact) {
           const metrics = await downloadAndParsePerfMetrics(
