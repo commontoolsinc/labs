@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
 import { sha256 } from "@/lib/sha2.ts";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import {
   extractSpaceFromCellLink,
   generateWebhookId,
@@ -88,6 +89,25 @@ describe("Webhook Utilities", () => {
           },
         },
       });
+      const space = extractSpaceFromCellLink(cellLink);
+      expect(space).toBe("did:key:z6Mktest123");
+    });
+
+    it("extracts space from a codec-encoded (fvj1:) cell link", () => {
+      // Expand-acceptor: the same link, but emitted in the codec wire form a
+      // future sender will use. Round-trips losslessly and extracts the same
+      // space as the legacy raw-JSON form above.
+      const cellLink = jsonFromValue({
+        "/": {
+          "link@1": {
+            id: "of:bafe123",
+            space: "did:key:z6Mktest123",
+            path: ["webhooks", "github"],
+          },
+        },
+      });
+      // Sanity: it really is the codec form, not legacy raw JSON.
+      expect(cellLink.startsWith("{")).toBe(false);
       const space = extractSpaceFromCellLink(cellLink);
       expect(space).toBe("did:key:z6Mktest123");
     });
