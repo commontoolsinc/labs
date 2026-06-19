@@ -43,6 +43,9 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
+      - name: 🧪 Run tasks/ unit tests
+        run: deno test --allow-read --allow-write --allow-env --allow-run tasks/
+
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
@@ -523,6 +526,7 @@ jobs:
           mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \

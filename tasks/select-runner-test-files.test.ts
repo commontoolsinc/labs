@@ -1,9 +1,11 @@
 import { assertEquals } from "@std/assert";
 import {
+  listRunnerTests,
   selectRunnerTestFiles,
-  shardForRunnerTestFile,
 } from "./select-runner-test-files.ts";
-import { parseShard, stableShardForName } from "./shard-utils.ts";
+import { parseShard } from "./shard-utils.ts";
+
+const TOTAL_SHARDS = 4;
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/4"), { index: 2, total: 4 });
@@ -21,50 +23,56 @@ Deno.test("parseShard rejects invalid shard notation", () => {
   }
 });
 
-Deno.test("runner test four-way shard keeps slow files balanced", () => {
-  // The heaviest files are spread one per shard so no shard dominates.
-  assertEquals(shardForRunnerTestFile("engine.test.ts", 4), 1);
-  assertEquals(shardForRunnerTestFile("piece-helpers.test.ts", 4), 2);
-  assertEquals(shardForRunnerTestFile("json-utils.test.ts", 4), 3);
-  assertEquals(shardForRunnerTestFile("reactive-dependencies.test.ts", 4), 4);
+Deno.test("runner test round-robin keeps shard counts even", () => {
+  const files = Array.from({ length: 30 }, (_, i) => ({
+    name: `t${String(i).padStart(2, "0")}.test.ts`,
+  }));
+  const counts = [1, 2, 3, 4].map((index) =>
+    selectRunnerTestFiles(files, { index, total: TOTAL_SHARDS }).length
+  );
+  assertEquals(
+    Math.max(...counts) - Math.min(...counts) <= 1,
+    true,
+    `${counts}`,
+  );
 });
 
-Deno.test("runner test sharding is stable when files are added or removed", () => {
-  const baseFiles = [
-    { name: "engine.test.ts" },
-    { name: "piece-helpers.test.ts" },
-    { name: "json-utils.test.ts" },
-    { name: "small-a.test.ts" },
-    { name: "small-b.test.ts" },
-  ];
+Deno.test("every real runner test file is covered exactly once across shards", async () => {
+  // Read the actual runner test directory so a file that silently falls out of
+  // every shard fails here — CI itself would run green, because a dropped file
+  // is simply never executed.
+  const files = await listRunnerTests();
+  const names = files.map((file) => file.name);
 
-  const before = [1, 2, 3, 4].map((index) =>
-    selectRunnerTestFiles(baseFiles, { index, total: 4 })
-  );
+  // Guard against the test passing vacuously if the listing breaks.
+  assertEquals(names.length > 0, true, "expected runner test files to exist");
 
-  // Adding a new file should not move any existing file between shards.
-  const withNewFile = [
-    ...baseFiles,
-    { name: "new-feature.test.ts" },
-  ];
-  const after = [1, 2, 3, 4].map((index) =>
-    selectRunnerTestFiles(withNewFile, { index, total: 4 })
-  );
+  const shardOf = new Map<string, number[]>();
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    for (
+      const name of selectRunnerTestFiles(files, { index, total: TOTAL_SHARDS })
+    ) {
+      const shards = shardOf.get(name) ?? [];
+      shards.push(index);
+      shardOf.set(name, shards);
+    }
+  }
 
-  for (const file of baseFiles) {
-    const shardBefore = before.findIndex((s) => s.includes(file.name));
-    const shardAfter = after.findIndex((s) => s.includes(file.name));
+  for (const name of names) {
+    const shards = shardOf.get(name) ?? [];
     assertEquals(
-      shardBefore,
-      shardAfter,
-      `${file.name} moved from shard ${shardBefore + 1} to ${shardAfter + 1}`,
+      shards.length,
+      1,
+      `${name} should run in exactly one shard, got ${JSON.stringify(shards)}`,
     );
   }
-});
 
-Deno.test("unknown runner test files are assigned deterministically", () => {
-  assertEquals(
-    shardForRunnerTestFile("new-test-file.test.ts", 4),
-    stableShardForName("new-test-file.test.ts", 4),
-  );
+  // No phantom files: everything selected corresponds to a real file.
+  for (const name of shardOf.keys()) {
+    assertEquals(
+      names.includes(name),
+      true,
+      `selected ${name} is not a real runner test file`,
+    );
+  }
 });

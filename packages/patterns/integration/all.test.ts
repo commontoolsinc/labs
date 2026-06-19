@@ -8,16 +8,43 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL } = env;
 
+// Optional sharding for CI fan-out: PATTERN_INTEGRATION_SHARD="i/n" (1-based)
+// runs only the patterns where (sorted index % n) == (i - 1), so the pattern
+// compiles spread across the n parallel "Pattern Integration Tests (i/n)" jobs
+// instead of all landing in one. Mirrors the CFCHECK_SHARD fan-out in
+// tasks/cfcheck.ts. Unset (local dev) runs every pattern.
+function parsePatternShard(): { index: number; count: number } {
+  const raw = Deno.env.get("PATTERN_INTEGRATION_SHARD");
+  if (!raw) return { index: 0, count: 1 };
+  const match = raw.match(/^(\d+)\/(\d+)$/);
+  if (!match) {
+    throw new Error(
+      `Invalid PATTERN_INTEGRATION_SHARD "${raw}"; expected "i/n" (1-based).`,
+    );
+  }
+  const index = Number(match[1]) - 1;
+  const count = Number(match[2]);
+  if (count < 1 || index < 0 || index >= count) {
+    throw new Error(`PATTERN_INTEGRATION_SHARD "${raw}" out of range.`);
+  }
+  return { index, count };
+}
+
 describe("Compile all patterns", () => {
   const skippedPatterns = [
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
 
-  // Add a test for each pattern, but skip ones that have issues
-  for (const file of Deno.readDirSync(join(import.meta.dirname!, ".."))) {
-    const { name } = file;
-    if (!name.endsWith(".tsx")) continue;
-    if (skippedPatterns.includes(name)) continue;
+  const shard = parsePatternShard();
+  const patterns = [...Deno.readDirSync(join(import.meta.dirname!, ".."))]
+    .filter((file) => file.name.endsWith(".tsx"))
+    .map((file) => file.name)
+    .filter((name) => !skippedPatterns.includes(name))
+    .sort();
+
+  // Add a test for each pattern in this shard's slice.
+  for (const [i, name] of patterns.entries()) {
+    if (i % shard.count !== shard.index) continue;
 
     it(`Executes: ${name}`, async () => {
       // Heap monitoring for bisection experiments (CT-1148)
