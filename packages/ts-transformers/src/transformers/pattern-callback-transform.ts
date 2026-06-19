@@ -94,6 +94,7 @@ export function registerCapabilitySummary(
 
   const summary = analyzeFunctionCapabilities(callback, {
     checker: context.checker,
+    typeRegistry: context.options.state?.typeRegistry,
     interprocedural,
   });
 

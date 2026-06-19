@@ -12,11 +12,15 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
+    showHistory: boolean;
     messageCount: number;
     dismissedIndex: __cfHelpers.ReadonlyCell<number>;
 }, boolean>(({ showHistory, messageCount, dismissedIndex }) => showHistory && messageCount !== dismissedIndex.get(), {
     type: "object",
     properties: {
+        showHistory: {
+            type: "boolean"
+        },
         messageCount: {
             type: "number"
         },
@@ -25,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             asCell: ["readonly"]
         }
     },
-    required: ["messageCount", "dismissedIndex"]
+    required: ["showHistory", "messageCount", "dismissedIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);

@@ -123,9 +123,11 @@ export function isLiftAppliedCall(
 function getFirstParameterCapabilitySummary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): CapabilityParamSummary | undefined {
   const summary = analyzeFunctionCapabilities(callback, {
     checker,
+    typeRegistry,
     includeNestedCallbacks: true,
   });
   const parameter = callback.parameters[0];
@@ -543,6 +545,7 @@ export function transformLiftAppliedCall(
   const inputParamSummary = getFirstParameterCapabilitySummary(
     newCallback,
     checker,
+    options.state?.typeRegistry,
   );
   if (inputParamSummary) {
     inputTypeNode = applyShrinkAndWrap(

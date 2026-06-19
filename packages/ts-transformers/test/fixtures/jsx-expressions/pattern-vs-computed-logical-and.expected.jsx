@@ -64,15 +64,19 @@ export const PatternLogicalAnd = pattern((__cf_pattern_input) => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
+    foo: boolean;
     bar: string;
 }, string | false>(({ foo, bar }) => foo && bar, {
     type: "object",
     properties: {
+        foo: {
+            type: "boolean"
+        },
         bar: {
             type: "string"
         }
     },
-    required: ["bar"]
+    required: ["foo", "bar"]
 } as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             type: "string"

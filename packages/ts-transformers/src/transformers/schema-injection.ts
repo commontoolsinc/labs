@@ -242,6 +242,7 @@ function findCapabilitySummaryForParameter(
   const summary = options?.includeNestedCallbacks
     ? analyzeFunctionCapabilities(fn, {
       checker: options.checker,
+      typeRegistry: context?.options.state?.typeRegistry,
       includeNestedCallbacks: true,
       summaryCache: context
         ? capabilitySummaryMemoFor(context).nested
@@ -251,6 +252,7 @@ function findCapabilitySummaryForParameter(
     ? (context.lookupCapabilitySummary(fn) ??
       analyzeFunctionCapabilities(fn, {
         checker: context.checker,
+        typeRegistry: context.options.state?.typeRegistry,
         summaryCache: capabilitySummaryMemoFor(context).fallback,
       }))
     : analyzeFunctionCapabilities(fn, {
