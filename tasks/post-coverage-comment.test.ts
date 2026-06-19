@@ -16,6 +16,7 @@ interface RecordedRequest {
 async function runWithPayload(
   payload: unknown,
   existingCommentBodies: string[],
+  options: { getStatus?: number } = {},
 ): Promise<RecordedRequest[]> {
   const dir = await Deno.makeTempDir({ prefix: "coverage-comment-test-" });
   const file = path.join(dir, "coverage-comment.json");
@@ -39,7 +40,15 @@ async function runWithPayload(
       );
     }
 
-    // GET comments — one page, fewer than per_page so pagination stops.
+    // GET comments. A non-200 status (404 is non-retryable) makes the lookup
+    // throw, exercising the best-effort error path.
+    const getStatus = options.getStatus ?? 200;
+    if (getStatus !== 200) {
+      return Promise.resolve(
+        new Response("not found", { status: getStatus }),
+      );
+    }
+    // One page, fewer than per_page so pagination stops.
     const comments = existingCommentBodies.map((body, index) => ({
       id: index + 1,
       body,
@@ -135,6 +144,55 @@ Deno.test("postCoverageComment does nothing to resolve when no comment exists", 
   const requests = await runWithPayload(
     { prNumber: 4211, state: "resolved", improvedLines: 5 },
     ["a normal review comment"],
+  );
+
+  assertEquals(requests.length, 0);
+});
+
+Deno.test("postCoverageComment leaves an already-resolved comment untouched", async () => {
+  const existing = [
+    COVERAGE_SUGGESTION_MARKER,
+    "<details>",
+    "<summary>Code coverage regression resolved.</summary>",
+    "",
+    "</details>",
+  ].join("\n");
+
+  const requests = await runWithPayload(
+    { prNumber: 4211, state: "resolved", improvedLines: 0 },
+    [existing],
+  );
+
+  assertEquals(requests.length, 0);
+});
+
+Deno.test("postCoverageComment treats a legacy body-only payload as a regression", async () => {
+  const body = `${COVERAGE_SUGGESTION_MARKER}\nlegacy comment.`;
+  const requests = await runWithPayload({ prNumber: 4211, body }, []);
+
+  assertEquals(requests.length, 1);
+  assertEquals(requests[0].method, "POST");
+  assertEquals(requests[0].body, body);
+});
+
+Deno.test("postCoverageComment skips a regression payload with an empty body", async () => {
+  const requests = await runWithPayload(
+    { prNumber: 4211, state: "regressed", body: "" },
+    [],
+  );
+
+  assertEquals(requests.length, 0);
+});
+
+Deno.test("postCoverageComment swallows a comment-lookup failure", async () => {
+  const requests = await runWithPayload(
+    {
+      prNumber: 4211,
+      state: "regressed",
+      body: `${COVERAGE_SUGGESTION_MARKER}\nbody.`,
+    },
+    [],
+    { getStatus: 404 },
   );
 
   assertEquals(requests.length, 0);

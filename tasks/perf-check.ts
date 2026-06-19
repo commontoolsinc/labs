@@ -251,7 +251,7 @@ async function readCombinedLcov(lcovDir: string): Promise<string> {
 }
 
 type TableAlign = "left" | "right";
-type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+export type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
 
 function printTextTable(
   headers: string[],
@@ -336,7 +336,7 @@ function metricDisplayParts(metric: string): { task: string; metric: string } {
   return { task: kind, metric: rest };
 }
 
-interface Row {
+export interface Row {
   metric: string;
   status: Status;
   current: number;
@@ -454,14 +454,45 @@ async function extractCoverageDebtSamples(
   return { samples: metrics, lcov };
 }
 
+/** File the coverage-comment payload is written to; tests override via env. */
+function coverageCommentOutputPath(): string {
+  return Deno.env.get("COVERAGE_COMMENT_FILE") ?? COVERAGE_COMMENT_FILE;
+}
+
 /**
- * Write the once-per-PR coverage-debt comment to a file for a later workflow to
+ * Decide and write the coverage-debt comment payload for a PR. A coverage
+ * regression writes a "regressed" body; an acceptable run writes a "resolved"
+ * payload so the poster can collapse any earlier comment. Done for every real PR
+ * run, pass or fail, so a fixed regression is reflected even when the run still
+ * fails for other reasons.
+ */
+export async function writeCoverageComment(
+  prNumber: number,
+  coverageFailures: Row[],
+  coverageRows: Row[],
+  prFiles: PRFile[],
+  lcov: string,
+): Promise<void> {
+  if (coverageFailures.length > 0) {
+    await writeCoverageDebtSuggestion(
+      prNumber,
+      coverageFailures,
+      prFiles,
+      lcov,
+    );
+  } else {
+    await writeCoverageResolved(prNumber, coverageRows);
+  }
+}
+
+/**
+ * Write the coverage-debt regression comment to a file for a later workflow to
  * post. The gate runs on `pull_request`, where fork PRs get a read-only token
  * and cannot comment, so the `coverage-comment` workflow_run job posts this from
  * the base-repo context instead. Never throws — this is best-effort so it cannot
  * mask the regression failure itself.
  */
-async function writeCoverageDebtSuggestion(
+export async function writeCoverageDebtSuggestion(
   prNumber: number,
   coverageFailures: Row[],
   prFiles: PRFile[],
@@ -518,12 +549,10 @@ async function writeCoverageDebtSuggestion(
       state: "regressed",
       body,
     };
-    await Deno.writeTextFile(
-      COVERAGE_COMMENT_FILE,
-      JSON.stringify(payload, null, 2),
-    );
+    const outputFile = coverageCommentOutputPath();
+    await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));
     console.log(
-      `Wrote ${COVERAGE_COMMENT_FILE} for PR #${prNumber}; the coverage-comment workflow will post or update it.`,
+      `Wrote ${outputFile} for PR #${prNumber}; the coverage-comment workflow will post or update it.`,
     );
   } catch (error) {
     console.warn(
@@ -543,7 +572,7 @@ async function writeCoverageDebtSuggestion(
  * count versus its `main` baseline — the previously-uncovered lines the PR now
  * covers. Never throws — best-effort, like the regression path.
  */
-async function writeCoverageResolved(
+export async function writeCoverageResolved(
   prNumber: number,
   coverageRows: Row[],
 ): Promise<void> {
@@ -560,12 +589,10 @@ async function writeCoverageResolved(
       state: "resolved",
       improvedLines,
     };
-    await Deno.writeTextFile(
-      COVERAGE_COMMENT_FILE,
-      JSON.stringify(payload, null, 2),
-    );
+    const outputFile = coverageCommentOutputPath();
+    await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));
     console.log(
-      `Wrote ${COVERAGE_COMMENT_FILE} (resolved, net ${improvedLines} line(s) covered) for PR #${prNumber}; the coverage-comment workflow will update any existing comment.`,
+      `Wrote ${outputFile} (resolved, net ${improvedLines} line(s) covered) for PR #${prNumber}; the coverage-comment workflow will update any existing comment.`,
     );
   } catch (error) {
     console.warn(
@@ -1309,25 +1336,17 @@ async function main() {
   );
 
   // Coverage-debt PR comment, written for the coverage-comment workflow to post
-  // (fork PRs get a read-only token on pull_request and cannot comment here). A
-  // regression earns a comment pointing the author at the uncovered lines; once
-  // coverage is acceptable again the poster collapses and rewrites any earlier
-  // comment. Done before the exit branches so it runs whether the run passes or
-  // fails for other reasons.
+  // (fork PRs get a read-only token on pull_request and cannot comment here).
+  // Done before the exit branches so it runs whether the run passes or fails for
+  // other reasons.
   if (prNumber) {
-    if (coverageFailures.length > 0) {
-      await writeCoverageDebtSuggestion(
-        parseInt(prNumber),
-        coverageFailures,
-        prFiles,
-        coverageLcov,
-      );
-    } else {
-      await writeCoverageResolved(
-        parseInt(prNumber),
-        rows.filter((row) => isCoverageDebtMetric(row.metric)),
-      );
-    }
+    await writeCoverageComment(
+      parseInt(prNumber),
+      coverageFailures,
+      rows.filter((row) => isCoverageDebtMetric(row.metric)),
+      prFiles,
+      coverageLcov,
+    );
   }
 
   if (failures.length === 0) {
