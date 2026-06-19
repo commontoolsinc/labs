@@ -653,3 +653,58 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
     await storageManager.close();
   }
 });
+
+Deno.test("memory v2 runner applies watch remove syncs to confirmed docs", async () => {
+  const docA = `of:watch-remove-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-remove-b-${crypto.randomUUID()}` as URI;
+  const transport = new IncrementalEffectTransport(
+    new Map([
+      [docA, { value: { label: docA } }],
+      [docB, { value: { label: docB } }],
+    ]),
+  );
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-remove"),
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    await Promise.all([
+      provider.sync(docA, { path: [], schema: false }),
+      provider.sync(docB, { path: [], schema: false }),
+    ]);
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+    assertEquals(getObjectValue(provider, docB), { label: docB });
+
+    const integrated = Promise.withResolvers<void>();
+    const subscription = {
+      next(notification: { type: string }) {
+        if (notification.type === "integrate") {
+          integrated.resolve();
+        }
+        return undefined;
+      },
+    };
+    storageManager.subscribe(subscription);
+    transport.emitSync({
+      type: "sync",
+      fromSeq: 2,
+      toSeq: 3,
+      upserts: [],
+      removes: [{
+        branch: "",
+        id: docB,
+      }],
+    });
+
+    await integrated.promise;
+    storageManager.unsubscribe(subscription);
+
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+    assertEquals(provider.get(docB), undefined);
+  } finally {
+    await storageManager.close();
+  }
+});

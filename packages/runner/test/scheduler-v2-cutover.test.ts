@@ -10,6 +10,7 @@ import {
   space,
   toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
+import { FakeTime } from "@std/testing/time";
 import type {
   Action,
   IExtendedStorageTransaction,
@@ -1099,5 +1100,37 @@ describe("scheduler v2 cutover fixtures", () => {
     } finally {
       delays.clearActiveDebounceTimers();
     }
+  });
+
+  it("moves a debounced action to pending after its timer fires", async () => {
+    using time = new FakeTime();
+    const delays = new SchedulerDelays({
+      actionStats: new Map(),
+      getActionId: () => "debounced-action",
+    });
+    const action: Action = function debouncedAction() {};
+    const pending = new Set<Action>();
+    const messages: string[] = [];
+    let queueCount = 0;
+
+    delays.setDebounce(action, 4);
+    delays.scheduleWithDebounce(action, {
+      pending,
+      queueExecution: () => queueCount++,
+      logDebounce: (message) => messages.push(message),
+    });
+
+    expect(pending.has(action)).toBe(false);
+    expect(queueCount).toBe(0);
+    expect(delays.hasActiveDebounceTimer(action)).toBe(true);
+
+    await time.tickAsync(4);
+
+    expect(pending.has(action)).toBe(true);
+    expect(queueCount).toBe(1);
+    expect(delays.hasActiveDebounceTimer(action)).toBe(false);
+    expect(messages).toEqual([
+      "[DEBOUNCE] Action debounced-action debounced for 4ms",
+    ]);
   });
 });
