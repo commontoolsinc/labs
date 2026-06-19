@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
+import { txToReactivityLog } from "../src/scheduler.ts";
 
 const DOCUMENT_ADDRESS = {
   id: "bench:read-compaction" as const,
@@ -214,6 +215,65 @@ Deno.test("memory v2 excludeReadFromConflict drops ONLY marked nonRecursive (ref
   assert(
     paths.includes("value.scalar"),
     `unmarked nonRecursive by-value read must be kept; got ${paths}`,
+  );
+
+  await runtime.dispose();
+  await storage.close();
+});
+
+Deno.test("memory v2 excludeReadFromConflict reads STAY in the reactivity log (a repointed link still re-triggers the holder)", async () => {
+  // excludeReadFromConflict removes a read from the COMMIT-CONFLICT set only; it
+  // must NOT remove it from the reactivity log. The asCell reference-resolution
+  // read (the link read) therefore remains a reactive dependency, so if the link
+  // is repointed the holder is reader-dirtied and re-runs — it just no longer
+  // collides with disjoint writers under the referent. This pins the reactivity
+  // half (the conflict half is covered by the test above).
+  const { signer, storage, runtime } = await createRuntime(
+    "memory-v2-read-compaction-exclude-reactivity",
+  );
+  const space = signer.did();
+
+  const seed = runtime.edit();
+  seed.writeValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space },
+    { refShape: { a: 1, b: 2 } },
+  );
+  assertEquals((await seed.commit()).ok, {});
+
+  const tx = runtime.edit();
+  // The link read: a marked, nonRecursive reference-resolution shape read.
+  tx.readValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space, path: ["refShape"] },
+    { meta: excludeReadFromConflict, nonRecursive: true },
+  );
+
+  const replica = storage.open(space).replica as unknown as {
+    buildReads(source: unknown, localSeq: number): {
+      confirmed: Array<{ path: string[]; seq: number }>;
+      pending: Array<{ path: string[]; localSeq: number }>;
+    };
+  };
+
+  // Conflict set DROPS the link read (no spurious collision with disjoint writers).
+  const conflictPaths = replica.buildReads(tx.tx, 1).confirmed.map((read) =>
+    read.path.join(".")
+  );
+  assert(
+    !conflictPaths.some((p) => p.endsWith("refShape")),
+    `reference read must be excluded from the conflict set; got ${conflictPaths}`,
+  );
+
+  // Reactivity log KEEPS the link read (as a shallow/nonRecursive read) — this is
+  // what makes a repointed link re-trigger the holder.
+  const log = txToReactivityLog(tx);
+  const reactivePaths = [...log.reads, ...log.shallowReads].map((address) =>
+    address.path.join(".")
+  );
+  assert(
+    reactivePaths.some((p) => p.endsWith("refShape")),
+    `reference read must stay a reactive dependency; got reads=${
+      log.reads.map((a) => a.path.join("."))
+    } shallowReads=${log.shallowReads.map((a) => a.path.join("."))}`,
   );
 
   await runtime.dispose();
