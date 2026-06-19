@@ -30,6 +30,7 @@ import {
   parseBaselineOverrides,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
+  resolveCoverageDebtComment,
   serializePerfMetrics,
   serializePerfMetricsBackfill,
   shouldGateCoverageDebtMetric,
@@ -859,8 +860,17 @@ Deno.test("buildCoverageDebtSuggestionComment lists files (not lines), command, 
     ],
   });
 
-  // Posted-once marker so a later run can detect it.
+  // Marker so a later run can detect and update it.
   assertStringIncludes(comment, COVERAGE_SUGGESTION_MARKER);
+  // The body is wrapped in an open <details> summarizing the over-by total
+  // (15 - 12 = 3 lines), with no standalone header.
+  assertStringIncludes(comment, "<details open>");
+  assertStringIncludes(
+    comment,
+    "<summary>Test coverage regressed by 3 lines</summary>",
+  );
+  assertStringIncludes(comment, "</details>");
+  assertFalse(comment.includes("## 🧪 Test coverage regressed"));
   // The regressed group with its target and current value.
   assertStringIncludes(comment, "`packages/runner`");
   assertStringIncludes(comment, "| 12 | 15 | +3 |");
@@ -889,6 +899,72 @@ Deno.test("buildCoverageDebtSuggestionComment handles a regression with no pinne
   assertStringIncludes(
     comment,
     "coverage-debt: tasks uncovered lines  <=  0",
+  );
+});
+
+Deno.test("buildCoverageDebtSuggestionComment sums Over by across groups in the summary", () => {
+  const comment = buildCoverageDebtSuggestionComment({
+    groups: [
+      { group: "packages/runner", target: 12, current: 15 },
+      { group: "tasks", target: 4, current: 8 },
+    ],
+    files: [],
+  });
+
+  // 3 + 4 = 7 over baseline.
+  assertStringIncludes(
+    comment,
+    "<summary>Test coverage regressed by 7 lines</summary>",
+  );
+});
+
+Deno.test("buildCoverageDebtSuggestionComment uses the singular for a one-line regression", () => {
+  const comment = buildCoverageDebtSuggestionComment({
+    groups: [
+      { group: "tasks", target: 4, current: 5 },
+    ],
+    files: [],
+  });
+
+  assertStringIncludes(
+    comment,
+    "<summary>Test coverage regressed by 1 line</summary>",
+  );
+});
+
+Deno.test("resolveCoverageDebtComment collapses the details and reports the reduction", () => {
+  const regressed = buildCoverageDebtSuggestionComment({
+    groups: [{ group: "packages/runner", target: 12, current: 15 }],
+    files: [],
+  });
+
+  const resolved = resolveCoverageDebtComment(regressed, 5);
+
+  // The details collapses (no `open`) and the summary celebrates the reduction.
+  assertFalse(resolved.includes("<details open>"));
+  assertStringIncludes(resolved, "<details>");
+  assertStringIncludes(
+    resolved,
+    "<summary>Code coverage debt reduced by 5 lines!</summary>",
+  );
+  assertFalse(resolved.includes("Test coverage regressed by"));
+  // The body (marker, table) is preserved for context.
+  assertStringIncludes(resolved, COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(resolved, "| 12 | 15 | +3 |");
+});
+
+Deno.test("resolveCoverageDebtComment notes resolution when there is no net reduction", () => {
+  const regressed = buildCoverageDebtSuggestionComment({
+    groups: [{ group: "tasks", target: 4, current: 8 }],
+    files: [],
+  });
+
+  const resolved = resolveCoverageDebtComment(regressed, 0);
+
+  assertFalse(resolved.includes("<details open>"));
+  assertStringIncludes(
+    resolved,
+    "<summary>Code coverage regression resolved.</summary>",
   );
 });
 

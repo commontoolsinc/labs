@@ -22,11 +22,14 @@ permissions:
 jobs:
   post-coverage-comment:
     name: "Post Coverage Comment"
-    # Only PR runs that failed can carry a coverage regression (the gate exits
-    # non-zero), so skip the all-green and push runs.
+    # Runs on both outcomes of a PR run: a failed run may carry a coverage
+    # regression to post, and a passing run may need to update an earlier
+    # regression comment to its resolved state. Other conclusions (cancelled,
+    # skipped) carry nothing to do.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'failure'
+      (github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
