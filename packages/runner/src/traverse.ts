@@ -77,7 +77,8 @@ import {
 } from "./link-types.ts";
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { SigilLink } from "./sigil-types.ts";
+import { cellRefFrom } from "@commonfabric/data-model/cell-rep";
+import { type LinkV1Inner, SigilLink } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
@@ -2092,7 +2093,7 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   if (isRecord(obj) && "schemaHash" in obj) {
     const schemaHash = obj["schemaHash"];
     if (typeof schemaHash === "string" && schemaHash.length > 0) {
-      return { "/": { "link@1": { id: `cid:${obj["schemaHash"]}` } } };
+      return cellRefFrom<LinkV1Inner>({ id: `cid:${schemaHash}` });
     }
   }
   return undefined;
