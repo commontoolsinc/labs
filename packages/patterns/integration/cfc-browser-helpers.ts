@@ -1,4 +1,4 @@
-import { Page, waitFor } from "@commonfabric/integration";
+import { awaitViewSettled, Page, waitFor } from "@commonfabric/integration";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
@@ -456,28 +456,55 @@ export async function clickCfButtonAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
+  // Single timeout budget shared across settle, click, and wait-for-effect.
+  const deadline = Date.now() + timeout;
+  const remaining = () => Math.max(1, deadline - Date.now());
+
   let textProbe: TextProbe | undefined;
+
+  // Fast path: the effect may already be present (idempotent re-entry).
+  if (await textIsPresent(page, textSelector, text)) {
+    return;
+  }
+
+  // Settle the view BEFORE clicking, then click exactly ONCE. awaitViewSettled
+  // resolves only once the worker is idle, the vdom batch has been applied to
+  // the main thread, and Lit updates have drained — i.e. the button's handler
+  // is actually bound. A single settled click is delivered to a live handler,
+  // so we never re-click: re-clicking a freshly-rendered control is racy (it
+  // can double-fire, and against a dismissable overlay the repeat clicks
+  // dismiss it). See docs/development/UI_TESTING.md.
+  try {
+    await waitFor(() => awaitViewSettled(page), {
+      timeout: remaining(),
+      delay: 250,
+    });
+    await clickCfButton(page, buttonSelector, { timeout: remaining() });
+  } catch (cause) {
+    textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
+    throw new Error(
+      `Failed to click "${buttonSelector}" while waiting for "${textSelector}" to contain "${text}". Last probe: ${
+        toIndentedDebugString(textProbe)
+      }`,
+      { cause },
+    );
+  }
+
+  // The click is delivered; settle the view and wait for its effect. The settle
+  // re-runs each poll, so an effect that renders a few cycles after the click —
+  // including an optimistic perUser/perSpace write whose chip trails the
+  // commit — is captured without ever re-clicking.
   try {
     await waitFor(async () => {
+      await awaitViewSettled(page);
       if (await textIsPresent(page, textSelector, text)) {
         return true;
       }
-      try {
-        await clickCfButton(page, buttonSelector, { timeout: 2_000 });
-      } catch {
-        textProbe = await readTextProbe(page, textSelector).catch(() =>
-          undefined
-        );
-        return false;
-      }
-      const updated = await textIsPresent(page, textSelector, text);
-      if (!updated) {
-        textProbe = await readTextProbe(page, textSelector).catch(() =>
-          undefined
-        );
-      }
-      return updated;
-    }, { timeout, delay: 1_000 });
+      textProbe = await readTextProbe(page, textSelector).catch(() =>
+        undefined
+      );
+      return false;
+    }, { timeout: remaining(), delay: 250 });
   } catch (cause) {
     textProbe ??= await readTextProbe(page, textSelector).catch(() =>
       undefined

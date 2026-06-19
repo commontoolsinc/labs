@@ -46,7 +46,7 @@ function roots(...els: FakeEl[]): Iterable<Element> {
 Deno.test("drainViewUpdates - churn detection", async (t) => {
   await t.step("a settled element is not churning", async () => {
     assertEquals(
-      await drainViewUpdates(roots(lit(Promise.resolve(true)))),
+      (await drainViewUpdates(roots(lit(Promise.resolve(true))))).churned,
       false,
     );
   });
@@ -55,7 +55,8 @@ Deno.test("drainViewUpdates - churn detection", async (t) => {
     "plain elements without updateComplete are ignored",
     async () => {
       assertEquals(
-        await drainViewUpdates(roots(plain({ children: [plain()] }))),
+        (await drainViewUpdates(roots(plain({ children: [plain()] }))))
+          .churned,
         false,
       );
     },
@@ -63,42 +64,52 @@ Deno.test("drainViewUpdates - churn detection", async (t) => {
 
   await t.step("an element pending at scan time is churning", async () => {
     assertEquals(
-      await drainViewUpdates(
+      (await drainViewUpdates(
         roots(lit(Promise.resolve(true), { isUpdatePending: true })),
-      ),
+      )).churned,
       true,
     );
   });
 
   await t.step(
-    "a superseded update (resolves false) is churning",
+    "a superseded update (resolves false) is churning with no error",
     async () => {
-      assertEquals(
-        await drainViewUpdates(roots(lit(Promise.resolve(false)))),
-        true,
+      const { churned, errors } = await drainViewUpdates(
+        roots(lit(Promise.resolve(false))),
       );
+      assertEquals(churned, true);
+      assertEquals(errors, []);
     },
   );
 
   await t.step(
-    "a thrown update (rejects) is churning and does not throw",
+    "a thrown update (rejects) is churning and surfaces the error",
     async () => {
-      const rejected = Promise.reject(new Error("update threw"));
+      const boom = new Error("update threw");
+      const rejected = Promise.reject(boom);
       rejected.catch(() => {});
-      assertEquals(await drainViewUpdates(roots(lit(rejected))), true);
+      const { churned, errors } = await drainViewUpdates(roots(lit(rejected)));
+      assertEquals(churned, true);
+      assertEquals(errors, [boom]);
     },
   );
 
   await t.step("descends into children and shadow roots", async () => {
     const churningInShadow = plain({ shadow: [lit(Promise.resolve(false))] });
-    assertEquals(await drainViewUpdates(roots(churningInShadow)), true);
+    assertEquals(
+      (await drainViewUpdates(roots(churningInShadow))).churned,
+      true,
+    );
 
     const settledNested = plain({ children: [lit(Promise.resolve(true))] });
-    assertEquals(await drainViewUpdates(roots(settledNested)), false);
+    assertEquals(
+      (await drainViewUpdates(roots(settledNested))).churned,
+      false,
+    );
   });
 
   await t.step("no active renders means nothing is churning", async () => {
-    assertEquals(await drainViewUpdates(), false);
+    assertEquals((await drainViewUpdates()).churned, false);
   });
 });
 
@@ -147,6 +158,33 @@ Deno.test("viewSettled - loop", async (t) => {
       }
       assertEquals(passes, 3);
       assertEquals(warn.calls.length, 1);
+    },
+  );
+
+  await t.step(
+    "names the thrown update when it gives up after maxPasses",
+    async () => {
+      const warn = stub(console, "warn", () => {});
+      const boom = new Error("update threw");
+      const rejected = Promise.reject(boom);
+      rejected.catch(() => {});
+      let passes = 0;
+      const idle = () => {
+        passes++;
+        return Promise.resolve();
+      };
+      try {
+        await viewSettled(idle, {
+          roots: roots(lit(rejected)),
+          maxPasses: 2,
+        });
+      } finally {
+        warn.restore();
+      }
+      assertEquals(passes, 2);
+      assertEquals(warn.calls.length, 1);
+      // the actual error is surfaced as a console.warn argument, not lost
+      assertEquals(warn.calls[0].args.includes(boom), true);
     },
   );
 });

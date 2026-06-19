@@ -141,10 +141,12 @@ function formatTree(node: unknown, indent = 0): string {
 
 /**
  * Walk every active render's DOM subtree, descending through shadow roots, and
- * await `updateComplete` on each Lit element. Returns true if any element was
- * mid-update — pending when scanned, or resolving its `updateComplete` to a
- * re-triggered or thrown update during the drain — which signals the view was
- * not yet settled and the caller should drain again.
+ * await `updateComplete` on each Lit element. Returns `churned` — true if any
+ * element was mid-update (pending when scanned, or resolving its
+ * `updateComplete` to a re-triggered or thrown update during the drain), which
+ * signals the view was not yet settled and the caller should drain again — and
+ * `errors`, the reasons of any updates that threw, so a give-up can name the
+ * actual failure rather than blame re-rendering.
  *
  * This closes the gap between "the worker is reactively idle" and "the DOM is
  * interactive": custom elements such as cf-modal enable pointer events and bind
@@ -156,7 +158,7 @@ function formatTree(node: unknown, indent = 0): string {
  */
 export async function drainViewUpdates(
   roots: Iterable<Element> = activeRenderRoots(),
-): Promise<boolean> {
+): Promise<{ churned: boolean; errors: unknown[] }> {
   const pending: Promise<unknown>[] = [];
   let sawPending = false;
 
@@ -184,13 +186,22 @@ export async function drainViewUpdates(
   // updated(), as cf-modal does when toggling open), and rejects when the
   // update threw. Treat false and rejected as still-churning so the loop drains
   // again instead of exiting a cycle early; allSettled keeps a thrown update
-  // from aborting the check. An element that never stops churning trips
-  // viewSettled's maxPasses warning rather than spinning forever.
+  // from aborting the check. Collect rejection reasons so a give-up after
+  // maxPasses can name the throwing update instead of blaming re-rendering. An
+  // element that never stops churning trips viewSettled's maxPasses warning
+  // rather than spinning forever.
   const results = await Promise.allSettled(pending);
-  const churned = results.some(
-    (r) => r.status === "rejected" || r.value === false,
-  );
-  return sawPending || churned;
+  const errors: unknown[] = [];
+  let churned = sawPending;
+  for (const r of results) {
+    if (r.status === "rejected") {
+      errors.push(r.reason);
+      churned = true;
+    } else if (r.value === false) {
+      churned = true;
+    }
+  }
+  return { churned, errors };
 }
 
 function activeRenderRoots(): Element[] {
@@ -211,7 +222,9 @@ function activeRenderRoots(): Element[] {
  * A view that re-renders on every cycle (an animation that requests Lit updates
  * on a timer) never reports settled. Rather than fail such a view, the loop
  * gives up after maxPasses and warns: by then the view is interactive even
- * though it is still updating.
+ * though it is still updating. If the churn was a thrown update rather than
+ * benign re-rendering, the warning names that error so a real failure is not
+ * misread as animation.
  *
  * `roots` is forwarded to drainViewUpdates to scope the drain (used by tests);
  * it defaults to every active render's container.
@@ -221,16 +234,27 @@ export async function viewSettled(
   options: { maxPasses?: number; roots?: Iterable<Element> } = {},
 ): Promise<void> {
   const maxPasses = options.maxPasses ?? 50;
+  let lastErrors: unknown[] = [];
   for (let pass = 0; pass < maxPasses; pass++) {
     await idle();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const pending = await drainViewUpdates(options.roots);
-    if (!pending) return;
+    const { churned, errors } = await drainViewUpdates(options.roots);
+    lastErrors = errors;
+    if (!churned) return;
   }
-  console.warn(
-    `viewSettled: view still reported pending updates after ${maxPasses} ` +
-      `passes; proceeding. A perpetually re-rendering element can cause this.`,
-  );
+  if (lastErrors.length > 0) {
+    console.warn(
+      `viewSettled: gave up after ${maxPasses} passes; a view update threw ` +
+        `during the final drain (folded into churn, not re-thrown). Last of ` +
+        `${lastErrors.length} error(s):`,
+      lastErrors[lastErrors.length - 1],
+    );
+  } else {
+    console.warn(
+      `viewSettled: view still reported pending updates after ${maxPasses} ` +
+        `passes; proceeding. A perpetually re-rendering element can cause this.`,
+    );
+  }
 }
 
 /**
