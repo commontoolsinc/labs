@@ -8,13 +8,8 @@ import type { CellScope } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { ContextualFlowControl } from "../cfc.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
-import type {
-  PullError,
-  Result,
-  SchemaPathSelector,
-  Unit,
-  URI,
-} from "./interface.ts";
+import type { SchemaPathSelector } from "@commonfabric/api";
+import type { PullError, Result, Unit, URI } from "./interface.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
 type ScopedWatchAddress = { id: URI; type: MIME; scope?: CellScope };

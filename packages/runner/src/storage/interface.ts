@@ -58,7 +58,6 @@ export type {
   MediaType,
   MemorySpace,
   Result,
-  SchemaPathSelector,
   Signer,
   State,
   Unit,
