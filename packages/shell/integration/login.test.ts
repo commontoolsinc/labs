@@ -13,6 +13,53 @@ describe("shell login tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
+  it("waits for key store before showing login controls", async () => {
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: "common-knowledge" },
+    });
+
+    const result = await page.evaluate(async () => {
+      await customElements.whenDefined("x-login-view");
+
+      const login = document.createElement("x-login-view") as HTMLElement & {
+        keyStore?: unknown;
+        updateComplete: Promise<unknown>;
+      };
+      document.body.append(login);
+      await login.updateComplete;
+
+      const snapshot = () => {
+        const root = login.shadowRoot;
+        return {
+          hasLoading: root?.textContent?.includes(
+            "Preparing secure storage...",
+          ) ?? false,
+          hasRegister: !!root?.querySelector('[test-id="register-new-key"]'),
+        };
+      };
+
+      const beforeKeyStore = snapshot();
+      login.keyStore = {
+        get: () => Promise.resolve(undefined),
+        set: () => Promise.resolve(undefined),
+        clear: () => Promise.resolve(undefined),
+      };
+      await login.updateComplete;
+      const afterKeyStore = snapshot();
+      login.remove();
+
+      return { beforeKeyStore, afterKeyStore };
+    });
+
+    assert(result.beforeKeyStore.hasLoading);
+    assert(!result.beforeKeyStore.hasRegister);
+    assert(!result.afterKeyStore.hasLoading);
+    assert(result.afterKeyStore.hasRegister);
+  });
+
   it("can create a new user via passphrase", async () => {
     const page = shell.page();
     const spaceName = "common-knowledge";
