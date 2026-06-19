@@ -678,14 +678,23 @@ export class CFPromptInput extends BaseElement {
     }
 
     // Web-copied image with no bytes on the clipboard — only an <img> in the
-    // HTML flavor. Fetch it (handles data: URIs and CORS-permitting remotes);
-    // on failure we fall through silently so a plain text paste still works.
+    // HTML flavor. Fetch it (handles data: URIs and CORS-permitting remotes).
+    // We must preventDefault synchronously (the event is consumed the moment
+    // this handler returns) but the fetch is async, so capture the plain-text
+    // flavor NOW and restore it if the fetch fails — otherwise a CORS/network
+    // failure would silently swallow the paste entirely.
     if (this.uploadAttachments) {
       const html = clipboardData.getData("text/html");
       const src = html ? this._firstImgSrc(html) : null;
       if (src) {
+        const plain = clipboardData.getData("text");
+        // Don't fall back to a giant base64 data: URI as text; only a real
+        // text flavor (or an http(s) src) is worth restoring.
+        const fallbackText = plain || (src.startsWith("data:") ? "" : src);
         event.preventDefault();
-        void this._attachRemoteImage(src);
+        void this._attachRemoteImage(src).then((ok) => {
+          if (!ok) this._insertTextAtCursor(fallbackText);
+        });
         return;
       }
     }
@@ -772,22 +781,49 @@ export class CFPromptInput extends BaseElement {
     return null;
   }
 
-  /** Fetch a remote/data image URL and attach it as an uploadable blob. */
-  private async _attachRemoteImage(src: string): Promise<void> {
+  /**
+   * Fetch a remote/data image URL and attach it as an uploadable blob. Returns
+   * true if an attachment was added, false on any failure (non-ok response,
+   * non-image content, CORS/network error) so the caller can restore the
+   * plain-text flavor it suppressed with preventDefault().
+   */
+  private async _attachRemoteImage(src: string): Promise<boolean> {
     try {
       const resp = await fetch(src);
-      if (!resp.ok) return;
+      if (!resp.ok) return false;
       const blob = await resp.blob();
-      if (!blob.type.startsWith("image/")) return;
+      if (!blob.type.startsWith("image/")) return false;
       this.addAttachment({
         id: this._generateAttachmentId(),
         name: this._imageNameFromUrl(src, blob.type),
         type: "clipboard",
         data: blob,
       });
+      return true;
     } catch {
-      // CORS or network failure — give up quietly (user can attach the file).
+      // CORS or network failure — caller restores the suppressed text paste.
+      return false;
     }
+  }
+
+  /** Insert text at the current cursor (or append if the textarea is absent). */
+  private _insertTextAtCursor(text: string): void {
+    if (!text) return;
+    const textarea = this._textareaElement as HTMLTextAreaElement | null;
+    if (!textarea) {
+      this.value = this.value + text;
+      this.requestUpdate();
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = this.value.substring(0, start);
+    const after = this.value.substring(end);
+    this.value = before + text + after;
+    textarea.value = this.value;
+    const pos = before.length + text.length;
+    textarea.setSelectionRange(pos, pos);
+    this.requestUpdate();
   }
 
   private _imageNameFromUrl(src: string, mimeType: string): string {
@@ -964,6 +1000,10 @@ export class CFPromptInput extends BaseElement {
     const existing = this.attachments.get(id);
     this._revokePreview(existing);
     this.attachments.delete(id);
+    // Drop the tracked upload promise too, so a still-in-flight upload for an
+    // attachment the user already removed cannot delay the next send (_handleSend
+    // awaits _uploadPromises before emitting).
+    this._uploadPromises.delete(id);
     this.emit("cf-attachment-remove", { id });
     this.requestUpdate();
   }
