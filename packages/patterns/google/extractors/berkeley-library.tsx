@@ -491,7 +491,7 @@ const dismissHoldHandler = handler<
  * Handler to set a new due date for selected items in a group.
  */
 const setDueDateForGroup = handler<
-  unknown,
+  { target: { value: string } },
   {
     groupItems: TrackedItem[];
     selectedItems: Writable<string[] | Default<[]>>;
@@ -500,7 +500,7 @@ const setDueDateForGroup = handler<
     >;
   }
 >((event, { groupItems, selectedItems, dueDateOverrides }) => {
-  const input = (event as { target: { value: string } }).target;
+  const input = event.target;
   const newDueDate = input.value;
   if (!newDueDate) return;
 
