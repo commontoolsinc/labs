@@ -15,6 +15,7 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  cellRefInner,
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
@@ -57,7 +58,6 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type CfcEnforcementMode,
@@ -934,7 +934,7 @@ export class Runtime {
   ): Cell<any> {
     const carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
-        ? (cellLink["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+        ? (cellRefInner(cellLink) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView
         : isNormalizedFullLink(cellLink)
         ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })

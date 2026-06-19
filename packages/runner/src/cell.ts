@@ -13,6 +13,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
+  cellRefFrom,
+  cellRefInner,
   type EntityRef,
   entityRefFromString,
 } from "@commonfabric/data-model/cell-rep";
@@ -95,7 +97,6 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
-  LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
@@ -2740,11 +2741,7 @@ export function convertCellsToLinks(
   seen: Map<any, string[]> = new Map(),
 ): any {
   if (seen.has(value)) {
-    return {
-      "/": {
-        [LINK_V1_TAG]: { path: seen.get(value) },
-      },
-    };
+    return cellRefFrom({ path: seen.get(value) });
   }
 
   // Early-return cases
@@ -2754,7 +2751,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(cell);
       if (cfcLabelView) {
-        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+        (cellRefInner(link) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView = cfcLabelView;
       }
     }
@@ -2764,7 +2761,7 @@ export function convertCellsToLinks(
     if (options.includeCfcLabelView) {
       const cfcLabelView = getCarriedCfcLabelView(value);
       if (cfcLabelView) {
-        (link["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+        (cellRefInner(link) as { cfcLabelView?: CfcLabelView })
           .cfcLabelView = cfcLabelView;
       }
     }
