@@ -1,4 +1,5 @@
 import { sleep } from "@commonfabric/utils/sleep";
+import type { Page } from "./page.ts";
 
 // Default poll interval between predicate calls. Polls are cheap (a CDP
 // evaluate round-trip), and a coarse interval quantizes every wall-clock
@@ -41,4 +42,32 @@ export const waitFor = async (
   throw new Error(
     `Timeout: waitFor predicate could not complete after ${timeout}ms.`,
   );
+};
+
+/**
+ * Wait until the shell's rendered UI has caught up to runtime state and is
+ * interactive. The reactive scheduler runs in a worker while the DOM lives on
+ * the main thread, so there are three stages between a state change and a
+ * clickable control: the worker settles reactively, the resulting vdom batch
+ * crosses to the main thread and is applied, and the Lit elements finish their
+ * update cycle (which is when cf-modal binds handlers and drops
+ * `pointer-events:none`). This resolves once all three have happened.
+ *
+ * Returns true once settled, or false when the shell has not yet exposed
+ * `commonfabric.viewSettled` (for example the runtime is still starting), so a
+ * caller can keep polling with `waitFor`.
+ *
+ * Call this before issuing a click or keystroke after navigation or any state
+ * change, so the stimulus lands on a bound handler instead of a freshly
+ * rendered element whose handler is not wired up yet.
+ */
+export const awaitViewSettled = async (page: Page): Promise<boolean> => {
+  return await page.evaluate(async () => {
+    const settled = (globalThis as {
+      commonfabric?: { viewSettled?: () => Promise<void> };
+    }).commonfabric?.viewSettled;
+    if (!settled) return false;
+    await settled();
+    return true;
+  });
 };

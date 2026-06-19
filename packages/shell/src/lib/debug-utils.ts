@@ -21,6 +21,81 @@ import type {
 import type { DID } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
+import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
+
+/**
+ * Build the `commonfabric.viewSettled` helper for a runtime. The returned
+ * function resolves once the rendered view is interactive — the worker is idle
+ * and the resulting vdom and Lit updates have drained. getRt is read on each
+ * call so the helper tracks runtime replacement; with no runtime the idle step
+ * is skipped.
+ */
+export function createViewSettled(
+  getRt: () => RuntimeClient | undefined,
+): () => Promise<void> {
+  return () =>
+    viewSettled(async () => {
+      await getRt()?.idle();
+    });
+}
+
+/** The commonfabric console globals exposed for the active runtime. */
+export type CommonfabricDebugState =
+  & Partial<ReturnType<typeof createDebugUtils>>
+  & {
+    rt?: RuntimeClient;
+    viewSettled?: () => Promise<void>;
+    vdom?: ReturnType<typeof createVDomDebugHelpers>;
+    detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+  };
+
+type CommonfabricGlobal = { commonfabric?: CommonfabricDebugState };
+
+/**
+ * Install the per-runtime commonfabric console globals — rt, viewSettled, vdom,
+ * detectNonIdempotent, and the cell debug utilities — for the active runtime.
+ */
+export function exposeCommonfabricGlobals(
+  global: CommonfabricGlobal,
+  runtime: RuntimeClient,
+  getRuntime: () => RuntimeClient | undefined,
+  getSpace: () => DID | undefined,
+): void {
+  global.commonfabric ??= {};
+  const cf = global.commonfabric;
+  cf.rt = runtime;
+  cf.viewSettled = createViewSettled(getRuntime);
+  cf.vdom = createVDomDebugHelpers();
+  cf.detectNonIdempotent = async (durationMs = 5000) => {
+    const result = await runtime.detectNonIdempotent(durationMs);
+    console.table(
+      result.nonIdempotent.map((r) => ({
+        action: r.actionId,
+        differingWrites: r.differingWriteKeys.join(", "),
+      })),
+    );
+    console.log("Cycles:", result.cycles);
+    return result;
+  };
+  const debugUtils = createDebugUtils(getSpace, getRuntime);
+  cf.readCell = debugUtils.readCell;
+  cf.readArgumentCell = debugUtils.readArgumentCell;
+  cf.subscribeToCell = debugUtils.subscribeToCell;
+  cf.watchWrites = debugUtils.watchWrites;
+  cf.getWriteStackTrace = debugUtils.getWriteStackTrace;
+  cf.explainTriggerTrace = debugUtils.explainTriggerTrace;
+}
+
+/**
+ * Clear the per-runtime commonfabric console globals (rt and viewSettled) when
+ * the runtime is torn down, so they cannot run against a disposed runtime.
+ */
+export function clearRuntimeDebugGlobals(global: CommonfabricGlobal): void {
+  if (global.commonfabric) {
+    global.commonfabric.rt = undefined;
+    global.commonfabric.viewSettled = undefined;
+  }
+}
 
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */

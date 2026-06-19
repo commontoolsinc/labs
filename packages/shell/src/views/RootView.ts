@@ -17,8 +17,11 @@ import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
-import { createVDomDebugHelpers } from "@commonfabric/html/debug";
-import { createDebugUtils } from "../lib/debug-utils.ts";
+import {
+  clearRuntimeDebugGlobals,
+  type CommonfabricDebugState,
+  exposeCommonfabricGlobals,
+} from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
 import {
@@ -26,12 +29,6 @@ import {
   type ThemePreference,
 } from "../lib/theme-preference.ts";
 import { EXPERIMENTAL } from "../lib/env.ts";
-
-type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
-  rt?: RuntimeClient;
-  vdom?: ReturnType<typeof createVDomDebugHelpers>;
-  detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
-};
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -102,10 +99,7 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
-          const global = getCommonfabricGlobal();
-          if (global.commonfabric) {
-            global.commonfabric.rt = undefined;
-          }
+          clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
         }
 
@@ -123,10 +117,7 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
-          const global = getCommonfabricGlobal();
-          if (global.commonfabric) {
-            global.commonfabric.rt = undefined;
-          }
+          clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return;
         }
 
@@ -134,38 +125,14 @@ export class XRootView extends BaseView {
         // from app.view in updated() independent of the runtime's life.
         this.runtime = rt.runtime();
 
-        // Expose RuntimeClient for console debugging
-        // (e.g. commonfabric.rt.setLoggerLevel("debug"))
-        const global = getCommonfabricGlobal();
-        global.commonfabric ??= {};
-        global.commonfabric.rt = this.runtime;
-        global.commonfabric.vdom = createVDomDebugHelpers();
-        global.commonfabric.detectNonIdempotent = async (
-          durationMs = 5000,
-        ) => {
-          const result = await rt.runtime().detectNonIdempotent(durationMs);
-          console.table(
-            result.nonIdempotent.map((r: any) => ({
-              action: r.actionId,
-              differingWrites: r.differingWriteKeys.join(", "),
-            })),
-          );
-          console.log("Cycles:", result.cycles);
-          return result;
-        };
-
-        // Debug utilities for inspecting cell values from the console
-        const debugUtils = createDebugUtils(
-          () => this.space as DID,
+        // Expose the runtime and cell debug utilities for console use
+        // (e.g. commonfabric.rt.setLoggerLevel("debug")).
+        exposeCommonfabricGlobals(
+          getCommonfabricGlobal(),
+          this.runtime,
           () => this.runtime,
+          () => this.space as DID,
         );
-        global.commonfabric.readCell = debugUtils.readCell;
-        global.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
-        global.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
-        global.commonfabric.watchWrites = debugUtils.watchWrites;
-        global.commonfabric.getWriteStackTrace = debugUtils.getWriteStackTrace;
-        global.commonfabric.explainTriggerTrace =
-          debugUtils.explainTriggerTrace;
 
         return rt;
       },

@@ -184,6 +184,68 @@ describe("shadow DOM component test", () => {
 });
 ```
 
+## Waiting Until the UI Is Interactive
+
+Finding an element is one problem; knowing *when* it is ready to be clicked or
+typed into is a separate one. The reactive scheduler runs in a worker while the
+DOM lives on the main thread, so after a state change there are three stages
+before a control is interactive:
+
+1. the worker settles reactively — `rt.idle()` covers this;
+2. the resulting vdom batch crosses to the main thread and is applied — this is
+   where the click listener is attached;
+3. the Lit elements finish their update cycle — `cf-modal`, for example, only
+   binds handlers and removes `pointer-events: none` in its `updated()`
+   callback, one cycle after its `open` property is set.
+
+Only stage 1 is visible through the runtime idle signal, so an element can exist
+in the DOM, be found by a selector, and still drop a click because its handler
+is not bound yet.
+
+**Use `awaitViewSettled(page)`** from `@commonfabric/integration` before issuing
+the first click or keystroke after navigation or any state change. It resolves
+once all three stages are done, so a single click then lands on a bound handler:
+
+```typescript
+import { awaitViewSettled, waitFor } from "@commonfabric/integration";
+
+// Before interacting: wait until the view is mounted and interactive.
+await waitFor(() => awaitViewSettled(page));
+const button = await page.waitForSelector("cf-button[role='button']");
+await button.click(); // delivered to a bound handler
+
+// After interacting: settle, then wait for the click's specific effect.
+await waitFor(async () => {
+  await awaitViewSettled(page);
+  return (await page.$("cf-modal[open]", { strategy: "pierce" })) !== null;
+});
+```
+
+### Do not reach for these instead
+
+Each of the following is what `awaitViewSettled` replaces. They are either racy
+(they do not cover all three stages) or wasteful (a CDP round trip every poll):
+
+- **`await sleep(ms)`, `page.waitForTimeout(ms)`, or any fixed delay** — guesses
+  at timing; too short flakes, too long wastes wall-clock.
+- **`await rt.idle()` or `awaitRuntimeIdle(page)` alone, then interact** — covers
+  stage 1 only. The element may be in the DOM with no handler bound, or be a
+  `cf-modal` whose `pointer-events` are still off.
+- **`await waitFor(() => findButtonWithText(page, "X"))` then click** — presence
+  is not interactivity, and every poll is a CDP `evaluate` round trip (the
+  default 50 ms interval also quantizes timing measurements; see
+  `packages/integration/utils.ts`).
+- **`await waitFor(() => clickButtonWithText(page, "X"))`, re-clicking until it
+  "takes"** — fires the stimulus speculatively. It can double-fire (creating
+  duplicate state) and, against a `dismissable` overlay such as `cf-modal`,
+  repeated clicks behind the open modal dismiss it and leave the test stuck.
+- **`page.waitForSelector(...)` in a retry loop to "wait it out"** — Astral's
+  `waitForSelector` is itself a tight CDP poll, and a present element is not a
+  ready one.
+
+The shape is always: settle the view, click once, then wait for the effect —
+never poll-and-pray, and never re-click.
+
 ## Best Practices
 
 1. **Use roles first**: `button`, `textbox`, `checkbox`, etc.
