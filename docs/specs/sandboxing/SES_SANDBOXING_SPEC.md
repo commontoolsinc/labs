@@ -38,7 +38,7 @@ hardening of module-scope definitions at load time.
 4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
    only when they are direct functions.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
-   be a versioned, recursively inert subset of `StorableValue` and then
+   be a versioned, recursively inert subset of `FabricValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
    allowed only if the final result passes this verifier. Transitional explicit
    snapshot helpers such as `safeDateNow()` and `nonPrivateRandom()` are
@@ -356,7 +356,7 @@ stable SES contract. Pattern authors should call `safeDateNow()` and
 explicit narrow exceptions that yield plain data snapshots.
 
 Version 1 of the allowed domain is a deliberate subset of
-`@commonfabric/memory`'s `StorableValue`:
+`@commonfabric/memory`'s `FabricValue`:
 
 - `null`
 - `undefined`
@@ -373,9 +373,9 @@ Version 1 of the allowed domain is a deliberate subset of
 - exact intrinsic `Set` instances whose elements are allowed values
 
 Future widening of this set beyond the above, including temporal primitives or
-other richer `StorableValue` members, requires an explicit spec revision and
+other richer `FabricValue` members, requires an explicit spec revision and
 validator version bump. The v1 verifier MUST NOT silently widen with upstream
-`StorableValue` changes.
+`FabricValue` changes.
 
 This boundary is about executable behavior and authority, not about forcing
 author data into a JSON-like normal form. Sparse arrays, symbol keys, cyclic
@@ -1064,7 +1064,7 @@ must:
 - recursively validate `Map` keys and values and `Set` values
 - reject intrinsic `RegExp` instances whose `global` or `sticky` flags make
   `lastIndex` observable mutable state
-- reject any `StorableValue` members outside the approved v1 subset
+- reject any `FabricValue` members outside the approved v1 subset
 - allow shape-level cases such as sparse arrays, symbol keys, cycles, reserved
   property names, non-finite numbers, and extra own data properties if the
   surviving snapshot is inert
@@ -1811,10 +1811,10 @@ fail closed.
 #### 2.2 Add custom module-safe-data checker/freezer (Priority: High)
 
 Implement a runtime helper that proves a value is a versioned, recursively inert
-subset of `StorableValue` and then hardens it. This helper is stricter than
+subset of `FabricValue` and then hardens it. This helper is stricter than
 `harden()` alone and stricter than Endo pass-style checks. It must reject
 unsupported runtime kinds such as exotic/custom prototypes and non-approved
-`StorableValue` members, preserve accepted `Map` / `Set` contents while
+`FabricValue` members, preserve accepted `Map` / `Set` contents while
 converting the surviving collection object to immutable semantics rather than
 relying on `harden()` alone, and ensure that the value which escapes module
 load is recursively inert. Shape-level cases such as cycles, symbol keys,

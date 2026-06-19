@@ -1,24 +1,8 @@
 import { isRecord } from "@commonfabric/utils/types";
-import {
-  ACL,
-  ACLUser,
-  ANYONE,
-  Capability,
-  DID,
-  DIDKey,
-  MIME,
-} from "./interface.ts";
+import { ACL, ACLUser, ANYONE, Capability, DID, DIDKey } from "./interface.ts";
 import { isDID } from "../identity/src/interface.ts";
 
 export type { ACL, ACLUser, ANYONE, Capability, DID, DIDKey };
-
-/**
- * Well-known MIME type for the Access Control List
- *
- * Syncing requires `"application/json"`, but could be e.g.
- * `"application/acl+json"` in the future.
- */
-export const ACL_TYPE: MIME = "application/json" as const;
 
 export const ANYONE_USER: ANYONE = "*";
 
