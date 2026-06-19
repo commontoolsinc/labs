@@ -14,6 +14,7 @@ import {
   type PatternToolResult,
   SELF,
   type Stream,
+  TILE_UI,
   toCompactDebugString,
   UI,
   type VNode,
@@ -52,8 +53,9 @@ export interface NoteOutput extends NotePiece {
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
-  /** Minimal UI for embedding in containers like Record (read directly as `.embeddedUI`). */
-  embeddedUI: VNode;
+  /** Tile variant (CT-1764): the minimal embedded UI used when a container
+   * (e.g. Record) renders this note via `<cf-render variant="tile">`. */
+  [TILE_UI]: VNode;
   // Test-accessible state
   menuOpen: boolean;
   isEditingTitle: boolean;
@@ -579,7 +581,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       setTitle,
       appendLink,
       createNewNote,
-      embeddedUI: editorUI,
+      [TILE_UI]: editorUI,
       // Test-accessible state
       menuOpen,
       isEditingTitle,

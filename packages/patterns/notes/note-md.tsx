@@ -7,6 +7,7 @@ import {
   navigateTo,
   pattern,
   type Stream,
+  TILE_UI,
   UI,
   type VNode,
   wish,
@@ -35,8 +36,8 @@ export interface NoteMdOutput {
   isHidden: true;
   /** Excluded from mentions autocomplete (notes in notebooks may be hidden but still mentionable) */
   isMentionable: false;
-  /** Minimal UI for embedding in other patterns */
-  embeddedUI: VNode;
+  /** Tile variant (CT-1764): minimal embedded UI for `<cf-render variant="tile">`. */
+  [TILE_UI]: VNode;
   /** Processed content with wiki-links converted to markdown links */
   processedContent: string;
   /** Stream to toggle checkboxes in content */
@@ -203,7 +204,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       note,
       isHidden: true,
       isMentionable: false,
-      embeddedUI: markdownViewer,
+      [TILE_UI]: markdownViewer,
       processedContent,
       checkboxToggle: handleCheckboxToggle,
       hasBacklinks,

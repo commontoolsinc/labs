@@ -95,7 +95,7 @@ export default pattern<
         {profiles.map((p) => (
           <cf-hstack gap="2" align="center">
             <div style={{ flex: "1" }}>
-              <cf-cell-link $cell={p as any} />
+              <cf-render variant="chip" $cell={p as any} />
             </div>
             {ifElse(
               computed(() => {

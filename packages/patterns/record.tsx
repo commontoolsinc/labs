@@ -152,7 +152,7 @@ const initializeRecord = lift<{
   recordPatternJson,
 }) => {
   if ((currentPieces || []).length === 0) {
-    // Create Note as default module (rendered via its `.embeddedUI` export)
+    // Create Note as default module (rendered via cf-render variant="tile" → its [TILE_UI])
     // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
     const notesPiece = Note({ linkPattern: recordPatternJson });
 
@@ -276,7 +276,7 @@ const addSubPiece = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note (rendered via its `.embeddedUI` export)
+  // Special case: create Note (rendered via cf-render variant="tile" → its [TILE_UI])
   // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
   // Special case: create ExtractorModule as controller with parent Cells and title
   const piece = type === "notes"
@@ -1388,12 +1388,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              {computed(() => {
-                                const piece = entry.piece as any;
-                                // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
-                                return piece?.embeddedUI ??
-                                  <cf-render $cell={entry.piece} />;
-                              })}
+                              <cf-render
+                                variant={isExpanded ? "full" : "tile"}
+                                $cell={entry.piece}
+                              />
                             </div>,
                             null,
                           )}
@@ -1682,12 +1680,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   minHeight: isExpanded ? "0" : "auto",
                                 }}
                               >
-                                {computed(() => {
-                                  const piece = entry.piece as any;
-                                  // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
-                                  return piece?.embeddedUI ??
-                                    <cf-render $cell={entry.piece} />;
-                                })}
+                                <cf-render
+                                  variant={isExpanded ? "full" : "tile"}
+                                  $cell={entry.piece}
+                                />
                               </div>,
                               null,
                             )}
@@ -1969,12 +1965,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            {computed(() => {
-                              const piece = entry.piece as any;
-                              // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
-                              return piece?.embeddedUI ??
-                                <cf-render $cell={entry.piece} />;
-                            })}
+                            <cf-render
+                              variant={isExpanded ? "full" : "tile"}
+                              $cell={entry.piece}
+                            />
                           </div>,
                           null,
                         )}
