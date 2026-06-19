@@ -186,8 +186,11 @@ version of the data. Hashes are primarily used for:
 
 The `"/"` sigil convention is reused as a general escape mechanism for special
 object shapes, not specifically tied to IPLD/IPFS semantics. The legacy
-`{ "/": string }` bare-string link form has been removed from recognition;
-current link formats use structured objects under the `"/"` key.
+`{ "/": string }` bare-string *link* form has been removed from recognition;
+current link formats use structured objects under the `"/"` key. (This does not
+cover the serialized entity-id *reference* form, which still uses a
+`{ "/": "<tag>:<hash>" }` shape under the current cell representation — see
+[Identity and References](./3-identity-and-references.md#serialized-entity-id-reference-form).)
 
 ### Concerns: IPFS Conventions Without IPFS Benefits
 

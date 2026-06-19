@@ -64,20 +64,69 @@ from write and recognition code paths. The type definition still exists in
 `sigil-types.ts`, and backwards-compatible reading of previously persisted data
 is retained, but no code produces or actively recognizes this format.
 
-**Bare string link** (`{ "/": string }` with a plain string value) — removed
-from recognition entirely.
+**Bare string link** (`{ "/": string }` with a plain string value, used as a
+*generic* link) — removed from recognition entirely. This is distinct from the
+serialized entity-id reference form below, which uses the same `{ "/": string }`
+shape to carry a tagged entity-id hash and is still actively produced (see
+[Serialized Entity-Id Reference Form](#serialized-entity-id-reference-form)).
 
 ### Entity Identifiers
 
-Entities are identified by content-derived hashes computed via the `hashOf()`
-function. See [Data Model](./1-data-model.md#hashing-and-content-addressing) for
-details on the hashing mechanism.
+An entity is identified by an `EntityId`: a content-derived hash that names a
+cell/document within a space. An `EntityId` is a **branded `FabricHash`** — at
+runtime it is just a `FabricHash` (see [Data Model](./1-data-model.md)), and the
+brand is a type-only marker that distinguishes "this hash is an entity id" from
+an arbitrary content/value/schema hash:
 
-The `hashOf()` function is used for:
+```typescript
+// At runtime an `EntityId` is a `FabricHash`; the brand is type-only.
+type EntityId = FabricHash & { readonly [ENTITY_ID_BRAND]: true };
+```
+
+`EntityId`s are produced by `createRef()`, which derives a stable id from a
+source value (and an optional `cause`) via `hashOf()`, and by `entityIdFrom()`,
+which brands an existing content-hash string or `FabricHash`. A `FabricHash` has
+a tagged string form, `<tag>:<hash>` (e.g. `fid1:…`); construct one from that
+string via `FabricHash.fromString()`.
+
+The underlying `hashOf()` function — see
+[Data Model](./1-data-model.md#hashing-and-content-addressing) for the hashing
+mechanism — is also used directly for:
 - Pattern ID generation: `hashOf({ causal: { patternId, type: "pattern" } })`
 - Request deduplication: `hashOf(llmParams).toString()`
 - Cache keys: `hashOf(JSON.stringify(selector)).toString()`
 - Causal chain references
+
+### Serialized Entity-Id Reference Form
+
+When an entity id is serialized as a reference to another cell — for example as
+the value of `Cell.entityId`, or as extracted by `getEntityId()` — its concrete
+shape is **flag-dispatched** by the nascent "modern cell representation"
+(`modernCellRep`), a single gate that selects between two regimes:
+
+- **Modern cell representation _off_ (the current default):** the reference is
+  a plain `{ "/": "<tag>:<hash>" }` object — the legacy DAG-JSON-flavored form.
+- **Modern cell representation _on_:** the reference is a straight `FabricHash`.
+
+This is the one place that describes the flag bifurcation; the `EntityRef` type
+captures both regimes:
+
+```typescript
+type EntityRef = FabricHash | { "/": string };
+```
+
+Production and recognition route through a small chokepoint —
+`entityRefFromString()` / `entityRefFrom()` produce a reference, and
+`isEntityRef()` / `entityRefToString()` recognize and extract one. Recognition
+is **strict**: it accepts only the form for the currently active regime, never
+both. This is deliberate — a stored hash carries no record of which input form
+produced it, so the legacy and modern hash regimes are a clean break and never
+intermix within one regime.
+
+> The flag is not currently flipped: it is the plumbing wedge ahead of a future
+> hash-changing storage migration. Until it is flipped, every serialized
+> entity-id reference is the `{ "/": "<tag>:<hash>" }` form, byte-identical to
+> the prior behavior.
 
 ### Internal Representation
 
