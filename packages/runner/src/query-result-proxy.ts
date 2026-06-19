@@ -172,6 +172,14 @@ export function createQueryResultProxy<T>(
   ]);
   const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
 
+  // The SHAPE_READ above only tracks the container's shape, but the stream
+  // check depends on a specific field's VALUE. Register an explicit read of
+  // `$stream` when present, so a value flipping into/out of a stream marker
+  // re-triggers consumers. [review: ubik2]
+  if (isRecord(value) && "$stream" in value) {
+    readTx.readValueOrThrow({ ...link, path: [...link.path, "$stream"] });
+  }
+
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
   // pattern's Output type wasn't explicitly specified, causing the capture
@@ -491,7 +499,9 @@ export function createQueryResultProxy<T>(
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {
         const readTx = runtime.readTx(tx);
-        const current = readTx.readValueOrThrow(link, SHAPE_READ);
+        // Read the array fully (not SHAPE_READ) so the length descriptor tracks
+        // element add/remove, matching the `length` get trap above. [review: ubik2]
+        const current = readTx.readValueOrThrow(link);
         return {
           configurable: false,
           enumerable: false,
