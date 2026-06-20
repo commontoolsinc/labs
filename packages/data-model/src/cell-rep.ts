@@ -210,8 +210,8 @@ function assertWireLinkRefPayloadShape(
       (Array.isArray(val) && val.every((e) => typeof e === "string"));
     if (!ok) {
       throw new Error(
-        `Cell-link wire payload field "${key}" must be a string or an ` +
-          `array of strings.`,
+        `Cell-link wire payload field "${key}" must be a \`string\` or ` +
+          `\`string[]\`.`,
       );
     }
   }
