@@ -9,6 +9,7 @@ import {
   type JSONSchema,
   linkRefFrom,
   linkRefPayload,
+  linkRefPayloadToString,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -16,7 +17,6 @@ import {
   rebaseCfcLabelView,
 } from "@commonfabric/runner/cfc/label-view-core";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 import {
@@ -357,12 +357,21 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Encodes this cell's link to a wire string, in the `data-model/codec-json`
-   * (`fvj1:…`) form, for transport across a string boundary (e.g. an HTTP body)
-   * from which it will be decoded back to a link.
+   * Encodes this cell's link to a wire string (the `fcl1:` cell-link form) for
+   * transport across a string boundary (e.g. an HTTP body) from which it will
+   * be decoded back to a link. Only the plain addressing fields cross the wire;
+   * `schema` and the cfc label view are deliberately omitted (see
+   * {@link linkRefPayloadToString}).
    */
   toWireString(): string {
-    return jsonFromValue(this.toJSON());
+    return linkRefPayloadToString({
+      id: this.#ref.id,
+      space: this.#ref.space,
+      ...(this.#ref.scope !== undefined && { scope: this.#ref.scope }),
+      path: this.#ref.path,
+      ...(this.#ref.overwrite !== undefined &&
+        { overwrite: this.#ref.overwrite }),
+    });
   }
 
   // Called when cell has been updated from the backend with

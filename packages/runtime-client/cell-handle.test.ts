@@ -9,10 +9,7 @@ import {
   type RuntimeClient,
 } from "./mod.ts";
 import { cellRefToKey } from "./shared/utils.ts";
-import {
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {
@@ -144,7 +141,7 @@ describe("CellHandle CFC label IPC", () => {
     });
   });
 
-  it("encodes its link to a codec wire string that round-trips", () => {
+  it("encodes its link to an fcl1: wire string with only addressing fields", () => {
     const runtime = {
       [$conn]: () => ({
         request: () => Promise.resolve({}),
@@ -157,13 +154,52 @@ describe("CellHandle CFC label IPC", () => {
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: ["value"],
+      // Neither of these may cross the wire.
+      schema: { type: "object" },
+      cfcLabelView: {
+        version: 1 as const,
+        entries: [{ path: [], label: { integrity: ["selected-by-alice"] } }],
+      },
     } as CellRef);
 
     const wire = cell.toWireString();
-    // It's the codec form, not raw JSON.
-    expect(seemsLikeJsonEncodedFabricValue(wire)).toBe(true);
-    // ...and decodes back to the same link toJSON() produces.
-    expect(valueFromJson(wire)).toEqual(cell.toJSON());
+    // It's the fcl1: cell-link form, not raw JSON.
+    expect(wire.startsWith("fcl1:")).toBe(true);
+    // ...and decodes back to only the plain addressing fields: `schema` and
+    // `cfcLabelView` are dropped.
+    expect(linkRefPayloadFromString(wire)).toEqual({
+      id: "of:wire-cell",
+      space: "did:key:test",
+      scope: "space",
+      path: ["value"],
+    });
+  });
+
+  it("carries overwrite onto the wire when set", () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    // Exercises toWireString's `overwrite` conditional (the other tests leave
+    // it unset).
+    const cell = new CellHandle(runtime, {
+      id: "of:wire-cell-2" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+      overwrite: "redirect",
+    } as CellRef);
+
+    expect(linkRefPayloadFromString(cell.toWireString())).toEqual({
+      id: "of:wire-cell-2",
+      space: "did:key:test",
+      scope: "space",
+      path: ["value"],
+      overwrite: "redirect",
+    });
   });
 
   it("uses carried label views in subscription keys", () => {

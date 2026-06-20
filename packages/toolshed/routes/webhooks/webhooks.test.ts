@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
 import { sha256 } from "@/lib/sha2.ts";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { linkRefPayloadToString } from "@commonfabric/runner/shared";
 import {
   extractSpaceFromCellLink,
   generateWebhookId,
@@ -79,56 +79,25 @@ describe("Webhook Utilities", () => {
   });
 
   describe("extractSpaceFromCellLink", () => {
-    it("extracts space from link@1 cell link", () => {
-      const cellLink = JSON.stringify({
-        "/": {
-          "link@1": {
-            id: "of:bafe123",
-            space: "did:key:z6Mktest123",
-            path: ["webhooks", "github"],
-          },
-        },
+    it("extracts space from an fcl1: cell link", () => {
+      const cellLink = linkRefPayloadToString({
+        id: "of:bafe123",
+        space: "did:key:z6Mktest123",
+        path: ["webhooks", "github"],
       });
+      // Sanity: it really is the fcl1: wire form, not raw JSON.
+      expect(cellLink.startsWith("fcl1:")).toBe(true);
       const space = extractSpaceFromCellLink(cellLink);
       expect(space).toBe("did:key:z6Mktest123");
     });
 
-    it("extracts space from a codec-encoded (fvj1:) cell link", () => {
-      // The same link emitted in the codec wire form: it round-trips losslessly
-      // and extracts the same space as the legacy raw-JSON form above.
-      const cellLink = jsonFromValue({
-        "/": {
-          "link@1": {
-            id: "of:bafe123",
-            space: "did:key:z6Mktest123",
-            path: ["webhooks", "github"],
-          },
-        },
-      });
-      // Sanity: it really is the codec form, not legacy raw JSON.
-      expect(cellLink.startsWith("{")).toBe(false);
-      const space = extractSpaceFromCellLink(cellLink);
-      expect(space).toBe("did:key:z6Mktest123");
-    });
-
-    it("throws for invalid JSON", () => {
+    it("throws for a string without the fcl1: prefix", () => {
       expect(() => extractSpaceFromCellLink("not json")).toThrow();
-    });
-
-    it("throws for missing link data", () => {
-      expect(() => extractSpaceFromCellLink(JSON.stringify({}))).toThrow(
-        "Invalid cell link format",
-      );
+      expect(() => extractSpaceFromCellLink(JSON.stringify({}))).toThrow();
     });
 
     it("throws for missing space", () => {
-      const cellLink = JSON.stringify({
-        "/": {
-          "link@1": {
-            id: "of:bafe123",
-          },
-        },
-      });
+      const cellLink = linkRefPayloadToString({ id: "of:bafe123" });
       expect(() => extractSpaceFromCellLink(cellLink)).toThrow(
         "Cell link missing space",
       );

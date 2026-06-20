@@ -136,3 +136,14 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
 
 /** Standard type meaning constructor function, a/k/a "class object." */
 export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
+
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
+
+/**
+ * Indicates whether `key` must never be copied onto an object from untrusted
+ * input, because assigning it can pollute the prototype chain. Use at boundaries
+ * where external data enters the system (deserialization, structural copying).
+ */
+export function isUnsafeObjectKey(key: string): boolean {
+  return UNSAFE_OBJECT_KEYS.has(key);
+}

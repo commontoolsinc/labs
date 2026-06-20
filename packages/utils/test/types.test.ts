@@ -11,6 +11,7 @@ import {
   isPlainObject,
   isRecord,
   isString,
+  isUnsafeObjectKey,
   Mutable,
 } from "@commonfabric/utils/types";
 
@@ -340,6 +341,29 @@ describe("types", () => {
       expect(isBoolean("true")).toBe(false);
       expect(isBoolean(null)).toBe(false);
       expect(isBoolean(undefined)).toBe(false);
+    });
+  });
+
+  describe("isUnsafeObjectKey", () => {
+    it("returns true for prototype-pollution keys", () => {
+      expect(isUnsafeObjectKey("__proto__")).toBe(true);
+      expect(isUnsafeObjectKey("constructor")).toBe(true);
+    });
+
+    it("returns false for ordinary keys", () => {
+      expect(isUnsafeObjectKey("id")).toBe(false);
+      expect(isUnsafeObjectKey("space")).toBe(false);
+      expect(isUnsafeObjectKey("path")).toBe(false);
+      expect(isUnsafeObjectKey("")).toBe(false);
+    });
+
+    it("returns false for near-miss keys that are not in the set", () => {
+      // Only `__proto__` and `constructor` are unsafe — not every
+      // prototype-adjacent name.
+      expect(isUnsafeObjectKey("prototype")).toBe(false);
+      expect(isUnsafeObjectKey("proto")).toBe(false);
+      expect(isUnsafeObjectKey("toString")).toBe(false);
+      expect(isUnsafeObjectKey("hasOwnProperty")).toBe(false);
     });
   });
 });

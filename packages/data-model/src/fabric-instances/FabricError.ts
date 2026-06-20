@@ -10,7 +10,8 @@ import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
-import { errorClassFromType, UNSAFE_KEYS } from "@/native-conversion.ts";
+import { errorClassFromType } from "@/native-conversion.ts";
+import { isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -123,7 +124,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
           ? extras as Iterable<readonly [string, FabricValue]>
           : Object.entries(extras as Record<string, FabricValue>);
       for (const [key, value] of entries) {
-        if (UNSAFE_KEYS.has(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+        if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
           continue;
         }
         this.#extras.set(key, value);
@@ -142,7 +143,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
     const name = error.name === type ? null : error.name;
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
-      if (UNSAFE_KEYS.has(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+      if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
         continue;
       }
       extras.push([
@@ -179,7 +180,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
     if (Object.isFrozen(this)) {
       throw new Error("Cannot modify frozen FabricError");
     }
-    if (UNSAFE_KEYS.has(key)) {
+    if (isUnsafeObjectKey(key)) {
       throw new Error(`Cannot use unsafe key in FabricError extras: ${key}`);
     }
     if (FABRIC_ERROR_RESERVED_KEYS.has(key)) {
@@ -373,7 +374,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
 
         const extras: Array<[string, FabricValue]> = [];
         for (const key of Object.keys(s)) {
-          if (FABRIC_ERROR_RESERVED_KEYS.has(key) || UNSAFE_KEYS.has(key)) {
+          if (FABRIC_ERROR_RESERVED_KEYS.has(key) || isUnsafeObjectKey(key)) {
             continue;
           }
           extras.push([key, s[key]]);
