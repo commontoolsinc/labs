@@ -4,7 +4,7 @@
  * entity-id reference form.
  */
 
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
 import type { FabricObject } from "@/interface.ts";
 
@@ -157,4 +157,91 @@ export function linkRefPayload<Payload extends FabricObject>(
 ): Payload {
   if (isLinkRef(value)) return value["/"][LINK_V1_TAG] as Payload;
   throw new Error("Not a link reference.");
+}
+
+//
+// Wire serialization of a (plain) link payload
+//
+
+/**
+ * The wire-format prefix tagging a serialized cell-link payload — `fcl1:` for
+ * "Fabric Cell Link v1". Like codec-json's `fvj1:`, it makes the format
+ * self-identifying (so a decoder can reject anything else) and reserves room
+ * for a future versioned migration. Owned here alongside the chokepoint.
+ */
+const CELL_LINK_WIRE_PREFIX = "fcl1:";
+
+/**
+ * A cell-link payload in its wire-transmissible form: a plain object whose every
+ * property value is a string or an array of strings. This is the subset of a
+ * link payload that is provably plain JSON — the addressing fields (id, space,
+ * scope, path, overwrite). Richer payload fields (a `schema`, which can carry an
+ * arbitrary {@link FabricValue} default, or cfc side-channels) are deliberately
+ * NOT in this form: they are not plain JSON and have no role at a string
+ * boundary. The exact field set is a consumer concern (e.g. runner's
+ * `WebhookCellLinkRefPayload`); this layer enforces only the generic shape.
+ */
+export type WireLinkRefPayload = {
+  readonly [key: string]: string | readonly string[];
+};
+
+/**
+ * Validates that `value` is a well-formed {@link WireLinkRefPayload}: a plain
+ * object with no prototype-pollution keys whose every value is a string or an
+ * array of strings. Throws otherwise. This is the generic guard that makes the
+ * wire round-trip safe — it rejects, loudly and at the boundary, any payload
+ * carrying a non-plain-JSON value (an object, a `bigint`, a Fabric special).
+ */
+function assertWireLinkRefPayloadShape(
+  value: unknown,
+): asserts value is WireLinkRefPayload {
+  if (!isPlainObject(value)) {
+    throw new Error("Cell-link wire payload must be a plain object.");
+  }
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "__proto__" || key === "constructor") {
+      throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
+    }
+    const ok = typeof val === "string" ||
+      (Array.isArray(val) && val.every((e) => typeof e === "string"));
+    if (!ok) {
+      throw new Error(
+        `Cell-link wire payload field "${key}" must be a string or an ` +
+          `array of strings.`,
+      );
+    }
+  }
+}
+
+/**
+ * Serializes a link payload to a wire string for transport across a string
+ * boundary (e.g. an HTTP body), tagged with the `fcl1:` prefix. The payload
+ * must satisfy {@link WireLinkRefPayload}; throws otherwise (so a non-transmissible
+ * payload fails here, at the producer, rather than corrupting silently).
+ */
+export function linkRefPayloadToString(payload: WireLinkRefPayload): string {
+  assertWireLinkRefPayloadShape(payload);
+  return CELL_LINK_WIRE_PREFIX + JSON.stringify(payload);
+}
+
+/**
+ * Decodes a wire string produced by {@link linkRefPayloadToString} back to a
+ * {@link WireLinkRefPayload}. Requires the `fcl1:` prefix, valid JSON, and the
+ * generic wire-payload shape; throws on any violation. Field-level validation
+ * (which keys, which kinds) is the consumer's concern, applied on top.
+ */
+export function linkRefPayloadFromString(wire: string): WireLinkRefPayload {
+  if (!wire.startsWith(CELL_LINK_WIRE_PREFIX)) {
+    throw new Error(
+      `Not a cell-link wire string (missing "${CELL_LINK_WIRE_PREFIX}" prefix).`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(wire.slice(CELL_LINK_WIRE_PREFIX.length));
+  } catch {
+    throw new Error("Cell-link wire string is not valid JSON.");
+  }
+  assertWireLinkRefPayloadShape(parsed);
+  return parsed;
 }

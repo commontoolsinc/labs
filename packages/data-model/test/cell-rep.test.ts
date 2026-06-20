@@ -8,8 +8,15 @@ import {
   entityRefFromString,
   entityRefToString,
   isEntityRef,
+  isLinkRef,
+  LINK_V1_TAG,
+  linkRefFrom,
+  linkRefPayload,
+  linkRefPayloadFromString,
+  linkRefPayloadToString,
   resetModernCellRepConfig,
   setModernCellRepConfig,
+  type WireLinkRefPayload,
 } from "@/cell-rep.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
@@ -88,5 +95,104 @@ describe("cell-rep entity-id reference", () => {
       expect(entityRefToString(entityRefFrom(HASH))).toBe(TAGGED);
       resetModernCellRepConfig();
     }
+  });
+});
+
+describe("cell-rep link-ref envelope", () => {
+  const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
+
+  it('wraps a payload in the `{ "/": { "link@1": … } }` envelope', () => {
+    expect(linkRefFrom(PAYLOAD)).toEqual({ "/": { [LINK_V1_TAG]: PAYLOAD } });
+  });
+
+  it("recognizes the link-ref envelope", () => {
+    expect(isLinkRef(linkRefFrom(PAYLOAD))).toBe(true);
+  });
+
+  it("rejects everything that is not a link-ref envelope", () => {
+    // The `{ "/": string }` entity-ref form is deliberately NOT a link ref.
+    expect(isLinkRef({ "/": "fid1:abc" })).toBe(false);
+    // Envelope with extra keys, or missing the tag, or wrong shape.
+    expect(isLinkRef({ "/": { [LINK_V1_TAG]: PAYLOAD }, extra: 1 })).toBe(
+      false,
+    );
+    expect(isLinkRef({ "/": {} })).toBe(false);
+    expect(isLinkRef({ other: { [LINK_V1_TAG]: PAYLOAD } })).toBe(false);
+    expect(isLinkRef(undefined)).toBe(false);
+    expect(isLinkRef("link")).toBe(false);
+    expect(isLinkRef([])).toBe(false);
+  });
+
+  it("extracts the payload from an envelope", () => {
+    expect(linkRefPayload(linkRefFrom(PAYLOAD))).toEqual(PAYLOAD);
+  });
+
+  it("throws extracting a payload from a non-envelope", () => {
+    expect(() => linkRefPayload({ "/": "fid1:abc" } as never)).toThrow(
+      "Not a link reference",
+    );
+    expect(() => linkRefPayload({} as never)).toThrow("Not a link reference");
+  });
+});
+
+describe("cell-rep link-ref payload wire serialization", () => {
+  it("round-trips a payload of strings and string arrays", () => {
+    const payload = { id: "of:abc", space: "did:key:z6Mk", path: ["a", "b"] };
+    const wire = linkRefPayloadToString(payload);
+    expect(wire.startsWith("fcl1:")).toBe(true);
+    expect(linkRefPayloadFromString(wire)).toEqual(payload);
+  });
+
+  it("tags the output with the fcl1: prefix followed by the JSON", () => {
+    expect(linkRefPayloadToString({ id: "of:abc" })).toBe(
+      'fcl1:{"id":"of:abc"}',
+    );
+  });
+
+  describe("linkRefPayloadToString validation", () => {
+    const bad = (p: unknown) =>
+      expect(() => linkRefPayloadToString(p as WireLinkRefPayload)).toThrow();
+
+    it("throws on a non-plain-object payload", () => {
+      bad([]);
+      bad("of:abc");
+      bad(null);
+    });
+
+    it("throws on a value that is neither string nor array-of-strings", () => {
+      bad({ n: 1 }); // number
+      bad({ o: { k: "v" } }); // nested object (e.g. a `schema`)
+      bad({ a: ["ok", 2] }); // array with a non-string element
+    });
+  });
+
+  describe("linkRefPayloadFromString validation", () => {
+    it("throws without the fcl1: prefix", () => {
+      expect(() => linkRefPayloadFromString('{"id":"of:abc"}')).toThrow();
+      expect(() => linkRefPayloadFromString("of:abc")).toThrow();
+    });
+
+    it("throws on invalid JSON after the prefix", () => {
+      expect(() => linkRefPayloadFromString("fcl1:not json")).toThrow();
+    });
+
+    it("throws when the decoded value is not a plain object", () => {
+      expect(() => linkRefPayloadFromString('fcl1:"x"')).toThrow();
+      expect(() => linkRefPayloadFromString("fcl1:[]")).toThrow();
+      expect(() => linkRefPayloadFromString("fcl1:null")).toThrow();
+    });
+
+    it("throws when a decoded value is not a string or array-of-strings", () => {
+      expect(() => linkRefPayloadFromString('fcl1:{"n":1}')).toThrow();
+      expect(() => linkRefPayloadFromString('fcl1:{"o":{"k":"v"}}')).toThrow();
+      expect(() => linkRefPayloadFromString('fcl1:{"a":["ok",2]}')).toThrow();
+    });
+
+    it("rejects prototype-pollution keys carried on the wire", () => {
+      expect(() => linkRefPayloadFromString('fcl1:{"__proto__":"x"}'))
+        .toThrow();
+      expect(() => linkRefPayloadFromString('fcl1:{"constructor":"x"}'))
+        .toThrow();
+    });
   });
 });
