@@ -343,6 +343,25 @@ Deno.test("writeCoverageResolved omits groups the PR did not change", async () =
   assertEquals(payload?.groups, []);
 });
 
+Deno.test("writeCoverageResolved flags a changed group whose debt was overridden", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    // The PR changed `tasks` and accepted its regression with an override.
+    coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
+  ];
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }])
+  );
+
+  assertEquals(payload?.state, "resolved");
+  assertEquals(payload?.overridden, true);
+  // An override contributes no reduction, but the group still appears.
+  assertEquals(payload?.improvedLines, 0);
+  assertEquals(payload?.groups, [
+    { group: "tasks", baseline: 12, current: 15 },
+  ]);
+});
+
 Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
   const rows = [
     coverageRow("coverage-debt: workspace uncovered lines", 1000, 2000, "excl"),
@@ -358,6 +377,8 @@ Deno.test("writeCoverageResolved sums gated groups and ignores workspace and ove
   assertEquals(payload?.state, "resolved");
   assertEquals(payload?.improvedLines, 14); // 6 + 8
   assertEquals(payload?.groups, []);
+  // The overridden group is not one this PR changed, so it is not flagged.
+  assertEquals(payload?.overridden, false);
 });
 
 Deno.test("writeCoverageResolved reports zero improvement when gated groups sit at baseline", async () => {

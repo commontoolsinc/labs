@@ -999,6 +999,32 @@ Deno.test("buildCoverageResolvedComment reports a group that gained uncovered li
   );
 });
 
+Deno.test("buildCoverageResolvedComment says the debt was overridden, not improved", () => {
+  // The gate passed because the debt was accepted, so the summary must not
+  // imply the new code is covered, even when a group also improved.
+  const resolved = buildCoverageResolvedComment(
+    4,
+    [{ group: "packages/runner", baseline: 12, current: 15 }],
+    true,
+  );
+
+  assertStringIncludes(
+    resolved,
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt accepted with an override.</strong></summary>",
+  );
+  assertStringIncludes(
+    resolved,
+    "accepted with an override rather than covered by new tests",
+  );
+  assertFalse(resolved.includes("Code coverage debt reduced by"));
+  assertFalse(resolved.includes("no test reached on"));
+  // The table still shows the real per-group numbers.
+  assertStringIncludes(
+    resolved,
+    "| `packages/runner` | 12 | 15 | 3 lines more |",
+  );
+});
+
 Deno.test("buildCoverageResolvedComment falls back to a sentence with no groups", () => {
   const resolved = buildCoverageResolvedComment(3, []);
 

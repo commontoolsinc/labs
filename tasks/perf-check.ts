@@ -1052,12 +1052,22 @@ export async function writeCoverageResolved(
       changedGroups.has(group.group)
     );
 
+  // The gate passed because a changed group's debt was accepted with a
+  // per-metric override or the reset marker (status "ovrd"), not because the
+  // new code is covered.
+  const overridden = coverageRows.some((row) => {
+    if (row.status !== "ovrd") return false;
+    const group = coverageMetricGroupName(row.metric);
+    return group !== null && group !== "workspace" && changedGroups.has(group);
+  });
+
   try {
     const payload: CoverageCommentPayload = {
       prNumber,
       state: "resolved",
       improvedLines,
       groups,
+      overridden,
     };
     const outputFile = coverageCommentOutputPath();
     await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));

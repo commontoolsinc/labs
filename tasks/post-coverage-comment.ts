@@ -81,6 +81,7 @@ export async function postCoverageComment(): Promise<void> {
       const updated = buildCoverageResolvedComment(
         payload.improvedLines ?? 0,
         payload.groups ?? [],
+        payload.overridden ?? false,
       );
       if (updated === marked.body) {
         console.log(

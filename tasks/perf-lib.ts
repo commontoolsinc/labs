@@ -42,7 +42,8 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  *   a new comment, or updates an existing coverage comment in place.
  * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
  *   lines versus baseline across the changed, gated coverage groups, and
- *   `groups`, the per-group baseline-versus-this-PR breakdown. The poster
+ *   `groups`, the per-group baseline-versus-this-PR breakdown. When the gate
+ *   passed only because the debt was accepted, `overridden` is set. The poster
  *   rebuilds an existing comment into a collapsed summary of where the PR left
  *   coverage; it does nothing when there is no existing comment to update.
  */
@@ -56,6 +57,10 @@ export interface CoverageCommentPayload {
   /** Present when `state` is "resolved": the changed source groups and where
    * this PR left each one's uncovered-line count. */
   groups?: CoverageResolvedGroup[];
+  /** Present when `state` is "resolved": true when the gate passed because a
+   * changed group's debt was accepted with a per-metric override or the reset
+   * marker, not because the new code is covered. */
+  overridden?: boolean;
 }
 
 /**
@@ -1747,13 +1752,19 @@ function coverageChangeText(baseline: number, current: number): string {
  * count versus its `main` baseline: when positive the summary reports the
  * reduction, otherwise it just notes the regression is resolved. `groups` lists
  * the changed source groups the gate ratchets, each with its `main` baseline and
- * the count this PR produced, rendered as a before-and-after table.
+ * the count this PR produced, rendered as a before-and-after table. When
+ * `overridden` is set the gate passed only because the debt was accepted with an
+ * override or the reset marker, so the summary says the metric was overridden
+ * rather than implying the new code is covered.
  */
 export function buildCoverageResolvedComment(
   improvedLines: number,
   groups: CoverageResolvedGroup[],
+  overridden = false,
 ): string {
-  const summary = improvedLines > 0
+  const summary = overridden
+    ? "Code coverage debt accepted with an override."
+    : improvedLines > 0
     ? `Code coverage debt reduced by ${uncoveredLineCount(improvedLines)}!`
     : "Code coverage regression resolved.";
 
@@ -1762,7 +1773,11 @@ export function buildCoverageResolvedComment(
   out.push(coverageSummary(summary, "strong"));
   out.push("");
   out.push(
-    improvedLines > 0
+    overridden
+      ? "The coverage gate in the **Performance Check** job passes because this " +
+        "PR's coverage debt was accepted with an override rather than covered " +
+        "by new tests. Here is where it left each changed source group:"
+      : improvedLines > 0
       ? "The coverage gate in the **Performance Check** job passes again. This " +
         `PR now covers ${uncoveredLineCount(improvedLines)} that no test ` +
         "reached on `main`. Here is where it left each changed source group:"

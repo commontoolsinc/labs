@@ -159,6 +159,32 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   );
 });
 
+Deno.test("postCoverageComment reports an overridden metric rather than improved coverage", async () => {
+  const existing =
+    `${COVERAGE_SUGGESTION_MARKER}\n<details open>\nregression\n</details>`;
+
+  const requests = await runWithPayload(
+    {
+      prNumber: 4211,
+      state: "resolved",
+      improvedLines: 0,
+      groups: [{ group: "packages/runner", baseline: 12, current: 15 }],
+      overridden: true,
+    },
+    [existing],
+  );
+
+  assertEquals(requests.length, 1);
+  assertStringIncludes(
+    requests[0].body,
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt accepted with an override.</strong></summary>",
+  );
+  assertEquals(
+    requests[0].body.includes("Code coverage debt reduced by"),
+    false,
+  );
+});
+
 Deno.test("postCoverageComment does nothing to resolve when no comment exists", async () => {
   const requests = await runWithPayload(
     { prNumber: 4211, state: "resolved", improvedLines: 5 },
