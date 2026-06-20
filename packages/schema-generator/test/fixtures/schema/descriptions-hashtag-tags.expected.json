@@ -1,5 +1,5 @@
 {
-  "description": "A #note the user took, discoverable via #quick-capture.",
+  "description": "A #note the user took, discoverable via #quickCapture.",
   "properties": {
     "annotations": {
       "description": "Linked #annotation entries.",
@@ -22,7 +22,7 @@
   ],
   "tags": [
     "note",
-    "quick-capture"
+    "quickcapture"
   ],
   "type": "object"
 }
