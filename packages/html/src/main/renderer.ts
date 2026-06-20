@@ -88,7 +88,10 @@ export class VDomRenderer {
     // obtain VDOM capability — so a renderer cannot exist without being torn
     // down on disposal.
     this.session = options.connection.attachVDom(() => this.disposeLocal());
-    this.session.onBatch(this.handleVDomBatch);
+    // If the connection is already disposed, attachVDom runs the teardown
+    // synchronously, so `disposed` is set before `session` is assigned above.
+    // Subscribe to batches only while still live.
+    if (!this.disposed) this.session.onBatch(this.handleVDomBatch);
   }
 
   /**
@@ -102,6 +105,11 @@ export class VDomRenderer {
     container: HTMLElement,
     cellRef: CellRef,
   ): Promise<() => Promise<void>> {
+    if (this.disposed) {
+      // The connection was disposed before this render began (its teardown ran
+      // during construction). A torn-down renderer does not mount.
+      return async () => {};
+    }
     if (this.mountId !== null) {
       throw new Error(
         "VDomRenderer already has an active mount. Call cancel first.",
@@ -203,7 +211,9 @@ export class VDomRenderer {
     this.mountId = null;
     this.rootNodeId = null;
     this.containerElement = null;
-    this.session.offBatch(this.handleVDomBatch);
+    // `session` is still unassigned when this runs as the synchronous teardown
+    // during attachVDom against an already-disposed connection.
+    this.session?.offBatch(this.handleVDomBatch);
     this.applicator.dispose();
   };
 

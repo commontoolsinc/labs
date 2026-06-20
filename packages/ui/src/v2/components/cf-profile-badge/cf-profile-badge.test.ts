@@ -581,8 +581,11 @@ describe("CFProfileBadge disposal handling", () => {
     return {
       _resolveGeneration: 0,
       isConnected: true,
-      runtime: { signal: { aborted } },
+      // The ambient @consume runtime is cleared on logout; the guard reads the
+      // profile cell's own runtime instead, so leave this undefined.
+      runtime: undefined,
       profile: {
+        runtime: () => ({ signal: { aborted } }),
         resolveAsCell: () =>
           Promise.reject(new DOMException("aborted", "AbortError")),
       },

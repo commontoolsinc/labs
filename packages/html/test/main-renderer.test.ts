@@ -25,6 +25,11 @@ class MockConnection {
     return this.lifetime.signal;
   }
 
+  /** Dispose the connection, as a logout/runtime-swap would. */
+  abort(): void {
+    this.lifetime.abort();
+  }
+
   onDispose(teardown: () => void): () => void {
     if (this.lifetime.signal.aborted) {
       teardown();
@@ -230,6 +235,38 @@ Deno.test("VDomRenderer - acknowledges applied batches", async () => {
   assertEquals(connection.acknowledgedBatches, [{ mountId, batchId: 7 }]);
 
   await renderer.dispose();
+});
+
+Deno.test("VDomRenderer - constructs without throwing against an already-disposed connection", async () => {
+  const connection = new MockConnection();
+  // Dispose before the renderer attaches: attachVDom runs the teardown
+  // synchronously during construction, while `session` is still unassigned.
+  connection.abort();
+
+  const renderer = new VDomRenderer({
+    runtimeClient: {} as any,
+    connection: connection as any,
+    document: {
+      createElement: (tagName: string) => ({ tagName }),
+      createTextNode: (text: string) => ({ text }),
+    } as unknown as Document,
+  });
+
+  // The renderer is torn down, not half-built: no active mount, and the batch
+  // subscription was never registered.
+  assertEquals(renderer.getMountId(), null);
+
+  // A torn-down renderer refuses to mount rather than proceeding half-built.
+  const cellRef = {
+    space: "did:key:test",
+    id: "cell-id",
+    path: [],
+    type: "application/json",
+  } as unknown as CellRef;
+  const cancel = await renderer.render({} as unknown as HTMLElement, cellRef);
+  assertEquals(renderer.getMountId(), null);
+  assertEquals(connection.unmountCalls.length, 0);
+  await cancel();
 });
 
 function workerCellHandle(

@@ -86,9 +86,12 @@ describe("CFCodeEditor backlink disposal handling", () => {
 
   function editorThis(aborted: boolean): Record<string, unknown> {
     return {
-      runtime: { signal: { aborted } },
+      // The ambient @consume runtime is cleared on logout; the guard must read
+      // the pattern's own runtime instead, so leave this undefined.
+      runtime: undefined,
       pattern: {
         runtime: () => ({
+          signal: { aborted },
           createPage: () =>
             Promise.reject(new DOMException("aborted", "AbortError")),
         }),

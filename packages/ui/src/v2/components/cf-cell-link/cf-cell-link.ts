@@ -191,8 +191,9 @@ export class CFCellLink extends BaseElement {
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
         // A disposal race (logout, runtime swap) cancels the resolve; that is
-        // cancellation, not a failure to surface.
-        if (this.runtime?.signal.aborted) return;
+        // cancellation, not a failure to surface. Read the cell's own runtime,
+        // not the ambient `this.runtime` (cleared to undefined on logout).
+        if (cell.runtime().signal.aborted) return;
         console.error("Failed to resolve cell:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
@@ -217,8 +218,9 @@ export class CFCellLink extends BaseElement {
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
         // A disposal race (logout, runtime swap) cancels the resolve; that is
-        // cancellation, not a failure to surface.
-        if (this.runtime?.signal.aborted) return;
+        // cancellation, not a failure to surface. Read the runtime the linked
+        // cell was built from, not the ambient `this.runtime` (cleared on logout).
+        if (runtime.signal.aborted) return;
         console.error("Failed to resolve link:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
