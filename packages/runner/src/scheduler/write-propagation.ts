@@ -37,9 +37,6 @@ export function collectChangedWritesForTransaction(
 
   for (const space of spaces) {
     for (const detail of getTransactionWriteDetails(tx, space)) {
-      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
-      // to a `Fabric`-aware equality once available.
       if (!valueEqual(detail.previousValue, detail.value)) {
         changedWrites.push(detail.address);
       }

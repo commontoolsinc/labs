@@ -79,12 +79,22 @@ const collectChangedPaths = (
       return;
     }
 
-    // A `FabricSpecialObject` (`FabricPrimitive` leaf / `FabricInstance`
-    // wrapper) is atomic: its state is private, so the key-walk below sees
-    // zero own-keys and would wrongly report "no change". `valueEqual` above
-    // already established they differ, so record a change at this path and
-    // don't decompose. (CT-1770: a `FabricBytes` value updated in place
-    // otherwise never reaches reactive consumers.)
+    // A `FabricSpecialObject` keeps its state in private fields, so the
+    // key-walk below sees zero own-keys and would wrongly report "no change"
+    // even though `valueEqual` above already established they differ. Record a
+    // change at this path and don't decompose. (CT-1770: a `FabricBytes` value
+    // updated in place otherwise never reaches reactive consumers.)
+    //
+    // The `FabricPrimitive` vs `FabricInstance` distinction matters here even
+    // though both are handled the same way: a `FabricPrimitive` genuinely IS an
+    // atomic frozen leaf (no outgoing references), so emitting a single change
+    // at its path is exactly correct. A `FabricInstance` is neither necessarily
+    // frozen nor a leaf — it can hold outgoing references to other
+    // memory-tracked objects, so a fully correct walk would descend into them
+    // (cf. `codecOf()` in cell.ts) and emit per-reference change paths. Lumping
+    // it in as a leaf here is a safe approximation only because nothing in the
+    // system stores `FabricInstance`s yet; revisit when that part of the system
+    // (still in flux) gels.
     if (
       before instanceof FabricSpecialObject ||
       after instanceof FabricSpecialObject

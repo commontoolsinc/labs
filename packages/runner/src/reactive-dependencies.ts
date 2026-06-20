@@ -191,9 +191,6 @@ export function determineTriggeredActions(
           afterValues[targetPath.length],
         );
       } else {
-        // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-        // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so
-        // migrate to a `Fabric`-aware equality once available.
         hasChanged = !valueEqual(
           beforeValues[targetPath.length],
           afterValues[targetPath.length],
@@ -279,9 +276,6 @@ function shallowEqual(
   after: FabricValue,
 ): boolean {
   // Links compare by full identity — a different link target matters.
-  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
-  // `Fabric`-aware equality once available.
   if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
     return valueEqual(before, after);
   }
@@ -298,9 +292,6 @@ function shallowEqual(
   }
 
   // Primitives (null, number, string, boolean, undefined)
-  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-  // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to a
-  // `Fabric`-aware equality once available.
   return valueEqual(before, after);
 }
 

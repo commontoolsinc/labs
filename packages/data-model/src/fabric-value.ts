@@ -41,20 +41,21 @@ import { hashStringOf } from "./value-hash.ts";
 /**
  * Compares two `FabricValue`s for logical (content) equality.
  *
- * This is the `data-model`-aware equality that the storage layer's no-op /
- * change-detection gates need. It mirrors `deepEqual()`'s structural recursion
- * for plain objects and arrays (including its hole-vs-stored-`undefined`
- * handling), but defers to canonical content hashing for any
- * `FabricSpecialObject` (`FabricPrimitive` leaves like `FabricBytes` /
+ * This is the `data-model`-aware equality the storage layer's no-op /
+ * change-detection gates need, and the fix for what `deepEqual()` gets wrong:
+ * any `FabricSpecialObject` (`FabricPrimitive` leaves like `FabricBytes` /
  * `FabricRegExp` / `FabricEpoch*` / `FabricHash`, and `FabricInstance`
- * wrappers). Those carry their state in private `#fields` with zero enumerable
+ * wrappers) keeps its state in private `#fields` with zero enumerable
  * own-properties, so `deepEqual()` conflates every distinct same-class instance
- * as equal — the CT-1770 bug. Hashing sees their real contents.
+ * as equal (the CT-1770 bug). Here such values are compared by canonical
+ * content hash instead.
  *
- * Plain containers may *contain* special objects nested arbitrarily deep, so
- * the recursion checks every node; the hash fast-path only fires once a special
- * object is actually reached, leaving the common all-plain-data case on the
- * same fast, short-circuiting path as `deepEqual()`.
+ * Everything else is the ordinary structural recursion over the JSON-shaped
+ * `FabricValue` space — plain objects, arrays (including sparse holes vs a
+ * stored `undefined`), and primitives via `Object.is` — recursing through every
+ * node so a special object nested arbitrarily deep is still hashed. (Unlike
+ * `deepEqual()` it does not handle non-`Fabric` class instances or named
+ * properties on arrays: those are not representable as `FabricValue`s.)
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
@@ -67,50 +68,26 @@ export function valueEqual(a: unknown, b: unknown): boolean {
     return hashStringOf(a) === hashStringOf(b);
   }
 
+  const aIsArray = Array.isArray(a);
+  if (aIsArray || Array.isArray(b)) {
+    if (!aIsArray || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      // A hole and a stored `undefined` are different states.
+      if ((i in a) !== (i in b)) return false;
+      if (i in a && !valueEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
   if (!(isRecord(a) && isRecord(b))) return false;
-  if (a.constructor !== b.constructor) return false;
 
   const keysA = Object.keys(a);
-  const keysALength = keysA.length;
-  if (keysALength !== Object.keys(b).length) return false;
-
-  const aIsArray = Array.isArray(a);
-  const bIsArray = Array.isArray(b);
-  if (!(aIsArray || bIsArray)) {
-    return checkSpecificProps(a, b, keysA);
-  }
-  if (!(aIsArray && bIsArray)) return false;
-
-  const lengthA = (a as unknown[]).length;
-  if (lengthA !== (b as unknown[]).length) return false;
-
-  let indexCount = 0;
-  for (let i = 0; i < lengthA; i++) {
-    const aValue = (a as unknown[])[i];
-    const bValue = (b as unknown[])[i];
-    indexCount++;
-    if (!valueEqual(aValue, bValue)) return false;
-    if (aValue === undefined) {
-      const aHasIt = Object.hasOwn(a, i);
-      const bHasIt = Object.hasOwn(b, i);
-      if (aHasIt !== bHasIt) return false;
-      if (!aHasIt && !bHasIt) indexCount--;
-    }
-  }
-
-  if (indexCount === keysALength) return true;
-  return checkSpecificProps(a, b, keysA.slice(indexCount));
-}
-
-function checkSpecificProps(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-  keysToCheck: string[],
-): boolean {
-  for (const key of keysToCheck) {
-    const aValue = a[key];
-    if (!valueEqual(aValue, b[key])) return false;
-    if (aValue === undefined && !Object.hasOwn(b, key)) return false;
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    // A present `undefined` and an absent key are different states, so require
+    // the key on `b` (not just an equal looked-up value).
+    if (!Object.hasOwn(b, key)) return false;
+    if (!valueEqual(a[key], b[key])) return false;
   }
   return true;
 }

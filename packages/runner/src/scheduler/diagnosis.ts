@@ -237,9 +237,6 @@ function readInvariantMovedExternally(
     const previous = before.get(key);
     // Only reads both runs performed are comparable.
     if (!previous) continue;
-    // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-    // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate to
-    // a `Fabric`-aware equality once available.
     if (valueEqual(previous.value, value)) continue;
     // Cover writes of EITHER run: run1's commit moving its own read is the
     // accumulator pattern, and a write-then-read inside the recheck run is
