@@ -675,7 +675,7 @@ export function llm(
         })();
 
         // Track the call (loop + writeback) as async builtin work so
-        // `runtime.settled()` / `Cell.pull()` wait for the result to land;
+        // `runtime.settled()` wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
           resultPromise.catch((e) =>
@@ -1001,7 +1001,7 @@ export function generateText(
         })();
 
         // Track the call (loop + writeback) as async builtin work so
-        // `runtime.settled()` / `Cell.pull()` wait for the result to land;
+        // `runtime.settled()` wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
           resultPromise.catch((e) =>

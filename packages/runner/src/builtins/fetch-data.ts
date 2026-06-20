@@ -309,7 +309,7 @@ export function fetchData(
         "fetchData-start",
         () => {
           // Try to claim mutex - returns immediately if another tab is processing.
-          // Registered as async builtin work so `runtime.settled()` / `Cell.pull()`
+          // Registered as async builtin work so `runtime.settled()`
           // wait for the fetch (and its result writeback) to land; `idle()` does
           // not, so the handler never blocks on network I/O.
           const work = tryClaimMutex(

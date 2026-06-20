@@ -279,7 +279,7 @@ export function fetchProgram(
         "fetchProgram-start",
         () => {
           // Start fetch asynchronously only after the transaction commits.
-          // Tracked as async builtin work so `runtime.settled()` / `Cell.pull()`
+          // Tracked as async builtin work so `runtime.settled()`
           // wait for the program resolve + writeback; `idle()` does not.
           myRequestId = requestId;
           abortController = new AbortController();
