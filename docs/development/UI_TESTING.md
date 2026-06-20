@@ -256,6 +256,14 @@ never poll-and-pray, and never re-click.
 4. **Use pierce strategy as fallback**: It remains useful for components that
    have not been updated with host semantics
 
+## Running the Tests Locally
+
+`deno task integration` starts the servers for you. These are browser tests, so
+the toolshed must serve the shell frontend, not just the API: a bare `deno task
+dev` toolshed returns `404` for the UI and the test times out. To run a single
+file by hand, point it at the compiled binary (`deno task build-binaries`, then
+`./dist/toolshed`) or a source toolshed with `SHELL_URL` set.
+
 ## Environment Variables
 
 | Variable | Description |

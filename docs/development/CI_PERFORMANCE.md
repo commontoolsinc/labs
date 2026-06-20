@@ -51,6 +51,17 @@ failure by itself.
 Good CI optimization PRs should reduce critical-path wall time without making
 the workflow harder to reason about.
 
+## Pulling Timing Data
+
+The labs repository is public, so the GitHub Actions REST API returns run, job,
+and per-step timings unauthenticated — no `gh` or token needed. Logs and
+artifacts do need an admin token, so the per-test timings in the `test-timing-*`
+artifacts are not reachable this way; measure those locally.
+
+Jobs and steps for a run:
+`GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
+job and step carries `started_at` and `completed_at`.
+
 ## Coverage Debt Baselines
 
 Performance Check also tracks coverage debt as uncovered source lines. Coverage
