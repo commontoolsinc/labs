@@ -26,6 +26,14 @@ const DEFAULT_SCOPE_KEY = "space" as const;
 const DEFAULT_SCHEDULER_SNAPSHOT_LIST_LIMIT = 500;
 const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
 
+// Annotation primitive (prototype): structural tag of a sigil link. The memory
+// engine must not depend on the runner, so we re-declare the tag here rather
+// than importing it. A sigil link is `{ "/": { "link@1": { id, ..., linkRole? } } }`;
+// the reserved "/" key makes links detectable in any committed value without
+// schema knowledge. Keep in sync with packages/runner/src/sigil-types.ts
+// (LINK_V1_TAG).
+const SIGIL_LINK_TAG = "link@1";
+
 const normalizeScope = (scope: CellScope | undefined): CellScope =>
   scope ?? DEFAULT_SCOPE;
 
@@ -328,6 +336,30 @@ CREATE TABLE IF NOT EXISTS scheduler_action_state (
   FOREIGN KEY (latest_observation_id)
     REFERENCES scheduler_observation(observation_id)
 );
+
+-- Annotation primitive (prototype): reverse index of "about" edges.
+-- Populated at the commit boundary by walking each revised document for sigil
+-- links that carry a linkRole (see SIGIL_LINK_TAG). A row records that the
+-- source document (from_*) links to a target (to_*) under a role, so a reverse
+-- lookup (what is attached to X?) is a single indexed read.
+-- Per-space (each space is its own database); cross-space federation is future.
+CREATE TABLE IF NOT EXISTS link_index (
+  branch      TEXT    NOT NULL DEFAULT '',
+  from_space  TEXT    NOT NULL DEFAULT '',
+  from_id     TEXT    NOT NULL,
+  from_scope  TEXT    NOT NULL,
+  from_path   JSON    NOT NULL,
+  to_space    TEXT    NOT NULL DEFAULT '',
+  to_id       TEXT    NOT NULL,
+  to_scope    TEXT    NOT NULL,
+  role        TEXT    NOT NULL,
+  seq         INTEGER NOT NULL,
+  op_index    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_link_index_incoming
+  ON link_index (branch, to_id, to_scope, role);
+CREATE INDEX IF NOT EXISTS idx_link_index_source
+  ON link_index (branch, from_id, from_scope);
 
 COMMIT;
 `;
@@ -1451,6 +1483,57 @@ export const readState = (
     scope: declaredScope,
     scopeKey,
   });
+};
+
+// Annotation primitive (prototype): the reverse-index read. Returns the
+// incoming role-bearing links (e.g. annotation about-edges) targeting `toId`,
+// optionally filtered by `role`. Backs `annotationsOf(target)`.
+export interface IncomingLink {
+  fromSpace: string;
+  fromId: EntityId;
+  fromScope: string;
+  fromPath: string[];
+  toSpace: string;
+  toId: EntityId;
+  toScope: string;
+  role: string;
+  seq: number;
+  opIndex: number;
+}
+
+export const readIncomingLinks = (
+  engine: Engine,
+  { toId, toScope = DEFAULT_SCOPE_KEY, role, branch = DEFAULT_BRANCH }: {
+    toId: EntityId;
+    toScope?: string;
+    role?: string;
+    branch?: BranchName;
+  },
+): IncomingLink[] => {
+  const rows = (role !== undefined
+    ? engine.database.prepare(`
+        SELECT * FROM link_index
+        WHERE branch = :branch AND to_id = :to_id
+          AND to_scope = :to_scope AND role = :role
+        ORDER BY seq, op_index
+      `).all({ branch, to_id: toId, to_scope: toScope, role })
+    : engine.database.prepare(`
+        SELECT * FROM link_index
+        WHERE branch = :branch AND to_id = :to_id AND to_scope = :to_scope
+        ORDER BY seq, op_index
+      `).all({ branch, to_id: toId, to_scope: toScope })) as LinkIndexRow[];
+  return rows.map((row) => ({
+    fromSpace: row.from_space,
+    fromId: row.from_id,
+    fromScope: row.from_scope,
+    fromPath: JSON.parse(row.from_path) as string[],
+    toSpace: row.to_space,
+    toId: row.to_id,
+    toScope: row.to_scope,
+    role: row.role,
+    seq: row.seq,
+    opIndex: row.op_index,
+  }));
 };
 
 const readStateForScopeKey = (
@@ -3088,6 +3171,240 @@ function schedulerActionKey(entry: {
   }\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}`;
 }
 
+// ---------------------------------------------------------------------------
+// Annotation primitive (prototype): link_index maintenance at the commit
+// boundary. Mirrors the scheduler_read_index reconcile pattern. See
+// docs/development/connectors/annotations-prototype-plan.md
+// ---------------------------------------------------------------------------
+
+interface LinkIndexRow {
+  branch: string;
+  from_space: string;
+  from_id: string;
+  from_scope: string;
+  from_path: string;
+  to_space: string;
+  to_id: string;
+  to_scope: string;
+  role: string;
+  seq: number;
+  op_index: number;
+}
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// A sigil link is `{ "/": { "link@1": {...} } }`. A SourceLink is `{ "/": "<hash>" }`
+// (string under "/"), so the object-vs-string check at the "/" key disambiguates
+// the two without any schema knowledge.
+const sigilLinkInner = (value: unknown): Record<string, unknown> | undefined => {
+  if (!isPlainRecord(value)) return undefined;
+  const slash = value["/"];
+  if (!isPlainRecord(slash)) return undefined;
+  const inner = slash[SIGIL_LINK_TAG];
+  return isPlainRecord(inner) ? inner : undefined;
+};
+
+// Walk a committed document collecting every sigil link that carries a
+// `linkRole`. Only role-bearing links are indexed, keeping link_index scoped to
+// annotation edges rather than the entire link graph.
+const collectRoleLinks = (
+  document: EntityDocument,
+): Array<{ path: string[]; inner: Record<string, unknown> }> => {
+  const found: Array<{ path: string[]; inner: Record<string, unknown> }> = [];
+  const walk = (value: unknown, path: string[]): void => {
+    const inner = sigilLinkInner(value);
+    if (inner !== undefined) {
+      if (typeof inner.linkRole === "string" && inner.linkRole.length > 0) {
+        found.push({ path, inner });
+      }
+      // A link's inner fields (schema, etc.) are not document content; do not
+      // descend into them.
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, [...path, String(index)]));
+      return;
+    }
+    if (isPlainRecord(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        walk(child, [...path, key]);
+      }
+    }
+  };
+  walk(document as unknown, []);
+  return found;
+};
+
+const linkIndexRowsForDocument = (
+  options: {
+    branch: BranchName;
+    fromSpace: string;
+    fromId: EntityId;
+    fromScope: string;
+    seq: number;
+    opIndex: number;
+    document: EntityDocument | null;
+  },
+): LinkIndexRow[] => {
+  if (options.document === null) return [];
+  return collectRoleLinks(options.document)
+    .filter(({ inner }) => typeof inner.id === "string")
+    .map(({ path, inner }) => ({
+      branch: options.branch,
+      from_space: options.fromSpace,
+      from_id: options.fromId,
+      from_scope: options.fromScope,
+      from_path: JSON.stringify(path),
+      to_space: typeof inner.space === "string"
+        ? inner.space
+        : options.fromSpace,
+      to_id: inner.id as string,
+      to_scope: typeof inner.scope === "string" ? inner.scope : DEFAULT_SCOPE_KEY,
+      role: inner.linkRole as string,
+      seq: options.seq,
+      op_index: options.opIndex,
+    }));
+};
+
+const linkIndexRowKey = (row: LinkIndexRow): string =>
+  [
+    row.branch,
+    row.from_space,
+    row.from_id,
+    row.from_scope,
+    row.from_path,
+    row.to_space,
+    row.to_id,
+    row.to_scope,
+    row.role,
+  ].join("\0");
+
+// Reconcile all link_index rows for a single revised source document. Existing
+// rows for (branch, from_id, from_scope) are diffed against the links currently
+// in the document; removed links are deleted, new links inserted. A `delete`
+// revision yields no next rows, which clears the source's edges.
+const reconcileLinkRowsForSource = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    fromSpace: string;
+    fromId: EntityId;
+    fromScope: string;
+    seq: number;
+    opIndex: number;
+    document: EntityDocument | null;
+  },
+): void => {
+  const sourceParams = {
+    branch: options.branch,
+    from_id: options.fromId,
+    from_scope: options.fromScope,
+  };
+  const existingRows = engine.database.prepare(`
+    SELECT
+      branch, from_space, from_id, from_scope, from_path,
+      to_space, to_id, to_scope, role, seq, op_index
+    FROM link_index
+    WHERE branch = :branch
+      AND from_id = :from_id
+      AND from_scope = :from_scope
+  `).all(sourceParams) as LinkIndexRow[];
+  const nextRows = linkIndexRowsForDocument(options);
+
+  // Nothing here and nothing coming: avoid preparing delete/insert statements
+  // for the overwhelmingly common non-annotation commit.
+  if (existingRows.length === 0 && nextRows.length === 0) return;
+
+  const deleteRowStmt = engine.database.prepare(`
+    DELETE FROM link_index
+    WHERE branch = :branch
+      AND from_space = :from_space
+      AND from_id = :from_id
+      AND from_scope = :from_scope
+      AND from_path = :from_path
+      AND to_space = :to_space
+      AND to_id = :to_id
+      AND to_scope = :to_scope
+      AND role = :role
+  `);
+  const insertRowStmt = engine.database.prepare(`
+    INSERT INTO link_index (
+      branch, from_space, from_id, from_scope, from_path,
+      to_space, to_id, to_scope, role, seq, op_index
+    ) VALUES (
+      :branch, :from_space, :from_id, :from_scope, :from_path,
+      :to_space, :to_id, :to_scope, :role, :seq, :op_index
+    )
+  `);
+  reconcileSchedulerIndexRows<LinkIndexRow>({
+    existingRows,
+    nextRows,
+    keyForRow: linkIndexRowKey,
+    deleteAllRows: () => {
+      engine.database.prepare(`
+        DELETE FROM link_index
+        WHERE branch = :branch
+          AND from_id = :from_id
+          AND from_scope = :from_scope
+      `).run(sourceParams);
+    },
+    deleteRow: (row) => {
+      deleteRowStmt.run({
+        branch: row.branch,
+        from_space: row.from_space,
+        from_id: row.from_id,
+        from_scope: row.from_scope,
+        from_path: row.from_path,
+        to_space: row.to_space,
+        to_id: row.to_id,
+        to_scope: row.to_scope,
+        role: row.role,
+      });
+    },
+    insertRow: (row) => insertRowStmt.run({ ...row }),
+  });
+};
+
+// Entry point called from applyCommitTransaction after snapshots materialize.
+const reconcileLinkIndexForRevisions = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    space: string | undefined;
+    seq: number;
+    revisions: AppliedRevision[];
+  },
+): void => {
+  for (const revision of options.revisions) {
+    const fromScope = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
+    let document: EntityDocument | null;
+    if (revision.op === "delete") {
+      document = null;
+    } else if (revision.op === "set") {
+      document = revision.document ?? null;
+    } else {
+      // patch: AppliedRevision carries only the patches, so read the freshly
+      // materialized full document to recompute outgoing edges.
+      document = readStateForScopeKey(engine, {
+        id: revision.id,
+        scopeKey: fromScope,
+        branch: options.branch,
+        seq: options.seq,
+      })?.document ?? null;
+    }
+    reconcileLinkRowsForSource(engine, {
+      branch: options.branch,
+      fromSpace: options.space ?? "",
+      fromId: revision.id,
+      fromScope,
+      seq: options.seq,
+      opIndex: revision.opIndex,
+      document,
+    });
+  }
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -3247,6 +3564,10 @@ const applyCommitTransaction = (
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
+
+  // Annotation primitive (prototype): maintain the reverse link_index from the
+  // freshly materialized documents, atomically within this commit transaction.
+  reconcileLinkIndexForRevisions(engine, { branch, space, seq, revisions });
 
   const changedSchedulerWrites = space
     ? schedulerWriteAddressesForRevisions(space, revisions)
