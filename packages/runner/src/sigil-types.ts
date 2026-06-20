@@ -6,6 +6,7 @@ import {
   type LinkRef,
   type WireLinkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import { isLinkScope } from "./scope.ts";
 
 export type { URI } from "@commonfabric/memory/interface";
 
@@ -49,9 +50,9 @@ const WEBHOOK_LINK_KEYS = [
 /**
  * Validates the field-level shape of a decoded {@link WireLinkRefPayload} as a
  * {@link WebhookCellLinkRefPayload}: only the known addressing keys, each of the
- * expected kind (scalar string vs. string array). This layers on top of
- * cell-rep's generic guard, which has already ensured every value is a plain
- * string or array of strings.
+ * expected kind — `id`/`space` strings, `path` an array, and `scope`/`overwrite`
+ * actual enum members. This layers on top of cell-rep's generic guard, which has
+ * already ensured every value is a plain string or array of strings.
  */
 export function assertWebhookCellLinkRefPayload(
   payload: WireLinkRefPayload,
@@ -64,10 +65,24 @@ export function assertWebhookCellLinkRefPayload(
   if (payload.path !== undefined && !Array.isArray(payload.path)) {
     throw new Error('Cell-link "path" must be an array of strings.');
   }
-  for (const key of ["id", "space", "scope", "overwrite"] as const) {
+  for (const key of ["id", "space"] as const) {
     if (payload[key] !== undefined && typeof payload[key] !== "string") {
       throw new Error(`Cell-link "${key}" must be a string.`);
     }
+  }
+  // Validate the enum-valued fields against their actual members, not merely
+  // "is a string" — otherwise this assertion would be unsound (e.g. a bogus
+  // `scope` would pass and then be typed as a valid `LinkScope`).
+  if (payload.scope !== undefined && !isLinkScope(payload.scope)) {
+    throw new Error(
+      'Cell-link "scope" must be one of "inherit", "space", "user", "session".',
+    );
+  }
+  if (
+    payload.overwrite !== undefined &&
+    payload.overwrite !== "redirect" && payload.overwrite !== "this"
+  ) {
+    throw new Error('Cell-link "overwrite" must be "redirect" or "this".');
   }
 }
 
