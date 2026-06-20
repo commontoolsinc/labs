@@ -15,8 +15,17 @@ export {
   type LinkRef,
   linkRefFrom,
   linkRefPayload,
+  linkRefPayloadFromString,
+  linkRefPayloadToString,
+  type WireLinkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-export { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
+export {
+  assertWebhookCellLinkRefPayload,
+  LINK_V1_TAG,
+  type SigilLink,
+  type URI,
+  type WebhookCellLinkRefPayload,
+} from "./sigil-types.ts";
 export {
   CHIP_UI,
   ID,

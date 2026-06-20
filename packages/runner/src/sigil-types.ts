@@ -1,7 +1,11 @@
 import type { JSONSchema, JSONValue, LinkScope } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "@commonfabric/memory/interface";
-import { LINK_V1_TAG, type LinkRef } from "@commonfabric/data-model/cell-rep";
+import {
+  LINK_V1_TAG,
+  type LinkRef,
+  type WireLinkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 
 export type { URI } from "@commonfabric/memory/interface";
 
@@ -23,6 +27,49 @@ export type CellLinkRefPayload = {
   schema?: JSONSchema;
   overwrite?: "redirect" | "this"; // default is "this"
 };
+
+/**
+ * The subset of a {@link CellLinkRefPayload} that is safe to carry across a
+ * string boundary (the webhook wire): only the addressing fields, every one of
+ * which is a string or an array of strings. `schema` is dropped — it can carry
+ * an arbitrary `FabricValue` default (not plain JSON), and the webhook consumer
+ * imposes its own schema regardless. cfc's `cfcLabelView` is likewise absent (it
+ * is not part of the base payload, and stream/set operations never read it).
+ */
+export type WebhookCellLinkRefPayload = Omit<CellLinkRefPayload, "schema">;
+
+const WEBHOOK_LINK_KEYS = [
+  "id",
+  "space",
+  "scope",
+  "path",
+  "overwrite",
+] as const;
+
+/**
+ * Validates the field-level shape of a decoded {@link WireLinkRefPayload} as a
+ * {@link WebhookCellLinkRefPayload}: only the known addressing keys, each of the
+ * expected kind (scalar string vs. string array). This layers on top of
+ * cell-rep's generic guard, which has already ensured every value is a plain
+ * string or array of strings.
+ */
+export function assertWebhookCellLinkRefPayload(
+  payload: WireLinkRefPayload,
+): asserts payload is WebhookCellLinkRefPayload {
+  for (const key of Object.keys(payload)) {
+    if (!(WEBHOOK_LINK_KEYS as readonly string[]).includes(key)) {
+      throw new Error(`Unexpected cell-link field: "${key}".`);
+    }
+  }
+  if (payload.path !== undefined && !Array.isArray(payload.path)) {
+    throw new Error('Cell-link "path" must be an array of strings.');
+  }
+  for (const key of ["id", "space", "scope", "overwrite"] as const) {
+    if (payload[key] !== undefined && typeof payload[key] !== "string") {
+      throw new Error(`Cell-link "${key}" must be a string.`);
+    }
+  }
+}
 
 /**
  * Sigil link type.
