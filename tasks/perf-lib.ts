@@ -41,9 +41,10 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  * - `state: "regressed"` carries the full comment `body`. The poster posts it as
  *   a new comment, or updates an existing coverage comment in place.
  * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
- *   lines versus baseline across the changed, gated coverage groups. The poster
- *   collapses an existing comment's `<details>` and rewrites its `<summary>`; it
- *   does nothing when there is no existing comment to update.
+ *   lines versus baseline across the changed, gated coverage groups, and
+ *   `groups`, the per-group baseline-versus-this-PR breakdown. The poster
+ *   rebuilds an existing comment into a collapsed summary of where the PR left
+ *   coverage; it does nothing when there is no existing comment to update.
  */
 export interface CoverageCommentPayload {
   prNumber: number;
@@ -52,6 +53,9 @@ export interface CoverageCommentPayload {
   body?: string;
   /** Present when `state` is "resolved". */
   improvedLines?: number;
+  /** Present when `state` is "resolved": the changed source groups and where
+   * this PR left each one's uncovered-line count. */
+  groups?: CoverageResolvedGroup[];
 }
 
 /**
@@ -1533,6 +1537,15 @@ export interface CoverageSuggestionFileLines {
   uncoveredCount: number;
 }
 
+/** A changed source group and where this PR left its uncovered-line count. */
+export interface CoverageResolvedGroup {
+  group: string;
+  /** Uncovered-line count from latest `main`. */
+  baseline: number;
+  /** Uncovered-line count this PR produced. */
+  current: number;
+}
+
 export interface CoverageDebtSuggestionInput {
   groups: CoverageSuggestionGroup[];
   files: CoverageSuggestionFileLines[];
@@ -1561,11 +1574,16 @@ function uncoveredLineCount(count: number): string {
 }
 
 /**
- * Render the disclosure `<summary>`. An `<h3>` makes the line a little larger
- * and bold so it stands out when collapsed; the detective emoji leads it.
+ * Render the disclosure `<summary>`, leading with the detective emoji. The
+ * regression comment wraps the line in an `<h3>` so it stands out while the
+ * details are open; the resolved comment uses `<strong>`, a quieter weight that
+ * suits a collapsed, already-handled note.
  */
-function coverageSummary(text: string): string {
-  return `<summary><h3>🕵🏻‍♀️ ${text}</h3></summary>`;
+function coverageSummary(
+  text: string,
+  emphasis: "h3" | "strong" = "h3",
+): string {
+  return `<summary><${emphasis}>🕵🏻‍♀️ ${text}</${emphasis}></summary>`;
 }
 
 function formatTargetList(groups: CoverageSuggestionGroup[]): string[] {
@@ -1708,22 +1726,71 @@ export function buildCoverageDebtSuggestionComment(
 }
 
 /**
- * Update a previously-posted coverage-debt comment to reflect that the gate now
- * passes. Drops the `open` attribute from its `<details>` so the body collapses,
- * and rewrites the `<summary>`. `improvedLines` is the net reduction in
- * uncovered lines versus baseline: when positive, the summary reports the
- * reduction; when zero, it just notes the regression is resolved.
+ * Describe how a group's uncovered-line count moved between its `main` baseline
+ * and this PR, for the "Change" column of the resolved comment's table.
  */
-export function resolveCoverageDebtComment(
-  body: string,
+function coverageChangeText(baseline: number, current: number): string {
+  const delta = baseline - current;
+  if (delta === 0) return "no change";
+  const magnitude = uncoveredLineCount(Math.abs(delta));
+  return delta > 0 ? `${magnitude} fewer` : `${magnitude} more`;
+}
+
+/**
+ * Build the Markdown body of the coverage comment once the gate passes again
+ * after an earlier regression. Leads with the same hidden marker so the poster
+ * keeps finding the one comment, keeps the disclosure collapsed (no `open`), and
+ * replaces the regression body with a short summary of where the PR left
+ * coverage.
+ *
+ * `improvedLines` is the net reduction in the overall (workspace) uncovered-line
+ * count versus its `main` baseline: when positive the summary reports the
+ * reduction, otherwise it just notes the regression is resolved. `groups` lists
+ * the changed source groups the gate ratchets, each with its `main` baseline and
+ * the count this PR produced, rendered as a before-and-after table.
+ */
+export function buildCoverageResolvedComment(
   improvedLines: number,
+  groups: CoverageResolvedGroup[],
 ): string {
   const summary = improvedLines > 0
     ? `Code coverage debt reduced by ${uncoveredLineCount(improvedLines)}!`
     : "Code coverage regression resolved.";
-  return body
-    .replace("<details open>", "<details>")
-    .replace(/<summary>[\s\S]*?<\/summary>/, () => coverageSummary(summary));
+
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+  out.push("<details>");
+  out.push(coverageSummary(summary, "strong"));
+  out.push("");
+  out.push(
+    improvedLines > 0
+      ? "The coverage gate in the **Performance Check** job passes again. This " +
+        `PR now covers ${uncoveredLineCount(improvedLines)} that no test ` +
+        "reached on `main`. Here is where it left each changed source group:"
+      : "The coverage gate in the **Performance Check** job passes again. Here " +
+        "is where this PR left each changed source group:",
+  );
+  out.push("");
+
+  if (groups.length > 0) {
+    out.push("| Source group | Baseline (`main`) | This PR | Change |");
+    out.push("| --- | ---: | ---: | ---: |");
+    for (const group of groups) {
+      out.push(
+        `| \`${group.group}\` | ${group.baseline} | ${group.current} | ${
+          coverageChangeText(group.baseline, group.current)
+        } |`,
+      );
+    }
+  } else {
+    out.push(
+      "Every changed source group is at or below its `main` baseline for " +
+        "uncovered lines.",
+    );
+  }
+  out.push("");
+  out.push("</details>");
+
+  return out.join("\n");
 }
 
 /** Escape a string for use inside a Markdown table cell. */

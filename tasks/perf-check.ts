@@ -30,6 +30,7 @@ import {
   coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
+  type CoverageResolvedGroup,
   type CoverageSuggestionFileLines,
   type CoverageSuggestionGroup,
   downloadAndExtractArtifact,
@@ -924,7 +925,7 @@ export async function writeCoverageComment(
       lcov,
     );
   } else {
-    await writeCoverageResolved(prNumber, coverageRows);
+    await writeCoverageResolved(prNumber, coverageRows, prFiles);
   }
 }
 
@@ -1017,23 +1018,46 @@ export async function writeCoverageDebtSuggestion(
  * status "OK"; the workspace aggregate and untouched groups are "excl" and
  * overridden groups are "ovrd", so leaving everything but "OK" out keeps the
  * number to the debt this PR removed in the code it actually touched — not the
- * whole-workspace drift the gate never attributes to the PR. Never throws —
+ * whole-workspace drift the gate never attributes to the PR. `groups` is the
+ * per-group baseline-versus-this-PR breakdown for the source groups this PR
+ * changed, the same groups the gate ratchets, so the collapsed comment can show
+ * where the PR left coverage. Never throws —
  * best-effort, like the regression path.
  */
 export async function writeCoverageResolved(
   prNumber: number,
   coverageRows: Row[],
+  prFiles: PRFile[],
 ): Promise<void> {
   const improvedLines = coverageRows.reduce((sum, row) => {
     if (row.status !== "OK" || row.median === undefined) return sum;
     return sum + Math.max(0, Math.round(row.median - row.current));
   }, 0);
 
+  // Summarize the source groups this PR changed — the per-group ratchet the
+  // gate evaluates. Workspace is the aggregate behind `improvedLines`, so it
+  // stays out of the per-group breakdown.
+  const changedGroups = coverageGroupsForChangedFiles(
+    prFiles.map((prFile) => prFile.filename),
+  );
+  const groups: CoverageResolvedGroup[] = coverageRows
+    .map((row) => ({
+      group: coverageMetricGroupName(row.metric),
+      baseline: Math.round(row.median ?? 0),
+      current: Math.round(row.current),
+    }))
+    .filter((group): group is CoverageResolvedGroup =>
+      group.group !== null &&
+      group.group !== "workspace" &&
+      changedGroups.has(group.group)
+    );
+
   try {
     const payload: CoverageCommentPayload = {
       prNumber,
       state: "resolved",
       improvedLines,
+      groups,
     };
     const outputFile = coverageCommentOutputPath();
     await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));
