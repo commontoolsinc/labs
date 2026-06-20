@@ -6,9 +6,9 @@ import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
 import {
   markInvalid,
   type StorageNotificationState,
-} from "../src/scheduler/notifications.ts";
-import { processPullStorageNotification } from "../src/scheduler/pull-notifications.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
+} from "../src/scheduler/invalidation.ts";
+import { processStorageNotification } from "../src/scheduler/invalidation.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import type { Action } from "../src/scheduler/types.ts";
@@ -155,7 +155,7 @@ function makeTriggerIndexFor(action: Action): SchedulerTriggerIndex {
 describe("trigger reads follow the scheduling decision", () => {
   for (
     const [mode, process] of [
-      ["pull", processPullStorageNotification],
+      ["pull", processStorageNotification],
     ] as const
   ) {
     it(`${mode}: skip-own-commit-source records no trigger read`, () => {

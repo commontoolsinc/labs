@@ -1,4 +1,7 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
+import { toMemorySpaceAddress } from "../link-utils.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
 import {
@@ -9,7 +12,11 @@ import {
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
-import { type DependencyUpdateState } from "./dependency-updates.ts";
+import {
+  type DependencyUpdateState,
+  setSchedulerDependencies,
+} from "./dependency-updates.ts";
+import { filterIgnoredAddresses } from "./reactivity.ts";
 import {
   readsOverlapWrites,
   type WriterIndexState,
@@ -19,14 +26,25 @@ import {
   NodeRegistry,
   type SchedulerNode,
 } from "./node-record.ts";
-import { type TriggerSubscriptionState } from "./trigger-index.ts";
+import {
+  applyActionReadDelta,
+  ensureCancelForActionTriggers,
+  type TriggerSubscriptionState,
+} from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
   Action,
+  PopulateDependencies,
   PopulateDependenciesEntry,
   ReactivityLog,
   SpaceScopeAndURI,
+  TelemetryAnnotations,
 } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 type SchedulerActionTypeState = {
   readonly nodes: NodeRegistry;
@@ -112,6 +130,201 @@ export interface SchedulerSubscribeActionState {
       isEffect: boolean;
     },
   ) => void;
+}
+
+export function subscribePullSchedulerAction(
+  state: SchedulerSubscribeActionState,
+  action: Action,
+  populateDependencies: PopulateDependencies | ReactivityLog,
+  options: SchedulerSubscribeOptions = {},
+): Cancel {
+  let populateDependenciesEntry: PopulateDependenciesEntry;
+  let immediateLog: ReactivityLog | undefined;
+  if (typeof populateDependencies === "function") {
+    populateDependenciesEntry = populateDependencies;
+  } else {
+    immediateLog = populateDependencies;
+    populateDependenciesEntry = immediateLog;
+  }
+  const {
+    isEffect = false,
+    debounce,
+    noDebounce,
+    throttle,
+    deferInitialExecution = false,
+  } = options;
+
+  updateSchedulerActionChangeGroup(
+    state.subscriptionState,
+    action,
+    options,
+  );
+
+  if (debounce !== undefined) {
+    state.setDebounce(action, debounce);
+  }
+  if (noDebounce !== undefined) {
+    state.setNoDebounce(action, noDebounce);
+  }
+  if (throttle !== undefined) {
+    state.setThrottle(action, throttle);
+  }
+
+  const actionIsEffect = updateSchedulerActionType(
+    state.subscriptionState,
+    action,
+    isEffect,
+    {
+      queueExecution: !deferInitialExecution,
+      queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
+    },
+  );
+
+  registerParentChildAction(state.subscriptionState, action);
+  const record = state.subscriptionState.nodes.get(action);
+  const parentRecord = state.subscriptionState.nodes.parentOf(action);
+  if (
+    !actionIsEffect &&
+    record &&
+    parentRecord &&
+    isLive(state.subscriptionState.dependencyGraphState, parentRecord)
+  ) {
+    state.markProvisionalDemand(record);
+    if (!deferInitialExecution) {
+      state.queueExecution();
+    }
+  }
+
+  logger.debug(
+    "schedule",
+    () => [
+      "Subscribing to action:",
+      action,
+      actionIsEffect ? "effect" : "computation",
+    ],
+  );
+
+  state.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
+
+  const surface = resolveRegistrationSurface(action, immediateLog);
+  if (!actionIsEffect && surface.length > 0) {
+    state.writeIndex.setSurface(action, surface);
+    state.registerWriterDependents(action, surface);
+  }
+
+  if (immediateLog) {
+    const { previousLog, log: schedulingLog } = setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      immediateLog,
+    );
+    state.updateDependents(action, schedulingLog);
+    applyActionReadDelta(
+      state.triggerSubscriptionState,
+      action,
+      previousLog,
+      schedulingLog,
+    );
+    ensureCancelForActionTriggers(
+      state.triggerSubscriptionState,
+      action,
+    );
+  } else if (!deferInitialExecution) {
+    state.pendingDependencyCollection.add(action);
+  }
+
+  if (!deferInitialExecution) {
+    state.markInvalid(action);
+  }
+
+  const actionId = state.getActionId(action);
+  state.submitSubscribeTelemetry({
+    type: "scheduler.subscribe",
+    actionId,
+    isEffect: actionIsEffect,
+  });
+
+  return () => state.unsubscribe(action);
+}
+
+export function resolveRegistrationSurface(
+  action: Action,
+  immediateLog: ReactivityLog | undefined,
+): IMemorySpaceAddress[] {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  const annotatedSurface = annotated.writes ?? [];
+  const surface = annotatedSurface.length > 0
+    ? annotatedSurface.map(toMemorySpaceAddress)
+    : (immediateLog?.writes ?? []);
+  return sortAndCompactPaths(
+    filterIgnoredAddresses(surface, annotated.ignoredSchedulingWrites ?? []),
+  );
+}
+
+export function resubscribePullSchedulerAction(
+  state: SchedulerSubscribeActionState,
+  action: Action,
+  log: ReactivityLog,
+  options: SchedulerResubscribeOptions = {},
+): void {
+  const { isEffect } = options;
+  const existingRecord = state.subscriptionState.nodes.get(action);
+
+  updateSchedulerActionChangeGroup(
+    state.subscriptionState,
+    action,
+    options,
+  );
+
+  const { previousLog, reads, shallowReads, log: schedulingLog } =
+    setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      log,
+    );
+
+  const actionIsEffect = updateSchedulerActionType(
+    state.subscriptionState,
+    action,
+    isEffect,
+  );
+  const record = state.subscriptionState.nodes.get(action);
+  if (!existingRecord && record?.status === "never-ran") {
+    state.subscriptionState.nodes.setStatus(action, "clean");
+  }
+  const actionId = state.getActionId(action);
+
+  state.updateDependents(action, schedulingLog);
+
+  registerParentChildAction(state.subscriptionState, action, {
+    allowExisting: false,
+  });
+
+  const { triggerPathsByEntity } = applyActionReadDelta(
+    state.triggerSubscriptionState,
+    action,
+    previousLog,
+    schedulingLog,
+  );
+
+  logger.debug("schedule-resubscribe", () => [
+    `Action: ${actionId}`,
+    `Entities: ${triggerPathsByEntity.size}`,
+    `Reads: ${reads.length}`,
+  ]);
+
+  ensureCancelForActionTriggers(
+    state.triggerSubscriptionState,
+    action,
+  );
+
+  markEffectDirtyIfStaleInputs(
+    state,
+    action,
+    actionIsEffect,
+    reads,
+    shallowReads,
+  );
 }
 
 export function markEffectDirtyIfStaleInputs(

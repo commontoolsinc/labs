@@ -17,7 +17,7 @@ import {
 import {
   schedulerImplementationFingerprint,
   schedulerRuntimeFingerprint,
-} from "../src/scheduler/action-run.ts";
+} from "../src/scheduler/run.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type {
   Action,

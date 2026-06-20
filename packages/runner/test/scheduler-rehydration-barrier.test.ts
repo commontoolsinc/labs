@@ -3,7 +3,7 @@ import {
   collectPullIterationSeeds,
   hasRunnablePullWork,
   type PullSchedulingState,
-} from "../src/scheduler/pull-scheduling.ts";
+} from "../src/scheduler/settle.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import type { Action } from "../src/scheduler/types.ts";
 
@@ -12,7 +12,7 @@ import type { Action } from "../src/scheduler/types.ts";
 // a sync-fill of a resuming never-ran action can't promote it into the
 // status-based runnable-seed set, run it fresh, and abort the resume. Without
 // the barrier this made notebook reload nondeterministic and could hang on slow
-// CI runners. See pull-scheduling.ts:hasPendingInitialRehydrations.
+// CI runners. See settle.ts:hasPendingInitialRehydrations.
 
 function makeState(opts: {
   rehydrationsPending: boolean;

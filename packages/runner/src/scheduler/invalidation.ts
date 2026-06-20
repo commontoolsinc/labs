@@ -3,6 +3,7 @@ import type {
   ChangeGroup,
   IMemoryChange,
   IMemorySpaceAddress,
+  StorageNotification,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
@@ -21,6 +22,127 @@ export function hasRegisteredTriggers(
   state: TriggerIndexState,
 ): boolean {
   return state.hasRegisteredTriggers();
+}
+
+export function processStorageNotification(
+  state: StorageNotificationState,
+  notification: StorageNotification,
+): void {
+  const space = notification.space;
+
+  if (!("changes" in notification)) {
+    return;
+  }
+
+  const sourceChangeGroup = notification.type === "commit"
+    ? notification.source?.changeGroup
+    : undefined;
+  const hasSourceChangeGroup = notification.type === "commit" &&
+    sourceChangeGroup !== undefined;
+  const collectTriggerTrace = state.getCollectTriggerTrace();
+  const diagnosisEnabled = state.getDiagnosisEnabled();
+
+  let changeIndex = 0;
+  for (const change of notification.changes) {
+    changeIndex++;
+    state.recordCellUpdate(change);
+
+    if (!hasRegisteredTriggers(state.triggerIndex)) {
+      continue;
+    }
+
+    const {
+      entity: spaceAndURI,
+      hasMatchingTriggerPaths,
+      triggeredActions,
+    } = collectTriggeredActionsForChange(
+      state.triggerIndex,
+      space,
+      change,
+    );
+
+    if (!hasMatchingTriggerPaths) {
+      continue;
+    }
+
+    const writerActionId = hasSourceChangeGroup &&
+        sourceChangeGroup !== undefined
+      ? state.changeGroupToActionId.get(sourceChangeGroup)
+      : undefined;
+    const triggerTraceEntry: TriggerTraceEntry | null = collectTriggerTrace
+      ? createTriggerTraceEntry({
+        notificationType: notification.type,
+        changeIndex,
+        matchedActionCount: triggeredActions.length,
+        mode: "pull",
+        writerActionId,
+        space,
+        change,
+      })
+      : null;
+
+    for (const action of triggeredActions) {
+      if (
+        diagnosisEnabled && hasSourceChangeGroup &&
+        sourceChangeGroup !== undefined
+      ) {
+        const writerActionId = state.changeGroupToActionId.get(
+          sourceChangeGroup,
+        );
+        if (writerActionId) {
+          state.recordCausalEdge({
+            writer: writerActionId,
+            cell: spaceAndURI,
+            triggered: state.getActionId(action),
+            timestamp: performance.now(),
+          });
+        }
+      }
+
+      const actionChangeGroup = state.actionChangeGroups.get(action);
+      const actionId = state.getActionId(action);
+      const actionIsEffect = state.effects.has(action);
+      const actionType = actionIsEffect ? "effect" : "computation";
+      const pendingBefore = state.pending.has(action);
+      const dirtyBefore = state.isInvalid(action);
+      const isOwnCommitSource = notification.type === "commit" &&
+        notification.source !== undefined &&
+        notification.source.sourceAction === action;
+      const plan = planPullTriggeredAction({
+        invalidBefore: dirtyBefore,
+        isOwnCommitSource,
+        hasSourceChangeGroup,
+        actionChangeGroup,
+        sourceChangeGroup,
+      });
+      applyPullTriggeredActionPlan(
+        state,
+        action,
+        plan,
+        { ...change.address, space },
+      );
+
+      triggerTraceEntry?.triggered.push(
+        createTriggerTraceActionRecord({
+          actionId,
+          actionType,
+          mode: "pull",
+          decision: plan.decision,
+          pendingBefore,
+          pendingAfter: state.pending.has(action),
+          dirtyBefore,
+          dirtyAfter: state.isInvalid(action),
+        }),
+      );
+    }
+
+    if (
+      triggerTraceEntry &&
+      shouldRecordTriggerTraceEntry(triggerTraceEntry)
+    ) {
+      state.recordTriggerTrace(triggerTraceEntry);
+    }
+  }
 }
 
 export function collectTriggeredActionsForChange(

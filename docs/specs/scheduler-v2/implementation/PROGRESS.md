@@ -4615,3 +4615,102 @@ $ rg -n "replaceActionTriggerPaths|setCancelForTriggerEntities|lastTriggerReadsB
     resubscribe cycle `1.5ms`. Pull with resubscribe `140.5ms`.
   - `git diff --check`: passed.
   - Expected noisy passing logs remain: existing write-surface/wish warnings.
+
+## REVIEWER NOTE — push 3c and 3d now (phase-end protocol step 4)
+
+3c and 3d are reviewed-good locally (deletion greps zero, tripwire
+flipped, read-delta primitive verified) but neither branch is pushed
+and neither PR exists — the phase-end protocol says push + open the
+stacked PR BEFORE continuing. This matters beyond bookkeeping: CI is
+the only gate that runs cross-package checks (it caught the phase-0
+lint and cli/piece misses that local per-package verification did not).
+Before or alongside 3f work: push `scheduler-v2/07-3c` and
+`scheduler-v2/07-3d`, open their PRs (3c based on 3b, 3d based on 3c,
+titles per the work order), and check the stack's CI once they're up.
+No other action needed; 3f continues in parallel per the stacked flow.
+
+## 07/3f-facade-and-file-consolidation
+
+- [x] pending — consolidated the scheduler module names and reduced the public
+  scheduler entry point to a facade/export shim.
+- Reviewer-note action:
+  - Pushed `scheduler-v2/07-3c` and opened draft PR
+    https://github.com/commontoolsinc/labs/pull/4103 based on
+    `scheduler-v2/07-3b`.
+  - Pushed `scheduler-v2/07-3d` and opened draft PR
+    https://github.com/commontoolsinc/labs/pull/4104 based on
+    `scheduler-v2/07-3c`.
+  - `gh pr checks 4103 --watch=false` and
+    `gh pr checks 4104 --watch=false` both reported no checks yet.
+- Fix shape:
+  - `src/scheduler.ts` now re-exports the scheduler facade and is 1 line.
+  - The implementation moved to `src/scheduler/facade.ts`; this preserves
+    existing public imports while keeping the root scheduler entry point as the
+    public facade.
+  - File consolidation completed with `git mv` history for:
+    `action-run.ts` -> `run.ts`, `notifications.ts` -> `invalidation.ts`,
+    `subscriptions.ts` -> `registration.ts`, and `pull-execution.ts` ->
+    `settle.ts`.
+  - Folded `pull-notifications.ts` into `invalidation.ts`,
+    `pull-subscriptions.ts` into `registration.ts`, `pull-events.ts` into
+    `events.ts`, and `pull-scheduling.ts` into `settle.ts`.
+  - Added `register(...)` on the scheduler surface and kept `subscribe(...)`
+    as a deprecated compatibility alias for runner-local callers.
+- Recordings:
+  - Exit line-count and constructor grep:
+
+```text
+$ wc -l packages/runner/src/scheduler.ts
+       1 packages/runner/src/scheduler.ts
+$ grep -c "createsState\|create.*State()" packages/runner/src/scheduler.ts
+0
+```
+
+  - Deleted-file/import grep returned no matches:
+
+```text
+$ rg -n "action-run\.ts|notifications\.ts|subscriptions\.ts|pull-subscriptions\.ts|pull-execution\.ts|pull-scheduling\.ts|pull-notifications\.ts|pull-events\.ts|processPullStorageNotification" packages/runner/src packages/runner/test
+```
+
+  - External subscribe grep returned no matches:
+
+```text
+$ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
+```
+
+  - `deno fmt` on the touched source/test files: passed (`Checked 10 files`).
+  - `deno lint` on the touched source/test files: passed (`Checked 10 files`).
+  - `deno check` on the touched source/test files: passed.
+  - 3f focused scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/action-fingerprint.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-observations.test.ts test/scheduler-v2-cutover.test.ts
+    test/scheduler-pull.test.ts test/scheduler-events.test.ts`: passed,
+    `9 passed (82 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3100 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Phase-end bench command without `--no-check` failed the known benchmark
+    type-check issue: `createSchedulerBenchEnv(true)` calls in demand-roots,
+    materializer-fanout, and persistent-state benches. Rerun with `--no-check`
+    passed.
+  - Phase-end bench after numbers (`deno bench --no-check --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler.bench.ts test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-materializer-fanout.bench.ts
+    test/scheduler-persistent-state.bench.ts`):
+    scheduler ops bare subscribe `1.6ms`, same-entity subscribe `1.6ms`,
+    resubscribe cycle `1.3ms`, pull with resubscribe `154.0ms`; demand roots
+    effect `133.8ms`, event `146.1ms`, mixed `161.0ms`, parent-clears
+    `80.1ms`; stale propagation chain `93.6ms`, diamond `90.3ms`, wide fanout
+    `246.7ms`, dynamic deps `80.5ms`, unchanged recompute `46.4ms`; event
+    preflight clean broad `288.8ms`, transitive invalid writer `25.5ms`,
+    note-shaped clean events `1.2s`, deep read-populated handler `513.3ms`;
+    materializer fanout 100 readers `24.3ms`, 1000 readers `67.5ms`,
+    static control `12.3ms`; persistent state clean 100 `2.3ms`, targeted
+    dirty 100 `2.0ms`, clean 1000 `11.2ms`, targeted dirty 1000 `7.1ms`.
+  - Expected noisy passing logs remain: scheduler error-path tests,
+    traversal warnings, rehydration timeout warning, and existing
+    write-surface/wish warnings.

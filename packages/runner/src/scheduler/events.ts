@@ -451,6 +451,119 @@ function countInvalidNodes(nodes: NodeRegistry): number {
   return count;
 }
 
+export async function processPullQueuedEventDuringExecute(
+  state: SchedulerEventExecutionState,
+  eventBlockingDeps: Set<Action>,
+): Promise<void> {
+  const queuedEvent = state.eventQueue[0];
+  if (!queuedEvent) return;
+
+  if (queuedEvent.originTx !== undefined) {
+    const originStatus = state.lineageStatus(queuedEvent.originTx);
+    const sameSpace = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    ) !== undefined;
+    if (originStatus === "failed") {
+      state.eventQueue.shift();
+      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      logger.debug("scheduler-lineage", () => [
+        "Dropping event from failed lineage origin",
+        { eventId: queuedEvent.id },
+      ]);
+      return;
+    }
+    if (!sameSpace && originStatus === "pending") {
+      return;
+    }
+  }
+
+  if (
+    queuedEvent.notBefore !== undefined &&
+    queuedEvent.notBefore > performance.now()
+  ) {
+    state.scheduleEventQueueWake(queuedEvent.notBefore);
+    return;
+  }
+
+  delete queuedEvent.notBefore;
+
+  const { handler } = queuedEvent;
+  const handlerId = state.getActionId(handler);
+
+  let shouldSkipEvent = false;
+  if (handler.populateDependencies) {
+    const preflight = preflightQueuedEventDependencies({
+      runtime: state.runtime,
+      eventQueue: state.eventQueue,
+      nodes: state.nodes,
+      pending: state.pending,
+      pendingActions: state.pending,
+      eventBlockingDeps,
+      handleError: (error, target) => state.handleError(error, target),
+      setEventPreflightTraceContext: (trace) => {
+        state.setEventPreflightTraceContext(trace);
+      },
+      collectInvalidUpstreamForLog: (deps, invalidDeps) =>
+        state.collectInvalidUpstreamForLog(
+          deps,
+          invalidDeps,
+        ),
+      isDebouncedComputationWaiting: (dep) =>
+        state.isDebouncedComputationWaiting(dep),
+      getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+      getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+      scheduleEventQueueWake: (notBefore) =>
+        state.scheduleEventQueueWake(notBefore),
+    }, queuedEvent);
+    shouldSkipEvent = preflight.shouldSkipEvent;
+
+    if (state.eventPreflightTelemetryEnabled) {
+      state.runtime.telemetry.submit({
+        type: "scheduler.event.preflight",
+        handlerId,
+        handlerInfo: state.getActionTelemetryInfo(handler),
+        readCount: preflight.deps.reads.length,
+        shallowReadCount: preflight.deps.shallowReads.length,
+        dirtySizeBefore: preflight.dirtySizeBefore,
+        pendingSizeBefore: preflight.pendingSizeBefore,
+        dirtyDependencyCount: preflight.invalidDeps.size,
+        hasDirtyDependencies: preflight.hasInvalidDependencies,
+        skipped: shouldSkipEvent,
+        populateMs: preflight.populateMs,
+        txToLogMs: preflight.txToLogMs,
+        depCommitMs: preflight.depCommitMs,
+        collectMs: preflight.collectMs,
+        scheduleMs: preflight.scheduleMs,
+        stats: state.snapshotEventPreflightTraceContext(
+          preflight.preflightStats,
+        ),
+      });
+    }
+  }
+
+  if (shouldSkipEvent) return;
+
+  await dispatchQueuedEvent({
+    runtime: state.runtime,
+    eventQueue: state.eventQueue,
+    setRunningPromise: (promise) => {
+      state.setRunningPromise(promise);
+    },
+    getActionId: (target) => state.getActionId(target),
+    getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
+    handleError: (error, target) => state.handleError(error, target),
+    queueExecution: () => state.queueExecution(),
+    lineageStatus: (originTx) => state.lineageStatus(originTx),
+    releaseLineageEvent: (originTx, event) =>
+      state.releaseLineageEvent(originTx, event),
+    recordLineageEvent: (originTx, event) =>
+      state.recordLineageEvent(originTx, event),
+    getOriginLocalSeq: (originTx, space) =>
+      state.getOriginLocalSeq(originTx, space),
+  }, queuedEvent);
+}
+
 export async function dispatchQueuedEvent(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
