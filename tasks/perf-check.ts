@@ -1011,20 +1011,23 @@ export async function writeCoverageDebtSuggestion(
  * comment exists, nor what files earlier commits on the PR changed, so it defers
  * that to the poster, which no-ops when there is nothing to update.
  *
- * `improvedLines` is the net reduction in the overall (workspace) uncovered-line
- * count versus its `main` baseline — the previously-uncovered lines the PR now
- * covers. Never throws — best-effort, like the regression path.
+ * `improvedLines` is the reduction this PR makes to the coverage debt it is
+ * gated on: summed across the per-package groups whose files it changed, how far
+ * each now sits below its `main` ratchet baseline. A passing gated group has
+ * status "OK"; the workspace aggregate and untouched groups are "excl" and
+ * overridden groups are "ovrd", so leaving everything but "OK" out keeps the
+ * number to the debt this PR removed in the code it actually touched — not the
+ * whole-workspace drift the gate never attributes to the PR. Never throws —
+ * best-effort, like the regression path.
  */
 export async function writeCoverageResolved(
   prNumber: number,
   coverageRows: Row[],
 ): Promise<void> {
-  const workspaceRow = coverageRows.find(
-    (row) => coverageMetricGroupName(row.metric) === "workspace",
-  );
-  const improvedLines = workspaceRow?.median === undefined
-    ? 0
-    : Math.max(0, Math.round(workspaceRow.median - workspaceRow.current));
+  const improvedLines = coverageRows.reduce((sum, row) => {
+    if (row.status !== "OK" || row.median === undefined) return sum;
+    return sum + Math.max(0, Math.round(row.median - row.current));
+  }, 0);
 
   try {
     const payload: CoverageCommentPayload = {
