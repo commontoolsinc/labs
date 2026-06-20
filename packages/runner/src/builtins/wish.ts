@@ -25,6 +25,7 @@ import {
   internSchema,
 } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { extractHashtags } from "@commonfabric/data-model/schema-tags";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -206,8 +207,8 @@ export function tagMatchesHashtag(
   tag: string | undefined,
   searchTermWithoutHash: string,
 ): boolean {
-  const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-  return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+  if (tag === undefined) return false;
+  return extractHashtags(tag).includes(searchTermWithoutHash);
 }
 
 type WishContext = {

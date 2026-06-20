@@ -2,7 +2,7 @@ import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
 type Input = { url: string | Default<"/api/patterns/index.md"> };
 
-/** A URL to a #pattern-index */
+/** A URL to a #patternIndex */
 export type Output = { url: string };
 
 const PatternIndexUrl = pattern<Input, Output>(

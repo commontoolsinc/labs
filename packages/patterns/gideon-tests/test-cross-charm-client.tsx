@@ -103,7 +103,7 @@ export default pattern<Input, Output>(
       invocationLog: string[];
       incrementCounter: Stream<void>;
     }>({
-      query: "#cross-piece-test-server",
+      query: "#crossPieceTestServer",
     });
 
     // Access the result from the wish (WishState has a result property)

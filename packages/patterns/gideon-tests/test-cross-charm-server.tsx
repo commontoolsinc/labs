@@ -4,7 +4,7 @@
  * Exposes a Stream that increments a counter when invoked from another piece.
  * Used with test-cross-piece-client.tsx to verify cross-piece stream invocation.
  *
- * IMPORTANT: The #cross-piece-test-server tag is in the JSDoc on the Output
+ * IMPORTANT: The #crossPieceTestServer tag is in the JSDoc on the Output
  * interface below (not here) - that's where wish() looks for tags.
  *
  * SETUP: After deploying, you must FAVORITE this piece for wish() to find it.
@@ -27,7 +27,7 @@ interface Input {
   invocationLog: string[] | Default<[]>;
 }
 
-/** A #cross-piece-test-server that exposes a stream for testing cross-piece invocation. */
+/** A #crossPieceTestServer that exposes a stream for testing cross-piece invocation. */
 export interface Output {
   counter: number;
   invocationLog: string[];
@@ -63,7 +63,7 @@ export default pattern<Input, Output>(({ counter, invocationLog }) => {
       >
         <h2>Cross-Piece Test Server</h2>
         <p style={{ fontStyle: "italic", color: "#666" }}>
-          Tag: #cross-piece-test-server
+          Tag: #crossPieceTestServer
         </p>
 
         <div style={{ marginTop: "16px" }}>
