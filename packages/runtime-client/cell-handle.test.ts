@@ -175,6 +175,33 @@ describe("CellHandle CFC label IPC", () => {
     });
   });
 
+  it("carries overwrite onto the wire when set", () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    // Exercises toWireString's `overwrite` conditional (the other tests leave
+    // it unset).
+    const cell = new CellHandle(runtime, {
+      id: "of:wire-cell-2" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+      overwrite: "redirect",
+    } as CellRef);
+
+    expect(linkRefPayloadFromString(cell.toWireString())).toEqual({
+      id: "of:wire-cell-2",
+      space: "did:key:test",
+      scope: "space",
+      path: ["value"],
+      overwrite: "redirect",
+    });
+  });
+
   it("uses carried label views in subscription keys", () => {
     const first: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
