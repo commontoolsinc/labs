@@ -1,7 +1,7 @@
 {
   "name": "@commonfabric/runtime-client",
   "tasks": {
-    "test": "deno test --allow-env --allow-read --allow-ffi *.test.ts backends/*.test.ts",
+    "test": "deno test --allow-env --allow-read --allow-ffi *.test.ts backends/*.test.ts client/*.test.ts",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"
   },
   "exports": {
