@@ -251,10 +251,15 @@ Deno.test("valid merged PR baseline override metadata is parsed", () => {
   assertEquals(overrides?.metrics.get("job: Check"), 7);
 });
 
-function coverageRow(metric: string, current: number, median?: number): Row {
+function coverageRow(
+  metric: string,
+  current: number,
+  median?: number,
+  status: Row["status"] = median === undefined ? "n/a" : "OK",
+): Row {
   return {
     metric,
-    status: median === undefined ? "n/a" : "OK",
+    status,
     current,
     median,
     n: 1,
@@ -301,22 +306,42 @@ Deno.test("writeCoverageComment writes a regression payload when coverage fails"
   );
 });
 
-Deno.test("writeCoverageComment writes a resolved payload when coverage is acceptable", async () => {
+Deno.test("writeCoverageComment writes a resolved payload reporting the gated reduction", async () => {
   const rows = [
-    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953),
-    coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
+    // The workspace aggregate is never gated (status "excl"), so its large
+    // delta must not count toward the PR's reported reduction.
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    // A gated group the PR touched, now 5 lines below its baseline.
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 9),
   ];
   const payload = await payloadFrom(() =>
     writeCoverageComment(4211, [], rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
-  // Net reduction in the overall metric: 2953 - 2948 = 5 lines.
+  // Only the gated group counts: 9 - 4 = 5 lines; the workspace delta is excluded.
   assertEquals(payload?.improvedLines, 5);
 });
 
-Deno.test("writeCoverageResolved reports zero improvement without a workspace baseline", async () => {
-  const rows = [coverageRow("coverage-debt: workspace uncovered lines", 100)];
+Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 1000, 2000, "excl"),
+    coverageRow("coverage-debt: memory uncovered lines", 1680, 1686), // -6
+    coverageRow("coverage-debt: runner uncovered lines", 8860, 8868), // -8
+    // An overridden group accepted its debt, so it does not count as a reduction.
+    coverageRow("coverage-debt: identity uncovered lines", 50, 60, "ovrd"),
+  ];
+  const payload = await payloadFrom(() => writeCoverageResolved(4211, rows));
+
+  assertEquals(payload?.state, "resolved");
+  assertEquals(payload?.improvedLines, 14); // 6 + 8
+});
+
+Deno.test("writeCoverageResolved reports zero improvement when gated groups sit at baseline", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
+  ];
   const payload = await payloadFrom(() => writeCoverageResolved(4211, rows));
 
   assertEquals(payload?.state, "resolved");
