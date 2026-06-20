@@ -6,8 +6,8 @@ import { Summary, TestFileResults } from "./interface.ts";
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
 const BUNDLE_RETRY_ATTEMPTS = 5;
-const BUNDLE_RETRYABLE_ESBUILD_COPY = "failed to copy esbuild binary";
-const BUNDLE_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
+export const BUNDLE_RETRYABLE_ESBUILD_COPY = "failed to copy esbuild binary";
+export const BUNDLE_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
 
 // Given a `Manifest`, moves harness code and bundled
 // tests to the manifest's `serverDir`.
@@ -91,16 +91,32 @@ async function bundleTestFile(
 
   args.push(input);
 
+  await runBundleWithRetry(
+    () =>
+      new Deno.Command(Deno.execPath(), {
+        args,
+        cwd: manifest.projectDir,
+        stdout: "piped",
+        stderr: "piped",
+      }).output(),
+    () => downlevelBundleIfNeeded(output, manifest),
+    testPath,
+  );
+}
+
+// Runs `runBundle` until it succeeds, retrying on the transient esbuild
+// helper-copy / ETXTBSY races that Deno hits while bundling in CI. On success
+// `onSuccess` runs once; a non-retryable failure or the last attempt throws.
+export async function runBundleWithRetry(
+  runBundle: () => Promise<{ success: boolean; stderr: Uint8Array }>,
+  onSuccess: () => Promise<void>,
+  describeTarget: string,
+): Promise<void> {
   const decoder = new TextDecoder();
   for (let attempt = 1; attempt <= BUNDLE_RETRY_ATTEMPTS; attempt++) {
-    const result = await new Deno.Command(Deno.execPath(), {
-      args,
-      cwd: manifest.projectDir,
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    const result = await runBundle();
     if (result.success) {
-      await downlevelBundleIfNeeded(output, manifest);
+      await onSuccess();
       return;
     }
 
@@ -108,7 +124,7 @@ async function bundleTestFile(
     if (
       attempt === BUNDLE_RETRY_ATTEMPTS || !isRetryableBundleFailure(stderr)
     ) {
-      throw new Error(`Failed to bundle ${testPath}: ${stderr}`);
+      throw new Error(`Failed to bundle ${describeTarget}: ${stderr}`);
     }
 
     // Deno can race while copying the esbuild helper binary in CI.
@@ -237,12 +253,12 @@ async function resolveWorkspacePackageImports(
   return imports;
 }
 
-async function sleepForRetry(attempt: number): Promise<void> {
+export async function sleepForRetry(attempt: number): Promise<void> {
   const delayMs = 250 * 2 ** (attempt - 1);
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-function isRetryableBundleFailure(stderr: string): boolean {
+export function isRetryableBundleFailure(stderr: string): boolean {
   return stderr.includes(BUNDLE_RETRYABLE_ETXTBSY) ||
     stderr.includes(BUNDLE_RETRYABLE_ESBUILD_COPY);
 }
