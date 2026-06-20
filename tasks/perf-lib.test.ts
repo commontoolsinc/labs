@@ -9,6 +9,7 @@ import {
   applyBaselineOverrides,
   type Artifact,
   buildCoverageDebtSuggestionComment,
+  buildCoverageResolvedComment,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
@@ -30,7 +31,6 @@ import {
   parseBaselineOverrides,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
-  resolveCoverageDebtComment,
   serializePerfMetrics,
   serializePerfMetricsBackfill,
   shouldGateCoverageDebtMetric,
@@ -932,39 +932,107 @@ Deno.test("buildCoverageDebtSuggestionComment uses the singular for a one-line r
   );
 });
 
-Deno.test("resolveCoverageDebtComment collapses the details and reports the reduction", () => {
-  const regressed = buildCoverageDebtSuggestionComment({
-    groups: [{ group: "packages/runner", target: 12, current: 15 }],
-    files: [],
-  });
+Deno.test("buildCoverageResolvedComment collapses the details and summarizes the reduction", () => {
+  const resolved = buildCoverageResolvedComment(5, [
+    { group: "packages/runner", baseline: 15, current: 12 },
+  ]);
 
-  const resolved = resolveCoverageDebtComment(regressed, 5);
-
-  // The details collapses (no `open`) and the summary celebrates the reduction.
+  // The disclosure stays collapsed (no `open`) and the summary celebrates the
+  // reduction; none of the stale regression copy survives.
   assertFalse(resolved.includes("<details open>"));
   assertStringIncludes(resolved, "<details>");
   assertStringIncludes(
     resolved,
-    "<summary><h3>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</h3></summary>",
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</strong></summary>",
   );
   assertFalse(resolved.includes("Test coverage regressed by"));
-  // The body (marker, table) is preserved for context.
+  assertFalse(resolved.includes("Prompt for an AI coding agent"));
+  // The body keeps the marker and summarizes the per-group before-and-after.
   assertStringIncludes(resolved, COVERAGE_SUGGESTION_MARKER);
-  assertStringIncludes(resolved, "| 12 | 15 | +3 |");
+  assertStringIncludes(
+    resolved,
+    "| Source group | Baseline (`main`) | This PR | Change |",
+  );
+  assertStringIncludes(
+    resolved,
+    "| `packages/runner` | 15 | 12 | 3 lines fewer |",
+  );
 });
 
-Deno.test("resolveCoverageDebtComment notes resolution when there is no net reduction", () => {
-  const regressed = buildCoverageDebtSuggestionComment({
-    groups: [{ group: "tasks", target: 4, current: 8 }],
-    files: [],
-  });
-
-  const resolved = resolveCoverageDebtComment(regressed, 0);
+Deno.test("buildCoverageResolvedComment notes resolution when there is no net reduction", () => {
+  const resolved = buildCoverageResolvedComment(0, [
+    { group: "tasks", baseline: 8, current: 8 },
+  ]);
 
   assertFalse(resolved.includes("<details open>"));
   assertStringIncludes(
     resolved,
-    "<summary><h3>🕵🏻‍♀️ Code coverage regression resolved.</h3></summary>",
+    "<summary><strong>🕵🏻‍♀️ Code coverage regression resolved.</strong></summary>",
+  );
+  assertStringIncludes(resolved, "| `tasks` | 8 | 8 | no change |");
+});
+
+Deno.test("buildCoverageResolvedComment uses a single line of one uncovered line", () => {
+  const resolved = buildCoverageResolvedComment(1, [
+    { group: "tasks", baseline: 5, current: 4 },
+  ]);
+
+  assertStringIncludes(
+    resolved,
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt reduced by 1 line!</strong></summary>",
+  );
+  assertStringIncludes(resolved, "| `tasks` | 5 | 4 | 1 line fewer |");
+});
+
+Deno.test("buildCoverageResolvedComment reports a group that gained uncovered lines", () => {
+  // A changed group can reach the resolved comment with more uncovered lines
+  // than `main` when the regression was accepted with a per-metric override or
+  // the coverage reset marker. The table reports the increase rather than
+  // hiding it.
+  const resolved = buildCoverageResolvedComment(0, [
+    { group: "packages/runner", baseline: 12, current: 15 },
+  ]);
+
+  assertStringIncludes(
+    resolved,
+    "| `packages/runner` | 12 | 15 | 3 lines more |",
+  );
+});
+
+Deno.test("buildCoverageResolvedComment says the debt was overridden, not improved", () => {
+  // The gate passed because the debt was accepted, so the summary must not
+  // imply the new code is covered, even when a group also improved.
+  const resolved = buildCoverageResolvedComment(
+    4,
+    [{ group: "packages/runner", baseline: 12, current: 15 }],
+    true,
+  );
+
+  assertStringIncludes(
+    resolved,
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt accepted with an override.</strong></summary>",
+  );
+  assertStringIncludes(
+    resolved,
+    "accepted with an override rather than covered by new tests",
+  );
+  assertFalse(resolved.includes("Code coverage debt reduced by"));
+  assertFalse(resolved.includes("no test reached on"));
+  // The table still shows the real per-group numbers.
+  assertStringIncludes(
+    resolved,
+    "| `packages/runner` | 12 | 15 | 3 lines more |",
+  );
+});
+
+Deno.test("buildCoverageResolvedComment falls back to a sentence with no groups", () => {
+  const resolved = buildCoverageResolvedComment(3, []);
+
+  assertStringIncludes(resolved, "<details>");
+  assertFalse(resolved.includes("| Source group |"));
+  assertStringIncludes(
+    resolved,
+    "Every changed source group is at or below its `main` baseline",
   );
 });
 

@@ -11,9 +11,9 @@
  *
  * No-ops when the file is absent. Keeps a single comment per PR: posts when none
  * exists, otherwise updates the existing one in place. When the payload says
- * coverage is resolved, it collapses and rewrites the existing comment (and does
- * nothing if there is none). Best-effort: a failure is logged, not fatal, so the
- * workflow stays green.
+ * coverage is resolved, it rewrites the existing comment into a collapsed
+ * summary of where the PR left coverage (and does nothing if there is none).
+ * Best-effort: a failure is logged, not fatal, so the workflow stays green.
  *
  * Environment:
  *   GITHUB_TOKEN           - Required.
@@ -22,6 +22,7 @@
  */
 
 import {
+  buildCoverageResolvedComment,
   COVERAGE_COMMENT_FILE,
   COVERAGE_SUGGESTION_MARKER,
   type CoverageCommentPayload,
@@ -29,7 +30,6 @@ import {
   githubPatch,
   githubPost,
   REPO,
-  resolveCoverageDebtComment,
   TOKEN,
 } from "./perf-lib.ts";
 
@@ -78,9 +78,10 @@ export async function postCoverageComment(): Promise<void> {
         );
         return;
       }
-      const updated = resolveCoverageDebtComment(
-        marked.body,
+      const updated = buildCoverageResolvedComment(
         payload.improvedLines ?? 0,
+        payload.groups ?? [],
+        payload.overridden ?? false,
       );
       if (updated === marked.body) {
         console.log(

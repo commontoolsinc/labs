@@ -1,6 +1,9 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
-import { COVERAGE_SUGGESTION_MARKER } from "./perf-lib.ts";
+import {
+  buildCoverageResolvedComment,
+  COVERAGE_SUGGESTION_MARKER,
+} from "./perf-lib.ts";
 import { postCoverageComment } from "./post-coverage-comment.ts";
 
 interface RecordedRequest {
@@ -119,11 +122,18 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
     "",
     "table goes here",
     "",
+    "### Prompt for an AI coding agent",
+    "",
     "</details>",
   ].join("\n");
 
   const requests = await runWithPayload(
-    { prNumber: 4211, state: "resolved", improvedLines: 5 },
+    {
+      prNumber: 4211,
+      state: "resolved",
+      improvedLines: 5,
+      groups: [{ group: "packages/runner", baseline: 15, current: 12 }],
+    },
     [existing],
   );
 
@@ -136,7 +146,42 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   assertStringIncludes(requests[0].body, "<details>");
   assertStringIncludes(
     requests[0].body,
-    "<summary><h3>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</h3></summary>",
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt reduced by 5 lines!</strong></summary>",
+  );
+  // The stale regression body is replaced by a per-group coverage summary.
+  assertStringIncludes(
+    requests[0].body,
+    "| `packages/runner` | 15 | 12 | 3 lines fewer |",
+  );
+  assertEquals(
+    requests[0].body.includes("Prompt for an AI coding agent"),
+    false,
+  );
+});
+
+Deno.test("postCoverageComment reports an overridden metric rather than improved coverage", async () => {
+  const existing =
+    `${COVERAGE_SUGGESTION_MARKER}\n<details open>\nregression\n</details>`;
+
+  const requests = await runWithPayload(
+    {
+      prNumber: 4211,
+      state: "resolved",
+      improvedLines: 0,
+      groups: [{ group: "packages/runner", baseline: 12, current: 15 }],
+      overridden: true,
+    },
+    [existing],
+  );
+
+  assertEquals(requests.length, 1);
+  assertStringIncludes(
+    requests[0].body,
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt accepted with an override.</strong></summary>",
+  );
+  assertEquals(
+    requests[0].body.includes("Code coverage debt reduced by"),
+    false,
   );
 });
 
@@ -150,16 +195,12 @@ Deno.test("postCoverageComment does nothing to resolve when no comment exists", 
 });
 
 Deno.test("postCoverageComment leaves an already-resolved comment untouched", async () => {
-  const existing = [
-    COVERAGE_SUGGESTION_MARKER,
-    "<details>",
-    "<summary><h3>🕵🏻‍♀️ Code coverage regression resolved.</h3></summary>",
-    "",
-    "</details>",
-  ].join("\n");
+  const groups = [{ group: "tasks", baseline: 8, current: 8 }];
+  // A comment already carrying exactly what this run would write is left alone.
+  const existing = buildCoverageResolvedComment(0, groups);
 
   const requests = await runWithPayload(
-    { prNumber: 4211, state: "resolved", improvedLines: 0 },
+    { prNumber: 4211, state: "resolved", improvedLines: 0, groups },
     [existing],
   );
 

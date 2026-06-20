@@ -315,12 +315,51 @@ Deno.test("writeCoverageComment writes a resolved payload reporting the gated re
     coverageRow("coverage-debt: tasks uncovered lines", 4, 9),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageComment(4211, [], rows, [], "")
+    writeCoverageComment(4211, [], rows, [{ filename: "tasks/foo.ts" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
   // Only the gated group counts: 9 - 4 = 5 lines; the workspace delta is excluded.
   assertEquals(payload?.improvedLines, 5);
+  // The changed `tasks` group is summarized; workspace stays out of it.
+  assertEquals(payload?.groups, [
+    { group: "tasks", baseline: 9, current: 4 },
+  ]);
+});
+
+Deno.test("writeCoverageResolved omits groups the PR did not change", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 6),
+  ];
+  // No changed files map to a coverage group, so there is no per-group summary.
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{ filename: "README.md" }])
+  );
+
+  assertEquals(payload?.state, "resolved");
+  // Only the gated `tasks` group counts: 6 - 4 = 2 lines.
+  assertEquals(payload?.improvedLines, 2);
+  assertEquals(payload?.groups, []);
+});
+
+Deno.test("writeCoverageResolved flags a changed group whose debt was overridden", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    // The PR changed `tasks` and accepted its regression with an override.
+    coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
+  ];
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }])
+  );
+
+  assertEquals(payload?.state, "resolved");
+  assertEquals(payload?.overridden, true);
+  // An override contributes no reduction, but the group still appears.
+  assertEquals(payload?.improvedLines, 0);
+  assertEquals(payload?.groups, [
+    { group: "tasks", baseline: 12, current: 15 },
+  ]);
 });
 
 Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
@@ -331,10 +370,15 @@ Deno.test("writeCoverageResolved sums gated groups and ignores workspace and ove
     // An overridden group accepted its debt, so it does not count as a reduction.
     coverageRow("coverage-debt: identity uncovered lines", 50, 60, "ovrd"),
   ];
-  const payload = await payloadFrom(() => writeCoverageResolved(4211, rows));
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [])
+  );
 
   assertEquals(payload?.state, "resolved");
   assertEquals(payload?.improvedLines, 14); // 6 + 8
+  assertEquals(payload?.groups, []);
+  // The overridden group is not one this PR changed, so it is not flagged.
+  assertEquals(payload?.overridden, false);
 });
 
 Deno.test("writeCoverageResolved reports zero improvement when gated groups sit at baseline", async () => {
@@ -342,10 +386,24 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
     coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
     coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
   ];
-  const payload = await payloadFrom(() => writeCoverageResolved(4211, rows));
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [])
+  );
 
   assertEquals(payload?.state, "resolved");
   assertEquals(payload?.improvedLines, 0);
+  assertEquals(payload?.groups, []);
+});
+
+Deno.test("writeCoverageResolved reports zero improvement without a workspace baseline", async () => {
+  const rows = [coverageRow("coverage-debt: workspace uncovered lines", 100)];
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [])
+  );
+
+  assertEquals(payload?.state, "resolved");
+  assertEquals(payload?.improvedLines, 0);
+  assertEquals(payload?.groups, []);
 });
 
 Deno.test("writeCoverageDebtSuggestion writes nothing when no coverage group resolves", async () => {
