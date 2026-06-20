@@ -5,6 +5,7 @@ import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const { API_URL } = env;
 
@@ -54,10 +55,17 @@ describe("Compile all patterns", () => {
       // The PatternManager caches compiled patterns indefinitely, so we need a
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
+      // Back each controller with an in-memory emulated storage manager rather
+      // than the toolshed. Compiling and instantiating a pattern exercises the
+      // same runtime path either way; this only swaps the storage transport, so
+      // the suite no longer creates a persisted space or makes storage
+      // round-trips per pattern. dispose() closes the emulated server, keeping
+      // memory bounded.
       const cc = await PiecesController.initialize({
         spaceName: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,
+        storageManager: StorageManager.emulate({ as: identity }),
       });
 
       try {

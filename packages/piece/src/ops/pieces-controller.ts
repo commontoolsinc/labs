@@ -145,15 +145,20 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName }: {
+  static async initialize({ apiUrl, identity, spaceName, storageManager }: {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
+    // When provided, this storage manager is used instead of opening a
+    // toolshed-backed one against apiUrl. Tests pass an in-memory emulated
+    // manager so they neither create persisted spaces nor make storage
+    // round-trips.
+    storageManager?: Runtime["storageManager"];
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
       apiUrl: new URL(apiUrl),
-      storageManager: StorageManager.open({
+      storageManager: storageManager ?? StorageManager.open({
         as: session.as,
         memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
