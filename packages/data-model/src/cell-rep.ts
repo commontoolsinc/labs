@@ -4,7 +4,11 @@
  * entity-id reference form.
  */
 
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isPlainObject,
+  isRecord,
+  isUnsafeObjectKey,
+} from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
 import type { FabricObject } from "@/interface.ts";
 
@@ -199,7 +203,7 @@ function assertWireLinkRefPayloadShape(
     throw new Error("Cell-link wire payload must be a plain object.");
   }
   for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (key === "__proto__" || key === "constructor") {
+    if (isUnsafeObjectKey(key)) {
       throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
     }
     const ok = typeof val === "string" ||

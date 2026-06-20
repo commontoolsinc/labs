@@ -1,4 +1,8 @@
-import { isInstance, isRecord } from "@commonfabric/utils/types";
+import {
+  isInstance,
+  isRecord,
+  isUnsafeObjectKey,
+} from "@commonfabric/utils/types";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
 import {
@@ -16,7 +20,6 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { FrozenSet } from "./frozen-builtins.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
@@ -54,12 +57,6 @@ export function isConvertibleNativeInstance(value: object): boolean {
       return false;
   }
 }
-
-/** Keys that must never be copied to prevent prototype pollution. */
-export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
-  "__proto__",
-  "constructor",
-]);
 
 /** Map from Error subclass name to its constructor. */
 const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
@@ -619,7 +616,7 @@ export function nativeFromFabricValue(
 
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
-    if (!UNSAFE_KEYS.has(key)) {
+    if (!isUnsafeObjectKey(key)) {
       result[key] = nativeFromFabricValue(val, frozen);
     }
   }
