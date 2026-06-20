@@ -1217,27 +1217,11 @@ export async function runTestPattern(
       // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
       // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
       // before the next step. A test inserts this before an assertion that reads
-      // an async-builtin result so it never observes a half-settled state.
+      // an async-builtin result so it never observes a half-settled state. The
+      // step is transparent — it produces no result. A settle timeout propagates
+      // to the outer handler and fails the whole run (a stuck settle is fatal).
       if (isSettle) {
-        if (stepValue.skip || stepValue.settle === false) {
-          if (options.verbose) console.log(`  ⊘ settle (skipped)`);
-          continue;
-        }
-        if (options.verbose) console.log(`  ⏳ settle`);
-        try {
-          await settleFully(i);
-        } catch (err) {
-          // Surface a settle timeout as a failed step so the run fails loudly.
-          results.push({
-            name: `settle_${i}`,
-            passed: false,
-            afterAction: lastActionIndex !== null
-              ? `action_${actionCount}`
-              : null,
-            error: err instanceof Error ? err.message : String(err),
-            durationMs: performance.now() - itemStart,
-          });
-        }
+        if (!stepValue.skip) await settleFully(i);
         continue;
       }
 
