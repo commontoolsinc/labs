@@ -1,5 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
+import { VerifierIdentity } from "@commonfabric/identity";
 import { fromDID } from "../util.ts";
+import { alice } from "./principal.ts";
 
 Deno.test("fromDID rejects non-DID strings", async () => {
   const result = await fromDID("not-a-did");
@@ -32,4 +34,13 @@ Deno.test("fromDID wraps did:key parser errors as syntax errors", async () => {
     result.error.message,
     `Invalid DID "${unsupportedDid}", RangeError: Unsupported key algorithm expected 0xed, instead of 0xe7`,
   );
+});
+
+Deno.test("fromDID parses a valid did:key into a verifier", async () => {
+  const did = alice.did();
+
+  const result = await fromDID(did);
+
+  assert(result.ok instanceof VerifierIdentity);
+  assertEquals(result.ok.did(), did);
 });
