@@ -39,6 +39,13 @@ describe("Compile all patterns", () => {
   const patterns = [...Deno.readDirSync(join(import.meta.dirname!, ".."))]
     .filter((file) => file.name.endsWith(".tsx"))
     .map((file) => file.name)
+    // `.test.tsx` files are pattern tests, not authored patterns: they wrap a
+    // pattern in a test harness and are compiled and executed by the separate
+    // pattern unit-test job (`cf test`). Compiling them here too repeats that
+    // work — and recompiles the real pattern they import — on the pattern
+    // integration critical path. Match the pattern-source definition in
+    // tasks/cfcheck.ts, which already excludes `.test.tsx`/`.test.ts`.
+    .filter((name) => !name.endsWith(".test.tsx") && !name.endsWith(".test.ts"))
     .filter((name) => !skippedPatterns.includes(name))
     .sort();
 
