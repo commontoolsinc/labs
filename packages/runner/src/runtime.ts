@@ -468,6 +468,61 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
+  // In-flight async builtin operations — the work the async builtins (fetchData,
+  // fetchProgram, llm/llmDialog, streamData, and reactive sqlite queries) perform
+  // AFTER their handler returns, from a post-commit outbox flush: a network / LLM
+  // call or a sqlite RPC, plus the result writeback. `idle()` deliberately does
+  // NOT wait for these (a handler must never block on network I/O); `settled()`
+  // and the `Cell.pull()` convergence loop do.
+  #pendingAsyncWork = new Set<Promise<unknown>>();
+
+  /**
+   * Register an in-flight async builtin operation so `settled()` (and
+   * `Cell.pull()`) wait for it instead of racing the post-commit flush. The
+   * scheduler registers an effect-bearing commit's promise here (a race-free
+   * barrier — the flush runs inside that commit), and the fire-and-forget
+   * builtins register their network/LLM promise. Normalized to always resolve
+   * (failures are settled, not thrown) and auto-removed once it settles, so a
+   * rejecting promise is safe and never leaks.
+   */
+  trackAsyncWork(promise: Promise<unknown>): void {
+    const tracked = promise.then(() => {}, () => {});
+    this.#pendingAsyncWork.add(tracked);
+    tracked.finally(() => this.#pendingAsyncWork.delete(tracked));
+  }
+
+  /** Number of in-flight async builtin operations (see `trackAsyncWork`). */
+  pendingAsyncWorkCount(): number {
+    return this.#pendingAsyncWork.size;
+  }
+
+  /** Settle the currently-pending async builtin operations (without the full
+   *  scheduler/storage drain `settled()` does). Used by `Cell.pull()`'s
+   *  convergence loop. */
+  async asyncWorkSettled(): Promise<void> {
+    while (this.#pendingAsyncWork.size > 0) {
+      await Promise.allSettled([...this.#pendingAsyncWork]);
+    }
+  }
+
+  /**
+   * Wait until the runtime is fully settled: the scheduler is idle, storage is
+   * synced, AND every in-flight async builtin operation (`trackAsyncWork`) has
+   * completed — including the reactive cascade its result writeback triggers.
+   * This is the "wait for everything, including async builtin I/O" companion to
+   * `idle()` (which intentionally returns before that I/O so handlers don't
+   * block on the network). Bounded: a builtin whose result re-triggers more
+   * async work converges in a few rounds.
+   */
+  async settled(maxRounds = 50): Promise<void> {
+    for (let round = 0; round < maxRounds; round++) {
+      await this.scheduler.idle();
+      await this.storageManager.synced();
+      if (this.#pendingAsyncWork.size === 0) return;
+      await Promise.allSettled([...this.#pendingAsyncWork]);
+    }
+  }
+
   /**
    * Proactively checks all computations for idempotency by force-dirtying
    * and re-executing them, then comparing write snapshots.

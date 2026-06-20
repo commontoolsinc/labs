@@ -907,6 +907,15 @@ export interface IExtendedStorageTransaction
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
 
   /**
+   * True when this transaction still carries un-flushed post-commit side
+   * effects (the CFC outbox is non-empty). The scheduler uses this to decide
+   * whether `commit()` does asynchronous work after the inner storage commit
+   * (e.g. a sqlite query RPC + writeback) that `idle()` must wait on — a plain
+   * commit with no effects keeps its existing fire-and-forget fast path.
+   */
+  hasPendingPostCommitEffects(): boolean;
+
+  /**
    * Add a callback to be called when the transaction commit completes.
    * The callback receives the transaction as a parameter and is called
    * regardless of whether the commit succeeded or failed.

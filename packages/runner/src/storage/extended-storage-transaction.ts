@@ -463,6 +463,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.cfcState.outbox.push(effect);
   }
 
+  hasPendingPostCommitEffects(): boolean {
+    return this.cfcState.outbox.length > 0;
+  }
+
   private buildPreparedDigestInput(): PreparedDigestInput {
     // Each pushed record is deepFrozen so that every CfcAddress (and every
     // path inside one) that flows into the digest input is immutable from
@@ -1171,6 +1175,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
     this.wrapped.enqueuePostCommitEffect(effect);
+  }
+
+  hasPendingPostCommitEffects(): boolean {
+    return this.wrapped.hasPendingPostCommitEffects();
   }
 
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {

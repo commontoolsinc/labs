@@ -2714,7 +2714,10 @@ export function llmDialog(
               }
 
               abortController = new AbortController();
-              startRequest(
+              // Track the dialog turn (LLM call + writeback) as async builtin
+              // work so `runtime.settled()` / `Cell.pull()` wait for the result;
+              // `idle()` does not, so the handler never blocks on the LLM call.
+              runtime.trackAsyncWork(startRequest(
                 runtime,
                 parentCell.space,
                 cause,
@@ -2726,7 +2729,7 @@ export function llmDialog(
                 nextRequestId,
                 abortController.signal,
                 capturedRequest,
-              );
+              ));
             },
           );
         },

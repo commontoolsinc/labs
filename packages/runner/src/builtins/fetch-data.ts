@@ -308,8 +308,11 @@ export function fetchData(
         inputsSnapshot,
         "fetchData-start",
         () => {
-          // Try to claim mutex - returns immediately if another tab is processing
-          void tryClaimMutex(
+          // Try to claim mutex - returns immediately if another tab is processing.
+          // Registered as async builtin work so `runtime.settled()` / `Cell.pull()`
+          // wait for the fetch (and its result writeback) to land; `idle()` does
+          // not, so the handler never blocks on network I/O.
+          const work = tryClaimMutex(
             runtime,
             inputsCell,
             pending,
@@ -325,7 +328,7 @@ export function fetchData(
             inputHash,
             mutexTimeoutMs,
           ).then(
-            ({ claimed }) => {
+            async ({ claimed }) => {
               if (!claimed) {
                 // Another tab is handling this, we're done
                 return;
@@ -361,7 +364,7 @@ export function fetchData(
 
               // We claimed the mutex, start the fetch
               myRequestId = newRequestId;
-              startFetch(
+              await startFetch(
                 runtime,
                 inputsCell,
                 url,
@@ -376,6 +379,7 @@ export function fetchData(
               );
             },
           );
+          runtime.trackAsyncWork(work);
         },
       );
     }

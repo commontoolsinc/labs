@@ -64,7 +64,6 @@ export interface ParticipantInitResult {
 }
 
 const SETUP_CAUSE = "multi-user-test-setup";
-const SETTLE_FAST_MS = 2;
 
 let runtime: Runtime | undefined;
 let storageManager:
@@ -89,12 +88,11 @@ function rt(): Runtime {
 }
 
 async function settle(maxIterations = 20): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    const start = performance.now();
-    await rt().idle();
-    await storageManager!.synced();
-    if (performance.now() - start < SETTLE_FAST_MS) return;
-  }
+  // `settled()` drains the scheduler (idle), storage (synced) AND every
+  // in-flight async builtin operation (sqlite query RPC + writeback, fetch,
+  // llm) that `idle()` returns before — so a participant's assertion never
+  // reads a query result while its post-commit flush is still in flight.
+  await rt().settled(maxIterations);
 }
 
 const stepPeekSchema = {

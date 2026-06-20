@@ -1111,50 +1111,17 @@ export async function runTestPattern(
       stepLabel: string,
       maxSettle = 20,
     ): Promise<void> => {
+      // `runtime.settled()` drains the scheduler (idle), storage (synced), AND
+      // every in-flight async builtin operation — the sqlite query RPC + result
+      // writeback, fetch / llm calls — that `idle()` alone returns before. That
+      // last part is what stabilizes the sqlite-backed assertions: without it a
+      // step's assertion could read the query result while its post-commit flush
+      // was still in flight (got `{ pending: true }`).
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
         () =>
           Promise.race([
-            (async () => {
-              for (let settle = 0; settle < maxSettle; settle++) {
-                const iterStart = performance.now();
-                await withPhase(
-                  [
-                    "runTestPattern",
-                    "step",
-                    stepLabel,
-                    "settle",
-                    `iter-${settle}`,
-                    "idle",
-                  ],
-                  () => runtime.idle(),
-                );
-                await withPhase(
-                  [
-                    "runTestPattern",
-                    "step",
-                    stepLabel,
-                    "settle",
-                    `iter-${settle}`,
-                    "synced",
-                  ],
-                  () => storageManager.synced(),
-                );
-                const totalMs = performance.now() - iterStart;
-                if (options.verbose && totalMs > 1) {
-                  console.log(
-                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
-                  );
-                }
-                // If both resolved nearly instantly, the system is settled.
-                // synced() has ~1ms of overhead even when idle, so use 2ms.
-                if (settle > 0 && totalMs < 2) break;
-              }
-              await withPhase(
-                ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
-                () => runtime.idle(),
-              );
-            })(),
+            runtime.settled(maxSettle),
             timeout(
               TIMEOUT,
               `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
