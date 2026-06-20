@@ -81,27 +81,43 @@ the pre-audience-binding hole flagged when PR1 landed.
 
 ### Part B — space lifecycle: make `space` required, drop implicit spaces
 
-**Today.** PR2/PR2.5 made page-ops carry an optional `space?` and bound
-`RuntimeInternals` to `(identity, host)` with space-first methods. Berni's
-review ask (acknowledged on #3995): *"make every `space?` required, remove the
-implicit spaces"* — i.e. a space is always part of the address, never inferred.
-Plus a **refcount / lifecycle**: when is a space's per-space context
-(`PieceManager`/`PiecesController`, storage session) created and, crucially,
-**torn down**? Today opened spaces accumulate; nothing closes them.
+**Make-`space`-required: essentially done.** Verified against current main:
+#3995 already made all page-op protocol types, the `RuntimeProcessor` handlers,
+`lib-shell/runtime.ts`, and `RuntimeClient` methods take a required `space: DID`
+and ripped out the implicit current-space. The only remaining "optional" sites
+are (a) the **link/data-model layer** (`runner/link-types.ts`
+`NormalizedLink.space?`, sigil-link `space ?? from.space` in `cell-handle.ts`),
+which is **intentional relative-link inheritance** — making it required would
+break relative links — and (b) a couple of defensive runtime fallbacks
+(`pieceCreatedCallback`'s home-manager fallback, the redirect-link
+`space ?? requesting`). Those aren't the implicit-space Berni meant; forcing
+them strict risks breaking existing data, so leave as-is unless Berni wants them
+tightened.
 
-**Proposed shape (for Berni to confirm).**
-- Make `space` required across the page-op protocol + `RuntimeProcessor.spaces`
-  entry points; delete the home-defaulting fallbacks.
-- Add refcounted space contexts: open on first use, dispose when the last
-  page/cell referencing the space goes away (with a grace window to avoid
-  thrash on navigation). Ties into audience-binding: a closed space re-opens
-  with a fresh audience-bound handshake.
+**The real gap is teardown — and the labs code already flags it.**
+`v2.ts` `registerSpaceHost` says an opened space can't be re-pointed because
+"re-pointing requires an explicit close, *which is lifecycle follow-up work*"
+(v2.ts:~587). Today `StorageManager` holds a per-space `#providers` map and only
+ever closes *all* of them (`close()`/`closeNow()`); per-space contexts
+accumulate for the worker's lifetime.
 
-**Open questions for Berni**
-- Refcount granularity (per page? per cell subscription?) and the
-  close grace-window.
-- Does "remove implicit spaces" land as one mechanical PR, or staged behind the
-  refcount work?
+**Implemented in this PR — `StorageManager.closeSpace(space)`** (the named
+follow-up): the per-space counterpart to `close()` — flush, `provider.destroy()`,
+forget; a later `open(space)` re-establishes a fresh provider; other spaces
+untouched; no-op when not open. (`PieceManager`/`PiecesController` hold no
+persistent `.sink` of their own — just a one-shot `spaceCell.sync()` — so the
+`RuntimeProcessor` `SpaceContext` is GC-safe to drop; the storage *connection*
+was the only real per-space resource needing an explicit close.) Tests in
+`storage-close.test.ts`.
+
+**Remaining — the refcount that drives it (a separate, design-gated step).** A
+`RuntimeProcessor` refcount retains a space on `PageStart` + `CellSubscribe`,
+releases on `PageStop` + `CellUnsubscribe`, and on zero-after-grace evicts the
+`SpaceContext` + calls `closeSpace`. **Open questions for Berni** (why this is
+split out): refcount granularity (per page? per cell subscription? a
+combination?) and the close grace-window — getting them wrong prematurely tears
+down a live space. The teardown primitive is now in; the policy is the call to
+make.
 
 ## Sequencing
 - **A before B**: audience-binding is the security gate that lets the site

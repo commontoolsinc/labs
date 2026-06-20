@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
@@ -102,4 +102,51 @@ Deno.test("Provider.destroyNow force-closes after destroy is already pending", a
 
   assertEquals(result, "closed");
   assertEquals(closeNowCalls, 1);
+});
+
+Deno.test("StorageManager.closeSpace tears down one space, leaves others", async () => {
+  const signer = await Identity.fromPassphrase("storage-close-space");
+  const storage = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("http://localhost:65535"),
+  }, new PendingSessionFactory());
+
+  const spaceA = (await Identity.fromPassphrase("close-space-A")).did();
+  const spaceB = (await Identity.fromPassphrase("close-space-B")).did();
+
+  const a1 = storage.open(spaceA);
+  const b1 = storage.open(spaceB);
+  // The session never resolves, so let the graceful flush/destroy complete
+  // without blocking (same technique as the destroyNow test above).
+  if (hasDestroyNowProvider(a1)) {
+    a1.replica.synced = () => Promise.resolve();
+    a1.replica.close = () => Promise.resolve();
+  }
+
+  await storage.closeSpace(spaceA);
+
+  // spaceA is forgotten — a fresh open re-establishes a NEW provider.
+  // spaceB's connection is untouched (same provider instance).
+  assert(
+    storage.open(spaceA) !== a1,
+    "closeSpace should drop spaceA's provider so it re-opens fresh",
+  );
+  assertEquals(
+    storage.open(spaceB),
+    b1,
+    "closeSpace(spaceA) must not touch spaceB",
+  );
+});
+
+Deno.test("StorageManager.closeSpace is a no-op for an unopened space", async () => {
+  const signer = await Identity.fromPassphrase("storage-close-space-noop");
+  const storage = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("http://localhost:65535"),
+  }, new PendingSessionFactory());
+
+  // Must not throw or hang when nothing is open for the space.
+  await storage.closeSpace(
+    (await Identity.fromPassphrase("never-opened")).did(),
+  );
 });
