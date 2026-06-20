@@ -104,9 +104,15 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     try {
       const queryPattern = cf.pattern(() => {
         const db = cf.sqliteDatabase({
-          tables: { notes: cf.table({ id: "integer primary key", body: "text" }) },
+          tables: {
+            notes: cf.table({ id: "integer primary key", body: "text" }),
+          },
         });
-        return cf.sqliteQuery({ db, sql: "SELECT body FROM notes", reactOn: db });
+        return cf.sqliteQuery({
+          db,
+          sql: "SELECT body FROM notes",
+          reactOn: db,
+        });
       });
       const resultCell = runtime.getCell(
         space,
@@ -120,14 +126,17 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       // Observe the result so the effect runs in pull mode. `idle()` returns
       // before the latency-bounded flush completes (still pending); `settled()`
       // waits for it.
-      const cancel = (result as { sink: (f: () => void) => () => void })
-        .sink(() => {});
+      const view = result as unknown as {
+        get: () => QueryState;
+        sink: (f: () => void) => () => void;
+      };
+      const cancel = view.sink(() => {});
       try {
         await runtime.idle();
-        expect((result as { get: () => QueryState }).get().pending).toBe(true);
+        expect(view.get().pending).toBe(true);
 
         await runtime.settled();
-        const v = (result as { get: () => QueryState }).get();
+        const v = view.get();
         expect(v.pending).toBe(false);
         expect(v.error).toBeUndefined();
         expect(v.result).toEqual([]);
