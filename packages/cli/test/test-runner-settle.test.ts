@@ -33,5 +33,15 @@ describe(
         true,
       );
     });
+
+    it("rejects a step with no action/assertion/settle key", async () => {
+      const { results } = await runTests(
+        fixture("invalid-step.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(results[0].error ?? "").toContain(
+        "must have an 'action', 'assertion', or 'settle'",
+      );
+    });
   },
 );
