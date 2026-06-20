@@ -4,14 +4,11 @@ import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
 import { WebhookConfigSchema } from "@commonfabric/runner";
 import {
-  isLinkRef,
+  assertWebhookCellLinkRefPayload,
   linkRefFrom,
   linkRefPayload,
+  linkRefPayloadFromString,
 } from "@commonfabric/runner/shared";
-import {
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
 
 const _logger = getLogger("webhooks.utils");
 
@@ -101,17 +98,13 @@ function serviceCellLink(entityId: string) {
   });
 }
 
-// Parse a cell-link wire string. Accepts both the codec-encoded (`fvj1:…`) form
-// and the legacy raw `{ "/": { "link@1": … } }` JSON form, discriminated by
-// `seemsLikeJsonEncodedFabricValue`. The legacy branch exists only so links
-// serialized the old way still resolve.
-//
-// TODO(danfuzz): once every deployed server emits the codec form, drop the
-// legacy branch and decode with `valueFromJson(cellLink)` only.
+// Parse a cell-link wire string (the `fcl1:` addressing-payload form) back into
+// a link the runtime can resolve. The wire carries only the plain addressing
+// payload; the link envelope is reconstructed locally via `linkRefFrom`.
 function parseCellLink(cellLink: string) {
-  return seemsLikeJsonEncodedFabricValue(cellLink)
-    ? valueFromJson(cellLink)
-    : JSON.parse(cellLink);
+  const payload = linkRefPayloadFromString(cellLink);
+  assertWebhookCellLinkRefPayload(payload);
+  return linkRefFrom(payload);
 }
 
 // Read a cell from toolshed's service space, returning its value.
@@ -246,12 +239,10 @@ export async function sendToStream(
   if (error) throw error;
 }
 
-// Extract space DID from a serialized cell link
+// Extract space DID from a serialized cell link. `parseCellLink` already
+// guarantees a well-formed link (or throws), so this only needs the space.
 export function extractSpaceFromCellLink(cellLink: string): string {
-  const parsed = parseCellLink(cellLink);
-  if (!isLinkRef(parsed)) throw new Error("Invalid cell link format");
-
-  const space = linkRefPayload(parsed).space;
+  const space = linkRefPayload(parseCellLink(cellLink)).space;
   if (!space) throw new Error("Cell link missing space");
 
   return space as string;
