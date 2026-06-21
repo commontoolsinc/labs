@@ -413,6 +413,12 @@ describe("Memory v2 storage notifications", () => {
 
     const result = await commitPromise;
     expect(result.ok).toBeFalsy();
+    // The inline read-repair (waitForConflictReadRepair) must have applied the
+    // caught-up sync BEFORE the commit resolves — so confirmed state already
+    // reflects version 3 here, without any explicit readyToRetry() call. This
+    // guards the repair-before-revert ordering: removing the inline wait leaves
+    // this at the stale/optimistic value.
+    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
     expect(subscription.reverts.at(-1)).toMatchObject({
       type: "revert",
       space,

@@ -114,6 +114,12 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
+// Backstop for the inline conflict read-repair wait. In the connected path the
+// caught-up sync arrives within a refresh cycle; this only fires if the sync is
+// permanently undelivered on a still-open, never-reconnecting session, so the
+// commit cannot hang forever. On expiry we surface the conflict and let the
+// scheduler retry path re-gate on readiness.
+const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
@@ -2070,14 +2076,28 @@ class SpaceReplica implements ISpaceReplica {
     if (readyToRetry === undefined) {
       return;
     }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn(
+          "conflict-read-repair-timeout",
+          "caught-up sync not received within timeout; surfacing conflict",
+        );
+        resolve();
+      }, CONFLICT_READ_REPAIR_TIMEOUT_MS);
+    });
     try {
-      await readyToRetry();
+      await Promise.race([readyToRetry(), timedOut]);
     } catch (error) {
       logger.warn(
         "conflict-read-repair",
         "readyToRetry rejected while preserving original conflict result",
         error,
       );
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
   }
 

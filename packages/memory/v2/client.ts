@@ -393,6 +393,12 @@ export class SpaceSession {
   #readyOnConnection = true;
   #restoring = false;
   #caughtUpLocalSeq = 0;
+  // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
+  // or a synthetic forward). Subscribers such as runner storage only advance
+  // their own caught-up seq from emitted syncs, so a resume that promotes
+  // caughtUpLocalSeq via the top-level SessionOpenResult field (no sync) must
+  // be forwarded explicitly or their conflict-retry waiters strand.
+  #forwardedCaughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -684,12 +690,22 @@ export class SpaceSession {
           restored.sync.caughtUpLocalSeq !== undefined
         ) {
           this.#watchView.emit(restored.sync);
+          if (restored.sync.caughtUpLocalSeq !== undefined) {
+            this.#forwardedCaughtUpLocalSeq = Math.max(
+              this.#forwardedCaughtUpLocalSeq,
+              restored.sync.caughtUpLocalSeq,
+            );
+          }
         }
         this.scheduleAck(restored.serverSeq);
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
         this.scheduleAck(restored.serverSeq);
       }
       this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
+      // Forward a top-level-only caught-up marker (resume with no sync) to
+      // WatchView subscribers; the guard above suppresses a duplicate when a
+      // real sync already carried it.
+      this.forwardCaughtUpLocalSeqToWatchers(restored.caughtUpLocalSeq);
       if (restored.resumed !== true && this.#watchSpecs.length > 0) {
         const { view, sync } = await this.watchSetSync(this.#watchSpecs);
         if (!isEmptySync(sync)) {
@@ -845,6 +861,32 @@ export class SpaceSession {
     }
   }
 
+  // Forward a caught-up marker to WatchView subscribers when it was delivered
+  // out-of-band (top-level SessionOpenResult.caughtUpLocalSeq on resume) rather
+  // than via a sync they already observed. Emits an empty caught-up sync so
+  // downstream waiters (notably runner storage's read-repair gate) resolve
+  // instead of stranding after a reconnect.
+  private forwardCaughtUpLocalSeqToWatchers(
+    localSeq: number | undefined,
+  ): void {
+    if (
+      localSeq === undefined ||
+      localSeq <= this.#forwardedCaughtUpLocalSeq ||
+      this.#watchView === null
+    ) {
+      return;
+    }
+    this.#forwardedCaughtUpLocalSeq = localSeq;
+    this.#watchView.emit({
+      type: "sync",
+      fromSeq: this.#serverSeq,
+      toSeq: this.#serverSeq,
+      caughtUpLocalSeq: localSeq,
+      upserts: [],
+      removes: [],
+    });
+  }
+
   private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
     if (this.#closed) {
       return Promise.reject(
@@ -894,6 +936,7 @@ export class SpaceSession {
       }
       this.#outstandingCommits.clear();
       this.#caughtUpLocalSeq = 0;
+      this.#forwardedCaughtUpLocalSeq = 0;
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
     }
     this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);

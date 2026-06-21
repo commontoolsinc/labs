@@ -1586,6 +1586,138 @@ Deno.test("memory v2 client emits empty caught-up syncs after resume", async () 
   }
 });
 
+Deno.test("memory v2 client forwards a top-level-only caught-up seq on resume", async () => {
+  // Regression for the dual-channel strand: when a resume promotes
+  // caughtUpLocalSeq via the top-level SessionOpenResult field but NOT via a
+  // sync (the server already drained the pending catch-up before the lost
+  // send), WatchView subscribers (runner storage) must still observe it, or
+  // their conflict-retry read-repair waiters strand forever.
+  const transport = new TopLevelCaughtUpResumeTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-top-level-caught-up-resume");
+
+  try {
+    const view = await session.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+    const syncs = view.subscribeSync();
+
+    transport.disconnect();
+    await waitFor(() => transport.openCount >= 2);
+
+    const caughtUp = await nextWithTimeout(syncs);
+    assertEquals(caughtUp.done, false);
+    assertEquals(caughtUp.value, {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      caughtUpLocalSeq: 4,
+      upserts: [],
+      removes: [],
+    });
+  } finally {
+    await client.close();
+  }
+});
+
+class TopLevelCaughtUpResumeTransport implements Transport {
+  openCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #openedSession = false;
+  #closed = false;
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.openCount += 1;
+        this.#closed = false;
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
+        return Promise.resolve();
+      case "session.open": {
+        const resumed = this.#openedSession;
+        this.#openedSession = true;
+        this.#receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:top-level-caught-up-resume",
+            sessionToken: "token:top-level-caught-up-resume",
+            serverSeq: 0,
+            // Resume carries the caught-up marker ONLY at the top level — no
+            // sync — exactly the case that previously stranded the runner.
+            ...(resumed ? { resumed: true, caughtUpLocalSeq: 4 } : {}),
+          },
+        }));
+        return Promise.resolve();
+      }
+      case "session.watch.set":
+        this.#receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 0,
+            sync: {
+              type: "sync",
+              fromSeq: 0,
+              toSeq: 0,
+              upserts: [],
+              removes: [],
+            },
+          },
+        }));
+        return Promise.resolve();
+      case "session.ack":
+        this.#receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { serverSeq: 0 },
+        }));
+        return Promise.resolve();
+      default:
+        throw new Error(
+          `Unhandled top-level-caught-up message: ${message.type}`,
+        );
+    }
+  }
+
+  disconnect(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  close(): Promise<void> {
+    this.disconnect();
+    return Promise.resolve();
+  }
+}
+
 class EmptyCaughtUpResumeTransport implements Transport {
   openCount = 0;
   #receiver: (payload: string) => void = () => {};
