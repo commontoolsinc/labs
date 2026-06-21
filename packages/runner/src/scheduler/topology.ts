@@ -41,6 +41,11 @@ export function mapsEqual(
   if (a.size !== b.size) return false;
   for (const [key, val] of a) {
     if (!b.has(key)) return false;
+    // TODO(danfuzz): `mapsEqual` compares map values with `deepEqual`, which
+    // mishandles `FabricValue`; this helper is used on stored read-value maps,
+    // so two same-class `FabricPrimitive`s (state in private `#fields`, zero
+    // own-props) compare equal regardless of value. Use a Fabric-aware
+    // equality.
     if (!deepEqual(val, b.get(key))) return false;
   }
   return true;

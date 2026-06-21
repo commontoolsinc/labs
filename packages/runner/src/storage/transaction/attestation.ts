@@ -149,6 +149,12 @@ export const claim = (
 
   // Fast path: reference equality check avoids expensive comparison
   // when the replica state hasn't changed since the original read
+  // TODO(danfuzz): This compares a stored document value (the read/attested
+  // value) with `deepEqual`, which mishandles `FabricValue`: two same-class
+  // `FabricPrimitive` values (state in private `#fields`, zero own-props)
+  // compare equal regardless of value, so a changed Fabric value can be
+  // mis-detected as unchanged. Use a Fabric-aware equality for stored-value
+  // comparison.
   if (expected === actual || deepEqual(expected, actual)) {
     return { ok: state };
   } else {

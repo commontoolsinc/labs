@@ -122,6 +122,11 @@ function attachCfcToOutputs(
     return;
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
+    // TODO(danfuzz): This `isRecord`-gated `Object.entries` descent has no
+    // `FabricSpecialObject` guard; a `FabricPrimitive` output is decomposed
+    // (its state is private) and a `FabricInstance` is walked by internal
+    // slots, so CFC labels are not attached to the special object's actual
+    // contents.
     for (const [_, value] of Object.entries(outputs)) {
       attachCfcToOutputs(value, cfc, lubConfidentiality);
     }
