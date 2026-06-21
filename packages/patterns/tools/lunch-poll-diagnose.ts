@@ -141,6 +141,13 @@ interface PhaseSample {
   sessions: readonly CompactSessionSample[];
 }
 
+interface ChurnTotals {
+  commitConflicts: number;
+  commitPreempted: number;
+  commitReverts: number;
+  commitRejected: number;
+}
+
 interface CaseResult {
   case: {
     users: number;
@@ -148,7 +155,28 @@ interface CaseResult {
     voteRounds: number;
     includeHomepageRefresh: boolean;
   };
+  churn: ChurnTotals;
   phases: PhaseSample[];
+}
+
+async function collectChurn(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<ChurnTotals> {
+  const totals: ChurnTotals = {
+    commitConflicts: 0,
+    commitPreempted: 0,
+    commitReverts: 0,
+    commitRejected: 0,
+  };
+  for (const session of sessions) {
+    const counts = await session.loggerCounts();
+    const storage = counts["storage.v2"] ?? {};
+    totals.commitConflicts += storage["commit-conflict"]?.total ?? 0;
+    totals.commitPreempted += storage["commit-preempted"]?.total ?? 0;
+    totals.commitReverts += storage["commit-revert"]?.total ?? 0;
+    totals.commitRejected += storage["commit-rejected"]?.total ?? 0;
+  }
+  return totals;
 }
 
 const traceCursors = new Map<string, number>();
@@ -587,6 +615,14 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
       );
     }
 
+    const churn = await collectChurn(sessions);
+    console.error(
+      `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
+        `admission=${Deno.env.get("CF_CONFLICT_ADMISSION") ?? "0"}: ` +
+        `conflicts=${churn.commitConflicts} preempted=${churn.commitPreempted} ` +
+        `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`,
+    );
+
     return {
       case: {
         users: config.userCount,
@@ -594,6 +630,7 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         voteRounds: config.voteRounds,
         includeHomepageRefresh: config.includeHomepageRefresh,
       },
+      churn,
       phases,
     };
   } finally {
