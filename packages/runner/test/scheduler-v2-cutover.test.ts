@@ -10,7 +10,6 @@ import {
   space,
   toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
-import { FakeTime } from "@std/testing/time";
 import type {
   Action,
   Cell,
