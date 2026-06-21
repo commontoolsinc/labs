@@ -284,6 +284,34 @@ describe("trigger reads survive failed runs", () => {
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
+  it("re-arms the action when conflict readyToRetry rejects", async () => {
+    // readyToRetry rejects by design on session close/revoke/replacement. The
+    // scheduler must still restore trigger reads and re-arm (resubscribe +
+    // requeue) rather than dropping the action and logging an error.
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      readyToRetry: () => Promise.reject(new Error("session changed: a -> b")),
+    });
+    const calls: string[] = [];
+    let resolveQueued!: () => void;
+    const queued = new Promise<void>((resolve) => {
+      resolveQueued = resolve;
+    });
+    watchWith({
+      error,
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => {
+        calls.push("queue");
+        resolveQueued();
+      },
+    });
+
+    await queued;
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
   it("requeues primitive retryable errors without retry readiness", async () => {
     let restored = 0;
     let queued = 0;

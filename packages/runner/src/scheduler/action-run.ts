@@ -129,7 +129,25 @@ export function watchReactiveActionCommit(state: {
       ) {
         const readyToRetry = readyToRetryPromise(error);
         if (readyToRetry !== undefined) {
-          await readyToRetry;
+          // The readiness gate rejects by design when the session is closed,
+          // revoked, or replaced (new sessionId) while we are waiting — an
+          // expected control-flow signal, not an error. Swallow it and fall
+          // through to the re-arm below: re-subscribing keeps the action live
+          // so it re-triggers on the next input change. Letting the rejection
+          // escape would skip restoreCfcTriggerReads/resubscribe (stranding the
+          // action) and surface as a spurious console.error from the trailing
+          // .catch.
+          try {
+            await readyToRetry;
+          } catch (readyError) {
+            logger.debug(
+              "retry-readiness-aborted",
+              () => [
+                "conflict retry readiness aborted; re-arming action anyway",
+                readyError,
+              ],
+            );
+          }
         }
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
@@ -166,8 +184,13 @@ function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
   if (typeof candidate !== "function") {
     return undefined;
   }
-  const result = candidate.call(error);
-  return Promise.resolve(result);
+  try {
+    return Promise.resolve(candidate.call(error));
+  } catch (thrown) {
+    // A readyToRetry that throws synchronously is treated the same as one that
+    // returns a rejected promise; the caller swallows the rejection.
+    return Promise.reject(thrown);
+  }
 }
 
 export function appendActionRunTrace(state: {
