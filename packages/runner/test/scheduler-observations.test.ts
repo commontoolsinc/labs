@@ -1465,7 +1465,7 @@ describe("persistent scheduler observations", () => {
       runtimeB.unsafeTrustPattern(cleanRestartPattern, {
         reason: "unit test fixture",
       });
-      runtimeB.patternManager.registerPattern(cleanRestartPattern);
+      runtimeB.patternManager.ensureKeylessPatternIdentity(cleanRestartPattern);
       const resultCellB = runtimeB.getCell<{ doubled: number }>(
         space,
         "persistent scheduler clean restart",
