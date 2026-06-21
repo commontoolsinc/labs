@@ -187,6 +187,75 @@ describe("Pattern Runner - ifElse", () => {
     expect(piece.key("text").get()).toEqual("C");
   });
 
+  it("does not run the unselected branch's upstream writer", async () => {
+    // Regression guard for ifElse laziness: a branch fed by an upstream
+    // computed must NOT run when the OTHER branch is selected. ifElse only
+    // value-reads `condition` (the branches are opaque pass-through
+    // references), so its declared reads must not pull the unselected
+    // branch's writer. Before the opaque-input fix, all three inputs were
+    // declared reads and addDeclaredReadWriterClosure ran the unselected
+    // branch's writer at settle.
+    let trueRuns = 0;
+    let falseRuns = 0;
+    const incTrue = lift((x: string) => {
+      trueRuns++;
+      return "A" + x;
+    });
+    const incFalse = lift((x: string) => {
+      falseRuns++;
+      return "B" + x;
+    });
+
+    const lazyPattern = pattern<
+      { condition: boolean; trueSeed: string; falseSeed: string }
+    >(({ condition, trueSeed, falseSeed }) => ({
+      text: ifElse(condition, incTrue(trueSeed), incFalse(falseSeed)),
+    }));
+
+    // condition = true: only the true branch's writer may run.
+    const trueCell = runtime.getCell<{ text: string }>(
+      space,
+      "ifElse laziness condition true",
+      lazyPattern.resultSchema,
+      tx,
+    );
+    const truePiece = runtime.run(
+      tx,
+      lazyPattern,
+      { condition: true, trueSeed: "7", falseSeed: "9" },
+      trueCell,
+    );
+    tx.commit();
+    await truePiece.pull();
+
+    expect(truePiece.key("text").get()).toEqual("A7");
+    expect(trueRuns).toBeGreaterThanOrEqual(1); // selected branch ran
+    expect(falseRuns).toBe(0); // unselected branch writer must NOT run
+
+    // condition = false (symmetry): only the false branch's writer may run.
+    trueRuns = 0;
+    falseRuns = 0;
+    tx = runtime.edit();
+    const falseCell = runtime.getCell<{ text: string }>(
+      space,
+      "ifElse laziness condition false",
+      lazyPattern.resultSchema,
+      tx,
+    );
+    const falsePiece = runtime.run(
+      tx,
+      lazyPattern,
+      { condition: false, trueSeed: "7", falseSeed: "9" },
+      falseCell,
+    );
+    tx.commit();
+    await falsePiece.pull();
+
+    expect(falsePiece.key("text").get()).toEqual("B9");
+    expect(falseRuns).toBeGreaterThanOrEqual(1); // selected branch ran
+    expect(trueRuns).toBe(0); // unselected branch writer must NOT run
+  });
+
   it("should allow Cell<Array>.push of newly created pieces", async () => {
     const InnerSchema = {
       type: "object",

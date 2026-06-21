@@ -1,5 +1,9 @@
 import { createNodeFactory } from "./builder/module.ts";
-import { Module, type ModuleFactory } from "./builder/types.ts";
+import {
+  type JSONSchema,
+  Module,
+  type ModuleFactory,
+} from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import type { Action, ReactivityLog } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
@@ -99,6 +103,13 @@ export interface RawModuleOptions {
   noDebounce?: boolean;
   /** Optional scheduler throttle period in milliseconds */
   throttle?: number;
+  /**
+   * Optional argument schema for the raw module's inputs. Threaded into input
+   * binding resolution so the emitted links carry per-key schema annotations
+   * (e.g. an `asCell: ["opaque"]` marker on a forwarded reference), which the
+   * scheduler uses to decide whether an input is a declared read.
+   */
+  argumentSchema?: JSONSchema;
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.
@@ -130,5 +141,8 @@ export function raw<T, R>(
     debounce: options?.debounce,
     noDebounce: options?.noDebounce,
     throttle: options?.throttle,
+    ...(options?.argumentSchema !== undefined
+      ? { argumentSchema: options.argumentSchema }
+      : {}),
   });
 }

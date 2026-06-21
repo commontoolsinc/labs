@@ -43,6 +43,7 @@ import {
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
+  opaqueArgumentKeys,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -3704,9 +3705,19 @@ export class Runner {
     // identity instead of deserializing the embedded graph.
     this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
 
+    // Opaque forwarded references (argument keys the module's schema marks
+    // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
+    // never value-read by the builtin, so they must not become declared reads
+    // that pull their (possibly unselected) writer. Drop those top-level keys
+    // when building inputCells only; outputCells and other callers keep the
+    // full surface.
+    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
       processCell,
+      opaqueInputKeys.size > 0
+        ? { skipTopLevelKeys: opaqueInputKeys }
+        : undefined,
     );
     // outputCells tracks the static write surface for dependency ordering and
     // event preflight.
