@@ -402,7 +402,24 @@ function addLiveDownstreamClosure(state: {
     for (const dependent of dependents) {
       if (!state.isLiveAction(dependent)) continue;
       workSet.add(dependent);
-      visit(dependent);
+      // Solution #1 (walk-computed invalid-upstream prune): only descend past a
+      // dependent that is ITSELF invalid/never-ran — it will run and propagate
+      // this iteration, so its downstream may also become runnable now. A clean
+      // live dependent is still added (tier-1 speculation, needed e.g. for
+      // materializer-output readers — see "should schedule normal output
+      // readers when a materializer input dirties"), but its own downstream
+      // cannot become runnable until it actually runs, so we do NOT
+      // speculatively pull the clean TAIL of the cone. When this node runs and
+      // changes, channel-1 invalidates its dependents and the settle loop
+      // re-seeds them next iteration. Bounds the per-pass work-set under
+      // wide-fan-out hubs (the closure 3b's deleted staleness pruning kept
+      // small) with no change to executions or settle-iteration count.
+      const dependentRecord = state.nodes.get(dependent);
+      if (
+        dependentRecord !== undefined && isInvalidOrNeverRan(dependentRecord)
+      ) {
+        visit(dependent);
+      }
     }
   };
 
