@@ -2138,6 +2138,12 @@ export class Server {
       }
       const toSeq = Engine.serverSeq(engine);
       if (upserts.length === 0) {
+        // The watched set was re-evaluated current as of toSeq even though it
+        // produced no net upserts; advance the watermark so a later default
+        // fromSeq is not stale. emptyCatchUp receives the original fromSeq
+        // explicitly, so this does not mutate the bounds of this sync (the
+        // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+        session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
         return await emptyCatchUp(fromSeq, toSeq);
       }
       session.lastSyncedSeq = toSeq;

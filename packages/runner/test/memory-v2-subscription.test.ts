@@ -525,17 +525,27 @@ describe("Memory v2 storage notifications", () => {
     );
   });
 
-  it("preserves the original conflict when retry read repair rejects", async () => {
+  it("swallows a rejecting readyToRetry during read repair", async () => {
     const provider = storageManager.open(space);
     const harness = retryRepairHarness(provider.replica);
     const retryError = new Error("retry unavailable");
+    let called = 0;
 
+    // A rejecting readyToRetry must be invoked and then swallowed (logged), not
+    // thrown, so the original conflict result is preserved for the caller. If
+    // the repair short-circuited, `called` stays 0; if it rethrew, the await
+    // would reject and fail the test.
     await harness.waitForConflictReadRepair(
       syntheticConflict(
         `of:memory-v2-retry-reject-${Date.now()}` as URI,
-        () => Promise.reject(retryError),
+        () => {
+          called += 1;
+          return Promise.reject(retryError);
+        },
       ),
     );
+
+    expect(called).toBe(1);
   });
 
   it("does not emit duplicate pull notifications for unchanged v2 sync results", async () => {

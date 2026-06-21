@@ -1693,7 +1693,7 @@ class SpaceReplica implements ISpaceReplica {
         }
         return result;
       }, (error) => {
-        const rejection = toRejectedError(error, commit);
+        const rejection = toRejectedError(error, commit, this.#space);
         const result = { error: rejection };
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -1859,7 +1859,7 @@ class SpaceReplica implements ISpaceReplica {
       this.confirmPending(localSeq, operations, applied);
       return { ok: {} };
     } catch (error) {
-      const rejection = toRejectedError(error, commit);
+      const rejection = toRejectedError(error, commit, this.#space);
       this.attachProviderReadyToRetry(rejection, localSeq);
       // Counted (even while silent) so multi-writer churn can be read back via
       // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
@@ -2350,6 +2350,7 @@ const toConnectionError = (error: unknown): IConnectionError =>
 const toRejectedError = (
   error: unknown,
   commit: unknown,
+  space: MemorySpace,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error
@@ -2381,8 +2382,12 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit as Transaction,
+      // Diagnostic-only conflict descriptor: the storage layer surfaces a
+      // ConflictError by name/readyToRetry, not by inspecting these fields.
+      // `the`/`expected`/`actual` are placeholders; space and of are filled in
+      // so the debug log is accurate.
       conflict: {
-        space: "" as MemorySpace,
+        space,
         the: DOCUMENT_MIME,
         of: firstOperation?.id ?? "of:unknown",
         expected: null,
@@ -2391,6 +2396,9 @@ const toRejectedError = (
         history: [],
       },
     };
+    // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
+    // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark
+    // the conflict retryable.
     if (typeof retryAfterSeq === "number") {
       rejected.retryAfterSeq = retryAfterSeq;
     }
