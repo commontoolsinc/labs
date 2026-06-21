@@ -1417,10 +1417,18 @@ export class Runner {
     // Fast path for pieces prepared in the current runtime via setup()/run() or
     // explicitly restarted after stop(). Those writes are already present
     // locally, so we should preserve the historical synchronous start()
-    // behavior even if an earlier read flipped the cell's generic `synced`
-    // flag. The dependency sync below is specifically for resumed pieces that
-    // came from storage.
-    if (!wasSyncedAtEntry || wasPreparedLocally || wasStoppedLocally) {
+    // behavior. The dependency sync + snapshot resume below is specifically for
+    // pieces resumed from storage in a fresh runtime.
+    //
+    // We gate on the locally-assembled signals (`wasPreparedLocally` /
+    // `wasStoppedLocally`) rather than the cell's `synced` flag: a fresh-runtime
+    // resume reaches here past Step 3 with `getRaw()` populated, so it is not
+    // locally assembled iff neither flag is set. The `synced` flag is no longer
+    // reliably set for a storage-loaded cell, which would otherwise drop the
+    // resume path and re-run the piece from scratch (`wasSyncedAtEntry` kept for
+    // diagnostics).
+    void wasSyncedAtEntry;
+    if (wasPreparedLocally || wasStoppedLocally) {
       try {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
