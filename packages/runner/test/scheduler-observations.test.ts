@@ -19,6 +19,7 @@ import {
   schedulerRuntimeFingerprint,
 } from "../src/scheduler/run.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 import type {
   Action,
   Cell,
@@ -26,6 +27,25 @@ import type {
   Runtime,
 } from "./scheduler-test-utils.ts";
 import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+
+// Source-backed `value -> doubled` pattern for the clean-restart resume test. A
+// fresh runtime resuming from storage must resolve the piece's pattern by its
+// content identity, which requires a compiled source closure — a hand-built
+// pattern only gets a keyless, session-only identity (unrecoverable on reload).
+const CLEAN_RESTART_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { pattern, lift } from 'commonfabric';",
+      "const double = lift((input: number) => input * 2);",
+      "export default pattern<{ value: number }>(({ value }) => {",
+      "  const doubled = double(value);",
+      "  return { doubled };",
+      "});",
+    ].join("\n"),
+  }],
+};
 
 const createSchedulerTestRuntime: typeof createBaseSchedulerTestRuntime = (
   apiUrl,
@@ -1415,17 +1435,8 @@ describe("persistent scheduler observations", () => {
     let restoreEvaluateWatchSet: (() => void) | undefined;
     try {
       const { runtime: runtimeA, storageManager, tx } = runtimeAEnv;
-      const { commonfabric } = createTrustedBuilder(runtimeA);
-      const { lift, pattern } = commonfabric;
-      let runs = 0;
-      const cleanRestartPattern = pattern<{ value: number }>(
-        ({ value }) => {
-          const doubled = lift((input: number) => {
-            runs++;
-            return input * 2;
-          })(value);
-          return { doubled };
-        },
+      const compiledA = await runtimeA.patternManager.compilePattern(
+        CLEAN_RESTART_PROGRAM,
       );
 
       const resultCellA = runtimeA.getCell<{ doubled: number }>(
@@ -1434,14 +1445,13 @@ describe("persistent scheduler observations", () => {
         undefined,
         tx,
       );
-      const result = runtimeA.run(tx, cleanRestartPattern, {
+      const result = runtimeA.run(tx, compiledA, {
         value: 5,
       }, resultCellA);
       runtimeA.prepareTxForCommit(tx);
       await tx.commit();
 
       expect(await result.pull()).toEqual({ doubled: 10 });
-      expect(runs).toBe(1);
       await runtimeA.storageManager.synced();
       runtimeA.scheduler.dispose();
 
@@ -1458,14 +1468,16 @@ describe("persistent scheduler observations", () => {
         server.evaluateWatchSet = evaluateWatchSet;
       };
 
+      // A fresh runtime resuming from storage compiles the same source so the
+      // piece's pattern resolves by its content identity.
       runtimeBEnv = createSchedulerTestRuntime("https://example.test", {
         storageManager,
       });
       const runtimeB = runtimeBEnv.runtime;
-      runtimeB.unsafeTrustPattern(cleanRestartPattern, {
-        reason: "unit test fixture",
-      });
-      runtimeB.patternManager.ensureKeylessPatternIdentity(cleanRestartPattern);
+      await runtimeB.patternManager.compilePattern(CLEAN_RESTART_PROGRAM);
+      // Every action run appends a trace entry; a clean resume rehydrates the
+      // persisted observation instead of running, so the trace stays empty.
+      runtimeB.scheduler.setActionRunTraceEnabled(true);
       const resultCellB = runtimeB.getCell<{ doubled: number }>(
         space,
         "persistent scheduler clean restart",
@@ -1475,7 +1487,7 @@ describe("persistent scheduler observations", () => {
       await runtimeB.idle();
 
       expect(resultCellB.get()).toEqual({ doubled: 10 });
-      expect(runs).toBe(1);
+      expect(runtimeB.scheduler.getActionRunTrace()).toHaveLength(0);
       expect(cellDataReads).toBe(0);
     } finally {
       restoreEvaluateWatchSet?.();
