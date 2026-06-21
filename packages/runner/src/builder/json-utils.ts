@@ -139,6 +139,11 @@ export function toJSONWithLegacyAliases(
       : (value as Record<string, any>);
 
     const result: any = {};
+    // TODO(danfuzz): This `isRecord`-gated `for...in` walk has no
+    // `FabricSpecialObject` guard, so a `FabricPrimitive` (state in private
+    // fields, zero enumerable own-props) flattens to `{}` and a
+    // `FabricInstance` is walked by its internal slots instead of its codec
+    // contents.
     for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
