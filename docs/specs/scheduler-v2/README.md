@@ -476,7 +476,12 @@ pass():
 ```
 collectWorkSet():
   seeds = { N : N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N) }
-  closure = seeds ∪ { live R reachable downstream from seeds via node edges }
+  // Bounded downstream closure: add each invalid node's direct live readers,
+  // but recurse past a reader only if it is itself invalid/never-ran.
+  closure = seeds
+  walk downstream from each seed via node edges:
+    add live reader R to closure
+    recurse past R only if R.status ∈ {invalid, never-ran}
   return closure
 ```
 
@@ -488,6 +493,23 @@ the output doesn't change, the effect is still clean at its turn and is
 skipped (§7.3). This recovers v1's "conditional effect" precision — *effects
 run iff their actual inputs changed value* — without the watermark history,
 because the run-gate is the node's own value-accurate `invalid` bit.
+
+The closure is **bounded to the active wavefront**: a clean live reader is
+added (tier 1 — so it can run *this* iteration if its now-invalid direct
+upstream changes it), but the recursion does **not** descend past it into the
+clean *tail* of the cone. A clean reader cannot become runnable until it
+actually runs, and when it runs and changes value P1 invalidates *its*
+readers, which the loop re-seeds the next iteration. So the per-pass closure is
+the invalid set plus one clean tier, not the whole transitive live cone — this
+restores the bound v1's (now-deleted) staleness pruning provided, **without**
+re-adding any per-data-change transitive marking. Tier 1 is kept rather than
+pruned because some clean readers must be scheduled in the same pass as the
+write that feeds them — notably materializer-output readers (a normal reader of
+a cell a materializer eagerly writes; see the cutover guard "should schedule
+normal output readers when a materializer input dirties"). Without staleness
+pruning the unbounded cone is `O(fan-out)` per pass; under a wide-fan-out hub
+(one tally many clean readers observe) the bound is what keeps the per-pass
+work-set near v1 size (decision 16).
 
 Node edges for the closure and the sort: writer→reader edges derived from the
 static output map plus reader index (maintained incrementally as read deltas
@@ -1133,6 +1155,32 @@ Summary table; the full per-mechanism walkthrough with file references is in
     scoped to live nodes — feeding only this gate, never the run decision, so
     push mode / conditional effects / watermarks stay deleted. Adopt only
     behind the preflight benchmark.
+16. **Bounded settle work-set closure (2026-06-20).** The §7.2 downstream
+    closure originally added the *entire* live downstream cone of every invalid
+    seed, value-blind. With v1's staleness pruning deleted, that cone is
+    `O(fan-out)` per settle pass; under a wide-fan-out hub (e.g. a vote tally
+    that many clean readers observe, including a whole-state render sink) the
+    per-pass work-set grew 3–4× vs the staleness-pruned v1 set. *Executions did
+    not change* — value-gating (§7.3) already skips the clean members — but each
+    pass iterated and value-checked a much larger consideration set
+    (maintain-time → query-time cost shift, the dual of decision 15: there the
+    eager signal's deletion inflated a *query*; here it inflated the *closure*).
+    Resolution: **bound the closure to the active wavefront** — add each invalid
+    node's direct live readers (tier 1) but recurse past a reader only if it is
+    itself invalid/never-ran; the clean tail is re-seeded next iteration when
+    its upstream actually runs and P1 invalidates it (§7.2). This is the
+    walk-computed form of decision 15's `hasInvalidUpstream` signal — the
+    downstream walk *is* the gate, so no maintained refcount is needed unless
+    the walk itself becomes hot. Tier 1 is kept (not pruned) because
+    materializer-output readers need same-pass scheduling (cutover guard "should
+    schedule normal output readers when a materializer input dirties"); pruning
+    tier 1 too regresses that. Measured: lunch-poll concurrent-vote peak
+    per-pass work-set 62→43 / 61→49, single-runtime note-create @128 42→39 ms,
+    with action-execution count and settle-iteration count unchanged; full
+    runner suite green. Preserves lazy/non-transitive invalidation and the
+    decision-15 dormancy guarantee. Closing the remaining gap to v1 (the kept
+    tier-1 clean readers) would need value-awareness or the maintained refcount
+    and is not adopted.
 
 ### Open
 
