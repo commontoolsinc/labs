@@ -246,7 +246,9 @@ export function preflightQueuedEventDependencies(state: {
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
   const preflightStats = createEventPreflightTraceContext();
-  const dirtySizeBefore = countInvalidNodes(state.nodes);
+  // Diagnostic-only stat: read the maintained invalid-node index (O(1)) rather
+  // than scanning every node per queued event (was O(N) on a hot path).
+  const dirtySizeBefore = state.nodes.getInvalidNodes().size;
   const pendingSizeBefore = state.pending.size;
   let populateMs = 0;
   let txToLogMs = 0;
@@ -396,16 +398,6 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs,
     preflightStats,
   };
-}
-
-function countInvalidNodes(nodes: NodeRegistry): number {
-  let count = 0;
-  for (const record of nodes.nodes()) {
-    if (record.status === "invalid" || record.status === "never-ran") {
-      count++;
-    }
-  }
-  return count;
 }
 
 export async function processPullQueuedEventDuringExecute(

@@ -140,8 +140,15 @@ export function isSchedulerActionObservation(
     Array.isArray(candidate.reads) &&
     Array.isArray(candidate.shallowReads) &&
     Array.isArray(candidate.actualChangedWrites) &&
-    (version === 2 || Array.isArray(candidate.currentKnownWrites)) &&
-    (version === 2 || Array.isArray(candidate.declaredWrites)) &&
+    // v2 slimmed these to optional; v1 requires them. Absent ⇒ only valid for
+    // v2; present ⇒ must still be an address array (don't let malformed data
+    // through just because the payload is v2).
+    (candidate.currentKnownWrites === undefined
+      ? version === 2
+      : Array.isArray(candidate.currentKnownWrites)) &&
+    (candidate.declaredWrites === undefined
+      ? version === 2
+      : Array.isArray(candidate.declaredWrites)) &&
     Array.isArray(candidate.materializerWriteEnvelopes) &&
     isSchedulerObservationStatus(candidate.status);
 }

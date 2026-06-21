@@ -363,6 +363,12 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  // Depth of the initial-rehydration apply window (the rehydration barrier reads
+  // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
+  // resume a synchronous snapshot apply at registration, so this is >0 only
+  // inside applyPreloadedInitialActionRehydration; backgroundTasks now holds
+  // only event-driven piece-start tasks, which must not pause pull scheduling.
+  private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
@@ -615,18 +621,26 @@ export class Scheduler {
       PersistedSchedulerObservationSnapshot
     >,
   ): void {
-    const snapshot = snapshotsByActionId.get(this.getActionId(action));
-    if (
-      snapshot &&
-      isSchedulerActionObservation(snapshot.observation) &&
-      this.observationMatchesCurrentAction(action, snapshot.observation) &&
-      this.rehydrateActionFromObservation(action, snapshot)
-    ) {
-      logger.debug("rehydrate/ok", () => []);
-      return;
-    }
+    // Engage the rehydration barrier for the duration of the apply: if
+    // rehydrateActionFromObservation triggers a synchronous settle, no pull
+    // seed may promote this resuming action before its status is restored.
+    this.initialRehydrationInFlight++;
+    try {
+      const snapshot = snapshotsByActionId.get(this.getActionId(action));
+      if (
+        snapshot &&
+        isSchedulerActionObservation(snapshot.observation) &&
+        this.observationMatchesCurrentAction(action, snapshot.observation) &&
+        this.rehydrateActionFromObservation(action, snapshot)
+      ) {
+        logger.debug("rehydrate/ok", () => []);
+        return;
+      }
 
-    logger.debug("rehydrate/fallback-run/no-match", () => []);
+      logger.debug("rehydrate/fallback-run/no-match", () => []);
+    } finally {
+      this.initialRehydrationInFlight--;
+    }
   }
 
   private observationMatchesCurrentAction(
@@ -1479,9 +1493,11 @@ export class Scheduler {
       hasActiveDebounceTimer: (action) =>
         this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
-      // backgroundTasks holds exactly the in-flight initial-rehydration tasks
-      // (the only add() site is queueInitialActionRehydration).
-      hasPendingInitialRehydrations: () => this.backgroundTasks.size > 0,
+      // Engaged only while an initial rehydration is being applied (synchronous
+      // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
+      // the event-driven piece-start task (events.ts), so gating on it would
+      // pause all pull scheduling on every piece-start.
+      hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
     };
   }
 

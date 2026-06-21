@@ -309,6 +309,10 @@ describe("debounce and throttling", () => {
       expect(runCount).toBe(0);
     } finally {
       await local.tx.commit();
+      // NB: only the scheduler is disposed above (the behaviour under test).
+      // Calling runtime.dispose() here as well leaks a still-pending promise
+      // (the runtime dispose path does not compose with an already-disposed
+      // scheduler), so we close storage directly.
       await local.storageManager.close();
     }
   });
