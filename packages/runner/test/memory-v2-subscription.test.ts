@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { setConflictAdmissionEnabled } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -546,6 +547,84 @@ describe("Memory v2 storage notifications", () => {
     );
 
     expect(called).toBe(1);
+  });
+
+  it("admission control records, thresholds, and prunes a stale floor", () => {
+    const provider = storageManager.open(space);
+    const replica = provider.replica as unknown as {
+      recordStaleFloor: (commit: unknown, localSeq: number) => void;
+      preemptThreshold: (commit: unknown) => number | undefined;
+      noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
+    };
+    const uri = `of:admission-floor-${Date.now()}`;
+    const reading = {
+      localSeq: 9,
+      reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+      operations: [{ op: "set", id: uri, value: { value: { v: 2 } } }],
+    };
+
+    // Nothing stale yet -> the read is admitted.
+    expect(replica.preemptThreshold(reading)).toBeUndefined();
+
+    // A conflict at localSeq 7 marks uri stale until caughtUpLocalSeq >= 7.
+    replica.recordStaleFloor(reading, 7);
+    expect(replica.preemptThreshold(reading)).toBe(7);
+
+    // Catching up to the floor makes the id fresh again -> admitted.
+    replica.noteCaughtUpLocalSeq(7);
+    expect(replica.preemptThreshold(reading)).toBeUndefined();
+  });
+
+  it("pre-empts a known-stale commit instead of round-tripping when enabled", async () => {
+    setConflictAdmissionEnabled(true);
+    try {
+      const provider = storageManager.open(space);
+      const replica = provider.replica as typeof provider.replica & {
+        commitNative: (
+          transaction: unknown,
+          source?: unknown,
+        ) => Promise<
+          { ok?: unknown; error?: { name?: string; message?: string } }
+        >;
+        recordStaleFloor: (commit: unknown, localSeq: number) => void;
+        noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
+      };
+      const uri = `of:admission-preempt-${Date.now()}` as URI;
+
+      // Simulate a prior conflict that marked uri stale until caughtUpLocalSeq>=5.
+      replica.recordStaleFloor({
+        localSeq: 5,
+        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { version: 1 } } }],
+      }, 5);
+
+      const commitPromise = replica.commitNative({
+        operations: [{
+          op: "set",
+          id: uri,
+          type: "application/json",
+          value: { value: { version: 2 } },
+        }],
+      }, staleReadSource(uri, 0));
+
+      // The commit is pre-empted (never sent) and held until the catch-up seq
+      // is observed, exactly like a real conflict's retry gate.
+      let settled = false;
+      void commitPromise.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      replica.noteCaughtUpLocalSeq(5);
+      const result = await commitPromise;
+      expect(result.ok).toBeFalsy();
+      expect(result.error?.name).toBe("ConflictError");
+      expect(result.error?.message).toContain("preempted");
+    } finally {
+      setConflictAdmissionEnabled(undefined);
+    }
   });
 
   it("does not emit duplicate pull notifications for unchanged v2 sync results", async () => {
