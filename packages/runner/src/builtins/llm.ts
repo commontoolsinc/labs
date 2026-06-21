@@ -674,24 +674,29 @@ export function llm(
           }
         })();
 
-        resultPromise.catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            getRunForCancellation,
-            thisRun,
-            () => {
-              // Only clear if this is still the current request; a newer request
-              // may have already set previousCallHash to its own hash.
-              if (hash === previousCallHash) previousCallHash = undefined;
-            },
-          )
+        // Track the call (loop + writeback) as async builtin work so
+        // `runtime.settled()` wait for the result to land;
+        // `idle()` does not, so the handler never blocks on the LLM call.
+        runtime.trackAsyncWork(
+          resultPromise.catch((e) =>
+            handleLLMError(
+              e,
+              runtime,
+              resultCell.key("pending"),
+              resultCell.key("result"),
+              resultCell.key("error"),
+              resultCell.key("partial"),
+              resultCell.key("requestHash"),
+              hash,
+              getRunForCancellation,
+              thisRun,
+              () => {
+                // Only clear if this is still the current request; a newer request
+                // may have already set previousCallHash to its own hash.
+                if (hash === previousCallHash) previousCallHash = undefined;
+              },
+            )
+          ),
         );
       },
     );
@@ -995,24 +1000,29 @@ export function generateText(
           }
         })();
 
-        resultPromise.catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            getRunForCancellation,
-            thisRun,
-            () => {
-              // Only clear if this is still the current request; a newer request
-              // may have already set previousCallHash to its own hash.
-              if (hash === previousCallHash) previousCallHash = undefined;
-            },
-          )
+        // Track the call (loop + writeback) as async builtin work so
+        // `runtime.settled()` wait for the result to land;
+        // `idle()` does not, so the handler never blocks on the LLM call.
+        runtime.trackAsyncWork(
+          resultPromise.catch((e) =>
+            handleLLMError(
+              e,
+              runtime,
+              resultCell.key("pending"),
+              resultCell.key("result"),
+              resultCell.key("error"),
+              resultCell.key("partial"),
+              resultCell.key("requestHash"),
+              hash,
+              getRunForCancellation,
+              thisRun,
+              () => {
+                // Only clear if this is still the current request; a newer request
+                // may have already set previousCallHash to its own hash.
+                if (hash === previousCallHash) previousCallHash = undefined;
+              },
+            )
+          ),
         );
       },
     );

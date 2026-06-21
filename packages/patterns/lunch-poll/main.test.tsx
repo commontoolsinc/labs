@@ -379,17 +379,29 @@ export default pattern(() => {
       // Log the surviving option by title → one visit row, attributed to host,
       // plus one vote_history snapshot row for the green vote.
       { action: action_log_thai },
+      // The history assertions read the `recentVisits` / count `db.query`
+      // results, which resolve from an async post-commit flush (a sqlite RPC +
+      // writeback). The light per-action settle returns before that I/O lands,
+      // so under load the assertion could read a half-settled `{ pending }`
+      // result. `{ settle: true }` waits for the full settlement
+      // (runtime.settled()) so the read is deterministic.
+      { settle: true },
       { assertion: assert_thai_logged },
       { assertion: assert_recent_visit_row_renders },
       { assertion: assert_vote_snapshot },
       // A second, backdated, explicit log → two entries (proves backdating).
       { action: action_log_visit_chipotle_backdated },
+      { settle: true },
       { assertion: assert_two_history },
-      // Delete a single entry (host) → the other remains.
+      // Delete a single entry (host) → the other remains. The remove handler
+      // reads recentVisits.result[0].id, so settle BEFORE it too (the settle
+      // above this assertion covers that — recentVisits is unchanged between).
       { action: action_remove_first_history },
+      { settle: true },
       { assertion: assert_one_history_after_remove },
       // Clear all → empty (visits AND vote_history).
       { action: action_clear_history },
+      { settle: true },
       { assertion: assert_history_cleared },
     ],
     poll,

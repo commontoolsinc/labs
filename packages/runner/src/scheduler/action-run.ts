@@ -441,6 +441,10 @@ function finalizeReactiveActionCommit(
   // retry logic below will have re-scheduled this action, so
   // topological sorting should move it before the dependencies.
   let log: ReactivityLog | undefined;
+  // Captured at commit kickoff (after prepareTxForCommit populates the CFC
+  // outbox, before the async flush clears it): does this commit have
+  // asynchronous post-commit work that `settled()` must wait on?
+  let hasPostCommitEffects = false;
   const commitPromise = startReactiveActionCommit({
     runtime: state.runtime,
     tx: args.tx,
@@ -449,10 +453,21 @@ function finalizeReactiveActionCommit(
       log = txToReactivityLog(args.tx);
       warnOnWriteSurfaceViolations(state, args, log);
       attachSchedulerActionObservation(state, args, log);
+      hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
     },
   });
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
+  }
+  // Track the commit as in-flight async builtin work so `runtime.settled()`
+  // waits for its post-commit outbox flush (the sqlite query RPC + writeback;
+  // also the barrier that guarantees a fire-and-forget builtin's flush has
+  // registered its own network/LLM work). Registered before this run's running
+  // promise resolves, so a reader observes the settled result rather than racing
+  // the flush. `idle()` deliberately stays free of this. Commits with no
+  // post-commit effects keep the fire-and-forget fast path.
+  if (hasPostCommitEffects) {
+    state.runtime.trackAsyncWork(commitPromise);
   }
   const committedLog = log;
   const changedComputationWrites = state.recordChangedComputationWrites(

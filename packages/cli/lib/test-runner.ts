@@ -101,7 +101,7 @@ async function withPhase<T>(
 }
 
 /**
- * A test step is an object with either an 'assertion' or 'action' property.
+ * A test step is an object with an 'assertion', 'action', or 'settle' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
  *
@@ -110,6 +110,12 @@ async function withPhase<T>(
  * renderer-trusted DOM provenance for that surface/action — the headless
  * equivalent of the user clicking the trusted surface — which CFC
  * `TrustedActionWrite` policies require under enforcement.
+ *
+ * A `{ settle: true }` step waits for FULL settlement (the scheduler, storage,
+ * and every in-flight async builtin operation — a `db.query` RPC + writeback, a
+ * fetch / llm call) via `runtime.settled()`. The light per-action settle returns
+ * before that I/O lands, so insert `{ settle: true }` before an assertion that
+ * reads an async-builtin result to keep the read deterministic under load.
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
@@ -118,7 +124,8 @@ export type TestStep =
     event?: unknown;
     trustedUi?: TrustedUiDescriptor;
     skip?: boolean;
-  };
+  }
+  | { settle: true; skip?: boolean };
 
 type HarnessTestStepMeta = {
   action?: unknown;
@@ -126,6 +133,9 @@ type HarnessTestStepMeta = {
   event?: unknown;
   trustedUi?: unknown;
   skip?: boolean;
+  // `{ settle: true }` step: wait for full settlement (scheduler + storage +
+  // in-flight async builtin I/O) via `runtime.settled()` before the next step.
+  settle?: boolean;
 };
 
 type HarnessTestStepCell = Cell<unknown>;
@@ -145,6 +155,7 @@ const testStepPeekSchema = internSchema(
         },
       },
       skip: { type: "boolean" },
+      settle: { type: "boolean" },
     },
   },
 );
@@ -1163,6 +1174,25 @@ export async function runTestPattern(
       );
     };
 
+    // Explicit `{ settle: true }` test step: in addition to the light per-action
+    // settle above, wait for ALL in-flight async builtin work — the sqlite query
+    // RPC + result writeback, fetch / llm calls — via `runtime.settled()`. A test
+    // that asserts on an async-builtin result (e.g. a `db.query`) inserts this
+    // before the assertion so it never reads a half-settled `{ pending: true }`.
+    const settleFully = async (stepIndex: number): Promise<void> => {
+      await withPhase(
+        ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
+        () =>
+          Promise.race([
+            runtime.settled(),
+            timeout(
+              TIMEOUT,
+              `Settle step at index ${stepIndex} timed out after ${TIMEOUT}ms`,
+            ),
+          ]),
+      );
+    };
+
     // 5. Process tests sequentially
     const results: TestResult[] = [];
     let lastActionIndex: number | null = null;
@@ -1179,15 +1209,28 @@ export async function runTestPattern(
       const stepValue = stepCell.asSchema(testStepPeekSchema)
         .get() as HarnessTestStepMeta;
 
-      // Check if this step has 'action' or 'assertion' key
+      // Check if this step has 'action', 'assertion', or 'settle' key
       const isAction = Object.hasOwn(stepValue, "action");
       const isAssertion = Object.hasOwn(stepValue, "assertion");
+      const isSettle = Object.hasOwn(stepValue, "settle");
+
+      // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
+      // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
+      // before the next step. A test inserts this before an assertion that reads
+      // an async-builtin result so it never observes a half-settled state. The
+      // step is transparent — it produces no result. A settle timeout propagates
+      // to the outer handler and fails the whole run (a stuck settle is fatal).
+      if (isSettle) {
+        if (!stepValue.skip) await settleFully(i);
+        continue;
+      }
 
       if (!isAction && !isAssertion) {
         throw new Error(
-          `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
-            toCompactDebugString(Object.keys(stepValue))
-          }`,
+          `Test step at index ${i} must have an 'action', 'assertion', or ` +
+            `'settle' key. Got: ${
+              toCompactDebugString(Object.keys(stepValue))
+            }`,
         );
       }
 
