@@ -175,7 +175,7 @@ __cfReg({ __cfLift_1 });`;
   });
 });
 
-// CT-1623 follow-up: pin the staleness-overwrite contract at the public sink
+// CT-1623 follow-up: pin the outdated-overwrite contract at the public sink
 // layer. `indexArtifact` overwrites the reverse mapping on re-eval so by-identity
 // LOOKUP is always fresh; the same freshness must hold one layer down, where a
 // module that re-evaluates (same identity, fresh artifact instance) re-stages and

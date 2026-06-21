@@ -78,29 +78,23 @@ export function navigateTo(
       tx.addCommitCallback((_committedTx, commitResult) => {
         if (commitResult.error && navigationAttempt === thisAttempt) {
           navigated = previousNavigated;
+          return;
         }
-      });
-      // TODO(seefeld): This post-commit handoff regresses the previous
-      // speculative-navigation latency. Model navigation as an event instead.
-      tx.enqueuePostCommitEffect({
-        id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
-        kind: "navigate-to",
-        idempotencyKey: `navigate-to:${
-          JSON.stringify(resolvedTarget.getAsLink())
-        }`,
-        async flush() {
-          await runtime.navigateCallback!(resolvedTarget);
-        },
+        if (navigationAttempt !== thisAttempt) return;
+        void Promise.resolve(runtime.navigateCallback!(resolvedTarget)).catch(
+          (error) => {
+            console.error("navigateTo callback failed:", error);
+          },
+        );
       });
       resultCell.withTx(tx).set(true);
+      runtime.scheduler.queueExecution();
     }
   };
 
   return {
     action,
     isEffect: true,
-    populateDependencies: (depTx) => {
-      inputsCell.asSchema(targetCellSchema).withTx(depTx).get();
-    },
+    useDeclaredReadsAsDependencies: true,
   };
 }

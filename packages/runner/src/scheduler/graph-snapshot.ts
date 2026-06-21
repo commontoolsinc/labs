@@ -16,8 +16,6 @@ export interface SchedulerGraphSnapshotState {
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly conditionallyScheduledEffects: ReadonlyMap<Action, number>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly nodes: NodeRegistry;
@@ -75,14 +73,11 @@ export function buildSchedulerGraphSnapshot(
       id,
       type: state.effects.has(action) ? "effect" : "computation",
       stats: state.actionStats.get(id),
-      isDirty: state.dirty.has(action),
+      isDirty: isInvalidAction(state.nodes, action),
       isPending: state.pending.has(action),
       isDemanded: state.isDemandedPullComputation(action),
       isLiveEffect: state.isLiveEffect(action),
       isPullDemandRoot: state.isPullDemandRootEffect(action),
-      isConditionallyScheduled: state.conditionallyScheduledEffects.has(
-        action,
-      ),
       isDebouncedWaiting: nextDebounceRunAt !== undefined &&
         nextDebounceRunAt > now,
       hasActiveDebounceTimer: state.hasActiveDebounceTimer(action),
@@ -210,6 +205,11 @@ export function buildSchedulerGraphSnapshot(
     pullMode: state.pullMode,
     timestamp: now,
   };
+}
+
+function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
+  const record = nodes.get(action);
+  return record?.status === "invalid" || record?.status === "never-ran";
 }
 
 /**

@@ -114,12 +114,14 @@ document (its internal/result cell, per the per-internal-cell model of #3911 —
 the pattern builder structurally allows only one output redirect, so this
 needs no enforcement); statically-resolvable side-write targets (a passed-in
 cell bound to a fixed link — just additional output documents); and declared
-materializer envelopes for dynamic side-writes (§4.3). What disappears is not
-side-writing — it is *write-set discovery*: nothing about what a node can
-write is learned from runs, so current-known/historical write tracking
-disappears and the writer index is a static map. The price of side-writing is
-the idempotency contract (§4.2), which the idempotency validator enforces in
-tests.
+materializer envelopes for dynamic side-writes (§4.3). A registration-time
+immediate `ReactivityLog` is also a declaration channel: when action
+annotations do not supply a write surface, the log's writes seed the same
+static surface, and later run logs never broaden it. What disappears is not
+side-writing — it is *write-set discovery*: nothing about what a node can write
+is learned from runs, so current-known/historical write tracking disappears
+and the writer index is a static map. The price of side-writing is the
+idempotency contract (§4.2), which the idempotency validator enforces in tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
 carries a reference to its originating node (object identity, not an id
@@ -306,7 +308,7 @@ were entangled with.
 ```typescript
 register(node: NodeSpec, opts: {
   mode: "fresh" | "resume";       // §9.2
-  gate?: { debounce?: ms; noAutoDebounce?: boolean; throttle?: ms };
+  gate?: { debounce?: ms; noDebounce?: boolean; throttle?: ms };
 }): Cancel
 ```
 
@@ -474,7 +476,12 @@ pass():
 ```
 collectWorkSet():
   seeds = { N : N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N) }
-  closure = seeds ∪ { live R reachable downstream from seeds via node edges }
+  // Bounded downstream closure: add each invalid node's direct live readers,
+  // but recurse past a reader only if it is itself invalid/never-ran.
+  closure = seeds
+  walk downstream from each seed via node edges:
+    add live reader R to closure
+    recurse past R only if R.status ∈ {invalid, never-ran}
   return closure
 ```
 
@@ -486,6 +493,23 @@ the output doesn't change, the effect is still clean at its turn and is
 skipped (§7.3). This recovers v1's "conditional effect" precision — *effects
 run iff their actual inputs changed value* — without the watermark history,
 because the run-gate is the node's own value-accurate `invalid` bit.
+
+The closure is **bounded to the active wavefront**: a clean live reader is
+added (tier 1 — so it can run *this* iteration if its now-invalid direct
+upstream changes it), but the recursion does **not** descend past it into the
+clean *tail* of the cone. A clean reader cannot become runnable until it
+actually runs, and when it runs and changes value P1 invalidates *its*
+readers, which the loop re-seeds the next iteration. So the per-pass closure is
+the invalid set plus one clean tier, not the whole transitive live cone — this
+restores the bound v1's (now-deleted) staleness pruning provided, **without**
+re-adding any per-data-change transitive marking. Tier 1 is kept rather than
+pruned because some clean readers must be scheduled in the same pass as the
+write that feeds them — notably materializer-output readers (a normal reader of
+a cell a materializer eagerly writes; see the cutover guard "should schedule
+normal output readers when a materializer input dirties"). Without staleness
+pruning the unbounded cone is `O(fan-out)` per pass; under a wide-fan-out hub
+(one tally many clean readers observe) the bound is what keeps the per-pass
+work-set near v1 size (decision 16).
 
 Node edges for the closure and the sort: writer→reader edges derived from the
 static output map plus reader index (maintained incrementally as read deltas
@@ -572,7 +596,10 @@ Per pass, for each lane's head event:
    cache is proven.
 2. **Consistency gate.** Treat the closure as a transient demand root: any
    invalid upstream nodes of the closure join the pass's work set (they are
-   demanded *by the event*, live or not). If any are ineligible (time-gated),
+   demanded *by the event*, live or not). The invalid-upstream set is computed
+   by **inverted reachability** from the maintained invalid-node set into the
+   closure — not an upstream walk of the closure's cone, which is O(graph)
+   against a hub (decision 15). If any are ineligible (time-gated),
    park the lane's head with `notBefore = min eligibleAt` and set the wake
    gate; the lane stays FIFO.
 3. **Dispatch** once the closure is clean: presync handler inputs
@@ -658,6 +685,11 @@ correctness comes from cancellation, not staging:
      (Future server-routed/cross-runtime event delivery would reopen this
      with an origin-attestation design; deferred until such a path
      exists.)
+   If the send observes that its origin transaction is already settled, it
+   does not create pending lineage: an already-committed origin is treated as
+   confirmed immediately, and an already-failed origin is treated as failed
+   immediately so descendants cancel or drop instead of waiting for a callback
+   that will never arrive.
 2. Client-side, the runtime keeps a lineage registry: origin tx →
    {queued events, started pieces}. When an origin's failure becomes known
    locally, undispatched descendant events (parked or queued) are cancelled
@@ -787,9 +819,11 @@ eligible(N) = now ≥ eligibleAt(N)
 
 - **Manual debounce / throttle** — per node, via registration options or the
   control API; persisted as part of the observation (§9.3).
-- **Auto-debounce** — effects (never computations, never `cell.pull` roots)
-  averaging above a threshold after K runs get a default debounce unless
-  opted out. Pure policy: adjusts `gate.debounce`.
+- **Auto-debounce** — effects (never computations) averaging above a threshold
+  after K runs get a default debounce unless `noDebounce` is set.
+  `cell.pull()` sets `noDebounce: true` on its ephemeral effect, so pull roots
+  opt out explicitly rather than through a write-surface proxy. Pure policy:
+  adjusts `gate.debounce`.
 - **Cycle backoff** — replaces v1's cycle-aware debounce *and* cycle breaker
   with the §7.7 escalating gate.
 
@@ -1006,7 +1040,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2: reachability never decides runs, so transitive marking has no decision left to make. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); the incremental refcount is the spec'd escalation. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |
@@ -1102,6 +1136,51 @@ Summary table; the full per-mechanism walkthrough with file references is in
     machinery for now. UI-local events cannot race (the precondition is
     inert for them; the cost is one small create per handling). Future
     layering stays open as open question 2.
+15. **Preflight upstream-invalid reachability.** The event-preflight
+    consistency gate (§7.5 step 2, I4) is the one surviving consumer of
+    transitive-staleness reachability — P2's "reachability never decides
+    runs" holds for the run decision but not for this gate. Deleting v1's
+    `upstreamStaleCount` turned the gate's query into an O(graph) upstream
+    walk (`collectInvalidUpstreamForLog`), O(N²) under rapid creation against
+    a hub (measured: rapid-notebook, 564 ms/create). Resolution: **invert the
+    walk** — reachability from the maintained invalid-node set (a
+    `Set<Action>` in `NodeRegistry` updated through `setStatus`) downstream
+    into the closure — cost bounded by invalid-set × observed downstream cone,
+    re-adding no per-data-change transitive marking (dormancy stays zero-cost,
+    D5/I2). Orthogonal to decision 3 (closure caching), which addresses
+    read-closure *discovery*, a different cost. **Escalation (spec'd, not
+    adopted):** if a read-side-fan-out workload (one invalid node feeding many
+    closure writers) makes the inverted walk O(graph), adopt an incremental
+    `hasInvalidUpstream` signal maintained the way §5.2 maintains liveness,
+    scoped to live nodes — feeding only this gate, never the run decision, so
+    push mode / conditional effects / watermarks stay deleted. Adopt only
+    behind the preflight benchmark.
+16. **Bounded settle work-set closure (2026-06-20).** The §7.2 downstream
+    closure originally added the *entire* live downstream cone of every invalid
+    seed, value-blind. With v1's staleness pruning deleted, that cone is
+    `O(fan-out)` per settle pass; under a wide-fan-out hub (e.g. a vote tally
+    that many clean readers observe, including a whole-state render sink) the
+    per-pass work-set grew 3–4× vs the staleness-pruned v1 set. *Executions did
+    not change* — value-gating (§7.3) already skips the clean members — but each
+    pass iterated and value-checked a much larger consideration set
+    (maintain-time → query-time cost shift, the dual of decision 15: there the
+    eager signal's deletion inflated a *query*; here it inflated the *closure*).
+    Resolution: **bound the closure to the active wavefront** — add each invalid
+    node's direct live readers (tier 1) but recurse past a reader only if it is
+    itself invalid/never-ran; the clean tail is re-seeded next iteration when
+    its upstream actually runs and P1 invalidates it (§7.2). This is the
+    walk-computed form of decision 15's `hasInvalidUpstream` signal — the
+    downstream walk *is* the gate, so no maintained refcount is needed unless
+    the walk itself becomes hot. Tier 1 is kept (not pruned) because
+    materializer-output readers need same-pass scheduling (cutover guard "should
+    schedule normal output readers when a materializer input dirties"); pruning
+    tier 1 too regresses that. Measured: lunch-poll concurrent-vote peak
+    per-pass work-set 62→43 / 61→49, single-runtime note-create @128 42→39 ms,
+    with action-execution count and settle-iteration count unchanged; full
+    runner suite green. Preserves lazy/non-transitive invalidation and the
+    decision-15 dormancy guarantee. Closing the remaining gap to v1 (the kept
+    tier-1 clean readers) would need value-awareness or the maintained refcount
+    and is not adopted.
 
 ### Open
 

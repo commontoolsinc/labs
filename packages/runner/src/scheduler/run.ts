@@ -25,6 +25,7 @@ import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
+import { restoreInvalidCauses, takeInvalidCauses } from "./invalidation.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -106,9 +107,9 @@ export function watchReactiveActionCommit(state: {
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly markDirectDirty: (action: Action) => void;
+  readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
-  readonly restoreCfcTriggerReads: () => void;
+  readonly restoreInvalidCauses: () => void;
 }): void {
   state.commitPromise.then(({ error }) => {
     // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
@@ -129,12 +130,12 @@ export function watchReactiveActionCommit(state: {
       ) {
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
-        // then mark as dirty/pending to ensure it runs again.
+        // then mark as invalid/pending to ensure it runs again.
         // The retry run still exists only because of the consumed trigger
         // reads (§8.9.2), so restore them for its transaction.
-        state.restoreCfcTriggerReads();
+        state.restoreInvalidCauses();
         state.resubscribe(state.action, state.log);
-        state.markDirectDirty(state.action);
+        state.markInvalid(state.action);
         state.pending.add(state.action);
         state.queueExecution();
       } else {
@@ -198,19 +199,6 @@ export function appendActionRunTrace(state: {
 
 export interface SchedulerActionRunState {
   readonly runtime: Runtime;
-  // Consume (and clear) the pending CFC trigger reads for an action: the
-  // addresses whose invalidating writes scheduled this run (§8.9.2). The
-  // run's transaction joins their labels into the flow-label derivation.
-  readonly takeCfcTriggerReads: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-  // Re-insert consumed trigger reads when an aborted run is retried: the
-  // retry still exists only because of these triggers, so its transaction
-  // must join their labels too. Dedups against any newly recorded reads.
-  readonly restoreCfcTriggerReads: (
-    action: Action,
-    addresses: readonly IMemorySpaceAddress[],
-  ) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
   readonly retries: WeakMap<Action, number>;
@@ -244,16 +232,7 @@ export interface SchedulerActionRunState {
   readonly markNodeHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly markDirectDirty: (action: Action) => void;
-  readonly recordChangedComputationWrites: (
-    action: Action,
-    tx: IExtendedStorageTransaction,
-    log: ReactivityLog,
-  ) => IMemorySpaceAddress[];
-  readonly markReadersDirtyForChangedWrites: (
-    sourceAction: Action,
-    changedWrites: readonly IMemorySpaceAddress[],
-  ) => void;
+  readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -282,14 +261,18 @@ export async function runSchedulerAction(
   const tx = state.runtime.edit({
     changeGroup: state.actionChangeGroups.get(action),
   });
+  const record = state.nodes.get(action);
+  const invalidCauses = record ? takeInvalidCauses(record) : undefined;
+  if (record) {
+    state.nodes.setStatus(action, "clean");
+  }
   // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
   // run to the transaction so flow-label derivation can taint its writes
   // even when this run's branch never re-reads them. Consumed once; if the
   // run aborts and is retried (RetryImmediately, commit conflict) the
   // consumed addresses are restored below so the retry inherits them.
-  const cfcTriggerReads = state.takeCfcTriggerReads(action);
-  if (cfcTriggerReads !== undefined && cfcTriggerReads.length > 0) {
-    tx.addCfcTriggerReads(cfcTriggerReads);
+  if (invalidCauses !== undefined && invalidCauses.length > 0) {
+    tx.addCfcTriggerReads(invalidCauses);
   }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
   tx.tx.sourceAction = action;
@@ -303,7 +286,7 @@ export async function runSchedulerAction(
         actionId,
         tx,
         actionStartTime,
-        cfcTriggerReads,
+        invalidCauses,
         result,
         error,
         resolve,
@@ -347,7 +330,7 @@ function finalizeSchedulerAction(
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
-    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
+    readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
@@ -387,7 +370,7 @@ function rescheduleActionForImmediateRetry(
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
-    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
+    readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
   },
@@ -398,10 +381,15 @@ function rescheduleActionForImmediateRetry(
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
     // The retry run still exists only because of the consumed trigger
     // reads (§8.9.2); restore them so its transaction joins their labels.
-    if (args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0) {
-      state.restoreCfcTriggerReads(args.action, args.cfcTriggerReads);
+    const record = state.nodes.get(args.action);
+    if (
+      record &&
+      args.invalidCauses !== undefined &&
+      args.invalidCauses.length > 0
+    ) {
+      restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
     }
-    state.markDirectDirty(args.action);
+    state.markInvalid(args.action);
     state.pending.add(args.action);
     state.queueExecution();
   } else {
@@ -426,7 +414,7 @@ function finalizeReactiveActionCommit(
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
-    readonly cfcTriggerReads: readonly IMemorySpaceAddress[] | undefined;
+    readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly resolve: (value: unknown) => void;
   },
@@ -470,11 +458,6 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(commitPromise);
   }
   const committedLog = log;
-  const changedComputationWrites = state.recordChangedComputationWrites(
-    args.action,
-    args.tx,
-    committedLog,
-  );
   watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
@@ -483,13 +466,16 @@ function finalizeReactiveActionCommit(
     pending: state.pending,
     commitPromise,
     resubscribe: state.resubscribe,
-    markDirectDirty: state.markDirectDirty,
+    markInvalid: state.markInvalid,
     queueExecution: state.queueExecution,
-    restoreCfcTriggerReads: () => {
+    restoreInvalidCauses: () => {
+      const record = state.nodes.get(args.action);
       if (
-        args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0
+        record &&
+        args.invalidCauses !== undefined &&
+        args.invalidCauses.length > 0
       ) {
-        state.restoreCfcTriggerReads(args.action, args.cfcTriggerReads);
+        restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
   });
@@ -509,10 +495,6 @@ function finalizeReactiveActionCommit(
   } finally {
     logger.timeEnd("scheduler", "run", "resubscribe");
   }
-  state.markReadersDirtyForChangedWrites(
-    args.action,
-    changedComputationWrites,
-  );
   args.resolve(args.result);
 }
 
@@ -589,11 +571,6 @@ function attachSchedulerActionObservation(
   }
 
   const annotated = args.action as Partial<TelemetryAnnotations>;
-  const ignoredSchedulingWrites = annotated.ignoredSchedulingWrites ?? [];
-  const declaredWrites = sortAndCompactPaths(filterIgnoredAddresses(
-    (annotated.writes ?? []).map(toMemorySpaceAddress),
-    ignoredSchedulingWrites,
-  ));
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
@@ -619,12 +596,11 @@ function attachSchedulerActionObservation(
     observedAtSeq: 0,
     transactionKind: "action-run",
     transactionLog: log,
-    // The live registered surface — for actions without a `.writes`
-    // annotation it came from subscribe's ReactivityLog, which
-    // declaredWrites (annotation-only) does not capture.
-    currentKnownWrites: state.getSchedulingWrites(args.action) ??
-      declaredWrites,
-    declaredWrites,
+    // The live registered surface — for actions without a `.writes` annotation
+    // it came from subscribe's ReactivityLog. Persisted so rehydration can
+    // restore the surface (the log is gone after a restart). `declaredWrites`
+    // (annotation-only) is slimmed out; the annotation is still available live.
+    currentKnownWrites: state.getSchedulingWrites(args.action) ?? [],
     materializerWriteEnvelopes:
       state.getMaterializerWriteEnvelopes(args.action) ?? [],
     ignoredSchedulingWrites: filterIgnoredAddresses(
@@ -692,8 +668,8 @@ export function schedulerImplementationFingerprint(
   return `action:${telemetryId}:${actionId}`;
 }
 
-export function schedulerRuntimeFingerprint(mode: "pull" | "push"): string {
-  return `runner:scheduler:${mode}`;
+export function schedulerRuntimeFingerprint(_mode?: "pull" | "push"): string {
+  return "runner:scheduler:v2";
 }
 
 function schedulerActionOptions(

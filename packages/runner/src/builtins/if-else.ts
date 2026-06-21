@@ -15,9 +15,7 @@ export function ifElse(
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): RawBuiltinResult {
-  const readCondition = (
-    tx: IExtendedStorageTransaction,
-  ): { cell: Cell<any>; value: unknown } => {
+  const readCondition = (tx: IExtendedStorageTransaction) => {
     const conditionCell = inputsCell.key("condition");
     const resolvedCondition = resolveLink(
       runtime,
@@ -53,15 +51,7 @@ export function ifElse(
     resultWithLog.setRawUntyped(serializedRef);
   };
 
-  // Only depend on the condition for initial scheduling.
-  // This way, if condition is false, we don't trigger ifTrue's computation,
-  // and if condition is true, we don't trigger ifFalse's computation.
-  const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-    readCondition(depTx);
-  };
-
   return {
     action,
-    populateDependencies,
   };
 }
