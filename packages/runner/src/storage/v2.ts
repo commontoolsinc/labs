@@ -121,12 +121,20 @@ const DATA_URI_SYNC_CACHE_MAX = 10_000;
 // scheduler retry path re-gate on readiness.
 const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 
-// Strategy 1 — client-side conflict admission control. Once a commit conflicts,
-// the client knows its read set is behind until the server catches it up. New
-// commits reading those same ids before catch-up are near-certain to conflict
-// too, so when this is enabled we pre-empt them locally (revert + re-run after
-// catch-up) instead of issuing a doomed round trip that generates another
-// server conflict. Gated so the effect can be A/B measured; default off.
+// Strategy 1 — client-side conflict admission control (EXPERIMENT, default off).
+// Once a commit conflicts, the client knows its read set is behind until the
+// server catches it up. New commits reading those same ids before catch-up are
+// near-certain to conflict too, so when enabled we pre-empt them locally
+// (revert + re-run after catch-up) instead of issuing a doomed round trip.
+//
+// Measured NET-NEGATIVE on the lunch-poll contention workload: those conflicts
+// are genuine cross-session write-write ping-pong (first-conflicts that
+// admission cannot pre-empt), and since conflict responses are already cheap,
+// pre-empting only inserts extra revert+re-run cycles that re-enter the same
+// contention. 5x5 conflicts rose ~1380 -> ~1600 (plus pre-empts). Kept
+// flag-gated as a documented experiment; the real lever for this workload is
+// coalescing commutative ops. Do NOT enable without re-measuring on the target
+// workload.
 let conflictAdmissionConfigOverride: boolean | undefined;
 export function setConflictAdmissionEnabled(value: boolean | undefined): void {
   conflictAdmissionConfigOverride = value;
