@@ -143,64 +143,54 @@ Verification added or run for this work:
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
 
-- ✅ Stored in a **SQLite `visits` table** (`sqliteDatabase(...)` in the pattern
-  body), reworked from the original `history: PerSpace<HistoryEntry[]>` array as
-  the team's first dogfood of the SQLite builtins (PRs #3776/#3848). Columns:
-  `id, title, logged_by (TEXT name snapshot), logged_by_cf_link (cfLink<User>
-  live pointer), went_at`.
-  **No more 50-entry cap** — a table grows fine; the read query bounds itself
-  with `LIMIT 8`. Appended via the host-only `logVisit` (`db.exec` INSERT). Each
-  option still has a "✓ we went here" button.
+- ✅ Stored in a **`PerSpace<HistoryEntry[]>` array** (the `visits` input),
+  capped at the most-recent `MAX_HISTORY` (200) entries by date. Each entry is
+  `{ id, title, loggedByName (frozen), loggedBy (live Cell<User> link), wentAt,
+  votes }`.
+  Appended via the host-only `logVisit` (`visits.push`, then a cap-trim only on
+  overflow). Each option still has a "✓ we went here" button.
+  - History was briefly on a **SQLite `visits` table** (#4144/#4145, the team's
+    first dogfood of the SQLite builtins, #3776/#3848). It surfaced real builtin
+    bugs (below), but SQLite wasn't the right fit for a small in-cell collection
+    — it's now back on plain fabric storage.
 - ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
   today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
   date draft clears after each log so it defaults back to today.
-- ✅ **Editing:** `removeHistoryEntry({ id })` (`db.exec` DELETE) drops a single
-  mistaken entry via a per-row ✕; `clearHistory` (two-step confirm) truncates
-  the table. Both host-only, and both also clear the matching `vote_history`
-  rows.
+- ✅ **Editing:** `removeHistoryEntry({ id })` (a `visits.set(filter)`) drops a
+  single mistaken entry via a per-row ✕; `clearHistory` (two-step confirm)
+  empties the log (`visits.set([])`). Both host-only. The embedded vote snapshot
+  goes with the entry — no separate cascade to keep aligned.
 - ✅ Shown as a **"Recently eaten" list below the options** (8 most recent,
-  most-recent-first), a `db.query` rendered with the SAME plain-JSX `.map`
+  newest first), a `computed` over `visits` rendered with the plain-JSX `.map`
   idiom, labelled with each visit's own date ("Tuesday, May 20").
 - Implementation notes (hard-won):
-  - Visit labels derive **only from the stored `went_at`**, never from the
+  - Visit labels derive **only from the stored `wentAt`**, never from the
     current clock — `safeDateNow()` inside a `derive`/`computed` is
     non-idempotent (it belongs in handlers, like the backdate parse).
   - Interactive `onClick` handlers must live in **plain-ternary JSX**, not
     inside a `computed/lift`-returned VNode, or they mis-lower as lifts
-    (`$event in inputs`). The `db.query` result is fed to the card via
-    `computed(() => recentVisits.result ?? [])` — an OpaqueRef<row[]> shaped
-    exactly like the old `recentHistory` array, so the plain-JSX `.map` (where
-    the handlers live) is preserved unchanged.
-  - **SQLite issues found while dogfooding** (see
-    `session_outputs/2026-06-04_lunch-poll-sqlite/` for full writeups):
-    1. _(worked around)_ The `@db/sqlite` binding truncates a bound JS number to
-       32 bits, so a ms-epoch `went_at` round-trips as garbage. Workaround:
-       store timestamps as zero-padded TEXT (`encodeTs`/`decodeTs`); 16-digit
-       padding keeps `ORDER BY` correct.
-    2. _(worked around, test-runner only)_ `reactOn: db` left the `recentVisits`
-       query stale after writes in the emulated test runner; reacting on a
-       `PerSpace<number>` `sqliteRev` counter the handlers bump is reliable.
-    3. _(resolved by runtime PR #3967)_ On a _deployed_ piece, `db.exec` in the
-       mutating handlers threw "invalid database handle" — the `SqliteDb` handle
-       wasn't materialized on the deployed handler-input path (worked fine in
-       the emulated `cf test` runner). Root cause was a **client-side dispatch
-       race**: `cf piece call` dispatched the handler before its asCell input
-       docs had synced into the local replica, so the synchronous handle read
-       saw an empty doc. Fixed in the runtime by #3967 (merged) and verified
-       end-to-end on a deployed prod piece — `db.exec` writes land and the
-       migration is fully live. Full writeup in `SQLITE-DEPLOY-BUG.md`.
+    (`$event in inputs`). `recentVisits` is an array-shaped `computed`, so the
+    plain-JSX `.map` (where the handlers live) is preserved unchanged.
+  - The SQLite era surfaced real builtin bugs, kept here as history (the
+    fabric-array model has none of them): the `@db/sqlite` binding truncated
+    bound JS numbers to 32 bits (worked around with TEXT-encoded timestamps);
+    `reactOn: db` left queries stale after writes in the test runner (worked
+    around with a `sqliteRev` write-counter); async query flushes landed after
+    the light settle (needed `{ settle: true }` test steps); and a
+    deployed-piece "invalid database handle" dispatch race (resolved by runtime
+    PR #3967).
 
 ### 2026-06-15 — Durable vote-history snapshot
 
-When the host logs a visit, snapshot **who voted what** at that moment into a
-SQLite `vote_history` table tied to the visit. Live voting stays on the in-cell
-`votes` array — only the durable record is in SQLite.
+When the host logs a visit, snapshot **who voted what** at that moment, embedded
+in the entry's `votes` list. Live voting stays on the in-cell `votes` array —
+the log keeps its own frozen copy.
 
-- ✅ `vote_history`
-  (`id, visit_id, voter, voter_cf_link, option_title,
-  vote_color, went_at`).
-  `logVisit` loops the current votes and writes one row each (option title
-  denormalized; voter as both a frozen name and a live `cfLink<User>`). All
-  INSERTs fold into the one handler commit.
-- ✅ Surfaced as a read-only **"📊 Lunch stats"** card (a `GROUP BY` query):
-  per-place visit count + green/red tallies across the whole record.
+- ✅ Each entry's `votes` is
+  `{ voter (frozen), voterLink (live Cell<User>),
+  optionTitle (denormalized), color }[]`.
+  `logVisit` loops the current votes and embeds one snapshot each (option title
+  denormalized so the snapshot survives the option being removed).
+- ✅ Surfaced as a read-only **"📊 Lunch stats"** card (the `summarizePlaces`
+  group-by `computed`): per-place visit count + green/yellow/red tallies across
+  the whole record, scoped to the votes cast for each visited place.
