@@ -1,5 +1,8 @@
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
+import { type Immutable, isRecord } from "@commonfabric/utils/types";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -145,7 +148,19 @@ export function findDifferingWriteKeys(
       differingKeys.push(key);
       continue;
     }
-    if (!valueEqual(previousWrites.get(key), latestWrites.get(key))) {
+    // These come from `captureTransactionWrites()`, which routes each value
+    // through a structural `isRecord` unwrap (stripping a nested `{ value }`
+    // wrapper), so the captured type is `unknown` even though the underlying
+    // write detail is a `FabricValue`. The cast asserts what the type system
+    // can't verify across that boundary; a genuine `unknown` boundary
+    // ultimately warrants a runtime check, for which a recursive
+    // `isFabricValue()` predicate (not yet extracted) would be the right tool.
+    if (
+      !valueEqual(
+        previousWrites.get(key) as FabricValue,
+        latestWrites.get(key) as FabricValue,
+      )
+    ) {
       differingKeys.push(key);
     }
   }
@@ -187,10 +202,13 @@ export function findNonIdempotentPair(
 function transactionReadInvariants(
   tx: IExtendedStorageTransaction,
   spaces: ReadonlySet<IMemorySpaceAddress["space"]>,
-): Map<string, { address: IMemorySpaceAddress; value: unknown }> {
+): Map<
+  string,
+  { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
+> {
   const invariants = new Map<
     string,
-    { address: IMemorySpaceAddress; value: unknown }
+    { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
   >();
   for (const space of spaces) {
     try {
