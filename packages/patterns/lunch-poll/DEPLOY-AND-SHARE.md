@@ -34,10 +34,31 @@ cells can be copied to another piece via the CLI (see Option B's caveat).
 ## The canonical piece
 
 One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-06-15.** A piece is tied to one
+stable identifier — current as of 2026-06-22.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
+
+The poll now lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
+successor to `toolshed`. It was established fresh here with `cf piece new` (see
+"Recovering → Re-establishing") — we were the first poll in this space:
+
+```
+space:  team-lunch
+piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+```
+
+(History: an earlier poll lived in a _space_ literally named `rapids`, back on
+`toolshed` — unrelated to the `rapids` _server_ above, despite the name clash;
+`lunch-2026-05-26` / `lunch-2026-05-29` were earlier space pointers.
+`team-lunch` is a fresh space made to avoid that confusion.)
+
+### Historical: the `toolshed` piece
+
+Before `rapids`, the canonical poll ran on `toolshed`
+(`toolshed.saga-castor.ts.net`). Retained here for reference, and in case the
+`rapids` migration is rolled back:
 
 ```
 space:  team-lunch
@@ -45,16 +66,12 @@ piece:  fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
 url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
 ```
 
-(History: the `rapids` space held an earlier poll; `lunch-2026-05-26` /
-`lunch-2026-05-29` were earlier pointers. `team-lunch` is a fresh space made to
-avoid that confusion.)
-
 ## Environment setup
 
 ```bash
-export CF_API_URL=https://toolshed.saga-castor.ts.net/   # prod; or http://localhost:8000 for local dev
+export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg    # current as of 2026-06-15
+PIECE=fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0    # rapids; current as of 2026-06-22
 SPACE=team-lunch
 ```
 
