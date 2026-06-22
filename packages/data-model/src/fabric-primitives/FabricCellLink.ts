@@ -1,3 +1,7 @@
+import type {
+  FabricCellLink as ApiFabricCellLink,
+  FabricCellLinkConstructor as ApiFabricCellLinkConstructor,
+} from "@commonfabric/api";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
@@ -21,7 +25,8 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * `path`, `overwrite`). The two are kept as independent declarations rather than
  * one importing the other: `WireLinkRefPayload` names the subset that crosses a
  * *string* boundary, while this names the in-memory primitive's slot; they
- * coincide today but answer to different layers.
+ * coincide today but answer to different layers. `@commonfabric/api` mirrors
+ * this shape too, pinned to the class via `implements` / `satisfies` below.
  */
 export type FabricCellLinkPayload = {
   readonly [key: string]: string | readonly string[];
@@ -46,7 +51,8 @@ export type FabricCellLinkPayload = {
  * freezes `this`. The caller retains no mutable shared structure with the
  * instance.
  */
-export class FabricCellLink extends BaseFabricPrimitive {
+export class FabricCellLink extends BaseFabricPrimitive
+  implements ApiFabricCellLink {
   /** The deeply-frozen addressing payload. */
   readonly #payload: FabricCellLinkPayload;
 
@@ -153,3 +159,8 @@ function assertValidPayload(
     }
   }
 }
+
+// Compile-time check that the exported `FabricCellLink` constructor matches the
+// `FabricCellLinkConstructor` declared in `@commonfabric/api`. This catches
+// drift between the public type contract and this implementation.
+FabricCellLink satisfies ApiFabricCellLinkConstructor;
