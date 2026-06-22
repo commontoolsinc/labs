@@ -159,6 +159,11 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "reviewed",
     resourceAtom,
   );
+  const caveatWithByAtom: CfcCaveatAtom = cfcAtom.caveat(
+    "approved",
+    resourceAtom,
+    caveatAtom,
+  );
   const builtinAtom: CfcBuiltinAtom = cfcAtom.builtin("current-user");
   const injectionSafeAtom: CfcInjectionSafeAtom = cfcAtom.injectionSafe();
   const userSurfaceInputAtom: CfcUserSurfaceInputAtom = cfcAtom
@@ -188,6 +193,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   const atomValues: CfcAtom[] = [
     resourceAtom,
     caveatAtom,
+    caveatWithByAtom,
     builtinAtom,
     injectionSafeAtom,
     userSurfaceInputAtom,
@@ -221,7 +227,8 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(trustedWrite, { title: "nu" });
   assertEquals(trustedWriteWithIntegrity, { title: "xi" });
   assertEquals(trustedUiContract, "omicron");
-  assertEquals(atomValues.length, 8);
+  assertEquals(caveatWithByAtom.by, caveatAtom);
+  assertEquals(atomValues.length, 9);
   assertEquals(aliasNames, [
     "Cfc",
     "Confidential",

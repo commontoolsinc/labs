@@ -11,7 +11,7 @@ import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type Opaque, UI } from "../src/builder/types.ts";
+import { type FactoryInput, UI } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("CFC label view helpers", () => {
@@ -1119,7 +1119,7 @@ describe("CFC label view helpers", () => {
       const { pattern } = commonfabric;
       const renderLabels = pattern<{ items: unknown[] }>(({ items }) => {
         const rendered = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             (((item: any) => ({
               [UI]: {
                 type: "vnode" as const,

@@ -2538,7 +2538,7 @@ type TraverseResult<T> = { ok: T; error?: never } | {
   error: TraverseFailure;
 };
 
-/** Opaque memo cache shared across SchemaObjectTraverser instances within a query */
+/** Schema memo cache shared across SchemaObjectTraverser instances within a query */
 export type SchemaMemo = Map<string, TraverseResult<Immutable<FabricValue>>>;
 
 /** Create a shared memo cache to pass to multiple SchemaObjectTraverser instances */

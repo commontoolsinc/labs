@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   type CellScope,
+  type FactoryInput,
   type Frame,
   type ICell,
   isOpaqueRef,
@@ -11,7 +12,6 @@ import {
   type Module,
   type Node,
   type NodeRef,
-  type Opaque,
   type OpaqueCell,
   type OpaqueRef,
   type Pattern,
@@ -76,7 +76,7 @@ export function pattern<T>(
 export function pattern<T, R>(
   fn: (
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
+  ) => FactoryInput<R>,
 ): PatternFactory<T, R>;
 // Function + schemas overloads
 export function pattern<S extends JSONSchema>(
@@ -90,7 +90,7 @@ export function pattern<S extends JSONSchema>(
 export function pattern<S extends JSONSchema, R>(
   fn: (
     input: OpaqueRef<SchemaWithoutCell<S>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
+  ) => FactoryInput<R>,
   argumentSchema: S,
 ): PatternFactory<SchemaWithoutCell<S>, R>;
 export function pattern<S extends JSONSchema, RS extends JSONSchema>(
@@ -98,7 +98,7 @@ export function pattern<S extends JSONSchema, RS extends JSONSchema>(
     input: OpaqueRef<SchemaWithoutCell<S>> & {
       [SELF]: OpaqueRef<Schema<RS>>;
     },
-  ) => Opaque<Schema<RS>>,
+  ) => FactoryInput<Schema<RS>>,
   argumentSchema: S,
   resultSchema: RS,
 ): PatternFactory<SchemaWithoutCell<S>, Schema<RS>>;
@@ -113,7 +113,7 @@ export function pattern<T>(
 export function pattern<T, R>(
   fn: (
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
+  ) => FactoryInput<R>,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R>;
@@ -121,7 +121,7 @@ export function pattern<T, R>(
 export function pattern<T, R>(
   fn: (
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
+  ) => FactoryInput<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
@@ -170,7 +170,7 @@ export function pattern<T, R>(
 export function patternFromFrame<T, R>(
   fn: (
     input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
+  ) => FactoryInput<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
@@ -200,7 +200,7 @@ function factoryFromPattern<T, R>(
   argumentSchemaArg: JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
   inputs: OpaqueRef<RequireDefaults<T>>,
-  outputs: Opaque<R>,
+  outputs: FactoryInput<R>,
 ): PatternFactory<T, R> {
   // Capture selfRef before collectCellsAndNodes transforms inputs from OpaqueRef to Cell
   // (collectCellsAndNodes replaces OpaqueRef proxies with their underlying Cells,
@@ -215,7 +215,7 @@ function factoryFromPattern<T, R>(
   // we go. Our traverseValue doesn't descend into cells, but we'll recurse on
   // the cell's nodes ourselves. We'll also add any cells we see to allCells,
   // and any nodes to allNodes.
-  const collectCellsAndNodes = (value: Opaque<unknown>) =>
+  const collectCellsAndNodes = (value: FactoryInput<unknown>) =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
@@ -501,7 +501,7 @@ function factoryFromPattern<T, R>(
     defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
-      (inputs: Opaque<T>): OpaqueRef<R> => {
+      (inputs: FactoryInput<T>): OpaqueRef<R> => {
         const module: Module & toJSON = {
           type: "pattern",
           implementation: factory,

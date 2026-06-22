@@ -1,5 +1,6 @@
 import type {
   CellScope,
+  FactoryInput,
   Frame,
   Handler,
   HandlerFactory,
@@ -7,7 +8,6 @@ import type {
   Module,
   ModuleFactory,
   NodeRef,
-  Opaque,
   OpaqueCell,
   OpaqueRef,
   Schema,
@@ -132,7 +132,7 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+  const factory = Object.assign((inputs: FactoryInput<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -417,40 +417,45 @@ function handlerInternal<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
+    bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    with: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
   };
 
-  const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
-    // If the event schema is false, we actually set it to true here, since
-    // otherwise we won't think it needs to be handled. Ditto for state.
-    // TODO(@ubik2): I should be able to remove this workaround, but the stream
-    // handler wasn't being triggered. This is a temporary workaround.
-    const flexibleEventSchema = eventSchema ? eventSchema : true as JSONSchema;
-    const eventStream = stream<E>(flexibleEventSchema);
+  const factory = Object.assign(
+    (props: FactoryInput<StripCell<T>>): Stream<E> => {
+      // If the event schema is false, we actually set it to true here, since
+      // otherwise we won't think it needs to be handled. Ditto for state.
+      // TODO(@ubik2): I should be able to remove this workaround, but the stream
+      // handler wasn't being triggered. This is a temporary workaround.
+      const flexibleEventSchema = eventSchema
+        ? eventSchema
+        : true as JSONSchema;
+      const eventStream = stream<E>(flexibleEventSchema);
 
-    // Set stream marker (cast to E as stream is typed for the events it accepts)
-    const node: NodeRef = {
-      module,
-      inputs: { $ctx: props, $event: eventStream },
-      outputs: {},
-      frame: getTopFrame(),
-    };
+      // Set stream marker (cast to E as stream is typed for the events it accepts)
+      const node: NodeRef = {
+        module,
+        inputs: { $ctx: props, $event: eventStream },
+        outputs: {},
+        frame: getTopFrame(),
+      };
 
-    connectInputAndOutputs(node);
+      connectInputAndOutputs(node);
 
-    return eventStream;
-  }, module);
+      return eventStream;
+    },
+    module,
+  );
 
   // Provenance brand, like every factory from `createNodeFactory` (whose
   // comment always claimed handler coverage — handler factories are built

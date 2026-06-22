@@ -900,7 +900,7 @@ function extractElementFromArrayType(
  *
  * Handles:
  * - OpaqueRef<T[]> → T[] → T (intersection type case)
- * - Opaque<T[]> → OpaqueRef<T[]> → T[] → T (union type case)
+ * - FactoryInput<T[]> → OpaqueRef<T[]> → T[] → T (union type case)
  * - Plain Array<T> → T
  *
  * @param arrayExpr - Expression representing an array or array-like type
@@ -936,7 +936,7 @@ export function inferArrayElementType(
     }
   }
 
-  // Handle unions (Opaque<T[]> case)
+  // Handle unions (FactoryInput<T[]> case)
   if (arrayType.flags & ts.TypeFlags.Union) {
     const opaqueType = findOpaqueRefInUnion(
       arrayType as ts.UnionType,

@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type Opaque } from "../src/builder/types.ts";
+import { type FactoryInput } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-pointwise");
 const space = signer.did();
@@ -119,7 +119,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       mappedRef = (values as any).mapWithPattern(
-        pattern(({ element }: Opaque<any>) => double(element)),
+        pattern(({ element }: FactoryInput<any>) => double(element)),
         {},
       );
       return { mapped: mappedRef };
@@ -235,7 +235,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: Opaque<any>) => isPositive(element)),
+        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
         {},
       );
       return { kept: filteredRef };
@@ -323,7 +323,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: Opaque<any>) => isPositive(element)),
+        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
         {},
       );
       return { kept: filteredRef };
@@ -407,7 +407,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: Opaque<any>) => isPositive(element)),
+        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
         {},
       );
       return { kept: filteredRef };

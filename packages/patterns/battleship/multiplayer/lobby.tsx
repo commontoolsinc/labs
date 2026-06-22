@@ -266,32 +266,32 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       myName,
       myPlayerNumber,
       ...sharedCells,
-    } as any);
+    });
     const joinWithNameStream = joinWithName({
       myName,
       myPlayerNumber,
       ...sharedCells,
-    } as any);
+    });
     const joinPlayer1 = joinPlayer({
       slot: 1,
       ...sharedCells,
-    } as any);
+    });
     const joinPlayer2 = joinPlayer({
       slot: 2,
       ...sharedCells,
-    } as any);
+    });
     const reset = resetGame({
       ...sharedCells,
       myName,
       myPlayerNumber,
-    } as any);
+    });
 
     const room = BattleshipRoom({
       gameName,
       ...sharedCells,
       myName,
       myPlayerNumber,
-    } as any);
+    });
 
     const player1Data = computed(() => player1.get());
     const player2Data = computed(() => player2.get());
@@ -366,7 +366,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       name={player1Data?.name ?? "?"}
                       size="xs"
                     />
-                    Player 1: {player1Data?.name ?? "Open"}
+                    Player 1: {String(player1Data?.name ?? "Open")}
                   </div>
                   <div
                     style={{
@@ -380,7 +380,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       name={player2Data?.name ?? "?"}
                       size="xs"
                     />
-                    Player 2: {player2Data?.name ?? "Open"}
+                    Player 2: {String(player2Data?.name ?? "Open")}
                   </div>
                 </div>
 

@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { NAME, type Opaque } from "../src/builder/types.ts";
+import { type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -75,7 +75,7 @@ describe("Pattern Runner - Regressions", () => {
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             (((item: any) =>
               ifElse(
                 lift((i: { name: string; visible: boolean }) => i.visible)(

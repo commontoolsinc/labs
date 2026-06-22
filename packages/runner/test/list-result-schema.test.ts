@@ -5,7 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { listResultSchema } from "../src/builtins/list-result-schema.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type JSONSchema, type Opaque } from "../src/builder/types.ts";
+import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-list-result-schema");
 const space = signer.did();
@@ -79,19 +79,19 @@ describe("listResultSchema", () => {
 
     const collectionPattern = pattern<{ values: number[] }>(({ values }) => {
       mappedRef = (values as any).mapWithPattern(
-        pattern(({ element, index, array }: Opaque<any>) =>
+        pattern(({ element, index, array }: FactoryInput<any>) =>
           (((value: number) => value) as any)(element, index, array)
         ),
         {},
       );
       filteredRef = (values as any).filterWithPattern(
-        pattern(({ element, index, array }: Opaque<any>) =>
+        pattern(({ element, index, array }: FactoryInput<any>) =>
           (((_value: number) => true) as any)(element, index, array)
         ),
         {},
       );
       flattenedRef = (values as any).flatMapWithPattern(
-        pattern(({ element, index, array }: Opaque<any>) =>
+        pattern(({ element, index, array }: FactoryInput<any>) =>
           (((value: number) => [value]) as any)(element, index, array)
         ),
         {},
