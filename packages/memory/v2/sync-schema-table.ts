@@ -11,13 +11,14 @@ import { isPlainObject } from "@commonfabric/utils/types";
 
 const SCHEMA_REF_PREFIX = "schema-ref@1:";
 
+type SchemaTable = Record<string, JSONSchema>;
+
 export type SchemaTableSessionSync = SessionSync & {
-  schemaTable?: JSONSchema[];
+  schemaTable?: SchemaTable;
 };
 
 type RewriteState = {
-  schemas: JSONSchema[];
-  schemaIndexes: Map<string, number>;
+  schemas: Map<string, JSONSchema>;
   changed: boolean;
 };
 
@@ -33,29 +34,34 @@ const schemaRefFor = (
 ): string => {
   const schemaAndHash = internSchema(schema, true);
   const hash = schemaAndHash.taggedHashString;
-  const existing = state.schemaIndexes.get(hash);
-  if (existing !== undefined) {
-    return `${SCHEMA_REF_PREFIX}${existing}`;
+  if (!state.schemas.has(hash)) {
+    state.schemas.set(hash, schemaAndHash.schema);
   }
-
-  const index = state.schemas.length;
-  state.schemaIndexes.set(hash, index);
-  state.schemas.push(schemaAndHash.schema);
-  return `${SCHEMA_REF_PREFIX}${index}`;
+  return `${SCHEMA_REF_PREFIX}${hash}`;
 };
 
 const expandSchemaRef = (
   value: unknown,
-  schemas: readonly JSONSchema[] | undefined,
+  schemas: SchemaTable | undefined,
 ): JSONSchema | undefined => {
   if (typeof value !== "string" || !value.startsWith(SCHEMA_REF_PREFIX)) {
     return undefined;
   }
-  const index = Number(value.slice(SCHEMA_REF_PREFIX.length));
-  if (!Number.isInteger(index) || index < 0 || schemas?.[index] === undefined) {
+  const hash = value.slice(SCHEMA_REF_PREFIX.length);
+  if (
+    hash.length === 0 || schemas === undefined ||
+    !Object.hasOwn(schemas, hash)
+  ) {
     throw new Error(`Invalid sync schema table reference: ${value}`);
   }
-  return internSchema(schemas[index]);
+  const schema = schemas[hash];
+  const schemaAndHash = internSchema(schema, true);
+  if (schemaAndHash.taggedHashString !== hash) {
+    throw new Error(
+      `Invalid sync schema table content for reference: ${value}`,
+    );
+  }
+  return schemaAndHash.schema;
 };
 
 const rewriteSchemaValue = (
@@ -71,7 +77,7 @@ const rewriteSchemaValue = (
 
 const expandSchemaValue = (
   value: unknown,
-  schemas: readonly JSONSchema[] | undefined,
+  schemas: SchemaTable | undefined,
 ): unknown => expandSchemaRef(value, schemas) ?? value;
 
 const rewriteLinkPayload = (
@@ -87,7 +93,7 @@ const rewriteLinkPayload = (
 
 const expandLinkPayload = (
   payload: Record<string, unknown>,
-  schemas: readonly JSONSchema[] | undefined,
+  schemas: SchemaTable | undefined,
 ): Record<string, unknown> => {
   if (!Object.hasOwn(payload, "schema")) {
     return payload;
@@ -148,7 +154,7 @@ const rewriteValue = (value: unknown, state: RewriteState): unknown => {
 
 const expandValue = (
   value: unknown,
-  schemas: readonly JSONSchema[] | undefined,
+  schemas: SchemaTable | undefined,
 ): unknown => {
   if (Array.isArray(value)) {
     let changed = false;
@@ -203,8 +209,7 @@ export const compressSessionSyncSchemas = (
   sync: SessionSync,
 ): SessionSync | SchemaTableSessionSync => {
   const state: RewriteState = {
-    schemas: [],
-    schemaIndexes: new Map(),
+    schemas: new Map(),
     changed: false,
   };
   const upserts = sync.upserts.map((upsert) => {
@@ -225,7 +230,7 @@ export const compressSessionSyncSchemas = (
   return {
     ...sync,
     upserts,
-    schemaTable: state.schemas,
+    schemaTable: Object.fromEntries(state.schemas),
   };
 };
 
@@ -233,7 +238,7 @@ export const expandSessionSyncSchemas = (
   sync: SessionSync | SchemaTableSessionSync,
 ): SessionSync => {
   const schemas = (sync as SchemaTableSessionSync).schemaTable;
-  if (schemas === undefined || schemas.length === 0) {
+  if (schemas === undefined || Object.keys(schemas).length === 0) {
     return sync;
   }
 

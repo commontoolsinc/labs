@@ -6,6 +6,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { LINK_V1_TAG, linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
@@ -191,12 +192,13 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
   const compressedAliases =
     (compressed.upserts[0].doc?.value as Record<string, unknown>)
       .aliases as Record<string, unknown>[];
+  const schemaHash = internSchema(schema, true).taggedHashString;
 
   assertExists(compressed.schemaTable);
-  assertEquals(compressed.schemaTable.length, 1);
+  assertEquals(Object.keys(compressed.schemaTable), [schemaHash]);
   assertEquals(
     (compressedAliases[0].$alias as Record<string, unknown>).schema,
-    "schema-ref@1:0",
+    `schema-ref@1:${schemaHash}`,
   );
   assertEquals(
     (compressedAliases[1].$alias as Record<string, unknown>).schema,
@@ -247,7 +249,7 @@ Deno.test("sync schema table leaves syncs without compressible schemas unchanged
     ],
     removes: [],
   };
-  const emptyTableSync: SchemaTableSessionSync = { ...sync, schemaTable: [] };
+  const emptyTableSync: SchemaTableSessionSync = { ...sync, schemaTable: {} };
 
   assertStrictEquals(compressSessionSyncSchemas(sync), sync);
   assertStrictEquals(expandSessionSyncSchemas(sync), sync);
@@ -256,6 +258,7 @@ Deno.test("sync schema table leaves syncs without compressible schemas unchanged
 
 Deno.test("sync schema table expands unused tables and rejects bad refs", () => {
   const schema: JSONSchema = { type: "string" };
+  const schemaHash = internSchema(schema, true).taggedHashString;
   const syncWithUnusedTable: SchemaTableSessionSync = {
     type: "sync",
     fromSeq: 0,
@@ -296,7 +299,7 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
       },
     ],
     removes: [],
-    schemaTable: [schema],
+    schemaTable: { [schemaHash]: schema },
   };
 
   const expanded = expandSessionSyncSchemas(syncWithUnusedTable);
@@ -304,7 +307,8 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
     syncWithUnusedTable;
   assertEquals(expanded, syncWithoutTable);
   assertEquals(
-    (expanded as unknown as { schemaTable?: JSONSchema[] }).schemaTable,
+    (expanded as unknown as { schemaTable?: Record<string, JSONSchema> })
+      .schemaTable,
     undefined,
   );
   assert(Object.isFrozen(expanded));
@@ -325,7 +329,7 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
                   [LINK_V1_TAG]: {
                     id: "of:bad-ref-target",
                     path: [],
-                    schema: "schema-ref@1:99",
+                    schema: "schema-ref@1:sha256:missing",
                   },
                 },
               },
@@ -335,6 +339,35 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
       }),
     Error,
     "Invalid sync schema table reference",
+  );
+
+  assertThrows(
+    () =>
+      expandSessionSyncSchemas({
+        ...syncWithUnusedTable,
+        upserts: [{
+          branch: "",
+          id: "of:poisoned-ref",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: {
+              ref: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    id: "of:poisoned-ref-target",
+                    path: [],
+                    schema: `schema-ref@1:${schemaHash}`,
+                  },
+                },
+              },
+            },
+          },
+        }],
+        schemaTable: { [schemaHash]: { type: "number" } },
+      }),
+    Error,
+    "Invalid sync schema table content",
   );
 });
 
