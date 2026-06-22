@@ -11,6 +11,8 @@ import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
+  type EntityDocument,
+  getEntityDocumentMetadata,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
@@ -70,6 +72,25 @@ describe("memory v2 documents", () => {
       }),
       {
         value: { hello: "world" },
+      },
+    );
+  });
+
+  it("extracts document metadata without value", () => {
+    const source = entityRefFromString("abc123");
+    const document: EntityDocument = {
+      value: { hello: "world" },
+      source,
+      label: "example",
+      count: 2,
+    };
+
+    assertEquals(
+      getEntityDocumentMetadata(document),
+      {
+        source,
+        label: "example",
+        count: 2,
       },
     );
   });

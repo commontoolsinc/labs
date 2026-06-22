@@ -1,5 +1,11 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
+import { LINK_V1_TAG, linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
@@ -15,7 +21,9 @@ import {
 import { Server } from "../v2/server.ts";
 import {
   compressServerMessageSchemas,
+  compressSessionSyncSchemas,
   expandServerMessageSchemas,
+  expandSessionSyncSchemas,
   type SchemaTableSessionSync,
 } from "../v2/sync-schema-table.ts";
 
@@ -116,22 +124,6 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
     .split("$defs").length - 1;
   const expanded = expandServerMessageSchemas(compressed);
 
-  console.log(
-    JSON.stringify({
-      fixture: "repeated-schema-sync",
-      upserts: sync.upserts.length,
-      before: {
-        schemaOccurrences: schemaMarkerCount,
-        encodedBytes: bytes,
-      },
-      after: {
-        schemaOccurrences: compressedSchemaMarkerCount,
-        encodedBytes: compressedBytes,
-      },
-      encodedByteReduction: Number((1 - compressedBytes / bytes).toFixed(4)),
-    }),
-  );
-
   assertEquals(expanded, message);
   assert(
     schemaMarkerCount >= sync.upserts.length,
@@ -141,6 +133,271 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
     compressedBytes < bytes / 5,
     "schema-table encoding should materially reduce repeated schema frames",
   );
+});
+
+Deno.test("sync schema table round-trips legacy aliases nested in arrays", () => {
+  const schema: JSONSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+    },
+  };
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:legacy-alias-source",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          aliases: [
+            {
+              $alias: {
+                id: "of:legacy-target",
+                path: [],
+                schema,
+              },
+            },
+            {
+              $alias: {
+                id: "of:string-schema-target",
+                path: [],
+                schema: "opaque-schema-name",
+              },
+            },
+            {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:no-schema-target",
+                  path: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const compressedAliases =
+    (compressed.upserts[0].doc?.value as Record<string, unknown>)
+      .aliases as Record<string, unknown>[];
+
+  assertExists(compressed.schemaTable);
+  assertEquals(compressed.schemaTable.length, 1);
+  assertEquals(
+    (compressedAliases[0].$alias as Record<string, unknown>).schema,
+    "schema-ref@1:0",
+  );
+  assertEquals(
+    (compressedAliases[1].$alias as Record<string, unknown>).schema,
+    "opaque-schema-name",
+  );
+  assertEquals(
+    (
+      (compressedAliases[2]["/"] as Record<string, unknown>)[
+        LINK_V1_TAG
+      ] as Record<string, unknown>
+    ).schema,
+    undefined,
+  );
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
+Deno.test("sync schema table leaves syncs without compressible schemas unchanged", () => {
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [
+      {
+        branch: "",
+        id: "of:missing-doc",
+        scope: "space",
+        seq: 1,
+      },
+      {
+        branch: "",
+        id: "of:no-compressible-schema",
+        scope: "space",
+        seq: 1,
+        doc: {
+          value: {
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:string-schema",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    removes: [],
+  };
+  const emptyTableSync: SchemaTableSessionSync = { ...sync, schemaTable: [] };
+
+  assertStrictEquals(compressSessionSyncSchemas(sync), sync);
+  assertStrictEquals(expandSessionSyncSchemas(sync), sync);
+  assertStrictEquals(expandSessionSyncSchemas(emptyTableSync), emptyTableSync);
+});
+
+Deno.test("sync schema table expands unused tables and rejects bad refs", () => {
+  const schema: JSONSchema = { type: "string" };
+  const syncWithUnusedTable: SchemaTableSessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [
+      {
+        branch: "",
+        id: "of:missing-doc",
+        scope: "space",
+        seq: 1,
+      },
+      {
+        branch: "",
+        id: "of:non-ref-schema",
+        scope: "space",
+        seq: 1,
+        doc: {
+          value: {
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:non-ref-schema-target",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+            refWithoutSchema: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:no-schema-target",
+                  path: [],
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    removes: [],
+    schemaTable: [schema],
+  };
+
+  const expanded = expandSessionSyncSchemas(syncWithUnusedTable);
+  const { schemaTable: _unusedSchemaTable, ...syncWithoutTable } =
+    syncWithUnusedTable;
+  assertEquals(expanded, syncWithoutTable);
+  assertEquals(
+    (expanded as unknown as { schemaTable?: JSONSchema[] }).schemaTable,
+    undefined,
+  );
+  assert(Object.isFrozen(expanded));
+
+  assertThrows(
+    () =>
+      expandSessionSyncSchemas({
+        ...syncWithUnusedTable,
+        upserts: [{
+          branch: "",
+          id: "of:bad-ref",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: {
+              ref: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    id: "of:bad-ref-target",
+                    path: [],
+                    schema: "schema-ref@1:99",
+                  },
+                },
+              },
+            },
+          },
+        }],
+      }),
+    Error,
+    "Invalid sync schema table reference",
+  );
+});
+
+Deno.test("server schema table helpers ignore non-sync messages", () => {
+  const hello = {
+    type: "hello.ok",
+    protocol: MEMORY_PROTOCOL,
+    flags: getMemoryProtocolFlags(),
+  } satisfies ServerMessage;
+  const responseWithoutOk = {
+    type: "response",
+    requestId: "without-ok",
+  } satisfies ServerMessage;
+  const responseWithPrimitiveOk = {
+    type: "response",
+    requestId: "primitive-ok",
+    ok: "done",
+  } satisfies ServerMessage;
+  const responseWithNonSyncOk = {
+    type: "response",
+    requestId: "non-sync",
+    ok: { sync: { type: "not-sync" } },
+  } satisfies ServerMessage;
+
+  assertStrictEquals(compressServerMessageSchemas(hello), hello);
+  assertStrictEquals(
+    compressServerMessageSchemas(responseWithoutOk),
+    responseWithoutOk,
+  );
+  assertStrictEquals(
+    compressServerMessageSchemas(responseWithPrimitiveOk),
+    responseWithPrimitiveOk,
+  );
+  assertStrictEquals(
+    compressServerMessageSchemas(responseWithNonSyncOk),
+    responseWithNonSyncOk,
+  );
+
+  assertStrictEquals(
+    expandServerMessageSchemas("not-an-object"),
+    "not-an-object",
+  );
+  assertStrictEquals(
+    expandServerMessageSchemas(responseWithoutOk),
+    responseWithoutOk,
+  );
+  assertStrictEquals(
+    expandServerMessageSchemas(responseWithNonSyncOk),
+    responseWithNonSyncOk,
+  );
+});
+
+Deno.test("server schema table helpers expand response sync payloads", () => {
+  const sync = repeatedSchemaSync(1);
+  const response = {
+    type: "response",
+    requestId: "sync-response",
+    ok: {
+      sync: compressSessionSyncSchemas(sync),
+    },
+  } satisfies ServerMessage;
+
+  const expanded = expandServerMessageSchemas(response) as ResponseMessage<{
+    sync: SessionSync;
+  }>;
+
+  assertEquals(expanded.ok?.sync, sync);
 });
 
 Deno.test("memory server negotiates schema-table sync frames per connection", async () => {
