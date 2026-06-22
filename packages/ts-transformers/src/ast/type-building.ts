@@ -654,7 +654,7 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
 }
 
 /**
- * Warns when a reactive value consumed across a boundary has inferred type
+ * Reports when a reactive value consumed across a boundary has inferred type
  * `unknown`. That type lowers to `{ type: "unknown" }`, which the runner reads
  * back as `undefined` rather than materializing the value (see
  * `runner/src/traverse.ts`, `_traverseWithSchemaInner`: a
@@ -665,9 +665,9 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
  * leaves below — `computed`/`lift`, `handler`/`action`, reactive array methods,
  * `patternTool`) and the condition of `ifElse`/`when`/`unless` (checked where
  * their schemas are built). `reportDiagnosticOnce` keeps the same value from
- * being warned about twice when more than one stage walks it.
+ * being reported twice when more than one stage walks it.
  */
-export function warnIfUnknownReactiveType(
+export function reportUnknownReactiveType(
   context: TransformationContext,
   expression: ts.Expression,
   type: ts.Type | undefined,
@@ -677,7 +677,7 @@ export function warnIfUnknownReactiveType(
     return;
   }
   context.reportDiagnosticOnce({
-    severity: "warning",
+    severity: "error",
     type: "reactive-capture:unknown-type",
     message:
       `Reactive value \`${describeCapture(expression, label)}\` has inferred ` +
@@ -744,7 +744,7 @@ export function buildTypeElementsFromCaptureTree(
       // same one expressionToTypeNode uses. A bare getTypeAtLocation would skip
       // the typeRegistry lookup and initializer fallback; literal widening here
       // can't change whether the type is unknown.
-      warnIfUnknownReactiveType(
+      reportUnknownReactiveType(
         context,
         childNode.expression,
         inferWidenedTypeFromExpression(
