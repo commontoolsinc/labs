@@ -160,6 +160,10 @@ export class Client {
         (error as Error & { precondition?: string }).precondition =
           result.error.precondition;
       }
+      if (result.error.retryAfterSeq !== undefined) {
+        (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
+          result.error.retryAfterSeq;
+      }
       throw error;
     }
     return result.ok as Result;
@@ -388,6 +392,17 @@ export class SpaceSession {
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
+  #caughtUpLocalSeq = 0;
+  // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
+  // or a synthetic forward). Subscribers such as runner storage only advance
+  // their own caught-up seq from emitted syncs, so a resume that promotes
+  // caughtUpLocalSeq via the top-level SessionOpenResult field (no sync) must
+  // be forwarded explicitly or their conflict-retry waiters strand.
+  #forwardedCaughtUpLocalSeq = 0;
+  #caughtUpLocalSeqWaiters: {
+    localSeq: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
 
   constructor(
     private readonly client: Client,
@@ -627,6 +642,7 @@ export class SpaceSession {
       this.#watchView.applySync(effect, true);
     }
     this.scheduleAck(effect.toSeq);
+    this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
   async restore(): Promise<void> {
@@ -663,18 +679,33 @@ export class SpaceSession {
         })
       );
       if (restored.sync) {
+        this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
         } else {
           this.#watchView.applySync(restored.sync, false);
         }
-        if (!isEmptySync(restored.sync)) {
+        if (
+          !isEmptySync(restored.sync) ||
+          restored.sync.caughtUpLocalSeq !== undefined
+        ) {
           this.#watchView.emit(restored.sync);
+          if (restored.sync.caughtUpLocalSeq !== undefined) {
+            this.#forwardedCaughtUpLocalSeq = Math.max(
+              this.#forwardedCaughtUpLocalSeq,
+              restored.sync.caughtUpLocalSeq,
+            );
+          }
         }
         this.scheduleAck(restored.serverSeq);
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
         this.scheduleAck(restored.serverSeq);
       }
+      this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
+      // Forward a top-level-only caught-up marker (resume with no sync) to
+      // WatchView subscribers; the guard above suppresses a duplicate when a
+      // real sync already carried it.
+      this.forwardCaughtUpLocalSeqToWatchers(restored.caughtUpLocalSeq);
       if (restored.resumed !== true && this.#watchSpecs.length > 0) {
         const { view, sync } = await this.watchSetSync(this.#watchSpecs);
         if (!isEmptySync(sync)) {
@@ -698,6 +729,7 @@ export class SpaceSession {
     this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
     this.client.forgetSession(this);
+    this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
@@ -723,6 +755,7 @@ export class SpaceSession {
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
     }
+    this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -808,6 +841,74 @@ export class SpaceSession {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
   }
 
+  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+    if (localSeq === undefined) {
+      return;
+    }
+    this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
+    const ready: PromiseWithResolvers<void>[] = [];
+    this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
+      (waiter) => {
+        if (waiter.localSeq <= this.#caughtUpLocalSeq) {
+          ready.push(waiter.pending);
+          return false;
+        }
+        return true;
+      },
+    );
+    for (const pending of ready) {
+      pending.resolve();
+    }
+  }
+
+  // Forward a caught-up marker to WatchView subscribers when it was delivered
+  // out-of-band (top-level SessionOpenResult.caughtUpLocalSeq on resume) rather
+  // than via a sync they already observed. Emits an empty caught-up sync so
+  // downstream waiters (notably runner storage's read-repair gate) resolve
+  // instead of stranding after a reconnect.
+  private forwardCaughtUpLocalSeqToWatchers(
+    localSeq: number | undefined,
+  ): void {
+    if (
+      localSeq === undefined ||
+      localSeq <= this.#forwardedCaughtUpLocalSeq ||
+      this.#watchView === null
+    ) {
+      return;
+    }
+    this.#forwardedCaughtUpLocalSeq = localSeq;
+    this.#watchView.emit({
+      type: "sync",
+      fromSeq: this.#serverSeq,
+      toSeq: this.#serverSeq,
+      caughtUpLocalSeq: localSeq,
+      upserts: [],
+      removes: [],
+    });
+  }
+
+  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(
+        this.#closeError ?? new Error("memory session closed"),
+      );
+    }
+    if (this.#caughtUpLocalSeq >= localSeq) {
+      return Promise.resolve();
+    }
+    const pending = Promise.withResolvers<void>();
+    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    return pending.promise;
+  }
+
+  private rejectCaughtUpLocalSeqWaiters(error: Error | null): void {
+    const waiters = this.#caughtUpLocalSeqWaiters;
+    this.#caughtUpLocalSeqWaiters = [];
+    for (const waiter of waiters) {
+      waiter.pending.reject(error ?? new Error("memory session closed"));
+    }
+  }
+
   private async reopen(): Promise<SessionOpenResult> {
     const oldSessionId = this.#sessionId;
     const session = {
@@ -821,20 +922,29 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
     }, auth);
+    const sessionChanged = restored.sessionId !== oldSessionId;
+    const sessionReplaced = sessionChanged || restored.resumed !== true;
     this.#sessionId = restored.sessionId;
     this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
     this.noteResult(restored.serverSeq);
 
-    if (restored.sessionId !== oldSessionId) {
-      for (const pending of this.#outstandingCommits.values()) {
-        pending.pending.reject(
-          new Error(
-            `session changed: ${oldSessionId} -> ${restored.sessionId}`,
-          ),
-        );
+    if (sessionReplaced) {
+      const sessionChangedError = new Error(
+        sessionChanged
+          ? `session changed: ${oldSessionId} -> ${restored.sessionId}`
+          : `session replaced without resume: ${restored.sessionId}`,
+      );
+      if (sessionChanged) {
+        for (const pending of this.#outstandingCommits.values()) {
+          pending.pending.reject(sessionChangedError);
+        }
+        this.#outstandingCommits.clear();
       }
-      this.#outstandingCommits.clear();
+      this.#caughtUpLocalSeq = 0;
+      this.#forwardedCaughtUpLocalSeq = 0;
+      this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
     }
+    this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
     return restored;
   }
@@ -902,6 +1012,9 @@ export class SpaceSession {
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
           this.#outstandingCommits.delete(localSeq);
         }
+        if (isRetryableConflict(error)) {
+          error.readyToRetry = () => this.waitForCaughtUpLocalSeq(localSeq);
+        }
         pendingCommit.pending.reject(
           error instanceof Error ? error : new Error(String(error)),
         );
@@ -910,6 +1023,17 @@ export class SpaceSession {
     this.queueBackground(task);
     return task;
   }
+}
+
+type RetryableConflictError = Error & {
+  name: "ConflictError";
+  retryAfterSeq: number;
+  readyToRetry?: () => Promise<void>;
+};
+
+function isRetryableConflict(error: unknown): error is RetryableConflictError {
+  return error instanceof Error && error.name === "ConflictError" &&
+    typeof (error as { retryAfterSeq?: unknown }).retryAfterSeq === "number";
 }
 
 export class WatchView {

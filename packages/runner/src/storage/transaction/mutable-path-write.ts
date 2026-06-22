@@ -14,9 +14,11 @@ import {
   cloneForMutation,
   CloneForMutationError,
 } from "@commonfabric/data-model/value-clone";
-import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
@@ -101,7 +103,7 @@ export const applyMutablePathWrite = (
       ok: {
         root: nextRoot,
         previousValue: currentRoot,
-        changed: !deepEqual(currentRoot, nextRoot),
+        changed: !valueEqual(currentRoot, nextRoot),
       },
     };
   }
@@ -193,7 +195,7 @@ export const applyMutablePathWrite = (
     // Presence-aware no-op detection: a hole and a stored `undefined` are
     // different states, so equal values only short-circuit when the slot
     // actually exists.
-    if (slot in parent && deepEqual(previousValue, value)) {
+    if (slot in parent && valueEqual(previousValue, value)) {
       return { ok: { root: newRoot, previousValue, changed: false } };
     }
     parent[slot] = value;
@@ -210,7 +212,7 @@ export const applyMutablePathWrite = (
     delete obj[leafKey];
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
-  if (leafKey in obj && deepEqual(previousValue, value)) {
+  if (leafKey in obj && valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
   obj[leafKey] = value as FabricValue;
@@ -232,7 +234,7 @@ const applyArrayLengthWrite = (
   value: FabricValue | undefined,
 ): Result<MutableWriteResult, ITypeMismatchError> => {
   const previousValue = parent.length;
-  if (deepEqual(previousValue, value)) {
+  if (valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
   // Funnel non-numbers (and `undefined`, which arises from

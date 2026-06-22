@@ -8,16 +8,8 @@ import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
+import { isValueComputationExpressionKind } from "../../../utils/expression.ts";
 import type { Emitter } from "../types.ts";
-
-function isHelperOwnedComputationExpression(
-  expression: ts.Expression,
-): boolean {
-  return ts.isBinaryExpression(expression) ||
-    ts.isPrefixUnaryExpression(expression) ||
-    ts.isPostfixUnaryExpression(expression) ||
-    ts.isConditionalExpression(expression);
-}
 
 function isHelperOwnedCellGetExpression(
   expression: ts.Expression,
@@ -132,7 +124,7 @@ export function rewriteHelperOwnedExpression(
   if (
     relevantDataFlows.length > 0 &&
     (
-      isHelperOwnedComputationExpression(expression) ||
+      isValueComputationExpressionKind(expression) ||
       isHelperOwnedCellGetExpression(expression, context)
     )
   ) {

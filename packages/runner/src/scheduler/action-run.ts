@@ -110,7 +110,7 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
-  state.commitPromise.then(({ error }) => {
+  state.commitPromise.then(async ({ error }) => {
     // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
     // on every attempt we still call the re-subscribe below, so that
     // even after we run out of retries, this will be re-triggered when
@@ -127,6 +127,28 @@ export function watchReactiveActionCommit(state: {
       if (
         retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
       ) {
+        const readyToRetry = readyToRetryPromise(error);
+        if (readyToRetry !== undefined) {
+          // The readiness gate rejects by design when the session is closed,
+          // revoked, or replaced (new sessionId) while we are waiting — an
+          // expected control-flow signal, not an error. Swallow it and fall
+          // through to the re-arm below: re-subscribing keeps the action live
+          // so it re-triggers on the next input change. Letting the rejection
+          // escape would skip restoreCfcTriggerReads/resubscribe (stranding the
+          // action) and surface as a spurious console.error from the trailing
+          // .catch.
+          try {
+            await readyToRetry;
+          } catch (readyError) {
+            logger.debug(
+              "retry-readiness-aborted",
+              () => [
+                "conflict retry readiness aborted; re-arming action anyway",
+                readyError,
+              ],
+            );
+          }
+        }
         // Re-schedule the action to run again on conflict failure.
         // Use resubscribe to set up dependencies/triggers from the log,
         // then mark as dirty/pending to ensure it runs again.
@@ -152,6 +174,23 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
+  if (typeof candidate !== "function") {
+    return undefined;
+  }
+  try {
+    return Promise.resolve(candidate.call(error));
+  } catch (thrown) {
+    // A readyToRetry that throws synchronously is treated the same as one that
+    // returns a rejected promise; the caller swallows the rejection.
+    return Promise.reject(thrown);
+  }
 }
 
 export function appendActionRunTrace(state: {

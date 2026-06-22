@@ -15,6 +15,7 @@ import {
   PiecesController,
 } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 export interface WorkerRequest {
   id: number;
@@ -211,6 +212,11 @@ const handlers: Record<
         actionRunTrace: scheduler.getActionRunTrace(),
       } satisfies RuntimeDiagnosticsSnapshot,
     );
+  },
+
+  async loggerCounts() {
+    await idle();
+    return getLoggerCountsBreakdown();
   },
 
   async dispose() {

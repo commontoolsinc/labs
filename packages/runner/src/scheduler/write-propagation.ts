@@ -1,4 +1,4 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type {
   IExtendedStorageTransaction,
@@ -37,10 +37,7 @@ export function collectChangedWritesForTransaction(
 
   for (const space of spaces) {
     for (const detail of getTransactionWriteDetails(tx, space)) {
-      // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-      // `utils/deep-equal.ts`); this compares stored `FabricValue`s, so migrate
-      // to a `Fabric`-aware equality once available.
-      if (!deepEqual(detail.previousValue, detail.value)) {
+      if (!valueEqual(detail.previousValue, detail.value)) {
         changedWrites.push(detail.address);
       }
     }

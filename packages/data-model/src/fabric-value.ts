@@ -34,13 +34,4 @@ export {
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-
-/**
- * Compares two fabric values for equality.
- */
-export function valueEqual(a: unknown, b: unknown): boolean {
-  // TODO(danfuzz): This needs to be a `data-model`-aware function.
-  // `deepEqual()` is not that.
-  return deepEqual(a, b);
-}
+export { valueEqual } from "./valueEqual.ts";

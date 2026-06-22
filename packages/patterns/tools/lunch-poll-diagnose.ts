@@ -141,6 +141,15 @@ interface PhaseSample {
   sessions: readonly CompactSessionSample[];
 }
 
+interface ChurnTotals {
+  commitConflicts: number;
+  commitPreempted: number;
+  commitHeldRevert: number;
+  commitHeldSent: number;
+  commitReverts: number;
+  commitRejected: number;
+}
+
 interface CaseResult {
   case: {
     users: number;
@@ -148,7 +157,80 @@ interface CaseResult {
     voteRounds: number;
     includeHomepageRefresh: boolean;
   };
+  churn: ChurnTotals;
+  convergence: ConvergenceResult;
   phases: PhaseSample[];
+}
+
+async function collectChurn(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<ChurnTotals> {
+  const totals: ChurnTotals = {
+    commitConflicts: 0,
+    commitPreempted: 0,
+    commitHeldRevert: 0,
+    commitHeldSent: 0,
+    commitReverts: 0,
+    commitRejected: 0,
+  };
+  for (const session of sessions) {
+    const counts = await session.loggerCounts();
+    const storage = counts["storage.v2"] ?? {};
+    totals.commitConflicts += storage["commit-conflict"]?.total ?? 0;
+    totals.commitPreempted += storage["commit-preempted"]?.total ?? 0;
+    totals.commitHeldRevert += storage["commit-held-revert"]?.total ?? 0;
+    totals.commitHeldSent += storage["commit-held-sent"]?.total ?? 0;
+    totals.commitReverts += storage["commit-revert"]?.total ?? 0;
+    totals.commitRejected += storage["commit-rejected"]?.total ?? 0;
+  }
+  return totals;
+}
+
+interface ConvergenceResult {
+  converged: boolean;
+  voteCounts: number[];
+  optionCounts: number[];
+  userCounts: number[];
+  fingerprints: string[];
+}
+
+// After heavy conflict churn, every session must agree on the shared poll
+// state. A canonical fingerprint of the (PerSpace) vote set that differs across
+// sessions is a correctness/convergence bug, not just contention.
+async function collectConvergence(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<ConvergenceResult> {
+  const states = await Promise.all(sessions.map(async (session) => {
+    const poll = pollSummary(await session.read());
+    const fingerprint = poll.votes
+      .map((vote) =>
+        `${vote.voterName ?? "?"}|${vote.optionId ?? "?"}|${
+          vote.voteType ?? "?"
+        }`
+      )
+      .sort()
+      .join(",");
+    return {
+      votes: poll.voteCount,
+      options: poll.optionCount,
+      users: poll.userCount,
+      fingerprint,
+    };
+  }));
+  const ref = states[0];
+  const converged = states.every((state) =>
+    state.votes === ref.votes &&
+    state.options === ref.options &&
+    state.users === ref.users &&
+    state.fingerprint === ref.fingerprint
+  );
+  return {
+    converged,
+    voteCounts: states.map((state) => state.votes),
+    optionCounts: states.map((state) => state.options),
+    userCounts: states.map((state) => state.users),
+    fingerprints: states.map((state) => state.fingerprint),
+  };
 }
 
 const traceCursors = new Map<string, number>();
@@ -587,6 +669,31 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
       );
     }
 
+    const churn = await collectChurn(sessions);
+    console.error(
+      `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
+        `admission=${Deno.env.get("CF_CONFLICT_ADMISSION") ?? "0"}: ` +
+        `conflicts=${churn.commitConflicts} preempted=${churn.commitPreempted} ` +
+        `heldRevert=${churn.commitHeldRevert} heldSent=${churn.commitHeldSent} ` +
+        `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`,
+    );
+
+    // Settle once more, then assert all sessions converged on the shared state.
+    await harness.settle(5);
+    const convergence = await collectConvergence(sessions);
+    console.error(
+      `[lunch-poll diagnose] convergence ${config.optionCount}x${config.userCount}: ` +
+        `converged=${convergence.converged} ` +
+        `votes=[${convergence.voteCounts.join(",")}] ` +
+        `options=[${convergence.optionCounts.join(",")}] ` +
+        `users=[${convergence.userCounts.join(",")}]` +
+        (convergence.converged
+          ? ""
+          : ` DIVERGED fingerprints=${
+            JSON.stringify(convergence.fingerprints)
+          }`),
+    );
+
     return {
       case: {
         users: config.userCount,
@@ -594,6 +701,8 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         voteRounds: config.voteRounds,
         includeHomepageRefresh: config.includeHomepageRefresh,
       },
+      churn,
+      convergence,
       phases,
     };
   } finally {
