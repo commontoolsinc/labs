@@ -130,6 +130,10 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
     "baseline fixture should repeat schema definitions across many upserts",
   );
   assert(
+    compressedSchemaMarkerCount < schemaMarkerCount / 100,
+    "schema-table encoding should remove almost all repeated schema definitions",
+  );
+  assert(
     compressedBytes < bytes / 5,
     "schema-table encoding should materially reduce repeated schema frames",
   );
