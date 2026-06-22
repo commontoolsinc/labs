@@ -751,87 +751,6 @@ const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
 
-interface OptionSummaryRowInput {
-  title: string;
-  voters: readonly { name: string; voteType: VoteColor; color: string }[];
-  me: string;
-}
-
-interface OptionSummaryRowOutput {
-  [NAME]: string;
-  [UI]: VNode;
-}
-
-// One row of the compact "All options" overview: the option title plus a
-// swatch per voter who picked it. `voters` is the pattern input — a top-level
-// reactive binding — so `voters.map(...)` lowers to a reactive mapping. The
-// parent feeds each row a single option's voters (from `ranked`), so the
-// chips count the actual votes rather than options × votes. Mapping a per-item
-// field of `ranked` inline (e.g. `tally.voters.map(...)`) instead is rejected
-// at runtime — `OpaqueRef.map` has no stable per-item identity to lower.
-const OptionSummaryRow = pattern<OptionSummaryRowInput, OptionSummaryRowOutput>(
-  ({ title, voters, me }) => ({
-    [NAME]: "Option summary row",
-    [UI]: (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "6px 10px",
-          backgroundColor: "white",
-          border: "1px solid #e5e7eb",
-          borderRadius: "6px",
-        }}
-      >
-        <div
-          style={{
-            flex: 1,
-            fontSize: "13px",
-            fontWeight: 500,
-            color: "#111827",
-          }}
-        >
-          {title}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            gap: "4px",
-            flexWrap: "wrap",
-            justifyContent: "flex-end",
-          }}
-        >
-          {voters.map((voter) => (
-            <span
-              title={voter.name}
-              data-vote-swatch-name={voter.name}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: "22px",
-                height: "22px",
-                padding: "0 6px",
-                borderRadius: "9999px",
-                backgroundColor: VOTE_SWATCH[voter.voteType],
-                color: "white",
-                fontSize: "11px",
-                fontWeight: 700,
-                boxShadow: voter.name === me
-                  ? "0 0 0 2px white, 0 0 0 3px #111827"
-                  : "none",
-              }}
-            >
-              {getInitials(voter.name)}
-            </span>
-          ))}
-        </div>
-      </div>
-    ),
-  }),
-);
-
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
     {
@@ -1297,13 +1216,75 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {ranked.map((tally) => (
-                          <OptionSummaryRow
-                            title={tally.option.title}
-                            voters={tally.voters}
-                            me={me}
-                          />
-                        ))}
+                        {options.map((option) => {
+                          const oid = option.id;
+                          const summaryRank = computed(() => {
+                            const idx = ranked.findIndex(
+                              (t) => t.option.id === oid,
+                            );
+                            return idx >= 0 ? idx + 1 : 9999;
+                          });
+                          return (
+                            <div
+                              style={{
+                                order: summaryRank,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "6px 10px",
+                                backgroundColor: "white",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "6px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  flex: 1,
+                                  fontSize: "13px",
+                                  fontWeight: 500,
+                                  color: "#111827",
+                                }}
+                              >
+                                {option.title}
+                              </div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "4px",
+                                  flexWrap: "wrap",
+                                  justifyContent: "flex-end",
+                                }}
+                              >
+                                {votes.filter((vote) => vote.optionId === oid)
+                                  .map((vote) => (
+                                    <span
+                                      title={vote.voterName}
+                                      data-vote-swatch-name={vote.voterName}
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        minWidth: "22px",
+                                        height: "22px",
+                                        padding: "0 6px",
+                                        borderRadius: "9999px",
+                                        backgroundColor:
+                                          VOTE_SWATCH[vote.voteType],
+                                        color: "white",
+                                        fontSize: "11px",
+                                        fontWeight: 700,
+                                        boxShadow: vote.voterName === me
+                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                          : "none",
+                                      }}
+                                    >
+                                      {getInitials(vote.voterName)}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )
