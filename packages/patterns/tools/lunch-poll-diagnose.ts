@@ -77,6 +77,11 @@ interface MatrixConfig {
   userCounts: readonly number[];
   voteRounds: number;
   includeHomepageRefresh: boolean;
+  // Per-session offset (ms) applied within the join phase and each vote round:
+  // session `i` starts its send at `i * staggerMs`. 0 = the original
+  // all-at-once Promise.all burst; a small value (e.g. 150) emulates humans
+  // acting over a few seconds rather than the same 50ms window.
+  staggerMs: number;
 }
 
 interface CaseConfig {
@@ -84,6 +89,7 @@ interface CaseConfig {
   userCount: number;
   voteRounds: number;
   includeHomepageRefresh: boolean;
+  staggerMs: number;
 }
 
 interface CompactSessionSample {
@@ -603,6 +609,25 @@ async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
   return harness;
 }
 
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Like `Promise.all(items.map(send))`, but offsets session `i`'s send by
+// `i * staggerMs` so the cohort acts over a span instead of one simultaneous
+// burst. staggerMs=0 reproduces the original all-at-once behavior exactly.
+function staggeredAll<T>(
+  items: readonly T[],
+  staggerMs: number,
+  fn: (item: T, index: number) => Promise<unknown>,
+): Promise<unknown[]> {
+  return Promise.all(
+    items.map(async (item, index) => {
+      if (staggerMs > 0 && index > 0) await sleep(index * staggerMs);
+      return fn(item, index);
+    }),
+  );
+}
+
 async function runCase(config: CaseConfig): Promise<CaseResult> {
   traceCursors.clear();
   const harness = await createHarness(config);
@@ -620,10 +645,11 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
     phases.push(
       await samplePhase("all-users-join", harness, async () => {
         await host.send("joinAs", { name: "User 1" });
-        await Promise.all(
-          sessions.slice(1).map((session, index) =>
-            session.send("joinAs", { name: `User ${index + 2}` })
-          ),
+        await staggeredAll(
+          sessions.slice(1),
+          config.staggerMs,
+          (session, index) =>
+            session.send("joinAs", { name: `User ${index + 2}` }),
         );
       }),
     );
@@ -644,13 +670,14 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
           async () => {
             const ids = await optionIds(host);
             if (ids.length === 0) return;
-            await Promise.all(
-              sessions.map((session, index) =>
+            await staggeredAll(
+              sessions,
+              config.staggerMs,
+              (session, index) =>
                 session.send("castVote", {
                   optionId: ids[(round + index) % ids.length],
                   voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
-                })
-              ),
+                }),
             );
           },
         ),
@@ -762,6 +789,7 @@ function explicitCasesArg(
       userCount,
       voteRounds: config.voteRounds,
       includeHomepageRefresh: config.includeHomepageRefresh,
+      staggerMs: config.staggerMs,
     }];
   });
   return cases.length > 0 ? cases : undefined;
@@ -784,6 +812,7 @@ function matrixConfigFromArgs(): MatrixConfig {
     userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
     includeHomepageRefresh: !Deno.args.includes("--skip-refresh"),
+    staggerMs: numberArg("stagger-ms", 0),
   };
 }
 
@@ -799,6 +828,7 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
         userCount,
         voteRounds: config.voteRounds,
         includeHomepageRefresh: config.includeHomepageRefresh,
+        staggerMs: config.staggerMs,
       });
     }
   }
