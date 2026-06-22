@@ -1255,34 +1255,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {votes.map((vote) =>
-                                  vote.optionId === oid
-                                    ? (
-                                      <span
-                                        title={vote.voterName}
-                                        style={{
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          justifyContent: "center",
-                                          minWidth: "22px",
-                                          height: "22px",
-                                          padding: "0 6px",
-                                          borderRadius: "9999px",
-                                          backgroundColor:
-                                            VOTE_SWATCH[vote.voteType],
-                                          color: "white",
-                                          fontSize: "11px",
-                                          fontWeight: 700,
-                                          boxShadow: vote.voterName === me
-                                            ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                            : "none",
-                                        }}
-                                      >
-                                        {getInitials(vote.voterName)}
-                                      </span>
-                                    )
-                                    : null
-                                )}
+                                {votes.filter((vote) => vote.optionId === oid)
+                                  .map((vote) => (
+                                    <span
+                                      title={vote.voterName}
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        minWidth: "22px",
+                                        height: "22px",
+                                        padding: "0 6px",
+                                        borderRadius: "9999px",
+                                        backgroundColor:
+                                          VOTE_SWATCH[vote.voteType],
+                                        color: "white",
+                                        fontSize: "11px",
+                                        fontWeight: 700,
+                                        boxShadow: vote.voterName === me
+                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                          : "none",
+                                      }}
+                                    >
+                                      {getInitials(vote.voterName)}
+                                    </span>
+                                  ))}
                               </div>
                             </div>
                           );
