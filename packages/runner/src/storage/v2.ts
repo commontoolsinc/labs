@@ -1602,6 +1602,11 @@ class SpaceReplica implements ISpaceReplica {
 
       const { view, sync } = await session.watchAddSync(watches);
 
+      if (this.#closed) {
+        view.close();
+        return { error: toConnectionError(new Error("memory replica closed")) };
+      }
+
       this.#watchView = view;
       this.applySessionSync(sync, type);
       if (this.#updatePromises.size === 0) {
