@@ -6,8 +6,10 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
+  type SessionFactory,
   setConflictAdmissionEnabled,
   setConflictAdmissionMode,
+  StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -18,6 +20,7 @@ import type {
   StorageTransactionRejected,
 } from "../src/storage/interface.ts";
 import type { MIME, URI } from "@commonfabric/memory/interface";
+import type { SessionSync } from "@commonfabric/memory/v2";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
@@ -92,6 +95,16 @@ type RetryRepairHarness = {
   waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
   ): Promise<void>;
+};
+
+type WatchRefreshHarness = {
+  closeNow(): void;
+  refreshWatchSet(
+    entries: Iterable<[
+      { id: URI; type: MIME; scope?: string },
+      { path: string[]; schema: false },
+    ]>,
+  ): Promise<{ ok?: unknown; error?: { message?: string } }>;
 };
 
 const retryRepairHarness = (replica: unknown): RetryRepairHarness =>
@@ -791,6 +804,44 @@ describe("Memory v2 storage notifications", () => {
     } finally {
       setConflictAdmissionMode(undefined);
     }
+  });
+
+  it("closes a watch refresh view that resolves after replica close", async () => {
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+    };
+    const view = MemoryV2Client.WatchView.fromSync(sync);
+    const client = {
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const session = {
+      watchAddSync: () => Promise.resolve({ view, sync }),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const sessionFactory: SessionFactory = {
+      create: () => Promise.resolve({ client, session }),
+    };
+    class TestStorageManager extends V2StorageManager {
+      constructor() {
+        super({ as: signer, memoryHost: new URL("memory://") }, sessionFactory);
+      }
+    }
+    const testStorageManager = new TestStorageManager();
+    const provider = testStorageManager.open(space);
+    const replica = provider.replica as unknown as WatchRefreshHarness;
+
+    replica.closeNow();
+    const result = await replica.refreshWatchSet([[
+      { id: "of:late-refresh" as URI, type: "application/json" as MIME },
+      { path: [], schema: false },
+    ]]);
+
+    expect(result.error?.message).toBe("memory replica closed");
+    expect((await view.subscribeSync().next()).done).toBe(true);
+    await testStorageManager.closeNow();
   });
 
   it("admission control records, thresholds, and prunes a stale floor", () => {
