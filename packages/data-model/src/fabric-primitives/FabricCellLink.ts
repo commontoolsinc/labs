@@ -1,7 +1,16 @@
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import {
+  CODEC,
+  type FabricCodec,
+  type ReconstructionContext,
+} from "@/codec-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * The payload of a {@link FabricCellLink}: a map of string keys to values that
@@ -70,6 +79,51 @@ export class FabricCellLink extends BaseFabricPrimitive {
    */
   get payload(): FabricCellLinkPayload {
     return this.#payload;
+  }
+
+  //
+  // Static members
+  //
+
+  static #codec = Object.freeze(
+    new (class CellLinkCodec extends BaseFabricCodec {
+      constructor() {
+        super(CODEC_TYPE_TAGS.CellLink, FabricCellLink);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricCellLink): FabricValue {
+        // The payload is already a deeply-frozen plain object of `string` /
+        // `string[]` values -- itself a valid `FabricValue` -- so it serializes
+        // as-is.
+        return value.#payload;
+      }
+
+      /** @inheritDoc */
+      decode(
+        typeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        // The constructor validates the shape (plain object, no unsafe keys,
+        // every value `string` / `string[]`) and throws on any violation, so
+        // bad state simply falls into the `catch` below.
+        try {
+          return new FabricCellLink(state as FabricCellLinkPayload);
+        } catch (e) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `CellLink: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 
