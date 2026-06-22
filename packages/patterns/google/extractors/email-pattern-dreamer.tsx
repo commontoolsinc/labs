@@ -9,7 +9,7 @@
  * 2. Deploy this pattern
  * 3. Link: cf piece link google-auth/auth email-pattern-dreamer/overrideAuth
  */
-import { NAME, pattern, UI } from "commonfabric";
+import { NAME, pattern, TILE_UI, UI, uiVariant } from "commonfabric";
 import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
@@ -118,7 +118,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
     calendar,
     notes,
     united,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>
@@ -142,7 +142,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={usps}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{usps.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(usps, "tile")}</div>
             </div>
 
             {/* Berkeley Library */}
@@ -153,7 +153,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={library}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{library.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(library, "tile")}</div>
             </div>
 
             {/* Chase */}
@@ -164,7 +164,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={chase}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{chase.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(chase, "tile")}</div>
             </div>
 
             {/* BAM School */}
@@ -175,7 +175,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={bam}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{bam.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(bam, "tile")}</div>
             </div>
 
             {/* BofA */}
@@ -186,7 +186,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={bofa}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{bofa.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(bofa, "tile")}</div>
             </div>
 
             {/* Tickets */}
@@ -197,7 +197,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={tickets}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{tickets.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(tickets, "tile")}</div>
             </div>
 
             {/* Calendar */}
@@ -208,7 +208,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={calendar}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{calendar.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(calendar, "tile")}</div>
             </div>
 
             {/* Notes */}
@@ -219,7 +219,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={notes}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{notes.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(notes, "tile")}</div>
             </div>
 
             {/* United */}
@@ -230,7 +230,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 </div>
                 <cf-cell-link $cell={united}>Open</cf-cell-link>
               </div>
-              <div style={previewBoxStyle}>{united.previewUI as any}</div>
+              <div style={previewBoxStyle}>{uiVariant(united, "tile")}</div>
             </div>
           </cf-vstack>
         </cf-vscroll>

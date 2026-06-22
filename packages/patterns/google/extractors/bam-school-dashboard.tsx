@@ -24,6 +24,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -297,7 +298,7 @@ export interface PatternOutput {
   urgentEvents: SchoolEvent[];
   upcomingEvents: SchoolEvent[];
   teacherMessages: SchoolEvent[];
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -562,7 +563,7 @@ Extract:
       urgentEvents,
       upcomingEvents,
       teacherMessages,
-      previewUI,
+      [TILE_UI]: previewUI,
 
       [UI]: (
         <cf-screen>

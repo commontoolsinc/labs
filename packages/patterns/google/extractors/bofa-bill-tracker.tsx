@@ -22,6 +22,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -176,7 +177,7 @@ export default pattern<PatternInput>(
       paidBills: paidBills,
       totalUnpaid: totalUnpaid,
       overdueCount: overdueCount,
-      previewUI: ui.previewUI,
+      [TILE_UI]: ui.previewUI,
 
       [UI]: (
         <cf-screen>

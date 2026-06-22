@@ -8,9 +8,9 @@
  * The pattern has:
  * - A main UI (always present)
  * - sidebarUI: explicitly undefined (should NOT block rendering)
- * - previewUI: a valid UI (should render when accessed via variant)
+ * - [TILE_UI]: a valid UI (should render when accessed via variant)
  */
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { computed, Default, NAME, pattern, TILE_UI, UI } from "commonfabric";
 
 interface State {
   title: string | Default<"Test Pattern">;
@@ -31,7 +31,7 @@ export default pattern<State>((state) => {
     // but since it's undefined, our object won't match the schema.
     //sidebarUI: undefined,
     // Valid UI for testing variant rendering
-    previewUI: (
+    [TILE_UI]: (
       <div id="preview-ui">
         <span>Preview: {state.title}</span>
       </div>

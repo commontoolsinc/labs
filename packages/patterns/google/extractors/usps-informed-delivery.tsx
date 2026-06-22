@@ -24,6 +24,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -283,7 +284,7 @@ export interface PatternOutput {
   medicalCount: number;
   subscriptionCount: number;
   charityCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -583,7 +584,7 @@ If you cannot read the image clearly, make your best guess based on what you can
       medicalCount,
       subscriptionCount,
       charityCount,
-      previewUI,
+      [TILE_UI]: previewUI,
 
       [UI]: (
         <cf-screen>

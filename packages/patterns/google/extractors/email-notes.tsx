@@ -17,7 +17,15 @@
  * 2. Authenticate with Google (will auto-prompt)
  * 3. View notes, copy content, mark as done
  */
-import { computed, handler, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  computed,
+  handler,
+  NAME,
+  pattern,
+  TILE_UI,
+  UI,
+  Writable,
+} from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/util/google-auth-manager.tsx";
 import {
@@ -190,7 +198,7 @@ interface PatternInput {
 export interface PatternOutput {
   notes: Note[];
   noteCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(() => {
@@ -322,7 +330,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     [NAME]: "Email Notes",
     notes,
     noteCount,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>

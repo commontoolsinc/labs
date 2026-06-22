@@ -8,7 +8,15 @@
  * 1. Pre-hoc: Create this directly, log in, and favorite
  * 2. Post-hoc: Created by google-auth-switcher after login
  */
-import { computed, Default, ifElse, NAME, pattern, UI } from "commonfabric";
+import {
+  computed,
+  Default,
+  ifElse,
+  NAME,
+  pattern,
+  TILE_UI,
+  UI,
+} from "commonfabric";
 import GoogleAuth, {
   Auth,
   createPreviewUI,
@@ -46,7 +54,7 @@ export interface Output {
   auth: Auth;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<Input, Output>(({ auth, selectedScopes }) => {
@@ -162,6 +170,6 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
     ),
     auth: baseAuth.auth,
     accountType: "work" as const,
-    previewUI,
+    [TILE_UI]: previewUI,
   };
 });

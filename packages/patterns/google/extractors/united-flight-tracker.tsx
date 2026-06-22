@@ -22,6 +22,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  TILE_UI,
   toIndentedDebugString,
   UI,
 } from "commonfabric";
@@ -478,7 +479,7 @@ export interface Output {
   activeAlerts: TrackedFlight[];
   pastFlights: TrackedFlight[];
   trips: TrackedTrip[];
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<Input, Output>(({ overrideAuth }) => {
@@ -876,7 +877,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     activeAlerts,
     pastFlights,
     trips,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>
