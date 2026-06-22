@@ -2,7 +2,7 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { type Immutable, isRecord } from "@commonfabric/utils/types";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -195,10 +195,13 @@ export function findNonIdempotentPair(
 function transactionReadInvariants(
   tx: IExtendedStorageTransaction,
   spaces: ReadonlySet<IMemorySpaceAddress["space"]>,
-): Map<string, { address: IMemorySpaceAddress; value: unknown }> {
+): Map<
+  string,
+  { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
+> {
   const invariants = new Map<
     string,
-    { address: IMemorySpaceAddress; value: unknown }
+    { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
   >();
   for (const space of spaces) {
     try {
@@ -245,9 +248,7 @@ function readInvariantMovedExternally(
     const previous = before.get(key);
     // Only reads both runs performed are comparable.
     if (!previous) continue;
-    if (valueEqual(previous.value as FabricValue, value as FabricValue)) {
-      continue;
-    }
+    if (valueEqual(previous.value, value)) continue;
     // Cover writes of EITHER run: run1's commit moving its own read is the
     // accumulator pattern, and a write-then-read inside the recheck run is
     // nondeterminism, not external interference — both must stay flagged.
