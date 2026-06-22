@@ -10,6 +10,7 @@ import {
   type MemorySpace,
   type MIME,
   type Signer,
+  type Transaction,
   type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
@@ -112,6 +113,71 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
+// Backstop for the inline conflict read-repair wait. In the connected path the
+// caught-up sync arrives within a refresh cycle; this only fires if the sync is
+// permanently undelivered on a still-open, never-reconnecting session, so the
+// commit cannot hang forever. On expiry we surface the conflict and let the
+// scheduler retry path re-gate on readiness.
+const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
+
+// Strategy 1 — client-side conflict admission control (EXPERIMENT, default off).
+// Once a commit conflicts, the client knows its read set is behind on the
+// touched ids until the server catches it up. Two modes gate what we do with a
+// new commit whose reads land on a still-catching-up id:
+//
+//   "preempt" (coarse): assume it will conflict and pre-empt it locally (revert
+//     + re-run after catch-up) without sending. Measured NET-NEGATIVE on the
+//     lunch-poll workload: the stale floor taints every id a losing tx touched
+//     (incl. write targets), so it pre-empts commits that would have SUCCEEDED,
+//     turning them into extra revert+re-run cycles. 5x5 server conflicts rose
+//     ~1380 -> ~1600 (plus pre-empts), wall time flat (conflicts are cheap).
+//
+//   "hold" (precise): hold the commit until the catch-up is applied, then run
+//     the server's precondition check LOCALLY against the now-current confirmed
+//     seqs. Locally revert only the commits that are genuinely stale; SEND the
+//     rest. Eliminates the coarse mode's false pre-empts and stops sending
+//     knowingly-doomed commits to the server.
+//
+//     Measured NEUTRAL (safe but no win) on lunch-poll: heldRevert ~= 0,
+//     heldSent ~= 70, conflicts ~= baseline. The reason is fundamental — the
+//     staleness here is SERVER-side, not locally knowable: when the action
+//     runs it reads the latest LOCAL confirmed value, which looks current
+//     (read.seq == local confirmed seq), so the local check cannot tell the
+//     commit is behind the server. Only the server (or a not-yet-received sync)
+//     knows. So the precise check correctly SENDS the held commits (no false
+//     pre-empts, unlike coarse) but cannot prevent the server conflict. This
+//     mode only pays off where a client routinely holds commits built against
+//     data its own later syncs have already superseded.
+//
+// Default off. Do NOT enable without re-measuring on the target workload.
+type ConflictAdmissionMode = "off" | "preempt" | "hold";
+let conflictAdmissionModeOverride: ConflictAdmissionMode | undefined;
+export function setConflictAdmissionMode(
+  mode: ConflictAdmissionMode | undefined,
+): void {
+  conflictAdmissionModeOverride = mode;
+}
+// Back-compat for existing tests/callers: true -> coarse preempt, false -> off.
+export function setConflictAdmissionEnabled(value: boolean | undefined): void {
+  conflictAdmissionModeOverride = value === undefined
+    ? undefined
+    : (value ? "preempt" : "off");
+}
+function conflictAdmissionMode(): ConflictAdmissionMode {
+  if (conflictAdmissionModeOverride !== undefined) {
+    return conflictAdmissionModeOverride;
+  }
+  try {
+    const value = Deno.env.get("CF_CONFLICT_ADMISSION");
+    if (value === "hold") return "hold";
+    if (value === "preempt" || value === "1" || value === "true") {
+      return "preempt";
+    }
+    return "off";
+  } catch {
+    return "off";
+  }
+}
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
@@ -640,7 +706,6 @@ export class StorageManager implements IStorageManager {
     if (this.#providers.size === 0) {
       return;
     }
-    await this.synced();
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
@@ -973,7 +1038,6 @@ class Provider implements IStorageProviderWithReplica {
       return;
     }
     this.#destroyed = true;
-    await this.replica.synced();
     await this.replica.close();
   }
 
@@ -1065,6 +1129,16 @@ class SpaceReplica implements ISpaceReplica {
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+  #closed = false;
+  #caughtUpLocalSeq = 0;
+  #caughtUpLocalSeqWaiters: {
+    localSeq: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
+  // docKey -> required caughtUpLocalSeq. An entry means "this id conflicted and
+  // is stale until we observe caughtUpLocalSeq >= value". Pruned as the runner
+  // catches up; only populated while conflict admission control is enabled.
+  #staleFloor = new Map<string, number>();
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
 
@@ -1169,6 +1243,9 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
+    this.resetConflictAdmissionState();
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     await this.synced();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -1201,7 +1278,63 @@ class SpaceReplica implements ISpaceReplica {
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
+  private resetConflictAdmissionState(): void {
+    this.#caughtUpLocalSeq = 0;
+    this.#staleFloor.clear();
+  }
+
+  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+    if (localSeq === undefined) {
+      return;
+    }
+    this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
+    const ready: PromiseWithResolvers<void>[] = [];
+    this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
+      (waiter) => {
+        if (waiter.localSeq <= this.#caughtUpLocalSeq) {
+          ready.push(waiter.pending);
+          return false;
+        }
+        return true;
+      },
+    );
+    for (const pending of ready) {
+      pending.resolve();
+    }
+    // Ids whose staleness has now been caught up are fresh again; stop
+    // pre-empting commits that read them.
+    if (this.#staleFloor.size > 0) {
+      for (const [key, floor] of this.#staleFloor) {
+        if (floor <= this.#caughtUpLocalSeq) {
+          this.#staleFloor.delete(key);
+        }
+      }
+    }
+  }
+
+  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(new Error("memory replica closed"));
+    }
+    if (this.#caughtUpLocalSeq >= localSeq) {
+      return Promise.resolve();
+    }
+    const pending = Promise.withResolvers<void>();
+    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    return pending.promise;
+  }
+
+  private rejectCaughtUpLocalSeqWaiters(error: Error): void {
+    const waiters = this.#caughtUpLocalSeqWaiters;
+    this.#caughtUpLocalSeqWaiters = [];
+    for (const waiter of waiters) {
+      waiter.pending.reject(error);
+    }
+  }
+
   closeNow(): void {
+    this.#closed = true;
+    this.resetConflictAdmissionState();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
@@ -1215,6 +1348,7 @@ class SpaceReplica implements ISpaceReplica {
       });
     }
     void Promise.allSettled([...this.#updatePromises]);
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
@@ -1429,6 +1563,8 @@ class SpaceReplica implements ISpaceReplica {
   reset(): void {
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.resetConflictAdmissionState();
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
     this.#subscription.next({
@@ -1464,6 +1600,11 @@ class SpaceReplica implements ISpaceReplica {
       }));
 
       const { view, sync } = await session.watchAddSync(watches);
+
+      if (this.#closed) {
+        view.close();
+        return { error: toConnectionError(new Error("memory replica closed")) };
+      }
 
       this.#watchView = view;
       this.applySessionSync(sync, type);
@@ -1635,7 +1776,7 @@ class SpaceReplica implements ISpaceReplica {
         }
         return result;
       }, (error) => {
-        const rejection = toRejectedError(error, commit);
+        const rejection = toRejectedError(error, commit, this.#space);
         const result = { error: rejection };
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -1782,6 +1923,62 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // Strategy 1: a commit whose read set lands on a still-catching-up id.
+    const admissionMode = conflictAdmissionMode();
+    if (admissionMode !== "off") {
+      const threshold = this.preemptThreshold(commit);
+      if (threshold !== undefined) {
+        if (admissionMode === "hold") {
+          const rejection = this.makePreemptRejection(commit, threshold);
+          // Precise mode: hold until the catch-up is applied, then run the
+          // server's stale-read check locally. Revert only the genuinely stale
+          // commits; fall through to send the ones whose reads still hold.
+          try {
+            await this.waitForCaughtUpLocalSeq(threshold);
+          } catch {
+            // Session/replica closing or reset: do not open/send a new session
+            // while shutdown is in progress. Finalize the held rejection so the
+            // optimistic write is dropped and close can drain promptly.
+            return await this.finalizeRejection(
+              localSeq,
+              operations,
+              source,
+              rejection,
+            );
+          }
+          if (!this.#closed && this.commitReadsStaleLocally(commit)) {
+            logger.debug("commit-held-revert", () => [
+              `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+              { localSeq, operations: operations.length },
+            ]);
+            return await this.finalizeRejection(
+              localSeq,
+              operations,
+              source,
+              rejection,
+            );
+          }
+          logger.debug("commit-held-sent", () => [
+            `held commit sent after catch-up (reads still valid)`,
+            { localSeq, operations: operations.length },
+          ]);
+          // fall through to send
+        } else {
+          // Coarse mode: assume conflict and pre-empt without sending.
+          const rejection = this.makePreemptRejection(commit, threshold);
+          logger.debug("commit-preempted", () => [
+            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
+            { localSeq, operations: operations.length },
+          ]);
+          return await this.finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+          );
+        }
+      }
+    }
     try {
       if (
         operations.length > 0 &&
@@ -1801,7 +1998,11 @@ class SpaceReplica implements ISpaceReplica {
       this.confirmPending(localSeq, operations, applied);
       return { ok: {} };
     } catch (error) {
-      const rejection = toRejectedError(error, commit);
+      const rejection = toRejectedError(error, commit, this.#space);
+      this.attachProviderReadyToRetry(rejection, localSeq);
+      if (admissionMode !== "off" && rejection.name === "ConflictError") {
+        this.recordStaleFloor(commit, localSeq);
+      }
       // Counted (even while silent) so multi-writer churn can be read back via
       // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
       // drops only the optimistic pending write and re-derives from confirmed
@@ -1816,46 +2017,64 @@ class SpaceReplica implements ISpaceReplica {
           { localSeq, operations: operations.length },
         ],
       );
-      const touched = operations.map((operation) => ({
-        id: operation.id,
-        scope: operation.scope,
-      }));
-      const hasSemanticOperations = operations.length > 0;
-      const shouldNotifySubscribers = hasSemanticOperations &&
-        this.hasNotificationSubscribers();
-      const shouldNotifySinks = hasSemanticOperations &&
-        this.hasSinkSubscribers(touched);
-      const before = shouldNotifySubscribers
-        ? Differential.checkout(
-          this,
-          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-        )
-        : undefined;
-      this.dropPending(localSeq);
-      if (before !== undefined) {
-        const changes = before.compare(this);
-        // The revert snapshots CURRENT confirmed state (which already includes
-        // any newer seq received by subscription since this commit started) and
-        // drops only this commit's pending write — so it should not stomp newer
-        // data. Counted to verify reverts stay bounded.
-        logger.debug("commit-revert", () => [
-          `revert after ${rejection.name ?? "rejection"}`,
-        ]);
-        this.#subscription.next({
-          type: "revert",
-          space: this.#space,
-          changes,
-          reason: rejection,
-          source,
-        });
-        if (shouldNotifySinks) {
-          this.notifySinks(changes);
-        }
-      } else if (shouldNotifySinks) {
-        this.notifySinksForIds(touched);
-      }
-      return { error: rejection };
+      return await this.finalizeRejection(
+        localSeq,
+        operations,
+        source,
+        rejection,
+      );
     }
+  }
+
+  // Shared rejection tail for both real conflicts and pre-empted commits: wait
+  // for the caught-up read-repair, drop the optimistic pending write, and emit
+  // the revert notification reflecting repaired confirmed state.
+  private async finalizeRejection(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    source: IStorageTransaction | undefined,
+    rejection: StorageTransactionRejected,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const touched = operations.map((operation) => ({
+      id: operation.id,
+      scope: operation.scope,
+    }));
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+      )
+      : undefined;
+    await this.waitForConflictReadRepair(rejection);
+    this.dropPending(localSeq);
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      // The revert snapshots CURRENT confirmed state (which already includes
+      // any newer seq received by subscription since this commit started) and
+      // drops only this commit's pending write — so it should not stomp newer
+      // data. Counted to verify reverts stay bounded.
+      logger.debug("commit-revert", () => [
+        `revert after ${rejection.name ?? "rejection"}`,
+      ]);
+      this.#subscription.next({
+        type: "revert",
+        space: this.#space,
+        changes,
+        reason: rejection,
+        source,
+      });
+      if (shouldNotifySinks) {
+        this.notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+    return { error: rejection };
   }
 
   private buildReads(
@@ -1925,6 +2144,7 @@ class SpaceReplica implements ISpaceReplica {
     type: "pull" | "integrate",
   ): void {
     if (sync.upserts.length === 0 && sync.removes.length === 0) {
+      this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
 
@@ -1984,6 +2204,157 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
+    }
+    this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+  }
+
+  // Mark every id this conflicted commit touched (reads + writes) stale until
+  // the runner observes caughtUpLocalSeq >= the commit's localSeq — the seq the
+  // server stages as the post-conflict catch-up point for these ids.
+  private recordStaleFloor(commit: ClientCommit, localSeq: number): void {
+    const mark = (id: string, scope?: CellScope) => {
+      const key = docKey(id as URI, scope);
+      const current = this.#staleFloor.get(key);
+      if (current === undefined || current < localSeq) {
+        this.#staleFloor.set(key, localSeq);
+      }
+    };
+    for (const operation of commit.operations) {
+      if (operation.op === "sqlite") continue; // no entity id
+      mark(operation.id, operation.scope);
+    }
+    for (const read of commit.reads.confirmed) {
+      mark(read.id, read.scope);
+    }
+    for (const read of commit.reads.pending) {
+      mark(read.id, read.scope);
+    }
+  }
+
+  // If any of this commit's reads are still stale (a recorded floor above our
+  // current caught-up seq), return the highest such floor — the seq we must
+  // reach before a retry can succeed. Only reads gate admission: a stale read
+  // precondition is what the server rejects.
+  private preemptThreshold(commit: ClientCommit): number | undefined {
+    if (this.#staleFloor.size === 0) {
+      return undefined;
+    }
+    let threshold: number | undefined;
+    const consider = (id: string, scope?: CellScope) => {
+      const floor = this.#staleFloor.get(docKey(id as URI, scope));
+      if (floor !== undefined && floor > this.#caughtUpLocalSeq) {
+        threshold = threshold === undefined
+          ? floor
+          : Math.max(threshold, floor);
+      }
+    };
+    for (const read of commit.reads.confirmed) {
+      consider(read.id, read.scope);
+    }
+    for (const read of commit.reads.pending) {
+      consider(read.id, read.scope);
+    }
+    return threshold;
+  }
+
+  // The server's stale-read precondition check, run LOCALLY against the current
+  // confirmed seqs (use after catch-up has been applied). Returns true only when
+  // a confirmed read is PROVABLY behind our local confirmed base — i.e. the
+  // commit is genuinely going to conflict. Anything we cannot prove stale
+  // (unknown id, no local record, or only pending reads) returns false so the
+  // commit is still sent and the server stays the source of truth.
+  private commitReadsStaleLocally(commit: ClientCommit): boolean {
+    for (const read of commit.reads.confirmed) {
+      const record = this.#docs.get(docKey(read.id as URI, read.scope));
+      const confirmedSeq = record?.confirmed.seq ?? 0;
+      if (read.seq < confirmedSeq) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private makePreemptRejection(
+    commit: ClientCommit,
+    threshold: number,
+  ): StorageTransactionRejected {
+    let firstId: URI | undefined;
+    for (const operation of commit.operations) {
+      if (operation.op !== "sqlite") {
+        firstId = operation.id as URI;
+        break;
+      }
+    }
+    return {
+      name: "ConflictError",
+      message:
+        `commit preempted: read set stale until caughtUpLocalSeq>=${threshold}`,
+      transaction: commit as unknown as Transaction,
+      conflict: {
+        space: this.#space,
+        the: DOCUMENT_MIME,
+        of: firstId ?? "of:unknown",
+        expected: null,
+        actual: null,
+        existsInHistory: false,
+        history: [],
+      },
+      // The catch-up that clears `threshold` is already in flight from the
+      // earlier conflict; gate the retry directly on it (no provider round trip
+      // to wrap, so we do NOT call attachProviderReadyToRetry here).
+      readyToRetry: () => this.waitForCaughtUpLocalSeq(threshold),
+    };
+  }
+
+  private attachProviderReadyToRetry(
+    rejection: StorageTransactionRejected,
+    localSeq: number,
+  ): void {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const readyToRetry = rejection.readyToRetry;
+    if (readyToRetry === undefined) {
+      return;
+    }
+    rejection.readyToRetry = async () => {
+      await readyToRetry();
+      await this.waitForCaughtUpLocalSeq(localSeq);
+    };
+  }
+
+  private async waitForConflictReadRepair(
+    rejection: StorageTransactionRejected,
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const readyToRetry = rejection.readyToRetry;
+    if (readyToRetry === undefined) {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn(
+          "conflict-read-repair-timeout",
+          "caught-up sync not received within timeout; surfacing conflict",
+        );
+        resolve();
+      }, CONFLICT_READ_REPAIR_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([readyToRetry(), timedOut]);
+    } catch (error) {
+      logger.warn(
+        "conflict-read-repair",
+        "readyToRetry rejected while preserving original conflict result",
+        error,
+      );
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
   }
 
@@ -2236,6 +2607,7 @@ const toConnectionError = (error: unknown): IConnectionError =>
 const toRejectedError = (
   error: unknown,
   commit: unknown,
+  space: MemorySpace,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error
@@ -2259,17 +2631,38 @@ const toRejectedError = (
     message.includes("stale confirmed read") ||
     message.includes("pending dependency")
   ) {
-    return {
+    const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
+    const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
+    const firstOperation = (commit as Partial<NativeStorageCommit>)
+      .operations?.[0];
+    const rejected: IConflictError = {
       name: "ConflictError",
       message,
-      transaction: commit as any,
+      transaction: commit as Transaction,
+      // Diagnostic-only conflict descriptor: the storage layer surfaces a
+      // ConflictError by name/readyToRetry, not by inspecting these fields.
+      // `the`/`expected`/`actual` are placeholders; space and of are filled in
+      // so the debug log is accurate.
       conflict: {
+        space,
+        the: DOCUMENT_MIME,
+        of: firstOperation?.id ?? "of:unknown",
         expected: null,
         actual: null,
         existsInHistory: false,
         history: [],
       },
-    } as unknown as IConflictError;
+    };
+    // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
+    // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark
+    // the conflict retryable.
+    if (typeof retryAfterSeq === "number") {
+      rejected.retryAfterSeq = retryAfterSeq;
+    }
+    if (typeof readyToRetry === "function") {
+      rejected.readyToRetry = () => Promise.resolve(readyToRetry.call(error));
+    }
+    return rejected;
   }
 
   return {
@@ -2280,6 +2673,6 @@ const toRejectedError = (
       message,
       code: 500,
     },
-    transaction: commit as any,
+    transaction: commit as Transaction,
   } as unknown as TransactionError;
 };

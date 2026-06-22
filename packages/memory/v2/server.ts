@@ -26,6 +26,7 @@ import {
   type SessionOpenRequest,
   type SessionOpenResult,
   type SessionRevokedMessage,
+  type SessionSync,
   type SqliteDbRef,
   type SqliteParamsWire,
   type SqliteQueryRequest,
@@ -1379,6 +1380,7 @@ export class Server {
           sessionId: opened.sessionId,
           sessionToken: opened.sessionToken,
           serverSeq: opened.serverSeq,
+          caughtUpLocalSeq: opened.caughtUpLocalSeq,
           ...(opened.resumed === true ? { resumed: true } : {}),
           ...(catchup ? { sync: catchup.effect } : {}),
         },
@@ -1548,24 +1550,34 @@ export class Server {
         ok: commit,
       };
     } catch (error) {
+      let retryAfterSeq: number | undefined;
       if (error instanceof Engine.ConflictError) {
-        this.stageConflictRefreshDirtyIds(message.space, message.commit);
-        await this.flushSessions([message.space]);
+        this.stageConflictRefreshDirtyIds(
+          message.space,
+          session,
+          message.commit,
+        );
+        const engine = await this.openEngine(message.space);
+        retryAfterSeq = Engine.serverSeq(engine);
       }
       const messageText = error instanceof Error
         ? error.message
         : String(error);
       const preconditionError = toPreconditionFailedError(error, messageText);
+      const responseError = preconditionError ? preconditionError : toError(
+        error instanceof Engine.ConflictError
+          ? "ConflictError"
+          : error instanceof Engine.ProtocolError
+          ? "ProtocolError"
+          : "TransactionError",
+        messageText,
+      );
+      if (retryAfterSeq !== undefined) {
+        responseError.retryAfterSeq = retryAfterSeq;
+      }
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
-        preconditionError ? preconditionError : toError(
-          error instanceof Engine.ConflictError
-            ? "ConflictError"
-            : error instanceof Engine.ProtocolError
-            ? "ProtocolError"
-            : "TransactionError",
-          messageText,
-        ),
+        responseError,
       );
     }
   }
@@ -2017,8 +2029,49 @@ export class Server {
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
-    if (session === null || session.watches.length === 0) {
+    if (session === null) {
       return null;
+    }
+    const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
+    const hasPendingCatchUp =
+      pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
+    const finishCatchUp = (sync: SessionSync): SessionEffectMessage => {
+      if (hasPendingCatchUp) {
+        session.caughtUpLocalSeq = Math.max(
+          session.caughtUpLocalSeq,
+          pendingCaughtUpLocalSeq,
+        );
+        if (session.pendingCaughtUpLocalSeq <= session.caughtUpLocalSeq) {
+          session.pendingCaughtUpLocalSeq = 0;
+        }
+        sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
+      }
+      return {
+        type: "session/effect",
+        space,
+        sessionId,
+        effect: sync,
+      };
+    };
+    const emptyCatchUp = async (
+      fromSeq = session.lastSyncedSeq,
+      toSeq?: number,
+    ): Promise<SessionEffectMessage | null> => {
+      if (!hasPendingCatchUp) {
+        return null;
+      }
+      const serverSeq = toSeq ?? Engine.serverSeq(await this.openEngine(space));
+      session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
+      return finishCatchUp({
+        type: "sync",
+        fromSeq,
+        toSeq: serverSeq,
+        upserts: [],
+        removes: [],
+      });
+    };
+    if (session.watches.length === 0) {
+      return await emptyCatchUp();
     }
     if (dirtyIds !== undefined) {
       const startedAt = performance.now();
@@ -2030,7 +2083,7 @@ export class Server {
         }
       }
       if (!touched) {
-        return null;
+        return await emptyCatchUp();
       }
 
       const engine = await this.openEngine(space);
@@ -2061,7 +2114,7 @@ export class Server {
       }
 
       if (updates.size === 0) {
-        return null;
+        return await emptyCatchUp();
       }
 
       const upserts: SessionCacheEntry[] = [];
@@ -2084,28 +2137,29 @@ export class Server {
         }
       }
       const toSeq = Engine.serverSeq(engine);
-      session.lastSyncedSeq = toSeq;
       if (upserts.length === 0) {
-        return null;
+        // The watched set was re-evaluated current as of toSeq even though it
+        // produced no net upserts; advance the watermark so a later default
+        // fromSeq is not stale. emptyCatchUp receives the original fromSeq
+        // explicitly, so this does not mutate the bounds of this sync (the
+        // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+        session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
+        return await emptyCatchUp(fromSeq, toSeq);
       }
+      session.lastSyncedSeq = toSeq;
       recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
         watches: session.watches.length,
       });
-      return {
-        type: "session/effect",
-        space,
-        sessionId,
-        effect: {
-          type: "sync",
-          fromSeq,
-          toSeq,
-          upserts: upserts.toSorted((left, right) =>
-            left.branch.localeCompare(right.branch) ||
-            left.id.localeCompare(right.id)
-          ),
-          removes: [],
-        },
-      };
+      return finishCatchUp({
+        type: "sync",
+        fromSeq,
+        toSeq,
+        upserts: upserts.toSorted((left, right) =>
+          left.branch.localeCompare(right.branch) ||
+          left.id.localeCompare(right.id)
+        ),
+        removes: [],
+      });
     }
 
     const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
@@ -2128,14 +2182,9 @@ export class Server {
     session.trackedIds = trackedIdsFromEntries(entities.values());
     session.lastSyncedSeq = serverSeq;
     if (isEmptySync(sync)) {
-      return null;
+      return await emptyCatchUp(sync.fromSeq, sync.toSeq);
     }
-    return {
-      type: "session/effect",
-      space,
-      sessionId,
-      effect: sync,
-    };
+    return finishCatchUp(sync);
   }
 
   markSpaceDirty(
@@ -2172,8 +2221,13 @@ export class Server {
 
   private stageConflictRefreshDirtyIds(
     space: string,
+    session: SessionState,
     commit: ClientCommit,
   ): void {
+    session.pendingCaughtUpLocalSeq = Math.max(
+      session.pendingCaughtUpLocalSeq,
+      commit.localSeq,
+    );
     const ids = new Set<string>();
     for (const operation of commit.operations) {
       if (operation.op === "sqlite") continue; // no entity id

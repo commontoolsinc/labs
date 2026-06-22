@@ -184,6 +184,18 @@ export class MultiRuntimeSession {
     return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
   }
 
+  /** Per-logger message counts (logger name -> key -> {total,...}). */
+  async loggerCounts(): Promise<
+    Record<string, Record<string, { total: number }>> & { total: number }
+  > {
+    return await this.#client.call("loggerCounts") as
+      & Record<
+        string,
+        Record<string, { total: number }>
+      >
+      & { total: number };
+  }
+
   async disposeSession(): Promise<void> {
     try {
       await this.#client.call("dispose");
