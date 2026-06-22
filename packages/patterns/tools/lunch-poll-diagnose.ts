@@ -21,7 +21,6 @@ interface PollOutputSummary {
   historyCount: number;
   isJoined: boolean;
   isAdmin: boolean;
-  homePageLookupUrls: readonly string[];
 }
 
 interface TraceAddressSummary {
@@ -76,7 +75,6 @@ interface MatrixConfig {
   optionCounts: readonly number[];
   userCounts: readonly number[];
   voteRounds: number;
-  includeHomepageRefresh: boolean;
   // Per-session offset (ms) applied within the join phase and each vote round:
   // session `i` starts its send at `i * staggerMs`. 0 = the original
   // all-at-once Promise.all burst; a small value (e.g. 150) emulates humans
@@ -88,7 +86,6 @@ interface CaseConfig {
   optionCount: number;
   userCount: number;
   voteRounds: number;
-  includeHomepageRefresh: boolean;
   staggerMs: number;
 }
 
@@ -100,7 +97,6 @@ interface CompactSessionSample {
     users: number;
     options: number;
     votes: number;
-    activeLookupUrls: number;
   };
   graph: {
     nodes: number;
@@ -161,7 +157,6 @@ interface CaseResult {
     users: number;
     options: number;
     voteRounds: number;
-    includeHomepageRefresh: boolean;
   };
   churn: ChurnTotals;
   convergence: ConvergenceResult;
@@ -277,7 +272,7 @@ function pollSummary(value: unknown): PollOutputSummary {
     users: asRecordArray(value.users),
     options: asRecordArray(value.options),
     votes: asRecordArray(value.votes),
-    history: Array.isArray(value.history) ? value.history : [],
+    history: Array.isArray(value.recentVisits) ? value.recentVisits : [],
     adminName: asString(value.adminName),
     myName: asString(value.myName),
     userCount: asNumber(value.userCount),
@@ -286,7 +281,6 @@ function pollSummary(value: unknown): PollOutputSummary {
     historyCount: asNumber(value.historyCount),
     isJoined: asBoolean(value.isJoined),
     isAdmin: asBoolean(value.isAdmin),
-    homePageLookupUrls: asStringArray(value.homePageLookupUrls),
   };
 }
 
@@ -476,8 +470,6 @@ function compactSessionSample(
       users: poll.userCount,
       options: poll.optionCount,
       votes: poll.voteCount,
-      activeLookupUrls: poll.homePageLookupUrls.filter((url) => url !== "")
-        .length,
     },
     graph: {
       nodes: diagnostics.graph.nodes,
@@ -684,18 +676,6 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
       );
     }
 
-    if (config.includeHomepageRefresh) {
-      phases.push(
-        await samplePhase(
-          "host-refreshes-homepage-lookups",
-          harness,
-          async () => {
-            await host.send("enrichHomePages", {});
-          },
-        ),
-      );
-    }
-
     const churn = await collectChurn(sessions);
     console.error(
       `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
@@ -726,7 +706,6 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         users: config.userCount,
         options: config.optionCount,
         voteRounds: config.voteRounds,
-        includeHomepageRefresh: config.includeHomepageRefresh,
       },
       churn,
       convergence,
@@ -788,7 +767,6 @@ function explicitCasesArg(
       optionCount,
       userCount,
       voteRounds: config.voteRounds,
-      includeHomepageRefresh: config.includeHomepageRefresh,
       staggerMs: config.staggerMs,
     }];
   });
@@ -811,7 +789,6 @@ function matrixConfigFromArgs(): MatrixConfig {
     optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
     userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
-    includeHomepageRefresh: !Deno.args.includes("--skip-refresh"),
     staggerMs: numberArg("stagger-ms", 0),
   };
 }
@@ -827,7 +804,6 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
         optionCount,
         userCount,
         voteRounds: config.voteRounds,
-        includeHomepageRefresh: config.includeHomepageRefresh,
         staggerMs: config.staggerMs,
       });
     }
