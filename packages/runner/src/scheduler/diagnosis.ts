@@ -1,4 +1,7 @@
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import type {
   IExtendedStorageTransaction,
@@ -145,7 +148,12 @@ export function findDifferingWriteKeys(
       differingKeys.push(key);
       continue;
     }
-    if (!valueEqual(previousWrites.get(key), latestWrites.get(key))) {
+    if (
+      !valueEqual(
+        previousWrites.get(key) as FabricValue,
+        latestWrites.get(key) as FabricValue,
+      )
+    ) {
       differingKeys.push(key);
     }
   }
@@ -237,7 +245,9 @@ function readInvariantMovedExternally(
     const previous = before.get(key);
     // Only reads both runs performed are comparable.
     if (!previous) continue;
-    if (valueEqual(previous.value, value)) continue;
+    if (valueEqual(previous.value as FabricValue, value as FabricValue)) {
+      continue;
+    }
     // Cover writes of EITHER run: run1's commit moving its own read is the
     // accumulator pattern, and a write-then-read inside the recheck run is
     // nondeterminism, not external interference — both must stay flagged.
