@@ -707,7 +707,6 @@ export class StorageManager implements IStorageManager {
     if (this.#providers.size === 0) {
       return;
     }
-    await this.synced();
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
@@ -1040,7 +1039,6 @@ class Provider implements IStorageProviderWithReplica {
       return;
     }
     this.#destroyed = true;
-    await this.replica.synced();
     await this.replica.close();
   }
 
@@ -1247,6 +1245,8 @@ class SpaceReplica implements ISpaceReplica {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.resetConflictAdmissionState();
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     await this.synced();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -1275,9 +1275,13 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     await Promise.allSettled([...this.#updatePromises]);
-    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+  }
+
+  private resetConflictAdmissionState(): void {
+    this.#caughtUpLocalSeq = 0;
+    this.#staleFloor.clear();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -1331,6 +1335,7 @@ class SpaceReplica implements ISpaceReplica {
 
   closeNow(): void {
     this.#closed = true;
+    this.resetConflictAdmissionState();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
@@ -1559,6 +1564,8 @@ class SpaceReplica implements ISpaceReplica {
   reset(): void {
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.resetConflictAdmissionState();
+    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
     this.#subscription.next({
@@ -1918,17 +1925,24 @@ class SpaceReplica implements ISpaceReplica {
       const threshold = this.preemptThreshold(commit);
       if (threshold !== undefined) {
         if (admissionMode === "hold") {
+          const rejection = this.makePreemptRejection(commit, threshold);
           // Precise mode: hold until the catch-up is applied, then run the
           // server's stale-read check locally. Revert only the genuinely stale
           // commits; fall through to send the ones whose reads still hold.
           try {
             await this.waitForCaughtUpLocalSeq(threshold);
           } catch {
-            // Session/replica closing — fall through to the normal path, which
-            // surfaces the closed-state error cleanly.
+            // Session/replica closing or reset: do not open/send a new session
+            // while shutdown is in progress. Finalize the held rejection so the
+            // optimistic write is dropped and close can drain promptly.
+            return await this.finalizeRejection(
+              localSeq,
+              operations,
+              source,
+              rejection,
+            );
           }
           if (!this.#closed && this.commitReadsStaleLocally(commit)) {
-            const rejection = this.makePreemptRejection(commit, threshold);
             logger.debug("commit-held-revert", () => [
               `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
               { localSeq, operations: operations.length },
@@ -1936,7 +1950,6 @@ class SpaceReplica implements ISpaceReplica {
             return await this.finalizeRejection(
               localSeq,
               operations,
-              commit,
               source,
               rejection,
             );
@@ -1956,7 +1969,6 @@ class SpaceReplica implements ISpaceReplica {
           return await this.finalizeRejection(
             localSeq,
             operations,
-            commit,
             source,
             rejection,
           );
@@ -2004,7 +2016,6 @@ class SpaceReplica implements ISpaceReplica {
       return await this.finalizeRejection(
         localSeq,
         operations,
-        commit,
         source,
         rejection,
       );
@@ -2017,7 +2028,6 @@ class SpaceReplica implements ISpaceReplica {
   private async finalizeRejection(
     localSeq: number,
     operations: NativeCommitOperation[],
-    commit: ClientCommit,
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
   ): Promise<Result<Unit, StorageTransactionRejected>> {

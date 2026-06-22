@@ -739,12 +739,67 @@ describe("Memory v2 storage notifications", () => {
     }
   });
 
+  it("public close settles a commit held by conflict admission", async () => {
+    setConflictAdmissionMode("hold");
+    try {
+      const provider = storageManager.open(space);
+      const replica = provider.replica as typeof provider.replica & {
+        commitNative: (
+          transaction: unknown,
+          source?: unknown,
+        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
+        recordStaleFloor: (commit: unknown, localSeq: number) => void;
+      };
+      const uri = `of:hold-close-${Date.now()}` as URI;
+
+      replica.recordStaleFloor({
+        localSeq: 5,
+        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
+      }, 5);
+
+      const commitPromise = replica.commitNative({
+        operations: [{
+          op: "set",
+          id: uri,
+          type: "application/json",
+          value: { value: { v: 2 } },
+        }],
+      }, staleReadSource(uri, 0));
+
+      let settled = false;
+      void commitPromise.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      const closeAndCommit = Promise.all([
+        storageManager.close(),
+        commitPromise,
+      ]);
+      const [, result] = await Promise.race([
+        closeAndCommit,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("close timed out")), 250)
+        ),
+      ]);
+
+      expect(result.ok).toBeFalsy();
+      expect(result.error?.name).toBe("ConflictError");
+    } finally {
+      setConflictAdmissionMode(undefined);
+    }
+  });
+
   it("admission control records, thresholds, and prunes a stale floor", () => {
     const provider = storageManager.open(space);
     const replica = provider.replica as unknown as {
       recordStaleFloor: (commit: unknown, localSeq: number) => void;
       preemptThreshold: (commit: unknown) => number | undefined;
       noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
+      reset: () => void;
     };
     const uri = `of:admission-floor-${Date.now()}`;
     const reading = {
@@ -763,6 +818,26 @@ describe("Memory v2 storage notifications", () => {
     // Catching up to the floor makes the id fresh again -> admitted.
     replica.noteCaughtUpLocalSeq(7);
     expect(replica.preemptThreshold(reading)).toBeUndefined();
+
+    // A reset starts a new replica epoch; stale floors from the old epoch must
+    // not hold or pre-empt post-reset commits that read the same id.
+    replica.recordStaleFloor(reading, 8);
+    expect(replica.preemptThreshold(reading)).toBe(8);
+    replica.reset();
+    expect(replica.preemptThreshold(reading)).toBeUndefined();
+  });
+
+  it("reset rejects caught-up waiters from the previous replica epoch", async () => {
+    const provider = storageManager.open(space);
+    const replica = provider.replica as unknown as {
+      waitForCaughtUpLocalSeq: (localSeq: number) => Promise<void>;
+      reset: () => void;
+    };
+
+    const wait = replica.waitForCaughtUpLocalSeq(3);
+    replica.reset();
+
+    await expect(wait).rejects.toThrow("memory replica reset");
   });
 
   it("pre-empts a known-stale commit instead of round-tripping when enabled", async () => {
