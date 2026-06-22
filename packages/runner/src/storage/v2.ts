@@ -122,32 +122,61 @@ const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 
 // Strategy 1 — client-side conflict admission control (EXPERIMENT, default off).
-// Once a commit conflicts, the client knows its read set is behind until the
-// server catches it up. New commits reading those same ids before catch-up are
-// near-certain to conflict too, so when enabled we pre-empt them locally
-// (revert + re-run after catch-up) instead of issuing a doomed round trip.
+// Once a commit conflicts, the client knows its read set is behind on the
+// touched ids until the server catches it up. Two modes gate what we do with a
+// new commit whose reads land on a still-catching-up id:
 //
-// Measured NET-NEGATIVE on the lunch-poll contention workload: those conflicts
-// are genuine cross-session write-write ping-pong (first-conflicts that
-// admission cannot pre-empt), and since conflict responses are already cheap,
-// pre-empting only inserts extra revert+re-run cycles that re-enter the same
-// contention. 5x5 conflicts rose ~1380 -> ~1600 (plus pre-empts). Kept
-// flag-gated as a documented experiment; the real lever for this workload is
-// coalescing commutative ops. Do NOT enable without re-measuring on the target
-// workload.
-let conflictAdmissionConfigOverride: boolean | undefined;
-export function setConflictAdmissionEnabled(value: boolean | undefined): void {
-  conflictAdmissionConfigOverride = value;
+//   "preempt" (coarse): assume it will conflict and pre-empt it locally (revert
+//     + re-run after catch-up) without sending. Measured NET-NEGATIVE on the
+//     lunch-poll workload: the stale floor taints every id a losing tx touched
+//     (incl. write targets), so it pre-empts commits that would have SUCCEEDED,
+//     turning them into extra revert+re-run cycles. 5x5 server conflicts rose
+//     ~1380 -> ~1600 (plus pre-empts), wall time flat (conflicts are cheap).
+//
+//   "hold" (precise): hold the commit until the catch-up is applied, then run
+//     the server's precondition check LOCALLY against the now-current confirmed
+//     seqs. Locally revert only the commits that are genuinely stale; SEND the
+//     rest. Eliminates the coarse mode's false pre-empts and stops sending
+//     knowingly-doomed commits to the server.
+//
+//     Measured NEUTRAL (safe but no win) on lunch-poll: heldRevert ~= 0,
+//     heldSent ~= 70, conflicts ~= baseline. The reason is fundamental — the
+//     staleness here is SERVER-side, not locally knowable: when the action
+//     runs it reads the latest LOCAL confirmed value, which looks current
+//     (read.seq == local confirmed seq), so the local check cannot tell the
+//     commit is behind the server. Only the server (or a not-yet-received sync)
+//     knows. So the precise check correctly SENDS the held commits (no false
+//     pre-empts, unlike coarse) but cannot prevent the server conflict. This
+//     mode only pays off where a client routinely holds commits built against
+//     data its own later syncs have already superseded.
+//
+// Default off. Do NOT enable without re-measuring on the target workload.
+type ConflictAdmissionMode = "off" | "preempt" | "hold";
+let conflictAdmissionModeOverride: ConflictAdmissionMode | undefined;
+export function setConflictAdmissionMode(
+  mode: ConflictAdmissionMode | undefined,
+): void {
+  conflictAdmissionModeOverride = mode;
 }
-function conflictAdmissionEnabled(): boolean {
-  if (conflictAdmissionConfigOverride !== undefined) {
-    return conflictAdmissionConfigOverride;
+// Back-compat for existing tests/callers: true -> coarse preempt, false -> off.
+export function setConflictAdmissionEnabled(value: boolean | undefined): void {
+  conflictAdmissionModeOverride = value === undefined
+    ? undefined
+    : (value ? "preempt" : "off");
+}
+function conflictAdmissionMode(): ConflictAdmissionMode {
+  if (conflictAdmissionModeOverride !== undefined) {
+    return conflictAdmissionModeOverride;
   }
   try {
     const value = Deno.env.get("CF_CONFLICT_ADMISSION");
-    return value === "1" || value === "true";
+    if (value === "hold") return "hold";
+    if (value === "preempt" || value === "1" || value === "true") {
+      return "preempt";
+    }
+    return "off";
   } catch {
-    return false;
+    return "off";
   }
 }
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
@@ -1883,24 +1912,55 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    // Strategy 1: pre-empt a commit whose read set is known stale rather than
-    // letting it conflict at the server. The retry path is identical to a real
-    // conflict, minus the doomed round trip and the server-side conflict.
-    if (conflictAdmissionEnabled()) {
+    // Strategy 1: a commit whose read set lands on a still-catching-up id.
+    const admissionMode = conflictAdmissionMode();
+    if (admissionMode !== "off") {
       const threshold = this.preemptThreshold(commit);
       if (threshold !== undefined) {
-        const rejection = this.makePreemptRejection(commit, threshold);
-        logger.debug("commit-preempted", () => [
-          `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
-          { localSeq, operations: operations.length },
-        ]);
-        return await this.finalizeRejection(
-          localSeq,
-          operations,
-          commit,
-          source,
-          rejection,
-        );
+        if (admissionMode === "hold") {
+          // Precise mode: hold until the catch-up is applied, then run the
+          // server's stale-read check locally. Revert only the genuinely stale
+          // commits; fall through to send the ones whose reads still hold.
+          try {
+            await this.waitForCaughtUpLocalSeq(threshold);
+          } catch {
+            // Session/replica closing — fall through to the normal path, which
+            // surfaces the closed-state error cleanly.
+          }
+          if (!this.#closed && this.commitReadsStaleLocally(commit)) {
+            const rejection = this.makePreemptRejection(commit, threshold);
+            logger.debug("commit-held-revert", () => [
+              `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+              { localSeq, operations: operations.length },
+            ]);
+            return await this.finalizeRejection(
+              localSeq,
+              operations,
+              commit,
+              source,
+              rejection,
+            );
+          }
+          logger.debug("commit-held-sent", () => [
+            `held commit sent after catch-up (reads still valid)`,
+            { localSeq, operations: operations.length },
+          ]);
+          // fall through to send
+        } else {
+          // Coarse mode: assume conflict and pre-empt without sending.
+          const rejection = this.makePreemptRejection(commit, threshold);
+          logger.debug("commit-preempted", () => [
+            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
+            { localSeq, operations: operations.length },
+          ]);
+          return await this.finalizeRejection(
+            localSeq,
+            operations,
+            commit,
+            source,
+            rejection,
+          );
+        }
       }
     }
     try {
@@ -1924,7 +1984,7 @@ class SpaceReplica implements ISpaceReplica {
     } catch (error) {
       const rejection = toRejectedError(error, commit, this.#space);
       this.attachProviderReadyToRetry(rejection, localSeq);
-      if (conflictAdmissionEnabled() && rejection.name === "ConflictError") {
+      if (admissionMode !== "off" && rejection.name === "ConflictError") {
         this.recordStaleFloor(commit, localSeq);
       }
       // Counted (even while silent) so multi-writer churn can be read back via
@@ -2181,6 +2241,23 @@ class SpaceReplica implements ISpaceReplica {
       consider(read.id, read.scope);
     }
     return threshold;
+  }
+
+  // The server's stale-read precondition check, run LOCALLY against the current
+  // confirmed seqs (use after catch-up has been applied). Returns true only when
+  // a confirmed read is PROVABLY behind our local confirmed base — i.e. the
+  // commit is genuinely going to conflict. Anything we cannot prove stale
+  // (unknown id, no local record, or only pending reads) returns false so the
+  // commit is still sent and the server stays the source of truth.
+  private commitReadsStaleLocally(commit: ClientCommit): boolean {
+    for (const read of commit.reads.confirmed) {
+      const record = this.#docs.get(docKey(read.id as URI, read.scope));
+      const confirmedSeq = record?.confirmed.seq ?? 0;
+      if (read.seq < confirmedSeq) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private makePreemptRejection(

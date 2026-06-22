@@ -5,7 +5,10 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { setConflictAdmissionEnabled } from "../src/storage/v2.ts";
+import {
+  setConflictAdmissionEnabled,
+  setConflictAdmissionMode,
+} from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -642,6 +645,98 @@ describe("Memory v2 storage notifications", () => {
     );
 
     expect(called).toBe(1);
+  });
+
+  it("hold-mode local check flags only provably-stale confirmed reads", async () => {
+    const provider = storageManager.open(space);
+    const replica = provider.replica as unknown as {
+      commitReadsStaleLocally: (commit: unknown) => boolean;
+    };
+    const uri = `of:hold-check-${Date.now()}` as URI;
+
+    // Establish a confirmed record with seq > 0.
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
+    });
+    await provider.sync(uri);
+    await waitFor(() =>
+      (provider.replica as unknown as {
+        get(a: { id: URI; type: MIME }): { is?: unknown } | undefined;
+      }).get({ id: uri, type: "application/json" as MIME }) !== undefined
+    );
+
+    const read = (seq: number) => ({
+      reads: { confirmed: [{ id: uri, path: [], seq }], pending: [] },
+      operations: [],
+    });
+    // seq 0 is below the confirmed base -> provably stale.
+    expect(replica.commitReadsStaleLocally(read(0))).toBe(true);
+    // a seq at/above the confirmed base -> not provably stale, so it is sent.
+    expect(replica.commitReadsStaleLocally(read(Number.MAX_SAFE_INTEGER))).toBe(
+      false,
+    );
+  });
+
+  it("hold mode reverts a held commit only when its read is actually stale", async () => {
+    setConflictAdmissionMode("hold");
+    try {
+      const provider = storageManager.open(space);
+      const replica = provider.replica as typeof provider.replica & {
+        commitNative: (
+          transaction: unknown,
+          source?: unknown,
+        ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
+        recordStaleFloor: (commit: unknown, localSeq: number) => void;
+        noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
+      };
+      const uri = `of:hold-revert-${Date.now()}` as URI;
+
+      await remoteSession.transact({
+        localSeq: remoteLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
+      });
+      await provider.sync(uri);
+      await waitFor(() =>
+        replica.get({ id: uri, type: "application/json" as MIME }) !== undefined
+      );
+
+      // Floor uri so a new commit reading it is held until caughtUpLocalSeq>=5.
+      replica.recordStaleFloor({
+        localSeq: 5,
+        reads: { confirmed: [{ id: uri, path: [], seq: 0 }], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
+      }, 5);
+
+      const commitPromise = replica.commitNative({
+        operations: [{
+          op: "set",
+          id: uri,
+          type: "application/json",
+          value: { value: { v: 2 } },
+        }],
+      }, staleReadSource(uri, 0));
+
+      // Held: not sent, not settled, until we observe the catch-up seq.
+      let settled = false;
+      void commitPromise.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      replica.noteCaughtUpLocalSeq(5);
+      const result = await commitPromise;
+      // Read seq 0 is below the confirmed base, so the local check reverts it
+      // (instead of sending a doomed commit).
+      expect(result.ok).toBeFalsy();
+      expect(result.error?.name).toBe("ConflictError");
+    } finally {
+      setConflictAdmissionMode(undefined);
+    }
   });
 
   it("admission control records, thresholds, and prunes a stale floor", () => {

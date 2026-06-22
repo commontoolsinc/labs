@@ -144,6 +144,8 @@ interface PhaseSample {
 interface ChurnTotals {
   commitConflicts: number;
   commitPreempted: number;
+  commitHeldRevert: number;
+  commitHeldSent: number;
   commitReverts: number;
   commitRejected: number;
 }
@@ -166,6 +168,8 @@ async function collectChurn(
   const totals: ChurnTotals = {
     commitConflicts: 0,
     commitPreempted: 0,
+    commitHeldRevert: 0,
+    commitHeldSent: 0,
     commitReverts: 0,
     commitRejected: 0,
   };
@@ -174,6 +178,8 @@ async function collectChurn(
     const storage = counts["storage.v2"] ?? {};
     totals.commitConflicts += storage["commit-conflict"]?.total ?? 0;
     totals.commitPreempted += storage["commit-preempted"]?.total ?? 0;
+    totals.commitHeldRevert += storage["commit-held-revert"]?.total ?? 0;
+    totals.commitHeldSent += storage["commit-held-sent"]?.total ?? 0;
     totals.commitReverts += storage["commit-revert"]?.total ?? 0;
     totals.commitRejected += storage["commit-rejected"]?.total ?? 0;
   }
@@ -668,6 +674,7 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
       `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
         `admission=${Deno.env.get("CF_CONFLICT_ADMISSION") ?? "0"}: ` +
         `conflicts=${churn.commitConflicts} preempted=${churn.commitPreempted} ` +
+        `heldRevert=${churn.commitHeldRevert} heldSent=${churn.commitHeldSent} ` +
         `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`,
     );
 
