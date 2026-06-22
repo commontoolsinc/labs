@@ -219,6 +219,14 @@ export default pattern(() => {
       v?.voterName === "Alex";
   });
 
+  // The "All options" overview renders one swatch per voter, sourced from the
+  // per-option `tally.voters` list. Regression guard for the filter/map bug
+  // where the swatches silently stopped rendering: after Alex's green vote, his
+  // swatch must appear in the rendered UI tree.
+  const assert_alex_swatch_renders = computed(() =>
+    findNodeByProp(poll[UI], "data-vote-swatch-name", "Alex") !== undefined
+  );
+
   const assert_changed_to_yellow = computed(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
@@ -348,6 +356,7 @@ export default pattern(() => {
       // Vote green → yellow → red (covers all three colors)
       { action: action_vote_green_first },
       { assertion: assert_green_vote_recorded },
+      { assertion: assert_alex_swatch_renders },
       { action: action_vote_yellow_first },
       { assertion: assert_changed_to_yellow },
       { action: action_vote_red_first },
