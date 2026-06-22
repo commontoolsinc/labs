@@ -7,6 +7,10 @@ import { FabricRegExp } from "./FabricRegExp.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { FabricBytes } from "./FabricBytes.ts";
+export {
+  FabricCellLink,
+  type FabricCellLinkPayload,
+} from "./FabricCellLink.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";
 export { FabricEpochNsec } from "./FabricEpochNsec.ts";
