@@ -148,6 +148,13 @@ export function findDifferingWriteKeys(
       differingKeys.push(key);
       continue;
     }
+    // These come from `captureTransactionWrites()`, which routes each value
+    // through a structural `isRecord` unwrap (stripping a nested `{ value }`
+    // wrapper), so the captured type is `unknown` even though the underlying
+    // write detail is a `FabricValue`. The cast asserts what the type system
+    // can't verify across that boundary; a genuine `unknown` boundary
+    // ultimately warrants a runtime check, for which a recursive
+    // `isFabricValue()` predicate (not yet extracted) would be the right tool.
     if (
       !valueEqual(
         previousWrites.get(key) as FabricValue,
