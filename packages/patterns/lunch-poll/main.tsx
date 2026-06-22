@@ -544,7 +544,9 @@ const summarizePlaces = (visits: readonly HistoryEntry[]): PlaceStat[] => {
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
   options?: PerSpace<Option[] | Default<[]>>;
-  votesByOption?: PerSpace<VotesByOption | Default<typeof EMPTY_VOTES_BY_OPTION>>;
+  votesByOption?: PerSpace<
+    VotesByOption | Default<typeof EMPTY_VOTES_BY_OPTION>
+  >;
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
@@ -972,7 +974,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {votes.filter((vote) => vote.optionId === oid)
+                                {votesArray.filter((vote) =>
+                                  vote.optionId === oid
+                                )
                                   .map((vote) => (
                                     <span
                                       title={vote.voterName}
