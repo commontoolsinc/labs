@@ -2,11 +2,12 @@ import { computed, NAME, pattern, UI, wish } from "commonfabric";
 
 export default pattern(
   () => {
-    const profileWish = wish({ query: "#profile" });
+    const profileWish = wish<{ initialNameApplied?: string }>({
+      query: "#profile",
+    });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const displayName = computed(() =>
-      (profileWish.result as { initialNameApplied?: string } | undefined)
-        ?.initialNameApplied ??
+      profileWish.result?.initialNameApplied ??
         profileNameWish.result ?? "No profile"
     );
     const status = computed(() =>

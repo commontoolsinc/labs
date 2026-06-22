@@ -269,8 +269,8 @@ export interface GmailAgenticSearchOutput {
   lastScanAt: number;
 
   // Actions (bound handlers for embedding patterns to use)
-  startScan: Stream<unknown>;
-  stopScan: Stream<unknown>;
+  startScan: Stream<void>;
+  stopScan: Stream<void>;
 
   // ========================================================================
   // SHARED SEARCH STRINGS
@@ -371,7 +371,7 @@ const setAccountTypeHandler = handler<
 
 // Handler to stop scan
 const stopScanHandler = handler<
-  unknown,
+  void,
   {
     lastScanAt: Writable<number | Default<0>>;
     isScanning: Writable<boolean | Default<false>>;
@@ -727,7 +727,7 @@ const searchGmailHandler = handler<
 
 // Handler to start scan
 const startScanHandler = handler<
-  unknown,
+  void,
   {
     isScanning: Writable<boolean | Default<false>>;
     isAuthenticated: Writable<boolean>;

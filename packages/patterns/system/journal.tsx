@@ -19,7 +19,7 @@ import {
 type JournalEntry = {
   timestamp?: number;
   eventType?: string;
-  subject?: Writable<unknown>;
+  subject?: Writable<any>;
   snapshot?: {
     name?: string;
     schemaTag?: string;

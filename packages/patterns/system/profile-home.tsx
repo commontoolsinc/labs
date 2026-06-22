@@ -126,7 +126,7 @@ export type ProfileHomeOutput = {
   addPiece: Stream<MutateProfileElementsEvent>;
   // Flips the rendered profile view (CT-1748) between the read-only
   // presentation and the edit form. UI state — not owner-protected.
-  toggleEditing: Stream<unknown>;
+  toggleEditing: Stream<void>;
   // Current view mode: false = read-only presentation, true = edit form.
   isEditing: boolean;
   initialNameApplied: string;
@@ -368,7 +368,7 @@ const setBio = handler<
 // UI state: visiting a profile shows the read-only presentation; this flips to
 // the edit form. The flag itself is not owner-protected — anyone can flip their
 // own view — but CFC still gates the actual field writes behind the form.
-const toggleProfileEditing = handler<unknown, { editing: Writable<boolean> }>(
+const toggleProfileEditing = handler<void, { editing: Writable<boolean> }>(
   (_event, state) => {
     state.editing.set(!state.editing.get());
   },

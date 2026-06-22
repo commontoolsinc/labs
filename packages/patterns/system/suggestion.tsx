@@ -87,7 +87,7 @@ export default pattern<
   {
     situation: string;
     context: { [id: string]: any };
-    initialResults: Writable<unknown>[] | Default<[]>;
+    initialResults: Writable<any>[] | Default<[]>;
   },
   WishState<Writable<any>> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {
@@ -100,7 +100,7 @@ export default pattern<
     return userConfirmedIndex.get();
   });
 
-  const pickerResult = computed(() => {
+  const pickerResult = computed((): Writable<any> | undefined => {
     if (initialResults.length === 0) return undefined;
     const idx = confirmedIndex; // Auto-unwraps to number | null
     if (idx === null) return undefined; // Wait for user confirmation
@@ -134,7 +134,7 @@ export default pattern<
     }
   });
 
-  const { result: patternIndex } = fetchData({
+  const { result: patternIndex } = fetchData<string>({
     url: resolvedPatternUrl,
     mode: "text",
   });
