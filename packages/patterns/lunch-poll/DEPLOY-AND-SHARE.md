@@ -39,20 +39,14 @@ space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
 
-The poll now lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
-successor to `toolshed`. It was established fresh here with `cf piece new` (see
-"Recovering → Re-establishing") — we were the first poll in this space:
+The poll lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
+successor to `toolshed`.
 
 ```
 space:  team-lunch
 piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
 url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
 ```
-
-(History: an earlier poll lived in a _space_ literally named `rapids`, back on
-`toolshed` — unrelated to the `rapids` _server_ above, despite the name clash;
-`lunch-2026-05-26` / `lunch-2026-05-29` were earlier space pointers.
-`team-lunch` is a fresh space made to avoid that confusion.)
 
 ### Historical: the `toolshed` piece
 
