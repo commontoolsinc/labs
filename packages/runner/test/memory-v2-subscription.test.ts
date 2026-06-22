@@ -356,6 +356,101 @@ describe("Memory v2 storage notifications", () => {
     });
   });
 
+  it("reverts a non-conflicting sibling write to current while the conflicting doc lands fresh", async () => {
+    // tx writes A and B; only B conflicts. The whole tx is rejected, so A's
+    // optimistic write must roll back (it is NOT in the catch-up sync), while B
+    // must land on the CURRENT confirmed value (fresh), never on past data.
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const aUri = `of:memory-v2-revert-sibling-a-${Date.now()}` as URI;
+    const bUri = `of:memory-v2-revert-sibling-b-${Date.now()}` as URI;
+    const aAddress = { id: aUri, type: "application/json" as MIME };
+    const bAddress = { id: bUri, type: "application/json" as MIME };
+
+    const provider = storageManager.open(space);
+    const replica = provider.replica as typeof provider.replica & {
+      commitNative: (
+        transaction: unknown,
+        source?: unknown,
+      ) => Promise<{ ok?: unknown; error?: { name?: string } }>;
+    };
+
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: aUri, value: { value: { a: 1 } } },
+        { op: "set", id: bUri, value: { value: { b: 1 } } },
+      ],
+    });
+    await provider.sync(aUri);
+    await provider.sync(bUri);
+
+    // Another writer advances ONLY B to b:3; A stays at a:1.
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: bUri, value: { value: { b: 3 } } }],
+    });
+    await waitFor(() =>
+      JSON.stringify(replica.get(bAddress)?.is) ===
+        JSON.stringify({ value: { b: 3 } })
+    );
+
+    // Local tx writes both A and B optimistically; a stale read of B forces the
+    // conflict. Whole tx is rejected.
+    const result = await replica.commitNative({
+      operations: [
+        {
+          op: "set",
+          id: aUri,
+          type: "application/json",
+          value: { value: { a: 10 } },
+        },
+        {
+          op: "set",
+          id: bUri,
+          type: "application/json",
+          value: { value: { b: 20 } },
+        },
+      ],
+    }, staleReadSource(bUri, 1));
+
+    expect(result.ok).toBeFalsy();
+    expect(result.error?.name).toBe("ConflictError");
+
+    // A rolled back to its confirmed (current) value; B at the fresh current
+    // value — not the optimistic 20 and not the past 1.
+    expect(replica.get(aAddress)?.is).toEqual({ value: { a: 1 } });
+    expect(replica.get(bAddress)?.is).toEqual({ value: { b: 3 } });
+
+    // One revert notification carrying BOTH the sibling rollback and the fresh
+    // value, each reverting to current.
+    expect(subscription.reverts).toHaveLength(1);
+    const changes = [...subscription.reverts[0].changes];
+    expect(changes).toContainEqual({
+      address: {
+        id: aUri,
+        type: "application/json",
+        scope: "space",
+        path: ["value", "a"],
+      },
+      before: { value: { a: 10 } },
+      after: { value: { a: 1 } },
+    });
+    expect(changes).toContainEqual({
+      address: {
+        id: bUri,
+        type: "application/json",
+        scope: "space",
+        path: ["value", "b"],
+      },
+      before: { value: { b: 20 } },
+      after: { value: { b: 3 } },
+    });
+  });
+
   it("refreshes subscribed state before conflict readyToRetry resolves", async () => {
     const subscription = new Subscription();
     storageManager.subscribe(subscription);
