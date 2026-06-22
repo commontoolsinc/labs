@@ -11,10 +11,31 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    n: number;
+    multiplier: __cfHelpers.Cell<number>;
+}, number>(({ n, multiplier }) => n * multiplier.get(), {
+    type: "object",
+    properties: {
+        n: {
+            type: "number"
+        },
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["n", "multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const n = __cf_pattern_input.key("element");
     const multiplier = __cf_pattern_input.key("params", "multiplier");
-    return n * multiplier.get();
+    return __cfLift_1({
+        n: n,
+        multiplier: multiplier
+    }).for("__patternResult", true);
 }, {
     type: "object",
     properties: {
@@ -36,7 +57,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_1 = __cfHelpers.lift<{
+const __cfLift_2 = __cfHelpers.lift<{
     numbers: __cfHelpers.ReadonlyCell<number[]>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
 }, number[]>(({ numbers, multiplier }) => numbers.mapWithPattern(__cfPattern_1, {
@@ -83,7 +104,7 @@ export default pattern(() => {
     // The computed gets transformed to the lift-applied form lift(() => numbers.map(...))({})
     // Inside a lift-applied computation, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
-    const doubled = __cfLift_1({
+    const doubled = __cfLift_2({
         numbers: numbers,
         multiplier: multiplier
     }).for("doubled", true);
@@ -98,6 +119,7 @@ export default pattern(() => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    __cfLift_1,
     __cfPattern_1,
-    __cfLift_1
+    __cfLift_2
 });
