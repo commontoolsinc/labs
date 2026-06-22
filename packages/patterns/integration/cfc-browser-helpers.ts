@@ -226,6 +226,43 @@ async function settleView(
   await awaitViewSettled(page);
 }
 
+/**
+ * Wait for `selector` to contain `text` after a stimulus has been dispatched,
+ * driving the shell to settle between checks and resolving the instant the text
+ * appears.
+ *
+ * A freshly dispatched click's effect reaches the DOM only once the worker→main
+ * pipeline runs: the worker settles the reactive graph, pushes a vdom batch,
+ * the main thread applies it, and Lit drains its updates. `awaitViewSettled`
+ * pumps that pipeline. An integration test holds no UI subscription, so nothing
+ * else pumps it — a purely passive wait can sit on a DOM that never changes and
+ * time out even though the effect is ready to apply.
+ *
+ * Each iteration awaits one full view settle, then re-checks. The settle is the
+ * re-evaluation trigger — real asynchronous work (a worker idle round-trip plus
+ * a drained Lit cycle), not a fixed-interval sleep — so the effect is observed
+ * within a settle cycle or two and the wait resolves immediately once it holds.
+ * The settle must be driven from the same call sequence as the check; running
+ * it concurrently with a separate waiter does not help, because the astral CDP
+ * connection serializes evaluations.
+ */
+async function waitForTextWhileSettling(
+  page: Page,
+  selector: string,
+  text: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  if (await textIsPresent(page, selector, text)) return;
+  do {
+    await awaitViewSettled(page);
+    if (await textIsPresent(page, selector, text)) return;
+  } while (Date.now() < deadline);
+  throw new Error(
+    `"${selector}" did not contain "${text}" within ${timeout}ms`,
+  );
+}
+
 export async function clickTrustedAction(
   page: Page,
   action: string,
@@ -300,13 +337,13 @@ export async function clickTrustedActionAndWaitForText(
     );
   }
 
-  // The click is delivered; wait for its effect, notification-driven. The
-  // predicate re-runs whenever the DOM changes — including an optimistic
-  // perUser/perSpace write whose chip trails the commit — without re-clicking.
+  // The click is delivered; wait for its effect, resolving the instant the
+  // text appears while driving the settle that applies it. No re-clicking — an
+  // optimistic perUser/perSpace write whose chip trails the commit is caught by
+  // the same wait.
   try {
-    await waitForCondition(page, textPresent, {
+    await waitForTextWhileSettling(page, selector, text, {
       timeout: remaining(),
-      args: [selector, text],
     });
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
@@ -538,14 +575,13 @@ export async function clickCfButtonAndWaitForText(
     );
   }
 
-  // The click is delivered; wait for its effect, notification-driven. The
-  // predicate re-runs whenever the DOM changes, so an effect that renders a few
-  // cycles after the click — including an optimistic perUser/perSpace write
+  // The click is delivered; wait for its effect, resolving the instant the text
+  // appears while driving the settle that applies it. An effect that renders a
+  // few cycles after the click — including an optimistic perUser/perSpace write
   // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitForCondition(page, textPresent, {
+    await waitForTextWhileSettling(page, textSelector, text, {
       timeout: remaining(),
-      args: [textSelector, text],
     });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);

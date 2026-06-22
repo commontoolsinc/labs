@@ -199,13 +199,19 @@ function installWaiter(
   }).__cfcPulseHub ??= (() => {
     const listeners = new Set<() => void>();
     const observed = new WeakSet<Document | ShadowRoot>();
+    // Keep observers reachable from JS. A MutationObserver with no script
+    // reference can be collected even while its node lives, which would silently
+    // stop pulses; the array prevents that.
+    const retained: MutationObserver[] = [];
     const notify = () => {
       for (const listener of listeners) listener();
     };
     const observe = (root: Document | ShadowRoot) => {
       if (observed.has(root)) return;
       observed.add(root);
-      new MutationObserver(notify).observe(root, {
+      const mo = new MutationObserver(notify);
+      retained.push(mo);
+      mo.observe(root, {
         subtree: true,
         childList: true,
         characterData: true,
@@ -271,12 +277,23 @@ function installWaiter(
     stopped = true;
     hub.listeners.delete(pulse);
     // The binding is added and awaited before this script installs, so the
-    // bound function is normally present; retry on the macrotask queue in case
-    // it has not yet attached to this execution context.
+    // bound function is normally present; retry a bounded number of times on the
+    // macrotask queue in case it has not yet attached to this execution context.
+    // If it never attaches, report it rather than spinning silently until the
+    // outer timeout.
+    let attempts = 0;
     const tryFire = () => {
       if (signalled) return;
-      if (fire()) registry.delete(bindingName);
-      else setTimeout(tryFire, 0);
+      if (fire()) {
+        registry.delete(bindingName);
+      } else if (++attempts < 100) {
+        setTimeout(tryFire, 0);
+      } else {
+        console.error(
+          `[waitForCondition] binding "${bindingName}" never became callable;` +
+            ` condition held but could not signal the test.`,
+        );
+      }
     };
     tryFire();
   };
