@@ -337,7 +337,7 @@ export function logBaselineSourceRuns(
   contexts: BaselineRunContext[],
   currentRunCreatedAt: string,
 ): void {
-  console.log("Baseline source runs:");
+  console.log("\n::group::Baseline source runs:\n");
   for (
     const { run, artifacts, pr, prLookupError, commitsBehindMain } of contexts
   ) {
@@ -363,6 +363,7 @@ export function logBaselineSourceRuns(
         `${ageLabel}; ${prLabel}; ${artifactLabel}`,
     );
   }
+  console.log("\n::endgroup::\n");
 }
 
 export interface BaselinePRLookupSummary {
