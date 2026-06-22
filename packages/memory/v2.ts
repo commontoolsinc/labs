@@ -202,6 +202,7 @@ export interface MemoryProtocolFlags {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
+  syncSchemaTable: boolean;
 }
 
 /**
@@ -211,6 +212,7 @@ export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
+  syncSchemaTable?: boolean;
 };
 
 export interface HelloMessage {
@@ -574,6 +576,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = false;
+let syncSchemaTableEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -608,10 +611,28 @@ export function resetCommitPreconditionsConfig(): void {
   commitPreconditionsEnabled = false;
 }
 
+/**
+ * Ambient protocol capability for frame-local schema tables in sync payloads.
+ * This is a wire-size optimization only; peers that do not advertise it keep
+ * receiving the historical fully-expanded `SessionSync` shape.
+ */
+export function setSyncSchemaTableConfig(enabled?: boolean): void {
+  syncSchemaTableEnabled = enabled ?? true;
+}
+
+export function getSyncSchemaTableConfig(): boolean {
+  return syncSchemaTableEnabled;
+}
+
+export function resetSyncSchemaTableConfig(): void {
+  syncSchemaTableEnabled = true;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
+  syncSchemaTable: getSyncSchemaTableConfig(),
 });
 
 /**
@@ -660,10 +681,19 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const syncSchemaTable = value.syncSchemaTable;
+  if (
+    syncSchemaTable !== undefined &&
+    typeof syncSchemaTable !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
+    syncSchemaTable: syncSchemaTable === true,
   };
 };
 
@@ -676,6 +706,7 @@ export const wireMemoryProtocolFlags = (
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
+  syncSchemaTable: flags.syncSchemaTable,
 });
 
 export const encodeMemoryBoundary = (value: FabricValue): string =>
