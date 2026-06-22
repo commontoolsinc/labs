@@ -156,6 +156,7 @@ interface CaseResult {
     includeHomepageRefresh: boolean;
   };
   churn: ChurnTotals;
+  convergence: ConvergenceResult;
   phases: PhaseSample[];
 }
 
@@ -177,6 +178,53 @@ async function collectChurn(
     totals.commitRejected += storage["commit-rejected"]?.total ?? 0;
   }
   return totals;
+}
+
+interface ConvergenceResult {
+  converged: boolean;
+  voteCounts: number[];
+  optionCounts: number[];
+  userCounts: number[];
+  fingerprints: string[];
+}
+
+// After heavy conflict churn, every session must agree on the shared poll
+// state. A canonical fingerprint of the (PerSpace) vote set that differs across
+// sessions is a correctness/convergence bug, not just contention.
+async function collectConvergence(
+  sessions: readonly MultiRuntimeSession[],
+): Promise<ConvergenceResult> {
+  const states = await Promise.all(sessions.map(async (session) => {
+    const poll = pollSummary(await session.read());
+    const fingerprint = poll.votes
+      .map((vote) =>
+        `${vote.voterName ?? "?"}|${vote.optionId ?? "?"}|${
+          vote.voteType ?? "?"
+        }`
+      )
+      .sort()
+      .join(",");
+    return {
+      votes: poll.voteCount,
+      options: poll.optionCount,
+      users: poll.userCount,
+      fingerprint,
+    };
+  }));
+  const ref = states[0];
+  const converged = states.every((state) =>
+    state.votes === ref.votes &&
+    state.options === ref.options &&
+    state.users === ref.users &&
+    state.fingerprint === ref.fingerprint
+  );
+  return {
+    converged,
+    voteCounts: states.map((state) => state.votes),
+    optionCounts: states.map((state) => state.options),
+    userCounts: states.map((state) => state.users),
+    fingerprints: states.map((state) => state.fingerprint),
+  };
 }
 
 const traceCursors = new Map<string, number>();
@@ -623,6 +671,22 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         `reverts=${churn.commitReverts} rejected=${churn.commitRejected}`,
     );
 
+    // Settle once more, then assert all sessions converged on the shared state.
+    await harness.settle(5);
+    const convergence = await collectConvergence(sessions);
+    console.error(
+      `[lunch-poll diagnose] convergence ${config.optionCount}x${config.userCount}: ` +
+        `converged=${convergence.converged} ` +
+        `votes=[${convergence.voteCounts.join(",")}] ` +
+        `options=[${convergence.optionCounts.join(",")}] ` +
+        `users=[${convergence.userCounts.join(",")}]` +
+        (convergence.converged
+          ? ""
+          : ` DIVERGED fingerprints=${
+            JSON.stringify(convergence.fingerprints)
+          }`),
+    );
+
     return {
       case: {
         users: config.userCount,
@@ -631,6 +695,7 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         includeHomepageRefresh: config.includeHomepageRefresh,
       },
       churn,
+      convergence,
       phases,
     };
   } finally {
