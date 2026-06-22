@@ -90,6 +90,38 @@ describe("FabricCellLink", () => {
         expect(() => new FabricCellLink({ path: [1] as unknown as string[] }))
           .toThrow('field "path" must be');
       });
+
+      it("rejects `null` as the payload", () => {
+        expect(() =>
+          new FabricCellLink(null as unknown as Record<string, string>)
+        ).toThrow("must be a plain object");
+      });
+
+      it("rejects a primitive (non-object) payload", () => {
+        expect(() => new FabricCellLink(7 as unknown as Record<string, string>))
+          .toThrow("must be a plain object");
+      });
+
+      it("rejects a `constructor` key", () => {
+        const evil = JSON.parse('{ "constructor": "x" }');
+        expect(() => new FabricCellLink(evil)).toThrow("forbidden key");
+      });
+
+      it("rejects an object-valued field", () => {
+        expect(() => new FabricCellLink({ id: {} as unknown as string }))
+          .toThrow('field "id" must be');
+      });
+
+      it("rejects a nested array as an array element", () => {
+        expect(() =>
+          new FabricCellLink({ path: [["a"]] as unknown as string[] })
+        ).toThrow('field "path" must be');
+      });
+
+      it("rejects a `null` field value", () => {
+        expect(() => new FabricCellLink({ id: null as unknown as string }))
+          .toThrow('field "id" must be');
+      });
     });
   });
 
