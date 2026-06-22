@@ -166,7 +166,40 @@ export type ClearHistoryEvent = Record<PropertyKey, never>;
 
 type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
-type VotesCell = Writable<Vote[] | Default<[]>>;
+// Votes are no longer one shared array. Each (option, voter) vote is its OWN
+// cell/document, stored as a link under votesByOption[optionId][voterName]
+// (Berni's per-vote-cell idiom; ref packages/runner/test/
+// cell-set-nested-array-docs.bench.ts). Write conflicts are detected per
+// document, so two voters writing different (option, voter) slots no longer
+// contend on a single array container the way `votes.push()` / `votes.set([…])`
+// did. "" is the cleared/no-vote sentinel (lets a leaf clear without a
+// parent-level key delete). `Vote[]` lives on as the flat PROJECTION
+// (flattenVotes) that the tally, UI, output snapshot, and the diagnose harness
+// all read.
+type VoteSlot = VoteColor | "";
+type VotesByOption = Record<string, Record<string, VoteSlot>>;
+const EMPTY_VOTES_BY_OPTION: VotesByOption = {};
+type VotesByOptionCell = Writable<
+  VotesByOption | Default<typeof EMPTY_VOTES_BY_OPTION>
+>;
+
+// Flatten the per-(option,voter) vote documents into the flat `Vote[]` shape the
+// tally, UI, output snapshot, and the diagnose harness consume. Skips cleared
+// ("") slots. Pure + key-order-stable so it stays idempotent inside a computed.
+const flattenVotes = (vbo: VotesByOption | undefined): Vote[] => {
+  const out: Vote[] = [];
+  const byOption = vbo ?? {};
+  for (const optionId of Object.keys(byOption)) {
+    const byUser = byOption[optionId] ?? {};
+    for (const voterName of Object.keys(byUser)) {
+      const v = byUser[voterName];
+      if (v === "green" || v === "yellow" || v === "red") {
+        out.push({ voterName, optionId, voteType: v });
+      }
+    }
+  }
+  return out;
+};
 type UsersCell = Writable<User[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
@@ -284,10 +317,10 @@ const addOption = handler<AddOptionEvent, {
 
 const removeOption = handler<RemoveOptionEvent, {
   options: OptionsCell;
-  votes: VotesCell;
+  votesByOption: VotesByOptionCell;
   myName: NameCell;
   adminName: NameCell;
-}>(({ optionId }, { options, votes, myName, adminName }) => {
+}>(({ optionId }, { options, votesByOption, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -295,40 +328,42 @@ const removeOption = handler<RemoveOptionEvent, {
   const target = current.find((o) => o.id === optionId);
   if (!target) return;
   options.remove(target);
-  votes.set(votes.get().filter((v) => v.optionId !== optionId));
+  // Drop this option's whole vote bucket (host action, not on the hot path).
+  votesByOption.key(optionId).set({});
 });
 
 const castVote = handler<CastVoteEvent, {
-  votes: VotesCell;
+  votesByOption: VotesByOptionCell;
   myName: NameCell;
-}>(({ optionId, voteType }, { votes, myName }) => {
+}>(({ optionId, voteType }, { votesByOption, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  const current = votes.get();
-  const existingIdx = current.findIndex(
-    (v) => v.voterName === me && v.optionId === optionId,
-  );
-  if (existingIdx >= 0) {
-    const existing = current[existingIdx];
-    if (existing.voteType === voteType) {
-      votes.remove(existing);
-      return;
-    }
-    votes.key(existingIdx).key("voteType").set(voteType);
+  // Read + write ONLY this voter's own slot for this option — never the whole
+  // `votes` container — so concurrent voters on other slots don't conflict.
+  const slot = votesByOption.key(optionId).key(me);
+  const current = slot.get();
+  if (current === voteType) {
+    slot.set(""); // same color again → toggle the vote off
     return;
   }
-  votes.push({ voterName: me, optionId, voteType });
+  if (current === "green" || current === "yellow" || current === "red") {
+    slot.set(voteType); // change an existing vote — writes only this slot's doc
+    return;
+  }
+  // First vote for this (option, voter): mint a dedicated cell with a unique
+  // cause so the value lives in its own document, then link it into the map.
+  slot.set(Writable.for<VoteSlot>(`vote:${optionId}:${me}`).set(voteType));
 });
 
 const resetVotes = handler<ResetVotesEvent, {
-  votes: VotesCell;
+  votesByOption: VotesByOptionCell;
   myName: NameCell;
   adminName: NameCell;
-}>((_, { votes, myName, adminName }) => {
+}>((_, { votesByOption, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  votes.set([]);
+  votesByOption.set({});
 });
 
 export interface ClearVoteEvent {
@@ -336,16 +371,12 @@ export interface ClearVoteEvent {
 }
 
 const clearMyVote = handler<ClearVoteEvent, {
-  votes: VotesCell;
+  votesByOption: VotesByOptionCell;
   myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
+}>(({ optionId }, { votesByOption, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
+  votesByOption.key(optionId).key(me).set(""); // clears only this voter's slot
 });
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
@@ -355,7 +386,7 @@ const clearMyVote = handler<ClearVoteEvent, {
 const logVisit = handler<LogVisitEvent, {
   visits: HistoryCell;
   options: OptionsCell;
-  votes: VotesCell;
+  votesByOption: VotesByOptionCell;
   users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
@@ -363,7 +394,7 @@ const logVisit = handler<LogVisitEvent, {
 }>(
   (
     { optionId, title, wentAt },
-    { visits, options, votes, users, myName, adminName, visitDate },
+    { visits, options, votesByOption, users, myName, adminName, visitDate },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -391,7 +422,7 @@ const logVisit = handler<LogVisitEvent, {
     // option title (options can be removed later; the title is the record).
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
-    for (const v of votes.get()) {
+    for (const v of flattenVotes(votesByOption.get())) {
       const optTitle = trimmedName(titleById.get(v.optionId));
       if (!optTitle) continue; // vote for an already-removed option → skip
       voteSnapshot.push({
@@ -513,7 +544,7 @@ const summarizePlaces = (visits: readonly HistoryEntry[]): PlaceStat[] => {
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
   options?: PerSpace<Option[] | Default<[]>>;
-  votes?: PerSpace<Vote[] | Default<[]>>;
+  votesByOption?: PerSpace<VotesByOption | Default<typeof EMPTY_VOTES_BY_OPTION>>;
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
@@ -565,7 +596,6 @@ export interface CozyPollOutput {
 // Stable empty fallbacks for the output snapshots below — fresh `[]` per
 // recompute would make the computed results non-idempotent.
 const EMPTY_OPTIONS: Option[] = [];
-const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
@@ -573,7 +603,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     {
       question,
       options,
-      votes,
+      votesByOption,
       users,
       adminName,
       myName,
@@ -606,22 +636,25 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const boundRemoveOption = removeOption({
       options,
-      votes,
+      votesByOption,
       myName,
       adminName,
     });
-    const boundCastVote = castVote({ votes, myName });
-    const boundClearMyVote = clearMyVote({ votes, myName });
-    const boundResetVotes = resetVotes({ votes, myName, adminName });
+    const boundCastVote = castVote({ votesByOption, myName });
+    const boundClearMyVote = clearMyVote({ votesByOption, myName });
+    const boundResetVotes = resetVotes({ votesByOption, myName, adminName });
     const boundLogVisit = logVisit({
       visits,
       options,
-      votes,
+      votesByOption,
       users,
       myName,
       adminName,
       visitDate,
     });
+    // Flat projection of the per-vote documents — the single reactive `Vote[]`
+    // the tally, per-option card, output snapshot, and diagnose harness read.
+    const votesArray = computed(() => flattenVotes(votesByOption));
     const boundRemoveHistoryEntry = removeHistoryEntry({
       visits,
       myName,
@@ -634,7 +667,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const userCount = users.length;
     const optionCount = options.length;
-    const voteCount = votes.length;
+    const voteCount = computed(() => votesArray.length);
     // The "Recently eaten" card: the 8 most-recent visits (newest first),
     // derived straight from the `visits` array. An array-shaped computed (not a
     // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
@@ -672,7 +705,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const isClearHistoryConfirm = computed(() =>
       clearHistoryConfirmPending.get()
     );
-    const ranked = tallyOptions(options, votes, users);
+    const ranked = tallyOptions(options, votesArray, users);
 
     const topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
 
@@ -1034,7 +1067,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       me={me}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
-                      votes={votes}
+                      votes={votesArray}
                       removeConfirmTarget={removeConfirmTarget}
                       castVote={boundCastVote}
                       removeOption={boundRemoveOption}
@@ -1377,7 +1410,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // history is no longer a PerSpace input — it lives in SQLite now and is
       // surfaced via `recentVisits`/`mostRecentTitle` below.
       options: computed(() => options ?? EMPTY_OPTIONS),
-      votes: computed(() => votes ?? EMPTY_VOTES),
+      votes: votesArray,
       users: computed(() => users ?? EMPTY_USERS),
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
