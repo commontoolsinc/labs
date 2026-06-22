@@ -25,6 +25,9 @@ type Favorite = {
   cell: { [NAME]?: string };
   // Discovery tags snapshotted from the piece's schema when favorited.
   tags: string[];
+  // Display name snapshotted when favorited, used as a fallback if the link is
+  // slow or impossible to resolve from the favorites tab.
+  name?: string;
   userTags: string[];
   spaceName?: string;
 };
@@ -60,9 +63,14 @@ export type HomeOutput = {
 
 // Handler to add a favorite
 const addFavorite = handler<
-  { piece: Writable<{ [NAME]?: string }>; tags?: string[]; spaceName?: string },
+  {
+    piece: Writable<{ [NAME]?: string }>;
+    tags?: string[];
+    name?: string;
+    spaceName?: string;
+  },
   { favorites: Writable<Favorite[]> }
->(({ piece, tags, spaceName }, { favorites }) => {
+>(({ piece, tags, name, spaceName }, { favorites }) => {
   const current = favorites.get();
   if (!current.some((f) => f && equals(f.cell, piece))) {
     // Discovery tags are derived by the client (which can see the piece's
@@ -70,6 +78,7 @@ const addFavorite = handler<
     favorites.push({
       cell: piece,
       tags: tags ?? [],
+      name,
       userTags: [],
       spaceName,
     });

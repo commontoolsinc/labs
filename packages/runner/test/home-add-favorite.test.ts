@@ -10,7 +10,12 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("home add-favorite tests");
 const space = signer.did();
 
-type FavoriteEntry = { tags?: string[]; tag?: string; userTags?: string[] };
+type FavoriteEntry = {
+  tags?: string[];
+  tag?: string;
+  name?: string;
+  userTags?: string[];
+};
 
 // Compiles and runs the real home pattern, then drives its addFavorite handler
 // the way the runtime client does after deriving tags: it sends the tags as
@@ -61,6 +66,7 @@ describe("home addFavorite handler", () => {
     (home.key("addFavorite") as any).send({
       piece: target.getAsLink(),
       tags: ["alpha", "beta"],
+      name: "Favorite Target",
       spaceName: "test-space",
     });
 
@@ -75,6 +81,7 @@ describe("home addFavorite handler", () => {
 
     expect(favorites.length).toBe(1);
     expect(favorites[0].tags).toEqual(["alpha", "beta"]);
+    expect(favorites[0].name).toEqual("Favorite Target");
     expect(favorites[0].userTags).toEqual([]);
   });
 });

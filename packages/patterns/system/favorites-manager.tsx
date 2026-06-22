@@ -13,7 +13,8 @@ import {
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
-  tag: string;
+  tags: string[];
+  name?: string;
   userTags: Writable<string[]>;
   spaceName?: string;
 };
@@ -50,7 +51,11 @@ export default pattern<Record<string, never>>((_) => {
           <cf-cell-context $cell={item.cell}>
             <cf-vstack gap="2">
               <cf-hstack gap="2" align="center">
-                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
+                <cf-cell-link
+                  $cell={item.cell}
+                  label={item.name}
+                  spaceName={item.spaceName}
+                />
                 <cf-button
                   variant="destructive"
                   size="sm"

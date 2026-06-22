@@ -9,6 +9,7 @@ import { DID } from "@commonfabric/identity";
 import { CellHandle } from "./cell-handle.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import type { CellRef } from "./protocol/types.ts";
+import { NAME } from "@commonfabric/runner/shared";
 import {
   FavoriteEntry,
   favoriteListSchema,
@@ -50,34 +51,53 @@ export class FavoritesManager {
   ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
     const pieceCellRef = this.#createPieceRef(space, pieceId);
-    const tags = await this.#deriveTags(space, pieceId, tag);
-    await handler.send({ piece: pieceCellRef, tags, spaceName });
+    const { tags, name } = await this.#getFavoriteMetadata(
+      space,
+      pieceId,
+      tag,
+    );
+    const event: {
+      piece: CellRef;
+      tags: string[];
+      name?: string;
+      spaceName?: string;
+    } = { piece: pieceCellRef, tags, spaceName };
+    if (name !== undefined) event.name = name;
+    await handler.send(event);
   }
 
   /**
-   * Derive the discovery tags for a piece. An explicit tag wins; otherwise
-   * read the piece's result schema (carried on its resolved cell ref) and
-   * extract its tags. Returns `[]` when no schema is available — a tagless
-   * favorite that later code can heal.
+   * Read display metadata for a favorite. An explicit tag wins and avoids the
+   * page read; otherwise read the piece's result schema (carried on its
+   * resolved cell ref) and extract its tags. Missing schema or name is not a
+   * failure: the stored favorite can still be followed and later healed.
    */
-  async #deriveTags(
+  async #getFavoriteMetadata(
     space: DID,
     pieceId: string,
     explicitTag?: string,
-  ): Promise<string[]> {
-    if (explicitTag) return [explicitTag.toLowerCase().replace(/^#/, "")];
+  ): Promise<{ tags: string[]; name?: string }> {
+    if (explicitTag) {
+      return { tags: [explicitTag.toLowerCase().replace(/^#/, "")] };
+    }
     try {
       // `getPage` resolves the piece's cell ref, which the backend serializes
       // with its result schema (`getAsLink({ includeSchema: true })`). It does
       // not start the piece (runIt defaults to false), so a piece that is not
       // already running may resolve without a schema and yield no tags — a
       // tagless favorite that later code can heal.
-      const page = await this.#rt.getPage(pieceId, space);
-      const schema = page?.cell().ref().schema;
-      return schema ? tagsFromSchema(schema) : [];
+      const cell = (await this.#rt.getPage(pieceId, space))?.cell();
+      const schema = cell?.ref().schema;
+      const namedCell = cell?.asSchema<{ [NAME]?: string }>({
+        type: "object",
+        properties: { [NAME]: { type: "string" } },
+      });
+      const value = await namedCell?.sync();
+      const name = typeof value?.[NAME] === "string" ? value[NAME] : undefined;
+      return { tags: schema ? tagsFromSchema(schema) : [], name };
     } catch {
-      // A missing or unreadable piece schema yields no tags, not a failure.
-      return [];
+      // Missing or unreadable metadata yields a minimal favorite, not a failure.
+      return { tags: [] };
     }
   }
 
@@ -94,7 +114,7 @@ export class FavoritesManager {
 
   /**
    * Get all favorites.
-   * @returns Array of favorite entries with cell, tag, and userTags
+   * @returns Array of favorite entries with cell, tags, name, and userTags
    */
   async getFavorites(): Promise<readonly FavoriteEntry[]> {
     const defaultPattern = await this.#getHomePattern();

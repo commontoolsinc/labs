@@ -10,6 +10,7 @@ const space = "did:key:test-space" as DID;
 
 interface StubOptions {
   schema?: JSONSchema; // schema carried on the resolved piece ref
+  name?: string; // value returned by the resolved piece's $NAME cell
   getPageThrows?: boolean; // make getPage reject (derivation error path)
   favorites?: unknown; // value returned by the favorites cell
   ensureThrows?: boolean; // make ensureHomePatternRunning reject
@@ -55,7 +56,12 @@ function makeStub(opts: StubOptions = {}) {
       return opts.getPageThrows
         ? Promise.reject(new Error("getPage failed"))
         : Promise.resolve({
-          cell: () => ({ ref: () => ({ schema: opts.schema }) }),
+          cell: () => ({
+            ref: () => ({ schema: opts.schema }),
+            asSchema: () => ({
+              sync: () => Promise.resolve({ $NAME: opts.name }),
+            }),
+          }),
         });
     },
   } as unknown as RuntimeClient;
@@ -80,9 +86,11 @@ describe("FavoritesManager.addFavorite tag derivation", () => {
         description: "A #note",
         tags: ["search", "go"],
       },
+      name: "Search Piece",
     });
     await new FavoritesManager(stub.rt).addFavorite(space, "piece-1");
     expect(stub.sent[0].tags).toEqual(["search", "go"]);
+    expect(stub.sent[0].name).toEqual("Search Piece");
     expect(stub.sent[0].piece).toMatchObject({ id: "of:piece-1", space });
   });
 
