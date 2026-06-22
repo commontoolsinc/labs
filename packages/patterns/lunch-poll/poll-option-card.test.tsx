@@ -166,6 +166,32 @@ export default pattern(() => {
     setOptionHomePageUrl,
     setOptionImage,
   });
+  // Host viewing an option with no stored image — the one combination that
+  // should open the generated-art gate. This is exactly what the transformer
+  // dependency-capture bug silently broke: `isAdmin` was dropped from the lift
+  // schema, read `undefined` at runtime, so `!isAdmin` was always true and the
+  // request URL came back "". The cards above don't exercise it (stored image →
+  // the gate short-circuits earlier; non-host → gate shut by design).
+  const hostNoImageCard = PollOptionCard({
+    option: EMPTY_IMAGE_OPTION,
+    rank: 3,
+    me: "Alex",
+    isJoined: true,
+    isAdmin: true,
+    votes,
+    cityLabel: "Berkeley, CA",
+    searchEndpoint: "",
+    homePageRefresh,
+    linkEditTarget,
+    linkDraft,
+    removeConfirmTarget,
+    castVote,
+    removeOption,
+    logVisit,
+    setOptionUrl,
+    setOptionHomePageUrl,
+    setOptionImage,
+  });
 
   const assert_my_green_vote_label_renders = computed(() =>
     findNodeByProp(
@@ -225,8 +251,21 @@ export default pattern(() => {
   const assert_host_did_not_rewrite_stored_art = computed(() =>
     lastImageUrl.get() === ""
   );
-  const assert_missing_art_is_not_marked_stored = computed(() =>
-    propValue(noImageViewerCard[UI], "data-art-sync") !== "stored"
+  // Regression guard for the isAdmin dependency-capture bug: a host viewing an
+  // option with no stored image must open the art gate and produce a non-empty
+  // request URL. With the bug, `isAdmin` read `undefined`, the gate stayed shut,
+  // and the URL was "" — so `/api/ai/img` never fired and no thumbnail rendered.
+  // `generatedArtRequestUrl` is the gate's direct, fetch-independent signal (it
+  // does not depend on the `fetchData` result, which is unobservable in the
+  // pattern-test harness — see the PR description).
+  const assert_host_requests_art_for_missing_image = computed(() =>
+    hostNoImageCard.generatedArtRequestUrl !== ""
+  );
+  // The non-host viewer must NOT request art even with no stored image — the
+  // gate is shut by `isAdmin`. (Previously asserted `data-art-sync !== "stored"`,
+  // which read `undefined` and so passed vacuously.)
+  const assert_viewer_does_not_request_art = computed(() =>
+    noImageViewerCard.generatedArtRequestUrl === ""
   );
 
   return {
@@ -237,7 +276,8 @@ export default pattern(() => {
       { assertion: assert_host_controls_render },
       { assertion: assert_stored_art_renders },
       { assertion: assert_host_did_not_rewrite_stored_art },
-      { assertion: assert_missing_art_is_not_marked_stored },
+      { assertion: assert_viewer_does_not_request_art },
+      { assertion: assert_host_requests_art_for_missing_image },
     ],
     card,
   };
