@@ -13,6 +13,7 @@ import {
   findLowerableExpressionSite,
   findPreferredNestedLowerableExpressionSite,
   getExpressionContainerKind,
+  isArrayMethodValueLiftOwner,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
   shouldPreferArrayMethodSharedCallRootSite,
@@ -761,7 +762,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
     );
     if (
       handling.kind !== "owned" ||
-      handling.owner !== "array-method-receiver-method" ||
+      !isArrayMethodValueLiftOwner(handling.owner) ||
       !handling.lowerable
     ) {
       return undefined;
