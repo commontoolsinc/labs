@@ -729,13 +729,13 @@ export class SpaceSession {
     this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
     this.client.forgetSession(this);
+    this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(new Error("memory session closed"));
     }
-    this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
     this.#watchView?.close();
@@ -923,18 +923,23 @@ export class SpaceSession {
       sessionToken: this.#sessionToken,
     }, auth);
     const sessionChanged = restored.sessionId !== oldSessionId;
+    const sessionReplaced = sessionChanged || restored.resumed !== true;
     this.#sessionId = restored.sessionId;
     this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
     this.noteResult(restored.serverSeq);
 
-    if (sessionChanged) {
+    if (sessionReplaced) {
       const sessionChangedError = new Error(
-        `session changed: ${oldSessionId} -> ${restored.sessionId}`,
+        sessionChanged
+          ? `session changed: ${oldSessionId} -> ${restored.sessionId}`
+          : `session replaced without resume: ${restored.sessionId}`,
       );
-      for (const pending of this.#outstandingCommits.values()) {
-        pending.pending.reject(sessionChangedError);
+      if (sessionChanged) {
+        for (const pending of this.#outstandingCommits.values()) {
+          pending.pending.reject(sessionChangedError);
+        }
+        this.#outstandingCommits.clear();
       }
-      this.#outstandingCommits.clear();
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);

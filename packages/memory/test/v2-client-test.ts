@@ -465,6 +465,59 @@ Deno.test("memory v2 client readyToRetry rejects when session ID changes on rest
   }
 });
 
+Deno.test("memory v2 client readyToRetry rejects when same session ID is not resumed", async () => {
+  const transport = new ConflictReadyFreshSameSessionTransport();
+  const client = await connect({ transport });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-ready-fresh-same-session",
+  );
+
+  try {
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:doc:1",
+            value: { value: { version: 2 } },
+          }],
+        }),
+      Error,
+      "conflict",
+    );
+    const readyToRetry = (error as Error & {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+
+    let settled = false;
+    const readyPromise = readyToRetry().then(
+      () => "resolved",
+      (error) => error instanceof Error ? error.message : String(error),
+    ).finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    assertEquals(settled, false);
+
+    await session.restore();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assertEquals(settled, true);
+    assertEquals(
+      await readyPromise,
+      "session replaced without resume: session:fresh-same-session",
+    );
+    assertEquals(session.sessionId, "session:fresh-same-session");
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   const transport = new AckCountingTransport();
   const client = await connect({ transport });
@@ -1079,6 +1132,63 @@ class ConflictReadySessionChangingTransport implements Transport {
       default:
         throw new Error(
           `Unhandled conflict-ready session-changing message: ${message.type}`,
+        );
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+class ConflictReadyFreshSameSessionTransport implements Transport {
+  #receiver: (payload: string) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(): void {}
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:fresh-same-session",
+            sessionToken: "token:fresh-same-session",
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "transact":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          error: {
+            name: "ConflictError",
+            message: "conflict",
+            retryAfterSeq: 2,
+          },
+        });
+        return Promise.resolve();
+      default:
+        throw new Error(
+          `Unhandled conflict-ready fresh-session message: ${message.type}`,
         );
     }
   }
