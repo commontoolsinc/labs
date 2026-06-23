@@ -203,12 +203,7 @@ export function resolveLink(
 
         if (lastValid.length === link.path.length) {
           // full path candidate, only check legacy-at full path
-          const legacy = checkLegacyAt(
-            tx,
-            link,
-            lastValid,
-            lastNode === "writeRedirect",
-          );
+          const legacy = checkLegacyAt(tx, link, lastValid);
           if (legacy) {
             nextHop = {
               link: legacy,
@@ -241,7 +236,7 @@ export function resolveLink(
               kind: hopKindForLink(nextLink),
             };
           } else {
-            const legacy = checkLegacyAt(tx, link, lastValid, false);
+            const legacy = checkLegacyAt(tx, link, lastValid);
             if (legacy) {
               nextHop = {
                 link: legacy,
@@ -367,7 +362,6 @@ function checkLegacyAt(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   atPath: readonly string[],
-  onlyRedirects: boolean,
 ): NormalizedFullLink | undefined {
   const aliasPath = tx.read(
     toMemorySpaceAddress({
@@ -377,20 +371,6 @@ function checkLegacyAt(
     { meta: linkResolutionProbe },
   );
   if (Array.isArray(aliasPath.ok?.value)) {
-    return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
-      { ...link, path: atPath },
-    );
-  }
-  if (onlyRedirects) return undefined;
-  const legacyCell = tx.read(
-    toMemorySpaceAddress({
-      ...link,
-      path: [...atPath, "cell", "/"],
-    }),
-    { meta: linkResolutionProbe },
-  );
-  if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
       tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
       { ...link, path: atPath },
@@ -426,9 +406,6 @@ export function readMaybeLink(
     (maybeSigilPayload !== undefined &&
       (!onlyWriteRedirects ||
         (maybeSigilPayload as CellLinkRefPayload).overwrite === "redirect")) ||
-    // Legacy cell link: { cell: {"/": <id> }, path: [] }
-    (!onlyWriteRedirects && typeof readSubPath(["cell", "/"]) === "string" &&
-      Array.isArray(readSubPath(["path"]))) ||
     // Legacy alias: { $alias: { path: [] } }
     Array.isArray(readSubPath(["$alias", "path"]))
   ) {
