@@ -1394,10 +1394,15 @@ export class RuntimeProcessor {
       return;
     }
 
-    mount.reconciler.dispatchEvent(
+    const dispatched = mount.reconciler.dispatchEvent(
       request.handlerId,
       request.event,
     );
+    if (!dispatched) {
+      console.warn(
+        `[RuntimeProcessor] No handler found for mountId: ${request.mountId}, handlerId: ${request.handlerId}`,
+      );
+    }
   }
 
   /**
