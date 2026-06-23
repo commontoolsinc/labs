@@ -13,8 +13,8 @@ newest at the bottom of each section.
 | Spike: CFC oracle | ✅ done (throwaway) | #4298 | naive batch SMEARS (sound but coarse); OQ-4 sharpened |
 | W0 — substrate & instrument | ⬜ not started | — | — |
 | W1 — leaf/access/construct/control | ⬜ not started | — | — |
-| W2 — collections (the win) | ⬜ not started | — | — |
-| W3 — OQ-4 per-path label emit | ⬜ not started | — | — |
+| W2 — OQ-4 per-path content-label emit (precision mechanism, long pole) | ⬜ not started | — | — |
+| W3 — collections (the win, pointwise) | ⬜ not started | — | — |
 | W4 — checkpoint tier | ⬜ not started | — | — |
 | W5 — nested patterns + addressability | ⬜ not started | — | — |
 | W6 — default-on & retire materialization | ⬜ not started | — | — |
@@ -35,3 +35,8 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
 - (seed) Spec + two spikes landed on #4298. Footprint win measured; CFC smear
   measured; OQ-4 is the one open soundness gap. Implementation work orders W0–W6
   defined in 00-README.
+- (kickoff 2026-06-23) Decisions: **D-SEQ = OQ-4 precision parity first** (W2 =
+  per-path label-emit, before W3 collections — no coarse interim) and **D-PR =
+  #4298 umbrella** (stacked branches roll up, merge once). W2 (OQ-4) is the long
+  pole; its acceptance test is the skipped oracle cases in
+  `spike-cfc-oracle.test.ts`.

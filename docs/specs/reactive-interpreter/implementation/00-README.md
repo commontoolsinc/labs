@@ -40,19 +40,23 @@
 Dependency-ordered. Detailed per-order docs (`NN-*.md`) are written when each
 order begins; until then this table + the cited spec sections are the order.
 
+Order reflects **D-SEQ = OQ-4 precision parity first** (collections land pointwise,
+never coarse). See [DECISIONS](./DECISIONS.md).
+
 | # | Work order | Contents | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | W0 | Substrate & instrument | Graduate the two spike harnesses into CI benches + the differential oracle; define the ROG type + a trusted `Pattern → ROG` extraction that round-trips the corpus; **re-verify the scheduler-v2 seam against landed code** (materializer envelope, P1/P2/P4, `invalidCauses`, `settled()`). | — | not started |
-| W1 | Interpret leaf/access/construct/control | `InterpreterState`, `evalFull`/`evalIncremental` for non-collection ops; egress-based materialization boundary (R-MAT-1); flow-join labels (sound, coarse — confidentiality union + integrity **meet**, not view union); idempotency-recheck hook (Delta C1) + interior-non-convergence API (Delta E). | W0 | not started |
-| W2 | **Collections — the win** | `evalCollection` inline (no child patterns/docs), identity keying, orphan release (R-MAT-5); sound coarse labels; `O(1)` edit + path-scoped container patch; scope carry-through to output effective scope (R-SCOPE). Measure footprint vs legacy on the W0 bench. | W1 | not started |
-| W3 | **OQ-4 — per-path label emit (precision)** | The trusted mechanism for a single batched node to emit per-path `derived` content labels computed from isolated per-element reads (extend the §8.9.1 trusted-claim path). Un-skip the oracle's read-isolated + sibling-bug cases → precision parity with legacy. **Gate before default-on in CFC-enforcing spaces.** | W2 | not started |
-| W4 | Checkpoint tier | Checkpoint write/read; automatic cost/size policy + author override; derivation-tracked staleness (transitive external-read closure); resume-from-checkpoint. Measure importer-sim resume. | W2 | not started |
-| W5 | Nested patterns + addressability | `pattern` recursion in-interpreter (outermost owns persistence); causal carry-through ids for retained deep links (R-MAT-3); cross-pattern links + FUSE parity. | W2 | not started |
-| W6 | Default-on & retire materialization | Flip the interpreter to default (gated on W3 for CFC-enforcing spaces); delete the per-element child-pattern instantiation path; migrate persistence (interpreter observation + checkpoints). | W3, W4, W5 | not started |
+| W1 | Interpret leaf/access/construct/control | `InterpreterState`, `evalFull`/`evalIncremental` for non-collection ops; egress-based materialization boundary (R-MAT-1); flow-join labels (confidentiality union + integrity **meet**, not view union — coarse is *correct* here: a single computation legitimately depends on all its inputs); idempotency-recheck hook (Delta C1) + interior-non-convergence API (Delta E). | W0 | not started |
+| W2 | **OQ-4 — per-path content-label emit (precision mechanism)** | The trusted mechanism for a single batched node to emit per-path `derived` content labels computed from **read-isolated** per-element evaluation (extend the §8.9.1 trusted-claim path / `prepare.ts` `valueWriteTargets`). Acceptance = the oracle's read-isolated + sibling-bug cases pass (un-skip them). **Built before collections so they are pointwise from day one.** | W1 | not started |
+| W3 | **Collections — the win (pointwise)** | `evalCollection` inline (no child patterns/docs), identity keying, orphan release (R-MAT-5); per-element labels via the W2 mechanism (pointwise, parity with legacy — no coarse interim); `O(1)` edit + path-scoped container patch; scope carry-through to output effective scope (R-SCOPE). Measure footprint vs legacy on the W0 bench; CFC parity on the oracle. | W2 | not started |
+| W4 | Checkpoint tier | Checkpoint write/read; automatic cost/size policy + author override; derivation-tracked staleness (transitive external-read closure); resume-from-checkpoint. Measure importer-sim resume. | W3 | not started |
+| W5 | Nested patterns + addressability | `pattern` recursion in-interpreter (outermost owns persistence); causal carry-through ids for retained deep links (R-MAT-3); cross-pattern links + FUSE parity. | W3 | not started |
+| W6 | Default-on & retire materialization | Flip the interpreter to default; delete the per-element child-pattern instantiation path; migrate persistence (interpreter observation + checkpoints). | W4, W5 | not started |
 
-**Independent tracks:** W3 (OQ-4) can be designed/prototyped in parallel with
-W1/W2 — but the footprint win (W1→W2) does **not** block on it, because coarse
-labels are sound (see D-SEQ in [DECISIONS](./DECISIONS.md)).
+**Note:** W2 (OQ-4) is the long pole — it is real CFC runtime work (a new trusted
+per-path label-emit) and gates the collection win (W3). Its acceptance test
+already exists: the skipped read-isolated + sibling-bug cases in
+`spike-cfc-oracle.test.ts`.
 
 ## Global rules (mirroring the scheduler-v2 work-order discipline)
 
@@ -61,10 +65,10 @@ labels are sound (see D-SEQ in [DECISIONS](./DECISIONS.md)).
 - **G2 — worktree pre-commit gotcha.** The pre-commit hook inspects the default
   worktree, not this one; new files fail spuriously. After local verification,
   commit with `--no-verify`. Never `--amend` (blocked).
-- **G3 — stacked PRs, one per work order.** Don't wait for review between orders:
-  when an order's exit checklist self-passes and its PR is open, continue on a
-  stacked branch. Review is async; address feedback on the earlier branch while
-  moving forward. (See D-PR in [DECISIONS](./DECISIONS.md) for the PR structure.)
+- **G3 — branches stacked onto the umbrella PR #4298 (D-PR).** Each work order is
+  its own stacked branch off the previous; they roll up into #4298, which merges
+  once as a coherent unit. Don't wait for review between orders; review is async,
+  per-branch. Each branch updates `PROGRESS.md`.
 - **G4 — red-green TDD.** A failing test first (the spec behavior or the bug),
   confirm red, then green; show the transition in the PR.
 - **G5 — measured, not asserted.** Every footprint/perf/precision claim is backed

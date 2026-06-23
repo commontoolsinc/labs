@@ -34,19 +34,16 @@ date + the evidence. This replaces ad-hoc tracking in agent memory.
   sub-transactions. This is W3. Status: design open; the oracle's read-isolated +
   sibling-bug cases are the executable acceptance test.
 
-## Proposed — confirm before W0
+## Resolved (kickoff, 2026-06-23)
 
-- **D-SEQ — Footprint-win-first (coarse-but-sound), OQ-4 as the precision gate.**
-  Proposed: land W1→W2 (the footprint win) with sound *coarse* labels first
-  (smearing over-taints — the safe direction), and treat W3 (OQ-4 per-path
-  precision) as the gate before flipping default-on in CFC-*enforcing* spaces.
-  Rationale: coarse is sound; CFC enforce-explicit is still rolling out, so a
-  precision regression is not yet user-visible by default; shipping the win early
-  de-risks the big change. Alternative: OQ-4 first (precision parity before any
-  cutover) if CFC enforcement is already load-bearing in target deployments.
-  **CONFIRM.**
-- **D-PR — PR structure.** Proposed: merge #4298 (spec + tracker + throwaway
-  spikes) as the design baseline, then land W0–W6 as **stacked implementation
-  PRs**, one per work order, each updating `PROGRESS.md` (the scheduler-v2
-  pattern). Alternative: keep #4298 as a long-lived umbrella PR and stack onto it.
-  **CONFIRM.**
+- **D-SEQ — OQ-4 precision parity FIRST (decided).** The interpreter must not
+  regress CFC precision vs legacy, so the trusted per-path content-label emit
+  (OQ-4) is built **before** the collection interpreter — collections land
+  pointwise from day one, never with an interim coarse-label phase. This moves
+  the per-path label-emit ahead of collections in the work-order sequence (it
+  becomes W2; collections becomes W3, depending on it). Implication: the footprint
+  win is gated on solving OQ-4 first; no coarse-but-sound interim ships.
+- **D-PR — #4298 stays the umbrella (decided).** Implementation lands as branches
+  **stacked onto #4298**, merged once as a unit (not a merge-the-spec-then-
+  separate-PRs split). Each stacked branch still updates `PROGRESS.md`. The PR
+  grows large; that is accepted in exchange for one coherent landing.
