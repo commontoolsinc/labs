@@ -3,6 +3,16 @@ import { FabricSpecialObject, type FabricValue } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
 
 /**
+ * Is the value a plain record — an object whose prototype is `Object.prototype`
+ * or `null`? This rejects arrays, class instances, and built-ins like `Map` /
+ * `Date`, none of which are representable as a `FabricValue` record.
+ */
+function isPlainRecord(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return (proto === Object.prototype) || (proto === null);
+}
+
+/**
  * Compares two `FabricValue`s for logical (content) equality.
  *
  * This is the `data-model`-aware equality the storage layer's no-op /
@@ -79,20 +89,30 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   const bIsSpecial = b instanceof FabricSpecialObject;
   if (aIsSpecial || bIsSpecial) {
     // A special object and a plain object can never share a hash (distinct type
-    // tags), so a subtype mismatch is unequal outright; two special objects fall
-    // through to the hash compare below.
+    // tags), so a subtype mismatch is unequal outright.
     if (aIsSpecial !== bIsSpecial) return false;
+    // Both special: two different concrete classes have distinct type tags and
+    // can never hash-equal, so short-circuit without hashing. Same-class
+    // instances fall through to the hash compare below.
+    if (a.constructor !== b.constructor) return false;
   } else {
-    // Both are plain non-`null` objects: an array and a non-array can't be
-    // equal, nor can two arrays of differing length or two records of differing
-    // key count.
+    // Both are non-`null`, non-special objects. An array and a non-array can't
+    // be equal, nor can two arrays of differing length or two records of
+    // differing key count.
     const aIsArray = Array.isArray(a);
     const bIsArray = Array.isArray(b);
     if (aIsArray !== bIsArray) return false;
     if (aIsArray && bIsArray) {
       if (a.length !== b.length) return false;
-    } else if (Object.keys(a).length !== Object.keys(b).length) {
-      return false;
+    } else {
+      // A non-array object here must be a plain record to be a `FabricValue`. A
+      // stray class instance (`Map`, `Date`, a user class, …) is reachable only
+      // via an unsound cast; reject it explicitly rather than treating it as an
+      // empty record.
+      if (!isPlainRecord(a) || !isPlainRecord(b)) {
+        throw new Error("Cannot compare a non-record object value.");
+      }
+      if (Object.keys(a).length !== Object.keys(b).length) return false;
     }
   }
 

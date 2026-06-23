@@ -6,6 +6,7 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 
 describe("fabric-value", () => {
   describe("valueEqual()", () => {
@@ -41,6 +42,17 @@ describe("fabric-value", () => {
       expect(() => valueEqual(fn, { a: 1 })).toThrow();
       // The function on the right (`b`) is rejected symmetrically.
       expect(() => valueEqual({ a: 1 }, fn)).toThrow();
+    });
+
+    it("throws when given a non-record object (not a `FabricValue`)", () => {
+      // A non-array, non-plain object (a `Date`, `Map`, or other class
+      // instance) is reachable only via an unsound cast; reject it rather than
+      // treat it as an empty record.
+      const date = new Date() as unknown as FabricValue;
+      const map = new Map() as unknown as FabricValue;
+      expect(() => valueEqual(date, { a: 1 })).toThrow();
+      expect(() => valueEqual({ a: 1 }, date)).toThrow();
+      expect(() => valueEqual(map, {})).toThrow();
     });
 
     it("returns `true` for structurally-equal objects", () => {
@@ -116,10 +128,24 @@ describe("fabric-value", () => {
         expect(valueEqual(wrap([1, 2]), wrap([1, 2]))).toBe(true);
       });
 
-      it("a special object never equals a plain value", () => {
-        expect(valueEqual(new FabricBytes(new Uint8Array([1])), { 0: 1 }))
-          .toBe(false);
-        expect(valueEqual(new FabricBytes(new Uint8Array([])), {})).toBe(false);
+      describe("given a special object and a plain value", () => {
+        it("are not equal", () => {
+          expect(valueEqual(new FabricBytes(new Uint8Array([1])), { 0: 1 }))
+            .toBe(false);
+          expect(valueEqual(new FabricBytes(new Uint8Array([])), {}))
+            .toBe(false);
+        });
+      });
+
+      describe("given two non-deep-frozen special objects of different classes", () => {
+        it("short-circuits to unequal without hashing", () => {
+          // A fresh `UnknownValue` is not auto-frozen, so the pair skips the
+          // both-deep-frozen early hash and reaches the constructor check.
+          const u = new UnknownValue("tag@1", 1);
+          const fb = new FabricBytes(new Uint8Array([1]));
+          expect(valueEqual(u, fb)).toBe(false);
+          expect(valueEqual(fb, u)).toBe(false);
+        });
       });
     });
 
@@ -170,57 +196,67 @@ describe("fabric-value", () => {
     // The cheap subtype short-circuits that resolve an object comparison
     // without computing a hash (taken when the sides are not both deep-frozen).
     describe("object-subtype-check branch", () => {
-      it("a plain object never equals an array", () => {
-        expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);
-        expect(valueEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
+      describe("given a plain object and an array", () => {
+        it("are not equal", () => {
+          expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);
+          expect(valueEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
+        });
       });
 
-      it("a Fabric* value never equals a plain object or array", () => {
-        const fb = new FabricBytes(new Uint8Array([1, 2]));
-        expect(valueEqual(fb, { 0: 1, 1: 2 })).toBe(false);
-        expect(valueEqual({ 0: 1, 1: 2 }, fb)).toBe(false);
-        expect(valueEqual(fb, [1, 2])).toBe(false);
-        expect(valueEqual([1, 2], fb)).toBe(false);
+      describe("given a Fabric* value and a plain object or array", () => {
+        it("are not equal", () => {
+          const fb = new FabricBytes(new Uint8Array([1, 2]));
+          expect(valueEqual(fb, { 0: 1, 1: 2 })).toBe(false);
+          expect(valueEqual({ 0: 1, 1: 2 }, fb)).toBe(false);
+          expect(valueEqual(fb, [1, 2])).toBe(false);
+          expect(valueEqual([1, 2], fb)).toBe(false);
+        });
       });
 
-      it("two same-subtype Fabric* values compare by content", () => {
-        // Same subtype falls through to the hash compare.
-        expect(
-          valueEqual(
-            new FabricBytes(new Uint8Array([1, 2])),
-            new FabricBytes(new Uint8Array([1, 2])),
-          ),
-        ).toBe(true);
-        expect(
-          valueEqual(
-            new FabricBytes(new Uint8Array([1, 2])),
-            new FabricBytes(new Uint8Array([3, 4])),
-          ),
-        ).toBe(false);
-        expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
-          .toBe(true);
-        expect(valueEqual(new FabricEpochDays(7n), new FabricEpochDays(7n)))
-          .toBe(true);
+      describe("given two same-subtype Fabric* values", () => {
+        it("compares them by content", () => {
+          // Same subtype falls through to the hash compare.
+          expect(
+            valueEqual(
+              new FabricBytes(new Uint8Array([1, 2])),
+              new FabricBytes(new Uint8Array([1, 2])),
+            ),
+          ).toBe(true);
+          expect(
+            valueEqual(
+              new FabricBytes(new Uint8Array([1, 2])),
+              new FabricBytes(new Uint8Array([3, 4])),
+            ),
+          ).toBe(false);
+          expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
+            .toBe(true);
+          expect(valueEqual(new FabricEpochDays(7n), new FabricEpochDays(7n)))
+            .toBe(true);
+        });
       });
 
-      it("two distinct Fabric* subtypes are never equal", () => {
-        expect(
-          valueEqual(
-            new FabricBytes(new Uint8Array([1])),
-            new FabricRegExp(/a/),
-          ),
-        )
-          .toBe(false);
-        expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
-          .toBe(false);
+      describe("given two distinct Fabric* subtypes", () => {
+        it("are never equal", () => {
+          expect(
+            valueEqual(
+              new FabricBytes(new Uint8Array([1])),
+              new FabricRegExp(/a/),
+            ),
+          )
+            .toBe(false);
+          expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
+            .toBe(false);
+        });
       });
 
-      it("same-subtype plain containers compare by content", () => {
-        // Same subtype + same content -> hash -> true; differing -> false.
-        expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
-        expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 9 })).toBe(false);
-        expect(valueEqual([1, 2, 3], [1, 2, 3])).toBe(true);
-        expect(valueEqual([1, 2, 3], [1, 2, 9])).toBe(false);
+      describe("given two same-subtype plain containers", () => {
+        it("compares them by content", () => {
+          // Same subtype + same content -> hash -> true; differing -> false.
+          expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+          expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 9 })).toBe(false);
+          expect(valueEqual([1, 2, 3], [1, 2, 3])).toBe(true);
+          expect(valueEqual([1, 2, 3], [1, 2, 9])).toBe(false);
+        });
       });
     });
   });
