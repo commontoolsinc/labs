@@ -10,6 +10,7 @@ Export a `mentionable` property from your pattern to make child pieces
 discoverable:
 
 ```tsx
+// Shown for illustration only.
 export default pattern<Input, Output>(({ ... }) => {
   const childPiece = ChildPattern({ ... });
 
@@ -24,6 +25,7 @@ export default pattern<Input, Output>(({ ... }) => {
 For dynamic collections, use a Writable:
 
 ```tsx
+// Shown inside a pattern body.
 const createdPieces = new Writable<any[]>([]);
 
 const create = handler((_, { createdPieces }) => {
@@ -47,12 +49,14 @@ return {
 Patterns can discover mentionables in the current space using `wish()`:
 
 ```tsx
+// Shown inside a pattern body.
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 ```
 
 Or with the `scope` parameter:
 
 ```tsx
+// Shown for illustration only.
 // Search mentionables in current space
 const result = wish<{ content: string }>({ query: "#note", scope: ["."] });
 
@@ -69,6 +73,7 @@ See [wish](wish.md) for full documentation.
 Pass the mentionable cell to `cf-prompt-input` via the `$mentionable` attribute:
 
 ```tsx
+// Shown inside a pattern body.
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 
 <cf-prompt-input
@@ -86,6 +91,7 @@ follow the LLM-friendly link format used throughout the system.
 Pass mentionable and mentioned cells to `cf-code-editor`:
 
 ```tsx
+// Shown inside a pattern body.
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 const mentioned = new Writable<MentionablePiece[]>([]);
 

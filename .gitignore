@@ -47,3 +47,6 @@ ralph.yml
 .commands
 tour-screenshots
 CLAUDE.local.md
+
+# Temp dir created by docs/check.ts while type-checking doc code blocks
+docs/.doccheck*

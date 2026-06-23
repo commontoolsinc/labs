@@ -36,6 +36,7 @@ A client ships each transaction as a `ClientCommit`
 (`packages/memory/v2.ts`):
 
 ```ts
+// Shown for illustration only.
 ClientCommit {
   localSeq,                       // client-session-local sequence number
   reads: {

@@ -291,6 +291,7 @@ Keep rich types as themselves within the runtime:
 The `FabricValue` type would expand to a union of three categories:
 
 ```typescript
+// Shown at module scope.
 type FabricValue =
   // (a) Primitives
   | null | boolean | number | string
@@ -322,6 +323,7 @@ Types *we control* opt into storability by implementing members keyed by
 well-known symbols:
 
 ```typescript
+// Shown inside a pattern body.
 const CODEC = Symbol.for('data-model.codec');
 const DEEP_FREEZE = Symbol.for('common.deepFreeze');
 const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
@@ -379,6 +381,7 @@ Since `FabricInstance` is an abstract class, the natural brand check is
 `instanceof` — no separate type guard function is needed:
 
 ```typescript
+// Shown at module scope.
 if (value instanceof FabricInstance) {
   // value is a FabricInstance
 }
@@ -387,6 +390,7 @@ if (value instanceof FabricInstance) {
 Example implementation:
 
 ```typescript
+// Shown for illustration only.
 class Cell<T> extends FabricInstance {
   static #codec = new (class extends BaseFabricCodec {
     constructor() {
@@ -459,6 +463,7 @@ be **passed through** rather than rejected, preserving forward compatibility.
 This requires a generic `FabricInstance` to hold unrecognized types:
 
 ```typescript
+// Shown for illustration only.
 class UnknownValue extends FabricInstance {
   constructor(
     readonly wireTypeTag: string, // e.g., "FutureType@2"
@@ -505,6 +510,7 @@ own the wire format. A **serialization context** owns the format-specific
 pipeline, dispatching per-type work to the codecs through a registry:
 
 ```typescript
+// Shown at module scope.
 // The public boundary (formal spec Section 4.3):
 interface SerializationContext<SerializedForm = unknown> {
   readonly lenient: boolean;
@@ -549,6 +555,7 @@ Each boundary would use a serialization context (sketches of the context's
 internal walkers):
 
 ```typescript
+// Shown inside a pattern body.
 // At boundary exit (inside the context's encode walk)
 function encodeValue(value: FabricValue): JsonWireValue {
   const codec = registry.codecFromValue(value);

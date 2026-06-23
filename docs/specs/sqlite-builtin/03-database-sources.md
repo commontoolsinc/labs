@@ -22,6 +22,7 @@ descriptor lives as server-side state keyed by the handle cell's id.
 ## 03.1 Cell-derived (default)
 
 ```ts
+// Shown inside a pattern body.
 const db = sqliteDatabase({ tables }); // -> OpaqueRef<SqliteDb>, bound to a cell the runtime allocates here
 ```
 
@@ -77,6 +78,7 @@ and atomic with the pattern's cells.
 ## 03.2 VM file (stub)
 
 ```ts
+// Shown inside a pattern body.
 const db = sqliteDatabase({}, { vm: vmHandle, path: "/data/app.db" });
 ```
 
@@ -107,6 +109,7 @@ builder; instead it declares a database **input** (typed `SqliteDb`) and an
 operator connects a file to it via `cf`:
 
 ```tsx
+// Shown inside a pattern body.
 // The pattern is source-agnostic — it just consumes whatever is wired into `db`.
 pattern<{ db: SqliteDb }>(({ db }) => {
   const rows = db.query<{ name: string }>("SELECT name FROM lookup");

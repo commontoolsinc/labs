@@ -10,6 +10,7 @@ inspecting loggers interactively from the browser console, see
 ## Creating a Logger
 
 ```typescript
+// Shown at module scope.
 import { getLogger } from "@commonfabric/utils/logger";
 
 // Create a logger for your module (disabled by default, debug level)
@@ -36,6 +37,7 @@ A logger only emits messages at or above its configured level. The default
 level is `info`.
 
 ```typescript
+// Shown inside a pattern body.
 const logger = getLogger("verbose", { level: "debug" }); // show everything
 logger.level = "warn"; // change at runtime — now only warn + error
 ```
@@ -48,6 +50,7 @@ loggers that don't specify one explicitly.
 Each logger has a `disabled` property:
 
 ```typescript
+// Shown inside a pattern body.
 const logger = getLogger("noisy-module", { enabled: false });
 // ...later, turn it on:
 logger.disabled = false;
@@ -64,6 +67,7 @@ Every log call increments a counter, even when the logger is disabled or the
 message is filtered by level.
 
 ```typescript
+// Shown inside a pattern body.
 logger.counts;       // { debug: 0, info: 5, warn: 1, error: 0, total: 6 }
 logger.countsByKey;  // { "event-a": { debug: 0, info: 3, ... }, ... }
 logger.resetCounts();
@@ -80,6 +84,7 @@ By default, a debug-level summary is emitted every 100 calls:
 Configure or disable with `logCountEvery`:
 
 ```typescript
+// Shown inside a pattern body.
 getLogger("chatty", { logCountEvery: 50 });  // every 50 calls
 getLogger("quiet", { logCountEvery: 0 });    // disable summaries
 ```
@@ -89,6 +94,7 @@ getLogger("quiet", { logCountEvery: 0 });    // disable summaries
 Loggers can track operation timing with reservoir-sampled percentiles:
 
 ```typescript
+// Shown inside a pattern body.
 // Start/end pattern
 logger.timeStart("cell", "get");
 // ... operation ...
@@ -109,6 +115,7 @@ logger.timeStats; // all timing stats for this logger
 Baselines let you measure deltas — useful for profiling a specific interaction:
 
 ```typescript
+// Shown inside a pattern body.
 // Snapshot current state as baseline
 logger.resetCountBaseline();
 logger.resetTimingBaseline();
@@ -126,6 +133,7 @@ Flags track named boolean state per ID, with optional metadata. They're used
 to surface runtime conditions like "this action has invalid input":
 
 ```typescript
+// Shown inside a pattern body.
 // Set a flag with metadata
 logger.flag("action invalid input", "action:myModule", true, {
   schema: { type: "object" },

@@ -7,6 +7,7 @@ Any cell result with `[UI]` renders when placed in JSX — you don't need to kno
 Use a `Writable<string>` to represent the active view. A `computed()` block maps the string to a pattern instance:
 
 ```tsx
+// Shown at module scope.
 import { computed, handler, pattern, UI, Writable } from "commonfabric";
 import EditView from "./edit-view.tsx";
 import PreviewView from "./preview-view.tsx";
@@ -111,6 +112,7 @@ This is useful when:
 For simple tabbed UIs, `cf-tabs` handles string-based view switching as a built-in:
 
 ```tsx
+// Shown inside a pattern body.
 const activeTab = new Writable("spaces").for("activeTab");
 
 <cf-tabs $value={activeTab}>

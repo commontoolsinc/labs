@@ -84,6 +84,7 @@ Minimize unknown type usage. Not only does `processData` allow any type, but
 it's unclear what the intended types are:
 
 ```ts
+// Shown inside a pattern body.
 function processData(data: any) {
   if (typeof data === "object") {
     if (!data) {
@@ -132,6 +133,7 @@ at every interface:
 > **❌ Avoid**
 
 ```ts
+// Shown at module scope.
 interface LLMRequest {
   prompt?: string;
   messages?: string[];
@@ -168,6 +170,7 @@ Constructing the request could be also be a class, if we always wanted to apply
 appropriate e.g. defaults.
 
 ```ts
+// Shown at module scope.
 enum Model {
   Default = "default model",
 }
@@ -207,6 +210,7 @@ occurred, and there's nothing to be done. `run` should be considered errored and
 failed.
 
 ```ts
+// Shown for illustration only.
 async function getData(): Promise<string | undefined> {
   try {
     const res = await fetch(URL);
@@ -237,6 +241,7 @@ In this case, we expect `getData()` to throw, or always return a `string`. Less
 handling here, and let the caller determine what to do on failure.
 
 ```ts
+// Shown for illustration only.
 async function getData(): Promise<string> {
   const res = await fetch(URL);
   if (res.ok) {
@@ -286,6 +291,7 @@ export const get = (key: string): string | undefined => cache.get(key);
 ```
 
 ```ts
+// Shown at module scope.
 export const cache = new Map();
 export const instance = new Foo();
 ```

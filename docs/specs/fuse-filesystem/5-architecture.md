@@ -79,6 +79,7 @@ use `fuse_session_fd()` to get the FUSE file descriptor and integrate it with
 Deno's event loop:
 
 ```typescript
+// Shown inside a pattern body.
 const fuseSessionFd = fuse_session_fd(session);
 
 // Poll the FUSE fd alongside Deno's event loop
@@ -108,6 +109,7 @@ complex and only worth pursuing if single-threaded mode proves too slow.
 The FFI layer needs to bind a relatively small subset of libfuse:
 
 ```typescript
+// Shown as JSX element children.
 // Core session lifecycle
 fuse_session_new(args, ops, ops_size, userdata): FuseSession
 fuse_session_mount(session, mountpoint): number

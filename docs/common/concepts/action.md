@@ -38,6 +38,7 @@ Actions are defined inside your pattern body and naturally close over any cells 
 When you need data from the event (like form input), the action receives it as a parameter:
 
 ```tsx
+// Shown inside a pattern body.
 const items = new Writable<string[]>([]);
 
 const addItem = action((event: { title: string }) => {
@@ -55,6 +56,7 @@ const addItem = action((event: { title: string }) => {
 Actions can perform multiple mutations in a single handler:
 
 ```tsx
+// Shown inside a pattern body.
 const resetGame = action(() => {
   score.set(0);
   lives.set(3);
@@ -86,6 +88,7 @@ Use `action()` for most cases. Switch to `handler()` when you need to:
 2. **Export the handler for other patterns to call via linking**
 
 ```tsx
+// Shown inside a pattern body.
 // If you need the SAME logic bound to DIFFERENT state:
 const increment = handler<void, { count: Writable<number> }>(
   (_, { count }) => count.set(count.get() + 1)
@@ -103,6 +106,7 @@ See [Reusable Handlers](./handler.md) for the full `handler()` API.
 For very simple one-liners, you can use arrow functions directly in JSX:
 
 ```tsx
+// Shown as JSX element children.
 <cf-button onClick={() => count.set(count.get() + 1)}>+</cf-button>
 ```
 

@@ -29,6 +29,7 @@ to cells require a transaction context.
 Within a transaction, reads reflect pending writes:
 
 ```typescript
+// Shown as JSX element children.
 const tx = runtime.edit();
 cell.withTx(tx).set(5);
 cell.withTx(tx).get();  // returns 5, even before commit
@@ -108,6 +109,7 @@ This system does not implement SQL-style transaction isolation. Key differences:
 The `editWithRetry()` helper provides automatic retry on commit failure:
 
 ```typescript
+// Shown for illustration only.
 const result = await runtime.editWithRetry(async (tx) => {
   const current = cell.withTx(tx).get();
   cell.withTx(tx).set(current + 1);
@@ -129,6 +131,7 @@ Handlers execute within transaction context:
 - On handler error, the transaction aborts
 
 ```typescript
+// Shown for illustration only.
 const handler = (tx, event) => {
   const current = someCell.withTx(tx).get();
   someCell.withTx(tx).set(current + 1);

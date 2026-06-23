@@ -108,6 +108,7 @@ result schema so each viewer sees their own profile projection.
 Add a well-known field to the home default pattern:
 
 ```ts
+// Shown at module scope.
 // v1 single-profile shape (historical). Superseded by multi-profile support
 // (PR #3830): the home default pattern now carries
 //   profiles: Cell<ProfileDefaultPattern>[]; defaultProfile; mru
@@ -124,6 +125,7 @@ type HomeDefaultPattern = {
 in the profile space, so its normalized link carries the profile space DID:
 
 ```ts
+// Shown for illustration only.
 homeSpaceCell.defaultPattern.profile -> profile default pattern cell
 ```
 
@@ -136,6 +138,7 @@ home-field convention is `homeSpaceCell.defaultPattern.profile`.
 Profile creation uses the **anonymous** `PatternFactory.inSpace()` (CT-1650):
 
 ```ts
+// Shown inside a pattern body.
 const profile = ProfileHome.inSpace()({ initialName: name });
 ```
 
@@ -157,6 +160,7 @@ annotations are rewritten to the resolved DID during post-run.
 The initial profile default pattern should export this contract:
 
 ```ts
+// Shown at module scope.
 type ProfileElement = {
   cell: Cell<unknown>;
   tag: string;
@@ -281,6 +285,7 @@ and element mutations:
 Those protected fields must carry owner integrity shaped like:
 
 ```ts
+// Shown for illustration only.
 { kind: "represents-principal", subject: ownerDid }
 ```
 
@@ -317,6 +322,7 @@ the owner DID into the profile default schema.
 Add a profile wish scope value:
 
 ```ts
+// Shown at module scope.
 type WishScope = "~" | "." | "profile" | DID;
 ```
 
@@ -340,6 +346,7 @@ the query path suffix the same way favorites and mentionables do.
 Examples:
 
 ```tsx
+// Shown inside a pattern body.
 // Search profile elements only.
 const profileCard = wish({ query: "#profile-card", scope: ["profile"] });
 
@@ -368,6 +375,7 @@ pattern.
 Add these explicit profile targets:
 
 ```tsx
+// Shown at module scope.
 wish({ query: "#profile" })            // homeDefault.profile
 wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
 wish({ query: "#profileName" })        // default profile's initialNameApplied (no `profileName` mirror field post-#3830)
@@ -398,6 +406,7 @@ Create a small test/demo pattern that renders the current user's shared profile
 name and profile wish UI:
 
 ```tsx
+// Shown for illustration only.
 export default pattern(() => {
   const profile = wish({ query: "#profile" });
   const name = wish<string>({ query: "#profileName" });

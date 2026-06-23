@@ -5,6 +5,7 @@
 Patterns run in a sandboxed environment. DOM APIs don't work:
 
 ```typescript
+// Shown for illustration only.
 // Won't work - DOM APIs not available in sandbox
 const addItem = handler((_, { items }) => {
   const input = document.getElementById('item-input');  // Error!
@@ -41,6 +42,7 @@ export default pattern<Input, Input>(({ items }) => {
 Using `await` in handlers blocks the entire UI:
 
 ```typescript
+// Shown for illustration only.
 // Blocks UI - async handlers block the entire UI
 const handleFetch = handler(async (_, { url, result }) => {
   const response = await fetch(url.get());  // BLOCKS!

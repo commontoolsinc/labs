@@ -198,6 +198,7 @@ product); what dies is the *symbol-on-object identity-carry*. The replacement
 is one explicit call at each copy site:
 
 ```ts
+// Shown as JSX element children.
 // pattern-manager (or a small trust module):
 noteDerivedCopy(copy: object, original: object): void
 //  - if isTrustedBuilderArtifact(original): brand `copy` as derived-trusted
@@ -301,6 +302,7 @@ verifiedProvenance: WeakMap<Function, {
 up in `verifiedProvenance`; if present, emit
 
 ```ts
+// Shown for illustration only.
 { kind: "verified",
   moduleIdentity,            // replaces bundleId — content-addressed, reload-stable
   symbol,                    // replaces codeHash for module-scope artifacts
@@ -360,6 +362,7 @@ builder artifacts constructed directly in tests.
 Design: a synthetic-identity registrar, one mechanism for both:
 
 ```ts
+// Shown for illustration only.
 runtime.unsafe_registerHostArtifact(value: object, options: {
   symbol: string;            // caller-chosen name
   reason: string;            // non-empty, like UnsafeHostTrustOptions today

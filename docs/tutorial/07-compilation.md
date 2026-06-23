@@ -99,6 +99,7 @@ A real before/after, from the transformer test fixtures
 and its `.expected.jsx`):
 
 ```tsx
+// Shown for illustration only.
 // You write:
 const myHandler = handler<CounterEvent, CounterState>((event, state) => {
   state.value.set(state.value.get() + event.increment);
@@ -134,6 +135,7 @@ result is a frozen, serializable description
 (`packages/runner/src/builder/types.ts`):
 
 ```ts
+// Shown for illustration only.
 Pattern {
   argumentSchema, resultSchema,   // the generated schemas
   nodes: Node[],                  // the graph

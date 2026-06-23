@@ -77,6 +77,7 @@ declared writes. This keeps the dependency graph precise while still
 handling no-op runs and declared outputs:
 
 ```typescript
+// Shown as JSX element children.
 // Sometimes writes A, sometimes B
 if (condition) cellA.set(x);
 else cellB.set(x);
@@ -153,6 +154,7 @@ actions is O(1) per changed cell before path-overlap filtering.
 Before an action runs for the first time, the scheduler discovers its dependencies:
 
 ```typescript
+// Shown as JSX element children.
 // Scheduler calls the action's populateDependencies callback
 const tx = runtime.edit();
 populateDependencies(tx);  // Action reads cells it will access
@@ -168,6 +170,7 @@ In pull mode, the work set starts from runnable demand roots and pulls their
 dirty or stale dependencies:
 
 ```typescript
+// Shown for illustration only.
 workSet = new Set<Action>();
 
 // Start with pending effects, event-blocking dependencies, and other
@@ -199,6 +202,7 @@ pending.
 Actions are sorted so dependencies run before dependents:
 
 ```typescript
+// Shown as JSX element children.
 function topologicalSort(
   actions,
   dependencies,
@@ -226,6 +230,7 @@ dependency requires the child first.
 ### 5. Run Actions
 
 ```typescript
+// Shown for illustration only.
 for (const action of sortedOrder) {
   // Skip if unsubscribed during this tick
   if (!isStillScheduled(action)) continue;
@@ -248,6 +253,7 @@ for (const action of sortedOrder) {
 Dependencies can change at runtime. The classic example is `ifElse`:
 
 ```typescript
+// Shown as JSX element children.
 const result = ifElse(condition, branchA, branchB);
 ```
 
@@ -259,6 +265,7 @@ When `condition` changes from `true` to `false`:
 The settle loop handles this:
 
 ```typescript
+// Shown inside a pattern body.
 for (let iter = 0; iter < 10; iter++) {
   collectNewSubscriptionDependencies();
   const workSet = buildCurrentWorkSet();
@@ -325,6 +332,7 @@ queued handler action. In push mode, the handler dispatch path is direct.
 When registering a handler, the runtime provides a `populateDependencies` callback:
 
 ```typescript
+// Shown for illustration only.
 handler.populateDependencies = (tx, event) => {
   // Read with traverseCells to capture nested Cell dependencies
   inputsCell.asSchema(schema).get({ traverseCells: true });
@@ -836,6 +844,7 @@ violations.
 Delays execution until triggers stop arriving:
 
 ```typescript
+// Shown as JSX element children.
 scheduler.setDebounce(action, 100);  // Wait 100ms after last trigger
 ```
 
@@ -852,6 +861,7 @@ out with `{ noDebounce: true }` in subscription options.
 Limits execution frequency:
 
 ```typescript
+// Shown as JSX element children.
 scheduler.setThrottle(action, 1000);  // Max once per second
 ```
 
@@ -877,6 +887,7 @@ This slows down problematic effect cycles without manually assigning a debounce.
 ## Key Data Structures
 
 ```typescript
+// Shown for illustration only.
 class Scheduler {
   // Action classification and scheduling state
   private effects = new Set<Action>();
@@ -936,6 +947,7 @@ modules under `packages/runner/src/scheduler/`, including:
 ## Constants
 
 ```typescript
+// Shown as JSX element children.
 MAX_ITERATIONS_PER_RUN = 100       // Max runs per action per execute cycle
 MAX_SETTLE_STATS_HISTORY = 20      // Max settle stats entries retained
 MAX_TRIGGER_TRACE_HISTORY = 400    // Max trigger trace entries retained
@@ -955,6 +967,7 @@ MAX_RETRIES_FOR_REACTIVE = 10      // Retry count for reactive actions
 ### Enable Logging
 
 ```typescript
+// Shown inside a pattern body.
 // packages/runner/src/scheduler.ts and scheduler helper modules
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -966,6 +979,7 @@ For browser-side debugging, prefer changing the worker logger through
 `RuntimeClient` instead of editing code:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.rt.setLoggerEnabled(true, "scheduler")
 await commonfabric.rt.setLoggerLevel("debug", "scheduler")
 ```
@@ -979,6 +993,7 @@ Logs show:
 ### Diagnostic API
 
 ```typescript
+// Shown for illustration only.
 // Overall state
 scheduler.getStats()              // { effects, computations, pending }
 
@@ -1029,6 +1044,7 @@ scheduler.getFilterStats()        // { filtered, executed }
 ### Scheduling
 
 ```typescript
+// Shown for illustration only.
 scheduler.subscribe(
   action: Action,
   populateDependencies: ((tx: Transaction) => void) | ReactivityLog,
@@ -1063,6 +1079,7 @@ scheduler.idle(): Promise<void>
 ### Events
 
 ```typescript
+// Shown for illustration only.
 scheduler.queueEvent(
   eventLink: NormalizedFullLink,
   event: any,
@@ -1084,6 +1101,7 @@ scheduler.addEventHandler(
 ### Console and Error Hooks
 
 ```typescript
+// Shown as JSX element children.
 scheduler.onConsole(fn: ConsoleHandler): void
 scheduler.onError(fn: ErrorHandler): void
 ```
@@ -1091,6 +1109,7 @@ scheduler.onError(fn: ErrorHandler): void
 ### Timing Controls
 
 ```typescript
+// Shown as JSX element children.
 scheduler.setDebounce(action, ms)
 scheduler.getDebounce(action)
 scheduler.clearDebounce(action)
@@ -1104,6 +1123,7 @@ scheduler.clearThrottle(action)
 ### Breakpoints and Basic Queries
 
 ```typescript
+// Shown as JSX element children.
 scheduler.setBreakpoints(actionIds)
 scheduler.getBreakpoints()
 scheduler.hasBreakpoint(actionId)
@@ -1122,6 +1142,7 @@ scheduler.resetFilterStats()
 ### Graph and Trace Diagnostics
 
 ```typescript
+// Shown as JSX element children.
 scheduler.getGraphSnapshot()
 
 scheduler.enableSettleStats()
@@ -1142,6 +1163,7 @@ scheduler.isEventPreflightTelemetryEnabled()
 ### Non-Settling and Idempotency Diagnosis
 
 ```typescript
+// Shown as JSX element children.
 scheduler.isNonSettling()
 scheduler.setAutoTriggerDiagnosis(enabled)
 scheduler.runDiagnosis(durationMs)
@@ -1155,6 +1177,7 @@ scheduler.runIdempotencyCheck()
 ### Lifecycle
 
 ```typescript
+// Shown as JSX element children.
 scheduler.dispose()
 ```
 
@@ -1164,6 +1187,7 @@ These are public on the class for runtime integration, but are not general
 pattern APIs:
 
 ```typescript
+// Shown as JSX element children.
 scheduler.runningPromise
 scheduler.withExecutingAction(action, fn)
 ```
@@ -1173,6 +1197,7 @@ scheduler.withExecutingAction(action, fn)
 The scheduler module also re-exports:
 
 ```typescript
+// Shown as JSX element children.
 txToReactivityLog
 allowMutableTransactionRead
 ignoreReadForScheduling

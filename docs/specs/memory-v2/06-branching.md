@@ -51,6 +51,7 @@ Each branch has its own head table that maps entity ids to their current state
 on that branch:
 
 ```typescript
+// Shown at module scope.
 // Conceptual schema for the branch-scoped head table
 interface BranchHead {
   branch: BranchName;
@@ -93,6 +94,7 @@ entry for audit/idempotence.
 ### 6.3.1 API
 
 ```typescript
+// Shown at module scope.
 interface CreateBranchRequest {
   localSeq: number; // Session-scoped idempotence key
   name: BranchName; // Must be unique within the space
@@ -158,6 +160,7 @@ the head table is scoped to the target branch.
 ### 6.4.1 Commit Targeting
 
 ```typescript
+// Shown at module scope.
 type BranchCommit = ClientCommit & {
   branch?: BranchName; // Omit for default branch
 };
@@ -296,6 +299,7 @@ operates at the **entity level** -- each entity is considered independently.
 ### 6.7.1 Merge API
 
 ```typescript
+// Shown at module scope.
 interface MergeRequest {
   source: BranchName; // Branch to merge from
   target: BranchName; // Branch to merge into
@@ -432,6 +436,7 @@ server returns the conflicts to the client for resolution.
 ### 6.8.1 Conflict Structure
 
 ```typescript
+// Shown at module scope.
 interface BranchConflict {
   entityId: EntityId;
   sourceValue: JSONValue | null; // Value on source branch (null = deleted)
@@ -461,6 +466,7 @@ Alternatively, the client can resolve all conflicts in a single step by
 committing the resolutions and immediately retrying the merge with a flag:
 
 ```typescript
+// Shown at module scope.
 interface MergeRequest {
   source: BranchName;
   target: BranchName;
@@ -498,6 +504,7 @@ revisions.
 ### 6.9.1 API
 
 ```typescript
+// Shown at module scope.
 interface DeleteBranchRequest {
   localSeq: number;
   name: BranchName;
@@ -538,6 +545,7 @@ Point-in-time queries (see `05-queries.md` section 5.5) compose naturally with
 branches:
 
 ```typescript
+// Shown at module scope.
 interface BranchPointInTimeQuery extends QueryOptions {
   branch: BranchName;
   atSeq: number;
@@ -579,6 +587,7 @@ their metadata.
 ### 6.11.1 API
 
 ```typescript
+// Shown at module scope.
 interface ListBranchesRequest {
   includeDeleted?: boolean; // Default: false
 }
@@ -698,6 +707,7 @@ code-review-style workflows and pre-merge inspection.
 ### 6.14.1 API
 
 ```typescript
+// Shown at module scope.
 interface DiffRequest {
   source: BranchName;
   target: BranchName;

@@ -39,6 +39,7 @@ Favorites are stored on the home default pattern at
 Via `PieceManager`:
 
 ```typescript
+// Shown inside a pattern body.
 const manager = new PieceManager(session, runtime);
 await manager.addFavorite(piece);
 await manager.removeFavorite(piece);
@@ -49,6 +50,7 @@ const favoritesCell = manager.getFavorites();
 Via the favorites functions directly:
 
 ```typescript
+// Shown for illustration only.
 import {
   addFavorite,
   removeFavorite,
@@ -94,6 +96,7 @@ from the current view.
 Patterns can discover profile data from any space:
 
 ```tsx
+// Shown inside a pattern body.
 const profile = wish({ query: "#profile" });
 const profileName = wish<string>({ query: "#profileName" });
 const portfolioItem = wish({ query: "#portfolio", scope: ["profile"] });

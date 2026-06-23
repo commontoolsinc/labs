@@ -26,6 +26,7 @@ Prefer object-shaped shared state and scoped writable aliases when handlers need
 stable cell handles.
 
 ```tsx
+// Shown for illustration only.
 import {
   Default,
   handler,
@@ -140,6 +141,7 @@ Use a plain data-shaped input style when the pattern should expose a simple API
 and only reads values:
 
 ```ts
+// Shown at module scope.
 interface ChatInput {
   profile?: PerUser<ChatProfile | Default<typeof DEFAULT_PROFILE>>;
   conversation?: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
@@ -156,6 +158,7 @@ For a shared list of participants, keep the directory in `PerSpace<T>` and keep
 each viewer's pointer or profile in `PerUser<T>`.
 
 ```tsx
+// Shown at module scope.
 interface User {
   displayName: string;
 }
@@ -261,6 +264,7 @@ profile, durable preference, or draft that should resume in another tab.
 For pattern-owned local cells that are not inputs, use scoped constructors:
 
 ```ts
+// Shown inside a pattern body.
 const sharedBoard = new Writable.perSpace(DEFAULT_BOARD);
 const displayName = new Writable.perUser("");
 const selectedItem = new Writable.perSession<string | null>(null);
@@ -286,6 +290,7 @@ If a multi-user pattern has admins, moderators, managers, or protected writes:
 5. Use CFC integrity types and trusted surfaces for enforcement.
 
 ```ts
+// Shown at module scope.
 import {
   type ActiveAdminRole,
   type AdminManagerCredential,
@@ -336,6 +341,7 @@ which operations require which integrity.
 references through handlers instead of inventing lookup ids.
 
 ```ts
+// Shown for illustration only.
 const roomButtons = conversation.rooms.map((room) => (
   <cf-button onClick={selectRoom({ selectedRoom, room })}>
     {room.name}

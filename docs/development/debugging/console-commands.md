@@ -21,6 +21,7 @@ options object. If you already have a full trigger-trace entity id such as
 `of:baedrei...`, pass it as `id`.
 
 ```javascript
+// Shown inside a pattern body.
 // Read the full output of the current piece
 await commonfabric.readCell()
 
@@ -48,6 +49,7 @@ Always check the actual stored value before assuming a write failed — see
 ### What's actually rendered?
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.vdom.dump()    // pretty-print the VDOM tree
 commonfabric.vdom.renders()       // list all active renderings
 commonfabric.vdom.stats()         // node/listener counts per renderer
@@ -59,6 +61,7 @@ Full documentation: [VDOM Debug Helpers](vdom-debug.md).
 ### Why is it churning?
 
 ```javascript
+// Shown inside a pattern body.
 // Run diagnosis for 5 seconds (default), prints table + returns result
 await commonfabric.detectNonIdempotent()
 
@@ -82,6 +85,7 @@ runner flags actions whose current input doesn't validate against their
 schema, and skips them.
 
 ```javascript
+// Shown inside a pattern body.
 // Active flags across all loggers — look for "action invalid input"
 commonfabric.getLoggerFlagsBreakdown()
 // {
@@ -100,6 +104,7 @@ tab.
 ### Watching values during interaction
 
 ```javascript
+// Shown inside a pattern body.
 // Subscribe to live updates; logs timestamped values on every change
 const cancel = commonfabric.subscribeToCell()
 // Console: [debug] cell update [2025-08-10T...]: { $NAME: "My Piece", ... }
@@ -147,6 +152,7 @@ used when *writing* runtime code (creating loggers, `timeStart`/`timeEnd`,
 ## Logger Access
 
 ```javascript
+// Shown inside a pattern body.
 // List all registered loggers (by module name)
 Object.keys(commonfabric.logger)
 
@@ -158,6 +164,7 @@ commonfabric.logger["runtime-client"]
 ## Enabling / Disabling Loggers
 
 ```javascript
+// Shown inside a pattern body.
 // Disable a noisy logger
 commonfabric.logger["runner"].disabled = true
 
@@ -176,6 +183,7 @@ track call volume even for silent loggers.
 ## Counts
 
 ```javascript
+// Shown inside a pattern body.
 // Total log calls across all loggers
 commonfabric.getTotalLoggerCounts()
 
@@ -206,6 +214,7 @@ commonfabric.logger["runner"].resetCounts()
 ## Timing
 
 ```javascript
+// Shown inside a pattern body.
 // Timing stats across all loggers, grouped by logger name
 commonfabric.getTimingStatsBreakdown()
 // {
@@ -232,6 +241,7 @@ Baselines snapshot current counts and timing so you can measure what happens
 during a specific interaction:
 
 ```javascript
+// Shown inside a pattern body.
 // Set baselines for all loggers
 commonfabric.resetAllCountBaselines()
 commonfabric.resetAllTimingBaselines()
@@ -252,6 +262,7 @@ Flags track named boolean state per ID (e.g. which actions have invalid
 inputs), with optional metadata:
 
 ```javascript
+// Shown inside a pattern body.
 // Active flags across all loggers
 commonfabric.getLoggerFlagsBreakdown()
 
@@ -275,6 +286,7 @@ and most runtime code runs in a web worker, so its loggers are in a separate
   `commonfabric.rt` for console access:
 
 ```javascript
+// Shown inside a pattern body.
 // Fetch worker counts, timing, and flags
 await commonfabric.rt.getLoggerCounts()
 
@@ -290,6 +302,7 @@ trigger trace, action-run trace below) and targeted loggers before raising the
 whole `scheduler` module:
 
 ```javascript
+// Shown inside a pattern body.
 // Focus on nested piece/materialization runs
 await commonfabric.rt.setLoggerEnabled(true, "runner.trigger-flow")
 await commonfabric.rt.setLoggerLevel("debug", "runner.trigger-flow")
@@ -311,6 +324,7 @@ run when the logger is enabled and the chosen level will actually emit them.
 Capture per-`execute()` settle-loop stats from the worker scheduler:
 
 ```javascript
+// Shown inside a pattern body.
 // Enable settle stats collection
 await commonfabric.rt.setSettleStatsEnabled(true)
 
@@ -340,6 +354,7 @@ If you need the recent wave sequence rather than just the last settle result,
 read the bounded history buffer:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.rt.setSettleStatsEnabled(true)
 await commonfabric.rt.getSettleStatsHistory()
 // [
@@ -356,6 +371,7 @@ If you need live sampling while the interaction is still in progress, polling
 is still useful:
 
 ```javascript
+// Shown for illustration only.
 await commonfabric.rt.setSettleStatsEnabled(true)
 
 globalThis.__settleSamples = []
@@ -381,6 +397,7 @@ globalThis.__settleSamples
 Capture the exact action ids that actually ran during one interaction:
 
 ```javascript
+// Shown inside a pattern body.
 // Reset and enable exact action-run tracing
 await commonfabric.rt.setActionRunTraceEnabled(false)
 await commonfabric.rt.setActionRunTraceEnabled(true)
@@ -403,6 +420,7 @@ Each trace entry contains:
 To group by exact action id:
 
 ```javascript
+// Shown inside a pattern body.
 const trace = await commonfabric.rt.getActionRunTrace()
 const counts = new Map()
 
@@ -431,6 +449,7 @@ for (const entry of trace) {
 To disable tracing and clear the ring buffer:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.rt.setActionRunTraceEnabled(false)
 ```
 
@@ -439,6 +458,7 @@ await commonfabric.rt.setActionRunTraceEnabled(false)
 Capture structured change-to-action scheduling data from the worker scheduler:
 
 ```javascript
+// Shown inside a pattern body.
 // Reset and enable trigger tracing
 await commonfabric.rt.setTriggerTraceEnabled(false)
 await commonfabric.rt.setTriggerTraceEnabled(true)
@@ -462,6 +482,7 @@ Each trace entry contains:
 To find repeated actions quickly:
 
 ```javascript
+// Shown inside a pattern body.
 const trace = await commonfabric.rt.getTriggerTrace()
 const counts = new Map()
 
@@ -483,6 +504,7 @@ for (const entry of trace) {
 To disable tracing and clear the buffer:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.rt.setTriggerTraceEnabled(false)
 ```
 
@@ -492,6 +514,7 @@ Group recent trigger-trace entries, resolve the hottest changed cells, and add
 semantic summaries for the current values:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.explainTriggerTrace()
 
 // Focus on broad root writes only
@@ -522,6 +545,7 @@ fresh one each time. In the integration harness, set `SPACE_NAME=...` so note
 creation keeps adding to one existing space.
 
 ```javascript
+// Shown inside a pattern body.
 // Watch all root writes in the current shell space
 await commonfabric.watchWrites({
   space: commonfabric.space,
@@ -539,6 +563,7 @@ trace.slice(-5)
 To watch one specific changed cell from trigger trace:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.watchWrites({
   space: "did:key:z6Mkm...",
   id: "of:baedrei...",
@@ -565,6 +590,7 @@ If you want immediate log output instead of post-hoc inspection, enable the
 focused worker logger before replaying the interaction:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.rt.setLoggerEnabled(true, "storage.write-trace")
 await commonfabric.rt.setLoggerLevel("warn", "storage.write-trace")
 ```
@@ -572,6 +598,7 @@ await commonfabric.rt.setLoggerLevel("warn", "storage.write-trace")
 Disable the watcher and clear the buffer by passing an empty matcher list:
 
 ```javascript
+// Shown inside a pattern body.
 await commonfabric.watchWrites([])
 ```
 

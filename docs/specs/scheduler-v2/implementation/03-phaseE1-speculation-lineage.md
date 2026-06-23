@@ -30,6 +30,7 @@ exists in this space". The client must therefore know, per space, the
 1. New file `src/storage/commit-identity.ts`:
 
    ```typescript
+   // Shown at module scope.
    import type { IStorageTransaction, MemorySpace } from "./interface.ts";
 
    // Per-space client commit sequence numbers recorded for a source
@@ -83,6 +84,7 @@ Commit: `feat(runner): record per-space commit localSeq on source transactions (
    Read its definition. Add an optional field (JSON-serializable):
 
    ```typescript
+   // Shown as interface or class members.
    preconditions?: Array<{
      kind: "origin-committed";
      /** localSeq of a commit from the SAME session in this space. */
@@ -93,6 +95,7 @@ Commit: `feat(runner): record per-space commit localSeq on source transactions (
 2. `src/storage/interface.ts` — on `IExtendedStorageTransaction`:
 
    ```typescript
+   // Shown as interface or class members.
    /**
     * Commit-time preconditions attached to this transaction's commit in
     * the given space (scheduler-v2 §7.6). Violations surface as
@@ -173,6 +176,7 @@ Commit: `feat(memory): origin-committed commit precondition (scheduler-v2 E1)`
 New file: `src/scheduler/lineage.ts`.
 
 ```typescript
+// Shown for illustration only.
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { QueuedEvent } from "./types.ts";
 
@@ -401,6 +405,7 @@ non-deferred path; after phase 0 the block ends with
 `addCancel(() => this.stop(resultCell));`), add:
 
 ```typescript
+// Shown for illustration only.
 // Spec scheduler-v2 §7.6 rule 2: the launch is speculative; if this
 // handler's transaction ultimately fails, stop the piece (data writes
 // roll back with the transaction; registrations do not).

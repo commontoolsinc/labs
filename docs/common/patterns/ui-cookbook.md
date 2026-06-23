@@ -64,6 +64,7 @@ Use when the UI should feel like a focused mobile product rather than a raw
 tool form.
 
 ```tsx
+// Shown as JSX element children.
 <cf-theme theme={theme}>
   <div
     style={{
@@ -121,6 +122,7 @@ automatically. Add `cf-vscroll` only if you need snap-to-bottom or fade-edges.
 Use when the pattern centers on one record, note, recipe, or project.
 
 ```tsx
+// Shown as JSX element children.
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Details</cf-heading>
@@ -149,6 +151,7 @@ Use when first-run or zero-data states matter. They always do more than you
 think.
 
 ```tsx
+// Shown for illustration only.
 <cf-theme theme={theme}>
   <cf-card
     style="

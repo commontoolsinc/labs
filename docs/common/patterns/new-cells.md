@@ -20,6 +20,7 @@ creating internal cells.
 You cannot initialize a cell with a reactive value (like an input prop) because `new Writable()` runs at pattern initialization time, outside a reactive context:
 
 ```tsx
+// Shown for illustration only.
 // WRONG - deck.name is reactive, causes "reactive reference outside context" error
 export default pattern<Input>(({ deck }) => {
   const editedName = new Writable(deck.name);  // ERROR!
@@ -43,6 +44,7 @@ Derived data belongs in `computed()`, not a writable cell — a
 change. Legitimate pattern-owned cells hold UI state that only handlers write:
 
 ```typescript
+// Shown for illustration only.
 // Creating new cells in pattern body
 export default pattern(({ items }) => {
   // Pattern-owned UI state, mutated by handlers

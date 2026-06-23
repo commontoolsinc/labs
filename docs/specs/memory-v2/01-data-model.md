@@ -48,6 +48,7 @@ Key properties:
 Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
+// Shown at module scope.
 interface SigilLink {
   "/": {
     "link@1": {
@@ -156,6 +157,7 @@ A **Write** fact asserts a new value for an entity. There are two sub-kinds of
 writes depending on how the value is expressed:
 
 ```typescript
+// Shown at module scope.
 /**
  * A Write that sets the entity's full logical document by replacement.
  */
@@ -186,6 +188,7 @@ written to again after deletion — a delete is not permanent, it simply marks t
 end of one value's lifetime.
 
 ```typescript
+// Shown at module scope.
 interface Delete {
   type: "delete";
   id: EntityId;
@@ -217,6 +220,7 @@ and leave any future metadata rules to explicit higher-layer writes.
 ### 2.3 Fact (union)
 
 ```typescript
+// Shown as JSX element children.
 type Fact = Write | Delete;
 ```
 
@@ -225,6 +229,7 @@ type Fact = Write | Delete;
 When a fact is committed to a space, the server assigns additional metadata:
 
 ```typescript
+// Shown at module scope.
 interface StoredFact {
   /** Content hash of this fact's logical content (type, id, value/ops, parent). */
   hash: Reference;
@@ -292,6 +297,7 @@ The **Empty** reference represents the genesis state before any writes. It is
 computed as the merkle reference of the entity's identity:
 
 ```typescript
+// Shown inside a pattern body.
 const EMPTY = refer({ id: entityId });
 ```
 
@@ -339,6 +345,7 @@ later layer and are not part of the MVP acceptance bar for the core
 seq/revision rewrite.
 
 ```typescript
+// Shown at module scope.
 interface Blob {
   /** Content hash = identity. SHA-256 of the raw bytes. */
   hash: Reference;
@@ -376,6 +383,7 @@ Entity values can reference blobs by including the blob's hash as a field value.
 The convention is:
 
 ```typescript
+// Shown for illustration only.
 // An entity value that references a blob
 {
   "$blob": "bafk...",   // Reference to the blob's content hash
@@ -396,6 +404,7 @@ provenance, application-specific policy) is mutable. Blob metadata is stored as
 a **regular entity** whose `id` is derived from the blob's content hash.
 
 ```typescript
+// Shown inside a pattern body.
 /**
  * Derives the entity ID used to store metadata for a given blob.
  */
@@ -407,6 +416,7 @@ function blobMetadataId(blobHash: Reference): EntityId {
 The metadata entity's value follows this shape:
 
 ```typescript
+// Shown at module scope.
 interface BlobMetadata {
   /** The blob this metadata describes. */
   blob: Reference;
@@ -476,6 +486,7 @@ current value. Patch operations are inspired by
   `text-insert`, `text-delete`) are planned as extensions to this set.
 
 ```typescript
+// Shown at module scope.
 /**
  * A JSON Pointer path, e.g. "/foo/bar/0".
  */
@@ -545,6 +556,7 @@ patch list is invalid (e.g., removing a non-existent path), the entire patch
 fails and the fact is rejected.
 
 ```typescript
+// Shown inside a pattern body.
 function applyPatch(state: FabricValue, ops: PatchOp[]): FabricValue {
   let current = state;
   for (const op of ops) {
@@ -586,6 +598,7 @@ Snapshots accelerate reads by avoiding full replay of the entity's entire patch
 history.
 
 ```typescript
+// Shown at module scope.
 interface Snapshot {
   /** The entity this snapshot is for. */
   id: EntityId;
@@ -668,6 +681,7 @@ regular entities (self-describing: a schema is an entity whose value is a JSON
 Schema).
 
 ```typescript
+// Shown at module scope.
 // A schema entity's value is a JSON Schema
 interface SchemaEntity {
   $schema: "https://json-schema.org/draft/2020-12/schema";

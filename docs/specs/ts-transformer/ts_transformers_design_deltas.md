@@ -503,6 +503,7 @@ The classifier must treat synthetic callback boundaries created by earlier
 passes as authoritative context boundaries. Example target behavior:
 
 ```tsx
+// Shown for illustration only.
 <div>{[0, 1].forEach(() => list.map(...))}</div>
 ```
 

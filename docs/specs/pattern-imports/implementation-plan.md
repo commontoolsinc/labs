@@ -115,6 +115,7 @@ Reload paths:
 ### M0.1 New file: `packages/runner/src/sandbox/fabric-import-specifier.ts`
 
 ```ts
+// Shown for illustration only.
 export interface FabricRef {
   /** Toolshed host (authority); only present in the cf://host/... form. */
   host?: string;
@@ -223,6 +224,7 @@ formatting — they compare byte-exact.
 Extend `isAllowedAuthoredImportSpecifier` (line 25):
 
 ```ts
+// Shown at module scope.
 export function isAllowedAuthoredImportSpecifier(specifier: string): boolean {
   if (specifier.startsWith("cf:")) {
     try { return parseFabricRef(specifier) !== undefined; }
@@ -301,6 +303,7 @@ File: `packages/js-compiler/typescript/compiler.ts`.
 
 1. Add to `TypeScriptCompilerOptions` (line 227):
    ```ts
+   // Shown as interface or class members.
    /**
     * Maps an import specifier (verbatim text) to a program file name. Used
     * for scheme-prefixed specifiers (cf:…) that the path-join and
@@ -314,6 +317,7 @@ File: `packages/js-compiler/typescript/compiler.ts`.
    the relative-path branch; alias text is exact, so order is safe — but
    first keeps the dispatch obvious):
    ```ts
+   // Shown for illustration only.
    const aliased = this.specifierAliases?.get(name);
    if (aliased !== undefined) {
      return {
@@ -347,6 +351,7 @@ File: `packages/runner/src/sandbox/module-record-compiler.ts`.
    `internal → cf:module/… / runtimeModules → cf:runtime/… / unknown` chain),
    insert an alias branch BEFORE the unknown-external fallback:
    ```ts
+   // Shown for illustration only.
    } else if (options.specifierAliases?.has(spec)) {
      const target = options.specifierAliases.get(spec)!;
      const targetSpecifier = specifierByPath.get(target);
@@ -374,6 +379,7 @@ File: `packages/runner/src/sandbox/module-record-compiler.ts` (next to
 `computeModuleIdentities`).
 
 ```ts
+// Shown for illustration only.
 export const FABRIC_MOUNT_ROOT = "/~cf/";
 
 export interface FabricMount {
@@ -433,6 +439,7 @@ Tests (new file `packages/runner/test/fabric-module-identity.test.ts`):
 New file: `packages/runner/src/harness/fabric-resolver.ts`.
 
 ```ts
+// Shown for illustration only.
 export interface FabricResolutionContext {
   runtime: Runtime;          // this.ctRuntime from the engine
   space: MemorySpace;        // the cell-cache space of this compile
@@ -523,6 +530,7 @@ File: `packages/runner/src/harness/engine.ts`.
 1. Add to `TypeScriptHarnessProcessOptions`
    (`packages/runner/src/harness/types.ts:21`):
    ```ts
+   // Shown as interface or class members.
    /**
     * Enables fabric (cf:) imports for this compile: the space whose cell
     * cache fabric refs are fetched from / verified against. Absent → any
@@ -534,6 +542,7 @@ File: `packages/runner/src/harness/engine.ts`.
 2. `compileToRecordGraph` (engine.ts:212):
    - Wrap the resolver (line 228):
      ```ts
+     // Shown for illustration only.
      const engineResolver = new EngineProgramResolver(mappedProgram, this.ctRuntime.staticCache);
      const resolver = options.fabricImports
        ? new FabricAwareResolver(engineResolver, { runtime: this.ctRuntime, space: options.fabricImports.space })
@@ -551,6 +560,7 @@ File: `packages/runner/src/harness/engine.ts`.
    - **Dedupe `moduleFiles` by `name`** after the `.d.ts` filter, asserting
      equal contents on duplicates (see M1.4 pitfall):
      ```ts
+     // Shown for illustration only.
      const byName = new Map<string, Source>();
      for (const f of moduleFiles) {
        const prev = byName.get(f.name);
@@ -572,6 +582,7 @@ File: `packages/runner/src/harness/engine.ts`.
      from `resolveModuleImports` whose `externalDeps` include fabric
      specifiers. Extend the `modules` mapping:
      ```ts
+     // Shown for illustration only.
      const fabricEdges = (importEdges.get(file.name)?.externalDeps ?? [])
        .filter((s) => isFabricImportSpecifier(s))
        .map((s) => {
@@ -630,6 +641,7 @@ File: `packages/runner/src/compilation-cache/cell-cache.ts`.
 1. `storedImportRefs` (line 119): skip fabric edges when building SOURCE
    links:
    ```ts
+   // Shown for illustration only.
    const refs = module.imports
      .filter((imp) => !isFabricImportSpecifier(imp.specifier))
      .map(…);
@@ -739,6 +751,7 @@ uses only `runtime` + `space`. Lift it:
 New: `packages/runner/src/fabric-ref-resolution.ts`.
 
 ```ts
+// Shown for illustration only.
 export interface FabricChaseResult {
   entryIdentity: string;
   /** Human-readable hops for errors/tooling, e.g.
@@ -797,6 +810,7 @@ cell; piece with only legacy `patternId`; meta without `entryIdentity`
 New: `packages/runner/src/fabric-pin-rewrite.ts`.
 
 ```ts
+// Shown for illustration only.
 export interface PinRewrite { specifier: string; pinned: string; line: number }
 
 /**

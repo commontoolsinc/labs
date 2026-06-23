@@ -125,6 +125,7 @@ file plus its resolved import closure, then:
 1. Computes a single id over the whole program:
 
    ```ts
+   // Shown inside a pattern body.
    // packages/runner/src/harness/engine.ts
    const id = options.identifier ?? computeId(program);
    // computeId(program) = hashOf([program.main, ...files.filter(non .d.ts)])

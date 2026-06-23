@@ -18,6 +18,7 @@ Import `FS` and `FsProjection` from `commonfabric` and add `[FS]` to the
 pattern's return object:
 
 ```tsx
+// Shown at module scope.
 import { FS, type FsProjection, NAME, pattern, UI } from "commonfabric";
 
 const MyPattern = pattern<Input, Output>(({ title, content }) => {
@@ -95,6 +96,7 @@ Omitting `type` treats the entire `[FS]` value as the content of
 `index.json`. Equivalent to `{ type: "application/json", content: theObject }`:
 
 ```tsx
+// Shown for illustration only.
 [FS]: { summary, count }  // → index.json with { entityId, summary, count }
 ```
 
@@ -184,6 +186,7 @@ cache. Reads always see the current cell value.
 The `Note` pattern in `packages/patterns/notes/note.tsx` uses `[FS]`:
 
 ```tsx
+// Shown inside a pattern body.
 return {
   [NAME]: computed(() => `📝 ${title.get()}`),
   [UI]: <cf-screen>...</cf-screen>,

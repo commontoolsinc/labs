@@ -23,6 +23,7 @@ without traversing shadow roots.
    placeholder for inputs.
 
    ```typescript
+   // Shown as JSX element children.
    <cf-button>Submit</cf-button>
    <cf-input aria-label="Email" type="email" />
    ```
@@ -37,6 +38,7 @@ without traversing shadow roots.
    ```
 
    ```typescript
+   // Shown inside a pattern body.
    // Browser test APIs with ARIA support should use the same role/name shape.
    const submit = page.getByRole("button", { name: "Submit" });
    const email = page.getByRole("textbox", { name: "Email" });
@@ -44,6 +46,7 @@ without traversing shadow roots.
 
 3. **Use ShellIntegration for setup**
    ```typescript
+   // Shown inside a pattern body.
    const shell = new ShellIntegration();
    shell.bindLifecycle(); // Sets up beforeAll/afterAll hooks
 
@@ -75,6 +78,7 @@ For older components that do not expose host roles yet, use unique data
 attributes on the actual HTML elements combined with Astral's pierce strategy.
 
 ```typescript
+// Shown inside a pattern body.
 const input = await page.$("[data-cf-input]", {
   strategy: "pierce",
 });
@@ -92,6 +96,7 @@ Playwright's `fill()` requires a native `<input>` or `<textarea>`. Since
 semantic tab stop and forwards focus to the inner native input automatically:
 
 ```typescript
+// Shown inside a pattern body.
 const input = page.getByRole("textbox", { name: "Email" });
 await input.pressSequentially("user@example.com");
 ```
@@ -121,6 +126,7 @@ const path = ["x-root", "#shadow-root", "cf-input", "#shadow-root", "input"];
 ## Example Test
 
 ```typescript
+// Shown at module scope.
 import { env, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -207,6 +213,7 @@ the first click or keystroke after navigation or any state change. It resolves
 once all three stages are done, so a single click then lands on a bound handler:
 
 ```typescript
+// Shown at module scope.
 import { awaitViewSettled, waitFor } from "@commonfabric/integration";
 
 // Before interacting: wait until the view is mounted and interactive.

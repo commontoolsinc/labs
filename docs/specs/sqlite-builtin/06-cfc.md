@@ -44,6 +44,7 @@ mechanism schemas already support. `table(...)` (registered via
 field:
 
 ```tsx
+// Shown inside a pattern body.
 const notes = table({
   id: "integer primary key",
   body: { type: "string", ifc: { confidentiality: ["secret-body"] } },
@@ -154,6 +155,7 @@ and returns `{ confidentiality?, integrity? }` — two **independent**
 expressions:
 
 ```tsx
+// Shown inside a pattern body.
 const { table, all, principal, match, whenMatches, authoredBy, dbOwner } =
   cfSqlite;
 // Pull address tokens out of a messy "Name <addr>, addr" recipient line.
@@ -303,6 +305,7 @@ computed label (per-row joined with the projection's per-column atoms), **not**
 reader clearance (no read-time clearance model exists):
 
 ```tsx
+// Shown for illustration only.
 const skim = db.query<Row>(sql, {
   maxConfidentiality: [{ __ctCurrentPrincipal: true }, { __ctDbOwner: true }],
   onExceed: "skip",

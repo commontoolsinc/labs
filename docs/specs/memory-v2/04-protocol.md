@@ -86,6 +86,7 @@ Pending-read resolution, idempotent replay, and live sync are scoped to a
 logical session per space rather than to one TCP connection.
 
 ```typescript
+// Shown at module scope.
 type SessionId = string;
 
 interface SessionOpenRequest {
@@ -145,6 +146,7 @@ only signed authorization material in this pass; `transact` carries just the
 semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 
 ```typescript
+// Shown at module scope.
 interface HelloMessage {
   type: "hello";
   protocol: "memory/v2";
@@ -179,6 +181,7 @@ The server sends:
 - `session/revoked` when a session loses ownership to a newer connection
 
 ```typescript
+// Shown at module scope.
 interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
@@ -206,6 +209,7 @@ Live data delivery is not routed through the initiating request id.
 ### 4.2.3 Session Sync Payload
 
 ```typescript
+// Shown at module scope.
 interface SessionSync {
   type: "sync";
   fromSeq: number;
@@ -242,6 +246,7 @@ issue one request per message in this pass.
 ### 4.3.1 `transact` — Write Operations
 
 ```typescript
+// Shown at module scope.
 interface TransactRequest {
   type: "transact";
   requestId: string;
@@ -294,6 +299,7 @@ wire. One-shot reads in this pass use `graph.query` directly.
 `graph.query` performs one-shot schema-guided traversal.
 
 ```typescript
+// Shown at module scope.
 type ValuePath = readonly string[];
 
 type ValueSchemaPathSelector = Omit<SchemaPathSelector, "path"> & {
@@ -333,6 +339,7 @@ The watch set defines the union of queries whose results the session wants kept
 up to date.
 
 ```typescript
+// Shown at module scope.
 interface WatchSpec {
   id: string;
   kind: "query" | "graph";
@@ -367,6 +374,7 @@ Semantics:
 session watch set by `id`.
 
 ```typescript
+// Shown at module scope.
 interface WatchAddRequest {
   type: "session.watch.add";
   requestId: string;
@@ -509,6 +517,7 @@ The runtime-facing scheduler rules remain the same:
 All errors are returned in `response`.
 
 ```typescript
+// Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
   commit: ClientCommit;
@@ -545,6 +554,7 @@ interface RateLimitError extends Error {
 ### 4.8.1 Connection
 
 ```typescript
+// Shown at module scope.
 interface MountOptions {
   sessionId?: SessionId;
   seenSeq?: number;
@@ -559,6 +569,7 @@ interface MemorySession {
 ### 4.8.2 Space Session
 
 ```typescript
+// Shown at module scope.
 interface SpaceSession {
   transact(
     args: ClientCommit,

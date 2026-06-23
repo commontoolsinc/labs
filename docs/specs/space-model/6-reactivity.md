@@ -96,6 +96,7 @@ for a given computation can only be known by actually running it.
 
 For value cells:
 ```typescript
+// Shown for illustration only.
 const cancel = cell.sink((value) => {
   console.log("Value changed:", value);
 });
@@ -105,6 +106,7 @@ The callback fires when the cell's value changes.
 
 For stream cells:
 ```typescript
+// Shown for illustration only.
 const cancel = stream.sink((event) => {
   console.log("Event received:", event);
 });
@@ -115,6 +117,7 @@ The callback fires for each event.
 #### `pull()` — Read with Dependency Tracking
 
 ```typescript
+// Shown as JSX element children.
 const value = await cell.pull();
 ```
 

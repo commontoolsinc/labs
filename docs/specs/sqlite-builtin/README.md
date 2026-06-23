@@ -114,6 +114,7 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 ## At a glance
 
 ```tsx
+// Shown for illustration only.
 import { sqliteDatabase, table, cfLink, handler, derive, type Cell } from "commonfabric";
 
 // A database tied to this pattern's own cell (default source). Tables (and the

@@ -87,6 +87,7 @@ Migration sharp edges identified during the spike:
 Legacy:
 
 ```ts
+// Shown as interface or class members.
 @property({ type: Number })
 x = 0;
 
@@ -97,6 +98,7 @@ private isOpen = false;
 Standard:
 
 ```ts
+// Shown as interface or class members.
 @property({ type: Number })
 accessor x = 0;
 
@@ -109,6 +111,7 @@ private accessor isOpen = false;
 Legacy:
 
 ```ts
+// Shown as interface or class members.
 @property({ attribute: false })
 theme?: CFTheme;
 ```
@@ -116,6 +119,7 @@ theme?: CFTheme;
 Standard:
 
 ```ts
+// Shown as interface or class members.
 @property({ attribute: false })
 accessor theme: CFTheme | undefined = undefined;
 ```
@@ -125,6 +129,7 @@ accessor theme: CFTheme | undefined = undefined;
 Legacy:
 
 ```ts
+// Shown as interface or class members.
 @query("form")
 private _form!: HTMLFormElement;
 ```
@@ -132,6 +137,7 @@ private _form!: HTMLFormElement;
 Standard:
 
 ```ts
+// Shown as interface or class members.
 @query("form")
 private accessor _form!: HTMLFormElement;
 ```
@@ -141,6 +147,7 @@ private accessor _form!: HTMLFormElement;
 Legacy:
 
 ```ts
+// Shown for illustration only.
 @property()
 get src() {
   return this.#src;
@@ -154,6 +161,7 @@ set src(value: string) {
 Standard:
 
 ```ts
+// Shown for illustration only.
 get src() {
   return this.#src;
 }
@@ -169,6 +177,7 @@ set src(value: string) {
 Legacy:
 
 ```ts
+// Shown for illustration only.
 @consume({ context: cfThemeContext, subscribe: true })
 @property({ attribute: false })
 declare theme?: CFTheme;
@@ -177,6 +186,7 @@ declare theme?: CFTheme;
 Standard shape from the spike:
 
 ```ts
+// Shown as interface or class members.
 @consume({ context: cfThemeContext, subscribe: true })
 @property({ attribute: false })
 accessor theme: CFTheme = defaultTheme;

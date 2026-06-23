@@ -7,10 +7,12 @@ Patterns can compose other patterns by instantiating them and including the resu
 Use either function call or JSX syntax:
 
 ```ts
+// Shown inside a pattern body.
 {items.map((item) => ItemCard({ item }))}
 ```
 
 ```tsx
+// Shown inside a pattern body.
 {items.map((item) => <ItemCard item={item} />)}
 ```
 
@@ -72,6 +74,7 @@ Both patterns receive the same `items` cell - changes sync automatically.
 Pattern inputs are cellified — they become cell proxies, not plain objects. You **cannot** spread a pattern input directly into an object literal, because the spread operates on the proxy's own properties (which are empty) rather than the underlying value.
 
 ```tsx
+// Shown inside a pattern body.
 // BROKEN: ...extraTools spreads a cell proxy, yields nothing
 const omnibot = Chatbot({
   tools: {
@@ -84,6 +87,7 @@ const omnibot = Chatbot({
 **Fix:** wrap the merge in `computed()`. Inside a computed body, CTS auto-unwraps cell proxies to their actual values, so the spread works on the plain object:
 
 ```tsx
+// Shown inside a pattern body.
 // WORKS: computed() unwraps extraTools before spreading
 const baseTools = {
   searchWeb: { pattern: searchWeb },

@@ -7,6 +7,7 @@ favorites, mentionables, and profile elements by tag, and returns a reactive
 `WishState<T>`.
 
 ```tsx
+// Shown inside a pattern body.
 const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
 
@@ -24,6 +25,7 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 Access the resolved piece via `wishResult.result`:
 
 ```tsx
+// Shown for illustration only.
 const wishResult = wish<{ content: string }>({ query: "#note" });
 
 // Read a property from the resolved piece
@@ -47,6 +49,7 @@ user browses candidates and clicks "Confirm Selection". Until confirmed,
 You can render the built-in UI directly:
 
 ```tsx
+// Shown inside a pattern body.
 return { [UI]: <div>{wishResult}</div> };
 ```
 
@@ -55,6 +58,7 @@ return { [UI]: <div>{wishResult}</div> };
 Decorate your schema with a jsdoc comment containing a `#tag`:
 
 ```tsx
+// Shown at module scope.
 /** Represents a small #note a user took to remember some text. */
 type Output = {
   content: string | Default<"">;
@@ -64,6 +68,7 @@ type Output = {
 Then wish for that tag from another pattern:
 
 ```tsx
+// Shown inside a pattern body.
 const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
 
@@ -81,6 +86,7 @@ compatibility.
 ### Examples
 
 ```tsx
+// Shown inside a pattern body.
 // Search only favorites (default behavior)
 wish({ query: "#note" })
 wish({ query: "#note", scope: ["~"] })
@@ -103,6 +109,7 @@ recency-ordered `mru`. The well-known wishes enumerate that list and resolve,
 ordered **default first, then by MRU**:
 
 ```tsx
+// Shown inside a pattern body.
 wish({ query: "#profile" }) // the default profile (headless); see [UI] below
 wish({ query: "#profileName" }) // default profile's initialNameApplied
 wish({ query: "#profileAvatar" }) // default profile's avatar
@@ -139,6 +146,7 @@ any space. You can wish for the favorites list directly (see
 `system/favorites-manager.tsx` for a full example):
 
 ```tsx
+// Shown at module scope.
 type Favorite = { cell: { [NAME]?: string }; tags: string[] };
 const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 ```
@@ -168,6 +176,7 @@ Always call `wish()` at the pattern body level, not inside `computed()` or other
 reactive constructs:
 
 ```tsx
+// Shown at module scope.
 export default pattern<Input>(({ enableSearch }) => {
   // ✅ Call wish() once at pattern level
   const searchPiece = wish<SearchOutput>({ query: "#search" });
@@ -195,6 +204,7 @@ preferences/biography, cross-cutting data (calendar).
 To add new pieces to the space, wish for the `addPiece` handler as a `Stream`:
 
 ```tsx
+// Shown for illustration only.
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
