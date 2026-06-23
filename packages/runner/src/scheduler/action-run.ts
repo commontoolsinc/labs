@@ -8,7 +8,10 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
-import { isPermanentRejection } from "../storage/rejection.ts";
+import {
+  isConflictRejection,
+  isPermanentRejection,
+} from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -110,62 +113,57 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
-  state.commitPromise.then(async ({ error }) => {
-    // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-    // on every attempt we still call the re-subscribe below, so that
-    // even after we run out of retries, this will be re-triggered when
-    // input data changes.
-    if (error) {
-      logger.info(
-        "schedule-run-error",
-        "Error committing transaction",
-        error,
-      );
-
-      const retries = (state.retries.get(state.action) ?? 0) + 1;
-      state.retries.set(state.action, retries);
-      if (
-        retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
-      ) {
-        const readyToRetry = readyToRetryPromise(error);
-        if (readyToRetry !== undefined) {
-          // The readiness gate rejects by design when the session is closed,
-          // revoked, or replaced (new sessionId) while we are waiting — an
-          // expected control-flow signal, not an error. Swallow it and fall
-          // through to the re-arm below: re-subscribing keeps the action live
-          // so it re-triggers on the next input change. Letting the rejection
-          // escape would skip restoreCfcTriggerReads/resubscribe (stranding the
-          // action) and surface as a spurious console.error from the trailing
-          // .catch.
-          try {
-            await readyToRetry;
-          } catch (readyError) {
-            logger.debug(
-              "retry-readiness-aborted",
-              () => [
-                "conflict retry readiness aborted; re-arming action anyway",
-                readyError,
-              ],
-            );
-          }
-        }
-        // Re-schedule the action to run again on conflict failure.
-        // Use resubscribe to set up dependencies/triggers from the log,
-        // then mark as dirty/pending to ensure it runs again.
-        // The retry run still exists only because of the consumed trigger
-        // reads (§8.9.2), so restore them for its transaction.
-        state.restoreCfcTriggerReads();
-        state.resubscribe(state.action, state.log);
-        state.markDirectDirty(state.action);
-        state.pending.add(state.action);
-        state.queueExecution();
-      } else {
-        // WATCH(scheduler-v2): exhausted retries can leave a piece registered
-        // against rolled-back data (accepted zombie — spec §15 decision 9).
-      }
-    } else {
+  state.commitPromise.then(({ error }) => {
+    if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      return;
+    }
+
+    logger.info(
+      "schedule-run-error",
+      "Error committing transaction",
+      error,
+    );
+
+    // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
+    // means one of its inputs moved; the write that moved it dirtied this
+    // action's still-subscribed reads, so reader-dirty propagation re-runs it
+    // with the latest state. (This holds because the commit-conflict matcher is
+    // a subset of the reader-dirty matcher — the leaf-only alignment in the
+    // memory engine; a parent-injecting commit matcher would conflict on
+    // disjoint siblings that reader-dirty does NOT re-trigger, stranding the
+    // write.) So a conflict is a WAIT, not a retry: keep the subscription fresh
+    // and return WITHOUT consuming the retry budget — otherwise sustained
+    // contention would exhaust the budget and strand the compute as a zombie
+    // against rolled-back data. Restore the consumed trigger reads (§8.9.2) so a
+    // reader-dirty re-run's transaction still carries their flow labels.
+    if (isConflictRejection(error)) {
+      state.restoreCfcTriggerReads();
+      state.resubscribe(state.action, state.log);
+      return;
+    }
+
+    // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
+    // transport error, or the path-blind local StorageTransactionInconsistent
+    // guard that fires before the engine's granular matcher — so they still
+    // warrant a bounded retry. Permanent (precondition) rejections are never
+    // retried. On every attempt we still resubscribe, so even after the budget
+    // is exhausted the action is re-triggered when its input data changes.
+    const retries = (state.retries.get(state.action) ?? 0) + 1;
+    state.retries.set(state.action, retries);
+    if (retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)) {
+      // Resubscribe sets up dependencies/triggers from the log so the action
+      // re-runs when its inputs change. The run still exists only because of the
+      // consumed trigger reads (§8.9.2), so restore them for its tx.
+      state.restoreCfcTriggerReads();
+      state.resubscribe(state.action, state.log);
+      state.markDirectDirty(state.action);
+      state.pending.add(state.action);
+      state.queueExecution();
+    } else {
+      // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+      // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
   }).catch((error) => {
     logger.error(
@@ -174,23 +172,6 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
-}
-
-function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
-  if (typeof error !== "object" || error === null) {
-    return undefined;
-  }
-  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
-  if (typeof candidate !== "function") {
-    return undefined;
-  }
-  try {
-    return Promise.resolve(candidate.call(error));
-  } catch (thrown) {
-    // A readyToRetry that throws synchronously is treated the same as one that
-    // returns a rejected promise; the caller swallows the rejection.
-    return Promise.reject(thrown);
-  }
 }
 
 export function appendActionRunTrace(state: {
