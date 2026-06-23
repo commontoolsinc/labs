@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.target_sha }}
 
@@ -25,7 +25,7 @@ jobs:
         uses: ./.github/actions/deno-setup
 
       - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v6
         with:
           # TODO these are not the paths used in macos
           path: |
@@ -42,7 +42,7 @@ jobs:
           ./dist/cf --help
 
       - name: 📤 Upload CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-cli
           path: |
