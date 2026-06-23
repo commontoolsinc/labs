@@ -41,3 +41,11 @@ Pick whichever applies:
   identifier to `others` in `check.vocabulary.json`.
 - The snippet is illustrative pseudocode (placeholders, `...`, a wrong-then-right
   pair) — mark it `// Shown for illustration only.`
+
+## TODO: drive the skipped count to zero
+
+Every `// Shown for illustration only.` block is a snippet the check does not
+verify, so it can rot silently. The goal is to have none. As the contexts and
+vocabulary grow and snippets are tidied up, each illustrative block should either
+become checkable in a real context or be rewritten so it compiles. Treat the
+skipped count as a number to drive down to zero over time.

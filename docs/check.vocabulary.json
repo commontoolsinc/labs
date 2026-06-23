@@ -1,5 +1,6 @@
 {
   "comment": "Ambient vocabulary for docs/check.ts: identifiers a doc snippet may reference from elided surrounding code. frameworkValues/frameworkTypes are imported from commonfabric; every name in others is declared ambient (as a cell/array within a block that maps it, otherwise as any). Add a name here when a snippet legitimately references an identifier defined in code outside the snippet.",
+  "todo": "Audit this allowlist periodically. Some entries may name identifiers from APIs that have since changed; where that is so, the right fix is to update the snippet to the current API and drop the entry, rather than leave it stubbed as any. Each name removed this way is one less place a doc can quietly drift from the real surface.",
   "frameworkValues": [
     "Cell",
     "FS",
