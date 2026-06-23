@@ -44,41 +44,45 @@ per-output labels or interior incrementality, which are this design's new work.
 | v2 mechanism | Interpreter use |
 | --- | --- |
 | One node, one `fn(tx)` (§4.1) | The interpreter instance is one node; `fn` evaluates the ROG. |
-| Materializer envelope (§4.3): standing demand at idle, promotion under demand, **envelope edges ordering-only, never marking readers invalid** | The interpreter's dynamic/lazily-promoted outputs ride the **tier-3 envelope** (not tier-2), so data-dependent reachability does not require a static writer map (Delta A). |
+| Materializer envelope (§4.3): standing demand at idle, promotion under demand, **envelope edges ordering-only, never marking readers invalid** | Available if needed, but for the expression-only scope the write surface is just the **top outputs** (Delta A); the envelope is deferred until imperative side-writes / lazy promotion are added. |
 | Value-accurate invalidation + trigger index (§6.1) | Delivers changed addresses to the node; the interpreter routes them internally (Delta B). |
 | `invalidCauses` / `addCfcTriggerReads` (§10) | Consumed as the trigger set ([03](./03-cfc.md) §5.4). |
 | `tx.nodeId` self-suppression (P5) | The interpreter's interior writes are self-suppressed as one node's writes. |
 | Persistent observation (§9) | Extended to carry the interface read-set + a checkpoint/read-closure manifest (Delta D). |
 
-## 2. Delta A — write surface: static over-approximation + tier-3 envelope
+## 2. Delta A — write surface: the top outputs
 
-The interpreter's externally-materialized set is **data-dependent**:
-`control` flips and collection growth change what is reachable from the egress
-boundary ([03](./03-cfc.md) / [02](./02-design.md) §3.3–3.4), and lazy promotion
-(R-MAT-3) materializes a cell *because a reader appeared at runtime* — which is
-exactly the write-set *discovery* P4 forbids for the static writer map. So the
-naïve "declare N static outputs (tier-2)" framing is wrong.
+The static ROG structure is used for the **initial topological sort** only;
+after that, **actual runtime reads** drive invalidation. So the write surface
+question reduces to the documents the interpreter actually writes — the
+**top-level outputs reachable from the egress** ([02](./02-design.md) §4) — not
+the interior links, which are never materialized.
 
-- **A1 — static over-approximation.** At registration the interpreter MUST
-  compute a **static over-approximation** of its write surface from the ROG: the
-  union over *all* control branches plus an *element-position template* for
-  collections (one templated output family per `collection` op), independent of
-  which branch is live or how many elements exist. The dynamic reachable set MUST
-  always be a subset of this over-approximation (formal obligation 8,
-  [03](./03-cfc.md) §8).
-- **A2 — tier-3, not tier-2.** Outputs that are not statically pinned (collection
-  elements at runtime positions, lazily-promoted internal cells) ride the **tier-3
-  materializer envelope**: standing demand at idle, promotion under demand,
-  **envelope edges contribute ordering only and never mark readers invalid** —
-  only the cell's *actual committed change* does (v2 §4.3 rule 3). Do **not**
-  cite tier-2 "additional output documents" for the dynamic case.
-- **A3 — re-derivable writer map.** Because reachability is data-dependent, the
-  concrete writer map (which document the interpreter will write for a given
-  external reference) MUST be re-derivable on read-delta, within the static
-  over-approximation. This is a genuine delta against P4's "static writer map"
-  assumption and MUST be called out as such in the v2 reconciliation.
+- **A1 — top outputs are the surface.** Because the interpreter handles only
+  expression-shaped ROGs (no imperative side-writes), the set of documents it
+  writes is the egress-reachable top outputs, statically known from the result
+  shape. `control` flips and collection growth change the *values* and *which*
+  top outputs carry content, but the **set of top-output families** is determined
+  by the ROG; that set is the write surface. This is sufficient for the
+  expression scope and preserves P4's spirit (no write-set *discovery* from runs).
+- **A2 — collections are one container family.** A `collection` op contributes one
+  container output (at the input-list scope) whose entries are interior inline
+  values/links; the per-element results are not separate top outputs unless
+  externally referenced (then they materialize per R-MAT-3 with causal ids). So a
+  collection adds a bounded, statically-known top-output family, not an
+  element-indexed write surface.
+- **A3 — scope dimension.** A top output carries an **effective scope** determined
+  dynamically (narrowest scope read, R-SCOPE); the same causal id addresses
+  per-scope instances. The write surface is the (id, scope_key) the run actually
+  writes for its scope context.
 - **A4 — idempotency.** All outputs satisfy the §4 idempotency contract: writes
   are a pure function of inputs.
+
+> **Deferred.** A broader **static over-approximation + tier-3 materializer
+> envelope** treatment (union over all branches, element-position templates,
+> re-derivable writer map, the obligation-8 subset proof) is only needed if/when
+> imperative side-writes or runtime lazy promotion of deep interior cells are
+> added. For the expression-only scope it is unnecessary.
 
 ## 3. Delta B — read-set and incremental routing
 
@@ -161,8 +165,9 @@ observations are never treated as clean", `persistent-scheduler-state.md`).
   `O(1)`**; G1 / I2 are scoped accordingly ([05](./05-baselines.md) §5).
 - **D4 — identity.** The interpreter node's durable identity is the existing
   scheme (owner space / branch / piece id / process generation / impl hash), with
-  the **ROG content hash** as the impl component (also the basis for per-ROG trust
-  granularity, [03](./03-cfc.md) §2). No new identity scheme.
+  the **ROG content hash** as the impl component (for observation fingerprinting,
+  as for any node). No new identity scheme; trust is by TCB membership, not
+  per-ROG ([03](./03-cfc.md) §2).
 - **D5 — resume.** Rehydrate from observation + checkpoints, install the union
   read-set, recompute only the demanded, non-checkpointed interior
   ([02](./02-design.md) §4.1). Missing/invalid ⇒ recompute, never clean.
@@ -174,23 +179,29 @@ Interior non-convergence does **not** surface today: P5 self-suppression
 it, and scheduler budgets count re-runs *between* `fn` calls, blind to iteration
 *inside* one `fn(tx)`. A partial, non-converged interior commit would
 self-suppress and let `idle()` / `settled()` resolve cleanly **with a wrong
-value** (MA-4). This MUST be fixed by one of:
+value** (MA-4).
 
-- **E1a — interior fixpoint with hard reject.** The interpreter MUST run its
-  interior to fixpoint within one `fn(tx)`; budget exhaustion is a **hard
-  reject** (no partial commit), surfaced via the error path, never a silent
-  partial write. This also closes the single-pass-prune soundness gap (a stale
-  cached order in a single topo pass can commit a *wrong* result, not just cost an
-  iteration — [02](./02-design.md) §3.2 / R-EXEC-5): mandate the in-`fn` fixpoint
-  loop, or prove the cached order is always topologically valid for the live
-  graph.
-- **E1b — self-invalidate signal (scheduler-v2 delta).** Alternatively add a node
-  API (`tx.markSelfInvalid()` / an `fn` "not-done" return) so the scheduler
-  applies pass-level iteration/backoff to the interpreter. Add the chosen API to
-  the v2 node interface.
+**Chosen: the scheduler-API route (E1).** Interior convergence is fundamentally a
+scheduler responsibility moving into the node, so it is exposed back to the
+scheduler rather than reimplemented privately. Add a node API
+(`tx.markSelfInvalid()` / an `fn` "not-done" return) — an explicit scheduler-v2
+delta on the node interface — so when the interpreter has not reached interior
+fixpoint, the scheduler applies its existing pass-level iteration cap and
+escalating backoff to the interpreter node, exactly as it would for any node that
+re-dirties itself. A non-converged interior thus surfaces as the ordinary
+"node still invalid" condition (feeding `scheduler.non-settling`), never a silent
+clean `idle()`. The interpreter still commits only a consistent interior state per
+`fn` (it must not commit a half-updated interior); the API governs *re-scheduling*,
+not partial commits.
 
-E1a is recommended (it keeps interior convergence an interior concern); E1b is
-the fallback if interior fixpoint per `fn` is too coarse.
+This also closes the single-pass-prune soundness gap (a stale cached order in a
+single topo pass could commit a *wrong* result, not just cost an iteration —
+[02](./02-design.md) §3.2 / R-EXEC-5): the node re-runs under the scheduler's
+budget until the interior is consistent, rather than relying on a single pass.
+
+(Rejected alternative: a private in-`fn` hard-reject fixpoint loop — it duplicates
+scheduler machinery the node already lives inside, and hides convergence state
+from the scheduler's telemetry/backoff.)
 
 - **E2 — settled().** `settled()` is a post-v2 **runtime** method
   (`runtime.ts:494-509`), not a v2-spec surface; cite it as such. The interpreter

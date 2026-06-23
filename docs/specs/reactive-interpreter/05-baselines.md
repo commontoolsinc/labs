@@ -116,12 +116,14 @@ interpreter mode):
   container with N inline entries + user state), **independent of N**. Concretely:
   replace `~5 + 3N` documents with a small constant (target ≤ ~5, dominated by the
   container + user-state cells), plus one document per checkpointed element only.
-  **Excludes scoped collections** (PerUser/PerSession results fall back to
-  materialization — [02](./02-design.md) §3.4, [01](./01-requirements.md) §9 q1).
-  Note this is a **document** target; the persistent **read-index** stays
-  `O(distinct external reads)` (still `O(N)` for per-element external reads — the
-  importer case — but cheaper rows; see §4 and the cost-model row). G1/I2 are
-  scoped to documents+nodes, not read-index rows.
+  **Per scope context.** For scoped data (PerUser/PerSession), the target holds
+  per observed scope; genuinely scope-varying *outputs* exist per observed scope
+  (intrinsic to scoping — per-user data is per-user), but the scaffolding and
+  scope-invariant work never multiply by scope ([02](./02-design.md) §3.4,
+  [01](./01-requirements.md) R-SCOPE). This is a **document** target; the
+  persistent **read-index** stays `O(distinct external reads)` (still `O(N)` for
+  per-element external reads — the importer case — but cheaper rows; see §4 and the
+  cost-model row). G1/I2 are scoped to documents+nodes, not read-index rows.
 - **T-NODES — `O(1)` scheduler nodes.** Replace `8 + 4N` scheduler nodes with
   `O(1)` (the interpreter node + its effects), independent of N.
 - **T-EDIT — preserve `O(1)` edit.** Editing one element MUST remain `O(1)`

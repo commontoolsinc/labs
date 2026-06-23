@@ -132,18 +132,26 @@ builder calls.
   reachability determines what persists. An inner pattern's internals are
   internal to the interpreter unless reachable from the outermost return.
 
-- **R-MAT-3 (deterministic id, lazy materialization).** Identity is **not** lazy;
-  only materialization is. Every reachable-or-referenceable cell MUST have a
-  deterministic id derivable **at registration** from `{ owning result-cell
-  entityId, static ROG position }`, computed identically by the linker and the
-  interpreter, independent of run order, and anchored on a **position-based,
-  program-independent** anchor (the CT-1623 `outputSpot` discipline) — **NOT**
-  derived from the session-varying serialized ROG/Pattern (which churns ids across
-  reloads). A cell that is internal but becomes externally referenced is
-  materialized on first reference under that already-determined id, so a reader
-  can wire a link to it before it is first written. If a position-anchored id
-  cannot be derived for some op without the session-varying program, R-MAT-3 is
-  unimplementable for that op (§9 open question 3).
+- **R-MAT-3 (causal ids; materialize the reachable closure).** Materializing the
+  full egress-reachable closure (R-MAT-1) handles the common case directly. For
+  the residual case where something external retains a **deep link** into interior
+  structure, output ids MUST stay **causal and stable**: an output's id is causal
+  to its inputs (e.g. a `map` output is causal to the input list's id; scope is
+  excluded from the cause), and the interpreter MUST **carry that causal
+  derivation through** (input-id → output-id) so retained deep links resolve
+  identically across runs and reloads. This is the existing cause-derivation
+  mechanism threaded through the interpreter — not a new identity scheme.
+
+- **R-SCOPE (carry effective scope to outputs).** The interpreter run executes in
+  one runtime scope context (one user/session); its interior state is
+  non-serialized and therefore implicitly that scope's data — no per-scope
+  interior keying is required. The load-bearing requirement is **dynamic scope
+  carry-through**: the interpreter MUST track the **narrowest scope actually read**
+  while computing each output and stamp the output's effective scope accordingly
+  (`scoped-cell-instances.md` computation rule: effective output scope = narrower
+  of result-schema scope and narrowest scope read). Static schema scope only clips
+  a maximum; the actual scope is data-determined. This is what lets one stable
+  output link resolve to each reader's per-scope instance.
 
 - **R-MAT-4 (checkpoint tier).** The interpreter MUST be able to *checkpoint*
   selected expensive internal results as documents that behave like outputs:
@@ -212,9 +220,9 @@ These are summarized here and specified in full in [03-cfc.md](./03-cfc.md).
 - **R-CFC-3 (collection precision as a trusted claim, split by operator).** Where
   the interpreter replaces per-element-transaction decomposition with batched
   evaluation, it MUST assert the appropriate flow-precision claim as a **trusted
-  claim** under an identity incorporating the ROG content hash, gated through the
-  §8.9.1 mechanism (which must be **built**, R-CFC-GATE), failing closed
-  otherwise. The claim differs by operator: `map` asserts
+  claim** under its TCB implementation identity (R-6: the interpreter is in the
+  trusted computing base; no per-ROG-hash trust), gated through the §8.9.1
+  mechanism (which must be **built**, R-CFC-GATE), failing closed otherwise. The claim differs by operator: `map` asserts
   `PointwisePresencePreserved` + `PointwiseWriteDependency`; `filter` / `flatMap`
   assert `ElementLocalExpansion` + `StableRelativeOrder` and additionally taint
   the **container structural** label with membership/order/multiplicity
@@ -274,12 +282,14 @@ The interpreter and its integration MUST preserve these invariants.
   and the path-granular CFC label the interpreter produces equal (value) or
   soundly over-approximate (label) what the materialized model produces.
 - **I2 — Footprint.** The steady-state **document and scheduler-node** count for a
-  non-scoped ROG instance is `O(externally referenced outputs + checkpoints)`,
-  independent of the count of internal operations and (for unchecked elements) of
-  `N`. The persistent **read-index** remains `O(distinct external reads)` (still
-  `O(N)` for per-element external reads, but cheaper rows — no value, no conflict
-  domain, no revision chain). Scoped (PerUser/PerSession) collections are excluded
-  (they fall back to materialization, §9 open question 1).
+  ROG instance, **per scope context**, is `O(externally referenced outputs +
+  checkpoints)`, independent of the count of internal operations and (for
+  unchecked elements) of `N`. The persistent **read-index** remains `O(distinct
+  external reads)` (still `O(N)` for per-element external reads, but cheaper rows —
+  no value, no conflict domain, no revision chain). For scoped data, genuinely
+  scope-varying *outputs* exist per observed scope (intrinsic to scoping — per-user
+  data is per-user); the scaffolding and scope-invariant work never multiply by
+  scope (R-SCOPE, §9 R-1).
 - **I3 — Incremental cost.** A change to one input causes recompute of
   `O(operations actually affected)`, not `O(|ROG|)` and not `O(N)`.
 - **I4 — One change channel.** All invalidation of the interpreter flows from the
@@ -320,50 +330,55 @@ supersede each. Cross-referenced where they are addressed.
    (how many internal operations map onto one commit/receipt).
 8. **Lowering-contract fidelity + dynamic graph rewiring (D3/D4).** → R-ROG-6,
    R-EXEC-5.
-9. **Deterministic, reproducible causes** (cause-derivation; CT-1623). →
-   R-MAT-3.
+9. **Deterministic, reproducible causes** (cause-derivation: outputs causal to
+   inputs, carried through). → R-MAT-3.
 10. **Bounding contracts (`idle()` / `settled()`).** → R-EXEC-6, I8. Note
     `settled()` is a post-v2 *runtime* method (`runtime.ts:494-509`), not a
     scheduler-v2 surface.
 
-## 9. Open design questions (genuinely unresolved — not papered over)
+## 9. Open design questions
 
-These are flagged open deliberately; the design states an interim answer where it
-has one, but does not claim them solved.
+One genuinely open; the rest resolved (decisions recorded for the record).
 
-1. **Scoped (PerUser/PerSession) collections.** No coherent in-memory per-scope
-   element-state design exists; a scope is a physical addressing dimension
-   (`scoped-cell-instances.md`), so inline interior values have no per-scope
-   instance. **Interim answer:** scoped collection results fall back to
-   materialization (today's footprint); the `O(1)`-document target excludes them.
-   lunch-vote is exactly this case. ([02](./02-design.md) §3.4.)
-2. **Static-vs-dynamic write surface.** Whether a static over-approximation of the
-   write surface (closure over all branches + element-position template) is
-   computable from the ROG at registration and how the concrete writer map is
-   re-derived on read-delta given P4 assumes it static. **Interim answer:**
-   over-approximate statically + tier-3 envelope for the dynamic remainder
-   ([04](./04-scheduler-and-transformer-deltas.md) Delta A); needs the
-   over-approximation-soundness proof (obligation 8).
-3. **Position-anchored promoted-cell identity.** Whether every externally-
-   referenceable internal cell has a deterministic, program-independent id (R-MAT-3).
-   If some op's id cannot be derived without the session-varying program, R-MAT-3
-   is unimplementable there. Unresolved until a position-anchored derivation is
-   exhibited per op kind.
-4. **Read-isolation enforcement mechanism.** R-CFC-ISO requires *structural*
-   enforcement (a scoped read view). The concrete mechanism for in-memory interior
-   evaluation does not exist yet ([04](./04-scheduler-and-transformer-deltas.md)
-   P-0.3); this is the load-bearing open soundness question.
-5. **Interior non-convergence signalling.** Which scheduler-v2 delta — interior
-   fixpoint with hard reject (E1a) vs a self-invalidate signal (E1b) — is the
-   right mechanism so a non-converged interior cannot silently self-suppress into
-   a clean `idle()` ([04](./04-scheduler-and-transformer-deltas.md) Delta E).
-6. **Trusted-atom granularity.** Whether `flow-taint-precision` trust is delegated
-   to the interpreter builtin alone or to interpreter+ROG-content-hash (per-ROG
-   trust). The design recommends incorporating the ROG hash ([03](./03-cfc.md)
-   §2), but the delegation UX/semantics are open.
+### Open
 
-**Settled, do NOT reopen:** whether the interpreter "closes S11" (it does not — S11
-is already closed structurally; the interpreter *re-incurs* the claim, G3); whether
-NG4 holds (it does — only the "precedent is exact" framing was wrong,
-[02](./02-design.md) §5); whether `settled()` is a v2 surface (it is a runtime
-method — a citation, not a design fork).
+- **OQ-4 — Read-isolation enforcement mechanism (load-bearing).** R-CFC-ISO
+  requires *structural* enforcement (a per-element, per-scope read-scoped view in
+  which observing another element's or another scope's data is impossible). The
+  concrete mechanism for in-memory interior evaluation does not exist yet
+  ([04](./04-scheduler-and-transformer-deltas.md) P-0.3); this is the load-bearing
+  open soundness question and the gate for G3.
+
+### Resolved
+
+- **R-1 — Scoped cells: per-running-scope interior + scope carry-through.** No
+  per-scope interior keying is needed: an interpreter run is in one runtime scope
+  context and its non-serialized interior is implicitly that scope's data. The
+  requirement is dynamic carry-through of the narrowest scope read to each
+  output's effective scope (R-SCOPE). Scoped collections are supported (container +
+  scope-invariant work get the win; only scope-varying outputs exist per observed
+  scope, which is intrinsic to scoping). One residual sub-detail: how a single
+  scheduler node serves multiple reader scopes (analogous to `cell.pull()` in a
+  scope context) — an integration choice, not a soundness one.
+- **R-2 — Write surface = top outputs.** The static ROG structure feeds only the
+  *initial topological sort*; thereafter actual reads drive invalidation. The
+  materialized write surface is the egress-reachable **top outputs**, not the
+  interior links; for the expression-only scope this is statically known from the
+  result shape and is sufficient (Delta A). Broader over-approximation / envelope
+  treatment is deferred until imperative side-writes or lazy promotion are added.
+- **R-3 — Identity by causal carry-through.** Materialize the egress-reachable
+  closure; for retained deep links, keep ids causal to inputs and thread the cause
+  through (R-MAT-3). (The reload id-churn class is fixed and is not a live concern.)
+- **R-5 — Interior non-convergence: scheduler API route.** Non-convergence is a
+  scheduler responsibility moving inward, so it is exposed via a scheduler-v2 API
+  (`tx.markSelfInvalid()` / an `fn` "not-done" signal) so pass-level backoff
+  applies — not a bespoke interior hard-reject ([04](./04-scheduler-and-transformer-deltas.md)
+  Delta E).
+- **R-6 — Interpreter is in the TCB.** The interpreter is trusted runtime code in
+  the trusted computing base; per-interpreter trust suffices for the §8.9.1 gate.
+  No per-ROG-hash trust granularity ([03](./03-cfc.md) §2).
+
+**Also settled:** the interpreter does **not** "close S11" (S11 is already closed
+structurally; the interpreter *re-incurs* the claim, G3); NG4 holds (only the
+"precedent is exact" framing was wrong, [02](./02-design.md) §5); `settled()` is a
+runtime method, not a v2 surface.

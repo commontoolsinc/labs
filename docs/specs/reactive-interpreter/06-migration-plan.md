@@ -32,9 +32,10 @@ compares them; production runs one.
   §0).** Build the **§8.9.1 trust gate** (`isTrustedForConcept`,
   `flow-taint-precision`, concept-trust delegation, `deriveLabelWithTrustGate`)
   generalized to path-granular `LabelView`s — it does not exist today and Phase 2
-  depends on it. Build the **read-isolation capability** (P-0.3) and decide the
-  **interior non-convergence signal** (Delta E) and the **idempotency recheck
-  hook** (Delta C1). These are not interpreter code per se but hard prerequisites
+  depends on it. Build the **read-isolation capability** (P-0.3), the chosen
+  **interior non-convergence API** (`tx.markSelfInvalid()` / `fn` not-done signal,
+  Delta E) and the **idempotency recheck hook** (Delta C1). These are not
+  interpreter code per se but hard prerequisites
   for its CFC soundness and correctness.
 
 Exit: ROG extraction exists and round-trips; harness measures both models; the
@@ -47,8 +48,7 @@ hooks exist.
   `leaf` / `access` / `construct` / `control` (no `collection` yet). Leaves call
   the existing harness.
 - **P1.2** Implement the materialization boundary (reachable-from-**egress**) and
-  the static-over-approximation write surface + tier-3 envelope (Delta A) for these
-  kinds.
+  the top-outputs write surface (Delta A) for these kinds.
 - **P1.3** Implement per-op label computation with the **flow join** (conf union +
   integrity meet, not view-union — [03](./03-cfc.md) §4) and the fail-closed
   conservative fallback; route egress through existing ceilings.
@@ -71,7 +71,9 @@ This already removes the per-op scaffolding for fine-grained patterns.
   differential CFC corpus (§4). Write per-index labels as stored metadata
   components with origin, not a component-blind view.
 - **P2.3** Preserve `O(1)` edit; implement path-granular container rewrite
-  (T-EDIT). Add the **scoped-collection fallback** to materialization (q1).
+  (T-EDIT). Add **scope carry-through** to each output's effective scope (R-SCOPE):
+  track narrowest scope read; stamp the output link's scope; verify a scoped `map`
+  serves per-reader instances correctly.
 - **P2.4** Measure against `map` N=5/50/500/5000: confirm `O(1)` docs/nodes,
   `O(1)` edit, sub-linear load; confirm the read-index stays `O(distinct external
   reads)` and quantify its cost.
@@ -128,8 +130,8 @@ Nearly free, by the structure of what is materialized
   re-instantiation. Internal cell ids are *not* preserved (NG5).
 - **External references.** Cross-pattern links that point at what is still
   externally reachable continue to resolve; links that pointed at a now-internal
-  derived cell are re-pointed via lazy promotion (R-MAT-3) with a reproducible id,
-  or recomputed. No bulk in-place rewrite of internal-cell documents is required.
+  derived cell resolve via causal carry-through ids (R-MAT-3), or are recomputed.
+  No bulk in-place rewrite of internal-cell documents is required.
 - **Net:** preserve user-state documents; let derived state rebuild. This matches
   the prior identity-migration precedent (data-wipe-of-derived was acceptable
   there too).
@@ -167,10 +169,10 @@ validated against — it does not replace the oracle as the CI gate.
 | --- | --- |
 | **Interpreter becomes a CFC hole** (unsound pointwise claim / read-isolation bug). | Build the §8.9.1 trust gate (prerequisite P-0.1); **enforce** read isolation (R-CFC-ISO); the O2 label-diff oracle (both axes + isolated-read lower bound) as the permanent gate; the formal read-isolation + refinement obligations (§6). Fail closed by default. **Note this is a net increase in trusted-claim surface, accepted for the footprint win** (G3). |
 | **Reintroducing the P1 second channel.** | The interior index is ephemeral one-node state, driven only by the scheduler's change delivery (NG4, [02](./02-design.md) §5); the index reuses exact `trigger-index.ts` semantics (Delta B2) but is genuinely new trusted machinery, reviewed explicitly against v2 §14. |
-| **Interior non-convergence silently commits a wrong value** (self-suppression hides it). | Interior fixpoint within one `fn` with **hard reject** on budget exhaustion (Delta E1a), or a self-invalidate signal (E1b) — a real scheduler-v2 delta; never a partial self-suppressed commit. |
+| **Interior non-convergence silently commits a wrong value** (self-suppression hides it). | A scheduler-v2 self-invalidate API (`tx.markSelfInvalid()` / `fn` not-done) surfaces non-convergence as the ordinary "node still invalid" condition, so pass-level iteration cap + backoff + `non-settling` telemetry apply (Delta E); never a partial self-suppressed commit. |
 | **Lost cross-pattern links / FUSE.** | Position-anchored *deterministic* ids (identity never lazy, only materialization — R-MAT-3); Phase 4 explicitly validates link + FUSE parity. |
 | **Checkpoint staleness bugs cache wrong values.** | Checkpoint `derivedFrom` is the **transitive external-read closure** (MA-6), invalidated by scheduler state; checkpoints never change semantics; the oracle compares checkpointed vs from-scratch; GC on element removal (MN-8). |
-| **Scoped (PerUser/PerSession) collections get no win.** | Explicit fallback to materialization (q1); footprint targets scoped to non-scoped collections; flagged open. |
+| **Scoped (PerUser/PerSession) data.** | Interior is per-running-scope (non-serialized); the requirement is dynamic scope carry-through to each output's effective scope (R-SCOPE). Container + scope-invariant work get the win; only genuinely scope-varying outputs exist per observed scope (intrinsic to scoping). |
 | **Read-index stays O(N)** for per-element external reads. | Accepted and scoped: G1/I2 are document/node claims; read-index rows are far cheaper than documents (no value/conflict/revision); quantified in [05](./05-baselines.md). |
 | **Scheduler-v2 not fully landed / drifted.** | P0.3 re-verifies the seam against landed code before building on README claims. |
 | **Idempotency recheck can't witness incrementalism bugs.** | Recheck hook runs `evalFull` against a state clone + pre-run snapshot (Delta C1); the differential oracle is the **permanent** gate (§4). |

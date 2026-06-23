@@ -213,10 +213,10 @@ node footprint scales with **observed output + checkpoints**, not with **N**
   non-convergence signalling, an idempotency-recheck hook).
 - **content-addressed-action-identity** / **pattern-id-retirement**: the
   interpreter reuses the existing `{identity, symbol}` content-addressed
-  identity for ROG leaves and externally-referenced outputs; externally-
-  referenceable internal cells get **position-anchored, program-independent**
-  ids (the CT-1623 `outputSpot` discipline), not ids derived from the
-  session-varying serialized graph ([01](./01-requirements.md) R-MAT-3).
+  identity for ROG leaves and externally-referenced outputs; for internal cells
+  reached by a retained deep link, ids stay **causal to their inputs** (e.g. a
+  `map` output is causal to the input list's id) by carrying the cause
+  derivation through ([01](./01-requirements.md) R-MAT-3).
 - **ts-transformer** target language: the ROG is the data form of the existing
   lowering. Emitting a ROG instead of executable builder calls is a genuine
   *extension* of the lowering contract (the §3.1–3.9 semantic obligations still

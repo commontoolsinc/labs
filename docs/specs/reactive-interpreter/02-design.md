@@ -222,8 +222,11 @@ This is where the `~3 docs + ~4 nodes per element` cost is removed.
 
 ```text
 evalCollection(state, tx, op, ins):
-  if isScoped(op):                                 // PerUser/PerSession element results
-    return materializeScopedFallback(state, tx, op, ins)   // see "Scoped collections" below
+  // The interpreter run is already in ONE runtime scope context (one user, one
+  // session); interior element state is non-serialized, so it is implicitly
+  // this scope's data — no per-scope interior keying is needed (see "Scoped
+  // cells" below). What IS needed: track the narrowest scope read per element
+  // and carry it to the element output's effective scope.
   list      := ins[op.detail.listInput]            // identity-only: links/positions, no element content
   elemState := state.elementState[op.id]
   result    := []                                  // inline array, lives in state.values[op.id]
@@ -272,17 +275,41 @@ Key points:
   scheme (cell-link identity stable across position; inline-value identity by
   position).
 
-**Scoped collections (PerUser / PerSession) — known limitation.** A scope is an
-addressing dimension: a PerUser/PerSession element result is a *distinct physical
-storage instance per user/session* (`scoped-cell-instances.md`; `map.ts:174`
-`scopedCell(...)`). An inline interior value has one interpreter identity and no
-per-scope instance, so the `O(1)`-document win **does not apply** to scoped
-collections. The interim design is `materializeScopedFallback`: scoped collection
-results fall back to per-scope materialization (today's footprint). lunch-vote is
-exactly this case. A future per-scope interior-state design (keying
-`elementState` by effective scope and materializing only observed scopes) is an
-open question ([01](./01-requirements.md) §9, open question 1). The footprint
-targets ([05](./05-baselines.md) §5) are stated for the non-scoped case.
+**Scoped cells (PerUser / PerSession / PerSpace) — simpler than it first looks.**
+A scope is an addressing dimension over a cell's causal id: the same id has
+distinct physical instances per `scope_key` (`space` / `user:<did>` /
+`session:<did>:<sid>`), resolved from the reader's runtime scope context
+(`scoped-cell-instances.md`). Two facts make this tractable for the interpreter
+without per-scope interior machinery:
+
+1. **The interpreter run is already in one runtime scope context** (one user,
+   one session). Its interior element state is *not serialized* — it is ephemeral
+   state of one node running in that context — so it is **implicitly that scope's
+   data**. There is no need to key `elementState` by scope or to share interior
+   across scopes; an interpreter instance simply *is* its scope's interior.
+   (Cross-scope sharing of scope-invariant work is a possible later optimization,
+   not a requirement.)
+2. **Scope cannot be predicted statically** (unless a schema clips to a minimum
+   scope, which only sets an upper bound on which links a read may follow). So the
+   **load-bearing requirement is dynamic scope carry-through**: the interpreter
+   MUST track the **narrowest scope actually read** while evaluating an element
+   (or any op) and stamp the materialized output with that **effective scope** —
+   the existing computation rule (`scoped-cell-instances.md`: "track the narrowest
+   scoped document read … decide whether the output value must be replaced with a
+   scoped link"; output effective scope = narrower of result-schema scope and
+   narrowest scope read).
+
+So a scoped `map` is: one container at the input-list scope holding **stable
+scoped links** (`exposedResultCell` semantics, unchanged), whose targets carry the
+per-element effective scope the interpreter tracked. Each reader follows the same
+stable link to *their* scope's instance. The container and all scope-invariant
+work get the `O(1)` win; genuinely scope-varying *output instances* exist per
+observed scope — which is intrinsic to scoping (per-user data is per-user) and is
+strictly cheaper than today (no per-element scaffolding). The footprint targets
+([05](./05-baselines.md) §5) hold *per scope context*; across S observed scopes
+the scope-varying outputs multiply by S, the scaffolding never does. The only
+genuinely open thread is the scheduler-integration detail of how one node serves
+multiple reader scopes ([01](./01-requirements.md) §9).
 
 ### 3.5 Nested patterns
 
@@ -306,9 +333,10 @@ materialize(state, tx, rog):
             ∪ handlerWriteTargets(state)               // cells handlers write that the UI subscribes to
   reachable := closureThroughLinks(state, egress)
   for ref in reachable ∪ userState(state) ∪ checkpointed(state):
-    doc := state.externals.get(ref) ?? allocExternalDoc(state, ref)   // id is NOT lazy — see below
+    doc := state.externals.get(ref) ?? allocExternalDoc(state, causalId(ref))    // id causal to inputs (§4)
+    scope := narrowestScopeRead(state, ref)                                       // effective output scope
     if doc.value != state.valueOf(ref) or doc.label != state.labelOf(ref):
-      writeDoc(tx, doc, state.valueOf(ref), state.labelOf(ref))       // value + per-path label metadata
+      writeDoc(tx, doc, state.valueOf(ref), state.labelOf(ref), scope)            // value + per-path labels + scope
   releaseUnreferenced(state.externals, reachable ∪ userState ∪ checkpointed)
 ```
 
@@ -322,24 +350,29 @@ materialize(state, tx, rog):
   These were the bulk of the `~5 + 3N`. (Whether the footprint win survives once
   handler-written / render-read interior cells materialize is workload-dependent
   and must be measured, [05](./05-baselines.md) §6.)
-- **The write surface is a static over-approximation** computed at registration
-  (union over all control branches + an element-position template per
-  `collection`), with the dynamic egress-reachable set always a subset; dynamic
-  and lazily-promoted outputs ride the **tier-3 materializer envelope**, not a
-  static writer map ([04](./04-scheduler-and-transformer-deltas.md) Delta A).
-- **Identity is never lazy; only materialization is (R-MAT-3, corrected).** Every
-  reachable-or-referenceable cell has a **deterministic id derivable at
-  registration** from `{ resultCell entityId, static ROG position }`, computed
-  *identically* by the linker and the interpreter, independent of run order, and
-  anchored on a **position-based, program-independent** anchor (the CT-1623
-  `outputSpot` discipline, `map.ts:153-167`) — **not** derived from the
-  session-varying serialized ROG/Pattern (which churns ids across reloads). So
-  another piece can wire a link to an internal cell's id *before* the interpreter
-  first materializes it; the interpreter promotes the cell to a document on first
-  external reference, but the id was always determined. This keeps cross-pattern
-  links working and is "good enough for FUSE." (If a position-anchored derivation
-  proves impossible for some op, R-MAT-3 is unimplementable for that op — see
-  [01](./01-requirements.md) §9 open question 3.)
+- **The write surface is the top outputs.** Because the interpreter handles only
+  expression-shaped ROGs (no imperative side-writes), the documents it writes are
+  exactly the **top-level outputs reachable from the egress** — not the interior
+  links. The static ROG structure is used for the *initial topological sort*;
+  after that, actual runtime reads drive invalidation. So the write surface is the
+  egress-reachable top outputs (statically known from the result shape), which is
+  sufficient for the expression scope ([04](./04-scheduler-and-transformer-deltas.md)
+  Delta A). (A broader over-approximation / materializer-envelope treatment is
+  only needed if imperative side-writes or lazy promotion are added later.)
+- **Materialize everything reachable from the outputs; ids stay causal.**
+  Identity is the existing **causal** scheme: an output's id is causal to its
+  inputs (e.g. a `map` output is causal to the input list's id), with scope
+  excluded from the cause. Materializing the full egress-reachable closure handles
+  the common case directly. For the residual case where something external retains
+  a **deep link** into interior structure, the interpreter MUST **carry the causal
+  derivation through** so those ids remain stable and reproducible across runs and
+  reloads (the cause flows input-id → output-id; not hard, just threaded). This
+  keeps retained cross-pattern links resolving and is good enough for FUSE.
+- **Carry the effective scope through to each output.** The interpreter MUST track
+  the **narrowest scope read** while computing each output and stamp the output's
+  effective scope accordingly (`scoped-cell-instances.md` computation rule);
+  static schema scope only clips a maximum. This is what lets a stable output link
+  resolve to the right per-scope instance for each reader (§3.4).
 
 ### 4.1 The checkpoint / memoization tier
 
@@ -446,7 +479,9 @@ PROPOSED:  same map
 The element *values* still exist (they are the output), but as inline,
 path-labeled entries in the one container, recomputed per-element on change and
 checkpointed only when expensive — instead of ~3 documents and ~4 scheduler
-nodes each, forever. The document and node footprint drops to `O(1)`; the
-persistent read-index stays `O(distinct external reads)` (cheaper rows, no
-value/conflict/revision). **Scoped (PerUser/PerSession) collections are the
-exception** and fall back to materialization (§3.4).
+nodes each, forever. The document and node footprint drops to `O(1)` per scope
+context; the persistent read-index stays `O(distinct external reads)` (cheaper
+rows, no value/conflict/revision). **Scoped (PerUser/PerSession) data** is handled
+by carrying the effective scope through to outputs (§3.4): the interpreter's
+interior is already per-running-scope, and only genuinely scope-varying outputs
+exist per observed scope.

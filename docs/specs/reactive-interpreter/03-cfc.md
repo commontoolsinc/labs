@@ -52,27 +52,24 @@ This is the honest framing, and it is the opposite of a security improvement:
 
 ## 2. What the interpreter is, in CFC terms
 
-- It is **trusted runtime code** with verified implementation identity
-  (`kind: "builtin"`), like `map.ts` today. Its `implementationIdentityAtom` is a
-  `Builtin` atom (§8.9.1 pseudocode).
-- Being a builtin makes it **eligible** to be a flow-precision claimant; it does
-  **not** make it trusted by construction. The §8.9.1 gate checks
-  `isTrustedForConcept(actingUser, implAtom, flow-taint-precision)` — trust is
-  **per acting user**, via concept-trust delegation (§4.8). A deployment that
-  has not delegated `flow-taint-precision` to the interpreter for a user gets the
-  conservative fallback (§5.1), not the precise labels.
-- **Per-ROG trust, not a blanket grant.** Trusting one fixed
-  `Builtin("reactive-interpreter")` atom for `flow-taint-precision` would trust
-  the interpreter to assert precision for *every* user-authored ROG. The
-  identity the gate checks therefore SHOULD incorporate the **ROG content hash**
-  (R-ROG-4 / [04](./04-scheduler-and-transformer-deltas.md) D4), so trust is
-  attributable per ROG shape, not a single grant covering all reactive programs.
-  (Open: the exact granularity of the trusted atom — interpreter-only vs
-  interpreter+ROG-hash — is [01](./01-requirements.md) §9 open question 6.)
+- It is **trusted runtime code in the TCB**, with verified implementation
+  identity (`kind: "builtin"`), like `map.ts` today. Its
+  `implementationIdentityAtom` is a `Builtin` atom (§8.9.1 pseudocode). The
+  decision: **the interpreter is in the trusted computing base**; per-interpreter
+  trust suffices for the §8.9.1 gate. There is **no** per-ROG-content-hash trust
+  granularity ([01](./01-requirements.md) §9 R-6).
+- This is sound because **trusting the interpreter does not require trusting the
+  ROG.** The interpreter computes label *values* from the data it actually reads,
+  under structurally-enforced read isolation (§5.2), *regardless of what the ROG
+  claims* — so a malformed or adversarial ROG cannot induce an unsound label; at
+  worst it produces a wrong *value* (which is the ROG author's own data) within
+  correct labels. Hence trusting the interpreter for `flow-taint-precision`
+  wholesale is the right model: soundness rests on the interpreter's correctness
+  (the formal obligations, §8), not on per-program trust.
 - It is **not** the transformer. Nothing the transformer emits is a trusted
   claim. The interpreter computes label *values* from the data it actually reads
-  (§4), and only the interpreter's own, identity-attributed assertions enter the
-  trust gate.
+  (§4), and only the interpreter's own assertions — attributed to its TCB identity
+  — are relied upon.
 
 ## 3. The trust boundary (NG-001 honored) — and what must be built first
 
@@ -184,6 +181,16 @@ collectionLabel_map(op, elements):
                          label = structuralLabelOfList(op.listInput),  # membership/order, §8.5.6
                          origin = structure)
 ```
+
+**The §8.9.1 gate, with the interpreter in the TCB (§2).** Each per-element label
+is a flow-precision claim that must pass the §8.9.1 gate (a claim less restrictive
+than the conservative whole-batch join is admitted only for a trusted claimant).
+Because the interpreter is in the TCB, that trust check is satisfied by the
+interpreter's identity — no per-acting-user delegation and no per-ROG hash. The
+gate **mechanism** still has to be built (§3 prerequisite); until it exists, and
+on any gate/label-read error, the interpreter MUST **fail closed** to the
+conservative join. The soundness of *admitting* the claim then rests entirely on
+read isolation (§5.2) and the interpreter's correctness, not on the ROG.
 
 ### 5.2 Read isolation — the load-bearing soundness obligation
 
