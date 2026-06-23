@@ -2,7 +2,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import {
   type FabricArray,
-  type FabricObject,
+  type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
 } from "./interface.ts";
@@ -107,8 +107,8 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
     case "plain": {
       // Alas, casts are required because TS doesn't know the correspondence
       // between subtype names and type restrictions.
-      const aObject = a as FabricObject;
-      const bObject = b as FabricObject;
+      const aObject = a as FabricPlainObject;
+      const bObject = b as FabricPlainObject;
       if (Object.keys(aObject).length !== Object.keys(bObject).length) {
         // Plain objects can't possibly be equal if they have different numbers
         // of properties.
@@ -136,7 +136,7 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
  * `throw`s given an object that shouldn't have been passed as a `FabricValue`.
  */
 function objectSubtypeOf(
-  value: FabricObject | FabricArray | FabricSpecialObject,
+  value: FabricPlainObject | FabricArray | FabricSpecialObject,
 ): "array" | "plain" | "special" {
   if (value instanceof FabricSpecialObject) {
     return "special";

@@ -11,7 +11,7 @@ import {
 } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
-import type { FabricObject } from "@/interface.ts";
+import type { FabricPlainObject } from "@/interface.ts";
 
 //
 // Configuration flags
@@ -125,19 +125,19 @@ export const LINK_V1_TAG = "link@1" as const;
  * shape-agnostic. As with {@link EntityRef}, recognition is strict — it accepts
  * only the form for the _currently active_ regime, never both.
  *
- * `Payload` is bounded by {@link FabricObject} (the payload is always a
+ * `Payload` is bounded by {@link FabricPlainObject} (the payload is always a
  * stored/serialized fabric record) but otherwise open, so this layer needn't
  * know the exact field types (URI / MemorySpace / JSONSchema — those stay in
  * `runner`). In modern mode the payload type is erased: a {@link FabricLink}
- * holds an unparameterized {@link FabricObject}, just as {@link FabricHash} is
+ * holds an unparameterized {@link FabricPlainObject}, just as {@link FabricHash} is
  * unparameterized on the modern arm of {@link EntityRef}.
  */
-export type LinkRef<Payload extends FabricObject> =
+export type LinkRef<Payload extends FabricPlainObject> =
   | FabricLink
   | { "/": { [LINK_V1_TAG]: Payload } };
 
 /** Produces a {@link LinkRef} wrapping `payload` for the active regime. */
-export function linkRefFrom<Payload extends FabricObject>(
+export function linkRefFrom<Payload extends FabricPlainObject>(
   payload: Payload,
 ): LinkRef<Payload> {
   return modernCellRepEnabled
@@ -151,7 +151,7 @@ export function linkRefFrom<Payload extends FabricObject>(
  */
 function isLegacyLinkEnvelope(
   value: unknown,
-): value is { "/": { [LINK_V1_TAG]: FabricObject } } {
+): value is { "/": { [LINK_V1_TAG]: FabricPlainObject } } {
   return isRecord(value) &&
     Object.keys(value).length === 1 &&
     isRecord(value["/"]) &&
@@ -163,7 +163,7 @@ function isLegacyLinkEnvelope(
  * {@link FabricLink} in modern mode, or the `{ "/": { "link@1": … } }` envelope
  * (no other props) in legacy mode.
  */
-export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
+export function isLinkRef(value: unknown): value is LinkRef<FabricPlainObject> {
   return modernCellRepEnabled
     ? value instanceof FabricLink
     : isLegacyLinkEnvelope(value);
@@ -173,7 +173,7 @@ export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
  * Extracts the link payload from a {@link LinkRef}. Throws if the value is not
  * a link reference for the currently active regime.
  */
-export function linkRefPayload<Payload extends FabricObject>(
+export function linkRefPayload<Payload extends FabricPlainObject>(
   value: LinkRef<Payload>,
 ): Payload {
   if (modernCellRepEnabled) {
@@ -215,11 +215,11 @@ export function linkProbeSubPath(): readonly string[] {
  */
 export function linkPayloadAtProbe(
   probeValue: unknown,
-): FabricObject | undefined {
+): FabricPlainObject | undefined {
   if (modernCellRepEnabled) {
     return isLinkRef(probeValue) ? linkRefPayload(probeValue) : undefined;
   }
-  return isRecord(probeValue) ? probeValue as FabricObject : undefined;
+  return isRecord(probeValue) ? probeValue as FabricPlainObject : undefined;
 }
 
 //
