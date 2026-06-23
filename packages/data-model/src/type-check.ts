@@ -1,6 +1,12 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { type Immutable } from "@commonfabric/utils/types";
 
-import { FabricSpecialObject, type FabricValueLayer } from "./interface.ts";
+import {
+  type FabricObject,
+  FabricSpecialObject,
+  type FabricValue,
+  type FabricValueLayer,
+} from "./interface.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`
@@ -51,4 +57,21 @@ export function isFabricValueLayer(
       return false;
     }
   }
+}
+
+/**
+ * Narrows to the plain-record arm of `FabricValue` (`FabricObject`): a
+ * non-`null` object that is neither an array nor a `FabricSpecialObject`. Unlike
+ * a bare `isRecord()` check, this preserves the value type — `FabricObject`'s
+ * string index of `FabricValue` keeps an indexed value typed as a `FabricValue`.
+ */
+export function isFabricPlainObject(
+  value: FabricValue | undefined,
+): value is FabricObject;
+export function isFabricPlainObject(
+  value: Immutable<FabricValue> | undefined,
+): value is Immutable<FabricObject>;
+export function isFabricPlainObject(value: unknown): boolean {
+  return (typeof value === "object") && (value !== null) &&
+    !Array.isArray(value) && !(value instanceof FabricSpecialObject);
 }

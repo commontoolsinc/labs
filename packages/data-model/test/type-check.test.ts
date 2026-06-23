@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { isFabricValueLayer } from "@/type-check.ts";
+import { isFabricPlainObject, isFabricValueLayer } from "@/type-check.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -134,6 +134,49 @@ describe("type-check", () => {
 
       it("rejects unique (uninterned) symbols", () => {
         expect(isFabricValueLayer(Symbol("k"))).toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricPlainObject()", () => {
+    describe("returns `true` for the plain-record arm of `FabricValue`", () => {
+      it("accepts a plain object", () => {
+        expect(isFabricPlainObject({})).toBe(true);
+        expect(isFabricPlainObject({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("accepts a null-prototype object", () => {
+        const obj = Object.create(null) as Record<string, never>;
+        expect(isFabricPlainObject(obj)).toBe(true);
+      });
+    });
+
+    describe("returns `false` for non-record `FabricValue`s", () => {
+      it("rejects arrays", () => {
+        expect(isFabricPlainObject([])).toBe(false);
+        expect(isFabricPlainObject([1, 2, 3])).toBe(false);
+      });
+
+      it("rejects `null`", () => {
+        expect(isFabricPlainObject(null)).toBe(false);
+      });
+
+      it("rejects `undefined`", () => {
+        expect(isFabricPlainObject(undefined)).toBe(false);
+      });
+
+      it("rejects primitives", () => {
+        expect(isFabricPlainObject(1)).toBe(false);
+        expect(isFabricPlainObject("a")).toBe(false);
+        expect(isFabricPlainObject(true)).toBe(false);
+        expect(isFabricPlainObject(42n)).toBe(false);
+      });
+
+      it("rejects `FabricSpecialObject` values", () => {
+        expect(isFabricPlainObject(new FabricBytes(new Uint8Array([1]))))
+          .toBe(false);
+        expect(isFabricPlainObject(FabricError.fromNativeError(new Error("x"))))
+          .toBe(false);
       });
     });
   });

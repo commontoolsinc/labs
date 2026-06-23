@@ -1,7 +1,6 @@
 import {
-  type FabricObject,
-  FabricSpecialObject,
   type FabricValue,
+  isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { type Immutable } from "@commonfabric/utils/types";
@@ -69,23 +68,10 @@ export function makeAddressKey(addr: IMemorySpaceAddress): string {
   return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
 }
 
-/**
- * Narrows to the plain-record arm of `FabricValue` (`FabricObject`): a
- * non-`null` object that is neither an array nor a `FabricSpecialObject`. Unlike
- * a bare `isRecord()` check, this preserves the value type — `FabricObject`'s
- * string index of `FabricValue` keeps `value.value` typed as a `FabricValue`.
- */
-function isFabricObject(
-  value: Immutable<FabricValue> | undefined,
-): value is Immutable<FabricObject> {
-  return (typeof value === "object") && (value !== null) &&
-    !Array.isArray(value) && !(value instanceof FabricSpecialObject);
-}
-
 function unwrapTransactionDetailValue(
-  value: Immutable<FabricValue> | undefined,
-): Immutable<FabricValue> | undefined {
-  return isFabricObject(value) && "value" in value ? value.value : value;
+  value: Immutable<FabricValue>,
+): Immutable<FabricValue> {
+  return isFabricPlainObject(value) && "value" in value ? value.value : value;
 }
 
 export function captureTransactionWrites(
