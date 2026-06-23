@@ -5,10 +5,12 @@ import type { User } from "./main.tsx";
 export default pattern(() => {
   const users = new Writable<User[] | Default<[]>>([]);
   const myName = new Writable<string | Default<"">>("");
+  const myUserIndex = new Writable<number | Default<-1>>(-1);
   const adminName = new Writable<string | Default<"">>("");
   const participantIdentity = ParticipantIdentityCard({
     users,
     myName,
+    myUserIndex,
     adminName,
   });
 
@@ -26,8 +28,10 @@ export default pattern(() => {
       avatar: "",
       color: "#c2573a",
       joinedAt: 1,
+      votes: [],
     });
     myName.set("Blair");
+    myUserIndex.set(1);
   });
 
   const action_claim_host_as_blair = action(() => {
@@ -46,6 +50,7 @@ export default pattern(() => {
     return currentUsers.length === 1 &&
       currentUsers[0]?.name === "Alex" &&
       myName.get() === "Alex" &&
+      myUserIndex.get() === 0 &&
       adminName.get() === "Alex" &&
       participantIdentity.me === "Alex" &&
       participantIdentity.isJoined === true &&

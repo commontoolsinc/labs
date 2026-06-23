@@ -7,7 +7,8 @@ Recent work reduced some graph/render costs, but the current question is
 broader: under concurrent users, are the slowdowns and dropped updates caused by
 non-idiomatic pattern code, runtime behavior, or an interaction between the two?
 
-This document records evidence before making source changes.
+This document records the investigation evidence and the measured effect of the
+subsequent real lunch-poll refactor.
 
 ## Scope and Constraints
 
@@ -21,8 +22,12 @@ This document records evidence before making source changes.
   - `http://localhost:9000/lunch-poll-perf-a587/fid1:h3rkJobE_JAna_yV8QSrDM5f1bNftTUMR7A41EwwuSU`
 - Source changes made during this phase:
   - This investigation log.
+  - `main.tsx` now stores live votes under participant rows and projects the
+    public `votes` output from `users[n].votes`.
+  - `participant-identity-card.tsx` now records a PerUser append-only
+    participant index so handlers can write to the current viewer's row.
   - `reference-shape-experiment.tsx`, an idiomatic reference-addressed
-    diagnostic pattern included in the PR.
+    diagnostic pattern included in the PR as mechanism evidence.
   - Multi-runtime harness support for serializing result cells as `@link` values
     so headless events can pass live references.
   - `lunch-poll-diagnose.ts` support for reference events and serial setup.
@@ -480,6 +485,56 @@ env DENO_DIR=/private/tmp/deno-cache-a587 \
 Conclusion: keying the roster reduces join churn, but the join correctness
 threshold is unchanged.
 
+## Real Lunch Poll Child-Vote Refactor
+
+The merge-relevant change is now in `packages/patterns/lunch-poll/main.tsx`, not
+only in a diagnostic fixture.
+
+What changed:
+
+- `User` rows now optionally contain `votes?: UserVote[]`.
+- `castVote` writes to `users.key(myUserIndex).key("votes")` instead of the
+  global `votes` array.
+- `resetVotes`, `clearMyVote`, and `removeOption` clear vote state from
+  participant child cells.
+- `votesForUsers(users)` projects the public `Vote[]` compatibility output.
+- `ParticipantIdentityCard` stores the viewer's append-only participant index in
+  PerUser state during join.
+
+This keeps the existing UI and public `Vote.optionId` shape, so it is not the
+final no-string-ID model. It specifically tests whether moving the hot vote
+write path out of the aggregate `votes` array improves the real lunch poll.
+
+### Real `main.tsx`, 3 options x 10 users x 3 vote rounds, serial setup
+
+Commands:
+
+```bash
+deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
+  --program=main.tsx \
+  --cases=3x10 --rounds=3 --skip-refresh \
+  --event-mode=id --join-mode=serial
+```
+
+Results from `/private/tmp/lunch-main-real-baseline.log` and
+`/private/tmp/lunch-main-real-child-votes.log`:
+
+| Shape                           | Elapsed | Final users | Final votes | Conflicts | Reverts | Vote round 3 max nodes | Vote round 3 max edges | Vote round 3 max workset | Vote round 3 trace |
+| ------------------------------- | ------: | ----------: | ----------: | --------: | ------: | ---------------------: | ---------------------: | -----------------------: | -----------------: |
+| Original `main.tsx` array votes |   36.0s |       10/10 |       18/30 |      1923 |    1923 |                    467 |                   1361 |                       24 |               1680 |
+| Real `main.tsx` child votes     |   28.1s |       10/10 |       30/30 |      1309 |    1309 |                    479 |                   1380 |                       16 |                915 |
+
+Result: the real lunch poll now preserves all expected votes in this workload.
+It also cuts elapsed diagnostic time by about 1.28x, conflicts/reverts by about
+1.47x, final vote-round scheduler workset by 1.5x, and final vote-round trace
+entries by about 1.84x.
+
+This does not prove that the full lunch-poll graph is fixed. The final graph is
+slightly larger after the refactor because the real UI still renders and derives
+through the same broad surfaces. The proof is narrower: removing the global
+`votes` hot array fixes the durable vote loss in this scenario and reduces
+runtime churn on the production pattern source.
+
 ## Reference-Addressed Pattern Experiment
 
 The PR now includes an idiomatic fixture:
@@ -517,7 +572,7 @@ The diagnostic harness was extended with:
 - Field-by-field result reads when whole-result materialization is `undefined`
   for reference-heavy outputs.
 
-### 3 options x 10 users x 3 vote rounds, serial setup
+### Fixture comparison, 3 options x 10 users x 3 vote rounds, serial setup
 
 Commands:
 
@@ -533,7 +588,7 @@ deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
   --event-mode=reference --join-mode=serial
 ```
 
-Results from `/private/tmp/lunch-main-3x10.json` and
+Earlier fixture results from `/private/tmp/lunch-main-3x10.json` and
 `/private/tmp/lunch-ref-3x10.json`:
 
 | Shape                 | Elapsed | Final Users | Final Votes | Conflicts | Reverts | Vote round 3 max nodes | Vote round 3 max edges | Vote round 3 max workset | Vote round 3 trace |
@@ -541,10 +596,11 @@ Results from `/private/tmp/lunch-main-3x10.json` and
 | Current arrays        |   35.9s |       10/10 |       18/30 |      1797 |    1797 |                    466 |                   1350 |                       24 |               1645 |
 | Reference child cells |    8.0s |       10/10 |       30/30 |       350 |     350 |                     80 |                    186 |                        4 |                152 |
 
-Result: the idiomatic reference shape is not speculative. With the same runtime
-patch and deterministic setup, it preserves all expected votes, cuts end-to-end
-diagnostic time by about 4.5x, cuts conflicts/reverts by about 5.1x, and reduces
-the final vote-round scheduler workset by about 6.0x.
+Result: the reference fixture is useful mechanism evidence. With the same
+runtime patch and deterministic setup, it preserves all expected votes, cuts
+end-to-end diagnostic time by about 4.5x, cuts conflicts/reverts by about 5.1x,
+and reduces the final vote-round scheduler workset by about 6.0x. It is not the
+merge proof for lunch poll; the real `main.tsx` result above is.
 
 This does not mean the runtime work is unnecessary. The reference fixture still
 records conflict/revert churn, and the runtime change is still what lets
@@ -864,38 +920,25 @@ Piece:
 fid1:KMMXckIrcnJr7P8JdJWTe6nGkfZzPvo-G0pJJzwhO6s
 ```
 
-Browser event-path finding:
+Current deployment target:
 
-- The fresh reference URL renders the poll header,
-  `0 joined | 0 options | 0
-  votes`, name input, join button, restaurant input,
-  and add button.
-- In-app browser automation can see and click the controls, but click attempts
-  left CLI-inspected durable state at `userCount=0`.
-- `cf piece call joinAs '{"name":"Alex"}'` also completed without mutating
-  `userCount`, while the multi-runtime harness drives the same handlers
-  successfully.
-- The in-app console log showed only shell `set-identity` / `set-view` entries
-  and no warnings or errors around the click attempts.
-- A separate `agent-browser` session opened the URL but only reached the local
-  auth/register screen, so it was not useful as an authenticated browser client.
-
-Interpretation: the blank UI was a pattern-side deployment issue and is fixed.
-The remaining browser question is narrower: confirm whether a normal manual
-click in an authenticated tab sends the rendered event stream, or whether the
-local shell/runtime event path is dropping clicks for this diagnostic UI. The
-CLI handler smoke tests and multi-runtime stress harness remain the strongest
-durability evidence for the storage/runtime proposal.
+- The URL should now be sourced from `packages/patterns/lunch-poll/main.tsx`,
+  not the stripped reference fixture.
+- The browser check is for real UI smoke testing and event-path confidence.
+- The performance/correctness proof comes from the multi-runtime diagnostic
+  harness, which drives the same handler workload across 10 clients.
 
 Interpretation:
 
 - The pattern's original array shape is still non-idiomatic for high-contention
   multi-user writes.
-- The keyed-record diagnostic shape showed the runtime issue, but it is not the
+- The real pattern now stores live votes below participant child cells and
+  preserves all expected votes in the 3x10x3 diagnostic workload.
+- The keyed-record diagnostic shape showed the runtime issue, but it is not a
   production target because it relies on synthetic string keys.
-- A production pattern shape should use live references/child cells, and it only
-  works efficiently if the runtime preserves the difference between recursive
-  content reads and shallow topology reads.
+- A future production shape should move option identity toward live references,
+  and it only works efficiently if the runtime preserves the difference between
+  recursive content reads and shallow topology reads.
 - The bug was emergent: pattern contention exposed a runtime/protocol gap where
   the runner had precise shallow-read information and the memory engine had
   path-aware validation, but the protocol boundary erased the shallow-read bit.
@@ -904,10 +947,11 @@ Interpretation:
 
 Current understanding:
 
-- Correctness failure is reproducible on current main.
-- 6 users is correct but conflict-heavy.
-- 7 users loses one vote per concurrent vote round.
-- 8+ users starts losing joins.
+- The original array-backed `main.tsx` correctness failure is reproducible.
+- The branch's real `main.tsx` child-vote refactor preserves `30/30` votes in
+  the measured 3x10x3 serial-join workload.
+- In the original scaling runs, 6 users is correct but conflict-heavy, 7 users
+  loses one vote per concurrent vote round, and 8+ users starts losing joins.
 - `hold` mode does not mitigate.
 - Keyed-record storage cuts conflict churn substantially but leaves the same
   correctness threshold.
@@ -920,11 +964,11 @@ Current understanding:
 - Preserving `nonRecursive` through `ClientCommit` plus type-aware object-add
   validation makes the diagnostic keyed 10-user workload preserve all joins and
   votes.
-- Browser telemetry is wired up, but CLI multi-runtime diagnostics are the most
-  reliable stress driver.
+- Browser telemetry is wired up, but CLI multi-runtime diagnostics are still the
+  most reliable stress driver.
 
 Most likely next step:
 
 - Keep the focused runtime tests, update the memory-v2 spec for shallow reads,
-  and build the real lunch-poll refactor around live references / child cells
-  rather than the string-keyed diagnostic shape.
+  browser-smoke the real `main.tsx` deployment, and decide whether the remaining
+  option identity cleanup belongs in this PR or a follow-up.

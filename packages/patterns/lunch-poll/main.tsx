@@ -31,9 +31,10 @@
  * there's no MAX_HISTORY cap and "Recently eaten" is a `db.query` (the read
  * bounds itself with LIMIT). Each `logVisit` also snapshots everyone's current
  * vote into a `vote_history` table tied to that visit; the "📊 Lunch stats"
- * card surfaces per-place visit + green/red tallies from it. Live voting stays
- * on the in-cell `votes` array — only the durable record is in SQLite. Both
- * tables carry a frozen TEXT name plus a `cfLink<User>` live profile pointer.
+ * card surfaces per-place visit + green/red tallies from it. Live voting is
+ * stored under each participant row and projected back to the public `votes`
+ * output; only the durable visit record is in SQLite. Both tables carry a
+ * frozen TEXT name plus a `cfLink<User>` live profile pointer.
  *
  * KNOWN ISSUE (open): correct + green in the emulated `cf test` runner, but on a
  * *deployed* piece `db.exec` throws "invalid database handle" (a sqlite-builtin
@@ -71,6 +72,7 @@ export interface User {
   avatar?: string;
   color: string;
   joinedAt: number;
+  votes?: UserVote[] | Default<[]>;
 }
 
 export interface Option {
@@ -89,6 +91,11 @@ export interface Option {
 const WEB_SEARCH_URL = "/api/agent-tools/web-search";
 
 export type VoteColor = "green" | "yellow" | "red";
+
+export interface UserVote {
+  optionId: string;
+  voteType: VoteColor;
+}
 
 export interface Vote {
   voterName: string;
@@ -199,6 +206,7 @@ type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
+type UserIndexCell = Writable<number | Default<-1>>;
 type HomePageRefreshCell = Writable<number>;
 // A monotonic write counter bumped by the sqlite-mutating handlers; the
 // db.query calls react on THIS rather than on `db`. In the test runner,
@@ -476,10 +484,10 @@ const setOptionImage = handler<SetOptionImageEvent, {
 
 const removeOption = handler<RemoveOptionEvent, {
   options: OptionsCell;
-  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
-}>(({ optionId }, { options, votes, myName, adminName }) => {
+}>(({ optionId }, { options, users, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -487,40 +495,61 @@ const removeOption = handler<RemoveOptionEvent, {
   const target = current.find((o) => o.id === optionId);
   if (!target) return;
   options.remove(target);
-  votes.set(votes.get().filter((v) => v.optionId !== optionId));
+  users.get().forEach((_user, userIndex) => {
+    const userVotes = users.key(userIndex).key("votes");
+    const rawVotes = userVotes.get();
+    const currentVotes: readonly UserVote[] = Array.isArray(rawVotes)
+      ? rawVotes as readonly UserVote[]
+      : [];
+    if (currentVotes.length === 0) return;
+    userVotes.set(currentVotes.filter((v) => v.optionId !== optionId));
+  });
 });
 
 const castVote = handler<CastVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId, voteType }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  const current = votes.get();
+  users: UsersCell;
+  myUserIndex: UserIndexCell;
+}>(({ optionId, voteType }, { users, myUserIndex }) => {
+  const userIndex = myUserIndex.get();
+  if (!Number.isInteger(userIndex) || userIndex < 0) return;
+  const user = users.key(userIndex);
+  if (!user.get()) return;
+
+  const userVotes = user.key("votes");
+  const rawVotes = userVotes.get();
+  const current: readonly UserVote[] = Array.isArray(rawVotes)
+    ? rawVotes as readonly UserVote[]
+    : [];
+  if (!Array.isArray(rawVotes)) {
+    userVotes.set([]);
+  }
+
   const existingIdx = current.findIndex(
-    (v) => v.voterName === me && v.optionId === optionId,
+    (v) => v.optionId === optionId,
   );
   if (existingIdx >= 0) {
     const existing = current[existingIdx];
     if (existing.voteType === voteType) {
-      votes.remove(existing);
+      userVotes.remove(existing);
       return;
     }
-    votes.key(existingIdx).key("voteType").set(voteType);
+    userVotes.key(existingIdx).key("voteType").set(voteType);
     return;
   }
-  votes.push({ voterName: me, optionId, voteType });
+  userVotes.push({ optionId, voteType });
 });
 
 const resetVotes = handler<ResetVotesEvent, {
-  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
-}>((_, { votes, myName, adminName }) => {
+}>((_, { users, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  votes.set([]);
+  users.get().forEach((_user, userIndex) => {
+    users.key(userIndex).key("votes").set([]);
+  });
 });
 
 export interface ClearVoteEvent {
@@ -528,17 +557,31 @@ export interface ClearVoteEvent {
 }
 
 const clearMyVote = handler<ClearVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
+  users: UsersCell;
+  myUserIndex: UserIndexCell;
+}>(({ optionId }, { users, myUserIndex }) => {
+  const userIndex = myUserIndex.get();
+  if (!Number.isInteger(userIndex) || userIndex < 0) return;
+  const user = users.key(userIndex);
+  if (!user.get()) return;
+
+  const userVotes = user.key("votes");
+  const rawVotes = userVotes.get();
+  const currentVotes: readonly UserVote[] = Array.isArray(rawVotes)
+    ? rawVotes as readonly UserVote[]
+    : [];
+  if (currentVotes.length === 0) return;
+  userVotes.set(currentVotes.filter((v) => v.optionId !== optionId));
 });
+
+const votesForUsers = (users: readonly User[]): Vote[] =>
+  users.flatMap((user) =>
+    (user.votes ?? []).map((vote) => ({
+      voterName: user.name,
+      optionId: vote.optionId,
+      voteType: vote.voteType,
+    }))
+  );
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
 // group actually ate — by option id (resolved to its title) or a free title —
@@ -550,7 +593,6 @@ const clearMyVote = handler<ClearVoteEvent, {
 const logVisit = handler<LogVisitEvent, {
   db: SqliteDb;
   options: OptionsCell;
-  votes: VotesCell;
   users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
@@ -559,7 +601,7 @@ const logVisit = handler<LogVisitEvent, {
 }>(
   (
     { optionId, title, wentAt },
-    { db, options, votes, users, myName, adminName, visitDate, rev },
+    { db, options, users, myName, adminName, visitDate, rev },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -595,7 +637,7 @@ const logVisit = handler<LogVisitEvent, {
     // Snapshot the current live votes tied to this visit. Denormalize the
     // option title (options can be removed later; the title is the record).
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
-    for (const v of votes.get()) {
+    for (const v of votesForUsers(users.get())) {
       const optTitle = trimmedName(titleById.get(v.optionId));
       if (!optTitle) continue; // vote for an already-removed option → skip
       db.exec(
@@ -692,6 +734,7 @@ export interface CozyPollInput {
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
+  myUserIndex?: PerUser<number | Default<-1>>;
   webSearchUrl?: PerSpace<string | Default<typeof WEB_SEARCH_URL>>;
   // Write counter bumped by the sqlite-mutating handlers; the db.query calls
   // react on this rather than on `db` directly (see RevCell for why).
@@ -748,7 +791,6 @@ export interface CozyPollOutput {
 // Stable empty fallbacks for the output snapshots below — fresh `[]` per
 // recompute would make the computed results non-idempotent.
 const EMPTY_OPTIONS: Option[] = [];
-const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
 
 interface OptionSummaryRowInput {
@@ -838,10 +880,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       question,
       city,
       options,
-      votes,
       users,
       adminName,
       myName,
+      myUserIndex,
       webSearchUrl,
       sqliteRev,
     },
@@ -905,6 +947,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
+      myUserIndex,
       adminName,
     });
     const boundAddOption = addOption({
@@ -915,17 +958,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const boundRemoveOption = removeOption({
       options,
-      votes,
+      users,
       myName,
       adminName,
     });
-    const boundCastVote = castVote({ votes, myName });
-    const boundClearMyVote = clearMyVote({ votes, myName });
-    const boundResetVotes = resetVotes({ votes, myName, adminName });
+    const boundCastVote = castVote({ users, myUserIndex });
+    const boundClearMyVote = clearMyVote({ users, myUserIndex });
+    const boundResetVotes = resetVotes({ users, myName, adminName });
     const boundLogVisit = logVisit({
       db,
       options,
-      votes,
       users,
       myName,
       adminName,
@@ -968,7 +1010,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const userCount = users.length;
     const optionCount = options.length;
-    const voteCount = votes.length;
+    const liveVotes = computed(() => votesForUsers(users));
+    const voteCount = liveVotes.length;
     // The "Recently eaten" card, now a SQLite query. It re-runs when the
     // sqliteRev counter changes — the mutating handlers bump it after each
     // db.exec (we react on the counter, not `db`; see RevCell). The read bounds
@@ -1051,7 +1094,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const isClearHistoryConfirm = computed(() =>
       clearHistoryConfirmPending.get()
     );
-    const ranked = tallyOptions(options, votes, users);
+    const ranked = tallyOptions(options, liveVotes, users);
     const homePageLookupUrls = options.map((option) =>
       homePageLookupUrlFor(
         isAdmin,
@@ -1372,7 +1415,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       me={me}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
-                      votes={votes}
+                      votes={liveVotes}
                       cityLabel={cityLabel}
                       searchEndpoint={searchEndpoint}
                       homePageRefresh={homePageRefresh}
@@ -1748,7 +1791,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // history is no longer a PerSpace input — it lives in SQLite now and is
       // surfaced via `recentVisits`/`mostRecentTitle` below.
       options: computed(() => options ?? EMPTY_OPTIONS),
-      votes: computed(() => votes ?? EMPTY_VOTES),
+      votes: liveVotes,
       users: computed(() => users ?? EMPTY_USERS),
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
