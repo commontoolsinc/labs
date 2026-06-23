@@ -10,6 +10,8 @@ import {
   isEntityRef,
   isLinkRef,
   LINK_V1_TAG,
+  linkPayloadAtProbe,
+  linkProbeSubPath,
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadFromString,
@@ -132,6 +134,37 @@ describe("cell-rep link-ref envelope", () => {
       "Not a link reference",
     );
     expect(() => linkRefPayload({} as never)).toThrow("Not a link reference");
+  });
+});
+
+describe("cell-rep link storage-tree probe", () => {
+  const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
+
+  it('probes two segments down at ["/", "link@1"]', () => {
+    expect(linkProbeSubPath()).toEqual(["/", LINK_V1_TAG]);
+  });
+
+  it("reads the payload back from the value at the probe sub-path", () => {
+    // The envelope is decomposed in the tree, so walking the probe sub-path
+    // lands directly on the payload record.
+    const envelope = linkRefFrom(PAYLOAD);
+    const atProbe = linkProbeSubPath().reduce<unknown>(
+      (node, key) => (node as Record<string, unknown>)[key],
+      envelope,
+    );
+    expect(linkPayloadAtProbe(atProbe)).toEqual(PAYLOAD);
+  });
+
+  it("treats any record at the probe as the payload", () => {
+    expect(linkPayloadAtProbe(PAYLOAD)).toBe(PAYLOAD);
+    expect(linkPayloadAtProbe({})).toEqual({});
+  });
+
+  it("returns undefined when the probed value is not a record", () => {
+    expect(linkPayloadAtProbe(undefined)).toBeUndefined();
+    expect(linkPayloadAtProbe(null)).toBeUndefined();
+    expect(linkPayloadAtProbe("redirect")).toBeUndefined();
+    expect(linkPayloadAtProbe(42)).toBeUndefined();
   });
 });
 

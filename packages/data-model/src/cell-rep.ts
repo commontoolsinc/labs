@@ -163,6 +163,38 @@ export function linkRefPayload<Payload extends FabricObject>(
   throw new Error("Not a link reference.");
 }
 
+/**
+ * The storage sub-path, relative to a value's position in the document tree, at
+ * which a link rooted there exposes its recognizable form. This encodes the
+ * link layout for consumers that navigate _into_ the document tree (notably link
+ * resolution), so they need not hardcode the layout — or the link tag —
+ * themselves.
+ *
+ * A link is a decomposed plain-object envelope (`{ "/": { "link@1": … } }`), so
+ * the recognizable payload sits two segments down at `["/", "link@1"]`. Pair
+ * with {@link linkPayloadAtProbe} to interpret whatever is read at
+ * `position + linkProbeSubPath()`. This is gathered here alongside the rest of
+ * the link chokepoint so that the modern cell representation can later dispatch
+ * the layout (an atomic value → an empty sub-path) from a single seam.
+ */
+export function linkProbeSubPath(): readonly string[] {
+  return ["/", LINK_V1_TAG];
+}
+
+/**
+ * Interprets the value read at `position + ` {@link linkProbeSubPath}: returns
+ * the link payload if that value denotes a link rooted at `position`, or
+ * `undefined` otherwise.
+ *
+ * The probed value already _is_ the inner payload (the tree walk descended into
+ * the envelope), so any record there is the payload.
+ */
+export function linkPayloadAtProbe(
+  probeValue: unknown,
+): FabricObject | undefined {
+  return isRecord(probeValue) ? probeValue as FabricObject : undefined;
+}
+
 //
 // Wire serialization of a (plain) link payload
 //
