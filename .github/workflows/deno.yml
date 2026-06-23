@@ -305,6 +305,9 @@ jobs:
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         env:
@@ -403,6 +406,9 @@ jobs:
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         env:
@@ -508,6 +514,9 @@ jobs:
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         run: |
@@ -635,6 +644,9 @@ jobs:
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🧪 Run pattern unit tests
         run: |
@@ -762,6 +774,9 @@ jobs:
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🔐 Process & sign binaries
         run: |
