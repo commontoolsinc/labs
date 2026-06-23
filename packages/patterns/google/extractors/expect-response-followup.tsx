@@ -453,11 +453,6 @@ const fetchLabels = handler<
     loadingLabels: Writable<boolean>;
   }
 >(async (_event, { auth, expectResponseLabelId, loadingLabels }) => {
-  if (!auth.get()) {
-    console.error("[ExpectResponse] No auth available for fetching labels");
-    return;
-  }
-
   loadingLabels.set(true);
   try {
     const client = new GmailSendClient(auth, { debugMode: DEBUG });
@@ -589,13 +584,14 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Use createGoogleAuth to handle authentication with the wish system
   // This will auto-request a google-auth piece if one doesn't exist
   const {
-    auth,
+    availability,
     fullUI: authUI,
     isReady,
     currentEmail,
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+  const auth = availability.state === "ready" ? availability.auth : null;
 
   // ==========================================================================
   // EMAIL STYLE WISH
@@ -619,7 +615,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const extractor = GmailExtractor({
     gmailQuery: "label:expect-response",
     limit: 100,
-    overrideAuth: auth,
+    overrideAuth: auth ?? undefined,
   });
 
   const allEmails = extractor.emails;
@@ -937,7 +933,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
               : null}
 
             {/* Label status */}
-            {isReady && (!expectResponseLabelId.get() || loadingLabels.get())
+            {auth && (!expectResponseLabelId.get() || loadingLabels.get())
               ? (
                 <div
                   style={{
@@ -985,7 +981,27 @@ Write only the email body, no subject line or greeting line (the greeting will b
               : null}
 
             {/* Threads list */}
-            {threadCount === 0
+            {!isReady
+              ? (
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                    border: "1px solid #e5e7eb",
+                    color: "#4b5563",
+                  }}
+                >
+                  <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                    Waiting for Google connection
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Connect Google with Gmail label access before loading
+                    follow-up threads or labels.
+                  </div>
+                </div>
+              )
+              : threadCount === 0
               ? (
                 <div
                   style={{

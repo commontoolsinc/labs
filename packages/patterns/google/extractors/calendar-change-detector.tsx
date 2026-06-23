@@ -19,7 +19,7 @@
 import { computed, JSONSchema, NAME, pattern, TILE_UI, UI } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
@@ -215,7 +215,7 @@ function formatDate(dateStr: string | undefined): string {
 // =============================================================================
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */

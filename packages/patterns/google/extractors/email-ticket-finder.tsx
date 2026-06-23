@@ -18,7 +18,7 @@
 import { computed, JSONSchema, NAME, pattern, TILE_UI, UI } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
@@ -403,7 +403,7 @@ function getStatusLabel(status: TicketStatus, daysUntil: number): string {
 // =============================================================================
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
   // No additional writable state needed for this pattern
   // (could add dismissed/hidden tickets later)
 }

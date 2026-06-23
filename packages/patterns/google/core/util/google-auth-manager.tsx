@@ -9,13 +9,12 @@
  *
  * Usage:
  * ```typescript
- * const { auth, fullUI, isReady } = createGoogleAuth({
+ * const { availability, fullUI, isReady } = createGoogleAuth({
  *   requiredScopes: ["gmail", "drive"],
  * });
  *
- * // Guard API calls with isReady
- * if (!isReady) return;
- * // Use auth.token for API calls
+ * if (availability.state !== "ready") return;
+ * const auth = availability.auth;
  *
  * // In UI: {fullUI} handles all auth states
  * return { [UI]: <div>{fullUI}</div> };
@@ -25,10 +24,10 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
-import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
-import GoogleAuth from "../google-auth.tsx";
+import GoogleAuth, { type Auth } from "../google-auth.tsx";
 
 // Re-export shared types for consumers
 export type {
@@ -38,10 +37,11 @@ export type {
 } from "../../../auth/auth-types.ts";
 import type {
   AuthManagerInput as GoogleAuthManagerInput,
-  AuthManagerOutput as GoogleAuthManagerOutput,
+  AuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
-export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
-export type { Auth } from "../google-auth.tsx";
+export type GoogleAuthManagerOutput = AuthManagerOutput<Auth>;
+export type { GoogleAuthManagerInput };
+export type { Auth, GoogleAuthCell } from "../google-auth.tsx";
 
 const GOOGLE_SCOPE_MAP_VALUES = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
@@ -132,13 +132,26 @@ export const GoogleAuthManager = pattern<
     );
   });
 
-  return AuthManagerBase({
+  const base = AuthManagerBase({
     requiredScopes,
     accountType,
     debugMode,
     descriptor: GoogleAuthManagerDescriptor,
     createAuth,
   });
+
+  return {
+    auth: base.auth as GoogleAuthManagerOutput["auth"],
+    availability: base.availability as GoogleAuthManagerOutput["availability"],
+    authInfo: base.authInfo as GoogleAuthManagerOutput["authInfo"],
+    isReady: base.isReady,
+    currentEmail: base.currentEmail,
+    currentState: base.currentState,
+    pickerUI: base.pickerUI,
+    statusUI: base.statusUI,
+    fullUI: base.fullUI,
+    [UI]: base.fullUI,
+  };
 });
 
 // Backward-compatible export for existing code that uses createGoogleAuth()

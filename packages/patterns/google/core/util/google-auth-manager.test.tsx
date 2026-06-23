@@ -4,7 +4,7 @@
  * Tests the GoogleAuthManager pattern behavior:
  * - Initial state (loading when no auth exists)
  * - Helper computed values (isReady, currentEmail, currentState)
- * - AuthInfo structure
+ * - Auth availability and AuthInfo structure
  *
  * Note: Since this pattern depends on wish() finding auth pieces,
  * we can only test the "no auth found" scenarios without external setup.
@@ -61,7 +61,10 @@ export default pattern<Record<string, never>, TestOutput>(() => {
     return state === "loading";
   });
 
-  const assert_default_auth_null = computed(() => authDefault.auth === null);
+  const assert_default_availability_loading = computed(() =>
+    authDefault.availability.state === "loading" &&
+    authDefault.availability.auth === null
+  );
 
   // AuthInfo should exist and have expected structure
   const _assert_authInfo_exists = computed(
@@ -104,7 +107,7 @@ export default pattern<Record<string, never>, TestOutput>(() => {
       // === Initial state checks ===
       { assertion: assert_default_not_ready },
       { assertion: assert_default_state_initial },
-      { assertion: assert_default_auth_null },
+      { assertion: assert_default_availability_loading },
 
       // === AuthInfo structure checks ===
       // NOTE: authInfo is a computed that depends on wish() results.

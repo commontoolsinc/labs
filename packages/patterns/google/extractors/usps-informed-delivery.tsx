@@ -29,7 +29,9 @@ import {
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
-import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import GmailExtractor, {
+  type GoogleAuthCell,
+} from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // Debug flag for development - disable in production
@@ -266,7 +268,7 @@ interface PatternInput {
   householdMembers?: HouseholdMember[] | Default<[]>;
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */

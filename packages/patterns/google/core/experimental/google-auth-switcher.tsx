@@ -16,9 +16,9 @@ import {
   navigateTo,
   pattern,
   UI,
-  Writable,
+  type Writable,
 } from "commonfabric";
-import GoogleAuth, { Auth } from "../google-auth.tsx";
+import GoogleAuth, { type GoogleAuthCell } from "../google-auth.tsx";
 import GoogleAuthPersonal from "../google-auth-personal.tsx";
 import GoogleAuthWork from "../google-auth-work.tsx";
 
@@ -47,28 +47,18 @@ interface Input {
       docs: false;
       contacts: false;
     }>;
-  auth:
-    | Auth
-    | Default<{
-      token: "";
-      tokenType: "";
-      scope: [];
-      expiresIn: 0;
-      expiresAt: 0;
-      refreshToken: "";
-      user: { email: ""; name: ""; picture: "" };
-    }>;
+  auth: GoogleAuthCell;
 }
 
 /** Google account switcher for choosing personal/work accounts. #googleAuthSwitcher */
 export interface Output {
-  auth: Auth;
+  auth: GoogleAuthCell;
 }
 
 // Handler to create personal wrapper and navigate to it
 const createPersonalWrapper = handler<
   unknown,
-  { auth: Writable<Auth>; selectedScopes: Writable<SelectedScopes> }
+  { auth: GoogleAuthCell; selectedScopes: Writable<SelectedScopes> }
 >((_, { auth, selectedScopes }) => {
   const wrapper = GoogleAuthPersonal({ auth, selectedScopes });
   return navigateTo(wrapper);
@@ -77,7 +67,7 @@ const createPersonalWrapper = handler<
 // Handler to create work wrapper and navigate to it
 const createWorkWrapper = handler<
   unknown,
-  { auth: Writable<Auth>; selectedScopes: Writable<SelectedScopes> }
+  { auth: GoogleAuthCell; selectedScopes: Writable<SelectedScopes> }
 >((_, { auth, selectedScopes }) => {
   const wrapper = GoogleAuthWork({ auth, selectedScopes });
   return navigateTo(wrapper);
@@ -88,13 +78,14 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
   const baseAuth = GoogleAuth({ auth, selectedScopes });
 
   // Check if logged in
-  const isLoggedIn = computed(() => !!baseAuth.auth?.user?.email);
-  const userEmail = computed(() => baseAuth.auth?.user?.email || "");
+  const authValue = computed(() => baseAuth.auth.get());
+  const isLoggedIn = computed(() => !!authValue?.user?.email);
+  const userEmail = computed(() => authValue?.user?.email || "");
 
   return {
     [NAME]: computed(() =>
-      baseAuth.auth?.user?.email
-        ? `Google Auth Setup - ${baseAuth.auth.user.email}`
+      authValue?.user?.email
+        ? `Google Auth Setup - ${authValue.user.email}`
         : "Google Auth Setup"
     ),
     [UI]: (
@@ -189,7 +180,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         )}
 
         {/* Embed base auth UI */}
-        {baseAuth as any}
+        {baseAuth[UI]}
       </div>
     ),
     auth: baseAuth.auth,

@@ -175,15 +175,13 @@ export default pattern<Input, Output>(
   ({ selectedBaseId, selectedTableId }) => {
     // Auth manager
     const {
-      auth: authResult,
-      isReady,
+      availability,
       fullUI: authUI,
     } = AirtableAuthManager({
       requiredScopes: REQUIRED_SCOPES,
     });
 
-    // deno-lint-ignore no-explicit-any
-    const auth = authResult as any;
+    const auth = availability.state === "ready" ? availability.auth : null;
 
     // State
     const bases = new Writable<BaseInfo[]>([]);
@@ -215,24 +213,6 @@ export default pattern<Input, Output>(
         (t) => t.id === selectedTableId,
       );
       return table?.name || "";
-    });
-
-    // Bound handlers — pass reactive inputs directly (no double-cast)
-    const boundFetchBases = fetchBases({ auth, bases, loading, error });
-    const boundFetchTables = fetchTables({
-      auth,
-      baseId: selectedBaseId,
-      tables,
-      loading,
-      error,
-    });
-    const boundFetchRecords = fetchRecords({
-      auth,
-      baseId: selectedBaseId,
-      tableId: selectedTableId,
-      records,
-      loading,
-      error,
     });
 
     // NOTE: onSelectBase/onSelectTable are bound per-item in .map() below
@@ -304,104 +284,16 @@ export default pattern<Input, Output>(
           {/* Auth section */}
           {authUI}
 
-          {/* Main content - only when authenticated */}
-          {ifElse(
-            isReady,
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-              }}
-            >
-              {/* Base selection */}
+          {auth
+            ? (
               <div
                 style={{
-                  padding: "16px",
-                  backgroundColor: "#f8f9fa",
-                  borderRadius: "8px",
-                  border: "1px solid #e0e0e0",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "12px",
-                  }}
-                >
-                  <h3 style={{ fontSize: "16px", margin: "0" }}>
-                    Select a Base
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={boundFetchBases}
-                    disabled={loading}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: loading ? "#93c5fd" : "#18BFFF",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: loading ? "not-allowed" : "pointer",
-                      fontWeight: "500",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {loading ? "Loading..." : "Load Bases"}
-                  </button>
-                </div>
-
-                {ifElse(
-                  hasBases,
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "4px",
-                    }}
-                  >
-                    {baseList.map((base) => (
-                      <button
-                        type="button"
-                        onClick={onSelectBase({
-                          baseId: base.id,
-                          selectedBaseId,
-                          selectedTableId,
-                          tables,
-                          records,
-                        })}
-                        style={{
-                          padding: "10px 14px",
-                          backgroundColor: selectedBaseId === base.id
-                            ? "#e0f2fe"
-                            : "white",
-                          border: selectedBaseId === base.id
-                            ? "1px solid #18BFFF"
-                            : "1px solid #e0e0e0",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          fontSize: "14px",
-                          fontWeight: selectedBaseId === base.id
-                            ? "600"
-                            : "normal",
-                        }}
-                      >
-                        {base.name}
-                      </button>
-                    ))}
-                  </div>,
-                  <p style={{ color: "#666", fontSize: "14px", margin: "0" }}>
-                    Click "Load Bases" to see your Airtable bases.
-                  </p>,
-                )}
-              </div>
-
-              {/* Table selection */}
-              {ifElse(
-                hasBaseSelected,
+                {/* Base selection */}
                 <div
                   style={{
                     padding: "16px",
@@ -419,11 +311,11 @@ export default pattern<Input, Output>(
                     }}
                   >
                     <h3 style={{ fontSize: "16px", margin: "0" }}>
-                      Select a Table from {selectedBaseName}
+                      Select a Base
                     </h3>
                     <button
                       type="button"
-                      onClick={boundFetchTables}
+                      onClick={fetchBases({ auth, bases, loading, error })}
                       disabled={loading}
                       style={{
                         padding: "8px 16px",
@@ -436,12 +328,12 @@ export default pattern<Input, Output>(
                         fontSize: "14px",
                       }}
                     >
-                      {loading ? "Loading..." : "Load Tables"}
+                      {loading ? "Loading..." : "Load Bases"}
                     </button>
                   </div>
 
                   {ifElse(
-                    hasTables,
+                    hasBases,
                     <div
                       style={{
                         display: "flex",
@@ -449,191 +341,311 @@ export default pattern<Input, Output>(
                         gap: "4px",
                       }}
                     >
-                      {tableList.map((table) => (
+                      {baseList.map((base) => (
                         <button
                           type="button"
-                          onClick={onSelectTable({
-                            tableId: table.id,
+                          onClick={onSelectBase({
+                            baseId: base.id,
+                            selectedBaseId,
                             selectedTableId,
+                            tables,
                             records,
                           })}
                           style={{
                             padding: "10px 14px",
-                            backgroundColor: selectedTableId === table.id
+                            backgroundColor: selectedBaseId === base.id
                               ? "#e0f2fe"
                               : "white",
-                            border: selectedTableId === table.id
+                            border: selectedBaseId === base.id
                               ? "1px solid #18BFFF"
                               : "1px solid #e0e0e0",
                             borderRadius: "6px",
                             cursor: "pointer",
                             textAlign: "left",
                             fontSize: "14px",
-                            fontWeight: selectedTableId === table.id
+                            fontWeight: selectedBaseId === base.id
                               ? "600"
                               : "normal",
                           }}
                         >
-                          {table.name}
+                          {base.name}
                         </button>
                       ))}
                     </div>,
                     <p
                       style={{ color: "#666", fontSize: "14px", margin: "0" }}
                     >
-                      Click "Load Tables" to see tables in this base.
+                      Click "Load Bases" to see your Airtable bases.
                     </p>,
                   )}
-                </div>,
-                null,
-              )}
+                </div>
 
-              {/* Fetch records */}
-              {ifElse(
-                hasTableSelected,
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#f8f9fa",
-                    borderRadius: "8px",
-                    border: "1px solid #e0e0e0",
-                  }}
-                >
+                {/* Table selection */}
+                {ifElse(
+                  hasBaseSelected,
                   <div
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "12px",
+                      padding: "16px",
+                      backgroundColor: "#f8f9fa",
+                      borderRadius: "8px",
+                      border: "1px solid #e0e0e0",
                     }}
                   >
-                    <h3 style={{ fontSize: "16px", margin: "0" }}>
-                      Records from {selectedTableName}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={boundFetchRecords}
-                      disabled={loading}
+                    <div
                       style={{
-                        padding: "8px 16px",
-                        backgroundColor: loading ? "#93c5fd" : "#18BFFF",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: loading ? "not-allowed" : "pointer",
-                        fontWeight: "500",
-                        fontSize: "14px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
                       }}
                     >
-                      {loading ? "Fetching..." : "Fetch Records"}
-                    </button>
-                  </div>
-
-                  {ifElse(
-                    hasRecords,
-                    <div>
-                      <p
+                      <h3 style={{ fontSize: "16px", margin: "0" }}>
+                        Select a Table from {selectedBaseName}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={fetchTables({
+                          auth,
+                          baseId: selectedBaseId,
+                          tables,
+                          loading,
+                          error,
+                        })}
+                        disabled={loading}
                         style={{
+                          padding: "8px 16px",
+                          backgroundColor: loading ? "#93c5fd" : "#18BFFF",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: loading ? "not-allowed" : "pointer",
+                          fontWeight: "500",
                           fontSize: "14px",
-                          color: "#666",
-                          margin: "0 0 12px 0",
                         }}
                       >
-                        {recordCount} records loaded
-                      </p>
+                        {loading ? "Loading..." : "Load Tables"}
+                      </button>
+                    </div>
+
+                    {ifElse(
+                      hasTables,
                       <div
                         style={{
-                          overflow: "auto",
-                          maxHeight: "500px",
-                          border: "1px solid #e0e0e0",
-                          borderRadius: "6px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
                         }}
                       >
-                        <table
+                        {tableList.map((table) => (
+                          <button
+                            type="button"
+                            onClick={onSelectTable({
+                              tableId: table.id,
+                              selectedTableId,
+                              records,
+                            })}
+                            style={{
+                              padding: "10px 14px",
+                              backgroundColor: selectedTableId === table.id
+                                ? "#e0f2fe"
+                                : "white",
+                              border: selectedTableId === table.id
+                                ? "1px solid #18BFFF"
+                                : "1px solid #e0e0e0",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: "14px",
+                              fontWeight: selectedTableId === table.id
+                                ? "600"
+                                : "normal",
+                            }}
+                          >
+                            {table.name}
+                          </button>
+                        ))}
+                      </div>,
+                      <p
+                        style={{ color: "#666", fontSize: "14px", margin: "0" }}
+                      >
+                        Click "Load Tables" to see tables in this base.
+                      </p>,
+                    )}
+                  </div>,
+                  null,
+                )}
+
+                {/* Fetch records */}
+                {ifElse(
+                  hasTableSelected,
+                  <div
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#f8f9fa",
+                      borderRadius: "8px",
+                      border: "1px solid #e0e0e0",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <h3 style={{ fontSize: "16px", margin: "0" }}>
+                        Records from {selectedTableName}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={fetchRecords({
+                          auth,
+                          baseId: selectedBaseId,
+                          tableId: selectedTableId,
+                          records,
+                          loading,
+                          error,
+                        })}
+                        disabled={loading}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: loading ? "#93c5fd" : "#18BFFF",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: loading ? "not-allowed" : "pointer",
+                          fontWeight: "500",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {loading ? "Fetching..." : "Fetch Records"}
+                      </button>
+                    </div>
+
+                    {ifElse(
+                      hasRecords,
+                      <div>
+                        <p
                           style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: "13px",
+                            fontSize: "14px",
+                            color: "#666",
+                            margin: "0 0 12px 0",
                           }}
                         >
-                          <thead>
-                            <tr
-                              style={{
-                                backgroundColor: "#f3f4f6",
-                                position: "sticky",
-                                top: "0",
-                              }}
-                            >
-                              {columnHeaders.map((col) => (
-                                <th
-                                  style={{
-                                    padding: "8px 12px",
-                                    textAlign: "left",
-                                    borderBottom: "2px solid #e0e0e0",
-                                    fontWeight: "600",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {col}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tableRows.map(
-                              (row) => (
-                                <tr>
-                                  {row.cells.map((cell) => (
-                                    <td
-                                      style={{
-                                        padding: "8px 12px",
-                                        borderBottom: "1px solid #f0f0f0",
-                                        maxWidth: "300px",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {cell}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ),
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>,
-                    <p
-                      style={{ color: "#666", fontSize: "14px", margin: "0" }}
-                    >
-                      Click "Fetch Records" to load data from this table.
-                    </p>,
-                  )}
-                </div>,
-                null,
-              )}
+                          {recordCount} records loaded
+                        </p>
+                        <div
+                          style={{
+                            overflow: "auto",
+                            maxHeight: "500px",
+                            border: "1px solid #e0e0e0",
+                            borderRadius: "6px",
+                          }}
+                        >
+                          <table
+                            style={{
+                              width: "100%",
+                              borderCollapse: "collapse",
+                              fontSize: "13px",
+                            }}
+                          >
+                            <thead>
+                              <tr
+                                style={{
+                                  backgroundColor: "#f3f4f6",
+                                  position: "sticky",
+                                  top: "0",
+                                }}
+                              >
+                                {columnHeaders.map((col) => (
+                                  <th
+                                    style={{
+                                      padding: "8px 12px",
+                                      textAlign: "left",
+                                      borderBottom: "2px solid #e0e0e0",
+                                      fontWeight: "600",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tableRows.map(
+                                (row) => (
+                                  <tr>
+                                    {row.cells.map((cell) => (
+                                      <td
+                                        style={{
+                                          padding: "8px 12px",
+                                          borderBottom: "1px solid #f0f0f0",
+                                          maxWidth: "300px",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {cell}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ),
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>,
+                      <p
+                        style={{ color: "#666", fontSize: "14px", margin: "0" }}
+                      >
+                        Click "Fetch Records" to load data from this table.
+                      </p>,
+                    )}
+                  </div>,
+                  null,
+                )}
 
-              {/* Error display */}
-              {ifElse(
-                hasError,
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#fee2e2",
-                    borderRadius: "8px",
-                    border: "1px solid #ef4444",
-                    fontSize: "14px",
-                    color: "#dc2626",
-                  }}
-                >
-                  <strong>Error:</strong> {error}
-                </div>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
+                {/* Error display */}
+                {ifElse(
+                  hasError,
+                  <div
+                    style={{
+                      padding: "12px",
+                      backgroundColor: "#fee2e2",
+                      borderRadius: "8px",
+                      border: "1px solid #ef4444",
+                      fontSize: "14px",
+                      color: "#dc2626",
+                    }}
+                  >
+                    <strong>Error:</strong> {error}
+                  </div>,
+                  null,
+                )}
+              </div>
+            )
+            : (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f9fafb",
+                  borderRadius: "8px",
+                  border: "1px solid #e5e7eb",
+                  color: "#4b5563",
+                }}
+              >
+                <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                  Waiting for Airtable connection
+                </div>
+                <div style={{ fontSize: "14px" }}>
+                  Connect Airtable with base and record read access before
+                  loading bases, tables, or records.
+                </div>
+              </div>
+            )}
         </div>
       ),
       records: computed(() => records.get()),

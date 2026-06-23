@@ -72,7 +72,7 @@ const AIRTABLE_AUTH_SOURCE = `import {
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -218,7 +218,10 @@ export function createPreviewUI(
  * Uses \`accessToken\` field (OAuth2TokenSchema convention).
  *
  * CRITICAL: When consuming from another pattern, DO NOT use derive()!
- * Use direct property access: \`airtableAuthPiece.auth\`
+ * Use direct property access: \`airtableAuthPiece.auth\`.
+ * If selecting between auth sources, use a bare ternary such as
+ * \`availability.state === "ready" ? availability.auth : null\`; this preserves
+ * the underlying writable cell reference needed for token refresh.
  */
 export type AirtableAuth = {
   accessToken: Secret<string> | Default<"">;
@@ -255,20 +258,12 @@ interface Input {
     "schema.bases:write": false;
     "webhook:manage": false;
   }>;
-  auth: AirtableAuth | Default<{
-    accessToken: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
-}
+	  auth: Writable<AirtableAuth>;
+	}
 
-/** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
-interface Output {
-  auth: AirtableAuth;
+	/** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
+	interface Output {
+	  auth: Writable<AirtableAuth>;
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display */
@@ -281,28 +276,35 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Module-scope singleton refresh guard for Airtable OAuth.
-// This is intentional: all instances of this auth pattern share one guard,
-// preventing concurrent refresh requests. This is correct because each
-// provider (e.g. Airtable, Google) has its own module with its own guard.
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/airtable-oauth/refresh",
-);
+async function refreshAirtableAuthToken(
+  auth: Writable<AirtableAuth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/airtable-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshAirtableAuthToken(
+        auth,
+        refreshInProgress,
+      );
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -316,17 +318,23 @@ const handleRefresh = handler<
 // Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshAirtableAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.accessToken || !currentAuth?.refreshToken) return;
 
@@ -341,7 +349,7 @@ const bgRefreshHandler = handler<
     );
 
     try {
-      await refreshAuthToken(auth);
+      await refreshAirtableAuthToken(auth, refreshInProgress);
       console.log("[airtable-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -387,11 +395,12 @@ export default pattern<Input, Output>(
     const hasSelectedScopes = computed(() =>
       Object.values(selectedScopes).some(Boolean)
     );
+    const authValue = computed(() => auth.get());
 
     // Check if re-auth is needed (selected scopes differ from granted)
     const needsReauth = computed(() => {
-      if (!auth?.accessToken) return false;
-      const grantedScopes: string[] = auth?.scope || [];
+      if (!authValue?.accessToken) return false;
+      const grantedScopes: string[] = authValue?.scope || [];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
         if (enabled && !grantedScopes.includes(key)) {
           return true;
@@ -404,31 +413,32 @@ export default pattern<Input, Output>(
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
-      if (!auth?.accessToken || !auth?.expiresAt) return false;
-      return auth.expiresAt < now.get();
+      if (!authValue?.accessToken || !authValue?.expiresAt) return false;
+      return authValue.expiresAt < now.get();
     });
 
     const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
     );
 
-    const checkboxesDisabled = computed(() => !!auth?.accessToken);
+    const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
+    const refreshInProgress = new Writable(false);
     const refreshing = new Writable(false);
     const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    const hasEmail = computed(() => !!auth?.user?.email);
-    const hasUserName = computed(() => !!auth?.user?.name);
+    const hasEmail = computed(() => !!authValue?.user?.email);
+    const hasUserName = computed(() => !!authValue?.user?.name);
 
     // Data-only computed for the tile preview — resolves reactive values to plain scalars
     const previewState = computed(() => {
-      const email = auth?.user?.email || "";
-      const name = auth?.user?.name || "";
+      const email = authValue?.user?.email || "";
+      const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
       const now = safeDateNow();
-      const expiresAt = auth?.expiresAt || 0;
+      const expiresAt = authValue?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
         expiresAt - now < 10 * 60 * 1000;
@@ -440,7 +450,7 @@ export default pattern<Input, Output>(
         ? "warning"
         : "ready";
       const scopeSummary = isAuthenticated
-        ? getScopeSummary(auth?.scope || [])
+        ? getScopeSummary(authValue?.scope || [])
         : getSelectedScopeSummary({
           "data.records:read": !!selectedScopes["data.records:read"],
           "data.records:write": !!selectedScopes["data.records:write"],
@@ -466,15 +476,15 @@ export default pattern<Input, Output>(
       };
     });
 
-    const loggedIn = computed(() => !!auth?.accessToken);
+    const loggedIn = computed(() => !!authValue?.accessToken);
     const notLoggedInWithScopes = computed(() => !loggedIn && hasSelectedScopes);
     const showTokenStatus = computed(() =>
-      !!auth?.user?.email && !isTokenExpired
+      !!authValue?.user?.email && !isTokenExpired
     );
 
     // Data-only computed for granted scopes
     const grantedScopesList = computed(() => {
-      const scopeList: string[] = auth?.scope || [];
+      const scopeList: string[] = authValue?.scope || [];
       return scopeList.map(
         (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
       );
@@ -483,7 +493,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return \`Airtable Auth (\${auth.user.email})\`;
+          return \`Airtable Auth (\${authValue.user.email})\`;
         }
         return "Airtable Auth";
       }),
@@ -517,10 +527,10 @@ export default pattern<Input, Output>(
               loggedIn,
               <div>
                 <p style={{ margin: "8px 0" }}>
-                  <strong>Email:</strong> {auth.user.email}
+                  <strong>Email:</strong> {authValue.user.email}
                 </p>
                 <p style={{ margin: "8px 0" }}>
-                  <strong>Name:</strong> {auth.user.name}
+                  <strong>Name:</strong> {authValue.user.name}
                 </p>
               </div>,
               <p style={{ color: "#666" }}>
@@ -533,7 +543,7 @@ export default pattern<Input, Output>(
           <div
             style={{
               padding: "20px",
-              backgroundColor: auth?.user?.email ? "#e5e7eb" : "#f0f4f8",
+              backgroundColor: authValue?.user?.email ? "#e5e7eb" : "#f0f4f8",
               borderRadius: "8px",
               border: "1px solid #d0d7de",
               opacity: loggedIn ? 0.7 : 1,
@@ -661,7 +671,12 @@ export default pattern<Input, Output>(
               </p>
               <button
                 type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                onClick={handleRefresh({
+                  auth,
+                  refreshInProgress,
+                  refreshing,
+                  refreshFailed,
+                })}
                 disabled={refreshing}
                 style={{
                   padding: "10px 20px",
@@ -765,7 +780,12 @@ export default pattern<Input, Output>(
                 </div>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
                   disabled={refreshing}
                   style={{
                     padding: "8px 16px",
@@ -817,12 +837,12 @@ export default pattern<Input, Output>(
           />
           <div>
             <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+              {ifElse(hasUserName, authValue.user.name, authValue.user.email)}
             </div>
             {ifElse(
               hasUserName,
               <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {auth.user.email}
+                {authValue.user.email}
               </div>,
               null,
             )}
@@ -925,8 +945,8 @@ export default pattern<Input, Output>(
           </div>
         </div>
       ),
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );
@@ -944,21 +964,24 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  *
  * Usage:
  * \`\`\`typescript
- * const { auth, fullUI, isReady } = AirtableAuthManager({
+ * const { availability, fullUI } = AirtableAuthManager({
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
  *
- * if (!isReady) return;
- * // Use auth.accessToken for API calls
+ * if (availability.state !== "ready") return;
+ * const auth = availability.auth;
  *
  * return { [UI]: <div>{fullUI}</div> };
  * \`\`\`
  */
 
-import { action, navigateTo, pattern, Writable } from "commonfabric";
-import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
-import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
-import AirtableAuth from "../airtable-auth.tsx";
+	import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
+	import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
+	import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+	import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
+	import AirtableAuth, {
+	  type AirtableAuth as AirtableAuthData,
+	} from "../airtable-auth.tsx";
 
 // Re-export shared types for consumers
 export type {
@@ -966,11 +989,11 @@ export type {
   AuthState,
   TokenExpiryWarning,
 } from "../../../auth/auth-types.ts";
-export type {
-  AuthManagerInput as AirtableAuthManagerInput,
-  AuthManagerOutput as AirtableAuthManagerOutput,
-} from "../../../auth/create-auth-manager.tsx";
-export type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
+	export type {
+	  AuthManagerInput as AirtableAuthManagerInput,
+	} from "../../../auth/create-auth-manager.tsx";
+	export type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
+	export type AirtableAuthManagerOutput = AuthManagerOutput<AirtableAuthData>;
 
 /** Airtable scope keys */
 export type ScopeKey =
@@ -1013,10 +1036,10 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: false,
 };
 
-export const AirtableAuthManager = pattern<
-  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
-  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
->(({ requiredScopes, accountType, debugMode }) => {
+	export const AirtableAuthManager = pattern<
+	  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+	  AirtableAuthManagerOutput
+	>(({ requiredScopes, accountType, debugMode }) => {
   const createAuth = action(() => {
     const required = Array.isArray(requiredScopes) ? requiredScopes : [];
     const emptyAuth: Record<string, unknown> = {
@@ -1059,14 +1082,29 @@ export const AirtableAuthManager = pattern<
     );
   });
 
-  return AuthManagerBase({
-    requiredScopes,
-    accountType,
-    debugMode,
-    descriptor: AirtableAuthManagerDescriptor,
-    createAuth,
-  });
-});
+	  const base = AuthManagerBase({
+	    requiredScopes,
+	    accountType,
+	    debugMode,
+	    descriptor: AirtableAuthManagerDescriptor,
+	    createAuth,
+	  });
+
+	  return {
+	    auth: base.auth as AirtableAuthManagerOutput["auth"],
+	    availability: base.availability as AirtableAuthManagerOutput[
+	      "availability"
+	    ],
+	    authInfo: base.authInfo as AirtableAuthManagerOutput["authInfo"],
+	    isReady: base.isReady,
+	    currentEmail: base.currentEmail,
+	    currentState: base.currentState,
+	    pickerUI: base.pickerUI,
+	    statusUI: base.statusUI,
+	    fullUI: base.fullUI,
+	    [UI]: base.fullUI,
+	  };
+	});
 
 export default AirtableAuthManager;
 `;
@@ -1587,14 +1625,13 @@ export default pattern<Input, Output>(
   ({ selectedBaseId, selectedTableId }) => {
     // Auth manager
     const {
-      auth: authResult,
-      isReady,
+      availability,
       fullUI: authUI,
     } = AirtableAuthManager({
       requiredScopes: REQUIRED_SCOPES,
     });
 
-    const auth = authResult as any;
+    const auth = availability.state === "ready" ? availability.auth : null;
 
     // State
     const bases = new Writable<BaseInfo[]>([]);
@@ -1626,24 +1663,6 @@ export default pattern<Input, Output>(
         (t) => t.id === selectedTableId,
       );
       return table?.name || "";
-    });
-
-    // Bound handlers -- pass reactive inputs directly (no double-cast)
-    const boundFetchBases = fetchBases({ auth, bases, loading, error });
-    const boundFetchTables = fetchTables({
-      auth,
-      baseId: selectedBaseId,
-      tables,
-      loading,
-      error,
-    });
-    const boundFetchRecords = fetchRecords({
-      auth,
-      baseId: selectedBaseId,
-      tableId: selectedTableId,
-      records,
-      loading,
-      error,
     });
 
     const boundSelectBase = onSelectBase({
@@ -1757,16 +1776,15 @@ export default pattern<Input, Output>(
           {/* Auth section */}
           {authUI}
 
-          {/* Main content - only when authenticated */}
-          {ifElse(
-            isReady,
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-              }}
-            >
+          {auth
+            ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
+                }}
+              >
               {/* Base selection */}
               <div
                 style={{
@@ -1789,7 +1807,7 @@ export default pattern<Input, Output>(
                   </h3>
                   <button
                     type="button"
-                    onClick={boundFetchBases}
+                    onClick={fetchBases({ auth, bases, loading, error })}
                     disabled={loading}
                     style={{
                       padding: "8px 16px",
@@ -1847,7 +1865,13 @@ export default pattern<Input, Output>(
                     </h3>
                     <button
                       type="button"
-                      onClick={boundFetchTables}
+                      onClick={fetchTables({
+                        auth,
+                        baseId: selectedBaseId,
+                        tables,
+                        loading,
+                        error,
+                      })}
                       disabled={loading}
                       style={{
                         padding: "8px 16px",
@@ -1909,7 +1933,14 @@ export default pattern<Input, Output>(
                     </h3>
                     <button
                       type="button"
-                      onClick={boundFetchRecords}
+                      onClick={fetchRecords({
+                        auth,
+                        baseId: selectedBaseId,
+                        tableId: selectedTableId,
+                        records,
+                        loading,
+                        error,
+                      })}
                       disabled={loading}
                       style={{
                         padding: "8px 16px",
@@ -2028,9 +2059,27 @@ export default pattern<Input, Output>(
                 </div>,
                 null,
               )}
-            </div>,
-            null,
-          )}
+              </div>
+            )
+            : (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f9fafb",
+                  borderRadius: "8px",
+                  border: "1px solid #e5e7eb",
+                  color: "#4b5563",
+                }}
+              >
+                <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                  Waiting for Airtable connection
+                </div>
+                <div style={{ fontSize: "14px" }}>
+                  Connect Airtable with base and record read access before
+                  loading bases, tables, or records.
+                </div>
+              </div>
+            )}
         </div>
       ),
       records: computed(() => records.get()),
@@ -2371,13 +2420,13 @@ Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` pattern — f
 - Import \`AuthManagerBase\` from \`"../../../auth/create-auth-manager.tsx"\`
 - Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
 - Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
-- Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, \`AuthManagerInput\`, \`AuthManagerOutput\`
+	- Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, and \`AuthManagerInput\`; define a provider-specific \`AuthManagerOutput<ProviderAuth>\` alias
 - Re-export the auth type from the auth pattern
 - Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
 - Define \`${pascalName}AuthManager\` as a module-scope \`pattern(...)\`
 - Inside that pattern, define \`createAuth = action(() => navigateTo(${pascalName}Auth(...)))\`; do not put pattern construction inside a standalone factory function
 - Build \`selectedScopes\` explicitly with one \`new Writable(required.includes("<scope>"))\` property per provider scope
-- Call \`AuthManagerBase({ requiredScopes, accountType, debugMode, descriptor, createAuth })\` and export the wrapper pattern as both named and default
+	- Call \`AuthManagerBase({ requiredScopes, accountType, debugMode, descriptor, createAuth })\`, return the provider-typed fields including \`availability\`, and export the wrapper pattern as both named and default
 - This file should be ~90-130 lines total
 
 ## File 3: \`packages/patterns/${providerName}/core/util/${providerName}-client.ts\`
@@ -2419,19 +2468,20 @@ Main importer pattern. Follow the Airtable importer reference:
 - Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
-  - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)
+  - Each provider call handler takes a non-null \`auth\` cell and the relevant state cells (\`loading\`, \`error\`, result cells)
   - Each uses \`try/catch/finally\` with \`loading.set(true/false)\`
   - Creates a client instance: \`${pascalName}Client(auth)\`
 - The pattern function:
-  1. Creates auth manager: \`const { auth, isReady, fullUI: authUI } = ${pascalName}AuthManager({ requiredScopes: [...] })\`
+  1. Creates auth manager: \`const { availability, fullUI: authUI } = ${pascalName}AuthManager({ requiredScopes: [...] })\`, then derives \`auth\` with \`availability.state === "ready" ? availability.auth : null\`
   2. Defines Writable cells for mutable state (lists, loading, error)
   3. Defines computed cells for derived state (hasList, recordCount, etc.)
-  4. Binds handlers with reactive context
-  5. Returns [NAME], [UI], and data outputs
+  4. Uses one terminal return statement; do not return early from the pattern body
+  5. Renders \`auth ? mainContent : notReadyPanel\` so provider handlers are bound only in the authenticated branch where \`auth\` is non-null
+  6. Returns [NAME], [UI], and data outputs
 - UI structure:
   1. Title header
   2. \`{authUI}\` for auth status/picker
-  3. \`ifElse(isReady, mainContent, null)\` — main content only when authenticated
+  3. \`auth ? mainContent : notReadyPanel\` — main content only when authenticated, with an in-app explanation while auth is unavailable
   4. Inside main content:
      - Resource selection (hierarchical if applicable, like base -> table)
      - Fetch button with loading state: \`{ifElse(loading, "Loading...", "Fetch Data")}\`

@@ -36,7 +36,7 @@ import {
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
@@ -537,7 +537,7 @@ const setDueDateForGroup = handler<
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
   // Track items manually marked as returned (persisted)
   manuallyReturned?: Writable<string[] | Default<[]>>;
   // Track holds manually dismissed (persisted)

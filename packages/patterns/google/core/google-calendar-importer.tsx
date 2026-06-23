@@ -34,6 +34,8 @@ export type Auth = {
   } | Default<{ email: ""; name: ""; picture: "" }>;
 };
 
+export type GoogleAuthCell = Writable<Auth>;
+
 export type CalendarEvent = {
   id: string;
   summary: string;
@@ -133,7 +135,7 @@ function parseCalendarEvent(
 type FetchState = {
   events: Writable<CalendarEvent[]>;
   calendars: Writable<Calendar[]>;
-  auth: Writable<Auth>;
+  auth: Writable<Auth> | null;
   settings: Writable<{
     daysBack: number;
     daysForward: number;
@@ -153,7 +155,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
 
   debugLog(debugMode, "fetchCalendarEvents!");
 
-  if (!state.auth.get().token) {
+  if (!state.auth?.get()?.token) {
     debugWarn(debugMode, "no token found in auth cell");
     if (state.fetching) state.fetching.set(false);
     return;
@@ -411,7 +413,7 @@ const toggleCalendarSelection = handler<
     selectedCalendarIds: Writable<string[]>;
     events: Writable<CalendarEvent[]>;
     calendars: Writable<Calendar[]>;
-    auth: Writable<Auth>;
+    auth: Writable<Auth> | null;
     settings: Writable<Settings>;
     fetching?: Writable<boolean>;
   }
@@ -433,7 +435,7 @@ const selectAllCalendars = handler<
     calendars: Writable<Calendar[]>;
     selectedCalendarIds: Writable<string[]>;
     events: Writable<CalendarEvent[]>;
-    auth: Writable<Auth>;
+    auth: Writable<Auth> | null;
     settings: Writable<Settings>;
     fetching?: Writable<boolean>;
   }
@@ -451,7 +453,7 @@ const deselectAllCalendars = handler<
     selectedCalendarIds: Writable<string[]>;
     events: Writable<CalendarEvent[]>;
     calendars: Writable<Calendar[]>;
-    auth: Writable<Auth>;
+    auth: Writable<Auth> | null;
     settings: Writable<Settings>;
     fetching?: Writable<boolean>;
   }
@@ -510,7 +512,7 @@ interface GoogleCalendarImporterInput {
     }>;
   // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
   // Use: cf piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Google Calendar event importer. #calendarEvents */
@@ -579,24 +581,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       requiredScopes: ["calendar"] as ScopeKey[],
     });
 
-    // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-    const hasLinkedAuth = !!(overrideAuth?.token);
-    const overrideAuthEmail = overrideAuth?.user?.email || "";
+    // Check if overrideAuth is provided for manual linking.
+    const overrideAuthValue = computed(() => overrideAuth?.get());
+    const hasLinkedAuth = !!(overrideAuthValue?.token);
+    const overrideAuthEmail = overrideAuthValue?.user?.email || "";
 
-    // Use overrideAuth if provided, otherwise use wished auth
-    // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
-    // Note: We wrap overrideAuth in a local Writable outside of reactive context
-    const overrideAuthCell = new Writable<Auth | null>(null);
-    computed(() => {
-      if (overrideAuth?.token) {
-        overrideAuthCell.set(overrideAuth as any);
-      }
-    });
-
-    // Choose auth source based on overrideAuth availability
-    // Keep the bare ternary so the chosen branch stays a live cell reference
-    // (preserves token writability for refresh); avoid projecting auth.
-    const auth = (hasLinkedAuth ? overrideAuthCell : wishedAuth) as any;
+    // Choose auth source based on overrideAuth availability.
+    const auth = overrideAuth && hasLinkedAuth ? overrideAuth : wishedAuth;
     const isReady = hasLinkedAuth ? hasLinkedAuth : wishedIsReady;
     const currentEmail = hasLinkedAuth ? overrideAuthEmail : wishedCurrentEmail;
 

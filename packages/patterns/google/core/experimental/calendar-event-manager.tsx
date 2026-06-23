@@ -301,7 +301,7 @@ const confirmOperation = handler<
   unknown,
   {
     pendingOp: Writable<PendingOperation>;
-    auth: Writable<Auth>;
+    auth: Writable<Auth> | null;
     processing: Writable<boolean>;
     result: Writable<OperationResult>;
     draft: Writable<EventDraft>;
@@ -314,6 +314,16 @@ const confirmOperation = handler<
   ) => {
     const op = pendingOp.get();
     if (!op) return;
+
+    if (!auth) {
+      result.set({
+        success: false,
+        operation: op.operation,
+        error: "Connect Google Calendar before applying changes.",
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
 
     processing.set(true);
     result.set(null);

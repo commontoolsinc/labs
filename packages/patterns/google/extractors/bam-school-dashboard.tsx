@@ -30,7 +30,7 @@ import {
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
@@ -288,7 +288,7 @@ interface PatternInput {
       teacher: "Mr. Zaragoza";
     }>;
   dismissedIds?: Writable<string[] | Default<[]>>;
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */

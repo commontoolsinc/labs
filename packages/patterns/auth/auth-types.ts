@@ -1,6 +1,7 @@
 /**
  * Shared types for OAuth auth patterns and auth managers.
  */
+import type { VNode, Writable } from "commonfabric";
 
 /**
  * Visual status of auth in preview/consumer UI components.
@@ -37,12 +38,43 @@ export type AuthState =
   | "token-expired"
   | "ready";
 
+/** Common fields the shared auth manager reads from provider auth data. */
+export interface OAuthAuthData {
+  token?: unknown;
+  accessToken?: unknown;
+  scope?: readonly string[];
+  expiresAt?: number;
+  refreshToken?: unknown;
+  user?: {
+    email?: string;
+    name?: string;
+    picture?: string;
+  };
+}
+
+/** Live writable provider auth cell. */
+export type AuthCell<TAuth extends OAuthAuthData = OAuthAuthData> = Writable<
+  TAuth
+>;
+
+/** Auth availability mirrors AuthState and carries auth only when a cell exists. */
+export type AuthAvailability<TAuth extends OAuthAuthData = OAuthAuthData> =
+  | { state: "loading"; auth: null }
+  | { state: "needs-login"; auth: AuthCell<TAuth> }
+  | {
+    state: "missing-scopes";
+    auth: AuthCell<TAuth>;
+    missingScopes: string[];
+  }
+  | { state: "token-expired"; auth: AuthCell<TAuth> }
+  | { state: "ready"; auth: AuthCell<TAuth> };
+
 /** Complete auth info bundle returned by auth managers */
-export interface AuthInfo {
+export interface AuthInfo<TAuth extends OAuthAuthData = OAuthAuthData> {
   state: AuthState;
-  // deno-lint-ignore no-explicit-any
-  auth: any | null;
-  authCell: unknown;
+  availability: AuthAvailability<TAuth>;
+  auth: AuthCell<TAuth> | null;
+  authCell: AuthCell<TAuth> | null;
   email: string;
   hasRequiredScopes: boolean;
   grantedScopes: string[];
@@ -55,5 +87,5 @@ export interface AuthInfo {
   statusDotColor: string;
   statusText: string;
   piece: unknown;
-  userChip: unknown;
+  userChip: VNode | null;
 }

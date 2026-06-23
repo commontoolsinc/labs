@@ -297,9 +297,9 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 
 3. **The pattern must support overrideAuth**: The gmail-importer has:
    ```typescript
-   overrideAuth?: Auth;
+   overrideAuth?: GoogleAuthCell;
    ```
-   This optional input is what receives the linked auth data.
+   This optional input receives the linked writable auth cell.
 
 4. **Check "Reading From" in inspect**: After linking, `cf piece inspect` shows:
    ```

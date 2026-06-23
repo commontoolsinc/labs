@@ -31,7 +31,9 @@ import {
   uiVariant,
   when,
 } from "commonfabric";
-import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import GmailExtractor, {
+  type GoogleAuthCell,
+} from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -119,7 +121,7 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */

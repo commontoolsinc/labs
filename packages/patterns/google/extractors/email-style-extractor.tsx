@@ -195,7 +195,7 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     const extractor = GmailExtractor({
       gmailQuery,
       limit: 30,
-      overrideAuth: auth,
+      overrideAuth: auth ?? undefined,
     });
 
     const allEmails = extractor.emails;

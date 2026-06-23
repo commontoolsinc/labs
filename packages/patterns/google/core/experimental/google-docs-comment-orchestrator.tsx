@@ -427,11 +427,7 @@ const fetchComments = handler<
     return;
   }
 
-  const token = auth.get()?.token;
-  if (!token) {
-    lastError.set("Please authenticate with Google first");
-    return;
-  }
+  const token = auth.get().token;
 
   isFetching.set(true);
   lastError.set(null);
@@ -459,6 +455,13 @@ const fetchComments = handler<
   } finally {
     isFetching.set(false);
   }
+});
+
+const reportFetchCommentsAuthNotReady = handler<
+  unknown,
+  { lastError: Writable<string | null> }
+>((_, { lastError }) => {
+  lastError.set("Please authenticate with Google first");
 });
 
 // Regenerate AI response for a comment (bump nonce)
@@ -578,18 +581,18 @@ export default pattern<Input, Output>(
 
     // Auth via createGoogleAuth utility (requires Drive and Docs scopes)
     const {
-      auth,
+      availability,
       authInfo,
       fullUI: authFullUI,
-      isReady: isAuthenticated,
       currentEmail: _currentEmail, // Prefixed with _ as not currently used in UI
     } = createGoogleAuth({
       requiredScopes: ["drive", "docs"] as ScopeKey[],
     });
+    const auth = availability.state === "ready" ? availability.auth : null;
 
     // Fetch button disabled when not authenticated or fetching
     // Prefixed with _ as not currently used - preserved for potential future UI binding
-    const _fetchButtonDisabled = !isAuthenticated || isFetchingCell.get();
+    const _fetchButtonDisabled = !auth || isFetchingCell.get();
 
     // Open comment count
     const openCommentCount = (commentsCell.get() ?? []).length;
@@ -783,32 +786,34 @@ export default pattern<Input, Output>(
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
-                  {isAuthenticated
-                    ? (
-                      <cf-button
-                        variant="primary"
-                        type="button"
-                        disabled={isFetchingCell}
-                        onClick={fetchComments({
-                          docUrl: docUrlCell,
-                          auth,
-                          comments: commentsCell,
-                          docContent: docContentCell,
-                          isFetching: isFetchingCell,
-                          lastError: lastErrorCell,
-                        })}
-                      >
-                        {isFetchingCell.get() === true
-                          ? (
-                            <cf-hstack align="center" gap={1}>
-                              <cf-loader />
-                              <span>Fetching...</span>
-                            </cf-hstack>
-                          )
-                          : "Fetch Comments"}
-                      </cf-button>
-                    )
-                    : null}
+                  <cf-button
+                    variant="primary"
+                    type="button"
+                    disabled={!auth || isFetchingCell.get()}
+                    onClick={auth
+                      ? fetchComments({
+                        docUrl: docUrlCell,
+                        auth,
+                        comments: commentsCell,
+                        docContent: docContentCell,
+                        isFetching: isFetchingCell,
+                        lastError: lastErrorCell,
+                      })
+                      : reportFetchCommentsAuthNotReady({
+                        lastError: lastErrorCell,
+                      })}
+                  >
+                    {isFetchingCell.get() === true
+                      ? (
+                        <cf-hstack align="center" gap={1}>
+                          <cf-loader />
+                          <span>Fetching...</span>
+                        </cf-hstack>
+                      )
+                      : auth
+                      ? "Fetch Comments"
+                      : "Connect Google"}
+                  </cf-button>
                 </cf-hstack>
 
                 {/* Error display */}

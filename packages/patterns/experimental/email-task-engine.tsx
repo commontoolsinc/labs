@@ -32,7 +32,10 @@ import {
   Writable,
 } from "commonfabric";
 import GmailExtractor, { type Email } from "../google/core/gmail-extractor.tsx";
-import type { Auth } from "../google/core/util/google-auth-manager.tsx";
+import type {
+  Auth,
+  GoogleAuthCell,
+} from "../google/core/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
   GmailSendClient,
@@ -437,7 +440,7 @@ const SUGGESTION_SCHEMA = schema({
 // =============================================================================
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 export interface PatternOutput {
@@ -462,23 +465,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
-    auth,
+    availability,
     fullUI: authUI,
-    isReady,
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+  const auth = availability.state === "ready" ? availability.auth : null;
 
-  // Resolve auth: use overrideAuth if provided, otherwise use created auth
-  const hasOverrideAuth = !!(overrideAuth as any)?.token;
-  const resolvedAuth = hasOverrideAuth ? overrideAuth : auth;
-
-  // Create a Stream from the fetchLabels handler for auto-triggering
-  const labelFetcherStream = fetchLabels({
-    auth,
-    taskCurrentLabelId,
-    loadingLabels,
-  });
+  // Resolve auth: use overrideAuth if provided, otherwise use created auth.
+  const overrideAuthValue = computed(() => overrideAuth?.get());
+  const hasOverrideAuth = !!overrideAuthValue?.token;
+  const resolvedAuth = overrideAuth && hasOverrideAuth ? overrideAuth : auth;
 
   // Auto-fetch labels is handled by the UI button - removed auto-trigger
   // to avoid reactivity loops from side effects in computed()
@@ -487,7 +484,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const extractor = GmailExtractor({
     gmailQuery: "label:task-current",
     limit: 50,
-    overrideAuth: resolvedAuth as Auth,
+    overrideAuth: resolvedAuth ?? undefined,
   });
 
   // Get emails from extractor
@@ -673,7 +670,7 @@ Respond with the most appropriate action.`;
             {authUI}
 
             {/* Connection status and refresh */}
-            {isReady
+            {resolvedAuth
               ? (
                 <div
                   style={{
@@ -720,7 +717,7 @@ Respond with the most appropriate action.`;
               : null}
 
             {/* Analysis progress */}
-            {isReady && pendingCount > 0
+            {resolvedAuth && pendingCount > 0
               ? (
                 <div
                   style={{
@@ -742,7 +739,7 @@ Respond with the most appropriate action.`;
               : null}
 
             {/* Label status warning */}
-            {isReady && (!taskCurrentLabelId.get() || loadingLabels.get())
+            {resolvedAuth && (!taskCurrentLabelId.get() || loadingLabels.get())
               ? (
                 <div
                   style={{
@@ -763,7 +760,11 @@ Respond with the most appropriate action.`;
                   )}
                   <button
                     type="button"
-                    onClick={labelFetcherStream}
+                    onClick={fetchLabels({
+                      auth: resolvedAuth,
+                      taskCurrentLabelId,
+                      loadingLabels,
+                    })}
                     disabled={loadingLabels.get()}
                     style={{
                       marginLeft: "8px",
@@ -786,7 +787,27 @@ Respond with the most appropriate action.`;
               : null}
 
             {/* Task cards */}
-            {taskCount === 0
+            {!resolvedAuth
+              ? (
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                    border: "1px solid #e5e7eb",
+                    color: "#4b5563",
+                  }}
+                >
+                  <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                    Waiting for Google connection
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Connect Google with Gmail label access before loading tasks
+                    or labels.
+                  </div>
+                </div>
+              )
+              : taskCount === 0
               ? (
                 <div
                   style={{

@@ -242,6 +242,22 @@ const confirmOperation = handler<
   },
 );
 
+const reportApplyAuthNotReady = handler<
+  unknown,
+  {
+    pendingOp: Writable<LabelOperation | null>;
+    result: Writable<OperationResult | null>;
+  }
+>((_, { pendingOp, result }) => {
+  const op = pendingOp.get();
+  result.set({
+    success: false,
+    messageCount: op?.messageIds.length ?? 0,
+    error: "Connect Google before applying label changes.",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 const dismissResult = handler<
   unknown,
   { result: Writable<OperationResult | null> }
@@ -256,9 +272,10 @@ const dismissResult = handler<
 export default pattern<Input, Output>(
   ({ messageIds, labelsToAdd, labelsToRemove }) => {
     // Auth via createGoogleAuth utility - handles discovery, validation, and UI
-    const { auth, fullUI, isReady } = createGoogleAuth({
+    const { availability, fullUI, isReady } = createGoogleAuth({
       requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
     });
+    const auth = availability.state === "ready" ? availability.auth : null;
     const hasAuth = isReady;
 
     // UI state
@@ -304,7 +321,7 @@ export default pattern<Input, Output>(
           {fullUI}
 
           {/* Refresh labels button - protected until authenticated */}
-          {isReady
+          {auth
             ? (
               <div
                 style={{
@@ -334,7 +351,26 @@ export default pattern<Input, Output>(
                 </button>
               </div>
             )
-            : null}
+            : (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  background: "#f9fafb",
+                  borderRadius: "8px",
+                  border: "1px solid #e5e7eb",
+                  color: "#4b5563",
+                  fontSize: "14px",
+                }}
+              >
+                <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                  Waiting for Google connection
+                </div>
+                <div style={{ fontSize: "13px" }}>
+                  Connect Google with Gmail label access before refreshing or
+                  editing labels.
+                </div>
+              </div>
+            )}
 
           {/* Result display */}
           {result.get()?.success === true
@@ -837,14 +873,16 @@ export default pattern<Input, Output>(
                     </button>
                     <button
                       type="button"
-                      onClick={confirmOperation({
-                        pendingOp,
-                        auth,
-                        processing,
-                        result,
-                        labelsToAdd,
-                        labelsToRemove,
-                      })}
+                      onClick={auth
+                        ? confirmOperation({
+                          pendingOp,
+                          auth,
+                          processing,
+                          result,
+                          labelsToAdd,
+                          labelsToRemove,
+                        })
+                        : reportApplyAuthNotReady({ pendingOp, result })}
                       disabled={processing}
                       style={{
                         padding: "10px 20px",

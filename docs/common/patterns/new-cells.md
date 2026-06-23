@@ -75,3 +75,22 @@ const items = new Writable<Item[]>([]);                  // Empty array with typ
 const user = new Writable<User>();                       // Optional value
 const config = new Writable<Config>({ theme: "dark" });  // Object with initial value
 ```
+
+### Representing values that are not available yet
+
+Use a discriminated union when a value is not available at first and later
+becomes a writable cell.
+
+This makes each state explicit. It also lets TypeScript narrow the value before
+code passes it to a handler or provider client.
+
+```typescript
+type AuthAvailability =
+  | { state: "loading"; auth: null }
+  | { state: "ready"; auth: Writable<AuthData> };
+
+const auth = availability.state === "ready" ? availability.auth : null;
+```
+
+This shape is useful for auth managers and follows the same state-machine style
+as `FetchState` in the program fetch cache.

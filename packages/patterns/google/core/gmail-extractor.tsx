@@ -70,16 +70,19 @@ import {
   pattern,
   Stream,
 } from "commonfabric";
-import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
+import GmailImporter, {
+  type Auth,
+  type Email,
+  type GoogleAuthCell,
+} from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import {
   createReadOnlyAuthCell,
   GmailSendClient,
 } from "./util/gmail-send-client.ts";
 
-// Re-export Email and Auth types and ProcessingStatus for consumers
-export type { Auth, Email } from "./gmail-importer.tsx";
-export { ProcessingStatus };
+// Re-export Email and Auth types for consumers
+export type { Auth, Email, GoogleAuthCell } from "./gmail-importer.tsx";
 
 // =============================================================================
 // TYPES
@@ -128,7 +131,7 @@ export interface GmailExtractorInput {
   // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
 
   /** Optional linked auth (overrides wish() default) */
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /**
