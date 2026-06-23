@@ -1,8 +1,11 @@
-import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { type CellLinkRefPayload, LINK_V1_TAG } from "./sigil-types.ts";
+import {
+  linkPayloadAtProbe,
+  linkProbeSubPath,
+} from "@commonfabric/data-model/cell-rep";
+import { type CellLinkRefPayload } from "./sigil-types.ts";
 import {
   type CellLink,
   createDataCellURI,
@@ -164,16 +167,18 @@ export function resolveLink(
     const sigilProbe = tx.read(
       toMemorySpaceAddress({
         ...link,
-        path: [...link.path, "/", LINK_V1_TAG],
+        path: [...link.path, ...linkProbeSubPath()],
       }),
       { meta: linkResolutionProbe },
     );
+    const probePayload = sigilProbe.ok
+      ? linkPayloadAtProbe(sigilProbe.ok.value)
+      : undefined;
     if (
-      sigilProbe.ok &&
-      isRecord(sigilProbe.ok.value) &&
+      probePayload !== undefined &&
       lastNode !== "top" &&
       (lastNode !== "writeRedirect" ||
-        (sigilProbe.ok.value as CellLinkRefPayload).overwrite === "redirect")
+        (probePayload as CellLinkRefPayload).overwrite === "redirect")
     ) {
       // Read the full value at this path to ensure correct reactivity logging
       // (we need to be reactive to siblings that could invalidate the link)
@@ -216,11 +221,14 @@ export function resolveLink(
           const parentSigil = tx.read(
             toMemorySpaceAddress({
               ...link,
-              path: [...lastValid, "/", LINK_V1_TAG],
+              path: [...lastValid, ...linkProbeSubPath()],
             }),
             { meta: linkResolutionProbe },
           );
-          if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
+          if (
+            parentSigil.ok &&
+            linkPayloadAtProbe(parentSigil.ok.value) !== undefined
+          ) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow({ ...link, path: lastValid });
             const nextLink = parseLink(whole as CellLink, {
@@ -409,16 +417,15 @@ export function readMaybeLink(
   link: NormalizedFullLink,
   onlyWriteRedirects = false,
 ): NormalizedFullLink | undefined {
-  const readSubPath = (extraPath: string[]) =>
+  const readSubPath = (extraPath: readonly string[]) =>
     tx.readValueOrThrow({ ...link, path: [...link.path, ...extraPath] });
 
-  const maybeSigilLink = readSubPath(["/", LINK_V1_TAG]);
+  const maybeSigilPayload = linkPayloadAtProbe(readSubPath(linkProbeSubPath()));
   if (
     // Sigil link: { "/": { "link@1": { id: <id>, ... } } }
-    (isRecord(maybeSigilLink) &&
+    (maybeSigilPayload !== undefined &&
       (!onlyWriteRedirects ||
-        ("overwrite" in maybeSigilLink &&
-          maybeSigilLink.overwrite === "redirect"))) ||
+        (maybeSigilPayload as CellLinkRefPayload).overwrite === "redirect")) ||
     // Legacy cell link: { cell: {"/": <id> }, path: [] }
     (!onlyWriteRedirects && typeof readSubPath(["cell", "/"]) === "string" &&
       Array.isArray(readSubPath(["path"]))) ||
