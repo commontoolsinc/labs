@@ -116,6 +116,24 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload (a `FabricObject`: its addressing fields plus an optional
+ * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
+ * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
+ * link is a small object graph, not a leaf.
+ */
+export interface FabricLink extends FabricInstance {
+  readonly payload: FabricObject;
+}
+
+export interface FabricLinkConstructor {
+  new (payload: FabricObject): FabricLink;
+  prototype: FabricLink;
+}
+
+export declare const FabricLink: FabricLinkConstructor;
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
