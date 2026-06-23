@@ -358,9 +358,27 @@ export function extractRog(pattern: RawPattern): ExtractResult {
  * callable (so callers can assert the boundary honestly instead of silently
  * getting a wrong/missing value).
  */
+/**
+ * Resolver for a *serialized* leaf, by its content-addressed `$implRef`. Backed
+ * by the runtime harness's `getVerifiedImplementation` — the session-lifetime
+ * index that survives serialization (a graph passed through a node `op` input
+ * loses its live `module.implementation` callable but keeps `$implRef`). This is
+ * a real lookup of the actually-registered verified implementation, not a
+ * hardcoded body. Returns undefined if the ref is not resolvable in this
+ * session (the genuine SES/serialized boundary).
+ */
+export type ImplRefResolver = (
+  identity: string,
+  symbol: string,
+) => ((input: unknown) => unknown) | undefined;
+
 export function resolveLeafImpls(
   pattern: RawPattern,
   rog: Rog,
+  /** Optional fallback for serialized leaves whose `module.implementation` is no
+   * longer a live callable but whose `$implRef` is resolvable (W1b-bridge over a
+   * graph read back via `getRaw()`). */
+  implRefResolver?: ImplRefResolver,
 ): { leafImpls: Map<OpId, LeafImpl>; unresolvedLeafOps: OpId[] } {
   const leafImpls = new Map<OpId, LeafImpl>();
   const unresolvedLeafOps: OpId[] = [];
@@ -373,6 +391,18 @@ export function resolveLeafImpls(
     const impl = module?.implementation;
     if (typeof impl === "function") {
       leafImpls.set(op.id, impl as LeafImpl);
+      continue;
+    }
+    // Serialized leaf: try the `$implRef` index (the verified-implementation
+    // registry the harness exposes). This is the path a graph read back from a
+    // cell (`getRaw()`) takes — `module.implementation` is gone, but the live
+    // function is still resolvable by its content-addressed ref.
+    const ref = module?.$implRef;
+    const resolved = ref && implRefResolver
+      ? implRefResolver(ref.identity, ref.symbol)
+      : undefined;
+    if (typeof resolved === "function") {
+      leafImpls.set(op.id, resolved as LeafImpl);
     } else {
       unresolvedLeafOps.push(op.id);
     }
