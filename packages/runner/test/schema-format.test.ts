@@ -74,6 +74,16 @@ Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
   assert(result.includes("count"), "Cell contents should be included");
 });
 
+Deno.test("schemaToTypeString converts opaque cells to FactoryInput", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      asCell: ["opaque"],
+    } as any),
+    "FactoryInput",
+  );
+});
+
 Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<T>>', () => {
   const schema: any = {
     type: "number",

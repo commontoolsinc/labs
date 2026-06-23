@@ -7,11 +7,11 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
+  type FactoryInput,
   isPattern,
   type JSONSchema,
   type JSONValue,
   type Module,
-  type Opaque,
   type OpaqueRef,
   type Pattern,
   type toJSON,
@@ -38,7 +38,7 @@ export type CellAliasResolver = (
 ) => LegacyAlias | null | undefined;
 
 export function toJSONWithLegacyAliases(
-  value: Opaque<any>,
+  value: FactoryInput<any>,
   resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
@@ -109,7 +109,7 @@ export function toJSONWithLegacyAliases(
 
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
-    return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
+    return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
       toJSONWithLegacyAliases(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
         i,
@@ -368,7 +368,7 @@ export function moduleToJSON(module: Module) {
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
     implementation = toJSONWithLegacyAliases(
-      implementation as unknown as Opaque<any>,
+      implementation as unknown as FactoryInput<any>,
     ) as unknown as Pattern;
     return {
       ...rest,

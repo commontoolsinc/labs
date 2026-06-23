@@ -263,7 +263,7 @@ function getWrappedTypeString(
     case "stream":
       return scoped(`(${innerType}) => void`);
     case "opaque":
-      return scoped("Opaque");
+      return scoped("FactoryInput");
     default:
       return "UnknownWrapper";
   }

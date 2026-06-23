@@ -642,9 +642,9 @@ describe("Engine.evaluateRecordGraph()", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { pattern, type Opaque } from "commonfabric";',
+            'import { pattern, type FactoryInput } from "commonfabric";',
             "const Wrapper = pattern(() => ({ value: 1 }));",
-            "function ChildManager(input: Opaque<{}>) {",
+            "function ChildManager(input: FactoryInput<{}>) {",
             "  input;",
             "  return Wrapper({});",
             "}",
@@ -680,9 +680,9 @@ describe("Engine.evaluateRecordGraph()", () => {
           {
             name: "/main.ts",
             contents: [
-              'import { pattern, type Opaque } from "commonfabric";',
+              'import { pattern, type FactoryInput } from "commonfabric";',
               "const Wrapper = pattern(() => ({ value: 1 }));",
-              "function ChildManager(input: Opaque<{}>) {",
+              "function ChildManager(input: FactoryInput<{}>) {",
               "  input;",
               ...body,
               "}",

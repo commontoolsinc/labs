@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
@@ -68,8 +68,8 @@ export function applyArgumentIfcToResult(
 
 // If our inputs had any ifc tags, carry them through to our outputs
 export function applyInputIfcToOutput<T, R>(
-  inputs: Opaque<T>,
-  outputs: Opaque<R>,
+  inputs: FactoryInput<T>,
+  outputs: FactoryInput<R>,
 ) {
   const collectedClassifications = new Set<unknown>();
   const cfc = new ContextualFlowControl();
