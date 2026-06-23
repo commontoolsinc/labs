@@ -10,6 +10,7 @@ import {
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import type { FabricObject } from "@/interface.ts";
 
 //
@@ -112,40 +113,45 @@ export function entityRefToString(value: EntityRef): string {
 export const LINK_V1_TAG = "link@1" as const;
 
 /**
- * A link reference: today the `{ "/": { "link@1": … } }` envelope wrapping a
- * link payload.
+ * A link reference, wrapping a link payload. Its concrete shape is
+ * flag-dispatched: with the modern cell representation _off_ it is the plain
+ * `{ "/": { "link@1": … } }` envelope; with it _on_ it is a {@link FabricLink}
+ * instance. This is the link analog of {@link EntityRef}'s `{ "/": string }` →
+ * {@link FabricHash}.
  *
  * Construction ({@link linkRefFrom}), recognition ({@link isLinkRef}) and
- * extraction ({@link linkRefPayload}) are gathered here so that this chokepoint
- * can later become the seam at which the modern cell representation dispatches
- * the envelope to a Fabric primitive (provisionally `FabricLink`) — the link
- * analog of {@link EntityRef}'s `{ "/": string }` → {@link FabricHash}. That
- * dispatch is intentionally NOT wired up yet: this pass only collapses the
- * scattered envelope sites onto these functions, so the eventual flag flip is a
- * localized edit here rather than a tree-wide change.
+ * extraction ({@link linkRefPayload}) are gathered here so this chokepoint is
+ * the sole seam that dispatches the representation; everything else stays
+ * shape-agnostic. As with {@link EntityRef}, recognition is strict — it accepts
+ * only the form for the _currently active_ regime, never both.
  *
- * When that dispatch lands, this type becomes a union (`FabricLink | { "/": …
- * }`) mirroring {@link EntityRef}. `Payload` is bounded by {@link FabricObject}
- * (the payload is always a stored/serialized fabric record) but otherwise open,
- * so this layer needn't know the exact field types (URI / MemorySpace /
- * JSONSchema — those stay in `runner`).
+ * `Payload` is bounded by {@link FabricObject} (the payload is always a
+ * stored/serialized fabric record) but otherwise open, so this layer needn't
+ * know the exact field types (URI / MemorySpace / JSONSchema — those stay in
+ * `runner`). In modern mode the payload type is erased: a {@link FabricLink}
+ * holds an unparameterized {@link FabricObject}, just as {@link FabricHash} is
+ * unparameterized on the modern arm of {@link EntityRef}.
  */
-export type LinkRef<Payload extends FabricObject> = {
-  "/": { [LINK_V1_TAG]: Payload };
-};
+export type LinkRef<Payload extends FabricObject> =
+  | FabricLink
+  | { "/": { [LINK_V1_TAG]: Payload } };
 
-/** Wraps a link payload in the link-ref envelope. */
+/** Produces a {@link LinkRef} wrapping `payload` for the active regime. */
 export function linkRefFrom<Payload extends FabricObject>(
   payload: Payload,
 ): LinkRef<Payload> {
-  return { "/": { [LINK_V1_TAG]: payload } };
+  return modernCellRepEnabled
+    ? new FabricLink(payload)
+    : { "/": { [LINK_V1_TAG]: payload } };
 }
 
 /**
- * Recognizes a {@link LinkRef}: the `{ "/": { "link@1": … } }` envelope, no
- * other props.
+ * Recognizes the legacy `{ "/": { "link@1": … } }` envelope (no other props).
+ * Regime-independent: names only the structural form, not the active flag.
  */
-export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
+function isLegacyLinkEnvelope(
+  value: unknown,
+): value is { "/": { [LINK_V1_TAG]: FabricObject } } {
   return isRecord(value) &&
     Object.keys(value).length === 1 &&
     isRecord(value["/"]) &&
@@ -153,13 +159,28 @@ export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
 }
 
 /**
+ * Recognizes a {@link LinkRef} for the currently active regime: a
+ * {@link FabricLink} in modern mode, or the `{ "/": { "link@1": … } }` envelope
+ * (no other props) in legacy mode.
+ */
+export function isLinkRef(value: unknown): value is LinkRef<FabricObject> {
+  return modernCellRepEnabled
+    ? value instanceof FabricLink
+    : isLegacyLinkEnvelope(value);
+}
+
+/**
  * Extracts the link payload from a {@link LinkRef}. Throws if the value is not
- * a link reference.
+ * a link reference for the currently active regime.
  */
 export function linkRefPayload<Payload extends FabricObject>(
   value: LinkRef<Payload>,
 ): Payload {
-  if (isLinkRef(value)) return value["/"][LINK_V1_TAG] as Payload;
+  if (modernCellRepEnabled) {
+    if (value instanceof FabricLink) return value.payload as Payload;
+  } else if (isLegacyLinkEnvelope(value)) {
+    return value["/"][LINK_V1_TAG] as Payload;
+  }
   throw new Error("Not a link reference.");
 }
 
@@ -170,15 +191,16 @@ export function linkRefPayload<Payload extends FabricObject>(
  * resolution), so they need not hardcode the layout — or the link tag —
  * themselves.
  *
- * A link is a decomposed plain-object envelope (`{ "/": { "link@1": … } }`), so
- * the recognizable payload sits two segments down at `["/", "link@1"]`. Pair
- * with {@link linkPayloadAtProbe} to interpret whatever is read at
- * `position + linkProbeSubPath()`. This is gathered here alongside the rest of
- * the link chokepoint so that the modern cell representation can later dispatch
- * the layout (an atomic value → an empty sub-path) from a single seam.
+ * The sub-path is flag-dispatched to match the regime's storage layout. In
+ * legacy mode a link is a decomposed plain-object envelope
+ * (`{ "/": { "link@1": … } }`), so the recognizable payload sits two segments
+ * down at `["/", "link@1"]`. In modern mode a link is an atomic {@link FabricLink}
+ * value at the position itself, so the sub-path is empty. Pair with
+ * {@link linkPayloadAtProbe} to interpret whatever is read at
+ * `position + linkProbeSubPath()`.
  */
 export function linkProbeSubPath(): readonly string[] {
-  return ["/", LINK_V1_TAG];
+  return modernCellRepEnabled ? [] : ["/", LINK_V1_TAG];
 }
 
 /**
@@ -186,12 +208,17 @@ export function linkProbeSubPath(): readonly string[] {
  * the link payload if that value denotes a link rooted at `position`, or
  * `undefined` otherwise.
  *
- * The probed value already _is_ the inner payload (the tree walk descended into
- * the envelope), so any record there is the payload.
+ * In legacy mode the probed value already _is_ the inner payload (the tree walk
+ * descended into the envelope), so any record there is the payload. In modern
+ * mode the probed value is the whole {@link FabricLink}, whose payload is
+ * unwrapped via {@link linkRefPayload}.
  */
 export function linkPayloadAtProbe(
   probeValue: unknown,
 ): FabricObject | undefined {
+  if (modernCellRepEnabled) {
+    return isLinkRef(probeValue) ? linkRefPayload(probeValue) : undefined;
+  }
   return isRecord(probeValue) ? probeValue as FabricObject : undefined;
 }
 
