@@ -374,7 +374,7 @@ export default pattern<Input, Output>(
           aisles: (extraction.result && extraction.result.aisles) || [],
         },
         pending: extraction.pending,
-        error: computed(() => !!extraction.error),
+        error: extraction.error,
       };
     });
 
