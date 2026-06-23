@@ -23,15 +23,21 @@ import type {
   ControlOp,
   ImplRef,
   Op,
+  OpId,
   OpKind,
   Rog,
   ValueRef,
 } from "./rog.ts";
+import type { LeafImpl } from "./interpret.ts";
 
 // The in-memory Pattern shape we read (a structural subset; see builder/types).
 interface RawModule {
   type?: string;
-  implementation?: string;
+  /** For `type: "ref"` this is the builtin name (string). For an in-memory
+   * `type: "javascript"` module it is the *live implementation function* (the
+   * lift body); once serialized it is the source-string form instead. We accept
+   * either and only treat the callable form as a resolvable leaf impl. */
+  implementation?: string | ((input: unknown) => unknown);
   $implRef?: { identity: string; symbol: string };
   $patternRef?: { identity: string; symbol: string };
   argumentSchema?: unknown;
@@ -82,7 +88,8 @@ function classifyModule(
     return { kind: "leaf", impl: m.$implRef };
   }
   if (m.type === "ref") {
-    const ref = m.implementation ?? "";
+    // A `ref` module's implementation is the builtin name (always a string).
+    const ref = typeof m.implementation === "string" ? m.implementation : "";
     if (COLLECTION_OPS.has(ref)) {
       return { kind: "collection", collOp: ref as CollectionOp };
     }
@@ -145,14 +152,39 @@ function inputRefs(inputs: unknown, unrecognized: Set<string>): ValueRef[] {
   return out;
 }
 
+/** Map an `outputs` alias to the internal-cell name it writes (the producing
+ * op's output alias), matching `aliasToValueRef`'s `internal` naming so the
+ * evaluator's `internalToOp` lookup keys line up. Returns null if the output is
+ * not a recognizable internal alias. */
+function outputInternalName(outputs: unknown): string | null {
+  if (!outputs || typeof outputs !== "object") return null;
+  const alias = (outputs as { $alias?: Record<string, unknown> }).$alias;
+  if (!alias || typeof alias !== "object") return null;
+  if (typeof alias.partialCause === "string") return alias.partialCause;
+  if (
+    alias.partialCause && typeof alias.partialCause === "object" &&
+    "$generated" in (alias.partialCause as object)
+  ) {
+    return `$generated:${
+      (alias.partialCause as { $generated: number }).$generated
+    }`;
+  }
+  return null;
+}
+
 export interface ExtractResult {
   rog: Rog;
   coverage: CoverageReport;
+  /** Internal-cell name (a node's output `partialCause`) → producing op id, so
+   * the evaluator can resolve `internal` ValueRefs to `opOut`. Only the
+   * top-level pattern's nodes are wired (nested element graphs are W3). */
+  internalToOp: Map<string, OpId>;
 }
 
 export function extractRog(pattern: RawPattern): ExtractResult {
   const unrecognized = new Set<string>();
   const byKind = {} as Record<OpKind | "unknown", number>;
+  const internalToOp = new Map<string, OpId>();
   let nodeCount = 0;
   let classified = 0;
   let nested = 0;
@@ -170,6 +202,13 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       const c = classifyModule(node.module);
       bump(c.kind);
       classified++; // every node classifies (leaf is the sound default)
+
+      // Wire this node's output alias → its op id (top-level only for now), so
+      // `internal` ValueRefs (result/input refs to derived cells) resolve.
+      if (depth === 0) {
+        const outName = outputInternalName(node.outputs);
+        if (outName !== null) internalToOp.set(outName, i);
+      }
 
       const inputs = inputRefs(node.inputs, unrecognized);
       const op: Op = {
@@ -208,7 +247,19 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         const inObj = (node.inputs ?? {}) as Record<string, unknown>;
         const pred = valueToRef(inObj.condition ?? inObj.if, unrecognized) ??
           ({ kind: "const", value: undefined } as ValueRef);
-        op.detail = { kind: "control", op: c.ctrlOp!, pred, branches: inputs };
+        // Branches must be exactly [then, else] in that order — NOT the flat
+        // `inputs` list (which also carries the condition). The builder names
+        // them ifTrue/ifFalse (with then/else as legacy fallbacks).
+        const thenRef = valueToRef(inObj.ifTrue ?? inObj.then, unrecognized) ??
+          ({ kind: "const", value: undefined } as ValueRef);
+        const elseRef = valueToRef(inObj.ifFalse ?? inObj.else, unrecognized) ??
+          ({ kind: "const", value: undefined } as ValueRef);
+        op.detail = {
+          kind: "control",
+          op: c.ctrlOp!,
+          pred,
+          branches: [thenRef, elseRef],
+        };
       } else if (c.kind === "pattern") {
         op.detail = {
           kind: "pattern",
@@ -287,5 +338,44 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       unrecognizedAliases: [...unrecognized],
       nested,
     },
+    internalToOp,
   };
+}
+
+/**
+ * Resolve leaf op implementations for an **in-memory** built pattern (the
+ * factory result), so an extracted ROG can be evaluated end-to-end.
+ *
+ * For an in-memory `type: "javascript"` module the builder keeps the lift body
+ * as a live callable at `module.implementation` (verified against builder
+ * output); we wrap it as a `LeafImpl`. This relies on op id == node index (the
+ * extraction invariant for top-level nodes). Once a pattern is *serialized*,
+ * `module.implementation` is a source string and only the `$implRef` survives —
+ * resolving THAT requires the session implementation index (the SES sandbox),
+ * which is the W1b-sandbox boundary, not handled here.
+ *
+ * Returns the map plus the set of leaf op ids that could NOT be resolved to a
+ * callable (so callers can assert the boundary honestly instead of silently
+ * getting a wrong/missing value).
+ */
+export function resolveLeafImpls(
+  pattern: RawPattern,
+  rog: Rog,
+): { leafImpls: Map<OpId, LeafImpl>; unresolvedLeafOps: OpId[] } {
+  const leafImpls = new Map<OpId, LeafImpl>();
+  const unresolvedLeafOps: OpId[] = [];
+  const nodes = pattern.nodes ?? [];
+  for (const op of rog.ops) {
+    if (op.detail.kind !== "leaf") continue;
+    // Synthesized ops (id < 0) are never leaves; real leaf ops map 1:1 to nodes.
+    const node = op.id >= 0 ? nodes[op.id] : undefined;
+    const module = node?.module as RawModule | undefined;
+    const impl = module?.implementation;
+    if (typeof impl === "function") {
+      leafImpls.set(op.id, impl as LeafImpl);
+    } else {
+      unresolvedLeafOps.push(op.id);
+    }
+  }
+  return { leafImpls, unresolvedLeafOps };
 }
