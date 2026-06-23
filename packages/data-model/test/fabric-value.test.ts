@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { valueEqual } from "@/fabric-value.ts";
+import { type FabricValue, valueEqual } from "@/fabric-value.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -27,6 +27,17 @@ describe("fabric-value", () => {
     it("compares `bigint` values", () => {
       expect(valueEqual(42n, 42n)).toBe(true);
       expect(valueEqual(1n, 2n)).toBe(false);
+    });
+
+    it("throws when given a function (not a `FabricValue`)", () => {
+      // A function is reachable only via an unsound cast; the comparison
+      // rejects it rather than silently mis-answering. Two distinct functions
+      // are needed so the `Object.is()` fast path doesn't short-circuit before
+      // the type switch is reached.
+      const fn = (() => {}) as unknown as FabricValue;
+      const fn2 = (() => {}) as unknown as FabricValue;
+      expect(() => valueEqual(fn, fn2)).toThrow();
+      expect(() => valueEqual(fn, 1)).toThrow();
     });
 
     it("returns `true` for structurally-equal objects", () => {
