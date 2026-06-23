@@ -7,6 +7,7 @@ import {
 import type { CfcMetadata } from "../src/cfc/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -312,7 +313,7 @@ describe("CFC label view helpers", () => {
 
       const recovered = runtime.getCellFromLink(link);
       expect(cfcLabelViewForCell(recovered)).toEqual(view);
-      expect(recovered.getAsLink()["/"][LINK_V1_TAG]).not.toHaveProperty(
+      expect(linkRefPayload(recovered.getAsLink())).not.toHaveProperty(
         "cfcLabelView",
       );
     } finally {
