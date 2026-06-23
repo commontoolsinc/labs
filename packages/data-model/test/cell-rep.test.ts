@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import {
   type EntityRef,
   entityRefFrom,
@@ -100,7 +101,7 @@ describe("cell-rep entity-id reference", () => {
   });
 });
 
-describe("cell-rep link-ref envelope", () => {
+describe("cell-rep link-ref (legacy envelope form)", () => {
   const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
 
   it('wraps a payload in the `{ "/": { "link@1": … } }` envelope', () => {
@@ -137,7 +138,42 @@ describe("cell-rep link-ref envelope", () => {
   });
 });
 
-describe("cell-rep link storage-tree probe", () => {
+describe("cell-rep link-ref (modern FabricLink form)", () => {
+  const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
+
+  afterEach(() => {
+    resetModernCellRepConfig();
+  });
+
+  it("produces a FabricLink wrapping the payload", () => {
+    setModernCellRepConfig(true);
+    const link = linkRefFrom(PAYLOAD);
+    expect(link).toBeInstanceOf(FabricLink);
+    expect((link as FabricLink).payload).toEqual(PAYLOAD);
+  });
+
+  it("recognizes a FabricLink, not the legacy envelope", () => {
+    setModernCellRepConfig(true);
+    expect(isLinkRef(linkRefFrom(PAYLOAD))).toBe(true);
+    expect(isLinkRef(new FabricLink(PAYLOAD))).toBe(true);
+    // The legacy envelope is the wrong regime's form, so it is NOT recognized.
+    expect(isLinkRef({ "/": { [LINK_V1_TAG]: PAYLOAD } })).toBe(false);
+  });
+
+  it("extracts the payload from a FabricLink", () => {
+    setModernCellRepConfig(true);
+    expect(linkRefPayload(linkRefFrom(PAYLOAD))).toEqual(PAYLOAD);
+    expect(linkRefPayload(new FabricLink(PAYLOAD))).toEqual(PAYLOAD);
+  });
+
+  it("throws extracting from the legacy envelope (wrong regime)", () => {
+    setModernCellRepConfig(true);
+    expect(() => linkRefPayload({ "/": { [LINK_V1_TAG]: PAYLOAD } } as never))
+      .toThrow("Not a link reference");
+  });
+});
+
+describe("cell-rep link storage-tree probe (legacy)", () => {
   const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
 
   it('probes two segments down at ["/", "link@1"]', () => {
@@ -165,6 +201,36 @@ describe("cell-rep link storage-tree probe", () => {
     expect(linkPayloadAtProbe(null)).toBeUndefined();
     expect(linkPayloadAtProbe("redirect")).toBeUndefined();
     expect(linkPayloadAtProbe(42)).toBeUndefined();
+  });
+});
+
+describe("cell-rep link storage-tree probe (modern)", () => {
+  const PAYLOAD = { id: "of:abc", path: ["x", "y"] };
+
+  afterEach(() => {
+    resetModernCellRepConfig();
+  });
+
+  it("probes at the position itself (empty sub-path)", () => {
+    setModernCellRepConfig(true);
+    // A modern link is an atomic value at its position, not a decomposed
+    // envelope, so there is nothing to descend into.
+    expect(linkProbeSubPath()).toEqual([]);
+  });
+
+  it("unwraps a FabricLink read at the probe position", () => {
+    setModernCellRepConfig(true);
+    expect(linkPayloadAtProbe(linkRefFrom(PAYLOAD))).toEqual(PAYLOAD);
+  });
+
+  it("returns undefined for a non-link value at the probe", () => {
+    setModernCellRepConfig(true);
+    // A bare record is the payload in legacy mode, but in modern mode only a
+    // FabricLink denotes a link — plain data and the legacy envelope do not.
+    expect(linkPayloadAtProbe(PAYLOAD)).toBeUndefined();
+    expect(linkPayloadAtProbe({ "/": { [LINK_V1_TAG]: PAYLOAD } }))
+      .toBeUndefined();
+    expect(linkPayloadAtProbe(undefined)).toBeUndefined();
   });
 });
 
