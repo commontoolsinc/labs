@@ -28,18 +28,18 @@ The PR now includes an idiomatic reference-addressed fixture:
 - `packages/patterns/lunch-poll/reference-shape-experiment.tsx`
 - No string IDs, generated IDs, `optionId`, or string-keyed mutation maps.
 - Option identity is the option cell.
-- Participant identity is the participant element cell in the shared PerSpace
-  `participants` array.
-- PerUser viewer state stores a live link to that participant element.
+- PerUser viewer state stores the viewer's append-only participant index, not a
+  generated app ID. This is only valid because the diagnostic roster never
+  reorders or removes participants.
 - Vote writes go under the participant child cell, not a global `votes` array.
 - Matching uses `equals()`.
 
 With the same 3x10x3 workload and serial setup:
 
 - Result: `10/10` users, `30/30` votes
-- Churn: `281` conflicts/reverts
-- Elapsed diagnostic time: `7.5s`
-- Final vote-round max workset: `5` versus `24` in current arrays
+- Churn: `350` conflicts/reverts
+- Elapsed diagnostic time: `8.0s`
+- Final vote-round max workset: `4` versus `24` in current arrays
 
 So this PR is no longer just a runtime speculation. It demonstrates that an
 idiomatic reference shape plus the runtime patch materially improves both
@@ -66,13 +66,12 @@ packages/patterns/lunch-poll/reference-shape-experiment.tsx
 ```
 
 Browser status: the fresh reference URL renders the header,
-`0 joined | 0
-options | 0 votes`, name input, join button, restaurant input, and
-add button. In-app browser automation and
-`cf piece call joinAs '{"name":"Alex"}'` did not mutate durable state, while the
-multi-runtime harness does drive the same handlers successfully. Treat the
-deployed URL as a render/manual-inspection surface; the measured performance
-evidence below comes from the headless multi-runtime harness.
+`0 joined | 0 options | 0 votes`, name input, join button, restaurant input, add
+button, and per-option green/yellow/red vote buttons. The previous deployed UI
+had a stripped top-level "Option #" vote control that did not match the
+reference-addressed row path and did not vote manually. The source is now
+redeployed with row-level option-cell vote buttons. The measured performance
+evidence below still comes from the headless multi-runtime harness.
 
 ## Evidence
 
@@ -89,10 +88,10 @@ Result:
 
 - users: `10/10`
 - votes: `30/30`
-- conflicts/reverts: `281`
-- elapsed: `7.5s`
-- vote round 3 max nodes/edges: `77/145`
-- vote round 3 max workset: `5`
+- conflicts/reverts: `350`
+- elapsed: `8.0s`
+- vote round 3 max nodes/edges: `80/186`
+- vote round 3 max workset: `4`
 - rejected commits: `0`
 
 Control against current array-backed `main.tsx` with the same runtime patch and
@@ -171,7 +170,11 @@ documented identity model:
 - Keep participant cells in PerSpace if every viewer must read them. A rejected
   PerSpace roster of PerUser participant links failed because space-scoped reads
   cannot follow narrower user-scoped links.
-- Let PerUser viewer state point to the viewer's PerSpace participant element.
+- Prefer a PerUser pointer to the viewer's PerSpace participant element. In this
+  fixture, the browser-safe version uses an append-only participant index
+  because a nested `ParticipantCell` in PerUser viewer state either materialized
+  as a plain value or failed the current TS/schema surface once votes contained
+  option-cell links.
 - Pass option references through handlers and compare with `equals()` where
   lookup is necessary.
 - Keep each user's vote state off the global aggregate hot path by writing below
@@ -191,14 +194,15 @@ documented identity model:
 - The local keyed-record diagnostic used string-addressed object keys. That
   source has been removed from the PR because it violates the documented Common
   Fabric identity model.
-- Browser auth/manual multi-tab verification is still needed before promoting
-  the pattern change. The local URL now renders, but automated clicks have not
-  yet confirmed the browser event path mutates durable state.
+- Browser manual multi-tab verification is still needed before promoting the
+  pattern change. The local URL now renders row-level vote controls, but
+  automated clicks have not been reliable enough to prove browser durability.
 
 ## Recommended Next Steps
 
 1. Manually open the local URL and verify the reference poll can be joined/voted
-   in normal browser tabs. This should be a browser event/durability check.
+   in normal browser tabs after refreshing the redeployed source. This should be
+   a browser event/durability check.
 2. Run a two-browser/two-identity smoke test if practical, after at least one
    manual click confirms the UI event path is live.
 3. Promote the runtime patch with the focused engine and runner tests.

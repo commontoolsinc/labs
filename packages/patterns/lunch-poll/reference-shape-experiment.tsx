@@ -3,14 +3,14 @@
  *
  * This is the reference-addressed version of the contention experiment. It
  * deliberately avoids app-level string IDs: option identity is the option cell
- * itself, participant identity is the participant cell itself, and all matching
- * uses `equals()`.
+ * itself, participant rows are addressed through the append-only roster, and
+ * vote matching uses `equals()`.
  *
  * Setup still appends participants and options to shared arrays, so the
  * diagnostic driver runs joins and option creation serially. The measured hot
- * path is concurrent voting: each user's PerUser state holds a live reference
- * to their participant element in the shared PerSpace participants array, and
- * the vote handler writes under that participant child cell.
+ * path is concurrent voting: each user's PerUser state stores their append-only
+ * participant index, and the vote handler writes under that participant child
+ * cell rather than a shared global votes array.
  */
 import {
   type Cell,
@@ -52,7 +52,7 @@ export interface Participant {
 export type ParticipantCell = Writable<Participant>;
 
 export interface ViewerState {
-  participant?: Participant;
+  participantIndex?: number;
 }
 
 export interface JoinEvent {
@@ -116,18 +116,19 @@ const joinAs = handler<JoinEvent, {
   viewer: ViewerCell;
   joinDraft: DraftCell;
 }>(({ name }, { participants, viewer, joinDraft }) => {
-  if (viewer.get()?.participant) return;
+  if (typeof viewer.get()?.participantIndex === "number") return;
   const nextName = trimmed(name) || trimmed(joinDraft.get());
   if (!nextName) return;
 
   const current = participants.get();
+  const participantIndex = current.length;
   participants.push({
     name: nextName,
-    color: colorForIndex(current.length),
+    color: colorForIndex(participantIndex),
     joinedAt: safeDateNow(),
     votes: [],
   });
-  viewer.set({ participant: participants.key(current.length) });
+  viewer.set({ participantIndex });
   joinDraft.set("");
 });
 
@@ -144,14 +145,19 @@ const addOption = handler<AddOptionEvent, {
   optionDraft.set("");
 });
 
-const castVote = handler<CastVoteEvent, { viewer: ViewerCell }>(
-  ({ option, voteType }, { viewer }) => {
-    const participant = viewer.key("participant");
-    if (!participant.get() || !option) return;
+const castVote = handler<CastVoteEvent, {
+  participants: ParticipantsCell;
+  viewer: ViewerCell;
+}>(
+  ({ option, voteType }, { participants, viewer }) => {
+    const participantIndex = viewer.get()?.participantIndex;
+    if (typeof participantIndex !== "number" || !option) return;
+    const participant = participants.key(participantIndex);
+    if (!participant.get()) return;
 
     const votes = participant.key("votes");
     const rawVotes = votes.get();
-    let current: readonly Vote[] = Array.isArray(rawVotes)
+    const current: readonly Vote[] = Array.isArray(rawVotes)
       ? rawVotes as readonly Vote[]
       : [];
     if (!Array.isArray(rawVotes)) {
@@ -174,9 +180,51 @@ const castVote = handler<CastVoteEvent, { viewer: ViewerCell }>(
   },
 );
 
-const clearMyVotes = handler<ClearMyVotesEvent, { viewer: ViewerCell }>(
-  (_event, { viewer }) => {
-    const participant = viewer.key("participant");
+const castOptionVote = handler<ClearMyVotesEvent, {
+  participants: ParticipantsCell;
+  viewer: ViewerCell;
+  option: OptionCell;
+  voteType: VoteColor;
+}>(
+  (_event, { participants, viewer, option, voteType }) => {
+    const participantIndex = viewer.get()?.participantIndex;
+    if (typeof participantIndex !== "number" || !option) return;
+    const participant = participants.key(participantIndex);
+    if (!participant.get()) return;
+
+    const votes = participant.key("votes");
+    const rawVotes = votes.get();
+    const current: readonly Vote[] = Array.isArray(rawVotes)
+      ? rawVotes as readonly Vote[]
+      : [];
+    if (!Array.isArray(rawVotes)) {
+      votes.set([]);
+    }
+
+    const existingIndex = current.findIndex((vote: Vote) =>
+      equals(vote.option, option)
+    );
+    if (existingIndex >= 0) {
+      const existing = current[existingIndex];
+      if (existing.voteType === voteType) {
+        votes.set(current.toSpliced(existingIndex, 1));
+        return;
+      }
+      votes.key(existingIndex).key("voteType").set(voteType);
+      return;
+    }
+    votes.push({ option, voteType });
+  },
+);
+
+const clearMyVotes = handler<ClearMyVotesEvent, {
+  participants: ParticipantsCell;
+  viewer: ViewerCell;
+}>(
+  (_event, { participants, viewer }) => {
+    const participantIndex = viewer.get()?.participantIndex;
+    if (typeof participantIndex !== "number") return;
+    const participant = participants.key(participantIndex);
     if (!participant.get()) return;
     participant.key("votes").set([]);
   },
@@ -244,13 +292,20 @@ export default pattern<ReferencePollInput, ReferencePollOutput>(
     const optionDraft = Writable.perSession.of<string>("");
     const boundJoinAs = joinAs({ participants, viewer, joinDraft });
     const boundAddOption = addOption({ options, optionDraft });
-    const boundCastVote = castVote({ viewer });
-    const boundClearMyVotes = clearMyVotes({ viewer });
+    const boundCastVote = castVote({ participants, viewer });
+    const boundClearMyVotes = clearMyVotes({ participants, viewer });
 
     const userRows = computed(() => participantSummariesFor(participants));
     const voteRows = computed(() => voteSummariesFor(participants));
-    const myName = computed(() => trimmed(viewer?.participant?.name));
-    const isJoined = computed(() => viewer?.participant !== undefined);
+    const myName = computed(() => {
+      const participantIndex = viewer?.participantIndex;
+      return typeof participantIndex === "number"
+        ? trimmed(participants[participantIndex]?.name)
+        : "";
+    });
+    const isJoined = computed(() =>
+      typeof viewer?.participantIndex === "number"
+    );
 
     return {
       [NAME]: "Reference lunch poll perf fixture",
@@ -311,7 +366,7 @@ export default pattern<ReferencePollInput, ReferencePollOutput>(
               </div>
 
               <div style="display:flex;flex-direction:column;gap:10px">
-                {options.map((option) => (
+                {options.map((option, optionIndex) => (
                   <div
                     style={{
                       background: "white",
@@ -320,25 +375,59 @@ export default pattern<ReferencePollInput, ReferencePollOutput>(
                       padding: "12px",
                     }}
                   >
-                    <div style="font-weight:700;margin-bottom:8px">
-                      {option.title}
+                    <div style="font-weight:700">
+                      {optionIndex + 1}. {option.title}
                     </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap">
-                      {(["green", "yellow", "red"] as const).map((
-                        voteType,
-                      ) => (
-                        <cf-button
-                          size="sm"
-                          style={{
-                            background: VOTE_SWATCH[voteType],
-                            color: "white",
-                          }}
-                          onClick={() =>
-                            boundCastVote.send({ option, voteType })}
-                        >
-                          {voteType}
-                        </cf-button>
-                      ))}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                        marginTop: "8px",
+                      }}
+                    >
+                      <cf-button
+                        size="sm"
+                        style={{
+                          background: VOTE_SWATCH.green,
+                          color: "white",
+                        }}
+                        onClick={castOptionVote({
+                          participants,
+                          viewer,
+                          option,
+                          voteType: "green",
+                        })}
+                      >
+                        green
+                      </cf-button>
+                      <cf-button
+                        size="sm"
+                        style={{
+                          background: VOTE_SWATCH.yellow,
+                          color: "white",
+                        }}
+                        onClick={castOptionVote({
+                          participants,
+                          viewer,
+                          option,
+                          voteType: "yellow",
+                        })}
+                      >
+                        yellow
+                      </cf-button>
+                      <cf-button
+                        size="sm"
+                        style={{ background: VOTE_SWATCH.red, color: "white" }}
+                        onClick={castOptionVote({
+                          participants,
+                          viewer,
+                          option,
+                          voteType: "red",
+                        })}
+                      >
+                        red
+                      </cf-button>
                     </div>
                   </div>
                 ))}

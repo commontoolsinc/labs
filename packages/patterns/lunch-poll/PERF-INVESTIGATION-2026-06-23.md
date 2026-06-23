@@ -487,17 +487,25 @@ The PR now includes an idiomatic fixture:
 - File: `packages/patterns/lunch-poll/reference-shape-experiment.tsx`
 - No generated `id`, `optionId`, or string-keyed mutation maps.
 - Options are addressed by live option cell references.
-- Participant identity is the participant element cell in the shared
-  `participants` array.
-- Each viewer's PerUser `viewer` state stores a live link to their participant
-  element; vote handlers write below that participant child cell.
+- Each viewer's PerUser `viewer` state stores an append-only participant index,
+  not a generated app ID. This is safe for the diagnostic fixture because
+  participants are only appended during serial setup.
+- Vote handlers write below that participant child cell rather than mutating a
+  global `votes` array.
 - Vote matching uses `equals(vote.option, option)`.
 
 One rejected intermediate shape stored PerUser participant cells in a shared
 PerSpace roster. That is not valid: a space-scoped read cannot follow a narrower
 user-scoped link, so other clients see `undefined`. The working shape keeps
-participant cells in PerSpace and only stores the per-user pointer from the user
-scope to the wider space scope.
+participant data in PerSpace and stores only the viewer's append-only roster
+position in PerUser state.
+
+Another attempted shape stored the viewer's live `ParticipantCell` directly in
+PerUser state. With the current transformer/schema surface that either
+materialized as a plain participant value, so writes did not reach the shared
+`participants` array, or failed once `Participant` itself contained
+`Vote.option: Cell<Option>`. The current reference fixture keeps the important
+hot-path property, child-cell vote writes, without introducing string IDs.
 
 The diagnostic harness was extended with:
 
@@ -531,12 +539,12 @@ Results from `/private/tmp/lunch-main-3x10.json` and
 | Shape                 | Elapsed | Final Users | Final Votes | Conflicts | Reverts | Vote round 3 max nodes | Vote round 3 max edges | Vote round 3 max workset | Vote round 3 trace |
 | --------------------- | ------: | ----------: | ----------: | --------: | ------: | ---------------------: | ---------------------: | -----------------------: | -----------------: |
 | Current arrays        |   35.9s |       10/10 |       18/30 |      1797 |    1797 |                    466 |                   1350 |                       24 |               1645 |
-| Reference child cells |    7.5s |       10/10 |       30/30 |       281 |     281 |                     77 |                    145 |                        5 |                152 |
+| Reference child cells |    8.0s |       10/10 |       30/30 |       350 |     350 |                     80 |                    186 |                        4 |                152 |
 
 Result: the idiomatic reference shape is not speculative. With the same runtime
 patch and deterministic setup, it preserves all expected votes, cuts end-to-end
-diagnostic time by about 4.8x, cuts conflicts/reverts by about 6.4x, and reduces
-the final vote-round scheduler workset by about 4.8x.
+diagnostic time by about 4.5x, cuts conflicts/reverts by about 5.1x, and reduces
+the final vote-round scheduler workset by about 6.0x.
 
 This does not mean the runtime work is unnecessary. The reference fixture still
 records conflict/revert churn, and the runtime change is still what lets
