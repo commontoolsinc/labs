@@ -3506,6 +3506,7 @@ const validateConfirmedReads = (
       scopeKey,
       read.seq,
       read.path,
+      read.nonRecursive === true,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
@@ -3551,6 +3552,7 @@ const resolvePendingReads = (
       resolveScopeKey(read.scope, { principal, sessionId }),
       resolution.seq,
       read.path,
+      read.nonRecursive === true,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
@@ -3569,6 +3571,7 @@ const findConflictSeq = (
   scopeKey: string,
   afterSeq: number,
   readPath: readonly string[],
+  nonRecursive = false,
 ): number | null => {
   const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
     branch,
@@ -3588,13 +3591,23 @@ const findConflictSeq = (
       after_seq: afterSeq,
     }) as Iterable<{
       seq: number;
+      op_index: number;
       data: string | null;
     }>
   ) {
     if (
       patchOverlapsRead(
+        engine,
+        {
+          branch,
+          id,
+          scopeKey,
+          seq: conflict.seq,
+          opIndex: conflict.op_index,
+        },
         decodeStoredPatchList(conflict.data),
         readPath,
+        nonRecursive,
       )
     ) {
       return conflict.seq;
@@ -3867,12 +3880,97 @@ const applySchedulerObservationBatchCommit = (
 };
 
 const patchOverlapsRead = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    seq: number;
+    opIndex: number;
+  },
   patches: readonly PatchOp[],
   readPath: readonly string[],
+  nonRecursive = false,
 ): boolean => {
-  return patches.some((patch) =>
-    touchedPathsForPatch(patch).some((path) => pathsOverlap(path, readPath))
-  );
+  if (nonRecursive) {
+    return patches.some((patch) =>
+      changedLeafPathsForPatch(patch).some((path) =>
+        pathIsSameOrAncestor(path, readPath)
+      )
+    );
+  }
+
+  let document: EntityDocument | undefined;
+  for (let index = 0; index < patches.length; index++) {
+    const patch = patches[index]!;
+    switch (patch.op) {
+      case "add":
+      case "remove": {
+        const path = parsePointer(patch.path);
+        if (pathsOverlap(path, readPath)) {
+          return true;
+        }
+
+        const parent = parentPath(path);
+        if (!pathsOverlap(parent, readPath)) {
+          break;
+        }
+
+        if (document === undefined) {
+          document = reconstructPatchedDocument(engine, {
+            ...options,
+            opIndex: options.opIndex - 1,
+            includeSnapshotAtTargetSeq: false,
+          });
+          if (index > 0) {
+            document = applyPatchDocument(
+              document,
+              patches.slice(0, index),
+            );
+          }
+        }
+        if (isArrayAtPath(document, parent)) {
+          return true;
+        }
+        break;
+      }
+      default:
+        if (
+          touchedPathsForPatch(patch).some((path) =>
+            pathsOverlap(path, readPath)
+          )
+        ) {
+          return true;
+        }
+    }
+
+    if (document !== undefined) {
+      document = applyPatchDocument(document, [patch]);
+    }
+  }
+  return false;
+};
+
+const pathIsSameOrAncestor = (
+  candidate: readonly string[],
+  path: readonly string[],
+): boolean =>
+  candidate.length <= path.length &&
+  candidate.every((segment, index) => path[index] === segment);
+
+const changedLeafPathsForPatch = (patch: PatchOp): string[][] => {
+  switch (patch.op) {
+    case "replace":
+    case "add":
+    case "remove":
+    case "splice":
+      return [parsePointer(patch.path)];
+    case "move": {
+      const from = parsePointer(patch.from);
+      const to = parsePointer(patch.path);
+      return [from, to];
+    }
+  }
 };
 
 const touchedPathsForPatch = (patch: PatchOp): string[][] => {
@@ -3892,6 +3990,27 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
     case "splice":
       return [parsePointer(patch.path)];
   }
+};
+
+const isArrayAtPath = (
+  root: FabricValue,
+  path: readonly string[],
+): boolean => {
+  let current = root;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      current = current[Number(segment)];
+    } else if (
+      current !== null &&
+      typeof current === "object" &&
+      Object.hasOwn(current, segment)
+    ) {
+      current = (current as Record<string, FabricValue>)[segment];
+    } else {
+      return false;
+    }
+  }
+  return Array.isArray(current);
 };
 
 // Scheduler reader-dirty propagation uses the EXACT changed leaf paths, not the
@@ -4098,6 +4217,7 @@ const reconstructPatchedDocument = (
     branch: BranchName;
     seq: number;
     opIndex: number;
+    includeSnapshotAtTargetSeq?: boolean;
   },
 ): EntityDocument => {
   const { id, scopeKey, branch, seq, opIndex } = options;
@@ -4112,7 +4232,7 @@ const reconstructPatchedDocument = (
     branch,
     id,
     scope_key: scopeKey,
-    seq,
+    seq: options.includeSnapshotAtTargetSeq === false ? seq - 1 : seq,
   }) as SnapshotRow | undefined;
 
   let baseSeq = 0;

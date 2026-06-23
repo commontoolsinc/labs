@@ -114,6 +114,7 @@ export interface ConfirmedRead {
   branch?: BranchName;
   path: ReadPath;
   seq: number;
+  nonRecursive?: boolean;
 }
 
 export interface PendingRead {
@@ -121,6 +122,7 @@ export interface PendingRead {
   scope?: CellScope;
   path: ReadPath;
   localSeq: number;
+  nonRecursive?: boolean;
 }
 
 export interface SchedulerObservationCommit {

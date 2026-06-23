@@ -154,12 +154,14 @@ interface ConfirmedRead {
   branch?: BranchId;
   path: ReadPath;
   seq: number;
+  nonRecursive?: boolean;
 }
 
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
   localSeq: number;
+  nonRecursive?: boolean;
 }
 
 interface ClientCommit {

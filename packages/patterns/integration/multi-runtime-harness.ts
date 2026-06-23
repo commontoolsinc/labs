@@ -175,6 +175,11 @@ export class MultiRuntimeSession {
     };
   }
 
+  /** Serialize the cell at `path` as a sigil link suitable for handler events. */
+  async linkValue(path: (string | number)[] = []): Promise<unknown> {
+    return await this.#client.call("linkValue", { path });
+  }
+
   async idle(): Promise<void> {
     await this.#client.call("idle");
   }

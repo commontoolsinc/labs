@@ -197,6 +197,21 @@ const handlers: Record<
     });
   },
 
+  /**
+   * Serialize a result cell as the same sigil-link value that pattern code and
+   * UI event payloads use when passing live references across boundaries.
+   */
+  async linkValue({ path }) {
+    const target = result();
+    await target.pull();
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    const resolved = cell.resolveAsCell();
+    return sanitizeForTransfer(resolved.getAsLink({ includeSchema: true }));
+  },
+
   async idle() {
     await idle();
     return {};

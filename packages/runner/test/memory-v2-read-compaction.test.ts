@@ -49,7 +49,11 @@ Deno.test("memory v2 compacts descendant confirmed reads under a recursive ances
 
   const replica = storage.open(space).replica as unknown as {
     buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
+      confirmed: Array<{
+        path: string[];
+        seq: number;
+        nonRecursive?: boolean;
+      }>;
       pending: Array<{ path: string[]; localSeq: number }>;
     };
   };
@@ -92,7 +96,11 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
 
   const replica = storage.open(space).replica as unknown as {
     buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
+      confirmed: Array<{
+        path: string[];
+        seq: number;
+        nonRecursive?: boolean;
+      }>;
       pending: Array<{ path: string[]; localSeq: number }>;
     };
   };
@@ -100,14 +108,19 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
 
   assertEquals(reads.pending, []);
   assertEquals(
-    reads.confirmed.map((read) => read.path).toSorted((left, right) =>
-      JSON.stringify(left).localeCompare(JSON.stringify(right))
-    ),
+    reads.confirmed
+      .map((read) => ({
+        path: read.path,
+        nonRecursive: read.nonRecursive === true,
+      }))
+      .toSorted((left, right) =>
+        JSON.stringify(left.path).localeCompare(JSON.stringify(right.path))
+      ),
     [
-      ["value"],
-      ["value", "section0", "field0"],
+      { path: ["value"], nonRecursive: true },
+      { path: ["value", "section0", "field0"], nonRecursive: false },
     ].toSorted((left, right) =>
-      JSON.stringify(left).localeCompare(JSON.stringify(right))
+      JSON.stringify(left.path).localeCompare(JSON.stringify(right.path))
     ),
   );
 
