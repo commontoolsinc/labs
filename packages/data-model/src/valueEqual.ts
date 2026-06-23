@@ -108,7 +108,7 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
       // Alas, casts are required because TS doesn't know the correspondence
       // between subtype names and type restrictions.
       const aObject = a as FabricObject;
-      const bObject = a as FabricObject;
+      const bObject = b as FabricObject;
       if (Object.keys(aObject).length !== Object.keys(bObject).length) {
         // Plain objects can't possibly be equal if they have different numbers
         // of properties.
