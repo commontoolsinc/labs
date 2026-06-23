@@ -181,7 +181,7 @@ describe("type-check", () => {
       });
 
       it("rejects non-plain class instances (`Date`, `Map`, …)", () => {
-        // Not representable as a `FabricObject`; reachable only via an unsound
+        // Not representable as a `FabricPlainObject`; reachable only via an unsound
         // cast, so the guard is fed them as `unknown`.
         expect(isFabricPlainObject(new Date() as unknown as FabricValue))
           .toBe(false);

@@ -1,7 +1,7 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
-  type FabricObject,
+  type FabricPlainObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -198,7 +198,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as FabricObject)[key];
+      value = (value as FabricPlainObject)[key];
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
