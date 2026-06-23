@@ -25,9 +25,13 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
+  compiledDocKey,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
@@ -52,6 +56,14 @@ const logger = getLogger("pattern-manager");
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
+
+function throwableStorageError(error: CommitError): Error {
+  if (error instanceof Error) return error;
+  return Object.assign(new Error(error.message), {
+    name: error.name,
+    cause: error,
+  });
+}
 
 /**
  * Re-derive a stored module's fabric edges from its SOURCE text (source docs
@@ -146,8 +158,10 @@ export class PatternManager {
   // re-evaluating it in SES. Content-addressed, so a hit is always the same
   // bytes — never stale. Bounded (FIFO) to cap memory.
   private modulesByIdentity = new Map<string, { exports: Exports }>();
-  // In-flight compiled-cache write-backs (fire-and-forget); awaited by
-  // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
+  // In-flight compiled-cache write-backs; awaited by flushCompileCacheWrites()
+  // for graceful shutdown / deterministic tests. Cold compile write-backs are
+  // awaited by compilePattern; recovery/replication paths may still run in the
+  // background.
   private compileCacheWrites = new Set<Promise<unknown>>();
   // The subset of `compileCacheWrites` that are cold-compile closure
   // write-backs. Tracked separately so `replicateClosures` can await them
@@ -455,7 +469,7 @@ export class PatternManager {
    * `cacheCtx.space`. On a warm full hit the per-module compiled bodies are
    * reused (no TypeScript compile / transformer pipeline / SES re-verify); on a
    * miss the program is compiled and its modules are written back (source +
-   * integrity-stamped compiled docs) on a fresh transaction, fire-and-forget.
+   * integrity-stamped compiled docs) on a fresh transaction before returning.
    */
   private async compileViaCellCache(
     program: RuntimeProgram,
@@ -495,8 +509,8 @@ export class PatternManager {
     // Read the cache on a dedicated, owned transaction (used read-only — the
     // load path only reads, and it is aborted below, never committed) so
     // cache-cell reads never enter the caller's transaction (whose commit must
-    // not gain dependencies on, or race, the fire-and-forget write-back), and
-    // so repeated compiles don't accumulate open transactions.
+    // not gain dependencies on the write-back), and so repeated compiles don't
+    // accumulate open transactions.
     const readTx = this.runtime.edit();
 
     let warmHit = false;
@@ -570,9 +584,8 @@ export class PatternManager {
       // guarantees every persisted ref has a durable closure behind it (no
       // race against session end). Cold compiles only; a warm hit means the
       // closure was just READ from storage, i.e. it is already durable. A
-      // failed cache write logs and does not fail the compile: the pattern
-      // works in-session regardless, and the next cold compile of the same
-      // content retries the write.
+      // failed cache write fails the compile: persisted refs-only pattern JSON
+      // would otherwise point at a closure that is not durable in `space`.
       const writeBack = this.writeBackCompileCache(
         space,
         modules,
@@ -583,11 +596,6 @@ export class PatternManager {
       this.pendingCacheWriteBacks.add(writeBack);
       try {
         await writeBack;
-      } catch (error) {
-        logger.warn("compile-cache-write-back-failed", () => [
-          `entry=${entryIdentity}`,
-          String(error),
-        ]);
       } finally {
         this.compileCacheWrites.delete(writeBack);
         this.pendingCacheWriteBacks.delete(writeBack);
@@ -840,7 +848,13 @@ export class PatternManager {
         compiled.modules,
         entryIdentity,
         cacheOpts,
-      );
+      ).catch((error) => {
+        logger.warn("load-pattern-by-identity-writeback-failed", () => [
+          `entry=${entryIdentity}`,
+          `symbol=${symbol}`,
+          String(error),
+        ]);
+      });
       this.compileCacheWrites.add(writeBack);
       this.pendingCacheWriteBacks.add(writeBack);
       writeBack.finally(() => {
@@ -1063,8 +1077,8 @@ export class PatternManager {
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
    * pattern's own space writes) retries rather than silently dropping the
-   * entry; a final failure is logged (not thrown) since the cache is an
-   * optimization, never on the correctness path.
+   * entry. A final failure throws because persisted refs-only pattern JSON
+   * requires a durable closure behind every `$patternRef`.
    */
   private async writeBackCompileCache(
     space: MemorySpace,
@@ -1073,6 +1087,7 @@ export class PatternManager {
     opts: { runtimeVersion: string },
   ): Promise<void> {
     const writebackStart = performance.now();
+    await this.syncCompileCacheWriteTargets(space, modules, opts);
     const { error } = await this.runtime.editWithRetry((tx) => {
       writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
       writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
@@ -1083,7 +1098,24 @@ export class PatternManager {
         `entry=${entryIdentity}`,
         error.message,
       ]);
+      throw throwableStorageError(error);
     }
+  }
+
+  private async syncCompileCacheWriteTargets(
+    space: MemorySpace,
+    modules: readonly CacheableModule[],
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
+    await Promise.all(
+      modules.flatMap((module) => [
+        this.runtime.getCell(space, sourceDocKey(module.identity)).sync(),
+        this.runtime.getCell(
+          space,
+          compiledDocKey(opts.runtimeVersion, module.identity),
+        ).sync(),
+      ]),
+    );
   }
 
   // Resolve a Pattern from an evaluate result.
