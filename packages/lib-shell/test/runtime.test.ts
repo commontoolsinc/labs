@@ -10,6 +10,7 @@ type MockRuntimeClientEvents = {
 };
 
 class MockRuntimeClient {
+  readonly signal: AbortSignal = new AbortController().signal;
   idleCalls = 0;
   syncedCalls = 0;
   slugByPageId = new Map<string, string | undefined>();
@@ -197,6 +198,78 @@ describe("RuntimeInternals", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("logs a navigation-convergence failure without escaping as unhandled", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const space = "did:key:z6Mk-lib-shell-nav-fail" as DID;
+    const client = new MockRuntimeClient();
+    client.synced = () => Promise.reject(new Error("convergence failed"));
+
+    let navigated = false;
+    const runtime = new RuntimeInternals(client as any, {
+      navigate: () => {
+        navigated = true;
+      },
+    });
+    // Isolate #handleNavigateRequest from the mock's rejecting root pattern.
+    runtime.registerNavigatedPiece = async () => {};
+
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      client.emit("navigaterequest", {
+        cell: { id: () => "piece-fail", space: () => space },
+      });
+      // Let the fire-and-forget handler settle. An unhandled rejection here
+      // would fail the test via Deno's sanitizer.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      console.error = originalError;
+      await runtime.dispose();
+    }
+
+    expect(navigated).toBe(false);
+    expect(errors.length).toBe(1);
+  });
+
+  it("abandons navigation convergence silently when disposed mid-flight", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const space = "did:key:z6Mk-lib-shell-nav-dispose" as DID;
+    const client = new MockRuntimeClient();
+    let rejectSynced!: (error: unknown) => void;
+    const syncedGate = new Promise<void>((_, reject) => {
+      rejectSynced = reject;
+    });
+    client.synced = () => syncedGate;
+
+    let navigated = false;
+    const runtime = new RuntimeInternals(client as any, {
+      navigate: () => {
+        navigated = true;
+      },
+    });
+    runtime.registerNavigatedPiece = async () => {};
+
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      client.emit("navigaterequest", {
+        cell: { id: () => "piece-dispose", space: () => space },
+      });
+      // The handler is now parked on synced(); dispose, then cancel it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await runtime.dispose();
+      rejectSynced(new DOMException("aborted", "AbortError"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(navigated).toBe(false);
+    expect(errors.length).toBe(0);
   });
 
   it("defaults worker runtime options to shell-compatible CFC policy and principal trust", async () => {
@@ -430,6 +503,71 @@ describe("RuntimeInternals", () => {
         expect(client.spaceRootCalls).toEqual([cellSpace]);
       } finally {
         await runtime.dispose();
+      }
+    });
+  });
+
+  describe("lifetime signal", () => {
+    it("exposes the client's lifetime signal", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      try {
+        expect(runtime.signal).toBe(client.signal);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  describe("trackRecentPiece", () => {
+    it("absorbs a failed root-pattern lookup and logs once while alive", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-lib-shell-runtime-recent" as DID;
+
+      const errors: unknown[][] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => errors.push(args);
+      try {
+        // getSpaceRootPattern rejects in the mock; the catch absorbs it and
+        // logs once because the runtime is still alive.
+        await runtime.trackRecentPiece(space, "piece-recent");
+        expect(client.spaceRootCalls).toEqual([space]);
+        expect(errors.length).toBe(1);
+      } finally {
+        console.error = originalError;
+        await runtime.dispose();
+      }
+    });
+
+    it("stays silent when the lookup fails after disposal", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-lib-shell-runtime-recent-disposed" as DID;
+      // Reject only after the runtime has been disposed, so the catch takes
+      // the silent branch.
+      let rejectRoot!: (error: unknown) => void;
+      client.getSpaceRootPattern = (s: DID) => {
+        client.spaceRootCalls.push(s);
+        return new Promise<never>((_, reject) => {
+          rejectRoot = reject;
+        });
+      };
+
+      const errors: unknown[][] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => errors.push(args);
+      try {
+        const tracking = runtime.trackRecentPiece(space, "piece-recent");
+        await runtime.dispose();
+        rejectRoot(new Error("no root pattern in mock"));
+        await tracking;
+        expect(errors.length).toBe(0);
+      } finally {
+        console.error = originalError;
       }
     });
   });

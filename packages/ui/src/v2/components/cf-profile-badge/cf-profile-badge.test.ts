@@ -572,3 +572,58 @@ describe("CFProfileBadge", () => {
     });
   });
 });
+
+describe("CFProfileBadge disposal handling", () => {
+  // _resolve awaits cell.resolveAsCell(); a disposal race rejects it with
+  // AbortError while the badge is still connected and its generation unchanged,
+  // so only the runtime-signal guard distinguishes cancellation from failure.
+  function badgeThis(aborted: boolean): Record<string, unknown> {
+    return {
+      _resolveGeneration: 0,
+      isConnected: true,
+      // The ambient @consume runtime is cleared on logout; the guard reads the
+      // profile cell's own runtime instead, so leave this undefined.
+      runtime: undefined,
+      profile: {
+        runtime: () => ({ signal: { aborted } }),
+        resolveAsCell: () =>
+          Promise.reject(new DOMException("aborted", "AbortError")),
+      },
+      _cleanup: () => {},
+      _applyValue: () => {},
+    };
+  }
+
+  function resolve(fakeThis: Record<string, unknown>): Promise<void> {
+    return (CFProfileBadge.prototype as unknown as {
+      _resolve(this: unknown): Promise<void>;
+    })._resolve.call(fakeThis);
+  }
+
+  function captureConsoleError(): { calls: unknown[][]; restore(): void } {
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    return { calls, restore: () => (console.error = original) };
+  }
+
+  it("logs a resolve failure while the runtime is alive", async () => {
+    const spy = captureConsoleError();
+    try {
+      await resolve(badgeThis(false));
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(1);
+  });
+
+  it("suppresses the resolve-failure log when the runtime is disposed", async () => {
+    const spy = captureConsoleError();
+    try {
+      await resolve(badgeThis(true));
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(0);
+  });
+});

@@ -435,4 +435,50 @@ describe("shell piece tests", () => {
       await Deno.remove(identityDir, { recursive: true });
     }
   });
+
+  it("tears the runtime down cleanly on logout while a piece is rendered", async () => {
+    const slug = `logout-teardown-${crypto.randomUUID()}`;
+    const identity = await Identity.generate({ implementation: "noble" });
+    const identityPath = await writeIdentityKey(identity);
+    const identityDir = dirname(identityPath);
+    const source = join(
+      import.meta.dirname!,
+      "fixtures",
+      "slug-piece-v1.tsx",
+    );
+
+    try {
+      await runCfPieceNewWithSlug({ sourcePath: source, identityPath, slug });
+
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug },
+        identity,
+      });
+      // The piece is rendered: the renderer, the favorites subscription, and
+      // the slug-target poll are all live.
+      await waitForSlugPieceMarker(shell, "slug piece v1");
+
+      // In-app logout clears the identity, which disposes the runtime via the
+      // RootView swap while those consumers are still active. Proactive
+      // cancellation must tear them all down without recording a console error
+      // — the harness afterEach fails the test on any (no allowlist).
+      await shell.page().evaluate(async () => {
+        await globalThis.app.apply({
+          type: "set-identity",
+          identity: undefined,
+        });
+      });
+      await waitFor(async () =>
+        await shell.page().evaluate(() => !globalThis.commonfabric?.rt)
+      );
+      // Let any disposal-raced async work settle before afterEach inspects the
+      // recorded console errors.
+      await shell.page().evaluate(() =>
+        new Promise((resolve) => setTimeout(resolve, 250))
+      );
+    } finally {
+      await Deno.remove(identityDir, { recursive: true }).catch(() => {});
+    }
+  });
 });

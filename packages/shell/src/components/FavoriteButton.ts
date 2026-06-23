@@ -146,6 +146,9 @@ export class XFavoriteButtonElement extends LitElement {
       }
       // Server state will update via subscription
     } catch (err) {
+      // A disposal race (logout, runtime swap) cancels the write; that is not
+      // a toggle failure to surface.
+      if (this.rt?.signal.aborted) return;
       console.error("[FavoriteButton] Error toggling favorite:", err);
       // Reset local state on error
       this._localIsFavorite = undefined;

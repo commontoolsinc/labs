@@ -616,10 +616,16 @@ An action run:
 
 Reactive action commits are optimistic. The scheduler continues after starting
 the commit, assuming success. If the commit resolves with an error, the action
-is resubscribed from the captured log and retried up to
-`MAX_RETRIES_FOR_REACTIVE` times by marking it dirty, adding it to `pending`,
-and queuing execution. Retry state is cleared after a successful commit. The
-in-flight source record is removed after the commit promise settles.
+is always resubscribed from the captured log so later input changes re-trigger
+it. A **conflict** (`ConflictError`, a stale read) is then a wait, not a retry:
+the write that caused it has dirtied this action's still-subscribed reads, so
+normal reader-dirty propagation re-runs it with the latest state — it is not
+re-queued and does **not** consume the retry budget. Other non-permanent errors
+are not re-triggered that way, so they are retried up to
+`MAX_RETRIES_FOR_REACTIVE` times by marking the action dirty, adding it to
+`pending`, and queuing execution; permanent (precondition) rejections are not
+retried. Retry state is cleared after a successful commit. The in-flight source
+record is removed after the commit promise settles.
 
 If an action throws, the scheduler reports it through registered error handlers,
 still finalizes commit/resubscription state for the transaction, and resolves

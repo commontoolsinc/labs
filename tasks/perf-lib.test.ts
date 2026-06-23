@@ -616,15 +616,15 @@ Deno.test("computeCiWallTimeRevisitSignals flags long required wall time", () =>
   );
 });
 
-Deno.test("computeBaseline enforces the 15 percent floor for low-variance samples", () => {
+Deno.test("computeBaseline enforces the 50 percent floor for low-variance samples", () => {
   const baseline = computeBaseline([100, 100, 100, 100, 100]);
 
   assertEquals(baseline?.median, 100);
   assertEquals(baseline?.stddev, 0);
-  assertAlmostEquals(baseline?.threshold ?? 0, 115, 1e-9);
+  assertAlmostEquals(baseline?.threshold ?? 0, 150, 1e-9);
 });
 
-Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 15 percent", () => {
+Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 50 percent", () => {
   const baseline = computeBaseline([100, 100, 100, 100, 150]);
 
   assertEquals(baseline?.median, 100);

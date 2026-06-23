@@ -52,6 +52,7 @@ import {
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
   type CfcLabelViewResponse,
+  ClientNotificationType,
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
@@ -67,6 +68,7 @@ import {
   type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
   type InitializationData,
+  type IPCClientNotification,
   IPCClientRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -100,8 +102,8 @@ import {
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
-  type VDomBatchAppliedRequest,
-  type VDomEventRequest,
+  type VDomBatchAppliedNotification,
+  type VDomEventNotification,
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
@@ -1368,16 +1370,32 @@ export class RuntimeProcessor {
         return this.setBreakpoints(request);
       case RequestType.UploadBlob:
         return await this.handleUploadBlob(request);
-      case RequestType.VDomEvent:
-        return this.handleVDomEvent(request);
       case RequestType.VDomMount:
         return this.handleVDomMount(request);
       case RequestType.VDomUnmount:
         return this.handleVDomUnmount(request);
-      case RequestType.VDomBatchApplied:
-        return this.handleVDomBatchApplied(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
+    }
+  }
+
+  /**
+   * Dispatch a one-way notification from the main thread. There is no response
+   * channel back to the sender, so handlers return void; a throw propagates to
+   * the worker message loop, which logs it worker-side.
+   */
+  handleNotification(notification: IPCClientNotification): void {
+    switch (notification.type) {
+      case ClientNotificationType.VDomEvent:
+        return this.handleVDomEvent(notification);
+      case ClientNotificationType.VDomBatchApplied:
+        return this.handleVDomBatchApplied(notification);
+      default:
+        console.warn(
+          `[RuntimeProcessor] Unknown notification type: ${
+            (notification as any).type
+          }`,
+        );
     }
   }
 
@@ -1385,7 +1403,7 @@ export class RuntimeProcessor {
    * Handle a DOM event dispatched from the main thread.
    * This routes the event to the appropriate reconciler based on mountId.
    */
-  handleVDomEvent(request: VDomEventRequest): void {
+  handleVDomEvent(request: VDomEventNotification): void {
     const mount = this.vdomMounts.get(request.mountId);
     if (!mount) {
       console.warn(
@@ -1475,7 +1493,7 @@ export class RuntimeProcessor {
     this.vdomMounts.delete(mountId);
   }
 
-  handleVDomBatchApplied(request: VDomBatchAppliedRequest): void {
+  handleVDomBatchApplied(request: VDomBatchAppliedNotification): void {
     const mount = this.vdomMounts.get(request.mountId);
     if (!mount) {
       return;

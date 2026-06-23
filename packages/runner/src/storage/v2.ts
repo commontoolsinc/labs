@@ -77,6 +77,7 @@ import type {
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
+import { isReadExcludedFromConflict } from "./reactivity-log.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
@@ -2104,6 +2105,16 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
 
+      // Reference-resolution reads (e.g. asCell argument materialization following
+      // a write-redirect to construct the Cell) are tagged excludeReadFromConflict.
+      // Scoped to NONRECURSIVE (shape/topology) reads: those resolve a reference,
+      // not consume a value, so they must not enter the conflict set (they stay in
+      // the journal for reactivity). A RECURSIVE read in the same scope is a real
+      // value dependency (a by-value arg) and is kept. Inert unless reads are marked.
+      if (isReadExcludedFromConflict(read.meta) && read.nonRecursive === true) {
+        continue;
+      }
+
       const scope = normalizeCellScope(read.scope);
       const record = this.#docs.get(docKey(read.id as URI, scope));
       const pendingLocalSeq = record?.pending
@@ -2129,13 +2140,13 @@ class SpaceReplica implements ISpaceReplica {
         });
       }
     }
+    // Keep the nonRecursive flag on the reads sent to the engine (it was
+    // historically stripped here). The engine applies shallow (shape-only)
+    // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
+    // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-      pending: compactCommitReads(this.#space, pending).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
+      confirmed: compactCommitReads(this.#space, confirmed),
+      pending: compactCommitReads(this.#space, pending),
     };
   }
 

@@ -4,7 +4,6 @@ import type { JSONSchema } from "@commonfabric/api";
 import type { DID } from "@commonfabric/identity";
 import { FavoritesManager } from "./favorites-manager.ts";
 import type { RuntimeClient } from "./runtime-client.ts";
-import { RuntimeDisposedError } from "./shared/disposed-error.ts";
 
 const space = "did:key:test-space" as DID;
 
@@ -13,7 +12,7 @@ interface StubOptions {
   getPageThrows?: boolean; // make getPage reject (derivation error path)
   favorites?: unknown; // value returned by the favorites cell
   ensureThrows?: boolean; // make ensureHomePatternRunning reject
-  ensureDisposed?: boolean; // reject with a RuntimeDisposedError
+  ensureDisposed?: boolean; // abort the runtime signal during setup
 }
 
 // A single flexible RuntimeClient stub covering everything FavoritesManager
@@ -44,9 +43,10 @@ function makeStub(opts: StubOptions = {}) {
     key: (k: string) => (k === "favorites" ? favoritesCell : handler),
   };
   const rt = {
+    signal: { aborted: opts.ensureDisposed === true },
     ensureHomePatternRunning: () =>
       opts.ensureDisposed
-        ? Promise.reject(new RuntimeDisposedError("disposed"))
+        ? Promise.reject(new DOMException("aborted", "AbortError"))
         : opts.ensureThrows
         ? Promise.reject(new Error("ensure failed"))
         : Promise.resolve(homeHandle),
@@ -167,7 +167,7 @@ describe("FavoritesManager other operations", () => {
     expect(seen).toEqual([[]]);
   });
 
-  it("subscribeFavorites treats a runtime-disposed error as cancellation", async () => {
+  it("subscribeFavorites treats an aborted runtime as cancellation", async () => {
     const stub = makeStub({ ensureDisposed: true });
     const seen: unknown[] = [];
     let reported: Error | undefined;
@@ -179,8 +179,8 @@ describe("FavoritesManager other operations", () => {
     );
     await tick();
     await tick();
-    // A disposed runtime is an expected teardown race, not an error: neither
-    // onError nor the empty-list callback fires.
+    // An aborted runtime signal marks an expected teardown race, not an error:
+    // neither onError nor the empty-list callback fires.
     expect(reported).toBeUndefined();
     expect(seen).toEqual([]);
   });

@@ -694,6 +694,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }, { includeCfcLabel: true });
     } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
+      // A disposal race (logout, runtime swap) cancels the resolve; that is
+      // cancellation, not a failure to surface. Read the cell's own runtime,
+      // not the ambient `this.runtime` (cleared to undefined on logout).
+      if (cell.runtime().signal.aborted) return;
       console.error("cf-profile-badge: failed to resolve profile cell", e);
       this._resolvedCell = undefined;
       this._navigable = false;

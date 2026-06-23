@@ -10,6 +10,7 @@ import "core-js/proposals/async-explicit-resource-management";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
+  isIPCClientNotification,
   RequestType,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
@@ -19,6 +20,20 @@ let workerInitialization: Promise<RuntimeProcessor> | undefined;
 
 self.addEventListener("message", async (event: MessageEvent) => {
   const message = event.data;
+
+  // One-way notifications carry no msgId and get no response. Drop them once
+  // the worker is gone or disposed; in teardown the main thread may still be
+  // flushing fire-and-forget signals.
+  if (isIPCClientNotification(message)) {
+    try {
+      if (worker && !worker.isDisposed()) {
+        worker.handleNotification(message);
+      }
+    } catch (error) {
+      console.error("[RuntimeWorker] Notification error:", error);
+    }
+    return;
+  }
 
   try {
     if (!isIPCClientMessage(message)) {

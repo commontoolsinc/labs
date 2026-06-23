@@ -100,6 +100,46 @@ describe("hasVariantValue", () => {
   });
 });
 
+describe("CFRender render-error handling", () => {
+  function cellWithSignal(aborted: boolean): CellHandle {
+    return {
+      runtime: () => ({ signal: { aborted } }),
+    } as unknown as CellHandle;
+  }
+
+  function captureConsoleError(fn: () => void): unknown[][] {
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    try {
+      fn();
+    } finally {
+      console.error = original;
+    }
+    return calls;
+  }
+
+  it("logs render errors while the runtime is alive", () => {
+    const element = new CFRender();
+    element.cell = cellWithSignal(false);
+    const calls = captureConsoleError(() => {
+      (element as unknown as { _handleRenderError(e: unknown): void })
+        ._handleRenderError(new Error("boom"));
+    });
+    expect(calls.length).toBe(1);
+  });
+
+  it("suppresses render-error logging when the runtime is disposed", () => {
+    const element = new CFRender();
+    element.cell = cellWithSignal(true);
+    const calls = captureConsoleError(() => {
+      (element as unknown as { _handleRenderError(e: unknown): void })
+        ._handleRenderError(new DOMException("aborted", "AbortError"));
+    });
+    expect(calls.length).toBe(0);
+  });
+});
+
 describe("CFRender disconnectedCallback", () => {
   it("should reset state on disconnect", () => {
     const element = new CFRender();

@@ -270,6 +270,19 @@ function commonPrefixLength(
  * - Objects: changed iff the key set changed (not the values).
  * - Arrays: changed iff the key set changed (not the values).
  * - Primitives: changed iff the value changed.
+ *
+ * NOTE: FabricSpecialObjects (FabricBytes / other FabricPrimitives) are NOT
+ * meaningfully handled here. They hold state in private fields with zero
+ * enumerable own-props, so the object branch below compares them by their
+ * (empty) key set and calls any two "unchanged" — detecting neither an in-place
+ * value change nor a class/type change. They are kept off this path upstream:
+ * query-result-proxy materializes a FabricPrimitive as an atomic value (a
+ * recursive read), so its change-detection runs through `valueEqual`, not here.
+ * And the intended behavior here is genuinely ambiguous: for an opaque, keyless
+ * leaf, should a "shallow" read react to a class/type change (its shape) or to
+ * any value change (it being atomic)? We don't decide — if a FabricSpecialObject
+ * ever reaches here via a nonRecursive read, treat it as an unhandled gap, not
+ * defined behavior.
  */
 function shallowEqual(
   before: FabricValue,

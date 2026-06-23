@@ -881,6 +881,9 @@ export class XHeaderView extends BaseView {
           .addFavorite(space, this.pieceId, undefined, this.spaceName);
       }
     } catch (err) {
+      // A disposal race (logout, runtime swap) cancels the write; that is not
+      // a toggle failure to surface.
+      if (this.rt?.signal.aborted) return;
       console.error("[HeaderView] Error toggling favorite:", err);
       this._localIsFavorite = undefined;
     } finally {
