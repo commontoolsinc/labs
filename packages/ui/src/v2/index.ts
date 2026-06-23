@@ -1,7 +1,10 @@
 /**
- * Web Components Library v2
+ * Web components library entrypoint.
  *
- * Main entry point for the v2 web components library
+ * Re-exports the component directory indexes under src/v2.
+ *
+ * TODO(ui-path-cleanup): Rename this path now that it is the only UI component
+ * implementation.
  */
 
 // Core exports
@@ -107,7 +110,7 @@ export * from "./components/cf-voice-input/index.ts";
 export * from "./components/cf-vscroll/index.ts";
 export * from "./components/cf-vstack/index.ts";
 export * from "./components/cf-select/index.ts";
-export * from "./components/cf-message-input/cf-message-input.ts";
+export * from "./components/cf-message-input/index.ts";
 export * from "./components/cf-prompt-input/index.ts";
 export * from "./components/cf-keybind/index.ts";
 export * from "./components/cf-tools-chip/index.ts";
@@ -116,11 +119,11 @@ export * from "./components/keyboard-router.ts";
 export * from "./components/modal-context.ts";
 export * from "./components/cf-modal-provider/index.ts";
 export * from "./components/cf-modal/index.ts";
-export * from "./components/cf-attachments-bar/cf-attachments-bar.ts";
-export * from "./components/cf-chip/cf-chip.ts";
+export * from "./components/cf-attachments-bar/index.ts";
+export * from "./components/cf-chip/index.ts";
 export * from "./components/cf-cfc-authorship/index.ts";
 export * from "./components/cf-cfc-label/index.ts";
-export * from "./components/cf-question/cf-question.ts";
+export * from "./components/cf-question/index.ts";
 export * from "./components/cf-cell-link/index.ts";
 export * from "./components/cf-cell-context/index.ts";
 export * from "./components/cf-space-link/index.ts";

@@ -1837,5 +1837,3 @@ export class CFCodeEditor extends BaseElement {
     });
   }
 }
-
-globalThis.customElements.define("cf-code-editor", CFCodeEditor);

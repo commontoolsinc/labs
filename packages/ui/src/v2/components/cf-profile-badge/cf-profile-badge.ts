@@ -2,7 +2,7 @@ import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-avatar/cf-avatar.ts";
+import "../cf-avatar/index.ts";
 import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
 import {
   type CellHandle,
@@ -883,10 +883,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       </span>
     `;
   }
-}
-
-if (!globalThis.customElements.get("cf-profile-badge")) {
-  globalThis.customElements.define("cf-profile-badge", CFProfileBadge);
 }
 
 declare global {

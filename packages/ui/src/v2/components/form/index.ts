@@ -4,8 +4,9 @@ if (!customElements.get("cf-form")) {
   customElements.define("cf-form", CFForm);
 }
 
+export type { CFForm as CFFormElement } from "./cf-form.ts";
+
 export { CFForm };
-export type { CFForm as CFFormElement };
 
 // Re-export form context types and utilities
 export {

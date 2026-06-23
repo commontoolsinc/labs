@@ -317,5 +317,3 @@ export class CFChip extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-chip", CFChip);

@@ -48,5 +48,3 @@ export class CFKbd extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-kbd", CFKbd);

@@ -385,5 +385,3 @@ export class CFCheckbox extends BaseElement {
       super.blur();
     }
   }
-
-  globalThis.customElements.define("cf-checkbox", CFCheckbox);

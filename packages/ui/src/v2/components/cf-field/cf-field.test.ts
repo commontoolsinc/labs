@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFField } from "./cf-field.ts";
+import { CFField } from "./index.ts";
 
 describe("CFField", () => {
   it("should be defined", () => {

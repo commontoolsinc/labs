@@ -51,6 +51,7 @@ import {
   getTypeAtLocationWithFallback,
   getVariableInitializer,
 } from "./utils.ts";
+import { isCollectionType } from "./type-inference.ts";
 
 const BUILDER_SYMBOL_NAMES = COMMONFABRIC_BUILDER_EXPORT_NAMES;
 
@@ -1192,10 +1193,7 @@ function hasReactiveCollectionProvenanceInternal(
         options.typeRegistry,
         options.logger,
       );
-      if (
-        resultType &&
-        (checker.isArrayType(resultType) || checker.isTupleType(resultType))
-      ) {
+      if (isCollectionType(resultType, checker)) {
         return true;
       }
     }

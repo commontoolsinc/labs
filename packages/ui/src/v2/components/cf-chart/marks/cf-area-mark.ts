@@ -34,8 +34,6 @@ export class CFAreaMark extends MarkElement {
   }
 }
 
-customElements.define("cf-area-mark", CFAreaMark);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-area-mark": CFAreaMark;

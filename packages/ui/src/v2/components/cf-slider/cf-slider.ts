@@ -627,5 +627,3 @@ export class CFSlider extends BaseElement {
     this.setValue(this.value - this.step);
   }
 }
-
-globalThis.customElements.define("cf-slider", CFSlider);

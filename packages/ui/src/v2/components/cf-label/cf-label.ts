@@ -165,5 +165,3 @@ export class CFLabel extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-label", CFLabel);

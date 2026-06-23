@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   detectCallKind,
+  isCollectionType,
   isFunctionLikeExpression,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -96,16 +97,7 @@ function isArrayLikeReceiverType(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const type = checker.getTypeAtLocation(expression);
-  if (checker.isArrayType(type) || checker.isTupleType(type)) {
-    return true;
-  }
-
-  return type.isUnion() &&
-    type.types.length > 0 &&
-    type.types.every((member) =>
-      checker.isArrayType(member) || checker.isTupleType(member)
-    );
+  return isCollectionType(checker.getTypeAtLocation(expression), checker);
 }
 
 function markSyntheticReactiveCollectionDeclarationIfNeeded(

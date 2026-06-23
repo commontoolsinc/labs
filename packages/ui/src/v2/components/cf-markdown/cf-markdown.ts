@@ -5,8 +5,8 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-copy-button/cf-copy-button.ts";
-import "../cf-cell-link/cf-cell-link.ts";
+import "../cf-copy-button/index.ts";
+import "../cf-cell-link/index.ts";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -626,5 +626,3 @@ export class CFMarkdown extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-markdown", CFMarkdown);

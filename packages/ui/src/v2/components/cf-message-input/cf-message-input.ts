@@ -135,5 +135,3 @@ export class CFMessageInput extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-message-input", CFMessageInput);

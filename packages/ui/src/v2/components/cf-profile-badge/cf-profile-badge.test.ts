@@ -5,7 +5,7 @@ import {
   CFProfileBadge,
   profileDisplayFromValue,
   profileTooltipFromValue,
-} from "./cf-profile-badge.ts";
+} from "./index.ts";
 import { identitySeal } from "./identity-seal.ts";
 
 const OWNER_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";

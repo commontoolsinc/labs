@@ -274,5 +274,3 @@ export class CFAccordionItem extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-accordion-item", CFAccordionItem);

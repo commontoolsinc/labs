@@ -8,7 +8,7 @@ import {
   updateDragPointer,
 } from "../../core/drag-state.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import "../cf-cell-context/cf-cell-context.ts";
+import "../cf-cell-context/index.ts";
 
 /**
  * CFDragSource - Wraps draggable content and initiates drag operations
@@ -251,8 +251,6 @@ export class CFDragSource extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-drag-source", CFDragSource);
 
 declare global {
   interface HTMLElementTagNameMap {

@@ -1168,5 +1168,3 @@ export class CFAutocomplete extends BaseElement {
     this._close();
   }
 }
-
-globalThis.customElements.define("cf-autocomplete", CFAutocomplete);

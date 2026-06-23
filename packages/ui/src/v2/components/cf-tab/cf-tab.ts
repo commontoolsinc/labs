@@ -239,5 +239,3 @@ export class CFTab extends BaseElement {
     this.button?.blur();
   }
 }
-
-globalThis.customElements.define("cf-tab", CFTab);

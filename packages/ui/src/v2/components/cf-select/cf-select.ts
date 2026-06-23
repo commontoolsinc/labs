@@ -524,5 +524,3 @@ export class CFSelect extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-select", CFSelect);

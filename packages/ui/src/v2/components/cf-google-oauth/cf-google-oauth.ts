@@ -1,4 +1,4 @@
-import { CFOAuth } from "../cf-oauth/cf-oauth.ts";
+import { CFOAuth } from "../cf-oauth/index.ts";
 import type { OAuthData } from "../cf-oauth/cf-oauth.ts";
 
 /**
@@ -29,5 +29,3 @@ export class CFGoogleOAuth extends CFOAuth {
     this.tokenField = "token";
   }
 }
-
-globalThis.customElements.define("cf-google-oauth", CFGoogleOAuth);

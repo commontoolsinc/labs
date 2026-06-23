@@ -989,5 +989,3 @@ export class CFInput extends BaseElement {
     this.input?.setCustomValidity(message);
   }
 }
-
-globalThis.customElements.define("cf-input", CFInput);

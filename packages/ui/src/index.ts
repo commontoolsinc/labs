@@ -1,7 +1,7 @@
 /**
  * Common UI Web Components Library
  *
- * Main entry point that provides access to both v1 and v2 components
+ * Public package entrypoint for the cf-* component library.
  */
 
 export * from "./v2/index.ts";

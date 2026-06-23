@@ -2,7 +2,7 @@ import { css, html, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-chip/cf-chip.ts";
+import "../cf-chip/index.ts";
 import {
   type CellHandle,
   CellRef,
@@ -421,8 +421,6 @@ export class CFCellLink extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-cell-link", CFCellLink);
 
 declare global {
   interface HTMLElementTagNameMap {

@@ -733,6 +733,4 @@ export class CFToolsChip extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-tools-chip", CFToolsChip);
-
 export type { CFToolsChip as CFToolsChipElement };

@@ -28,8 +28,6 @@ export class CFLineMark extends MarkElement {
   }
 }
 
-customElements.define("cf-line-mark", CFLineMark);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-line-mark": CFLineMark;

@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
-import { CFInput, INPUT_PATTERNS } from "./cf-input.ts";
+import { CFInput, INPUT_PATTERNS } from "./index.ts";
 
 // NOTE: Full DOM interaction tests (input events, Cell two-way binding,
 // timing strategy integration, validation UI) require Lit's rendering

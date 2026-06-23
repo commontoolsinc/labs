@@ -251,5 +251,3 @@ export class CFQuestion extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-question", CFQuestion);

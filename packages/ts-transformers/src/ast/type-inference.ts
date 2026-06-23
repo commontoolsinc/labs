@@ -274,6 +274,35 @@ export function isCellLikeType(
 }
 
 /**
+ * Does this type denote a collection — an array, a tuple, or a union whose
+ * every member is one of those?
+ *
+ * The union arm is the reason this is shared rather than a bare
+ * `checker.isArrayType(t) || checker.isTupleType(t)`: a value built from
+ * differently-typed arrays — e.g. `a ?? b` over `string[] | undefined` and
+ * `number[]` resolves to `string[] | number[]` — is a union that
+ * `checker.isArrayType` returns false for. Every caller that must keep
+ * collection-valued expressions structurally lowered (array-method callback
+ * returns in expression-site-policy, fallback receivers in
+ * expression-site-lowering, derived reactive-collection calls in call-kind)
+ * needs to catch that union, so the logic lives in one place.
+ */
+export function isCollectionType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!type) return false;
+  if (checker.isArrayType(type) || checker.isTupleType(type)) {
+    return true;
+  }
+  return type.isUnion() &&
+    type.types.length > 0 &&
+    type.types.every((member) =>
+      checker.isArrayType(member) || checker.isTupleType(member)
+    );
+}
+
+/**
  * Unwrap OpaqueRef-like types to get the underlying type
  * Handles unions, intersections, and nested OpaqueRef types
  * @param seen - Set to track visited types and prevent infinite recursion

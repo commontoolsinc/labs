@@ -27,5 +27,3 @@ export class CFLink extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-link", CFLink);

@@ -171,5 +171,3 @@ export class CFHStack extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-hstack", CFHStack);

@@ -107,5 +107,3 @@ export class CFSeparator extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-separator", CFSeparator);

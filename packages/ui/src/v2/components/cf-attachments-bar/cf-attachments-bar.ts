@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-chip/cf-chip.ts";
+import "../cf-chip/index.ts";
 import { isCellHandle } from "@commonfabric/runtime-client";
 
 /**
@@ -136,5 +136,3 @@ export class CFAttachmentsBar extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-attachments-bar", CFAttachmentsBar);

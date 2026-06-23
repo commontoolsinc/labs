@@ -761,5 +761,3 @@ export class CFTextarea extends BaseElement {
     this.textarea?.setCustomValidity(message);
   }
 }
-
-globalThis.customElements.define("cf-textarea", CFTextarea);

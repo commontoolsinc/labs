@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
-import { CFPiece } from "../cf-piece/cf-piece.ts";
+import { CFPiece } from "../cf-piece/index.ts";
 
 declare global {
   var Plaid: any;
@@ -623,5 +623,3 @@ export class CFPlaidLink extends BaseElement {
     `,
   ];
 }
-
-globalThis.customElements.define("cf-plaid-link", CFPlaidLink);

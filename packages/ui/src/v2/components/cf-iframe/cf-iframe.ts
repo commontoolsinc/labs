@@ -207,5 +207,3 @@ export class CFIframe extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-iframe", CFIframe);
