@@ -279,7 +279,9 @@ describe("trigger reads survive failed runs", () => {
     // "does not restore when retries are exhausted"). A conflict must NOT: it is
     // recovered by reader-dirty regardless of the budget, so it always re-arms
     // (restore + resubscribe) and never falls into the exhausted-retries branch.
-    const error = Object.assign(new Error("conflict"), { name: "ConflictError" });
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+    });
     const retries = new WeakMap<Action, number>();
     retries.get = () => MAX_RETRIES_FOR_REACTIVE;
     const calls: string[] = [];

@@ -99,8 +99,14 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
         return undefined;
       },
     });
-    rtA = new Runtime({ apiUrl: new URL(import.meta.url), storageManager: storageA });
-    rtB = new Runtime({ apiUrl: new URL(import.meta.url), storageManager: storageB });
+    rtA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storageA,
+    });
+    rtB = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storageB,
+    });
   });
 
   afterEach(async () => {
@@ -149,7 +155,8 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
       await storageA.synced();
     }
-    expect(srcB.get(), "B is provably stale (still 1) before the effect runs").toBe(1);
+    expect(srcB.get(), "B is provably stale (still 1) before the effect runs")
+      .toBe(1);
 
     // Subscribe an effect on B that reads source and writes source*10 into result.
     // Its first run reads the stale 1; its commit conflicts (server at 2); #4210
@@ -182,7 +189,9 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       recovered,
       "effect re-ran against the post-conflict value via reader-dirty",
     ).toBe(true);
-    expect(resB.get(), "effect's recovered write reflects fresh state").toBe(20);
+    expect(resB.get(), "effect's recovered write reflects fresh state").toBe(
+      20,
+    );
     expect(runs, "effect re-ran (was not stranded by the skipped retry)")
       .toBeGreaterThanOrEqual(2);
   };
