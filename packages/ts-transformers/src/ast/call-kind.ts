@@ -159,6 +159,15 @@ export interface ReactiveCollectionProvenanceOptions {
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
   readonly syntheticReactiveCollectionRegistry?: WeakSet<ts.Symbol>;
   readonly logger?: (message: string) => void;
+  /**
+   * True once the walk has descended into a variable declaration's initializer
+   * (CT-1778). The derived-reactive-collection-call recognition is gated on this
+   * because only a `const x = helper(reactiveArgs)` *binding* is lift-wrapped into
+   * a reactive collection; the same call used inline as a `.map` receiver
+   * (`helper(reactiveArgs).map(...)`) is NOT wrapped and stays a plain array, so
+   * lowering its `.map` would emit a `.mapWithPattern` the runtime value lacks.
+   */
+  readonly viaVariableInitializer?: boolean;
 }
 
 export type ArrayCallbackContainerCallKind =
@@ -259,7 +268,8 @@ function usesDefaultReactiveCollectionProvenanceOptions(
     options.sameScope === undefined &&
     options.typeRegistry === undefined &&
     options.syntheticReactiveCollectionRegistry === undefined &&
-    options.logger === undefined;
+    options.logger === undefined &&
+    options.viaVariableInitializer === undefined;
 }
 
 export function detectCallKind(
@@ -1134,6 +1144,62 @@ function hasReactiveCollectionProvenanceInternal(
       return true;
     }
 
+    // CT-1778: a non-reactive-origin call that reads a pattern-level reactive value
+    // and returns a collection — e.g. `tallyOptions(options, votes): OptionTally[]`,
+    // where `options`/`votes` are the pattern's reactive parameters — is lift-wrapped
+    // by the transformer into a reactive collection (`const ranked = __cfLift_N(...)`).
+    // That wrap, and the symbol's registration in syntheticReactiveCollectionRegistry,
+    // happen in a later pass than the array-method lowering decision, so a nested
+    // `.map`/`.filter` over the result's elements would otherwise race the registration
+    // and be emitted raw (-> "OpaqueRef.map(fn) is no longer supported" at runtime).
+    // Recognizing the shape structurally here makes the receiver provably reactive at
+    // decision time, exactly as the inline `options.map(...)` form already is.
+    //
+    // Gated on an argument that is reactive via a PARAMETER BINDING or a DERIVATION
+    // from one — recursing through the same provenance walk with
+    // `allowTypeBasedRoot: false`. Dropping the type root is what excludes values that
+    // are reactive only by static type: a reactive-typed parameter of a standalone
+    // (hardened) function is reactive-typed but is neither an implicit reactive
+    // parameter nor has a reactive initializer to walk, so it is rejected — which keeps
+    // this from firing inside standalone functions, where `helper(x).map(...)` is an
+    // eager, non-reactive map that PatternContextValidation (correctly) forbids from
+    // lowering. The same recursion also covers chained derivations, e.g.
+    // `const a = tallyOptions(options); const b = enrich(a); b.map(t => t.x.map(...))`.
+    // Only when reached through a variable initializer (`const x = call(...)`),
+    // never for a call used inline as a `.map` receiver — see
+    // `viaVariableInitializer` above. `viaVariableInitializer: false` on the
+    // argument recursion keeps the same restriction for chained args: a const
+    // argument re-establishes it through its own initializer walk, while an inline
+    // call argument does not.
+    if (
+      options.viaVariableInitializer &&
+      target.arguments.some((arg) =>
+        hasReactiveCollectionProvenanceInternal(
+          stripWrappers(arg),
+          checker,
+          {
+            ...options,
+            allowTypeBasedRoot: false,
+            viaVariableInitializer: false,
+          },
+          seenSymbols,
+        )
+      )
+    ) {
+      const resultType = getTypeAtLocationWithFallback(
+        target,
+        checker,
+        options.typeRegistry,
+        options.logger,
+      );
+      if (
+        resultType &&
+        (checker.isArrayType(resultType) || checker.isTupleType(resultType))
+      ) {
+        return true;
+      }
+    }
+
     const directBuilder = detectDirectBuilderCall(target, checker);
     return !!directBuilder &&
       COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES.has(directBuilder.builderName);
@@ -1188,7 +1254,7 @@ function hasReactiveCollectionProvenanceInternal(
         hasReactiveCollectionProvenanceInternal(
           declaration.initializer,
           checker,
-          options,
+          { ...options, viaVariableInitializer: true },
           seenSymbols,
         )
       ) {
@@ -1216,7 +1282,7 @@ function hasReactiveCollectionProvenanceInternal(
       hasReactiveCollectionProvenanceInternal(
         parent.initializer,
         checker,
-        options,
+        { ...options, viaVariableInitializer: true },
         seenSymbols,
       )
     ) {

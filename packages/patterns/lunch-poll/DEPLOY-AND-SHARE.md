@@ -5,39 +5,50 @@ verify it actually worked, and recover it when it breaks. Written for someone
 (human or agent) operating the poll for the first time — read top to bottom
 once.
 
-> **Status (2026-06-15): live-deployable.** The visit history + per-visit vote
-> snapshots live in the **SQLite builtin** (`sqliteDatabase`). The old
-> "`db.exec` throws 'invalid database handle' on a deployed piece" bug is
-> **resolved** by runtime PR #3967 (merged to main) — no pattern-side workaround
-> needed. Full root-cause writeup is in `SQLITE-DEPLOY-BUG.md`.
+> **Status (2026-06-22): live-deployable.** The visit history + per-visit vote
+> snapshots live in a plain **`PerSpace<HistoryEntry[]>` array** (`visits`),
+> each entry embedding its own vote snapshot. (History was briefly on the SQLite
+> builtin, #4144/#4145; that's been reverted — see `LUNCH-COORDINATOR-TODO.md`
+> for the history. There is no longer any `sqliteDatabase`, `db.exec`, or
+> `sqliteRev`.)
 
 ## Where the data lives (mental model)
 
 A poll's durable state belongs to **one deployed piece instance in one space**,
 addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
-"move that piece's values into a new piece." There are **two** stores:
+"move that piece's values into a new piece." It all lives in **`PerSpace` input
+cells**, shared by everyone in the space: `question`, `city`, `options`,
+`votes`, `users`, `adminName`, `webSearchUrl`, and **`visits`** (the "Recently
+eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
+**`myName`**, which is **`PerUser`** (keyed by your DID).
 
-1. **`PerSpace` input cells** — shared by everyone in the space: `question`,
-   `city`, `options`, `votes`, `users`, `adminName`, `webSearchUrl`,
-   `sqliteRev`. Plus **`myName`** which is **`PerUser`** (keyed by your DID).
-2. **A pattern-owned SQLite database** (`sqliteDatabase(...)`) holding the
-   `visits` and `vote_history` tables — i.e. the "Recently eaten" log and the
-   "Lunch stats". This is **not** a `PerSpace` input; it's a cell-derived db
-   tied to the piece's result cell. (There is no `history` input cell anymore —
-   if you find older docs/scripts referencing `history`, they predate the SQLite
-   migration.)
-
-Both stores survive an in-place `setsrc` (see Option A). Only the `PerSpace`
-cells can be copied to another piece via the CLI (see Option B's caveat).
+All of these survive an in-place `setsrc` (Option A) and — because `visits` is
+now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
+(Option B).
 
 ## The canonical piece
 
 One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-06-15.** A piece is tied to one
+stable identifier — current as of 2026-06-22.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
+
+The poll lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
+successor to `toolshed`.
+
+```
+space:  team-lunch
+piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+```
+
+### Historical: the `toolshed` piece
+
+Before `rapids`, the canonical poll ran on `toolshed`
+(`toolshed.saga-castor.ts.net`). Retained here for reference, and in case the
+`rapids` migration is rolled back:
 
 ```
 space:  team-lunch
@@ -45,16 +56,12 @@ piece:  fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
 url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
 ```
 
-(History: the `rapids` space held an earlier poll; `lunch-2026-05-26` /
-`lunch-2026-05-29` were earlier pointers. `team-lunch` is a fresh space made to
-avoid that confusion.)
-
 ## Environment setup
 
 ```bash
-export CF_API_URL=https://toolshed.saga-castor.ts.net/   # prod; or http://localhost:8000 for local dev
+export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg    # current as of 2026-06-15
+PIECE=fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0    # rapids; current as of 2026-06-22
 SPACE=team-lunch
 ```
 
@@ -85,13 +92,12 @@ deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 
-**What survives `setsrc` (verified):** both the `PerSpace` cells
-(`users`/`votes`/`options`/…) **and** the SQLite `visits`/`vote_history` tables.
-Cell ids derive from the causal generation chain (not contents, scope excluded),
-so `setsrc` keeps the same result cell, and the SQLite db — being derived from
-that cell — keeps its rows. **Adding a new `PerSpace` field is safe** — on an
-existing piece it hydrates to its `Default<>` while populated fields keep their
-data.
+**What survives `setsrc` (verified):** all the `PerSpace` cells
+(`users`/`votes`/`options`/`visits`/…). Cell ids derive from the causal
+generation chain (not contents, scope excluded), so `setsrc` keeps the same
+result cell and its populated inputs. **Adding a new `PerSpace` field is safe**
+— on an existing piece it hydrates to its `Default<>` while populated fields
+keep their data.
 
 **Caveat:** this holds only while each input's identity in the recipe stays
 stable. Adding fields is safe; heavily **reordering or renaming** pattern inputs
@@ -110,7 +116,7 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question city users options votes adminName webSearchUrl; do
+for field in question city users options votes adminName webSearchUrl visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
@@ -121,71 +127,26 @@ deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
 
 This is a **one-time snapshot copy**, not a live link — the pieces diverge
-after. **The SQLite history does NOT copy this way** — `visits`/`vote_history`
-live in a per-piece, cell-derived SQLite db, not in `PerSpace` inputs, so the
-loop above leaves your copy's "Recently eaten" / "Lunch stats" empty.
-
-### Migrating the SQLite history to another piece (the current gap)
-
-There is **no in-builtin way to share or repoint a writable history db** between
-pieces today (sqlite-builtin spec §03 "Database sources"):
-
-- **Cell-derived** (what this poll uses) is keyed to the piece's own handle-cell
-  entity id — _"no way to point the database at an arbitrary cell"_ (deliberate,
-  to avoid ambient authority). Two pieces can't share it, and a fresh piece
-  can't adopt an old one's db.
-- The **on-disk injected** source (`cf piece link sqlite:…`) _can_ be shared
-  across pieces (same path → same handle), but is **read-only in v1** — writes
-  are rejected, so it's no good for a live, mutated history.
-- The **VM-file** source is stubbed (not implemented).
-
-So moving history to a _different_ piece needs an explicit mechanism. Options,
-none built yet:
-
-1. **App-level export → import (portable).** Add a full-dump query output
-   (`SELECT * FROM visits` / `vote_history`) plus an `importHistory(rows)`
-   handler that `db.exec`-inserts them, then script export-from-A → import-to-B.
-   Caveat: reading the export over the CLI hits the subscriber gotcha above —
-   resolve it in a browser, or (locally) read the `cell-*.sqlite` file directly.
-2. **Local filesystem dump (hack).**
-   `sqlite3 A-cell.sqlite ".dump visits vote_history" | sqlite3 B-cell.sqlite`.
-   Local only (needs the files), you must map each piece → its
-   `cell-<hash>.sqlite`, and it must run while the piece is **idle** (the file
-   is ATTACHed during transactions). No `cf` surface for this yet.
-3. **Avoid the need:** keep iterating on the same piece (`setsrc`, Option A — no
-   migration), or re-log visits via `logVisit`.
-
-Honest trade-off: the pre-SQLite **array** history _was_ copyable as a
-`PerSpace` cell; the SQLite migration made it more durable-per-piece but no
-longer CLI-portable. Whether to invest in a portable/shared-history mechanism is
-an open design question — discuss before building.
+after. Because the copy loop includes `visits`, the "Recently eaten" log and
+"Lunch stats" come across too. (This is a change from the SQLite era, when the
+history lived in a per-piece, cell-derived db the CLI couldn't copy or repoint;
+the fabric-array model restores CLI portability — history copies like any other
+`PerSpace` cell.)
 
 ## Verifying a deploy actually worked
 
-This pattern's reads behave in a way that trips people up over the CLI:
+History is now a plain `PerSpace` cell with computeds over it, so it reads back
+over the CLI like the rest of the poll's state — no subscription/`{ pending }`
+gotcha and no SQLite files to inspect.
 
-- **Reactive queries only resolve under a _subscribed_ runtime (a browser).**
-  `recentVisits`, `placeStats`, `historyCount`, `mostRecentTitle` are `db.query`
-  results that re-run on the `sqliteRev` counter. A `cf piece get` does **not**
-  subscribe, so right after a write these read as `{ pending: true }` / `0` over
-  the CLI — even though the write landed. A freshly `new`-ed piece also isn't
-  registered with the background-charm-service (`monitoring 0 spaces`), so
-  nothing pumps the re-query headlessly. **Open the piece in a browser** and the
-  live subscription resolves them.
-
-- **To verify a write landed without a browser, read the SQLite file directly.**
-  `db.exec` writes (`logVisit`, `clearHistory`, `removeHistoryEntry`) persist
-  regardless of the query/subscription issue. On **local dev** the per-piece db
-  is under the toolshed cache; find it by table, and **use `sqlite3`, not `grep`
-  (the files are binary)**:
+- **Read the `visits` input directly** to confirm a write landed (no browser
+  needed):
   ```bash
-  DBDIR=packages/toolshed/cache/memory/engine-v3/engine-v3
-  for db in "$DBDIR"/*.sqlite; do
-    sqlite3 "$db" "SELECT title, logged_by FROM visits;" 2>/dev/null \
-      && echo "  ^ $db"
-  done
+  deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
   ```
-  (On prod the db lives server-side — confirm via the browser instead.)
+  The derived outputs (`recentVisits`, `placeStats`, `historyCount`,
+  `mostRecentTitle`, `voteHistoryCount`) recompute on `step` and read back the
+  same way.
 
 **Smoke test after deploy** (host-gated handlers need a join first):
 
@@ -196,12 +157,9 @@ deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test C
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-# No "invalid database handle" error => db.exec works (i.e. the runtime has #3967).
-# Then confirm the row via the sqlite recipe above, or in the browser.
+# Confirm the entry landed (no browser needed):
+deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
 ```
-
-If `db.exec` _does_ throw "invalid database handle" on a deployed piece, the
-server is running a runtime from **before #3967** — not a pattern bug.
 
 ## Identity & joining
 
@@ -237,19 +195,20 @@ the `users` directory are `PerSpace`. Consequences that bite:
 everyone sees, and direct `set` races anyone's live browser session.**
 
 - **Votes:** use the in-app `resetVotes` (host) — or call it via CLI.
-- **History (SQLite):** there is no `history` input cell. Use the
-  **`clearHistory` handler** (host-gated) — it clears both `visits` and
-  `vote_history`:
+- **History:** use the **`clearHistory` handler** (host-gated) — it empties the
+  `visits` log (and its embedded vote snapshots):
   ```bash
   deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
-- **PerSpace cells:** write the input cells directly (note: **no `history`**):
+  Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
+- **PerSpace cells:** write the input cells directly:
   ```bash
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
   echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
+  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   After this, the first person to join in the browser becomes host as their own
@@ -280,9 +239,9 @@ once when a "reset votes" click wedged the running instance. `setsrc` does
 NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
-# 2. Copy the PerSpace state across with the Option B loop. (SQLite history will
-#    NOT carry — see Option B's caveat.) Tip: leave users/adminName empty so the
-#    first joiner becomes host, or copy them and use Become host.
+# 2. Copy the PerSpace state across with the Option B loop (history carries too,
+#    since `visits` is now a PerSpace cell). Tip: leave users/adminName empty so
+#    the first joiner becomes host, or copy them and use Become host.
 
 # 3. Make the fresh piece canonical: update the "canonical piece" block above.
 ```

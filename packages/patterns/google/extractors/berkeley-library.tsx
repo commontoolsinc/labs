@@ -29,6 +29,7 @@ import {
   NAME,
   pattern,
   Stream,
+  TILE_UI,
   toIndentedDebugString,
   UI,
   Writable,
@@ -490,7 +491,7 @@ const dismissHoldHandler = handler<
  * Handler to set a new due date for selected items in a group.
  */
 const setDueDateForGroup = handler<
-  unknown,
+  { target: { value: string } },
   {
     groupItems: TrackedItem[];
     selectedItems: Writable<string[] | Default<[]>>;
@@ -499,7 +500,7 @@ const setDueDateForGroup = handler<
     >;
   }
 >((event, { groupItems, selectedItems, dueDateOverrides }) => {
-  const input = (event as { target: { value: string } }).target;
+  const input = event.target;
   const newDueDate = input.value;
   if (!newDueDate) return;
 
@@ -556,7 +557,7 @@ export interface PatternOutput {
   overdueCount: number;
   checkedOutCount: number;
   holdsReadyCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
   // Omnibot actions
   markAsReturned: Stream<{ title: string }>;
   dismissHold: Stream<{ title: string }>;
@@ -957,7 +958,7 @@ export default pattern<PatternInput, PatternOutput>(
       overdueCount,
       checkedOutCount,
       holdsReadyCount,
-      previewUI,
+      [TILE_UI]: previewUI,
 
       // Omnibot actions - bind handlers with current state
       markAsReturned: markAsReturnedHandler({

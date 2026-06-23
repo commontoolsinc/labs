@@ -7,6 +7,7 @@ import {
   pattern,
   safeDateNow,
   Stream,
+  TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
@@ -53,7 +54,7 @@ const SCOPE_DESCRIPTIONS = __cf_data(
   } as const,
 );
 
-// Short names for scope summary display in previewUI
+// Short names for scope summary display in the tile preview
 const SCOPE_SHORT_NAMES: Record<string, string> = __cf_data({
   "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
   "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
@@ -277,7 +278,7 @@ export interface Output {
   /** Compact user display with avatar, name, and email */
   userChip: unknown;
   /** Minimal preview for picker display with scope summary */
-  previewUI: unknown;
+  [TILE_UI]: unknown;
   /**
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */
@@ -980,7 +981,7 @@ export default pattern<Input, Output>(
       scopes,
       selectedScopes,
       userChip,
-      previewUI,
+      [TILE_UI]: previewUI,
       refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
       bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };

@@ -3,6 +3,7 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
+  hasReactiveCollectionProvenance,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
@@ -10,7 +11,10 @@ import {
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  isValueComputationExpressionKind,
+  unwrapExpression,
+} from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
@@ -56,6 +60,19 @@ type JsxExpressionSiteSkipReason =
   | "deferred-jsx-array-method-root"
   | "not-shared-jsx-root-kind";
 
+/**
+ * Who owns a lowered expression site — i.e. which lowering pass wraps it.
+ * `array-method-receiver-method` and `array-method-callback-value` both route
+ * to the array-method value-lift path (a receiver-method call vs a bare
+ * value-expression such as `a === b`); see {@link isArrayMethodValueLiftOwner}.
+ */
+export type ExpressionSiteOwner =
+  | "helper"
+  | "array-method-callback-jsx"
+  | "array-method-receiver-method"
+  | "array-method-callback-value"
+  | "jsx-root";
+
 export type ExpressionSiteHandlingDecision =
   | {
     kind: "shared";
@@ -64,11 +81,7 @@ export type ExpressionSiteHandlingDecision =
   }
   | {
     kind: "owned";
-    owner:
-      | "helper"
-      | "array-method-callback-jsx"
-      | "array-method-receiver-method"
-      | "jsx-root";
+    owner: ExpressionSiteOwner;
     lowerable: boolean;
   }
   | {
@@ -858,6 +871,18 @@ function isExpressionSiteLowerable(
     );
 }
 
+/**
+ * The lowerable signal shared by the reactive-boundary value-lift classifiers
+ * (helper-owned and array-method-owned): the expression reads a reactive value
+ * (`containsOpaqueRef`) and the dataflow analysis says it must be rewritten to
+ * resolve those reads (`requiresRewrite`).
+ */
+function hasReactiveComputationToLift(
+  analysis: ReturnType<AnalyzeFn>,
+): boolean {
+  return analysis.containsOpaqueRef && analysis.requiresRewrite;
+}
+
 function createSharedExpressionSiteDecision(
   lowerable: boolean,
   jsxRoute?: "shared-pre-closure" | "shared-post-closure",
@@ -868,14 +893,23 @@ function createSharedExpressionSiteDecision(
 }
 
 function createOwnedExpressionSiteDecision(
-  owner:
-    | "helper"
-    | "array-method-callback-jsx"
-    | "array-method-receiver-method"
-    | "jsx-root",
+  owner: ExpressionSiteOwner,
   lowerable: boolean,
 ): ExpressionSiteHandlingDecision {
   return { kind: "owned", owner, lowerable };
+}
+
+/**
+ * The two owners that route to the array-method value-lift lowering: a
+ * receiver-method call (`v.foo()`) and a bare value-expression (`v.x === y`,
+ * `!x`, `a + b`). Both are wrapped by createReactiveWrapperForExpression, so the
+ * array-method-callback lowering pass treats them identically.
+ */
+export function isArrayMethodValueLiftOwner(
+  owner: ExpressionSiteOwner,
+): boolean {
+  return owner === "array-method-receiver-method" ||
+    owner === "array-method-callback-value";
 }
 
 function classifyHelperOwnedExpressionSiteHandling(
@@ -897,10 +931,7 @@ function classifyHelperOwnedExpressionSiteHandling(
 
   const supportedCallRootKind = getSupportedCallRootKind(callRootPolicy);
   if (
-    !ts.isBinaryExpression(expression) &&
-    !ts.isPrefixUnaryExpression(expression) &&
-    !ts.isPostfixUnaryExpression(expression) &&
-    !ts.isConditionalExpression(expression) &&
+    !isValueComputationExpressionKind(expression) &&
     supportedCallRootKind !== "helper-owned-explicit-read" &&
     supportedCallRootKind !== "helper-owned-receiver-method"
   ) {
@@ -909,7 +940,7 @@ function classifyHelperOwnedExpressionSiteHandling(
 
   return createOwnedExpressionSiteDecision(
     "helper",
-    analysis.containsOpaqueRef && analysis.requiresRewrite,
+    hasReactiveComputationToLift(analysis),
   );
 }
 
@@ -951,11 +982,7 @@ export function classifyExpressionSiteHandling(
   ): ExpressionSiteHandlingDecision =>
     createSharedExpressionSiteDecision(sharedLowerable(), jsxRoute);
   const ownedDecision = (
-    owner:
-      | "helper"
-      | "array-method-callback-jsx"
-      | "array-method-receiver-method"
-      | "jsx-root",
+    owner: ExpressionSiteOwner,
     lowerable: boolean,
   ): ExpressionSiteHandlingDecision =>
     createOwnedExpressionSiteDecision(owner, lowerable);
@@ -1100,6 +1127,33 @@ export function classifyExpressionSiteHandling(
     return sharedDecision();
   }
 
+  // CT-1777: array-method-owned analog of classifyHelperOwnedExpressionSiteHandling.
+  // A bare reactive VALUE-expression — a comparison `a === b`, an arithmetic/concat
+  // `a + b`, a unary `!x`, etc. — in the return / object-property / array-element
+  // position of a reactive map/filter/flatMap callback (lowered to *WithPattern)
+  // must be lifted to operate on RESOLVED values, exactly as the same expression is
+  // lifted inside a helper body or a JSX value site. Without this it is emitted raw
+  // on OpaqueRef proxies: a filter predicate `v.optionId === oid` becomes
+  // proxy-vs-proxy `===` → a constant `false`.
+  //
+  // Two guards keep COLLECTION-valued expressions out, so they stay structurally
+  // lowered (the runtime *WithPattern flatten/map depends on it):
+  //   - control flow: `!controlFlowRewriteRoot` drops conditionals and logical
+  //     `&&`/`||` (they lower via ifElse/unless, which already lift);
+  //   - provenance: `!hasReactiveCollectionProvenance` drops `??` fallbacks whose
+  //     result is a reactive collection (e.g. `flatMap(i => i.tags ?? [])`, which
+  //     must stay `i.key("tags") ?? []`). Comparison/arithmetic/unary results are
+  //     never collections, so this never blocks them.
+  if (
+    siteInfo.arrayMethodOwned &&
+    !siteInfo.controlFlowRewriteRoot &&
+    isValueComputationExpressionKind(expression) &&
+    hasReactiveComputationToLift(getAnalysis()) &&
+    !hasReactiveCollectionProvenance(expression, context.checker)
+  ) {
+    return ownedDecision("array-method-callback-value", true);
+  }
+
   if (siteInfo.arrayMethodOwned && !siteInfo.controlFlowRewriteRoot) {
     return { kind: "skip", reason: "not-lowerable" };
   }
@@ -1201,7 +1255,7 @@ export function findLowerableExpressionSite(
           } as const;
           if (
             decision.kind === "owned" &&
-            decision.owner === "array-method-receiver-method"
+            isArrayMethodValueLiftOwner(decision.owner)
           ) {
             deferredArrayMethodReceiverSite ??= site;
             current = current.parent;

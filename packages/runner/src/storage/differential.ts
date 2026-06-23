@@ -1,5 +1,8 @@
 import { unclaimed } from "@commonfabric/memory/fact";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
@@ -72,7 +75,31 @@ const collectChangedPaths = (
   }
 
   if (isRecord(before) && isRecord(after)) {
-    if (deepEqual(before, after)) {
+    if (valueEqual(before, after)) {
+      return;
+    }
+
+    // A `FabricSpecialObject` keeps its state in private fields, so the
+    // key-walk below sees zero own-keys and would wrongly report "no change"
+    // even though `valueEqual` above already established they differ. Record a
+    // change at this path and don't decompose. (CT-1770: a `FabricBytes` value
+    // updated in place otherwise never reaches reactive consumers.)
+    //
+    // The `FabricPrimitive` vs `FabricInstance` distinction matters here even
+    // though both are handled the same way: a `FabricPrimitive` genuinely IS an
+    // atomic frozen leaf (no outgoing references), so emitting a single change
+    // at its path is exactly correct. A `FabricInstance` is neither necessarily
+    // frozen nor a leaf — it can hold outgoing references to other
+    // memory-tracked objects, so a fully correct walk would descend into them
+    // (cf. `codecOf()` in cell.ts) and emit per-reference change paths. Lumping
+    // it in as a leaf here is a safe approximation only because nothing in the
+    // system stores `FabricInstance`s yet; revisit when that part of the system
+    // (still in flux) gels.
+    if (
+      before instanceof FabricSpecialObject ||
+      after instanceof FabricSpecialObject
+    ) {
+      pushChangedPath(paths, currentPath, depth);
       return;
     }
 
@@ -173,7 +200,7 @@ const collectChangedPaths = (
     return;
   }
 
-  if (!deepEqual(before, after)) {
+  if (!valueEqual(before, after)) {
     pushChangedPath(paths, currentPath, depth);
   }
 };
@@ -184,7 +211,7 @@ const addStateChange = (
   before: State["is"] | undefined,
   after: State["is"] | undefined,
 ): void => {
-  if (deepEqual(before, after)) {
+  if (valueEqual(before, after)) {
     return;
   }
 

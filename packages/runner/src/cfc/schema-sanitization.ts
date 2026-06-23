@@ -422,6 +422,12 @@ export const validateAgainstSchema = (
     }
   }
 
+  // TODO(danfuzz): Latent — the enum/const equality arm here compares a runtime
+  // value against a schema constraint with `deepEqual`; schemas don't admit
+  // `Fabric*` values today but will, at which point this mishandles a
+  // `FabricValue` (same-class `FabricPrimitive`s compare equal regardless of
+  // value). Use a Fabric-aware equality when the path becomes live. (The
+  // property-walk in this same function is already marked.)
   if (
     Array.isArray(schema.enum) &&
     !schema.enum.some((entry) => deepEqual(entry, value))

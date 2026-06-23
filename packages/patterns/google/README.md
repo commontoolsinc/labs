@@ -130,7 +130,7 @@ Your Pattern
        └─ Gets raw emails
   └─ computed() chain for filtering/extraction
   └─ .map() with generateObject() for LLM analysis
-  └─ Exports: enriched data, counts, previewUI
+  └─ Exports: enriched data, counts, [TILE_UI] (tile preview)
 ```
 
 **Key code (usps-informed-delivery.tsx):**

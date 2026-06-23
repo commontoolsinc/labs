@@ -181,6 +181,7 @@ export interface SessionOpenResult {
   sessionId: SessionId;
   sessionToken: SessionToken;
   serverSeq: number;
+  caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
 }
@@ -286,6 +287,7 @@ export interface SessionSync {
   type: "sync";
   fromSeq: number;
   toSeq: number;
+  caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
 }
@@ -522,6 +524,7 @@ export interface V2Error {
   name: string;
   message: string;
   precondition?: string;
+  retryAfterSeq?: number;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };

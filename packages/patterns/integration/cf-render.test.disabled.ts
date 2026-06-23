@@ -259,13 +259,13 @@ describe("cf-render subpath handling", () => {
     );
   });
 
-  it("should verify previewUI exists in the pattern", () => {
-    // Verify previewUI exists (a valid subpath property)
-    const previewUI = piece.result.get(["previewUI"]);
+  it("should verify [TILE_UI] exists in the pattern", () => {
+    // Verify the tile variant exists (a valid subpath property)
+    const tileUI = piece.result.get(["$TILE_UI"]);
     assertEquals(
-      typeof previewUI,
+      typeof tileUI,
       "object",
-      "previewUI should be a VNode object",
+      "[TILE_UI] should be a VNode object",
     );
   });
 

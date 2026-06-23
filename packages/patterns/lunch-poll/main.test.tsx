@@ -140,14 +140,14 @@ export default pattern(() => {
   });
 
   // Cast a green vote on the surviving option (Thai) so that the next
-  // logVisit captures a non-empty vote snapshot into vote_history.
+  // logVisit captures a non-empty vote snapshot embedded in the entry.
   const action_vote_green_thai = action(() => {
     const first = poll.options[0]; // Thai Kitchen (the only survivor)
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
   });
 
   // Log a specific place by title (defaults wentAt to today). With a live
-  // green vote on Thai, this also writes one vote_history row.
+  // green vote on Thai, this also embeds one vote snapshot in the entry.
   const action_log_thai = action(() => {
     poll.logVisit.send({ title: "Thai Kitchen" });
   });
@@ -158,10 +158,10 @@ export default pattern(() => {
     poll.logVisit.send({ title: "Chipotle", wentAt: PAST_VISIT + 1000 });
   });
 
-  // Most-recent visit is recentVisits[0] (ORDER BY went_at DESC). Thai is
-  // logged "today" so it sorts ahead of the backdated Chipotle.
+  // Most-recent visit is recentVisits[0] (newest first). Thai is logged
+  // "today" so it sorts ahead of the backdated Chipotle.
   const action_remove_first_history = action(() => {
-    const first = poll.recentVisits.result?.[0];
+    const first = poll.recentVisits[0];
     if (first) poll.removeHistoryEntry.send({ id: first.id });
   });
 
@@ -219,6 +219,16 @@ export default pattern(() => {
       v?.voterName === "Alex";
   });
 
+  // The "All options" overview renders one swatch per voter, sourced from a
+  // per-option `votes.filter((v) => v.optionId === oid)`. Regression guard for
+  // the transformer filter/map lift bug (CT-1777) where the predicate compiled
+  // to a proxy-vs-proxy `===` (always false), so the filter dropped every vote
+  // and the swatches silently stopped rendering: after Alex's green vote, his
+  // swatch must appear in the rendered UI tree.
+  const assert_alex_swatch_renders = computed(() =>
+    findNodeByProp(poll[UI], "data-vote-swatch-name", "Alex") !== undefined
+  );
+
   const assert_changed_to_yellow = computed(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
@@ -245,20 +255,19 @@ export default pattern(() => {
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 
-  // History now lives in a SQLite `visits` table; we assert on the
-  // `recentVisits` query result (ORDER BY went_at DESC). The `historyCount` /
-  // `mostRecentTitle` scalars are exposed as a belt-and-suspenders signal — the
-  // most reliable values out of the emulated test runner.
+  // History lives in the `visits` PerSpace array now; we assert directly on the
+  // `recentVisits` array (newest first) plus the `historyCount` /
+  // `mostRecentTitle` / `voteHistoryCount` scalars.
 
-  // Logged the surviving option (Thai Kitchen) by title → one row, attributed
-  // to the host (the frozen `logged_by` name snapshot). If the pre-join attempt
-  // ("Sneaky") had not been gated, a row would exist before this — so this
+  // Logged the surviving option (Thai Kitchen) by title → one entry, attributed
+  // to the host (the frozen `loggedByName` snapshot). If the pre-join attempt
+  // ("Sneaky") had not been gated, an entry would exist before this — so this
   // implicitly verifies the host gate too.
   const assert_thai_logged = computed(() => {
-    const rows = poll.recentVisits.result ?? [];
+    const rows = poll.recentVisits ?? [];
     return rows.length === 1 &&
       rows[0]?.title === "Thai Kitchen" &&
-      rows[0]?.logged_by === "Alex" &&
+      rows[0]?.loggedByName === "Alex" &&
       poll.historyCount === 1 &&
       poll.mostRecentTitle === "Thai Kitchen";
   });
@@ -271,42 +280,36 @@ export default pattern(() => {
     ) !== undefined
   );
 
-  // The live green vote on Thai was snapshotted into vote_history when Thai was
-  // logged → exactly one snapshot row.
+  // The live green vote on Thai was snapshotted into the entry's `votes` when
+  // Thai was logged → exactly one embedded snapshot.
   const assert_vote_snapshot = computed(() => poll.voteHistoryCount === 1);
 
-  // Second row is the backdated Chipotle log; under went_at DESC it sorts after
-  // today's Thai, so it's rows[1]. went_at is stored as zero-padded TEXT (the
-  // @db/sqlite integer-truncation workaround), so we compare via Number(...) —
-  // proving the backdated value round-trips exactly.
+  // Second entry is the backdated Chipotle log; newest-first sort puts it after
+  // today's Thai, so it's rows[1]. `wentAt` is a plain ms-epoch number now, so
+  // the backdated value compares directly (no TEXT encoding to round-trip).
   const assert_two_history = computed(() => {
-    const rows = poll.recentVisits.result ?? [];
+    const rows = poll.recentVisits ?? [];
     return rows.length === 2 &&
       rows[1]?.title === "Chipotle" &&
-      Number(rows[1]?.went_at) === PAST_VISIT + 1000 &&
+      rows[1]?.wentAt === PAST_VISIT + 1000 &&
       poll.historyCount === 2;
   });
 
-  // After deleting rows[0] (Thai, the most recent), only Chipotle remains.
-  //
-  // These two assertions check the durable record AFTER a delete/clear. We key
-  // them on the COUNT queries (`historyCount` = `count(*) FROM visits`,
-  // `voteHistoryCount`), not on the `recentVisits` row query, because the two
-  // re-execute as independent async post-commit effects: the heavier row query
-  // (cf-link column decode + CFC label schema) can land just after the harness
-  // declares quiescence, so `recentVisits.result` is intermittently stale for
-  // one settle on a loaded CI runner — a flaky-test trap, not a real data bug
-  // (the counts, and the next render, are correct). Inserts (logs) don't hit
-  // this because every earlier assertion already gave the row query time to
-  // catch up. Row-content verification (which row survived) is covered by the
-  // pre-delete assertions above; re-add a row check here once the runner waits
-  // for pending sqlite-query effects before settling.
-  const assert_one_history_after_remove = computed(() =>
-    poll.historyCount === 1
-  );
+  // After deleting rows[0] (Thai, the most recent), only Chipotle remains. With
+  // SQLite gone there are no independent async queries to settle, so we assert
+  // the row content directly (which entry survived), not just the count — and
+  // that the entry's live `loggedBy` link survives the array round-trip (push
+  // on log + the set-subset filter on delete).
+  const assert_one_history_after_remove = computed(() => {
+    const rows = poll.recentVisits ?? [];
+    return poll.historyCount === 1 &&
+      rows.length === 1 &&
+      rows[0]?.title === "Chipotle" &&
+      rows[0]?.loggedByName === "Alex" &&
+      rows[0]?.loggedBy != null;
+  });
 
-  // Clearing visits also clears the vote_history snapshots. Same count-surface
-  // rationale as above.
+  // Clearing visits also drops the embedded vote snapshots.
   const assert_history_cleared = computed(() =>
     poll.historyCount === 0 &&
     poll.voteHistoryCount === 0
@@ -348,6 +351,7 @@ export default pattern(() => {
       // Vote green → yellow → red (covers all three colors)
       { action: action_vote_green_first },
       { assertion: assert_green_vote_recorded },
+      { assertion: assert_alex_swatch_renders },
       { action: action_vote_yellow_first },
       { assertion: assert_changed_to_yellow },
       { action: action_vote_red_first },
@@ -374,34 +378,24 @@ export default pattern(() => {
       // "We went here" history. The pre-join attempt above ("Sneaky") must
       // have left no trace.
       // Cast a live green vote on the surviving option (Thai) so the next
-      // logVisit snapshots it into vote_history.
+      // logVisit embeds it in the entry's snapshot.
       { action: action_vote_green_thai },
-      // Log the surviving option by title → one visit row, attributed to host,
-      // plus one vote_history snapshot row for the green vote.
+      // Log the surviving option by title → one visit entry, attributed to the
+      // host, with one embedded vote snapshot for the green vote. History reads
+      // are plain computeds over the `visits` array now, so the light per-action
+      // settle is sufficient — no `{ settle: true }` async-query waits needed.
       { action: action_log_thai },
-      // The history assertions read the `recentVisits` / count `db.query`
-      // results, which resolve from an async post-commit flush (a sqlite RPC +
-      // writeback). The light per-action settle returns before that I/O lands,
-      // so under load the assertion could read a half-settled `{ pending }`
-      // result. `{ settle: true }` waits for the full settlement
-      // (runtime.settled()) so the read is deterministic.
-      { settle: true },
       { assertion: assert_thai_logged },
       { assertion: assert_recent_visit_row_renders },
       { assertion: assert_vote_snapshot },
       // A second, backdated, explicit log → two entries (proves backdating).
       { action: action_log_visit_chipotle_backdated },
-      { settle: true },
       { assertion: assert_two_history },
-      // Delete a single entry (host) → the other remains. The remove handler
-      // reads recentVisits.result[0].id, so settle BEFORE it too (the settle
-      // above this assertion covers that — recentVisits is unchanged between).
+      // Delete a single entry (host) → the other remains.
       { action: action_remove_first_history },
-      { settle: true },
       { assertion: assert_one_history_after_remove },
-      // Clear all → empty (visits AND vote_history).
+      // Clear all → empty.
       { action: action_clear_history },
-      { settle: true },
       { assertion: assert_history_cleared },
     ],
     poll,

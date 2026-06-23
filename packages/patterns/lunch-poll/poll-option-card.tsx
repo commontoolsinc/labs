@@ -79,21 +79,6 @@ const homePageLookupUrlFor = (
     ? endpoint
     : "";
 
-// Host-only art-generation gate. Passing `isAdmin` as a function argument
-// (rather than a bare `!isAdmin` inside a computed) ensures the transformer
-// captures it as a lift input — see homePageLookupUrlFor for the same idiom.
-const mayGenerateArt = (
-  isAdmin: boolean,
-  storedImageUrl: string | undefined,
-): boolean => isAdmin && !safeImageUrl(storedImageUrl);
-
-const artRequestUrlFor = (
-  isAdmin: boolean,
-  storedImageUrl: string | undefined,
-  title: string,
-): string =>
-  mayGenerateArt(isAdmin, storedImageUrl) ? generatedImageUrlFor(title) : "";
-
 const homePageVerifierSystem =
   "You verify restaurant website search results. Choose the restaurant's own " +
   "official website only when it is clear from the candidate URL, title, and " +
@@ -234,6 +219,16 @@ export interface PollOptionCardOutput {
   /** Admin-side generated art persistence state. */
   artSyncState: PollOptionArtSyncState;
 
+  /**
+   * The art-generation request URL the host-only gate produces: the
+   * `/api/ai/img` endpoint when a host views an option with no stored image,
+   * and `""` otherwise (non-host, or a stored image already present). Unlike
+   * `artSyncState` this does not depend on the `fetchData` result, so it is the
+   * directly-observable signal that the `isAdmin` gate opened — exposed so tests
+   * can guard the dependency-capture fix without a live image endpoint.
+   */
+  generatedArtRequestUrl: string;
+
   /** Display homepage URL after stored, edited, or verified lookup resolution. */
   homePageUrl: string;
 }
@@ -269,9 +264,11 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const storedImageDisplay = computed(() =>
       safeImageUrl(option.imageUrl) ? "block" : "none"
     );
-    const generatedArtRequestUrl = computed(() =>
-      artRequestUrlFor(isAdmin, option.imageUrl, option.title)
-    );
+    const generatedArtRequestUrl = computed(() => {
+      if (safeImageUrl(option.imageUrl)) return "";
+      if (!isAdmin) return "";
+      return generatedImageUrlFor(option.title);
+    });
     const generatedArt = fetchData<string>({
       url: generatedArtRequestUrl,
       mode: "dataUrl",
@@ -284,7 +281,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     // URL. Other viewers render the stored value without running image-gen.
     const artSyncState = computed(() => {
       if (safeImageUrl(option.imageUrl)) return "stored";
-      if (!mayGenerateArt(isAdmin, option.imageUrl)) return "";
+      if (!isAdmin) return "";
       const generatedUrl = safeImageUrl(generatedArt.result ?? "");
       if (generatedUrl) {
         setOptionImage.send({
@@ -717,6 +714,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
         </div>
       ),
       artSyncState,
+      generatedArtRequestUrl,
       homePageUrl: displayHomePageUrl,
     };
   },

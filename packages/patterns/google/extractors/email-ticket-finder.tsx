@@ -15,7 +15,7 @@
  * 2. Deploy this pattern
  * 3. Link: cf piece link google-auth/auth email-ticket-finder/overrideAuth
  */
-import { computed, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import { computed, JSONSchema, NAME, pattern, TILE_UI, UI } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
@@ -416,7 +416,7 @@ export interface PatternOutput {
   pastTickets: TrackedTicket[];
   todayCount: number;
   upcomingCount: number;
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -623,7 +623,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     pastTickets,
     todayCount,
     upcomingCount,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>

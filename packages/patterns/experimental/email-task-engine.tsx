@@ -26,6 +26,7 @@ import {
   type Opaque,
   pattern,
   Stream,
+  TILE_UI,
   UI,
   wish,
   Writable,
@@ -443,7 +444,7 @@ export interface PatternOutput {
   taskEmails: TaskEmail[];
   taskCount: number;
   analyses: TaskAnalysis[];
-  previewUI: unknown;
+  [TILE_UI]: unknown;
 }
 
 /** Email task engine for processing actionable emails. #emailTaskEngine */
@@ -656,7 +657,7 @@ Respond with the most appropriate action.`;
     taskEmails,
     taskCount,
     analyses,
-    previewUI,
+    [TILE_UI]: previewUI,
 
     [UI]: (
       <cf-screen>

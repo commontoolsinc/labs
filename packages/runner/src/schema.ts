@@ -230,6 +230,12 @@ const matchesConcreteValue = (
   if (!canBranchMatch(resolved, value)) {
     return false;
   }
+  // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
+  // validation path today, but will in the not-too-distant future; at that
+  // point these `deepEqual(const/enum, value)` checks mishandle a
+  // `FabricValue` (same-class `FabricPrimitive`s compare equal regardless of
+  // value). Mark ahead of that; use a Fabric-aware equality when the path
+  // becomes live.
   if (resolved.const !== undefined && !deepEqual(resolved.const, value)) {
     return false;
   }

@@ -18,6 +18,8 @@ export type SessionState = {
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
   trackedIds: Set<string>;
+  caughtUpLocalSeq: number;
+  pendingCaughtUpLocalSeq: number;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -103,6 +105,8 @@ export class SessionRegistry {
       entities: existing?.entities ?? new Map(),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
+      caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
+      pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,
@@ -111,6 +115,7 @@ export class SessionRegistry {
       sessionId,
       sessionToken,
       serverSeq,
+      caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       ...(existing !== undefined ? { resumed: true } : {}),
       ...(revokedConnectionId ? { revokedConnectionId } : {}),
     };

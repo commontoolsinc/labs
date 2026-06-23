@@ -15,6 +15,11 @@ export function setValueAtPath(
     parent = parent[key];
   }
 
+  // TODO(danfuzz): This no-op write gate compares the existing value against
+  // the new value with `deepEqual`, which mishandles `FabricValue` (same-class
+  // `FabricPrimitive`s compare equal regardless of value, since their state
+  // lives in private `#fields` with zero own-props), so a real Fabric-value
+  // change can be dropped as a no-op. Use a Fabric-aware equality.
   if (deepEqual(parent[path[path.length - 1]], value)) return false;
 
   // We just set the values here. If you need to delete elements from an

@@ -815,6 +815,10 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
+    // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
+    // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
+    // in private `#fields` and zero own-props, compare equal regardless of
+    // value). Use a Fabric-aware equality for value comparison.
     if (!deepEqual(result, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
