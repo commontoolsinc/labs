@@ -202,6 +202,7 @@ node footprint scales with **observed output + checkpoints**, not with **N**
 | [04-scheduler-and-transformer-deltas.md](./04-scheduler-and-transformer-deltas.md) | Prerequisites (unbuilt machinery), and exact deltas to scheduler-v2 (node kind, write surface, demand, read-set, idempotency, persistence, convergence signalling) and to the transformer. |
 | [05-baselines.md](./05-baselines.md) | The measured baseline numbers (pinned), the cost model, and the scoped target numbers. |
 | [06-migration-plan.md](./06-migration-plan.md) | Phased plan with work-orders, the differential oracle (the permanent correctness gate), the formal-proof obligations, data migration, and risks. |
+| [implementation/](./implementation/00-README.md) | **Implementation tracking** (source of truth): work-order index + process (`00-README.md`), live status (`PROGRESS.md`), decision log (`DECISIONS.md`). Progress is tracked here, in the PR. |
 
 ## 6. Relationship to in-flight work
 
