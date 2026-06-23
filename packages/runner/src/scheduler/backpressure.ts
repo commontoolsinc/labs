@@ -47,9 +47,15 @@ export const DEFAULT_COMMIT_BACKPRESSURE: CommitBackpressurePolicy = {
 };
 
 /**
- * Fills in any unset fields from the defaults and clamps each field to a sane
- * range so a caller-supplied policy can never disable backpressure (a zero
- * window would reintroduce silent drops) or invert the delays.
+ * Fills in any unset fields from the defaults and clamps each field so the
+ * arithmetic stays well-defined: non-negative delays, a cap no lower than the
+ * base delay, jitter within [0, 1], and a non-negative window. These clamps keep
+ * the policy sane; they are not what prevents silent data loss. The
+ * never-silently-dropped guarantee holds for any resolved policy because a
+ * transient conflict either converges or surfaces a terminal error. A zero
+ * window does not drop a write silently — it makes the first conflict fail
+ * terminally instead of being retried (a config-level way to opt out of the
+ * retry window, distinct from the per-event `retries: 0` opt-out).
  */
 export function resolveCommitBackpressure(
   partial?: Partial<CommitBackpressurePolicy>,

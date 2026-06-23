@@ -11,6 +11,10 @@
 //      observable.
 //   3. A transient conflict that never clears surfaces a terminal error within
 //      the retry window instead of vanishing.
+//   4. A zero-window policy fails the first conflict loudly without dropping it
+//      silently.
+//   5. Three array appends survive a conflict storm so the durable count reaches
+//      three (the profile-append bug in miniature).
 
 import {
   afterEach,
@@ -419,6 +423,70 @@ describe("committed-write backpressure", () => {
         // Bounded resource use: the retry window capped the attempt count.
         expect(piece.invocations()).toBeGreaterThan(1);
         expect(piece.invocations()).toBeLessThan(500);
+      } finally {
+        injector.restore();
+      }
+    },
+  );
+
+  it(
+    "fails a zero-window conflict loudly on the first attempt without dropping silently",
+    async () => {
+      // A clamped policy can resolve to retryWindowMs: 0. That does not
+      // reintroduce a silent drop: the first conflict surfaces a terminal error
+      // and the handler is not retried.
+      await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+      ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+        import.meta.url,
+        {
+          experimental: { commitPreconditions: true },
+          commitBackpressure: { retryWindowMs: 0 },
+        },
+      ));
+
+      const piece = buildCounterPiece(runtime, tx, "backpressure-zerowin-root");
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const terminalErrors: ErrorWithContext[] = [];
+      runtime.scheduler.onError((error) => terminalErrors.push(error));
+
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "ConflictError",
+        message: "forced conflict against a zero window",
+      });
+
+      try {
+        piece.queueAdd(
+          9,
+          "evt:backpressure-zerowin:0:backpressure-zerowin-root",
+        );
+
+        await waitFor(
+          runtime,
+          () =>
+            terminalErrors.some((error) =>
+              error.name === "CommitConvergenceError"
+            ),
+          `zero-window conflict did not surface a terminal error ` +
+            `(invocations=${piece.invocations()}, total=${piece.total()})`,
+        );
+
+        // Give any erroneous retry a chance to run, then confirm none did.
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await runtime.idle();
+
+        // Loud, not silent: a terminal error surfaced.
+        expect(
+          terminalErrors.some((error) =>
+            error.name === "CommitConvergenceError"
+          ),
+        ).toBe(true);
+        // No retry: the handler ran exactly once and the write did not land.
+        expect(piece.invocations()).toBe(1);
+        expect(piece.total()).toBe(0);
       } finally {
         injector.restore();
       }

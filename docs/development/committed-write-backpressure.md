@@ -126,9 +126,13 @@ count no longer bounds conflict retries; the window does.
 `RuntimeOptions.commitBackpressure` tunes the policy
 (`scheduler/backpressure.ts`, `CommitBackpressurePolicy`): `baseDelayMs`,
 `maxDelayMs`, `jitter`, `retryWindowMs`. Unset fields fall back to
-`DEFAULT_COMMIT_BACKPRESSURE` and every field is clamped to a sane range, so a
-caller-supplied policy can never disable backpressure (a zero window would
-reintroduce silent drops). Tests use it to shrink the window and backoff.
+`DEFAULT_COMMIT_BACKPRESSURE` and every field is clamped to a well-defined range
+(non-negative delays, a cap no lower than the base delay, jitter within [0, 1], a
+non-negative window). The clamps only keep the arithmetic sane; the
+never-silently-dropped guarantee does not depend on them. A zero window is
+allowed and does not reintroduce silent drops — it makes the first conflict fail
+terminally instead of being retried. Tests use this to shrink the window and
+backoff.
 
 ## Observability
 
