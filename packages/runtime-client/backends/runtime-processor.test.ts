@@ -616,7 +616,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
         actionId: "action:reader",
         actionType: "computation" as const,
         mode: "pull" as const,
-        decision: "mark-dirty" as const,
+        decision: "mark-invalid" as const,
         pendingBefore: false,
         pendingAfter: false,
         dirtyBefore: false,
