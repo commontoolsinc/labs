@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { valueEqual } from "@/fabric-value.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
@@ -103,6 +104,107 @@ describe("fabric-value", () => {
         expect(valueEqual(new FabricBytes(new Uint8Array([1])), { 0: 1 }))
           .toBe(false);
         expect(valueEqual(new FabricBytes(new Uint8Array([])), {})).toBe(false);
+      });
+    });
+
+    // Content equality is independent of frozen-state. The three states differ
+    // only in which internal path decides them:
+    //   DF (deep-frozen)            -> the both-deep-frozen early-hash fast-path
+    //                                  (only when BOTH sides are DF).
+    //   F  (frozen, NOT deep-frozen) -> shallow `Object.freeze` with a non-frozen
+    //                                  nested value fails `isDeepFrozen()`, so it
+    //                                  takes the general subtype + hash path.
+    //   U  (unfrozen)                -> likewise the general subtype + hash path.
+    // Every pairing must agree on the value answer regardless of state.
+    describe("frozen-state matrix", () => {
+      // The nested array keeps the shallow-frozen `F` build genuinely
+      // not-deep-frozen (an all-primitive shallow freeze reads as deep-frozen).
+      const equalShape = () => ({ a: 1, b: [2, 3] });
+      const unequalShape = () => ({ a: 1, b: [2, 4] });
+
+      const states: Record<"DF" | "F" | "U", (v: object) => object> = {
+        DF: (v) => deepFreeze(v),
+        F: (v) => Object.freeze(v),
+        U: (v) => v,
+      };
+      const pairings: ["DF" | "F" | "U", "DF" | "F" | "U"][] = [
+        ["DF", "DF"],
+        ["DF", "F"],
+        ["DF", "U"],
+        ["F", "F"],
+        ["F", "U"],
+        ["U", "U"],
+      ];
+
+      for (const [sa, sb] of pairings) {
+        it(`compares ${sa}/${sb} by content (equal -> true)`, () => {
+          const a = states[sa](equalShape());
+          const b = states[sb](equalShape());
+          expect(valueEqual(a, b)).toBe(true);
+        });
+
+        it(`compares ${sa}/${sb} by content (unequal -> false)`, () => {
+          const a = states[sa](equalShape());
+          const b = states[sb](unequalShape());
+          expect(valueEqual(a, b)).toBe(false);
+        });
+      }
+    });
+
+    // The cheap subtype short-circuits that resolve an object comparison
+    // without computing a hash (taken when the sides are not both deep-frozen).
+    describe("object-subtype-check branch", () => {
+      it("a plain object never equals an array", () => {
+        expect(valueEqual({ 0: 1, 1: 2 }, [1, 2])).toBe(false);
+        expect(valueEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
+      });
+
+      it("a Fabric* value never equals a plain object or array", () => {
+        const fb = new FabricBytes(new Uint8Array([1, 2]));
+        expect(valueEqual(fb, { 0: 1, 1: 2 })).toBe(false);
+        expect(valueEqual({ 0: 1, 1: 2 }, fb)).toBe(false);
+        expect(valueEqual(fb, [1, 2])).toBe(false);
+        expect(valueEqual([1, 2], fb)).toBe(false);
+      });
+
+      it("two same-subtype Fabric* values compare by content", () => {
+        // Same subtype falls through to the hash compare.
+        expect(
+          valueEqual(
+            new FabricBytes(new Uint8Array([1, 2])),
+            new FabricBytes(new Uint8Array([1, 2])),
+          ),
+        ).toBe(true);
+        expect(
+          valueEqual(
+            new FabricBytes(new Uint8Array([1, 2])),
+            new FabricBytes(new Uint8Array([3, 4])),
+          ),
+        ).toBe(false);
+        expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
+          .toBe(true);
+        expect(valueEqual(new FabricEpochDays(7n), new FabricEpochDays(7n)))
+          .toBe(true);
+      });
+
+      it("two distinct Fabric* subtypes are never equal", () => {
+        expect(
+          valueEqual(
+            new FabricBytes(new Uint8Array([1])),
+            new FabricRegExp(/a/),
+          ),
+        )
+          .toBe(false);
+        expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
+          .toBe(false);
+      });
+
+      it("same-subtype plain containers compare by content", () => {
+        // Same subtype + same content -> hash -> true; differing -> false.
+        expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+        expect(valueEqual({ a: 1, b: 2 }, { a: 1, b: 9 })).toBe(false);
+        expect(valueEqual([1, 2, 3], [1, 2, 3])).toBe(true);
+        expect(valueEqual([1, 2, 3], [1, 2, 9])).toBe(false);
       });
     });
   });
