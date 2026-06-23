@@ -13,6 +13,8 @@ import { getBGPieces } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commonfabric/runner";
 
+type SpaceManagerLike = Pick<SpaceManager, "start" | "stop" | "watch">;
+
 export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
@@ -20,18 +22,24 @@ export interface BackgroundPieceServiceOptions {
   bgSpace?: MemorySpace;
   bgCause?: string;
   workerTimeoutMs?: number;
+  createSpaceManager?: (
+    options: ConstructorParameters<typeof SpaceManager>[0],
+  ) => SpaceManagerLike;
 }
 
 export class BackgroundPieceService {
   private piecesCell: Cell<Cell<BGPieceEntry>[]> | null = null;
   private isRunning = false;
-  private pieceSchedulers: Map<string, SpaceManager> = new Map();
+  private pieceSchedulers: Map<string, SpaceManagerLike> = new Map();
   private identity: Identity;
   private toolshedUrl: string;
   private runtime: Runtime;
   private bgSpace: MemorySpace;
   private bgCause: string;
   private workerTimeoutMs?: number;
+  private createSpaceManager: (
+    options: ConstructorParameters<typeof SpaceManager>[0],
+  ) => SpaceManagerLike;
 
   constructor(options: BackgroundPieceServiceOptions) {
     this.identity = options.identity;
@@ -40,9 +48,16 @@ export class BackgroundPieceService {
     this.bgSpace = options.bgSpace ?? BG_SYSTEM_SPACE_ID;
     this.bgCause = options.bgCause ?? BG_CELL_CAUSE;
     this.workerTimeoutMs = options.workerTimeoutMs;
+    this.createSpaceManager = options.createSpaceManager ??
+      ((managerOptions) => new SpaceManager(managerOptions));
   }
 
   async initialize() {
+    if (this.isRunning) {
+      console.log("Service is already running");
+      return;
+    }
+
     // Storage URL and signer are already configured in the Runtime
     this.piecesCell = await getBGPieces({
       bgSpace: this.bgSpace,
@@ -51,11 +66,6 @@ export class BackgroundPieceService {
     });
     await this.piecesCell.sync();
     await this.runtime.storageManager.synced();
-
-    if (this.isRunning) {
-      console.log("Service is already running");
-      return;
-    }
 
     this.isRunning = true;
     this.piecesCell.sink((cs) => this.ensurePieces(cs));
@@ -68,6 +78,7 @@ export class BackgroundPieceService {
       return Promise.resolve([]);
     }
 
+    this.isRunning = false;
     const promises = Array.from(this.pieceSchedulers.values()).map(
       (scheduler) => scheduler.stop(),
     );
@@ -98,7 +109,7 @@ export class BackgroundPieceService {
       if (!scheduler) {
         // Should send a derived/non-top-level key
         // to each space once delegation is working.
-        scheduler = new SpaceManager({
+        scheduler = this.createSpaceManager({
           did,
           toolshedUrl: this.toolshedUrl,
           identity: this.identity,
@@ -110,7 +121,7 @@ export class BackgroundPieceService {
       }
 
       // we are only filtering pieces because until the FIXME above is fixed
-      const didPieces = pieces.filter((c) => c.get().space === did);
+      const didPieces = pieces.filter((c) => c.get()?.space === did);
       addCancel(scheduler.watch(didPieces));
     }
 

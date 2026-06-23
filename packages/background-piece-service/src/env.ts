@@ -53,11 +53,13 @@ const envSchema = z.object({
 
 export type EnvVars = z.infer<typeof envSchema>;
 
-function loadEnv(): EnvVars {
+export function loadEnv(
+  source: (key: string) => string | undefined = (key) => Deno.env.get(key),
+): EnvVars {
   const rawEnv: Record<string, string | undefined> = {};
 
   for (const key of Object.keys(envSchema.shape)) {
-    rawEnv[key] = Deno.env.get(key);
+    rawEnv[key] = source(key);
   }
 
   return envSchema.parse(rawEnv);

@@ -31,6 +31,7 @@ export class SpaceManager {
   private pendingTasks: Task[] = [];
   private failureTracking = new Map<string, number>();
   private workerOptions: WorkerOptions;
+  private isRunning = false;
 
   constructor(options: PieceSchedulerOptions) {
     this.did = options.did;
@@ -116,12 +117,17 @@ export class SpaceManager {
   }
 
   start(): void {
+    if (this.isRunning) {
+      return;
+    }
+    this.isRunning = true;
     console.log(`${this.did} Piece scheduler starting...`);
     this.execLoop();
   }
 
   async stop(): Promise<void> {
     console.log(`${this.did} Stopping piece scheduler...`);
+    this.isRunning = false;
 
     // Wait for active jobs to finish with a timeout
     if (this.activePiece) {
@@ -142,7 +148,7 @@ export class SpaceManager {
   }
 
   private async execLoop(): Promise<void> {
-    while (true) {
+    while (this.isRunning) {
       if (!this.workerController.isReady()) {
         await sleep(this.pollingIntervalMs);
         continue;

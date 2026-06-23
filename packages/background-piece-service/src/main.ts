@@ -3,18 +3,33 @@ import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
-import { env } from "./env.ts";
-
-const { timeout } = parseArgs(Deno.args, {
-  string: [
-    "timeout",
-  ],
-});
+import { env, type EnvVars } from "./env.ts";
+import type { Identity } from "@commonfabric/identity";
 
 // 10 minute timeout
-const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60000;
+export const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60000;
 
-const workerTimeoutMs = (() => {
+type ServiceLike = Pick<BackgroundPieceService, "initialize" | "stop">;
+
+export interface MainDependencies {
+  env: EnvVars;
+  getIdentity: typeof getIdentity;
+  createRuntime: (env: EnvVars, identity: Identity) => Runtime;
+  createService: (
+    options: ConstructorParameters<typeof BackgroundPieceService>[0],
+  ) => ServiceLike;
+  addSignalListener: typeof Deno.addSignalListener;
+  exit: typeof Deno.exit;
+  log: typeof console.log;
+}
+
+export function parseWorkerTimeout(args: string[]): number {
+  const { timeout } = parseArgs(args, {
+    string: [
+      "timeout",
+    ],
+  });
+
   if (timeout) {
     const parsed = parseInt(timeout, 10);
     if (!isNaN(parsed)) {
@@ -22,39 +37,78 @@ const workerTimeoutMs = (() => {
     }
   }
   return DEFAULT_WORKER_TIMEOUT_MS;
-})();
+}
 
-const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
-const runtime = new Runtime({
-  apiUrl: new URL(env.API_URL),
-  storageManager: StorageManager.open({
-    as: identity,
-    memoryHost: new URL(env.API_URL),
-  }),
-  experimental: {
-    modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
-    persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
-  },
-});
-const service = new BackgroundPieceService({
-  identity,
-  toolshedUrl: env.API_URL,
-  runtime,
-  workerTimeoutMs,
-});
+export function createRuntime(env: EnvVars, identity: Identity): Runtime {
+  return new Runtime({
+    apiUrl: new URL(env.API_URL),
+    storageManager: StorageManager.open({
+      as: identity,
+      memoryHost: new URL(env.API_URL),
+    }),
+    experimental: {
+      modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
+      persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
+    },
+  });
+}
 
-function shutdown(service: BackgroundPieceService) {
+export function shutdown(
+  service: Pick<BackgroundPieceService, "stop">,
+  exit: typeof Deno.exit = Deno.exit,
+) {
   return () => {
     service.stop().then(() => {
-      Deno.exit(0);
+      exit(0);
     });
   };
 }
 
-Deno.addSignalListener("SIGINT", shutdown(service));
-Deno.addSignalListener("SIGTERM", shutdown(service));
+export async function startBackgroundPieceService(
+  args: string[] = Deno.args,
+  dependencies: MainDependencies = {
+    env,
+    getIdentity,
+    createRuntime,
+    createService: (options) => new BackgroundPieceService(options),
+    addSignalListener: Deno.addSignalListener,
+    exit: Deno.exit,
+    log: console.log,
+  },
+): Promise<ServiceLike> {
+  const workerTimeoutMs = parseWorkerTimeout(args);
+  const identity = await dependencies.getIdentity(
+    dependencies.env.IDENTITY,
+    dependencies.env.OPERATOR_PASS,
+  );
+  const runtime = dependencies.createRuntime(dependencies.env, identity);
+  const service = dependencies.createService({
+    identity,
+    toolshedUrl: dependencies.env.API_URL,
+    runtime,
+    workerTimeoutMs,
+  });
 
-service.initialize().then(() => {
-  console.log("Background Piece Service started successfully");
-  console.log("Press Ctrl+C to stop");
-});
+  dependencies.addSignalListener(
+    "SIGINT",
+    shutdown(service, dependencies.exit),
+  );
+  dependencies.addSignalListener(
+    "SIGTERM",
+    shutdown(service, dependencies.exit),
+  );
+
+  await service.initialize();
+  dependencies.log("Background Piece Service started successfully");
+  dependencies.log("Press Ctrl+C to stop");
+  return service;
+}
+
+export async function runIfMain(
+  isMain = import.meta.main,
+  start: () => Promise<unknown> = startBackgroundPieceService,
+): Promise<void> {
+  if (isMain) await start();
+}
+
+await runIfMain();

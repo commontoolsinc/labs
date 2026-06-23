@@ -23,22 +23,29 @@ import {
   isWorkerIPCRequest,
   RunData,
   WorkerIPCMessageType,
+  WorkerIPCRequest,
 } from "./worker-ipc.ts";
 
 let initialized = false;
-let spaceId: DID;
+let spaceId: DID | undefined;
 let latestError: Error | null = null;
 let currentSession: Session | null = null;
 let manager: PieceManager | null = null;
 let runtime: Runtime | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
+let streamValidator = isStream;
 
-// Error handler that will be passed to Runtime
-const errorHandler: ErrorHandler = (e: ErrorWithContext) => {
+export function recordLatestError(e: ErrorWithContext): void {
   latestError = e;
-};
+}
+
+const errorHandler: ErrorHandler = recordLatestError;
 
 const trueConsole = globalThis.console;
+export function workerConsoleContext(currentSpaceId = spaceId): string {
+  return `Worker(${currentSpaceId ?? "NO_SPACE"})`;
+}
+
 // Console for "worker" messages
 const console = {
   log(...args: unknown[]) {
@@ -48,18 +55,18 @@ const console = {
     trueConsole.error(this.context(), ...args);
   },
   context() {
-    return `Worker(${spaceId ?? "NO_SPACE"})`;
+    return workerConsoleContext();
   },
 };
-// Console handler that will be passed to Runtime
-const consoleHandler: ConsoleHandler = (
+
+export function formatConsoleMessage(
   {
     metadata,
     args,
   }: ConsoleMessage,
-) => {
-  if (!spaceId) {
-    // Shouldn't happen.
+  currentSpaceId = spaceId,
+): unknown[] {
+  if (!currentSpaceId) {
     throw new Error(
       "FatalError: Piece executing but worker has no space ID.",
     );
@@ -67,7 +74,7 @@ const consoleHandler: ConsoleHandler = (
   let ctx;
   if (metadata) {
     if (metadata.space) {
-      if (metadata.space !== spaceId) {
+      if (metadata.space !== currentSpaceId) {
         throw new Error("FatalError: Mismatched space ids in worker.");
       }
     }
@@ -77,9 +84,54 @@ const consoleHandler: ConsoleHandler = (
   }
   ctx = ctx ?? "Piece(NO_PIECE)";
   return [ctx, ...args.map((arg) => safeFormat(arg))];
-};
+}
 
-async function initialize(
+const consoleHandler: ConsoleHandler = (message) =>
+  formatConsoleMessage(message);
+
+export function setWorkerStateForTesting(
+  state: {
+    initialized?: boolean;
+    spaceId?: DID;
+    latestError?: Error | null;
+    currentSession?: Session | null;
+    manager?: PieceManager | null;
+    runtime?: Runtime | null;
+    loadedPieces?: Iterable<
+      [string, Cell<{ bgUpdater: Stream<unknown> }>]
+    >;
+    streamValidator?: typeof isStream;
+  },
+): void {
+  if ("initialized" in state) initialized = state.initialized ?? false;
+  if ("spaceId" in state) spaceId = state.spaceId;
+  if ("latestError" in state) latestError = state.latestError ?? null;
+  if ("currentSession" in state) currentSession = state.currentSession ?? null;
+  if ("manager" in state) manager = state.manager ?? null;
+  if ("runtime" in state) runtime = state.runtime ?? null;
+  if ("loadedPieces" in state) {
+    loadedPieces.clear();
+    for (const [pieceId, piece] of state.loadedPieces ?? []) {
+      loadedPieces.set(pieceId, piece);
+    }
+  }
+  if ("streamValidator" in state) {
+    streamValidator = state.streamValidator ?? isStream;
+  }
+}
+
+export function resetWorkerStateForTesting(): void {
+  initialized = false;
+  spaceId = undefined;
+  latestError = null;
+  currentSession = null;
+  manager = null;
+  runtime = null;
+  loadedPieces.clear();
+  streamValidator = isStream;
+}
+
+export async function initialize(
   data: InitializationData,
 ): Promise<void> {
   if (initialized) {
@@ -118,7 +170,7 @@ async function initialize(
 }
 
 // FIXME(ja) should we make sure we kill the worker?
-async function cleanup(): Promise<void> {
+export async function cleanup(): Promise<void> {
   if (!initialized) {
     console.log(`Not initialized, skipping cleanup`);
     return;
@@ -139,9 +191,12 @@ async function cleanup(): Promise<void> {
   initialized = false;
 }
 
-async function runPiece(data: RunData): Promise<void> {
+export async function runPiece(data: RunData): Promise<void> {
   if (!manager) {
     throw new Error("Worker session not initialized");
+  }
+  if (!spaceId) {
+    throw new Error("Worker space not initialized");
   }
 
   const { pieceId } = data;
@@ -194,7 +249,7 @@ async function runPiece(data: RunData): Promise<void> {
 
     // Find the updater stream
     const updater = runningPiece.key("bgUpdater") as unknown as Stream<unknown>;
-    if (!updater || !isStream(updater)) {
+    if (!updater || !streamValidator(updater)) {
       throw new Error(`No updater stream found for piece: ${pieceId}`);
     }
 
@@ -235,7 +290,7 @@ async function runPiece(data: RunData): Promise<void> {
 // Logs here are often viewed through observability dashboards
 // that don't render objects well. Attempt to stringify any objects
 // here.
-function safeFormat(value: unknown): unknown {
+export function safeFormat(value: unknown): unknown {
   if (value && typeof value === "object") {
     try {
       // While we use this formatter for runtime code, we also use
@@ -253,42 +308,79 @@ function safeFormat(value: unknown): unknown {
   return value;
 }
 
-self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
-  // Throw this so that `WorkerController`'s `error` handler can handle
-  // unhandled rejections the same way unhandled errors are handled.
+export function throwUnhandledRejectionReason(
+  e: PromiseRejectionEvent,
+): never {
   throw e.reason;
-});
+}
 
-self.addEventListener("message", async (event: MessageEvent) => {
-  const message = event.data;
+self.addEventListener("unhandledrejection", throwUnhandledRejectionReason);
+
+type WorkerMessageHandlers = {
+  initialize: typeof initialize;
+  runPiece: typeof runPiece;
+  cleanup: typeof cleanup;
+  postMessage: (message: unknown) => void;
+  error: typeof console.error;
+};
+
+function defaultWorkerMessageHandlers(): WorkerMessageHandlers {
+  return {
+    initialize,
+    runPiece,
+    cleanup,
+    postMessage: (message) => self.postMessage(message),
+    error: console.error.bind(console),
+  };
+}
+
+export async function executeWorkerRequest(
+  message: WorkerIPCRequest,
+  handlers: WorkerMessageHandlers = defaultWorkerMessageHandlers(),
+): Promise<void> {
+  switch (message.type) {
+    case WorkerIPCMessageType.Initialize: {
+      await handlers.initialize(message.data);
+      break;
+    }
+    case WorkerIPCMessageType.Run: {
+      await handlers.runPiece(message.data);
+      break;
+    }
+    case WorkerIPCMessageType.Cleanup: {
+      await handlers.cleanup();
+      break;
+    }
+    default:
+      throw new Error("Unknown message type.");
+  }
+}
+
+export async function handleWorkerMessage(
+  message: unknown,
+  handlers: WorkerMessageHandlers = defaultWorkerMessageHandlers(),
+): Promise<void> {
   try {
     if (!isWorkerIPCRequest(message)) {
       throw new Error(`Invalid IPC request: ${safeFormat(message)}`);
     }
-    switch (message.type) {
-      case WorkerIPCMessageType.Initialize: {
-        await initialize(message.data);
-        break;
-      }
-      case WorkerIPCMessageType.Run: {
-        await runPiece(message.data);
-        break;
-      }
-      case WorkerIPCMessageType.Cleanup: {
-        await cleanup();
-        break;
-      }
-      default:
-        throw new Error("Unknown message type.");
-    }
-    self.postMessage({ msgId: message.msgId });
+    await executeWorkerRequest(message, handlers);
+    handlers.postMessage({ msgId: message.msgId });
   } catch (error) {
-    console.error(`Worker error:`, error);
-    self.postMessage({
-      msgId: message.msgId,
+    handlers.error(`Worker error:`, error);
+    const msgId = typeof message === "object" && message !== null &&
+        "msgId" in message
+      ? (message as { msgId: unknown }).msgId
+      : undefined;
+    handlers.postMessage({
+      msgId,
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+self.addEventListener("message", async (event: MessageEvent) => {
+  await handleWorkerMessage(event.data);
 });
 
 // Signal to the controller that the worker is ready to receive messages.

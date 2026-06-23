@@ -200,7 +200,10 @@ export class WorkerController extends EventTarget {
     }
 
     if (response.type === "ready") {
-      this.startInitialize().then(() => this.initializeDeferred.resolve());
+      this.startInitialize().then(
+        () => this.initializeDeferred.resolve(),
+        (error) => this.initializeDeferred.reject(error),
+      );
       return;
     }
     const pending = this.pending.get(response.msgId);

@@ -1,7 +1,7 @@
 import {
-  Cell,
+  type Cell,
   computed,
-  Default,
+  type Default,
   handler,
   lift,
   NAME,
@@ -9,9 +9,9 @@ import {
   UI,
 } from "commonfabric";
 
-const DISABLED_VIA_UI = "Disabled via UI";
+export const DISABLED_VIA_UI = "Disabled via UI";
 
-type BGPieceEntry = {
+export type BGPieceEntry = {
   space: string;
   pieceId: string;
   integration: string;
@@ -30,32 +30,47 @@ type ResultSchema = {
   pieces: BGPieceEntry[];
 };
 
-const deletePiece = handler<
+export function removePieceFromList(
+  list: readonly BGPieceEntry[],
+  piece: Pick<BGPieceEntry, "space" | "pieceId">,
+): readonly BGPieceEntry[] {
+  const index = list.findIndex((i) =>
+    i.space === piece.space && i.pieceId === piece.pieceId
+  );
+  if (index < 0 || index >= list.length) {
+    return list;
+  }
+  const newList = list.slice();
+  newList.splice(index, 1);
+  return newList;
+}
+
+export function toggledPiece(piece: BGPieceEntry): BGPieceEntry {
+  if (piece.disabledAt) {
+    return { ...piece, disabledAt: 0, status: "Initializing..." };
+  }
+  return { ...piece, disabledAt: Date.now(), status: DISABLED_VIA_UI };
+}
+
+export const deletePiece = handler<
   never,
   { pieces: Cell<BGPieceEntry[]>; piece: Cell<BGPieceEntry> }
 >(
   (_, { piece, pieces }) => {
-    const { space, pieceId } = piece.get();
-    const newList = pieces.get().slice();
-    const index = newList.findIndex((i) =>
-      i.space === space && i.pieceId === pieceId
-    );
-    if (index >= 0 && index < newList.length) {
-      newList.splice(index, 1);
-      pieces.set(newList);
+    const currentPieces = pieces.get();
+    const nextPieces = removePieceFromList(currentPieces, piece.get());
+    if (nextPieces !== currentPieces) {
+      pieces.set(nextPieces as BGPieceEntry[]);
     }
   },
+  { proxy: true },
 );
 
-const togglePiece = handler<never, { piece: Cell<BGPieceEntry> }>(
+export const togglePiece = handler<never, { piece: Cell<BGPieceEntry> }>(
   (_, { piece }) => {
-    const data = piece.get();
-    if (data.disabledAt) {
-      piece.set({ ...data, disabledAt: 0, status: "Initializing..." });
-    } else {
-      piece.set({ ...data, disabledAt: Date.now(), status: DISABLED_VIA_UI });
-    }
+    piece.set(toggledPiece(piece.get()));
   },
+  { proxy: true },
 );
 
 // Minimal "moment" style formatting to get a string
@@ -65,8 +80,7 @@ const togglePiece = handler<never, { piece: Cell<BGPieceEntry> }>(
 //   we don't currently need e.g. "5 seconds from now".
 // * Disregard plural units, "1 minutes ago" is fine.
 // * Timezones are hard. Could maybe render "0 years ago".
-function fromNow(then: Date): string {
-  const now = new Date();
+export function fromNow(then: Date, now: Date = new Date()): string {
   const diffSeconds = Math.floor((now.getTime() - then.getTime()) / 1000);
   if (diffSeconds < 0) return "in the future";
   if (diffSeconds === 0) return "now";
@@ -81,12 +95,13 @@ function fromNow(then: Date): string {
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 365) return `${Math.floor(diffDays)} days ago`;
 
-  return `${Math.floor(then.getFullYear() - now.getFullYear())} `;
+  return `${Math.floor(diffDays / 365)} years ago`;
 }
 
-const getRenderData = lift((
+export function renderDataForPiece(
   piece: BGPieceEntry,
-) => {
+  now: Date = new Date(),
+) {
   const {
     integration,
     space: rawSpace,
@@ -107,10 +122,10 @@ const getRenderData = lift((
   const isSuccessful = status === "Success";
   const statusDisplay = isSuccessful ? "" : status;
   const details = `Created ${
-    fromNow(createdAtDate)
+    fromNow(createdAtDate, now)
   } (${createdAtDate.toLocaleString()})
-Updated ${fromNow(updatedAtDate)} (${updatedAtDate.toLocaleString()})
-Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
+Updated ${fromNow(updatedAtDate, now)} (${updatedAtDate.toLocaleString()})
+Last run ${lastRunDate ? fromNow(lastRunDate, now) : "never"} ${
     lastRunDate ? `(${lastRunDate.toLocaleString()})` : ""
   }`;
 
@@ -121,7 +136,44 @@ Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
     integration,
     name,
   };
-});
+}
+
+export function statusIndicatorData(
+  status: string,
+  disabledAt: number,
+): { statusColor: string; statusTitle: string } {
+  const SUCCESS = `#4CAF50`;
+  const UNKNOWN = `#FFC107`;
+  const DISABLED = `#9E9E9E`;
+  const FAILURE = `#F44336`;
+  const statusColor = disabledAt === 0
+    ? status === "Success" ? SUCCESS : UNKNOWN
+    : status === DISABLED_VIA_UI
+    ? DISABLED
+    : FAILURE;
+  const statusTitle = disabledAt === 0 && status === "Success"
+    ? "Running"
+    : status;
+  return { statusColor, statusTitle };
+}
+
+export function statusIndicator(status: string, disabledAt: number) {
+  const { statusColor, statusTitle } = statusIndicatorData(status, disabledAt);
+  return (
+    <div
+      title={statusTitle}
+      style={{
+        backgroundColor: statusColor,
+        width: "20px",
+        height: "20px",
+        borderRadius: "20px",
+      }}
+    >
+    </div>
+  );
+}
+
+export const getRenderData = lift(renderDataForPiece);
 
 const css = `
 .bg-piece-container {
@@ -165,77 +217,52 @@ const css = `
 }
 `;
 
+export const pieceRowPattern = pattern((input: any) => {
+  const piece = input.key("element");
+  const pieces = input.key("params", "pieces");
+  const {
+    details,
+    name,
+    integration,
+    statusDisplay,
+  } = getRenderData(piece);
+  return (
+    <div className="bg-piece-row">
+      <div className="toggle-button">
+        <button
+          onClick={togglePiece({ piece })}
+          type="button"
+        >
+          {computed(() => statusIndicator(piece.status, piece.disabledAt))}
+        </button>
+      </div>
+      <div className="name ellipsis" title={details}>
+        {name}
+        <span className="integration">{integration}</span>
+      </div>
+      <div className="status ellipsis">{statusDisplay}</div>
+      <div className="delete">
+        <button
+          onClick={deletePiece({ piece, pieces })}
+          type="button"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+});
+
 export default pattern<InputSchema, ResultSchema>(
   ({ pieces }) => {
-    computed(() => {
-      console.log("bg piece list:", pieces);
-    });
+    computed(() => console.log("bg piece list:", pieces));
     return {
       [NAME]: "BG Updater Management New",
       [UI]: (
         <div>
           <style>{css}</style>
           <div className="bg-piece-container">
-            {pieces.map((piece) => {
-              const {
-                details,
-                name,
-                integration,
-                statusDisplay,
-              } = getRenderData(piece);
-              return (
-                <div className="bg-piece-row">
-                  <div className="toggle-button">
-                    <button
-                      onClick={togglePiece({ piece })}
-                      type="button"
-                    >
-                      {computed(() => {
-                        const { status, disabledAt } = piece;
-                        const SUCCESS = `#4CAF50`;
-                        const UNKNOWN = `#FFC107`;
-                        const DISABLED = `#9E9E9E`;
-                        const FAILURE = `#F44336`;
-                        const statusColor = disabledAt === 0
-                          ? status === "Success" ? SUCCESS : UNKNOWN
-                          : status === DISABLED_VIA_UI
-                          ? DISABLED
-                          : FAILURE;
-                        const statusTitle =
-                          disabledAt === 0 && status === "Success"
-                            ? "Running"
-                            : status;
-                        return (
-                          <div
-                            title={statusTitle}
-                            style={{
-                              backgroundColor: statusColor,
-                              width: "20px",
-                              height: "20px",
-                              borderRadius: "20px",
-                            }}
-                          >
-                          </div>
-                        );
-                      })}
-                    </button>
-                  </div>
-                  <div className="name ellipsis" title={details}>
-                    {name}
-                    <span className="integration">{integration}</span>
-                  </div>
-                  <div className="status ellipsis">{statusDisplay}</div>
-                  <div className="delete">
-                    <button
-                      onClick={deletePiece({ piece, pieces })}
-                      type="button"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {(pieces as any).mapWithPattern(pieceRowPattern, { pieces })}
           </div>
         </div>
       ),
