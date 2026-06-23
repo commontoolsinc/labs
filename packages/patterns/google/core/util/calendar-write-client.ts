@@ -33,8 +33,6 @@
  */
 import { getPatternEnvironment, Writable } from "commonfabric";
 
-const env = getPatternEnvironment();
-
 // Re-export the Auth type for convenience
 export type { Auth } from "./google-auth-manager.tsx";
 import type { Auth } from "./google-auth-manager.tsx";
@@ -251,58 +249,121 @@ async function retryDelay(retryCount: number): Promise<void> {
  * IMPORTANT: Requires the calendar.events scope to be authorized.
  * The auth cell MUST be writable for token refresh to work!
  */
-export class CalendarWriteClient {
-  private auth: Writable<Auth>;
-  private debugMode: boolean;
+export interface CalendarWriteClient {
+  createEvent(
+    params: CreateEventParams,
+    retryCount?: number,
+  ): Promise<CalendarEventResult>;
+  updateEvent(
+    calendarId: string,
+    eventId: string,
+    params: UpdateEventParams,
+    sendUpdates?: "all" | "externalOnly" | "none",
+    retryCount?: number,
+  ): Promise<CalendarEventResult>;
+  deleteEvent(
+    calendarId: string,
+    eventId: string,
+    sendUpdates?: "all" | "externalOnly" | "none",
+    retryCount?: number,
+  ): Promise<void>;
+  rsvpToEvent(
+    calendarId: string,
+    eventId: string,
+    status: RSVPStatus,
+    retryCount?: number,
+  ): Promise<CalendarEventResult>;
+  createBatchEvents(
+    params: BatchCreateEventsParams,
+  ): Promise<BatchCreateEventsResult>;
+}
 
-  constructor(
+export interface CalendarWriteClientConstructor {
+  new (
     auth: Writable<Auth>,
-    { debugMode = false }: CalendarWriteClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.debugMode = debugMode;
-  }
+    config?: CalendarWriteClientConfig,
+  ): CalendarWriteClient;
+  (
+    auth: Writable<Auth>,
+    config?: CalendarWriteClientConfig,
+  ): CalendarWriteClient;
+}
 
-  /**
-   * Format a date/time for the Calendar API.
-   * Returns dateTime format (ISO with timezone) or date format (YYYY-MM-DD).
-   */
-  private formatDateTime(
-    dt: string | Date,
-    isAllDay = false,
-  ): { dateTime?: string; date?: string; timeZone?: string } {
-    const date = typeof dt === "string" ? new Date(dt) : dt;
+function formatDateTime(
+  dt: string | Date,
+  isAllDay = false,
+): { dateTime?: string; date?: string; timeZone?: string } {
+  const date = typeof dt === "string" ? new Date(dt) : dt;
 
-    if (isAllDay) {
-      // All-day events use date format (YYYY-MM-DD)
-      return {
-        date: date.toISOString().split("T")[0],
-      };
-    }
-
+  if (isAllDay) {
     return {
-      dateTime: date.toISOString(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      date: date.toISOString().split("T")[0],
     };
   }
 
-  /**
-   * Create a new calendar event.
-   *
-   * @param params - Event parameters
-   * @returns The created event
-   * @throws Error if creation fails or auth is invalid
-   */
-  async createEvent(
+  return {
+    dateTime: date.toISOString(),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function refreshAuth(
+  auth: Writable<Auth>,
+  debugMode: boolean,
+): Promise<void> {
+  const refreshToken = auth.get()?.refreshToken;
+  if (!refreshToken) {
+    throw new Error("No refresh token available. Please re-authenticate.");
+  }
+
+  debugLog(debugMode, "Refreshing auth token...");
+
+  const env = getPatternEnvironment();
+  const res = await fetch(
+    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error("Token refresh failed. Please re-authenticate.");
+  }
+
+  const json = await res.json();
+  if (!json.tokenInfo) {
+    throw new Error("Invalid refresh response");
+  }
+
+  const currentAuth = auth.get();
+  auth.update({
+    ...json.tokenInfo,
+    user: currentAuth?.user,
+  });
+
+  debugLog(debugMode, "Auth token refreshed successfully");
+}
+
+export function createCalendarWriteClient(
+  auth: Writable<Auth>,
+  { debugMode = false }: CalendarWriteClientConfig = {},
+): CalendarWriteClient {
+  async function createEvent(
     params: CreateEventParams,
     retryCount = 0,
   ): Promise<CalendarEventResult> {
-    const token = this.auth.get()?.token;
+    const token = auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Creating event:", {
+    debugLog(debugMode, "Creating event:", {
       calendarId: params.calendarId,
       summary: params.summary,
       start: params.start,
@@ -310,11 +371,10 @@ export class CalendarWriteClient {
       attendeeCount: params.attendees?.length || 0,
     });
 
-    // Build event body
     const body: Record<string, unknown> = {
       summary: params.summary,
-      start: this.formatDateTime(params.start, params.isAllDay),
-      end: this.formatDateTime(params.end, params.isAllDay),
+      start: formatDateTime(params.start, params.isAllDay),
+      end: formatDateTime(params.end, params.isAllDay),
     };
 
     if (params.description) {
@@ -330,7 +390,6 @@ export class CalendarWriteClient {
       body.recurrence = params.recurrence;
     }
 
-    // Build URL with query params
     const url = new URL(
       `https://www.googleapis.com/calendar/v3/calendars/${
         encodeURIComponent(params.calendarId)
@@ -349,10 +408,9 @@ export class CalendarWriteClient {
       body: JSON.stringify(body),
     });
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -364,9 +422,9 @@ export class CalendarWriteClient {
           } attempts. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth(auth, debugMode);
       await retryDelay(retryCount);
-      return this.createEvent(params, retryCount + 1);
+      return createEvent(params, retryCount + 1);
     }
 
     if (!res.ok) {
@@ -374,12 +432,12 @@ export class CalendarWriteClient {
       const errorMessage =
         (error as { error?: { message?: string } }).error?.message ||
         res.statusText;
-      debugLog(this.debugMode, "Create failed:", res.status, errorMessage);
+      debugLog(debugMode, "Create failed:", res.status, errorMessage);
       throw new Error(`Calendar API error: ${res.status} ${errorMessage}`);
     }
 
     const result = await res.json();
-    debugLog(this.debugMode, "Event created successfully:", result.id);
+    debugLog(debugMode, "Event created successfully:", result.id);
 
     return result;
   }
@@ -394,21 +452,20 @@ export class CalendarWriteClient {
    * @returns The updated event
    * @throws Error if update fails or auth is invalid
    */
-  async updateEvent(
+  async function updateEvent(
     calendarId: string,
     eventId: string,
     params: UpdateEventParams,
     sendUpdates: "all" | "externalOnly" | "none" = "all",
     retryCount = 0,
   ): Promise<CalendarEventResult> {
-    const token = this.auth.get()?.token;
+    const token = auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Updating event:", eventId, params);
+    debugLog(debugMode, "Updating event:", eventId, params);
 
-    // Build update body (only include fields that are provided)
     const body: Record<string, unknown> = {};
 
     if (params.summary !== undefined) {
@@ -421,10 +478,10 @@ export class CalendarWriteClient {
       body.location = params.location;
     }
     if (params.start !== undefined) {
-      body.start = this.formatDateTime(params.start, params.isAllDay);
+      body.start = formatDateTime(params.start, params.isAllDay);
     }
     if (params.end !== undefined) {
-      body.end = this.formatDateTime(params.end, params.isAllDay);
+      body.end = formatDateTime(params.end, params.isAllDay);
     }
     if (params.attendees !== undefined) {
       body.attendees = params.attendees.map((email) => ({ email }));
@@ -446,10 +503,9 @@ export class CalendarWriteClient {
       body: JSON.stringify(body),
     });
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -461,9 +517,9 @@ export class CalendarWriteClient {
           } attempts. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth(auth, debugMode);
       await retryDelay(retryCount);
-      return this.updateEvent(
+      return updateEvent(
         calendarId,
         eventId,
         params,
@@ -477,12 +533,12 @@ export class CalendarWriteClient {
       const errorMessage =
         (error as { error?: { message?: string } }).error?.message ||
         res.statusText;
-      debugLog(this.debugMode, "Update failed:", res.status, errorMessage);
+      debugLog(debugMode, "Update failed:", res.status, errorMessage);
       throw new Error(`Calendar API error: ${res.status} ${errorMessage}`);
     }
 
     const result = await res.json();
-    debugLog(this.debugMode, "Event updated successfully:", result.id);
+    debugLog(debugMode, "Event updated successfully:", result.id);
 
     return result;
   }
@@ -495,18 +551,18 @@ export class CalendarWriteClient {
    * @param sendUpdates - Whether to notify attendees of cancellation
    * @throws Error if deletion fails or auth is invalid
    */
-  async deleteEvent(
+  async function deleteEvent(
     calendarId: string,
     eventId: string,
     sendUpdates: "all" | "externalOnly" | "none" = "all",
     retryCount = 0,
   ): Promise<void> {
-    const token = this.auth.get()?.token;
+    const token = auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Deleting event:", eventId);
+    debugLog(debugMode, "Deleting event:", eventId);
 
     const url = new URL(
       `https://www.googleapis.com/calendar/v3/calendars/${
@@ -522,10 +578,9 @@ export class CalendarWriteClient {
       },
     });
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -537,22 +592,21 @@ export class CalendarWriteClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth(auth, debugMode);
       await retryDelay(retryCount);
-      return this.deleteEvent(calendarId, eventId, sendUpdates, retryCount + 1);
+      return deleteEvent(calendarId, eventId, sendUpdates, retryCount + 1);
     }
 
-    // DELETE returns 204 No Content on success
     if (!res.ok && res.status !== 204) {
       const error = await res.json().catch(() => ({}));
       const errorMessage =
         (error as { error?: { message?: string } }).error?.message ||
         res.statusText;
-      debugLog(this.debugMode, "Delete failed:", res.status, errorMessage);
+      debugLog(debugMode, "Delete failed:", res.status, errorMessage);
       throw new Error(`Calendar API error: ${res.status} ${errorMessage}`);
     }
 
-    debugLog(this.debugMode, "Event deleted successfully");
+    debugLog(debugMode, "Event deleted successfully");
   }
 
   /**
@@ -567,25 +621,24 @@ export class CalendarWriteClient {
    * @returns The updated event
    * @throws Error if RSVP fails or auth is invalid
    */
-  async rsvpToEvent(
+  async function rsvpToEvent(
     calendarId: string,
     eventId: string,
     status: RSVPStatus,
     retryCount = 0,
   ): Promise<CalendarEventResult> {
-    const token = this.auth.get()?.token;
+    const token = auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    const userEmail = this.auth.get()?.user?.email;
+    const userEmail = auth.get()?.user?.email;
     if (!userEmail) {
       throw new Error("No user email available for RSVP.");
     }
 
-    debugLog(this.debugMode, "RSVP to event:", eventId, "status:", status);
+    debugLog(debugMode, "RSVP to event:", eventId, "status:", status);
 
-    // First, get the current event to find attendee list
     const getUrl = new URL(
       `https://www.googleapis.com/calendar/v3/calendars/${
         encodeURIComponent(calendarId)
@@ -598,10 +651,9 @@ export class CalendarWriteClient {
       },
     });
 
-    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (getRes.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -613,9 +665,9 @@ export class CalendarWriteClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth(auth, debugMode);
       await retryDelay(retryCount);
-      return this.rsvpToEvent(calendarId, eventId, status, retryCount + 1);
+      return rsvpToEvent(calendarId, eventId, status, retryCount + 1);
     }
 
     if (!getRes.ok) {
@@ -630,7 +682,6 @@ export class CalendarWriteClient {
 
     const event = (await getRes.json()) as CalendarEventResult;
 
-    // Find and update own attendee status
     const userEmailLower = userEmail.toLowerCase();
     const attendees = (event.attendees || []).map((a) => {
       const attendeeEmail = a.email.toLowerCase();
@@ -640,7 +691,6 @@ export class CalendarWriteClient {
       return a;
     });
 
-    // Check if user was found as an attendee
     const userFound = event.attendees?.some(
       (a) => a.email.toLowerCase() === userEmailLower,
     );
@@ -651,7 +701,6 @@ export class CalendarWriteClient {
       );
     }
 
-    // Patch the event with updated attendee status
     const patchUrl = new URL(
       `https://www.googleapis.com/calendar/v3/calendars/${
         encodeURIComponent(calendarId)
@@ -673,12 +722,12 @@ export class CalendarWriteClient {
       const errorMessage =
         (error as { error?: { message?: string } }).error?.message ||
         patchRes.statusText;
-      debugLog(this.debugMode, "RSVP failed:", patchRes.status, errorMessage);
+      debugLog(debugMode, "RSVP failed:", patchRes.status, errorMessage);
       throw new Error(`Calendar API error: ${patchRes.status} ${errorMessage}`);
     }
 
     const result = await patchRes.json();
-    debugLog(this.debugMode, "RSVP successful:", result.id, "status:", status);
+    debugLog(debugMode, "RSVP successful:", result.id, "status:", status);
 
     return result;
   }
@@ -692,7 +741,7 @@ export class CalendarWriteClient {
    * @param params - Batch creation parameters
    * @returns Result with per-event success/failure details
    */
-  async createBatchEvents(
+  async function createBatchEvents(
     params: BatchCreateEventsParams,
   ): Promise<BatchCreateEventsResult> {
     const {
@@ -709,13 +758,12 @@ export class CalendarWriteClient {
     let succeeded = 0;
     let failed = 0;
 
-    debugLog(this.debugMode, "Starting batch creation:", {
+    debugLog(debugMode, "Starting batch creation:", {
       total: events.length,
       batchSize: effectiveBatchSize,
       calendarId,
     });
 
-    // Report initial progress
     onProgress?.({
       total: events.length,
       processed: 0,
@@ -724,12 +772,9 @@ export class CalendarWriteClient {
       percentComplete: 0,
     });
 
-    // Process events in batches
     for (let i = 0; i < events.length; i += effectiveBatchSize) {
       const batch = events.slice(i, i + effectiveBatchSize);
 
-      // Process each event in the batch sequentially
-      // (Google Calendar API doesn't have true batch endpoint for events)
       for (const event of batch) {
         onProgress?.({
           total: events.length,
@@ -741,7 +786,7 @@ export class CalendarWriteClient {
         });
 
         try {
-          const created = await this.createEvent({
+          const created = await createEvent({
             calendarId,
             summary: event.summary,
             start: event.start,
@@ -762,7 +807,7 @@ export class CalendarWriteClient {
           succeeded++;
 
           debugLog(
-            this.debugMode,
+            debugMode,
             `Created event ${results.length}/${events.length}:`,
             created.id,
           );
@@ -778,20 +823,18 @@ export class CalendarWriteClient {
           failed++;
 
           debugLog(
-            this.debugMode,
+            debugMode,
             `Failed event ${results.length}/${events.length}:`,
             errorMessage,
           );
         }
       }
 
-      // Delay between batches to avoid rate limiting
       if (i + effectiveBatchSize < events.length) {
-        await this.delay(batchDelayMs);
+        await delay(batchDelayMs);
       }
     }
 
-    // Report final progress
     onProgress?.({
       total: events.length,
       processed: events.length,
@@ -800,7 +843,7 @@ export class CalendarWriteClient {
       percentComplete: 100,
     });
 
-    debugLog(this.debugMode, "Batch creation complete:", {
+    debugLog(debugMode, "Batch creation complete:", {
       total: events.length,
       succeeded,
       failed,
@@ -814,51 +857,18 @@ export class CalendarWriteClient {
     };
   }
 
-  /**
-   * Delay helper for rate limiting.
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Refresh the OAuth token using the refresh token.
-   * Updates the auth cell with new token data.
-   */
-  private async refreshAuth(): Promise<void> {
-    const refreshToken = this.auth.get()?.refreshToken;
-    if (!refreshToken) {
-      throw new Error("No refresh token available. Please re-authenticate.");
-    }
-
-    debugLog(this.debugMode, "Refreshing auth token...");
-
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      throw new Error("Token refresh failed. Please re-authenticate.");
-    }
-
-    const json = await res.json();
-    if (!json.tokenInfo) {
-      throw new Error("Invalid refresh response");
-    }
-
-    // Update auth cell with new token data
-    // Keep existing user info since refresh doesn't return it
-    const currentAuth = this.auth.get();
-    this.auth.update({
-      ...json.tokenInfo,
-      user: currentAuth?.user,
-    });
-
-    debugLog(this.debugMode, "Auth token refreshed successfully");
-  }
+  return {
+    createEvent,
+    updateEvent,
+    deleteEvent,
+    rsvpToEvent,
+    createBatchEvents,
+  };
 }
+
+export const CalendarWriteClient = function CalendarWriteClient(
+  auth: Writable<Auth>,
+  config: CalendarWriteClientConfig = {},
+): CalendarWriteClient {
+  return createCalendarWriteClient(auth, config);
+} as CalendarWriteClientConstructor;
