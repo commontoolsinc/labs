@@ -9,7 +9,11 @@ import type {
   PatchOp,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
-import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
+import {
+  encodePointer,
+  parsePointer,
+  pathsOverlap,
+} from "../../../memory/v2/path.ts";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -605,6 +609,59 @@ const buildArrayPatchCandidates = (
   }
 
   return candidates;
+};
+
+// A concrete RFC 6901 array-index segment: a non-negative integer with no
+// leading zeros. Mirrors `isArraySegment` in memory/v2/patch.ts. The `-` append
+// marker is intentionally NOT an index — appending never shifts existing
+// elements, so a leaf-only matcher handles it conservatively via the array path.
+const ARRAY_INDEX_SEGMENT = /^(0|[1-9]\d*)$/;
+
+const terminalSegmentIsArrayIndex = (pointer: string): boolean => {
+  const segments = parsePointer(pointer);
+  const last = segments[segments.length - 1];
+  return last !== undefined && ARRAY_INDEX_SEGMENT.test(last);
+};
+
+// Generator invariant guard (see docs/specs/memory-v2/08-conflict-granularity.md
+// §"Array writes and the leaf-only matcher"). The commit-conflict matcher and
+// the scheduler reader-dirty index are both LEAF-ONLY, which is sound only if
+// array element insert/remove/reorder reaches the engine as a `splice` on the
+// array path or a whole-array `replace` — never as an `add`/`remove`/`move` at an
+// array INDEX. Such an op SHIFTS sibling elements, but its leaf path captures
+// only the touched index, so a leaf-only matcher would neither conflict (commit)
+// nor re-trigger (reader-dirty) a reader of a shifted sibling — a silent stale
+// read. `buildArrayPatchCandidates` only ever emits per-index `replace`,
+// array-path `splice`, or whole-array `replace`, so this assertion can never fire
+// for real input; it converts a future regression in the array diff path into a
+// loud failure instead of silent data loss. (A numeric *object* key is flagged
+// too — the generator never emits a structural op on one either.)
+const assertNoIndexedArrayStructuralOps = (
+  patches: readonly PatchOp[],
+): void => {
+  for (const patch of patches) {
+    let offending: string | null = null;
+    if (patch.op === "add" || patch.op === "remove") {
+      if (terminalSegmentIsArrayIndex(patch.path)) offending = patch.path;
+    } else if (patch.op === "move") {
+      if (
+        terminalSegmentIsArrayIndex(patch.path) ||
+        terminalSegmentIsArrayIndex(patch.from)
+      ) {
+        offending = `${patch.from} -> ${patch.path}`;
+      }
+    }
+    if (offending !== null) {
+      throw new Error(
+        `v2 patch generator invariant violation: emitted an indexed-array ` +
+          `${patch.op} (${offending}). Array element insert/remove/reorder must ` +
+          `be a splice on the array path or a whole-array replace; an indexed ` +
+          `add/remove/move shifts siblings that the leaf-only conflict and ` +
+          `reader-dirty matchers cannot track (see ` +
+          `docs/specs/memory-v2/08-conflict-granularity.md).`,
+      );
+    }
+  }
 };
 
 const isPrefixPath = (
@@ -2230,6 +2287,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       ...nonOverlappingCoverCandidates.map((candidate) => candidate.patch),
       ...retainedNonCoverCandidates.map((candidate) => candidate.patch),
     ];
+
+    assertNoIndexedArrayStructuralOps(patches);
 
     return { op: "patch", id, type, scope, patches, value: doc.current.value };
   }

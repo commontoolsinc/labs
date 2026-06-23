@@ -40,10 +40,52 @@ produced that collision; each is removed at its own seam.
 — the same discipline already applied to the scheduler reader-dirty index
 (CT-1623). Same-key writes still conflict (the leaf exactly matches an own-key
 read); whole-container and keyset readers still conflict (their read prefixes the
-leaf). Only the spurious sibling match is dropped. The runner never emits non-tail
-array `add`/`remove` or `move`, so array index shifts (the one shape where
-leaf-only could miss a conflict) never arise from the runner — they manifest as
-per-index `replace` (leaf-exact) plus a container-pathed tail `splice`.
+leaf). Only the spurious sibling match is dropped. The one shape where leaf-only could
+miss a conflict — an array **index shift** — never arises from the runner; see
+[Array writes and the leaf-only matcher](#array-writes-and-the-leaf-only-matcher)
+below.
+
+### Array writes and the leaf-only matcher
+
+Leaf-only matching has exactly one blind spot: an `add`/`remove`/`move` whose
+target is an **array index**. Such an op *shifts* sibling elements, but its leaf
+path captures only the touched index — so a recursive reader of a shifted sibling
+(`arr/5` after an insert at `arr/2`) would neither conflict on commit nor
+re-trigger via the (also leaf-only) reader-dirty index. That would be a silent
+stale read.
+
+This is safe because **the runner never emits an indexed-array
+`add`/`remove`/`move`**. `buildArrayPatchCandidates`
+(runner `storage/v2-transaction.ts`) encodes every array change as one of three
+shapes, all of which both the leaf-only commit matcher and the leaf-only
+reader-dirty index handle conservatively:
+
+- **in-place element change** → `replace` at `arr/i` (leaf-exact; no shift);
+- **tail grow / shrink** → a `splice` whose path **is the array** (`arr`), which
+  prefix-matches every index reader below it; and
+- **messy cases** (mid-array presence change, sparse growth) → a whole-array
+  `replace` at `arr` (same conservative coverage).
+
+`move` is never generated at all. So an array index shift always reaches the
+engine as a `splice` or whole-array `replace` on the array path — never as an
+indexed structural op.
+
+Because the safety of leaf-only matching *depends* on this — and it is a
+whole-system property of the producer rather than something the engine enforces —
+it is guarded two ways:
+
+- a runtime assertion, `assertNoIndexedArrayStructuralOps`, runs at the sole
+  patch-generator chokepoint (`buildPatchOperation`) and throws if a future
+  regression ever emits an indexed-array `add`/`remove`/`move`; and
+- a generator test (`packages/runner/test/memory-v2-native-commit.test.ts`,
+  "v2 patch generator never emits indexed-array add/remove/move") drives every
+  array idiom through real cell writes and asserts the emitted ops.
+
+The engine still *accepts* indexed-array structural ops — they remain
+protocol-legal (the nonRecursive matcher handles them via parent injection, and
+stacked-commit tests exercise committed `move`s). The guarantee is narrower and
+lives on the producer side: the **runner** never emits one, which is what keeps
+the recursive leaf-only matcher free of false-negatives in production.
 
 ## 2. Shape (nonRecursive) reads conflict only at-or-above the read path
 
