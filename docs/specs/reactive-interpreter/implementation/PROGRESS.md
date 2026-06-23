@@ -11,7 +11,7 @@ newest at the bottom of each section.
 | Spec + design (umbrella) | ✅ merged-pending | [#4298](https://github.com/commontoolsinc/labs/pull/4298) | requirements + design + plan; reviewed (5 blockers fixed); open questions resolved except OQ-4 |
 | Spike: footprint win | ✅ done (throwaway) | #4298 | docs 3N→0, comp-nodes N→1, ~11× load, edit O(1); falsifier disproven |
 | Spike: CFC oracle | ✅ done (throwaway) | #4298 | naive batch SMEARS (sound but coarse); OQ-4 sharpened |
-| W0 — substrate & instrument | ⬜ not started | — | — |
+| W0 — substrate & instrument | ✅ done | #4298 | harness + baseline (legacy law docSlope=3/nodeSlope=4 pinned); ROG type + Pattern→ROG extraction (representative map/control/leaf patterns 100% classify, nested recursion, object-results→constructs, no unrecognized aliases); seam re-verified = pure v2, gaps R-SEAM-1..4 identified |
 | W1 — leaf/access/construct/control | ⬜ not started | — | — |
 | W2 — OQ-4 per-path content-label emit (precision mechanism, long pole) | ⬜ not started | — | — |
 | W3 — collections (the win, pointwise) | ⬜ not started | — | — |
@@ -40,3 +40,9 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   #4298 umbrella** (stacked branches roll up, merge once). W2 (OQ-4) is the long
   pole; its acceptance test is the skipped oracle cases in
   `spike-cfc-oracle.test.ts`.
+- (W0 done 2026-06-23) Landed: `test/support/interpreter-measure.ts` (harness),
+  `test/reactive-interpreter/baseline.test.ts` (legacy law pinned),
+  `src/reactive-interpreter/rog.ts` (IR type) + `extract.ts` (Pattern→ROG
+  first-pass) + `test/reactive-interpreter/extract.test.ts` (coverage). Seam
+  re-verified (D-SEAM): pure v2; net-new runtime gaps = R-SEAM-2 (trigger delta)
+  and R-SEAM-3 (per-path label emit = W2). Next: W1.

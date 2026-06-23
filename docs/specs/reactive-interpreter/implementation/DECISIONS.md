@@ -34,6 +34,44 @@ date + the evidence. This replaces ad-hoc tracking in agent memory.
   sub-transactions. This is W3. Status: design open; the oracle's read-isolated +
   sibling-bug cases are the executable acceptance test.
 
+## D-SEAM — scheduler/runtime seam, re-verified against landed code (W0.5, 2026-06-23)
+
+From the `reverify-scheduler-seam` workflow (4 parallel readers + synthesis,
+cited to landed `packages/runner/src`):
+
+- **Scheduler reality: pure v2 (pull-based) — the only scheduler in the tree.**
+  No v1/v2 hedge; the interpreter builds on v2 as-is.
+- **The interpreter builtin node CAN, today:** hold persistent closure state
+  across runs (like `map.ts`'s `elementRuns`); do per-element reads whose
+  read-set is address-granular, with whole-node re-run on a single element
+  change; mint cells deterministically; output a container-of-links (one doc);
+  spawn + tear down child work (`addCancel`); register async sub-work via
+  `settled()` / `trackAsyncWork`.
+- **It CANNOT, today (net-new runtime work):**
+  - **R-SEAM-1** native multi-value fan-out through `sendResult` — one node emits
+    one output value (a container-of-links is fine; N separate output docs is
+    not). *Mitigation: the inline-container approach (the spike) sidesteps this —
+    no multi-doc fan-out needed for the win.*
+  - **R-SEAM-2** a **per-trigger delta** — a run cannot see *which* address
+    invalidated it (only that it was → whole-node re-run). Incremental per-element
+    recompute (W1/W3) must re-derive what changed from its inputs, or this delta
+    surface is added.
+  - **R-SEAM-3** a **write-side per-path CFC label primitive** — labeling is
+    schema-`ifc`-driven; there is **no imperative ambient-meta channel** for a
+    node to stamp a per-path `derived` content label. **This is the W2/OQ-4 gap,
+    independently confirmed: the biggest net-new piece.**
+  - **R-SEAM-4** read-side flow scoping for genuine value reads (needed for
+    R-CFC-ISO read isolation).
+- **Divergences (now reconciled in the work orders):** D1 static write surface
+  (matches P4); D2 legacy `map` is per-element fan-out, not one-node-broad-write;
+  D3 no CFC exemption for reading element content; D4 = R-SEAM-2; D5 no
+  auto-pruning of node state (R-MAT-5 must be implemented, not assumed).
+
+Net: the win is reachable with existing seam capabilities (inline container +
+persistent state + per-element reads); the genuine runtime additions are
+R-SEAM-2 (incremental delta) and R-SEAM-3 (per-path label emit = W2). Full
+report: workflow `wmbkm0782`.
+
 ## Resolved (kickoff, 2026-06-23)
 
 - **D-SEQ — OQ-4 precision parity FIRST (decided).** The interpreter must not
