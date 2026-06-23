@@ -273,6 +273,18 @@ describe("valueEqual()", () => {
       });
     });
 
+    describe("given equal mutable `FabricInstance`s of the same concrete class", () => {
+      it("returns `true`", () => {
+        expect(
+          valueEqual(
+            new UnknownValue("Unknownie@123", "yeppers"),
+            new UnknownValue("Unknownie@123", "yeppers"),
+          ),
+        )
+          .toBe(true);
+      });
+    });
+
     describe("given two same-subtype plain containers", () => {
       it("compares them by content", () => {
         // Same subtype + same content -> hash -> true; differing -> false.
