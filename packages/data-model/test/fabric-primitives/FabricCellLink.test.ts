@@ -11,6 +11,7 @@ import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstruction
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
 import { hashOf } from "@/value-hash.ts";
+import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 describe("FabricCellLink", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
@@ -204,6 +205,30 @@ describe("FabricCellLink", () => {
       const restored = valueFromJson(jsonFromValue(original)) as FabricCellLink;
       expect(restored).toBeInstanceOf(FabricCellLink);
       expect(restored.payload).toEqual(original.payload);
+    });
+  });
+
+  // `FabricCellLink` is inherently immutable (born deep-frozen), so it must be
+  // passed through as-is by the dispatch sites that enumerate the special
+  // primitives -- not fall into a "cannot handle this type" default.
+  describe("inherently-immutable pass-through", () => {
+    it("deep-clones a container holding one without throwing, passing it through", () => {
+      const link = new FabricCellLink({ id: "fid1:abc", path: ["a", "b"] });
+      // A mutable container forces an actual deep clone of the outer object,
+      // which recurses into the nested `FabricCellLink`.
+      const cloned = cloneIfNecessary({ link }, { frozen: true });
+      expect(cloned.link).toBe(link);
+    });
+
+    it("passes through a forced mutable deep clone", () => {
+      const link = new FabricCellLink({ id: "fid1:abc" });
+      const cloned = cloneIfNecessary({ link }, { frozen: false });
+      expect(cloned.link).toBe(link);
+    });
+
+    it("`shallowFabricFromNativeValue()` returns it as-is", () => {
+      const link = new FabricCellLink({ id: "fid1:abc" });
+      expect(shallowFabricFromNativeValue(link)).toBe(link);
     });
   });
 
