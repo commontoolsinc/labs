@@ -12,7 +12,7 @@ newest at the bottom of each section.
 | Spike: footprint win | ✅ done (throwaway) | #4298 | docs 3N→0, comp-nodes N→1, ~11× load, edit O(1); falsifier disproven |
 | Spike: CFC oracle | ✅ done (throwaway) | #4298 | naive batch SMEARS (sound but coarse); OQ-4 sharpened |
 | W0 — substrate & instrument | ✅ done | #4298 | harness + baseline (legacy law docSlope=3/nodeSlope=4 pinned); ROG type + Pattern→ROG extraction (representative map/control/leaf patterns 100% classify, nested recursion, object-results→constructs, no unrecognized aliases); seam re-verified = pure v2, gaps R-SEAM-1..4 identified |
-| W1 — leaf/access/construct/control | ⬜ not started | — | — |
+| W1 — leaf/access/construct/control | 🟡 in progress | #4298 | W1a evaluator core done + verified (interpret.ts; 6/6 unit tests: leaf+construct, access, ifElse/when/unless, internal-ref wiring, topo-order, boundary throw). W1b (runtime+sandbox+scheduler-node+label integration) is the larger remaining part. |
 | W2 — OQ-4 per-path content-label emit (precision mechanism, long pole) | ⬜ not started | — | — |
 | W3 — collections (the win, pointwise) | ⬜ not started | — | — |
 | W4 — checkpoint tier | ⬜ not started | — | — |
