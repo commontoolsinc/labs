@@ -201,8 +201,7 @@ export default pattern(() => {
     poll.options[0]?.title === "Chipotle" &&
     poll.options[0]?.addedByName === "Alex" &&
     poll.options[0]?.homePageUrl === "" &&
-    poll.options[0]?.homePageUrlOverride === "" &&
-    poll.options[0]?.imageUrl === ""
+    poll.options[0]?.homePageUrlOverride === ""
   );
 
   const assert_chipotle_link_updated = computed(() =>

@@ -13,7 +13,6 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
-  SetOptionImageEvent,
   SetOptionUrlEvent,
   Vote,
 } from "./main.tsx";
@@ -78,11 +77,6 @@ const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
 const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
 const noopSetOptionUrl = handler<SetOptionUrlEvent, EmptyState>(() => {});
-const recordSetOptionImage = handler<SetOptionImageEvent, {
-  lastImageUrl: Writable<string>;
-}>(({ imageUrl }, { lastImageUrl }) => {
-  lastImageUrl.set(imageUrl ?? "");
-});
 
 const STORED_OPTION: Option = {
   id: "opt-sushi",
@@ -90,16 +84,6 @@ const STORED_OPTION: Option = {
   addedByName: "Alex",
   homePageUrl: "https://sushi.example/menu",
   homePageUrlOverride: "",
-  imageUrl: "data:image/png;base64,stored",
-};
-
-const EMPTY_IMAGE_OPTION: Option = {
-  id: "opt-no-image",
-  title: "No Image Cafe",
-  addedByName: "Blair",
-  homePageUrl: "",
-  homePageUrlOverride: "",
-  imageUrl: "",
 };
 
 const votes: Vote[] = [
@@ -115,16 +99,12 @@ export default pattern(() => {
   const linkDraft = new Writable<string | Default<"">>("");
   const removeConfirmTarget = new Writable<string | null>(null);
   const homePageRefresh = new Writable<number>(0);
-  const lastImageUrl = new Writable("");
 
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
   const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
   const logVisit: Stream<LogVisitEvent> = noopLogVisit({});
   const setOptionUrl: Stream<SetOptionUrlEvent> = noopSetOptionUrl({});
   const setOptionHomePageUrl: Stream<SetOptionUrlEvent> = noopSetOptionUrl({});
-  const setOptionImage: Stream<SetOptionImageEvent> = recordSetOptionImage({
-    lastImageUrl,
-  });
 
   const card = PollOptionCard({
     option: STORED_OPTION,
@@ -144,53 +124,6 @@ export default pattern(() => {
     logVisit,
     setOptionUrl,
     setOptionHomePageUrl,
-    setOptionImage,
-  });
-  const noImageViewerCard = PollOptionCard({
-    option: EMPTY_IMAGE_OPTION,
-    rank: 2,
-    me: "Alex",
-    isJoined: true,
-    isAdmin: false,
-    votes,
-    cityLabel: "Berkeley, CA",
-    searchEndpoint: "",
-    homePageRefresh,
-    linkEditTarget,
-    linkDraft,
-    removeConfirmTarget,
-    castVote,
-    removeOption,
-    logVisit,
-    setOptionUrl,
-    setOptionHomePageUrl,
-    setOptionImage,
-  });
-  // Host viewing an option with no stored image — the one combination that
-  // should open the generated-art gate. This is exactly what the transformer
-  // dependency-capture bug silently broke: `isAdmin` was dropped from the lift
-  // schema, read `undefined` at runtime, so `!isAdmin` was always true and the
-  // request URL came back "". The cards above don't exercise it (stored image →
-  // the gate short-circuits earlier; non-host → gate shut by design).
-  const hostNoImageCard = PollOptionCard({
-    option: EMPTY_IMAGE_OPTION,
-    rank: 3,
-    me: "Alex",
-    isJoined: true,
-    isAdmin: true,
-    votes,
-    cityLabel: "Berkeley, CA",
-    searchEndpoint: "",
-    homePageRefresh,
-    linkEditTarget,
-    linkDraft,
-    removeConfirmTarget,
-    castVote,
-    removeOption,
-    logVisit,
-    setOptionUrl,
-    setOptionHomePageUrl,
-    setOptionImage,
   });
 
   const assert_my_green_vote_label_renders = computed(() =>
@@ -241,43 +174,12 @@ export default pattern(() => {
     return remove !== undefined && logVisit !== undefined;
   });
 
-  const assert_stored_art_renders = computed(() =>
-    findNodeByProp(
-      card[UI],
-      "src",
-      STORED_OPTION.imageUrl,
-    ) !== undefined
-  );
-  const assert_host_did_not_rewrite_stored_art = computed(() =>
-    lastImageUrl.get() === ""
-  );
-  // Regression guard for the isAdmin dependency-capture bug: a host viewing an
-  // option with no stored image must open the art gate and produce a non-empty
-  // request URL. With the bug, `isAdmin` read `undefined`, the gate stayed shut,
-  // and the URL was "" — so `/api/ai/img` never fired and no thumbnail rendered.
-  // `generatedArtRequestUrl` is the gate's direct, fetch-independent signal (it
-  // does not depend on the `fetchData` result, which is unobservable in the
-  // pattern-test harness — see the PR description).
-  const assert_host_requests_art_for_missing_image = computed(() =>
-    hostNoImageCard.generatedArtRequestUrl !== ""
-  );
-  // The non-host viewer must NOT request art even with no stored image — the
-  // gate is shut by `isAdmin`. (Previously asserted `data-art-sync !== "stored"`,
-  // which read `undefined` and so passed vacuously.)
-  const assert_viewer_does_not_request_art = computed(() =>
-    noImageViewerCard.generatedArtRequestUrl === ""
-  );
-
   return {
     tests: [
       { assertion: assert_my_green_vote_label_renders },
       { assertion: assert_my_green_vote_styles_buttons },
       { assertion: assert_host_homepage_link_renders },
       { assertion: assert_host_controls_render },
-      { assertion: assert_stored_art_renders },
-      { assertion: assert_host_did_not_rewrite_stored_art },
-      { assertion: assert_viewer_does_not_request_art },
-      { assertion: assert_host_requests_art_for_missing_image },
     ],
     card,
   };
