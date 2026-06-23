@@ -2,12 +2,14 @@ import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   CellUpdateNotification,
+  ClientNotificationType,
   CommandRequest,
   CommandResponse,
   Commands,
   ConsoleNotification,
   ErrorNotification,
   InitializationData,
+  IPCClientNotification,
   IPCRemoteMessage,
   isCellUpdateNotification,
   isConsoleNotification,
@@ -26,10 +28,6 @@ import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "../cell-handle.ts";
 import { cellRefToKey } from "../shared/utils.ts";
-import {
-  isRuntimeDisposedError,
-  RuntimeDisposedError,
-} from "../shared/disposed-error.ts";
 
 const ipcLogger = getLogger("runtime-client");
 
@@ -42,6 +40,10 @@ interface PendingRequest<T = unknown> {
   startTime: number;
   deferred: Deferred<T, Error>;
   timeoutId: ReturnType<typeof setTimeout>;
+  // Listener that settles this request if the connection is disposed while it
+  // is still in flight. Removed when the request settles normally. Absent for
+  // the Dispose request, which must outlive the abort.
+  onAbort?: () => void;
 }
 
 type SubscriptionCounterName =
@@ -72,12 +74,43 @@ export type RuntimeConnectionEvents = {
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
 
+/**
+ * A scoped VDOM capability obtained from `RuntimeConnection.attachVDom`. Holding
+ * one means a teardown has been registered, so the consumer is guaranteed to be
+ * torn down on disposal. The bare connection exposes no VDOM IPC directly, so a
+ * consumer cannot acquire VDOM capability without registering how it stops.
+ */
+export interface VDomConnection {
+  /** The connection's lifetime signal; aborts on disposal. */
+  readonly signal: AbortSignal;
+  mount(
+    mountId: number,
+    cellRef: import("../protocol/mod.ts").CellRef,
+  ): Promise<import("../protocol/mod.ts").VDomMountResponse>;
+  unmount(mountId: number): Promise<void>;
+  sendEvent(
+    mountId: number,
+    handlerId: number,
+    event: import("../protocol/mod.ts").SerializedDomEvent,
+    nodeId: number,
+  ): void;
+  ackBatch(mountId: number, batchId: number): void;
+  onBatch(handler: (notification: VDomBatchNotification) => void): void;
+  offBatch(handler: (notification: VDomBatchNotification) => void): void;
+  /** Unregister the teardown — call when ending normally, not via disposal. */
+  detach(): void;
+}
+
 export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #pendingRequests = new Map<number, PendingRequest>();
   #nextMsgId = 0;
   #timeoutMs = DEFAULT_TIMEOUT_MS;
   #initialized = false;
-  #disposed = false;
+  // The connection's lifetime. dispose() aborts it; every consumer registers
+  // its teardown against this signal and every in-flight request settles
+  // through it, so there is no disposed state to special-case beyond
+  // `signal.aborted`.
+  #lifetime = new AbortController();
   #transport: RuntimeTransport;
   #subscribed = new Map<string, Set<CellHandle>>();
   #subscriptionDiagnostics = new Map<string, SubscriptionCounterTotals>();
@@ -86,6 +119,31 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     super();
     this.#transport = transport;
     this.#transport.on("message", this._handleMessage);
+  }
+
+  /**
+   * The connection's lifetime signal. It aborts when the connection is
+   * disposed. Consumers observe it to stop work and to recognize that a
+   * disposal-raced operation was cancelled rather than failed.
+   */
+  get signal(): AbortSignal {
+    return this.#lifetime.signal;
+  }
+
+  /**
+   * Register a teardown to run synchronously when the connection is disposed,
+   * before the transport is torn down. If the connection is already disposed
+   * the teardown runs immediately. Returns an unregister function so a consumer
+   * that ends on its own detaches itself.
+   */
+  onDispose(teardown: () => void): () => void {
+    const signal = this.#lifetime.signal;
+    if (signal.aborted) {
+      teardown();
+      return () => {};
+    }
+    signal.addEventListener("abort", teardown, { once: true });
+    return () => signal.removeEventListener("abort", teardown);
   }
 
   async initialize(
@@ -103,32 +161,28 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     T extends keyof Commands,
   >(
     data: CommandRequest<T>,
-    timeoutMs?: number,
   ): Promise<CommandResponse<T>> {
     if (!this.#initialized && data.type !== RequestType.Initialize) {
       throw new Error("RuntimeConnection is uninitialized.");
     }
-    if (this.#disposed && data.type !== RequestType.Dispose) {
-      // Reject instead of sending into a (soon-to-be) dead transport,
-      // where the request would only ever time out.
-      return Promise.reject(
-        new RuntimeDisposedError(
-          `RuntimeConnection is disposed (request: ${data.type})`,
-        ),
-      );
+    const signal = this.#lifetime.signal;
+    if (signal.aborted && data.type !== RequestType.Dispose) {
+      // The connection is disposed; consumers should already be torn down, so
+      // reaching here means a caller outlived its scope. Settle as cancellation
+      // (the standard abort reason) rather than sending into a dead transport.
+      return Promise.reject(signal.reason);
     }
-    const timeout = timeoutMs ?? this.#timeoutMs;
     const msgId = this.#nextMsgId++;
     const message = { msgId, data };
 
     const deferred = defer<CommandResponse<T>, Error>();
 
     const timeoutId = setTimeout(() => {
-      this.#pendingRequests.delete(msgId);
+      this.#settle(msgId);
       deferred.reject(
         new Error(`RuntimeClient request timed out: ${data.type}`),
       );
-    }, timeout);
+    }, this.#timeoutMs);
 
     const pending: PendingRequest<CommandResponse<T>> = {
       msgId,
@@ -137,6 +191,18 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       deferred,
       timeoutId,
     };
+
+    // The Dispose request is the one operation that must outlive the abort, so
+    // it is not cancelled by it. Every other in-flight request is settled as
+    // cancellation when the connection is disposed.
+    if (data.type !== RequestType.Dispose) {
+      const onAbort = () => {
+        this.#settle(msgId);
+        deferred.reject(signal.reason);
+      };
+      pending.onAbort = onAbort;
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     this.#pendingRequests.set(msgId, pending as PendingRequest);
     if (DEBUG_IPC) {
@@ -148,6 +214,19 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     this.#transport.send(message);
 
     return deferred.promise;
+  }
+
+  // Remove a pending request's bookkeeping: clear its timeout and detach its
+  // abort listener. Returns the entry so the caller can settle its deferred.
+  #settle(msgId: number): PendingRequest | undefined {
+    const pending = this.#pendingRequests.get(msgId);
+    if (!pending) return undefined;
+    clearTimeout(pending.timeoutId);
+    if (pending.onAbort) {
+      this.#lifetime.signal.removeEventListener("abort", pending.onAbort);
+    }
+    this.#pendingRequests.delete(msgId);
+    return pending;
   }
 
   async subscribe(
@@ -185,7 +264,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       // callers create dedicated handles, so they are that first subscriber.
       ...(cell.wantsCfcLabel ? { includeCfcLabel: true } : {}),
     }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
+      if (!this.#lifetime.signal.aborted) {
         console.error("[RuntimeClient] Subscription failed:", error);
       }
       this.#subscribed.delete(key);
@@ -207,13 +286,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
     this.#subscribed.delete(key);
-    if (this.#disposed) return;
+    // After disposal the worker tears down every subscription wholesale, so a
+    // per-cell unsubscribe would be redundant.
+    if (this.#lifetime.signal.aborted) return;
     this.#recordSubscriptionDiagnostic(key, "backendUnsubscribes");
     const _ = await this.request<RequestType.CellUnsubscribe>({
       type: RequestType.CellUnsubscribe,
       cell: cell.ref(),
     }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
+      if (!this.#lifetime.signal.aborted) {
         console.error("[RuntimeClient] Unsubscription failed:", error);
       }
     });
@@ -221,19 +302,22 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   async dispose(): Promise<void> {
-    this.#disposed = true;
-    for (const pending of this.#pendingRequests.values()) {
-      clearTimeout(pending.timeoutId);
-      pending.deferred.reject(
-        new RuntimeDisposedError("Disposing runtime connection"),
-      );
-    }
-    this.#pendingRequests.clear();
+    if (this.#lifetime.signal.aborted) return;
+    // Abort synchronously first. This runs every registered consumer teardown
+    // (renderers detach listeners and drop DOM, subscriptions stop) and settles
+    // every in-flight request as cancellation, so nothing issues or awaits a
+    // request after this point — before the transport is touched.
+    this.#lifetime.abort();
 
-    await this.request<RequestType.Dispose>(
-      { type: RequestType.Dispose },
-      5000, // Short timeout for dispose
-    );
+    // One coarse "dispose everything" message replaces per-consumer teardown
+    // round-trips. The Dispose request is exempt from the abort above, so it
+    // still reaches the worker, which flushes pending storage writes before
+    // replying. We wait for that confirmation under the default request timeout,
+    // so a normal flush is durable before the transport is torn down.
+    await this.request<RequestType.Dispose>({ type: RequestType.Dispose })
+      .catch(() => {
+        // A worker-side error reply, or the timeout, still lets teardown proceed.
+      });
     await this.#transport.dispose();
   }
 
@@ -280,7 +364,13 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   private _handleMessage = (message: IPCRemoteMessage): void => {
+    // Once dead (disposed), the connection ignores incoming messages without
+    // warning: notifications are dropped here, stray/late messages are dropped
+    // below. The one exception is a reply to a still-pending request — the
+    // Dispose confirmation we are waiting on — which settles normally.
+    const dead = this.#lifetime.signal.aborted;
     if (isIPCRemoteNotification(message)) {
+      if (dead) return;
       if (isTelemetryNotification(message)) {
         this.emit("telemetry", message);
         // Do not log telemetry events when DEBUG_IPC is enabled
@@ -306,20 +396,21 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     }
 
     if (!isIPCRemoteResponse(message)) {
-      console.warn("[RuntimeClient] Invalid response:", message);
+      if (!dead) console.warn("[RuntimeClient] Invalid response:", message);
       return;
     }
     const { msgId } = message;
-    const pending = this.#pendingRequests.get(msgId);
+    const pending = this.#settle(msgId);
     if (!pending) {
-      console.warn(
-        `[RuntimeClient] Response for unknown request: ${msgId}`,
-      );
+      // A late response for a request we already settled. Expected after
+      // disposal cancelled its in-flight requests; surprising otherwise.
+      if (!dead) {
+        console.warn(
+          `[RuntimeClient] Response for unknown request: ${msgId}`,
+        );
+      }
       return;
     }
-
-    clearTimeout(pending.timeoutId);
-    this.#pendingRequests.delete(msgId);
 
     // Record IPC round-trip time using hierarchical keys
     ipcLogger.time(pending.startTime, "ipc", pending.type);
@@ -388,58 +479,68 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   /**
-   * Send a DOM event to the worker for dispatch to the appropriate handler.
-   * This is a fire-and-forget operation - we don't wait for a response.
+   * Send a one-way notification to the worker. Unlike `request`, this carries
+   * no msgId, registers no pending entry, and the worker sends no response.
+   *
+   * Notifications come only from owned consumers (the renderer), which are torn
+   * down synchronously on disposal — their listeners are detached before the
+   * transport goes away. So unlike `request` (whose unowned one-shot callers can
+   * legitimately race disposal and are tolerated), a notification after disposal
+   * means a sender outlived its teardown. That is a contract violation, thrown
+   * loudly rather than silently dropped.
    */
-  sendVDomEvent(
-    mountId: number,
-    handlerId: number,
-    event: import("../protocol/mod.ts").SerializedDomEvent,
-    nodeId: number,
-  ): void {
-    if (this.#disposed) return;
-    // Use request but don't await - fire and forget
-    this.request<RequestType.VDomEvent>({
-      type: RequestType.VDomEvent,
-      mountId,
-      handlerId,
-      event,
-      nodeId,
-    }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
-        console.error(
-          "[RuntimeClient] VDom event dispatch failed:",
-          error instanceof Error ? error.message : String(error),
-          error,
-        );
-      }
-    });
+  #notify(notification: IPCClientNotification): void {
+    if (this.#lifetime.signal.aborted) {
+      throw new Error(
+        `RuntimeConnection: ${notification.type} sent after disposal`,
+      );
+    }
+    if (DEBUG_IPC) {
+      console.log(`[IPC\x1B[96m=>\x1B[0m]`, notification);
+    }
+    this.#transport.send(notification);
   }
 
   /**
-   * Notify the worker that a VDOM batch has been applied on the main thread.
+   * Attach a VDOM consumer (the renderer). The teardown is a required argument:
+   * it runs synchronously when the connection is disposed, so a consumer cannot
+   * hold VDOM capability without also declaring how it is torn down. All VDOM
+   * IPC — mounting, events, acks, and the batch subscription — is reachable only
+   * through the returned session, never the bare connection. That is what lets
+   * #notify assert: every sender is, by construction, registered for teardown.
    */
-  ackVDomBatch(mountId: number, batchId: number): void {
-    if (this.#disposed) return;
-    this.request<RequestType.VDomBatchApplied>({
-      type: RequestType.VDomBatchApplied,
-      mountId,
-      batchId,
-    }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
-        console.error(
-          "[RuntimeClient] VDom batch acknowledgement failed:",
-          error instanceof Error ? error.message : String(error),
-          error,
-        );
-      }
-    });
+  attachVDom(onDispose: () => void): VDomConnection {
+    const unregister = this.onDispose(onDispose);
+    const signal = this.#lifetime.signal;
+    return {
+      signal,
+      mount: (mountId, cellRef) => this.#mountVDom(mountId, cellRef),
+      unmount: (mountId) => this.#unmountVDom(mountId),
+      sendEvent: (mountId, handlerId, event, nodeId) =>
+        this.#notify({
+          type: ClientNotificationType.VDomEvent,
+          mountId,
+          handlerId,
+          event,
+          nodeId,
+        }),
+      ackBatch: (mountId, batchId) =>
+        this.#notify({
+          type: ClientNotificationType.VDomBatchApplied,
+          mountId,
+          batchId,
+        }),
+      onBatch: (handler) => {
+        this.on("vdombatch", handler);
+      },
+      offBatch: (handler) => {
+        this.off("vdombatch", handler);
+      },
+      detach: unregister,
+    };
   }
 
-  /**
-   * Request the worker to start VDOM rendering for a cell.
-   */
-  async mountVDom(
+  async #mountVDom(
     mountId: number,
     cellRef: import("../protocol/mod.ts").CellRef,
   ): Promise<import("../protocol/mod.ts").VDomMountResponse> {
@@ -451,11 +552,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return response!;
   }
 
-  /**
-   * Request the worker to stop VDOM rendering for a mount.
-   */
-  async unmountVDom(mountId: number): Promise<void> {
-    if (this.#disposed) return;
+  async #unmountVDom(mountId: number): Promise<void> {
+    // After disposal the worker tears down every mount wholesale, so a
+    // per-mount unmount would be redundant.
+    if (this.#lifetime.signal.aborted) return;
     await this.request<RequestType.VDomUnmount>({
       type: RequestType.VDomUnmount,
       mountId,

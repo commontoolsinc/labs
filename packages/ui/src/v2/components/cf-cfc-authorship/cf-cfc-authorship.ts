@@ -726,10 +726,19 @@ export class CFCFCAuthorship extends BaseElement {
 
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
-    const { view, pendingResolution } = await readLabelView(
-      this.value,
-      this.kind ?? DEFAULT_AUTHORSHIP_KIND,
-    );
+    let view: typeof this.cfcLabel;
+    let pendingResolution: boolean;
+    try {
+      ({ view, pendingResolution } = await readLabelView(
+        this.value,
+        this.kind ?? DEFAULT_AUTHORSHIP_KIND,
+      ));
+    } catch {
+      // This runs fire-and-forget (void this.refreshLabel()). A disposal race
+      // (logout, runtime swap) cancels the read; leave the label as-is rather
+      // than leaking an unhandled rejection — matching refreshAuthorClaim.
+      return;
+    }
     if (requestId === this._labelRequestId) {
       const previous = this.cfcLabel;
       this.cfcLabel = view;

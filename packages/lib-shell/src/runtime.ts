@@ -5,14 +5,12 @@ import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
-  isRuntimeDisposedError,
   JSONValue,
   PageHandle,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
   RuntimeClientOptions,
-  RuntimeDisposedError,
   RuntimeTelemetryMarkerResult,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
@@ -331,6 +329,15 @@ export class RuntimeInternals extends EventTarget {
     return await this.#client.uploadBlob(options);
   }
 
+  /**
+   * The runtime's lifetime signal. It aborts when this runtime is disposed.
+   * Consumers observe it to stop polling/subscribing and to recognize that a
+   * disposal-raced operation was cancelled rather than failed.
+   */
+  get signal(): AbortSignal {
+    return this.#client.signal;
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -348,7 +355,7 @@ export class RuntimeInternals extends EventTarget {
       if (!page) return;
       await (trackRecent as any).send({ piece: page.cell() });
     } catch (e) {
-      if (isRuntimeDisposedError(e)) return;
+      if (this.#disposed) return;
       console.error("[RuntimeInternals] Failed to track recent piece:", e);
     }
   }
@@ -364,7 +371,7 @@ export class RuntimeInternals extends EventTarget {
       await (addPiece as any).send({ piece: cell });
       await spaceRoot.cell().sync();
     } catch (e) {
-      if (isRuntimeDisposedError(e)) return;
+      if (this.#disposed) return;
       console.error(
         "[RuntimeInternals] Failed to register navigated piece:",
         e,
@@ -405,7 +412,20 @@ export class RuntimeInternals extends EventTarget {
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
     void this.registerNavigatedPiece(cell);
-    await this.#waitForNavigationConvergence(cell.space());
+    try {
+      await this.#waitForNavigationConvergence(cell.space());
+    } catch (error) {
+      // A disposal race (logout, worker replacement) abandons convergence
+      // cleanly; a genuine failure is logged. Either way navigation is
+      // abandoned, and the rejection never escapes as unhandled.
+      if (!this.#disposed) {
+        console.error(
+          "[RuntimeInternals] Navigation convergence failed:",
+          error,
+        );
+      }
+      return;
+    }
 
     // The target is an address: (space, piece). Mapping a space DID back
     // to a human-readable view (e.g. a spaceName URL) is the embedder's
@@ -431,7 +451,7 @@ export class RuntimeInternals extends EventTarget {
 
   #check() {
     if (this.#disposed) {
-      throw new RuntimeDisposedError("RuntimeInternals disposed.");
+      throw new Error("RuntimeInternals disposed.");
     }
   }
 

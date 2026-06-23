@@ -18,7 +18,6 @@ import {
 } from "@commonfabric/runner/cfc/label-view-core";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
-import { isRuntimeDisposedError } from "./shared/disposed-error.ts";
 import {
   type CellRef,
   type CfcLabelView,
@@ -130,7 +129,7 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       value: CellHandle.serialize(value),
     }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
+      if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Set failed:", error);
       }
     });
@@ -142,7 +141,7 @@ export class CellHandle<T = unknown> {
       cell: this.ref(),
       event: CellHandle.serialize(event),
     }).catch((error) => {
-      if (!isRuntimeDisposedError(error)) {
+      if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
       }
     });

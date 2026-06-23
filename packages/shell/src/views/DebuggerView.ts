@@ -1639,15 +1639,21 @@ export class XDebuggerView extends LitElement {
     // Reset in worker via IPC
     const runtime = this.debuggerController?.getRuntime();
     const rt = runtime?.runtime();
-    if (rt) {
-      await rt.resetLoggerBaselines();
+    try {
+      if (rt) {
+        await rt.resetLoggerBaselines();
+      }
+      // Clear local baseline tracking
+      this.loggerBaseline = null;
+      // Sample to get fresh data
+      await this.sampleLoggerCounts();
+    } catch (error) {
+      // A disposal race (logout, runtime swap) cancels the op; that is
+      // cancellation, not a failure — and this runs fire-and-forget, so an
+      // un-caught rejection would surface as an unhandled rejection.
+      if (rt?.signal.aborted) return;
+      console.error("[DebuggerView] Failed to reset logger baselines:", error);
     }
-
-    // Clear local baseline tracking
-    this.loggerBaseline = null;
-
-    // Sample to get fresh data
-    await this.sampleLoggerCounts();
   }
 
   private async toggleLogger(name: string): Promise<void> {
@@ -1663,9 +1669,19 @@ export class XDebuggerView extends LitElement {
       const runtime = this.debuggerController?.getRuntime();
       const rt = runtime?.runtime();
       if (rt) {
-        await rt.setLoggerEnabled(!currentEnabled, name);
-        // Refresh metadata
-        await this.sampleLoggerCounts();
+        try {
+          await rt.setLoggerEnabled(!currentEnabled, name);
+          // Refresh metadata
+          await this.sampleLoggerCounts();
+        } catch (error) {
+          // A disposal race cancels the op (fire-and-forget — an un-caught
+          // rejection would surface as an unhandled rejection).
+          if (rt.signal.aborted) return;
+          console.error(
+            "[DebuggerView] Failed to toggle worker logger:",
+            error,
+          );
+        }
       }
     }
   }
@@ -1685,9 +1701,19 @@ export class XDebuggerView extends LitElement {
       const runtime = this.debuggerController?.getRuntime();
       const rt = runtime?.runtime();
       if (rt) {
-        await rt.setLoggerLevel(level, name);
-        // Refresh metadata
-        await this.sampleLoggerCounts();
+        try {
+          await rt.setLoggerLevel(level, name);
+          // Refresh metadata
+          await this.sampleLoggerCounts();
+        } catch (error) {
+          // A disposal race cancels the op (fire-and-forget — an un-caught
+          // rejection would surface as an unhandled rejection).
+          if (rt.signal.aborted) return;
+          console.error(
+            "[DebuggerView] Failed to set worker logger level:",
+            error,
+          );
+        }
       }
     }
   }
