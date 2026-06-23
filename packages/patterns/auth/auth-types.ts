@@ -73,8 +73,6 @@ export type AuthAvailability<TAuth extends OAuthAuthData = OAuthAuthData> =
 export interface AuthInfo<TAuth extends OAuthAuthData = OAuthAuthData> {
   state: AuthState;
   availability: AuthAvailability<TAuth>;
-  auth: AuthCell<TAuth> | null;
-  authCell: AuthCell<TAuth> | null;
   email: string;
   hasRequiredScopes: boolean;
   grantedScopes: string[];

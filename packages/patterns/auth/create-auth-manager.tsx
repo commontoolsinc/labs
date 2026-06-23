@@ -287,8 +287,6 @@ const deriveAuthState = lift<{
     authInfo: {
       state: currentState,
       availability,
-      auth,
-      authCell: auth,
       email: currentEmail,
       hasRequiredScopes,
       grantedScopes,
@@ -336,7 +334,7 @@ const deriveAuthState = lift<{
 // BASE PATTERN
 // =============================================================================
 
-export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
+const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
   ({ requiredScopes, accountType, debugMode, descriptor, createAuth }) => {
     // ======================================================================
     // WISH SETUP
@@ -849,3 +847,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     };
   },
 );
+
+export const AuthManagerBase = AuthManagerBasePattern as <
+  TAuth extends OAuthAuthData = OAuthAuthData,
+>(input: AuthManagerBaseInput) => AuthManagerOutput<TAuth>;

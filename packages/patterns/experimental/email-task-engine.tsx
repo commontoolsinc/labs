@@ -473,9 +473,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const auth = availability.state === "ready" ? availability.auth : null;
 
   // Resolve auth: use overrideAuth if provided, otherwise use created auth.
-  const overrideAuthValue = computed(() => overrideAuth?.get());
-  const hasOverrideAuth = !!overrideAuthValue?.token;
+  const hasOverrideAuth = computed(() => !!overrideAuth?.get()?.token);
   const resolvedAuth = overrideAuth && hasOverrideAuth ? overrideAuth : auth;
+  const extractorAuth = resolvedAuth ? resolvedAuth : undefined;
 
   // Auto-fetch labels is handled by the UI button - removed auto-trigger
   // to avoid reactivity loops from side effects in computed()
@@ -484,7 +484,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const extractor = GmailExtractor({
     gmailQuery: "label:task-current",
     limit: 50,
-    overrideAuth: resolvedAuth ?? undefined,
+    overrideAuth: extractorAuth,
   });
 
   // Get emails from extractor

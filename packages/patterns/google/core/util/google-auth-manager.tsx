@@ -132,7 +132,7 @@ export const GoogleAuthManager = pattern<
     );
   });
 
-  const base = AuthManagerBase({
+  const base = AuthManagerBase<Auth>({
     requiredScopes,
     accountType,
     debugMode,
@@ -141,9 +141,9 @@ export const GoogleAuthManager = pattern<
   });
 
   return {
-    auth: base.auth as GoogleAuthManagerOutput["auth"],
-    availability: base.availability as GoogleAuthManagerOutput["availability"],
-    authInfo: base.authInfo as GoogleAuthManagerOutput["authInfo"],
+    auth: base.auth,
+    availability: base.availability,
+    authInfo: base.authInfo,
     isReady: base.isReady,
     currentEmail: base.currentEmail,
     currentState: base.currentState,

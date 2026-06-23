@@ -128,7 +128,7 @@ export const AirtableAuthManager = pattern<
     );
   });
 
-  const base = AuthManagerBase({
+  const base = AuthManagerBase<AirtableAuthData>({
     requiredScopes,
     accountType,
     debugMode,
@@ -137,11 +137,9 @@ export const AirtableAuthManager = pattern<
   });
 
   return {
-    auth: base.auth as AirtableAuthManagerOutput["auth"],
-    availability: base.availability as AirtableAuthManagerOutput[
-      "availability"
-    ],
-    authInfo: base.authInfo as AirtableAuthManagerOutput["authInfo"],
+    auth: base.auth,
+    availability: base.availability,
+    authInfo: base.authInfo,
     isReady: base.isReady,
     currentEmail: base.currentEmail,
     currentState: base.currentState,

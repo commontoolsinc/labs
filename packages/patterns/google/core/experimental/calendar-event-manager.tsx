@@ -301,7 +301,7 @@ const confirmOperation = handler<
   unknown,
   {
     pendingOp: Writable<PendingOperation>;
-    auth: Writable<Auth> | null;
+    auth: Writable<Auth>;
     processing: Writable<boolean>;
     result: Writable<OperationResult>;
     draft: Writable<EventDraft>;
@@ -314,16 +314,6 @@ const confirmOperation = handler<
   ) => {
     const op = pendingOp.get();
     if (!op) return;
-
-    if (!auth) {
-      result.set({
-        success: false,
-        operation: op.operation,
-        error: "Connect Google Calendar before applying changes.",
-        timestamp: new Date().toISOString(),
-      });
-      return;
-    }
 
     processing.set(true);
     result.set(null);
@@ -436,10 +426,11 @@ const dismissResult = handler<unknown, { result: Writable<OperationResult> }>(
 
 export default pattern<Input, Output>(({ draft, existingEvent }) => {
   // Auth via createGoogleAuth utility - handles discovery, validation, and UI
-  const { auth, fullUI, isReady } = createGoogleAuth({
+  const { availability, fullUI } = createGoogleAuth({
     requiredScopes: ["calendar", "calendarWrite"] as ScopeKey[],
   });
-  const hasAuth = isReady;
+  const auth = availability.state === "ready" ? availability.auth : null;
+  const hasAuth = availability.state === "ready";
 
   // UI state
   const pendingOp = new Writable<PendingOperation>(null);
@@ -453,6 +444,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
     draft.start.trim() !== "" &&
     draft.end.trim() !== "" &&
     !processing.get();
+  const canModifyExisting = hasAuth && !processing.get();
 
   return {
     [NAME]: "Calendar Manager",
@@ -784,7 +776,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                   <button
                     type="button"
                     onClick={prepareDelete({ draft, existingEvent, pendingOp })}
-                    disabled={processing}
+                    disabled={!canModifyExisting}
                     style={{
                       padding: "10px 20px",
                       background: "#dc2626",
@@ -793,7 +785,8 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                       borderRadius: "6px",
                       fontSize: "14px",
                       fontWeight: "500",
-                      cursor: "pointer",
+                      cursor: canModifyExisting ? "pointer" : "not-allowed",
+                      opacity: canModifyExisting ? 1 : 0.5,
                     }}
                   >
                     Delete Event
@@ -823,7 +816,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         existingEvent,
                         pendingOp,
                       })}
-                      disabled={processing}
+                      disabled={!canModifyExisting}
                       style={{
                         padding: "8px 12px",
                         background: "#10b981",
@@ -831,7 +824,8 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         border: "none",
                         borderRadius: "6px",
                         fontSize: "13px",
-                        cursor: "pointer",
+                        cursor: canModifyExisting ? "pointer" : "not-allowed",
+                        opacity: canModifyExisting ? 1 : 0.5,
                       }}
                     >
                       Accept
@@ -844,7 +838,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         existingEvent,
                         pendingOp,
                       })}
-                      disabled={processing}
+                      disabled={!canModifyExisting}
                       style={{
                         padding: "8px 12px",
                         background: "#f59e0b",
@@ -852,7 +846,8 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         border: "none",
                         borderRadius: "6px",
                         fontSize: "13px",
-                        cursor: "pointer",
+                        cursor: canModifyExisting ? "pointer" : "not-allowed",
+                        opacity: canModifyExisting ? 1 : 0.5,
                       }}
                     >
                       Maybe
@@ -865,7 +860,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         existingEvent,
                         pendingOp,
                       })}
-                      disabled={processing}
+                      disabled={!canModifyExisting}
                       style={{
                         padding: "8px 12px",
                         background: "#ef4444",
@@ -873,7 +868,8 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                         border: "none",
                         borderRadius: "6px",
                         fontSize: "13px",
-                        cursor: "pointer",
+                        cursor: canModifyExisting ? "pointer" : "not-allowed",
+                        opacity: canModifyExisting ? 1 : 0.5,
                       }}
                     >
                       Decline
@@ -886,7 +882,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
         </div>
 
         {/* CONFIRMATION DIALOG */}
-        {pendingOp.get() !== null
+        {pendingOp.get() !== null && auth
           ? (
             <div
               style={{
