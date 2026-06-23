@@ -636,7 +636,11 @@ const terminalSegmentIsArrayIndex = (pointer: string): boolean => {
 // for real input; it converts a future regression in the array diff path into a
 // loud failure instead of silent data loss. (A numeric *object* key is flagged
 // too — the generator never emits a structural op on one either.)
-const assertNoIndexedArrayStructuralOps = (
+//
+// Exported for direct unit testing: the throw and `move` paths are unreachable
+// through the generator (which is the invariant), so they can only be exercised
+// by calling this with hand-built patches.
+export const assertNoIndexedArrayStructuralOps = (
   patches: readonly PatchOp[],
 ): void => {
   for (const patch of patches) {

@@ -1,4 +1,10 @@
-import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { Identity } from "@commonfabric/identity";
@@ -12,6 +18,7 @@ import type {
 } from "../src/storage/interface.ts";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { assertNoIndexedArrayStructuralOps } from "../src/storage/v2-transaction.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-native-commit");
 const space = signer.did();
@@ -1242,5 +1249,40 @@ Deno.test("v2 patch generator never emits indexed-array add/remove/move (leaf-on
     assert(seen.has("replace"), `expected a replace op; saw ${[...seen]}`);
   } finally {
     await storage.close();
+  }
+});
+
+Deno.test("assertNoIndexedArrayStructuralOps rejects indexed-array structural ops and allows the rest", () => {
+  // The guard's throw and `move` paths are unreachable through the diff generator
+  // (that's the invariant the previous test pins), so they're exercised directly
+  // here with hand-built patches.
+  const rejected: PatchOp[][] = [
+    [{ op: "add", path: "/value/arr/1", value: "x" }],
+    [{ op: "remove", path: "/value/arr/2" }],
+    [{ op: "add", path: "/value/arr/0", value: "x" }],
+    [{ op: "remove", path: "/value/arr/10" }],
+    // move: numeric on `path`, and numeric on `from` (covers both operands).
+    [{ op: "move", from: "/value/arr/0", path: "/value/arr/2" }],
+    [{ op: "move", from: "/value/arr/0", path: "/value/obj/k" }],
+  ];
+  for (const patches of rejected) {
+    assertThrows(
+      () => assertNoIndexedArrayStructuralOps(patches),
+      Error,
+      "indexed-array",
+    );
+  }
+
+  const allowed: PatchOp[][] = [
+    [{ op: "add", path: "/value/obj/key", value: "x" }], // object key, not index
+    [{ op: "remove", path: "/value/obj/key" }],
+    [{ op: "add", path: "/value/arr/-", value: "x" }], // append marker, not index
+    [{ op: "replace", path: "/value/arr/0", value: "x" }], // in-place, no shift
+    [{ op: "splice", path: "/value/arr", index: 0, remove: 1, add: ["z"] }],
+    [{ op: "move", from: "/value/a", path: "/value/b" }], // object-key move
+    [],
+  ];
+  for (const patches of allowed) {
+    assertNoIndexedArrayStructuralOps(patches); // must not throw
   }
 });
