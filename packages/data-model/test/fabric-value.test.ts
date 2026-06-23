@@ -72,6 +72,8 @@ describe("fabric-value", () => {
       expect(valueEqual([1, 2], { 0: 1, 1: 2 })).toBe(false); // array vs object
       expect(valueEqual([1, 2], 5)).toBe(false); // array vs primitive
       expect(valueEqual({ a: 1 }, 5)).toBe(false); // object vs primitive
+      expect(valueEqual({ a: 1 }, null)).toBe(false); // object vs null
+      expect(valueEqual([1, 2], null)).toBe(false); // array vs null
     });
 
     it("distinguishes object key count and present-undefined vs absent", () => {

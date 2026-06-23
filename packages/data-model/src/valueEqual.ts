@@ -1,4 +1,3 @@
-import { isRecord } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricSpecialObject, type FabricValue } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
@@ -44,12 +43,25 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
     }
   }
 
-  // `a` is a non-`null` object; `b` may be a primitive or a differently-shaped
-  // object. A function `b` is not a `FabricValue` (reachable only via an unsound
-  // cast); reject it here so invalid input fails the same way regardless of
-  // argument order.
-  if (typeof b === "function") {
-    throw new Error("Cannot compare a function value.");
+  // `a` is a non-`null` object. Classify `b` the same way, so invalid input
+  // fails identically regardless of argument order: only another non-`null`
+  // object can be equal to `a`.
+  switch (typeof b) {
+    case "object": {
+      // A non-`null` object can't equal `null`; otherwise compare below.
+      if (b === null) return false;
+      break;
+    }
+
+    case "function": {
+      // Not a `FabricValue`; reachable only via an unsound cast.
+      throw new Error("Cannot compare a function value.");
+    }
+
+    default: {
+      // `b` is a primitive, which can't equal the object `a`.
+      return false;
+    }
   }
 
   // The canonical content hash is the general object comparator, but it's worth
@@ -66,22 +78,20 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   const aIsSpecial = a instanceof FabricSpecialObject;
   const bIsSpecial = b instanceof FabricSpecialObject;
   if (aIsSpecial || bIsSpecial) {
-    // A special object and a plain/primitive value can never share a hash
-    // (distinct type tags), so a subtype mismatch is unequal outright; two
-    // special objects fall through to the hash compare below.
+    // A special object and a plain object can never share a hash (distinct type
+    // tags), so a subtype mismatch is unequal outright; two special objects fall
+    // through to the hash compare below.
     if (aIsSpecial !== bIsSpecial) return false;
   } else {
-    // Both plain: an array and a non-array can't be equal, nor can two arrays
-    // of differing length or two objects of differing key count.
+    // Both are plain non-`null` objects: an array and a non-array can't be
+    // equal, nor can two arrays of differing length or two records of differing
+    // key count.
     const aIsArray = Array.isArray(a);
     const bIsArray = Array.isArray(b);
     if (aIsArray !== bIsArray) return false;
     if (aIsArray && bIsArray) {
       if (a.length !== b.length) return false;
-    } else if (isRecord(a) && isRecord(b)) {
-      if (Object.keys(a).length !== Object.keys(b).length) return false;
-    } else {
-      // `b` is a primitive (not a record) while `a` is an object.
+    } else if (Object.keys(a).length !== Object.keys(b).length) {
       return false;
     }
   }
