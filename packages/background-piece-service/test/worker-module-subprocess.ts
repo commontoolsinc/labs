@@ -88,14 +88,17 @@ try {
   const posts: unknown[] = [];
   const errors: unknown[][] = [];
   const handlers = {
-    initialize: async () => {
+    initialize: () => {
       calls.push("initialize");
+      return Promise.resolve();
     },
-    runPiece: async () => {
+    runPiece: () => {
       calls.push("run");
+      return Promise.resolve();
     },
-    cleanup: async () => {
+    cleanup: () => {
       calls.push("cleanup");
+      return Promise.resolve();
     },
     postMessage: (message: unknown) => posts.push(message),
     error: (...args: unknown[]) => errors.push(args),
@@ -136,9 +139,7 @@ try {
     { msgId: 6, type: WorkerIPCMessageType.Cleanup },
     {
       ...handlers,
-      cleanup: async () => {
-        throw "string failure";
-      },
+      cleanup: () => Promise.reject("string failure"),
     },
   );
 
@@ -155,13 +156,13 @@ try {
   assertEquals(errors.length, 2);
 
   const pieceCell = { piece: true };
-  function setRunState(
+  const setRunState = (
     overrides: {
       activeEntry?: unknown;
       loadedPiece?: unknown;
       idle?: () => Promise<void>;
     } = {},
-  ) {
+  ) => {
     const sends: unknown[] = [];
     const updater = {
       runtime: {
@@ -184,15 +185,15 @@ try {
           return pieceCell;
         },
       },
-      getActivePiece: async (cell: unknown) => {
+      getActivePiece: (cell: unknown) => {
         assertEquals(cell, pieceCell);
-        return "activeEntry" in overrides
-          ? overrides.activeEntry
-          : { active: true };
+        return Promise.resolve(
+          "activeEntry" in overrides ? overrides.activeEntry : { active: true },
+        );
       },
-      get: async () => {
+      get: () => {
         getCalls++;
-        return loadedPiece;
+        return Promise.resolve(loadedPiece);
       },
     };
     setWorkerStateForTesting({
@@ -200,14 +201,14 @@ try {
       spaceId: TEST_DID as never,
       manager: manager as never,
       runtime: {
-        idle: overrides.idle ?? (async () => {}),
+        idle: overrides.idle ?? (() => Promise.resolve()),
       } as never,
       loadedPieces: [],
       streamValidator: ((value: unknown): value is never =>
         value === updater) as never,
     });
     return { getCalls: () => getCalls, sends };
-  }
+  };
 
   let state = setRunState();
   await runPiece({ pieceId: PIECE_ID });
@@ -247,7 +248,7 @@ try {
   );
 
   state = setRunState({
-    idle: async () => {
+    idle: () => {
       recordLatestError(
         Object.assign(new Error("runtime failed"), {
           space: TEST_DID,
@@ -255,6 +256,7 @@ try {
           patternId: "pattern",
         }) as never,
       );
+      return Promise.resolve();
     },
   });
   await assertRejects(

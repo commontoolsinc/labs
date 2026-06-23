@@ -124,14 +124,16 @@ class FakePiecesCell {
     return { "/": "fake-bg-pieces" };
   }
 
-  async sync() {
+  sync() {
     this.syncCount++;
+    return Promise.resolve();
   }
 
   asSchema(_schema: unknown) {
     return {
-      sync: async () => {
+      sync: () => {
         this.schemaSyncCount++;
+        return Promise.resolve();
       },
     };
   }
@@ -183,8 +185,9 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
     },
     storageManager: {
       syncedCount: 0,
-      synced: async function () {
+      synced: function () {
         this.syncedCount++;
+        return Promise.resolve();
       },
     },
     getCell(space: string, cause: string, schema: unknown) {
@@ -457,8 +460,9 @@ describe("BackgroundPieceService", () => {
       workerTimeoutMs: 123,
       createSpaceManager: (options) => ({
         start: () => started.push(options.did),
-        stop: async () => {
+        stop: () => {
           stopped.push(options.did);
+          return Promise.resolve();
         },
         watch: (entries) => {
           watched.push(entries.map((entry) => entry.get().pieceId));
@@ -503,8 +507,9 @@ describe("BackgroundPieceService", () => {
       runtime: fakeRuntime(piecesCell) as never,
       createSpaceManager: (options) => ({
         start: () => started.push(options.did),
-        stop: async () => {
+        stop: () => {
           stopped.push(options.did);
+          return Promise.resolve();
         },
         watch: (entries) => {
           watched.push(entries.map((cell) => cell.get().pieceId));
@@ -545,11 +550,13 @@ describe("SpaceManager", () => {
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
-        runPiece: async (cell: FakeEntryCell) => {
+        runPiece: (cell: FakeEntryCell) => {
           workerCalls.push(cell.get().pieceId);
+          return Promise.resolve();
         },
-        shutdown: async () => {
+        shutdown: () => {
           workerCalls.push("shutdown");
+          return Promise.resolve();
         },
       };
 
@@ -571,8 +578,9 @@ describe("SpaceManager", () => {
         runPiece: () => {
           throw new Error("graph failed");
         },
-        shutdown: async () => {
+        shutdown: () => {
           workerCalls.push("shutdown");
+          return Promise.resolve();
         },
       };
       await (manager as never as {
@@ -638,8 +646,9 @@ describe("SpaceManager", () => {
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
-        shutdown: async () => {
+        shutdown: () => {
           shutdowns.push("shutdown");
+          return Promise.resolve();
         },
       };
 
@@ -682,7 +691,7 @@ describe("SpaceManager", () => {
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => false,
-        shutdown: async () => {},
+        shutdown: () => Promise.resolve(),
       };
       (manager as never as { isRunning: boolean }).isRunning = true;
       setTimeout(() => {
@@ -692,7 +701,7 @@ describe("SpaceManager", () => {
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
-        shutdown: async () => {},
+        shutdown: () => Promise.resolve(),
       };
       (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
         entry;
@@ -718,11 +727,12 @@ describe("SpaceManager", () => {
       const calls: string[] = [];
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
-        runPiece: async () => {
+        runPiece: () => {
           calls.push("run");
           (manager as never as { isRunning: boolean }).isRunning = false;
+          return Promise.resolve();
         },
-        shutdown: async () => {},
+        shutdown: () => Promise.resolve(),
       };
       (manager as never as { enabledPieces: Map<string, FakeEntryCell> })
         .enabledPieces.set(PIECE_ID, entry);
@@ -1135,12 +1145,13 @@ describe("background piece service entry point", () => {
     const service = {
       initializeCalled: 0,
       stopCalled: 0,
-      async initialize() {
+      initialize() {
         this.initializeCalled++;
+        return Promise.resolve();
       },
-      async stop() {
+      stop() {
         this.stopCalled++;
-        return [];
+        return Promise.resolve([]);
       },
     };
     const dependencies: MainDependencies = {
@@ -1190,9 +1201,9 @@ describe("background piece service entry point", () => {
     const calls: string[] = [];
     const callback = shutdown(
       {
-        stop: async () => {
+        stop: () => {
           calls.push("stop");
-          return [];
+          return Promise.resolve([]);
         },
       },
       ((code?: number) => {
@@ -1210,11 +1221,13 @@ describe("background piece service entry point", () => {
 
   it("runs the service entry point only when invoked as main", async () => {
     let calls = 0;
-    await runMainIfMain(false, async () => {
+    await runMainIfMain(false, () => {
       calls++;
+      return Promise.resolve();
     });
-    await runMainIfMain(true, async () => {
+    await runMainIfMain(true, () => {
       calls++;
+      return Promise.resolve();
     });
     assertEquals(calls, 1);
   });
@@ -1227,15 +1240,17 @@ describe("cast admin entry point", () => {
     const exitCodes: number[] = [];
     const targetCell = {
       syncCount: 0,
-      async sync() {
+      sync() {
         this.syncCount++;
+        return Promise.resolve();
       },
     };
     const runtime = {
       storageManager: {
         syncedCount: 0,
-        async synced() {
+        synced() {
           this.syncedCount++;
+          return Promise.resolve();
         },
       },
       getCell(space: string, cause: string, schema: unknown) {
@@ -1256,13 +1271,15 @@ describe("cast admin entry point", () => {
       getIdentity: async () =>
         await Identity.generate({ implementation: "noble" }),
       createRuntime: () => runtime as never,
-      readTextFile: async () => "export default pattern(() => ({}));",
-      createSession: async () => ({ fakeSession: true } as never),
+      readTextFile: () =>
+        Promise.resolve("export default pattern(() => ({}));"),
+      createSession: () => Promise.resolve({ fakeSession: true } as never),
       createPieceManager: () => ({
         ready: Promise.resolve(),
-        runPersistent: async () => ({ entityId: "fid1:cast" }),
+        runPersistent: () => Promise.resolve({ entityId: "fid1:cast" }),
       }),
-      compileAndSavePattern: async () => ({ fakePattern: true } as never),
+      compileAndSavePattern: () =>
+        Promise.resolve({ fakePattern: true } as never),
       exit: ((code?: number) => {
         exitCodes.push(code ?? 0);
       }) as typeof Deno.exit,
@@ -1376,11 +1393,13 @@ describe("cast admin entry point", () => {
 
   it("runs the cast entry point only when invoked as main", async () => {
     let calls = 0;
-    await runCastIfMain(false, async () => {
+    await runCastIfMain(false, () => {
       calls++;
+      return Promise.resolve();
     });
-    await runCastIfMain(true, async () => {
+    await runCastIfMain(true, () => {
       calls++;
+      return Promise.resolve();
     });
     assertEquals(calls, 1);
   });
