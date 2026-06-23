@@ -342,11 +342,34 @@ One genuinely open; the rest resolved (decisions recorded for the record).
 
 ### Open
 
-- **OQ-4 — Read-isolation enforcement mechanism (load-bearing).** R-CFC-ISO
+- **OQ-4 — Read-isolation + per-path label emit (load-bearing).** R-CFC-ISO
   requires *structural* enforcement (a per-element, per-scope read-scoped view in
-  which observing another element's or another scope's data is impossible). The
-  concrete mechanism for in-memory interior evaluation does not exist yet
-  ([04](./04-scheduler-and-transformer-deltas.md) P-0.3); this is the load-bearing
+  which observing another element's or another scope's data is impossible). A CFC
+  spike (`packages/runner/test/spike-cfc-oracle.test.ts`) sharpened this from a
+  hunch into a confirmed, code-level gap:
+  - A naive single-transaction coordinator **smears**: mapping `[alice-secret,
+    bob-secret, clean, clean]` gives *every* output index the derived label
+    `{alice, bob}` (measured). Confirmed cause: `deriveFlowJoin` computes one
+    per-tx flow label and stamps it as the `derived` (content) component on
+    **every** value-write target (`prepare.ts` `valueWriteTargets`); carried
+    label-views are **link-only** (`data-updating.ts`
+    `cfcLabelViewForPrimitiveLink` requires `isSigilLink`). So an **inline-value**
+    container written in one batched tx *cannot* carry per-element content labels.
+  - The naive fix (per-element `runtime.edit()` sub-transactions inside the node)
+    **does not work** — a node can't cleanly commit sub-txs to a cell it created
+    in its own still-open tx.
+  - Therefore pointwise **content** labels require **either** per-element
+    label-isolated transactions (legacy gets this via per-element result *cells* —
+    the `3N` cost) **or a new trusted per-path label-emit** for batched nodes (the
+    §8.9.1 trusted-claim path extended to write per-path `derived` labels the
+    interpreter computed from isolated per-element reads). Note the `structure`
+    (membership) channel is *already* per-path; only the `derived` (content)
+    channel smears.
+
+  So OQ-4 is now precise: **the runtime needs a trusted mechanism for a single
+  node to emit per-path content labels (or to run label-isolated sub-transactions
+  into its own container).** It does not exist today
+  ([04](./04-scheduler-and-transformer-deltas.md) P-0.3); it is the load-bearing
   open soundness question and the gate for G3.
 
 ### Resolved

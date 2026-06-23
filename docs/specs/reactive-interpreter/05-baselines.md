@@ -171,14 +171,32 @@ in the same harness:
   scoping conflicts by path, inline-value containers are viable even for large
   values.
 
-**Not validated by the spike (deliberately):** CFC per-element labels — the naive
-coordinator reads the whole list in one transaction and would *smear* labels;
-pointwise soundness requires the read-isolation mechanism (§[01](./01-requirements.md)
-OQ-4), which is an implementation effort, not a spike. So **CFC soundness reduces
-entirely to OQ-4**; the footprint/load win and basic feasibility are confirmed.
-Also out of spike scope: filter/flatMap, control flow, nested patterns, scoped
-cells, the op passed in (leaf hardcoded), and externally-referenced element
-results.
+**CFC oracle (built, measured):** a second spike
+(`packages/runner/test/spike-cfc-oracle.test.ts`, harness reused from
+`cfc-flow-pointwise.test.ts`: `cfcEnforcementMode:"observe"` +
+`cfcFlowLabels:"persist"`) seeded one labeled element per atom — `[alice-secret,
+bob-secret, clean, clean]` — and probed the derived label a reader of `mapped[i]`
+picks up:
+
+- **Naive batched coordinator SMEARS (measured):** *every* output index, including
+  the two unlabeled elements, came back `{alice-secret, bob-secret}`. A
+  single-transaction interpreter is CFC-unsound (it over-taints). This is the
+  empirical proof that read isolation (OQ-4) is mandatory, not optional.
+- **Confirmed cause (code-level):** `deriveFlowJoin` stamps one per-tx label as
+  the `derived` (content) component on every value-write target; carried
+  label-views are link-only. So an **inline-value** container written in one
+  batched tx cannot carry per-element content labels. The naive per-element
+  sub-transaction fix does **not** work (a node can't commit sub-txs to a cell it
+  created in its own open tx).
+- **Therefore** pointwise content labels need *either* per-element label-isolated
+  transactions (legacy's `3N`-cost per-element cells) *or a new trusted per-path
+  label-emit* for batched nodes — the §8.9.1 path extended to the `derived`
+  channel. The `structure` (membership) channel is already per-path. This
+  **sharpens OQ-4** (§[01](./01-requirements.md) §9) and confirms **CFC soundness
+  for the interpreter reduces entirely to building that mechanism.**
+
+Still out of scope: filter/flatMap, control flow, nested patterns, scoped cells,
+the op passed in (leaf hardcoded), and externally-referenced element results.
 
 ## 7. Measurement plan during implementation
 
@@ -190,5 +208,7 @@ results.
   list, and a multi-user lunch-vote.
 - Track the per-document cost-model axes (§4) that change: observation row counts,
   conflict participants, sync FactSet size — not just raw document count.
-- Build the CFC differential oracle on a read-isolated `mapInterpreted` once OQ-4
-  has a mechanism: assert per-index labels match legacy (conf ⊇, integrity ⊆).
+- The CFC differential oracle exists (`spike-cfc-oracle.test.ts`) and already
+  pins the smear; once OQ-4 has a per-path label-emit mechanism, un-skip its
+  read-isolated + sibling-bug cases to assert per-index labels match legacy
+  (conf ⊇, integrity ⊆) and that a sibling-reading element op is caught.
