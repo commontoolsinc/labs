@@ -1,9 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import {
+  DEEP_FREEZE,
+  FabricInstance,
+  FabricPrimitive,
+  IS_DEEP_FROZEN,
+} from "@/interface.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
@@ -89,6 +95,16 @@ describe("FabricLink", () => {
 
     it("`isDeepFrozen()` is false for a mutable instance", () => {
       expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
+    });
+
+    it("`[IS_DEEP_FROZEN]` (direct) is false before, true after `[DEEP_FREEZE]`", () => {
+      // Direct member invocation: `isDeepFrozen()` short-circuits via
+      // `deepFreeze()`'s cache, so the protocol method only runs when called
+      // straight, as here.
+      const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
+      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+      link[DEEP_FREEZE](subFreeze);
+      expect(link[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
     });
   });
 
