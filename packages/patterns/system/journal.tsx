@@ -15,11 +15,15 @@ import {
   Writable,
 } from "commonfabric";
 
+type JournalSubject = {
+  [NAME]?: string;
+};
+
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
   timestamp?: number;
   eventType?: string;
-  subject?: Writable<any>;
+  subject?: Writable<JournalSubject>;
   snapshot?: {
     name?: string;
     schemaTag?: string;
