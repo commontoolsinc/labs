@@ -66,10 +66,10 @@ export function isFabricValueLayer(
  * string index of `FabricValue` keeps an indexed value typed as a `FabricValue`.
  */
 export function isFabricPlainObject(
-  value: FabricValue | undefined,
+  value: FabricValue,
 ): value is FabricObject;
 export function isFabricPlainObject(
-  value: Immutable<FabricValue> | undefined,
+  value: Immutable<FabricValue>,
 ): value is Immutable<FabricObject>;
 export function isFabricPlainObject(value: unknown): boolean {
   return (typeof value === "object") && (value !== null) &&
