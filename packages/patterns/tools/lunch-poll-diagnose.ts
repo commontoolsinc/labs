@@ -21,7 +21,6 @@ interface PollOutputSummary {
   historyCount: number;
   isJoined: boolean;
   isAdmin: boolean;
-  homePageLookupUrls: readonly string[];
 }
 
 interface TraceAddressSummary {
@@ -76,14 +75,12 @@ interface MatrixConfig {
   optionCounts: readonly number[];
   userCounts: readonly number[];
   voteRounds: number;
-  includeHomepageRefresh: boolean;
 }
 
 interface CaseConfig {
   optionCount: number;
   userCount: number;
   voteRounds: number;
-  includeHomepageRefresh: boolean;
 }
 
 interface CompactSessionSample {
@@ -94,7 +91,6 @@ interface CompactSessionSample {
     users: number;
     options: number;
     votes: number;
-    activeLookupUrls: number;
   };
   graph: {
     nodes: number;
@@ -155,7 +151,6 @@ interface CaseResult {
     users: number;
     options: number;
     voteRounds: number;
-    includeHomepageRefresh: boolean;
   };
   churn: ChurnTotals;
   convergence: ConvergenceResult;
@@ -234,8 +229,6 @@ async function collectConvergence(
 }
 
 const traceCursors = new Map<string, number>();
-const TEST_WEB_SEARCH_URL =
-  "data:application/json,%7B%22results%22%3A%5B%5D%7D";
 const VOTE_COLORS = ["green", "yellow", "red"] as const;
 let matrixProgram = "main.tsx";
 const ROOT_PATH = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -280,7 +273,6 @@ function pollSummary(value: unknown): PollOutputSummary {
     historyCount: asNumber(value.historyCount),
     isJoined: asBoolean(value.isJoined),
     isAdmin: asBoolean(value.isAdmin),
-    homePageLookupUrls: asStringArray(value.homePageLookupUrls),
   };
 }
 
@@ -470,8 +462,6 @@ function compactSessionSample(
       users: poll.userCount,
       options: poll.optionCount,
       votes: poll.voteCount,
-      activeLookupUrls: poll.homePageLookupUrls.filter((url) => url !== "")
-        .length,
     },
     graph: {
       nodes: diagnostics.graph.nodes,
@@ -590,9 +580,6 @@ async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
     programPath: `${LUNCH_POLL_DIR}/${matrixProgram}`,
     rootPath: ROOT_PATH,
     diagnostics: true,
-    input: {
-      webSearchUrl: TEST_WEB_SEARCH_URL,
-    },
     sessions: Array.from(
       { length: config.userCount },
       (_entry, index) => `user-${index + 1}`,
@@ -657,18 +644,6 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
       );
     }
 
-    if (config.includeHomepageRefresh) {
-      phases.push(
-        await samplePhase(
-          "host-refreshes-homepage-lookups",
-          harness,
-          async () => {
-            await host.send("enrichHomePages", {});
-          },
-        ),
-      );
-    }
-
     const churn = await collectChurn(sessions);
     console.error(
       `[lunch-poll diagnose] churn ${config.optionCount}x${config.userCount} ` +
@@ -699,7 +674,6 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         users: config.userCount,
         options: config.optionCount,
         voteRounds: config.voteRounds,
-        includeHomepageRefresh: config.includeHomepageRefresh,
       },
       churn,
       convergence,
@@ -761,7 +735,6 @@ function explicitCasesArg(
       optionCount,
       userCount,
       voteRounds: config.voteRounds,
-      includeHomepageRefresh: config.includeHomepageRefresh,
     }];
   });
   return cases.length > 0 ? cases : undefined;
@@ -783,7 +756,6 @@ function matrixConfigFromArgs(): MatrixConfig {
     optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
     userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
-    includeHomepageRefresh: !Deno.args.includes("--skip-refresh"),
   };
 }
 
@@ -798,7 +770,6 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
         optionCount,
         userCount,
         voteRounds: config.voteRounds,
-        includeHomepageRefresh: config.includeHomepageRefresh,
       });
     }
   }

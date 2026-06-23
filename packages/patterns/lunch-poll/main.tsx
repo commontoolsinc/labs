@@ -73,14 +73,7 @@ export interface Option {
   id: string;
   title: string;
   addedByName: string;
-  // Homepage link enrichment, persisted so we don't re-run the grounded web
-  // search on every load. `homePageUrl` is the auto-found official site; a host
-  // can refresh it. `homePageUrlOverride` is a human-supplied link that wins.
-  homePageUrl?: string;
-  homePageUrlOverride?: string;
 }
-
-const WEB_SEARCH_URL = "/api/agent-tools/web-search";
 
 export type VoteColor = "green" | "yellow" | "red";
 
@@ -172,13 +165,10 @@ export interface RemoveHistoryEntryEvent {
 export type ClearHistoryEvent = Record<PropertyKey, never>;
 
 type QuestionCell = Writable<string | Default<"Where should we eat?">>;
-type CityCell = Writable<string | Default<"Berkeley, CA">>;
-type LinkTargetCell = Writable<string | null>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
-type HomePageRefreshCell = Writable<number>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 
 const POLL_THEME = {
@@ -217,39 +207,6 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 };
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
-
-// Normalize a human-entered link to a safe http(s) URL. Returns "" for anything
-// that isn't http/https — this is what keeps a pasted `javascript:`/`data:`
-// override from ever reaching an `href`. We parse the value as-is first (so a
-// real `http(s)://` URL is honored), and only on failure retry with an
-// `https://` prefix — so a scheme-less `host:port` like `example.com:8080`
-// isn't mistaken for a `scheme:` and rejected. Also used defensively at render.
-const httpsOrNull = (candidate: string): string | null => {
-  try {
-    const u = new URL(candidate);
-    return (u.protocol === "http:" || u.protocol === "https:")
-      ? u.toString()
-      : null;
-  } catch {
-    return null;
-  }
-};
-const safeHttpUrl = (raw: string | undefined): string => {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  return httpsOrNull(s) ?? httpsOrNull(`https://${s}`) ?? "";
-};
-
-const homePageLookupUrlFor = (
-  isAdmin: boolean,
-  _refresh: number,
-  storedUrl: string | undefined,
-  overrideUrl: string | undefined,
-  endpoint: string,
-): string =>
-  isAdmin && !trimmedName(storedUrl) && !trimmedName(overrideUrl)
-    ? endpoint
-    : "";
 
 const newOptionId = () =>
   `o_${safeDateNow().toString(36)}_${
@@ -321,92 +278,8 @@ const addOption = handler<AddOptionEvent, {
     id: newOptionId(),
     title: trimmed,
     addedByName: me,
-    homePageUrl: "",
-    homePageUrlOverride: "",
   });
   optionDraft.set("");
-});
-
-export interface SetCityEvent {
-  city?: string;
-}
-
-// Host sets the city the poll is happening in. This scopes the menu-link web
-// search to local restaurants. Gate: host only.
-const setCity = handler<SetCityEvent, {
-  city: CityCell;
-  myName: NameCell;
-  adminName: NameCell;
-  cityDraft: NameCell;
-}>(({ city: cityArg }, { city, myName, adminName, cityDraft }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  const next = trimmedName(cityArg ?? cityDraft.get());
-  if (!next) return;
-  city.set(next);
-  cityDraft.set("");
-});
-
-export type EnrichHomePagesEvent = Record<PropertyKey, never>;
-
-// Host-only: bump the shared refresh marker. The actual homepage lookup is a
-// reactive fetchData node per option, so the handler never waits on network I/O.
-const enrichHomePages = handler<EnrichHomePagesEvent, {
-  myName: NameCell;
-  adminName: NameCell;
-  homePageRefresh: HomePageRefreshCell;
-}>((_evt, { myName, adminName, homePageRefresh }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  homePageRefresh.set(Number(homePageRefresh.get() ?? 0) + 1);
-});
-
-export interface SetOptionUrlEvent {
-  optionId: string;
-  url?: string;
-}
-
-const setOptionHomePageUrl = handler<SetOptionUrlEvent, {
-  options: OptionsCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>(({ optionId, url }, { options, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  const cur = options.get();
-  const idx = cur.findIndex((o) => o.id === optionId);
-  if (idx < 0) return;
-  const safe = safeHttpUrl(url ?? "");
-  if (!safe || trimmedName(cur[idx]?.homePageUrl) === safe) return;
-  options.key(idx).key("homePageUrl").set(safe);
-});
-
-// Any joined user supplies/overrides the homepage link for an option. An empty
-// value clears the override (reverting to the auto-enriched value). The
-// override always wins over the auto-found URL.
-const setOptionUrl = handler<SetOptionUrlEvent, {
-  options: OptionsCell;
-  myName: NameCell;
-  linkDraft: NameCell;
-  linkEditTarget: LinkTargetCell;
-}>(({ optionId, url }, { options, myName, linkDraft, linkEditTarget }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  const cur = options.get();
-  const idx = cur.findIndex((o) => o.id === optionId);
-  if (idx < 0) return;
-  const raw = trimmedName(url ?? linkDraft.get());
-  // Empty clears the override; otherwise only accept a safe http(s) URL. A
-  // non-empty value that isn't http(s) (e.g. `javascript:`) is rejected — leave
-  // the existing override and the edit field open so it can be corrected.
-  const safe = raw === "" ? "" : safeHttpUrl(raw);
-  if (raw !== "" && safe === "") return;
-  options.key(idx).key("homePageUrlOverride").set(safe);
-  linkDraft.set("");
-  linkEditTarget.set(null);
 });
 
 const removeOption = handler<RemoveOptionEvent, {
@@ -639,15 +512,11 @@ const summarizePlaces = (visits: readonly HistoryEntry[]): PlaceStat[] => {
 
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
-  // City the poll is happening in — scopes the menu-link web search so it
-  // finds the right local restaurants. Defaults to Berkeley, CA.
-  city?: PerSpace<string | Default<"Berkeley, CA">>;
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
-  webSearchUrl?: PerSpace<string | Default<typeof WEB_SEARCH_URL>>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
   // at MAX_HISTORY most-recent entries in `logVisit`. optionDraft etc. are
   // internal form drafts, declared as local per-session cells in the pattern
@@ -659,7 +528,6 @@ export interface CozyPollOutput {
   [NAME]: string;
   [UI]: VNode;
   question: string;
-  city: string;
   options: readonly Option[];
   votes: readonly Vote[];
   users: readonly User[];
@@ -682,7 +550,6 @@ export interface CozyPollOutput {
   placeStats: readonly PlaceStat[];
   isJoined: boolean;
   isAdmin: boolean;
-  homePageLookupUrls: readonly string[];
   joinAs: Stream<JoinEvent>;
   claimHost: Stream<ClaimHostEvent>;
   addOption: Stream<AddOptionEvent>;
@@ -693,9 +560,6 @@ export interface CozyPollOutput {
   logVisit: Stream<LogVisitEvent>;
   removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
   clearHistory: Stream<ClearHistoryEvent>;
-  setCity: Stream<SetCityEvent>;
-  enrichHomePages: Stream<EnrichHomePagesEvent>;
-  setOptionUrl: Stream<SetOptionUrlEvent>;
 }
 
 // Stable empty fallbacks for the output snapshots below — fresh `[]` per
@@ -708,13 +572,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
   (
     {
       question,
-      city,
       options,
       votes,
       users,
       adminName,
       myName,
-      webSearchUrl,
       visits,
     },
   ) => {
@@ -722,12 +584,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
     const optionDraft = Writable.perSession.of<string>("");
-    // Host's draft for the poll's city (scopes the menu web search).
-    const cityDraft = Writable.perSession.of<string>("");
-    // Which option's homepage link is being edited (null = none), plus the
-    // in-progress URL text. Per-session, like the other form drafts.
-    const linkEditTarget = Writable.perSession.of<string | null>(null);
-    const linkDraft = Writable.perSession.of<string>("");
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
@@ -737,9 +593,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const removeConfirmTarget = Writable.perSession.of<string | null>(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
-    // Shared marker that retriggers the host's reactive homepage lookup nodes.
-    // Missing homepage links are also looked up on first host load.
-    const homePageRefresh = Writable.perSpace.of<number>(0);
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
@@ -779,23 +632,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myName,
       adminName,
     });
-    const boundSetCity = setCity({ city, myName, adminName, cityDraft });
-    const boundEnrichHomePages = enrichHomePages({
-      myName,
-      adminName,
-      homePageRefresh,
-    });
-    const boundSetOptionUrl = setOptionUrl({
-      options,
-      myName,
-      linkDraft,
-      linkEditTarget,
-    });
-    const boundSetOptionHomePageUrl = setOptionHomePageUrl({
-      options,
-      myName,
-      adminName,
-    });
     const userCount = users.length;
     const optionCount = options.length;
     const voteCount = votes.length;
@@ -827,11 +663,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // per-option `options.map(...)` lift; passing this resolved value down
     // avoids that.
     const me = participantIdentity.me;
-    // Resolve the poll's city ONCE here (same reason as `me`): the raw ref
-    // doesn't resolve inside the per-option `options.map` lift where the menu
-    // search query is built. Blank → Berkeley, CA.
-    const cityLabel = trimmedName(city) || "Berkeley, CA";
-    const searchEndpoint = trimmedName(webSearchUrl) || WEB_SEARCH_URL;
     const isJoined = participantIdentity.isJoined;
     const isAdmin = participantIdentity.isAdmin;
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
@@ -842,15 +673,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       clearHistoryConfirmPending.get()
     );
     const ranked = tallyOptions(options, votes, users);
-    const homePageLookupUrls = options.map((option) =>
-      homePageLookupUrlFor(
-        isAdmin,
-        Number(homePageRefresh.get() ?? 0),
-        option.homePageUrl,
-        option.homePageUrlOverride,
-        searchEndpoint,
-      )
-    );
 
     const topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
 
@@ -887,15 +709,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   >
                     {question}
                   </h2>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "#6b7280",
-                      marginTop: "2px",
-                    }}
-                  >
-                    📍 {cityLabel}
-                  </div>
                   {computed(() => {
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
@@ -1207,8 +1020,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     id: option.id,
                     title: option.title,
                     addedByName: option.addedByName,
-                    homePageUrl: option.homePageUrl,
-                    homePageUrlOverride: option.homePageUrlOverride,
                   };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
@@ -1224,17 +1035,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       isJoined={isJoined}
                       isAdmin={isAdmin}
                       votes={votes}
-                      cityLabel={cityLabel}
-                      searchEndpoint={searchEndpoint}
-                      homePageRefresh={homePageRefresh}
-                      linkEditTarget={linkEditTarget}
-                      linkDraft={linkDraft}
                       removeConfirmTarget={removeConfirmTarget}
                       castVote={boundCastVote}
                       removeOption={boundRemoveOption}
                       logVisit={boundLogVisit}
-                      setOptionUrl={boundSetOptionUrl}
-                      setOptionHomePageUrl={boundSetOptionHomePageUrl}
                     />
                   );
                 })}
@@ -1491,30 +1295,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           display: "flex",
                           gap: "8px",
                           alignItems: "center",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        <cf-input
-                          $value={cityDraft}
-                          placeholder={`City for menu search (now: ${cityLabel})`}
-                          aria-label="Poll city"
-                          timing-strategy="immediate"
-                          style="flex:1"
-                        />
-                        <cf-button onClick={boundSetCity}>Set city</cf-button>
-                        <cf-button
-                          variant="secondary"
-                          onClick={boundEnrichHomePages}
-                          title="Look up each option's official homepage and store it"
-                        >
-                          🔄 Refresh homepage links
-                        </cf-button>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          alignItems: "center",
                         }}
                       >
                         <cf-input
@@ -1588,7 +1368,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
         </cf-theme>
       ),
       question,
-      city: cityLabel,
       // Output snapshots readable from OTHER runtimes (multi-user tests,
       // remote viewers): raw scoped values read as undefined in runtimes that
       // didn't write them, and a computed that RETURNS undefined is
@@ -1612,7 +1391,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       placeStats,
       isJoined: participantIdentity.isJoined,
       isAdmin: participantIdentity.isAdmin,
-      homePageLookupUrls,
       joinAs: participantIdentity.joinAs,
       claimHost: participantIdentity.claimHost,
       addOption: boundAddOption,
@@ -1623,9 +1401,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       logVisit: boundLogVisit,
       removeHistoryEntry: boundRemoveHistoryEntry,
       clearHistory: boundClearHistory,
-      setCity: boundSetCity,
-      enrichHomePages: boundEnrichHomePages,
-      setOptionUrl: boundSetOptionUrl,
     };
   },
 );

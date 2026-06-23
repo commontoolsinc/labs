@@ -1,6 +1,5 @@
 import {
   computed,
-  Default,
   handler,
   pattern,
   type Stream,
@@ -13,7 +12,6 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
-  SetOptionUrlEvent,
   Vote,
 } from "./main.tsx";
 
@@ -76,14 +74,11 @@ const propValue = (node: unknown, prop: string): unknown => {
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
 const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
-const noopSetOptionUrl = handler<SetOptionUrlEvent, EmptyState>(() => {});
 
 const STORED_OPTION: Option = {
   id: "opt-sushi",
   title: "Sushi Place",
   addedByName: "Alex",
-  homePageUrl: "https://sushi.example/menu",
-  homePageUrlOverride: "",
 };
 
 const votes: Vote[] = [
@@ -95,16 +90,11 @@ const votes: Vote[] = [
 ];
 
 export default pattern(() => {
-  const linkEditTarget = new Writable<string | null>(null);
-  const linkDraft = new Writable<string | Default<"">>("");
   const removeConfirmTarget = new Writable<string | null>(null);
-  const homePageRefresh = new Writable<number>(0);
 
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
   const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
   const logVisit: Stream<LogVisitEvent> = noopLogVisit({});
-  const setOptionUrl: Stream<SetOptionUrlEvent> = noopSetOptionUrl({});
-  const setOptionHomePageUrl: Stream<SetOptionUrlEvent> = noopSetOptionUrl({});
 
   const card = PollOptionCard({
     option: STORED_OPTION,
@@ -113,17 +103,10 @@ export default pattern(() => {
     isJoined: true,
     isAdmin: true,
     votes,
-    cityLabel: "Berkeley, CA",
-    searchEndpoint: "",
-    homePageRefresh,
-    linkEditTarget,
-    linkDraft,
     removeConfirmTarget,
     castVote,
     removeOption,
     logVisit,
-    setOptionUrl,
-    setOptionHomePageUrl,
   });
 
   const assert_my_green_vote_label_renders = computed(() =>
@@ -152,14 +135,6 @@ export default pattern(() => {
       propValue(red, "style") === "opacity: 0.4;";
   });
 
-  const assert_host_homepage_link_renders = computed(() =>
-    findNodeByProp(
-      card[UI],
-      "href",
-      "https://sushi.example/menu",
-    ) !== undefined
-  );
-
   const assert_host_controls_render = computed(() => {
     const remove = findNodeByProp(
       card[UI],
@@ -178,7 +153,6 @@ export default pattern(() => {
     tests: [
       { assertion: assert_my_green_vote_label_renders },
       { assertion: assert_my_green_vote_styles_buttons },
-      { assertion: assert_host_homepage_link_renders },
       { assertion: assert_host_controls_render },
     ],
     card,

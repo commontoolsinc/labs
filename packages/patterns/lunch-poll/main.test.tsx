@@ -96,16 +96,6 @@ export default pattern(() => {
     poll.addOption.send({ title: "Chipotle" });
   });
 
-  const action_set_chipotle_link = action(() => {
-    const first = poll.options[0];
-    if (first) {
-      poll.setOptionUrl.send({
-        optionId: first.id,
-        url: "https://example.com/chipotle",
-      });
-    }
-  });
-
   const action_add_thai = action(() => {
     poll.addOption.send({ title: "Thai Kitchen" });
   });
@@ -199,14 +189,7 @@ export default pattern(() => {
   const assert_chipotle_added = computed(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Chipotle" &&
-    poll.options[0]?.addedByName === "Alex" &&
-    poll.options[0]?.homePageUrl === "" &&
-    poll.options[0]?.homePageUrlOverride === ""
-  );
-
-  const assert_chipotle_link_updated = computed(() =>
-    poll.options.length === 1 &&
-    poll.options[0]?.homePageUrlOverride === "https://example.com/chipotle"
+    poll.options[0]?.addedByName === "Alex"
   );
 
   const assert_two_options = computed(() => poll.options.length === 2);
@@ -342,8 +325,6 @@ export default pattern(() => {
       // Admin adds options
       { action: action_add_chipotle },
       { assertion: assert_chipotle_added },
-      { action: action_set_chipotle_link },
-      { assertion: assert_chipotle_link_updated },
       { action: action_add_thai },
       { assertion: assert_two_options },
 
