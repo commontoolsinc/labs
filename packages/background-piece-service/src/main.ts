@@ -1,7 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { BackgroundCharmService } from "./service.ts";
+import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 import { env } from "./env.ts";
 
@@ -36,14 +36,14 @@ const runtime = new Runtime({
     persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
   },
 });
-const service = new BackgroundCharmService({
+const service = new BackgroundPieceService({
   identity,
   toolshedUrl: env.API_URL,
   runtime,
   workerTimeoutMs,
 });
 
-function shutdown(service: BackgroundCharmService) {
+function shutdown(service: BackgroundPieceService) {
   return () => {
     service.stop().then(() => {
       Deno.exit(0);
@@ -55,6 +55,6 @@ Deno.addSignalListener("SIGINT", shutdown(service));
 Deno.addSignalListener("SIGTERM", shutdown(service));
 
 service.initialize().then(() => {
-  console.log("Background Charm Service started successfully");
+  console.log("Background Piece Service started successfully");
   console.log("Press Ctrl+C to stop");
 });

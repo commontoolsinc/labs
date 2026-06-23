@@ -95,7 +95,7 @@ the same stack with the *why* attached:
 | Foundation | `api`, `runner`, `identity`, `memory` | The cell/pattern abstractions, the scheduler that runs graphs, cryptographic identity, and the durable store. Everything else is expressed in these terms. |
 | System | `schema-generator`, `ts-transformers`, `js-compiler`, `iframe-sandbox` | Patterns are authored as ordinary TypeScript, but the runtime needs *schemas* (to know what to subscribe to) and *graph nodes* (to schedule). A compiler pipeline extracts both. The sandbox exists because pattern code is untrusted. |
 | Capabilities | `piece`, `html`, `llm` | The things patterns can *do* beyond pure computation: be instantiated as pieces, render HTML, call LLMs. |
-| Operation | `background-charm-service`, `cli` | Run pieces with no browser open; drive the system from scripts and agents. |
+| Operation | `background-piece-service`, `cli` | Run pieces with no browser open; drive the system from scripts and agents. |
 | Deployed product | `toolshed`, `shell` | The server (storage, sync, LLM proxy, blobs) and the browser app users actually open. |
 | UI | `ui` | The `cf-*` web-component library patterns build interfaces from. |
 | End-user programs | `patterns`, `home-schemas` | The patterns themselves — the point of the whole exercise. |
@@ -117,7 +117,7 @@ seven words.
 - **Pattern** — a TypeScript/JSX module that runs once to define a reactive
   graph over cells.
 - **Piece** — a deployed instance of a pattern in a space, with its own
-  argument and result cells. (Legacy name: *charm*.)
+  argument and result cells.
 - **Stream** — a stateless channel; sending to it fires a handler. Event
   handlers and exported actions are streams.
 - **Toolshed** — the server: WebSocket sync endpoint, persistence, LLM

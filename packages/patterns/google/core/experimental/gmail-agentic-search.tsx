@@ -1123,7 +1123,7 @@ const GmailAgenticSearch = pattern<
     const auth = hasDirectAuth ? inputAuth : wishedAuth;
 
     // ========================================================================
-    // CROSS-CHARM TOKEN REFRESH
+    // CROSS-PIECE TOKEN REFRESH
     // ========================================================================
     // The google-auth piece exports a `refreshToken` Stream that allows
     // other pieces to trigger token refresh in google-auth's transaction context.

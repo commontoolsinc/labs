@@ -64,9 +64,6 @@ A piece is identified by an entity id (a hash, e.g. `fid1:abc...`) and can carry
 a human **slug** for URLs. In the shell, `/{spaceName}/{pieceIdOrSlug}` shows
 a piece's UI.
 
-> Legacy naming: pieces are called **charms** in older code
-> (`background-charm-service`, `BGCharmEntry`, ...). Same concept.
-
 ## Linking pieces
 
 Because a piece's inputs and outputs are cells, you can wire *deployed*

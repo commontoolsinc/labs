@@ -5,7 +5,7 @@ export const BG_SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
 // This maps to of:baedreiew6ioyvfnvp2bdvmgkkz64ffk6gssvgmibh7yaw43yqhtv2nq75a
 export const BG_CELL_CAUSE = "bgUpdater-2025-03-18";
-export const BGCharmEntrySchema = {
+export const BGPieceEntrySchema = {
   type: "object",
   properties: {
     space: { type: "string" },
@@ -27,12 +27,12 @@ export const BGCharmEntrySchema = {
     "status",
   ],
 } as const satisfies JSONSchema;
-export type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
+export type BGPieceEntry = Schema<typeof BGPieceEntrySchema>;
 
-export const BGCharmEntriesSchema = {
+export const BGPieceEntriesSchema = {
   type: "array",
-  items: BGCharmEntrySchema,
+  items: BGPieceEntrySchema,
   default: [],
 } as const satisfies JSONSchema;
 
-export type BGCharmEntries = Schema<typeof BGCharmEntriesSchema>;
+export type BGPieceEntries = Schema<typeof BGPieceEntriesSchema>;

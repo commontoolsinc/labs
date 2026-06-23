@@ -11,9 +11,9 @@ import {
 
 const DISABLED_VIA_UI = "Disabled via UI";
 
-type BGCharmEntry = {
+type BGPieceEntry = {
   space: string;
-  charmId: string;
+  pieceId: string;
   integration: string;
   createdAt: number;
   updatedAt: number;
@@ -23,37 +23,37 @@ type BGCharmEntry = {
 };
 
 type InputSchema = {
-  charms: Default<BGCharmEntry[], []>;
+  pieces: Default<BGPieceEntry[], []>;
 };
 
 type ResultSchema = {
-  charms: BGCharmEntry[];
+  pieces: BGPieceEntry[];
 };
 
-const deleteCharm = handler<
+const deletePiece = handler<
   never,
-  { charms: Cell<BGCharmEntry[]>; charm: Cell<BGCharmEntry> }
+  { pieces: Cell<BGPieceEntry[]>; piece: Cell<BGPieceEntry> }
 >(
-  (_, { charm, charms }) => {
-    const { space, charmId } = charm.get();
-    const newList = charms.get().slice();
+  (_, { piece, pieces }) => {
+    const { space, pieceId } = piece.get();
+    const newList = pieces.get().slice();
     const index = newList.findIndex((i) =>
-      i.space === space && i.charmId === charmId
+      i.space === space && i.pieceId === pieceId
     );
     if (index >= 0 && index < newList.length) {
       newList.splice(index, 1);
-      charms.set(newList);
+      pieces.set(newList);
     }
   },
 );
 
-const toggleCharm = handler<never, { charm: Cell<BGCharmEntry> }>(
-  (_, { charm }) => {
-    const data = charm.get();
+const togglePiece = handler<never, { piece: Cell<BGPieceEntry> }>(
+  (_, { piece }) => {
+    const data = piece.get();
     if (data.disabledAt) {
-      charm.set({ ...data, disabledAt: 0, status: "Initializing..." });
+      piece.set({ ...data, disabledAt: 0, status: "Initializing..." });
     } else {
-      charm.set({ ...data, disabledAt: Date.now(), status: DISABLED_VIA_UI });
+      piece.set({ ...data, disabledAt: Date.now(), status: DISABLED_VIA_UI });
     }
   },
 );
@@ -85,21 +85,21 @@ function fromNow(then: Date): string {
 }
 
 const getRenderData = lift((
-  charm: BGCharmEntry,
+  piece: BGPieceEntry,
 ) => {
   const {
     integration,
     space: rawSpace,
-    charmId: rawCharmId,
+    pieceId: rawPieceId,
     createdAt,
     updatedAt,
     disabledAt,
     lastRun,
     status,
-  } = charm;
+  } = piece;
   const space = rawSpace.slice(-4);
-  const charmId = rawCharmId.slice(-4);
-  const name = `#${space}/#${charmId}`;
+  const pieceId = rawPieceId.slice(-4);
+  const name = `#${space}/#${pieceId}`;
 
   const createdAtDate = new Date(createdAt);
   const updatedAtDate = new Date(updatedAt);
@@ -124,74 +124,74 @@ Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
 });
 
 const css = `
-.bg-charm-container {
+.bg-piece-container {
   display: flex;
   flex-direction: column;
 }
-.bg-charm-container .ellipsis {
+.bg-piece-container .ellipsis {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis; 
 }
-.bg-charm-container button {
+.bg-piece-container button {
   cursor: pointer;
 }
-.bg-charm-row {
+.bg-piece-row {
   display: flex;
   flex-direction: row;
   height: 50px;
   align-items: center;
 }
-.bg-charm-row > * {
+.bg-piece-row > * {
   padding: 10px;
 }
-.bg-charm-row .toggle-button, .bg-charm-row .delete {
+.bg-piece-row .toggle-button, .bg-piece-row .delete {
   flex: 0;
   display: flex;
 }
-.bg-charm-row .name {
+.bg-piece-row .name {
   width: 250px;
   cursor: help;
 }
-.bg-charm-row .integration {
+.bg-piece-row .integration {
   color: #aaa;
   padding-left: 3px;
 }
-.bg-charm-row .status {
+.bg-piece-row .status {
   flex: 1;
 }
-.bg-charm-container .delete button {
+.bg-piece-container .delete button {
   border: 1px solid black;
 }
 `;
 
 export default pattern<InputSchema, ResultSchema>(
-  ({ charms }) => {
+  ({ pieces }) => {
     computed(() => {
-      console.log("bg charm list:", charms);
+      console.log("bg piece list:", pieces);
     });
     return {
       [NAME]: "BG Updater Management New",
       [UI]: (
         <div>
           <style>{css}</style>
-          <div className="bg-charm-container">
-            {charms.map((charm) => {
+          <div className="bg-piece-container">
+            {pieces.map((piece) => {
               const {
                 details,
                 name,
                 integration,
                 statusDisplay,
-              } = getRenderData(charm);
+              } = getRenderData(piece);
               return (
-                <div className="bg-charm-row">
+                <div className="bg-piece-row">
                   <div className="toggle-button">
                     <button
-                      onClick={toggleCharm({ charm })}
+                      onClick={togglePiece({ piece })}
                       type="button"
                     >
                       {computed(() => {
-                        const { status, disabledAt } = charm;
+                        const { status, disabledAt } = piece;
                         const SUCCESS = `#4CAF50`;
                         const UNKNOWN = `#FFC107`;
                         const DISABLED = `#9E9E9E`;
@@ -227,7 +227,7 @@ export default pattern<InputSchema, ResultSchema>(
                   <div className="status ellipsis">{statusDisplay}</div>
                   <div className="delete">
                     <button
-                      onClick={deleteCharm({ charm, charms })}
+                      onClick={deletePiece({ piece, pieces })}
                       type="button"
                     >
                       Delete
@@ -239,7 +239,7 @@ export default pattern<InputSchema, ResultSchema>(
           </div>
         </div>
       ),
-      charms,
+      pieces,
     };
   },
 );

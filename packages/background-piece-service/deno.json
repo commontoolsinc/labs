@@ -1,9 +1,9 @@
 {
-  "name": "@commonfabric/background-charm",
+  "name": "@commonfabric/background-piece",
   "tasks": {
     "start": "deno run -A --unstable-worker-options src/main.ts",
     "help": "deno run -A src/main.ts --help",
-    "add-admin-charm": "deno run -A cast-admin.ts --patternPath=bgAdmin.tsx",
+    "add-admin-piece": "deno run -A cast-admin.ts --patternPath=bgAdmin.tsx",
     "test": "deno test test/*.test.ts",
     "check": "deno check src/**/*.ts",
     "lint": "deno lint",

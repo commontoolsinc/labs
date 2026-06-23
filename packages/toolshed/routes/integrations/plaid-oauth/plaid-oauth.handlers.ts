@@ -15,7 +15,7 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import { setBGCharm } from "@commonfabric/background-charm";
+import { setBGPiece } from "@commonfabric/background-piece";
 import {
   type NormalizedLink,
   parseLink,
@@ -206,7 +206,7 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
           "Registering Plaid integration piece for background updates",
         );
 
-        await setBGCharm({
+        await setBGPiece({
           space,
           pieceId: integrationPieceId,
           integration: "plaid",
@@ -550,7 +550,7 @@ export const backgroundIntegration: AppRouteHandler<
   try {
     const payload = await c.req.json();
 
-    await setBGCharm({
+    await setBGPiece({
       space: payload.space,
       pieceId: payload.pieceId,
       integration: payload.integration,

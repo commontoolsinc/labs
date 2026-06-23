@@ -2354,7 +2354,7 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
   - \`loginEndpoint="/api/integrations/${providerName}-oauth/login"\`
   - \`tokenField="accessToken"\`
 - Handle token refresh via \`/api/integrations/${providerName}-oauth/refresh\`
-- Include a \`bgUpdater\` stream handler for background-charm-service
+- Include a \`bgUpdater\` stream handler for background-piece-service
 - Define scope checkboxes matching the available scopes:
 ${
     Object.entries(providerConfig.scopes).map(([s, d]) =>

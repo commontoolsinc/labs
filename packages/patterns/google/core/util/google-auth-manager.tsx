@@ -21,7 +21,7 @@
  * return { [UI]: <div>{fullUI}</div> };
  * ```
  *
- * Token refresh: Tokens auto-refresh via background-charm-service (when registered).
+ * Token refresh: Tokens auto-refresh via background-piece-service (when registered).
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 

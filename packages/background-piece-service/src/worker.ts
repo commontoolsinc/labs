@@ -31,7 +31,7 @@ let latestError: Error | null = null;
 let currentSession: Session | null = null;
 let manager: PieceManager | null = null;
 let runtime: Runtime | null = null;
-const loadedCharms = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
+const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 
 // Error handler that will be passed to Runtime
 const errorHandler: ErrorHandler = (e: ErrorWithContext) => {
@@ -61,7 +61,7 @@ const consoleHandler: ConsoleHandler = (
   if (!spaceId) {
     // Shouldn't happen.
     throw new Error(
-      "FatalError: Charm executing but worker has no space ID.",
+      "FatalError: Piece executing but worker has no space ID.",
     );
   }
   let ctx;
@@ -72,10 +72,10 @@ const consoleHandler: ConsoleHandler = (
       }
     }
     if (metadata.pieceId) {
-      ctx = `Charm(${metadata.pieceId})`;
+      ctx = `Piece(${metadata.pieceId})`;
     }
   }
-  ctx = ctx ?? "Charm(NO_CHARM)";
+  ctx = ctx ?? "Piece(NO_PIECE)";
   return [ctx, ...args.map((arg) => safeFormat(arg))];
 };
 
@@ -98,7 +98,7 @@ async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and charm manager
+  // Initialize runtime and piece manager
   runtime = new Runtime({
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
@@ -125,7 +125,7 @@ async function cleanup(): Promise<void> {
   }
   console.log(`Shutting down execution environment`);
 
-  loadedCharms.clear();
+  loadedPieces.clear();
   currentSession = null;
   manager = null;
 
@@ -139,63 +139,63 @@ async function cleanup(): Promise<void> {
   initialized = false;
 }
 
-async function runCharm(data: RunData): Promise<void> {
+async function runPiece(data: RunData): Promise<void> {
   if (!manager) {
     throw new Error("Worker session not initialized");
   }
 
   const { pieceId } = data;
 
-  console.log(`Running charm ${spaceId}/${pieceId}`);
+  console.log(`Running piece ${spaceId}/${pieceId}`);
   try {
     // Reset error tracking
     latestError = null;
 
-    // Get the charm cell from the pieceId
-    let charmEntityId;
+    // Get the piece cell from the pieceId
+    let pieceEntityId;
     try {
-      charmEntityId = entityIdFrom(pieceId);
+      pieceEntityId = entityIdFrom(pieceId);
     } catch {
-      throw new Error(`Charm pieceId is not a valid entity id: ${pieceId}`);
+      throw new Error(`Piece ID is not a valid entity id: ${pieceId}`);
     }
-    const charmCell = manager.runtime.getCellFromEntityId(
+    const pieceCell = manager.runtime.getCellFromEntityId(
       spaceId,
-      charmEntityId,
+      pieceEntityId,
     );
 
-    // Check whether the charm is still active (in charms or pinned-charms)
-    const charmsEntryCell = await manager.getActivePiece(charmCell);
-    if (charmsEntryCell === undefined) {
-      // Skip any charms that aren't still in one of the lists
-      throw new Error(`No charms list entry found for charm: ${pieceId}`);
+    // Check whether the piece is still in the active piece list.
+    const piecesEntryCell = await manager.getActivePiece(pieceCell);
+    if (piecesEntryCell === undefined) {
+      // Skip any pieces that aren't still in one of the lists
+      throw new Error(`No pieces list entry found for piece: ${pieceId}`);
     }
 
-    // Check if we've already loaded this charm
-    let runningCharm = loadedCharms.get(pieceId);
+    // Check if we've already loaded this piece
+    let runningPiece = loadedPieces.get(pieceId);
 
-    if (!runningCharm) {
+    if (!runningPiece) {
       // If not loaded yet, get it from the manager
-      console.log(`Loading charm ${pieceId} for the first time`);
-      runningCharm = await manager.get(charmsEntryCell, true, {
+      console.log(`Loading piece ${pieceId} for the first time`);
+      runningPiece = await manager.get(piecesEntryCell, true, {
         type: "object",
         properties: { bgUpdater: { asCell: ["stream"] } },
         required: ["bgUpdater"],
       });
 
-      if (!runningCharm) {
-        throw new Error(`Charm not found: ${pieceId}`);
+      if (!runningPiece) {
+        throw new Error(`Piece not found: ${pieceId}`);
       }
 
       // Store for future use
-      loadedCharms.set(pieceId, runningCharm);
+      loadedPieces.set(pieceId, runningPiece);
     } else {
-      console.log(`Using previously loaded charm ${pieceId}`);
+      console.log(`Using previously loaded piece ${pieceId}`);
     }
 
     // Find the updater stream
-    const updater = runningCharm.key("bgUpdater") as unknown as Stream<unknown>;
+    const updater = runningPiece.key("bgUpdater") as unknown as Stream<unknown>;
     if (!updater || !isStream(updater)) {
-      throw new Error(`No updater stream found for charm: ${pieceId}`);
+      throw new Error(`No updater stream found for piece: ${pieceId}`);
     }
 
     // Execute the background updater
@@ -212,7 +212,7 @@ async function runCharm(data: RunData): Promise<void> {
       throw latestError;
     }
 
-    console.log(`Successfully executed charm ${spaceId}/${pieceId}`);
+    console.log(`Successfully executed piece ${spaceId}/${pieceId}`);
     return;
   } catch (error) {
     // Check if error has context properties
@@ -222,11 +222,11 @@ async function runCharm(data: RunData): Promise<void> {
         ? `${error.message} @ ${error.space}:${error.pieceId} running ${error.patternId}`
         : String(error);
     console.error(
-      `Error executing charm ${spaceId}/${pieceId}: ${errorMessage}`,
+      `Error executing piece ${spaceId}/${pieceId}: ${errorMessage}`,
     );
 
-    // FIXME(ja): this isn't enough to ensure we reload/stop the charm
-    loadedCharms.delete(pieceId);
+    // FIXME(ja): this isn't enough to ensure we reload/stop the piece
+    loadedPieces.delete(pieceId);
 
     throw new Error(errorMessage, { cause: error });
   }
@@ -271,7 +271,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         break;
       }
       case WorkerIPCMessageType.Run: {
-        await runCharm(message.data);
+        await runPiece(message.data);
         break;
       }
       case WorkerIPCMessageType.Cleanup: {

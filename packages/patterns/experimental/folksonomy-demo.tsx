@@ -10,7 +10,7 @@
  * 2. Favorite the aggregator with tag "folksonomyAggregator"
  * 3. Deploy this demo pattern
  * 4. Add tags in one section, see them appear as suggestions in another
- * 5. Check the aggregator charm to see events flowing in
+ * 5. Check the aggregator piece to see events flowing in
  *
  * FEATURES DEMONSTRATED:
  * - Two tag instances with the same scope share suggestions
@@ -293,7 +293,7 @@ export default pattern<Input, Output>(
                 Item C has a different scope, so it won't see recipe tags
               </li>
               <li>
-                Check the aggregator charm to see all events and top tags
+                Check the aggregator piece to see all events and top tags
               </li>
             </ol>
           </cf-vstack>

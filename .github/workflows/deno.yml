@@ -15,7 +15,7 @@ concurrency:
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service cf"
+  BINARIES: "toolshed bg-piece-service cf"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ jobs:
           name: common-binaries
           path: |
             ./dist/toolshed
-            ./dist/bg-charm-service
+            ./dist/bg-piece-service
             ./dist/cf
 
   generated-patterns-integration-test:
@@ -802,19 +802,19 @@ jobs:
           cp ./dist/toolshed ./signed/
           cp ./dist/toolshed.sig ./signed/
 
-          # Process bg-charm-service binary
-          echo "Processing binary: bg-charm-service"
-          sha256sum ./dist/bg-charm-service > ./dist/bg-charm-service.hash.txt
-          BG_CHARM_SERVICE_HASH=$(cat ./dist/bg-charm-service.hash.txt | awk '{print $1}')
-          echo "bg-charm-service hash: $BG_CHARM_SERVICE_HASH"
-          echo "bg_charm_service_hash=$BG_CHARM_SERVICE_HASH" >> $GITHUB_OUTPUT
+          # Process bg-piece-service binary
+          echo "Processing binary: bg-piece-service"
+          sha256sum ./dist/bg-piece-service > ./dist/bg-piece-service.hash.txt
+          BG_PIECE_SERVICE_HASH=$(cat ./dist/bg-piece-service.hash.txt | awk '{print $1}')
+          echo "bg-piece-service hash: $BG_PIECE_SERVICE_HASH"
+          echo "bg_piece_service_hash=$BG_PIECE_SERVICE_HASH" >> $GITHUB_OUTPUT
 
-          # Sign the bg-charm-service binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-charm-service.sig ./dist/bg-charm-service
+          # Sign the bg-piece-service binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-piece-service.sig ./dist/bg-piece-service
 
           # Copy to signed directory
-          cp ./dist/bg-charm-service ./signed/
-          cp ./dist/bg-charm-service.sig ./signed/
+          cp ./dist/bg-piece-service ./signed/
+          cp ./dist/bg-piece-service.sig ./signed/
 
           # Process cf binary
           echo "Processing binary: cf"
@@ -847,12 +847,12 @@ jobs:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: 📝 Generate attestation for bg-charm-service binary
-        id: attest_bg_charm_service
+      - name: 📝 Generate attestation for bg-piece-service binary
+        id: attest_bg_piece_service
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ./dist/bg-charm-service
-          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
+          subject-name: ./dist/bg-piece-service
+          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_piece_service_hash }}
 
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
@@ -875,7 +875,7 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
-            ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
+            ${{ steps.attest_bg_piece_service.outputs.bundle-path }}
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
@@ -905,14 +905,14 @@ jobs:
             exit 1
           fi
 
-          # Verify bg-charm-service binary attestation
-          echo "::group::bg-charm-service attestation details"
-          gh attestation verify ./dist/bg-charm-service -R ${{ github.repository }} --format json | jq
+          # Verify bg-piece-service binary attestation
+          echo "::group::bg-piece-service attestation details"
+          gh attestation verify ./dist/bg-piece-service -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ bg-charm-service attestation verified successfully\033[0m"
+            echo -e "\033[32m✓ bg-piece-service attestation verified successfully\033[0m"
           else
-            echo -e "\033[31m✗ bg-charm-service attestation verification failed\033[0m"
+            echo -e "\033[31m✗ bg-piece-service attestation verification failed\033[0m"
             exit 1
           fi
 

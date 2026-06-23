@@ -7,7 +7,7 @@ import { createSession } from "@commonfabric/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
-  BGCharmEntriesSchema,
+  BGPieceEntriesSchema,
 } from "./src/schema.ts";
 import { getIdentity } from "./src/utils.ts";
 
@@ -74,7 +74,7 @@ async function castPattern() {
     const targetCell = runtime.getCell(
       spaceId as DID,
       cause,
-      BGCharmEntriesSchema,
+      BGPieceEntriesSchema,
     );
 
     // Ensure the cell is synced
@@ -86,15 +86,15 @@ async function castPattern() {
     // Cast the pattern on the cell or with undefined if no cell
     console.log("Casting pattern...");
 
-    // Create session and charm manager (matching main.ts pattern)
+    // Create session and piece manager (matching main.ts pattern)
     const session = await createSession({
       identity,
       spaceDid: spaceId as DID,
     });
 
-    // Create charm manager for the specified space
-    const charmManager = new PieceManager(session, runtime);
-    await charmManager.ready;
+    // Create piece manager for the specified space
+    const pieceManager = new PieceManager(session, runtime);
+    await pieceManager.ready;
     const pattern = await compileAndSavePattern(
       runtime,
       patternSrc,
@@ -102,12 +102,12 @@ async function castPattern() {
     );
     console.log("Pattern compiled successfully");
 
-    const charm = await charmManager.runPersistent(pattern, {
-      charms: targetCell,
+    const piece = await pieceManager.runPersistent(pattern, {
+      pieces: targetCell,
     });
 
     console.log("Pattern cast successfully!");
-    console.log("Result charm ID:", charm.entityId);
+    console.log("Result piece ID:", piece.entityId);
 
     await runtime.storageManager.synced();
     console.log("Storage synced, exiting");

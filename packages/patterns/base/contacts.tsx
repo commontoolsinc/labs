@@ -1,7 +1,7 @@
 /**
  * Contacts - Master-detail container for PersonLike items.
  *
- * Architecture: Stores charm results (pattern outputs with [UI]), not raw data.
+ * Architecture: Stores piece results (pattern outputs with [UI]), not raw data.
  * Pattern instantiation happens at insertion time in handlers.
  *
  * Features:
@@ -81,12 +81,12 @@ const addPerson = handler<
     addresses: [],
     socialProfiles: [],
   });
-  const charm = PersonPattern({
+  const piece = PersonPattern({
     person: personData,
     sameAs: contacts,
   });
   const newIndex = (contacts.get() || []).length;
-  contacts.push(charm as ContactPiece);
+  contacts.push(piece as ContactPiece);
   selectedIndex.set(newIndex);
 });
 
@@ -108,12 +108,12 @@ const addFamilyMember = handler<
     allergies: [],
     giftIdeas: [],
   });
-  const charm = FamilyMemberPattern({
+  const piece = FamilyMemberPattern({
     member: memberData,
     sameAs: contacts,
   });
   const newIndex = (contacts.get() || []).length;
-  contacts.push(charm as ContactPiece);
+  contacts.push(piece as ContactPiece);
   selectedIndex.set(newIndex);
 });
 
@@ -174,8 +174,8 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
   const openInNewView = action(() => {
     const idx = selectedIndex.get();
     if (idx < 0) return;
-    const charm = contacts.key(idx).get();
-    return navigateTo(charm);
+    const piece = contacts.key(idx).get();
+    return navigateTo(piece);
   });
 
   return {
@@ -215,7 +215,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
             <cf-vscroll style="height: 100%;">
               <cf-vstack style="gap: 4px; padding: 8px;">
                 {/* Render contact list using reactive .map() */}
-                {contacts.map((charm, index) => (
+                {contacts.map((piece, index) => (
                   <cf-card
                     style={computed(() =>
                       selectedIndex.get() === index
@@ -239,7 +239,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                         }}
                       >
                         {computed(() => {
-                          const name = charm[NAME] || "";
+                          const name = piece[NAME] || "";
                           const parts = name.split(" ");
                           if (parts.length >= 2) {
                             return (parts[0].charAt(0) + parts[1].charAt(0))
@@ -249,7 +249,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                         })}
                       </span>
 
-                      <span style={{ flex: "1" }}>{charm[NAME]}</span>
+                      <span style={{ flex: "1" }}>{piece[NAME]}</span>
 
                       <cf-button
                         variant="ghost"

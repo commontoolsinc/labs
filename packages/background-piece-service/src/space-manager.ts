@@ -6,9 +6,9 @@ import {
   WorkerControllerErrorEvent,
   type WorkerOptions,
 } from "./worker-controller.ts";
-import { type BGCharmEntry } from "./schema.ts";
+import { type BGPieceEntry } from "./schema.ts";
 
-export interface CharmSchedulerOptions extends WorkerOptions {
+export interface PieceSchedulerOptions extends WorkerOptions {
   pollingIntervalMs?: number;
   deactivationTimeoutMs?: number;
   rerunIntervalMs?: number;
@@ -17,14 +17,14 @@ export interface CharmSchedulerOptions extends WorkerOptions {
 type Task = {
   pieceId: string;
   timestamp: number;
-  entry: Cell<BGCharmEntry>;
+  entry: Cell<BGPieceEntry>;
 };
 
 export class SpaceManager {
   private did: string;
   private pollingIntervalMs: number;
-  private enabledCharms = new Map<string, Cell<BGCharmEntry>>();
-  private activeCharm: Cell<BGCharmEntry> | null = null;
+  private enabledPieces = new Map<string, Cell<BGPieceEntry>>();
+  private activePiece: Cell<BGPieceEntry> | null = null;
   private deactivationTimeoutMs: number;
   private workerController!: WorkerController;
   private rerunIntervalMs: number;
@@ -32,7 +32,7 @@ export class SpaceManager {
   private failureTracking = new Map<string, number>();
   private workerOptions: WorkerOptions;
 
-  constructor(options: CharmSchedulerOptions) {
+  constructor(options: PieceSchedulerOptions) {
     this.did = options.did;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
@@ -41,13 +41,13 @@ export class SpaceManager {
     this.setupWorkerController();
 
     console.log(
-      `${this.did} Charm scheduler initialized | pollingIntervalMs: ${this.pollingIntervalMs} | deactivationTimeoutMs: ${this.deactivationTimeoutMs} | rerunIntervalMs: ${this.rerunIntervalMs}`,
+      `${this.did} Piece scheduler initialized | pollingIntervalMs: ${this.pollingIntervalMs} | deactivationTimeoutMs: ${this.deactivationTimeoutMs} | rerunIntervalMs: ${this.rerunIntervalMs}`,
     );
   }
 
   private pushTask(
     pieceId: string,
-    entry: Cell<BGCharmEntry>,
+    entry: Cell<BGPieceEntry>,
     whenInMs?: number,
   ) {
     const when = whenInMs ?? this.rerunIntervalMs;
@@ -61,22 +61,22 @@ export class SpaceManager {
     this.pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  private updateCharmStatus(b: BGCharmEntry, c: Cell<BGCharmEntry>) {
+  private updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
     const pieceId = b.pieceId;
     const enabled = !b.disabledAt;
-    const currentlyScheduled = this.enabledCharms.has(pieceId) ||
-      this.activeCharm?.get().pieceId === pieceId;
+    const currentlyScheduled = this.enabledPieces.has(pieceId) ||
+      this.activePiece?.get().pieceId === pieceId;
 
     if (enabled) {
-      // if we aren't already scheduling this charm, add it to the list
+      // if we aren't already scheduling this piece, add it to the list
       if (!currentlyScheduled) {
-        this.enabledCharms.set(pieceId, c);
+        this.enabledPieces.set(pieceId, c);
         this.pushTask(pieceId, c, 0);
       }
     } else {
-      // if we are disabling a charm, remove it from the list
+      // if we are disabling a piece, remove it from the list
       if (currentlyScheduled) {
-        this.enabledCharms.delete(pieceId);
+        this.enabledPieces.delete(pieceId);
         this.pendingTasks = this.pendingTasks.filter((r) =>
           r.pieceId !== pieceId
         );
@@ -84,16 +84,16 @@ export class SpaceManager {
     }
   }
 
-  // Update the list of charms to watch (removing any charms that are no longer in the list)
-  watch(entries: Cell<BGCharmEntry>[]): Cancel {
+  // Update the list of pieces to watch (removing any pieces that are no longer in the list)
+  watch(entries: Cell<BGPieceEntry>[]): Cancel {
     const [cancel, addCancel] = useCancelGroup();
 
-    const scheduled = Array.from(this.enabledCharms.keys());
+    const scheduled = Array.from(this.enabledPieces.keys());
     const desired = new Set();
 
     for (const entry of entries) {
       const raw = entry.get();
-      addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
+      addCancel(entry.sink((value) => this.updatePieceStatus(value, entry)));
 
       if (!raw.disabledAt) {
         desired.add(raw.pieceId);
@@ -103,33 +103,33 @@ export class SpaceManager {
     const toRemove = scheduled.filter((pieceId) => !desired.has(pieceId));
 
     for (const pieceId of toRemove) {
-      this.enabledCharms.delete(pieceId);
+      this.enabledPieces.delete(pieceId);
       this.pendingTasks = this.pendingTasks.filter((task) =>
         task.pieceId !== pieceId
       );
     }
 
     console.log(
-      `${this.did} Charm scheduling ${this.enabledCharms.size} charm updaters`,
+      `${this.did} Piece scheduling ${this.enabledPieces.size} piece updaters`,
     );
     return cancel;
   }
 
   start(): void {
-    console.log(`${this.did} Charm scheduler starting...`);
+    console.log(`${this.did} Piece scheduler starting...`);
     this.execLoop();
   }
 
   async stop(): Promise<void> {
-    console.log(`${this.did} Stopping charm scheduler...`);
+    console.log(`${this.did} Stopping piece scheduler...`);
 
     // Wait for active jobs to finish with a timeout
-    if (this.activeCharm) {
+    if (this.activePiece) {
       await Promise.race([
         sleep(this.deactivationTimeoutMs),
         new Promise((resolve) => {
           const checkInterval = setInterval(() => {
-            if (!this.activeCharm) {
+            if (!this.activePiece) {
               clearInterval(checkInterval);
               resolve(true);
             }
@@ -148,7 +148,7 @@ export class SpaceManager {
         continue;
       }
 
-      if (this.activeCharm) {
+      if (this.activePiece) {
         await sleep(this.pollingIntervalMs);
         continue;
       }
@@ -163,24 +163,24 @@ export class SpaceManager {
 
       const { pieceId, entry, timestamp: _ } = this.pendingTasks.shift()!;
 
-      this.processCharm(pieceId, entry);
+      this.processPiece(pieceId, entry);
     }
   }
 
-  private async processCharm(pieceId: string, entry: Cell<BGCharmEntry>) {
+  private async processPiece(pieceId: string, entry: Cell<BGPieceEntry>) {
     const raw = entry.get();
 
     if (raw.disabledAt) {
-      console.log(`${this.did} Charm ${pieceId} is disabled, skipping`);
+      console.log(`${this.did} Piece ${pieceId} is disabled, skipping`);
       return;
     }
 
     console.log(`${this.did} Starting ${raw.integration} ${raw.pieceId}`);
 
-    this.activeCharm = entry;
+    this.activePiece = entry;
 
     try {
-      await this.workerController.runCharm(entry);
+      await this.workerController.runPiece(entry);
       this.onProcessSuccess(pieceId, entry);
     } catch (error) {
       const errorString = error instanceof Error
@@ -189,10 +189,10 @@ export class SpaceManager {
       console.error(`${this.did} ${errorString}`);
       this.onProcessFail(pieceId, entry, errorString);
     }
-    this.activeCharm = null;
+    this.activePiece = null;
   }
 
-  private onProcessSuccess(pieceId: string, entry: Cell<BGCharmEntry>) {
+  private onProcessSuccess(pieceId: string, entry: Cell<BGPieceEntry>) {
     // If previous runs have failed, clear out the counter
     if (this.failureTracking.has(pieceId)) {
       this.failureTracking.delete(pieceId);
@@ -205,23 +205,23 @@ export class SpaceManager {
       });
     });
 
-    if (this.enabledCharms.has(pieceId)) {
+    if (this.enabledPieces.has(pieceId)) {
       this.pushTask(pieceId, entry);
     }
   }
 
   private onProcessFail(
     pieceId: string,
-    entry: Cell<BGCharmEntry>,
+    entry: Cell<BGPieceEntry>,
     error: string,
   ) {
     const failureCount = (this.failureTracking.get(pieceId) ?? 0) + 1;
 
     // If we've received graph errors 3 times in a row,
-    // disable the charm.
+    // disable the piece.
     if (failureCount >= 3) {
       this.failureTracking.delete(pieceId);
-      this.disableCharm(pieceId, entry, error);
+      this.disablePiece(pieceId, entry, error);
     } else {
       this.failureTracking.set(pieceId, failureCount);
       entry.runtime.editWithRetry((tx) => {
@@ -231,7 +231,7 @@ export class SpaceManager {
         });
       });
 
-      if (this.enabledCharms.has(pieceId)) {
+      if (this.enabledPieces.has(pieceId)) {
         // Apply a linear backoff for the next attempts
         this.pushTask(
           pieceId,
@@ -242,9 +242,9 @@ export class SpaceManager {
     }
   }
 
-  private disableCharm(
+  private disablePiece(
     pieceId: string,
-    entry: Cell<BGCharmEntry>,
+    entry: Cell<BGPieceEntry>,
     error: string,
   ) {
     entry.runtime.editWithRetry((tx) => {
@@ -255,24 +255,24 @@ export class SpaceManager {
       });
     });
 
-    this.enabledCharms.delete(pieceId);
+    this.enabledPieces.delete(pieceId);
     this.pendingTasks = this.pendingTasks.filter((r) => r.pieceId !== pieceId);
   }
 
   private disableSpace(reason: string) {
     console.log(`${this.did} Disabling space: ${reason}`);
-    for (const [pieceId, entry] of this.enabledCharms.entries()) {
-      this.disableCharm(pieceId, entry, reason);
+    for (const [pieceId, entry] of this.enabledPieces.entries()) {
+      this.disablePiece(pieceId, entry, reason);
     }
   }
 
   // This is fired from `WorkerController` when an terminal error
   // occurs (e.g. outside of the graph), and may happen at any point
   // during execution.
-  // Because this can occur from a charm calling `setTimeout(() => throw new Error(""), timeout)`
-  // we cannot determine the offending charm. Because this should not occur frequently,
-  // and happening currently due to older, misbehaving charms, this should flush out
-  // those misbehaving charms.
+  // Because this can occur from a piece calling `setTimeout(() => throw new Error(""), timeout)`
+  // we cannot determine the offending piece. Because this should not occur frequently,
+  // and happening currently due to older, misbehaving pieces, this should flush out
+  // those misbehaving pieces.
   //
   // Attempt to recreate the worker environment, which should only occur once per
   // space-wide disabling.
@@ -282,7 +282,7 @@ export class SpaceManager {
     );
 
     const reason =
-      `TerminalError: All charms in this space have been disabled: ${event.error?.message}`;
+      `TerminalError: All pieces in this space have been disabled: ${event.error?.message}`;
     this.disableSpace(reason);
     this.setupWorkerController();
   };
@@ -312,7 +312,7 @@ export class SpaceManager {
     } catch (e) {
       // Initialization error. This "should not" occur, but is seen on invalid IPC requests
       // during initialization.
-      // Disable all charms in this space and attempt to recreate the worker.
+      // Disable all pieces in this space and attempt to recreate the worker.
       console.error(`${this.did} failed to initialize: ${e}`);
       this.disableSpace(`Failed to initialize worker.`);
       this.setupWorkerController();

@@ -10,18 +10,18 @@ import {
   UI,
 } from "commonfabric";
 
-// the simple charm (to which we'll store references within a cell)
+// the simple piece (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
   [NAME]: "Some Simple Pattern",
   [UI]: <div>Some Simple Pattern</div>,
 }));
 
-// Create a cell to store an array of charms
+// Create a cell to store an array of pieces
 const createCellRef = lift(
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
       console.log("Creating cellRef - first time");
-      const newCellRef = Cell.for<any[]>("charmsArray");
+      const newCellRef = Cell.for<any[]>("piecesArray");
       newCellRef.set([]);
       // Local cast: the schema types storedCellRef as a cell of a generic object,
       // but this fixture stores an array cell into it; the schema accuracy isn't
@@ -49,20 +49,20 @@ const createCellRef = lift(
   },
 );
 
-// Add a charm to the array and navigate to it
+// Add a piece to the array and navigate to it
 // we get a new isInitialized passed in for each
-// charm we add to the list. this makes sure
-// we only try to add the charm once to the list
+// piece we add to the list. this makes sure
+// we only try to add the piece once to the list
 // and we only call navigateTo once
-const addCharmAndNavigate = lift(
-  ({ charm, cellRef, isInitialized }) => {
+const addPieceAndNavigate = lift(
+  ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
-        cellRef.push(charm);
+        cellRef.push(piece);
         isInitialized.set(true);
-        return navigateTo(charm);
+        return navigateTo(piece);
       } else {
-        console.log("addCharmAndNavigate undefined cellRef");
+        console.log("addPieceAndNavigate undefined cellRef");
       }
     }
     return undefined;
@@ -70,33 +70,33 @@ const addCharmAndNavigate = lift(
   {
     type: "object",
     properties: {
-      charm: { type: "object" },
+      piece: { type: "object" },
       cellRef: { type: "array", asCell: ["cell"] },
       isInitialized: { type: "boolean", asCell: ["cell"] },
     },
-    required: ["charm", "isInitialized"],
+    required: ["piece", "isInitialized"],
   },
 );
 
 // Create a new SimplePattern and add it to the array
 const createSimplePattern = handler<unknown, { cellRef: Cell<any[]> }>(
   (_, { cellRef }) => {
-    // Create isInitialized cell for this charm addition
+    // Create isInitialized cell for this piece addition
     const isInitialized = cell(false);
 
-    // Create the charm
-    const charm = SimplePattern({});
+    // Create the piece
+    const piece = SimplePattern({});
 
-    // Store the charm in the array and navigate
-    return addCharmAndNavigate({ charm, cellRef, isInitialized });
+    // Store the piece in the array and navigate
+    return addPieceAndNavigate({ piece, cellRef, isInitialized });
   },
 );
 
-// Handler to navigate to a specific charm from the list
-const goToCharm = handler<unknown, { charm: any }>(
-  (_, { charm }) => {
-    console.log("goToCharm clicked");
-    return navigateTo(charm);
+// Handler to navigate to a specific piece from the list
+const goToPiece = handler<unknown, { piece: any }>(
+  (_, { piece }) => {
+    console.log("goToPiece clicked");
+    return navigateTo(piece);
   },
 );
 
@@ -104,34 +104,34 @@ const goToCharm = handler<unknown, { charm: any }>(
 // Verifies: a reactive factory result still rewrites JSX ifElse predicates after
 //           the forbidden OpaqueRef cast is removed
 //   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
-//   cellRef.map((charm, index) => <li>...) → mapWithPattern(...) even with
+//   cellRef.map((piece, index) => <li>...) → mapWithPattern(...) even with
 //     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
-  // cell to store array of charms we created
+  // cell to store array of pieces we created
   const { cellRef } = createCellRef({
     isInitialized: cell(false),
     storedCellRef: cell(),
   }) as { cellRef: any[] };
 
   return {
-    [NAME]: "Charms Launcher",
+    [NAME]: "Pieces Launcher",
     [UI]: (
       <div>
-        <h3>Stored Charms:</h3>
+        <h3>Stored Pieces:</h3>
         {ifElse(
           !cellRef?.length,
-          <div>No charms created yet</div>,
+          <div>No pieces created yet</div>,
           <ul>
-            {cellRef.map((charm: any, index: number) => (
+            {cellRef.map((piece: any, index: number) => (
               <li>
                 <cf-button
-                  onClick={goToCharm({ charm })}
+                  onClick={goToPiece({ piece })}
                 >
-                  Go to Charm {index + 1}
+                  Go to Piece {index + 1}
                 </cf-button>
-                <span>Charm {index + 1}: {charm[NAME] || "Unnamed"}</span>
+                <span>Piece {index + 1}: {piece[NAME] || "Unnamed"}</span>
               </li>
             ))}
           </ul>,
@@ -140,7 +140,7 @@ export default pattern(() => {
         <cf-button
           onClick={createSimplePattern({ cellRef })}
         >
-          Create New Charm
+          Create New Piece
         </cf-button>
       </div>
     ),

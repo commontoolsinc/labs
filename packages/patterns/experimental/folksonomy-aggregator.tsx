@@ -1,11 +1,11 @@
 /**
- * Folksonomy Aggregator - Community Tag Telemetry Charm
+ * Folksonomy Aggregator - Community Tag Telemetry Piece
  *
- * This charm collects tag usage events from folksonomy-tags instances and
+ * This piece collects tag usage events from folksonomy-tags instances and
  * computes community suggestions ranked by usage count (preferential attachment).
  *
- * SETUP: After deploying, FAVORITE this charm with tag "folksonomyAggregator"
- * so that folksonomy-tags instances can discover it via wish("#folksonomyAggregator").
+ * SETUP: After deploying, FAVORITE this piece with tag "folksonomy-aggregator"
+ * so that folksonomy-tags instances can discover it via wish("#folksonomy-aggregator").
  *
  * HOW IT WORKS:
  * 1. folksonomy-tags instances post events via the postEvent stream
@@ -57,9 +57,9 @@ interface Input {
 }
 
 /**
- * A #folksonomyAggregator that collects tag usage events and serves community suggestions.
+ * A #folksonomy-aggregator that collects tag usage events and serves community suggestions.
  *
- * The #folksonomyAggregator tag is how folksonomy-tags instances discover this charm via wish().
+ * The #folksonomy-aggregator tag is how folksonomy-tags instances discover this piece via wish().
  */
 export interface Output {
   events: TagEvent[];
@@ -171,8 +171,8 @@ export default pattern<Input, Output>(({ events }) => {
         <cf-vstack gap="2">
           <h2 style={{ margin: 0 }}>🏷️ Folksonomy Aggregator</h2>
           <p style={{ color: "#666", margin: 0, fontSize: "14px" }}>
-            Community tag telemetry collector. Favorite this charm with tag
-            "folksonomyAggregator" for discovery.
+            Community tag telemetry collector. Favorite this piece with tag
+            "folksonomy-aggregator" for discovery.
           </p>
         </cf-vstack>
 

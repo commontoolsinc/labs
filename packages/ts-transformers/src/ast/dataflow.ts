@@ -959,7 +959,7 @@ export function createDataFlowAnalyzer(
           };
         }
 
-        // This is a direct property access on an OpaqueRef (like state.charms.length)
+        // This is a direct property access on an OpaqueRef (like state.pieces.length)
         // It should be its own explicit dependency
         recordDataFlow(expression, scope, parentId, true);
         return {

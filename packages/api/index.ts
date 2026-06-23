@@ -2721,7 +2721,7 @@ export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
  * Get the entity ID from a cell or value, or undefined if it has none. The
  * concrete reference form is dispatched on the "modern cell representation"
  * flag: a `{ "/": "id-string" }` object with the flag off, a `FabricHash` with
- * it on. Useful for extracting IDs from newly created charms for linking.
+ * it on. Useful for extracting IDs from newly created pieces for linking.
  */
 export type GetEntityIdFunction = (
   value: any,

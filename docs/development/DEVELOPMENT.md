@@ -436,7 +436,7 @@ deno task integration patterns counter
 - **Automatically stops servers after tests complete**
 
 **Available packages:** `runner`, `runtime-client`, `shell`,
-`background-charm-service`, `patterns`, `cli`, `generated-patterns`
+`background-piece-service`, `patterns`, `cli`, `generated-patterns`
 
 **Log files:** After servers start, check these if something goes wrong:
 

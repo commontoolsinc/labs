@@ -8,15 +8,15 @@ import { ID, type JSONSchema } from "@commonfabric/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
-  type BGCharmEntry,
-  BGCharmEntrySchema,
+  type BGPieceEntry,
+  BGPieceEntrySchema,
 } from "./schema.ts";
 
 export function isValidDID(did: string): boolean {
   return did?.startsWith("did:key:") && did.length > 10;
 }
 
-export function isValidCharmId(id: string): boolean {
+export function isValidPieceId(id: string): boolean {
   return !!id && id.length === 59;
 }
 
@@ -56,7 +56,7 @@ export async function getIdentity(
   throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
 }
 
-export async function setBGCharm({
+export async function setBGPiece({
   space,
   pieceId,
   integration,
@@ -71,26 +71,26 @@ export async function setBGCharm({
   bgSpace?: MemorySpace;
   bgCause?: string;
 }): Promise<boolean> {
-  console.log("[setBGCharm] called with", { space, pieceId, integration });
+  console.log("[setBGPiece] called with", { space, pieceId, integration });
 
-  const charmsCell = await getBGCharms({ bgSpace, bgCause, runtime });
+  const piecesCell = await getBGPieces({ bgSpace, bgCause, runtime });
 
   console.log(
-    "charmsCell",
-    JSON.stringify(charmsCell.getAsLink(), null, 2),
+    "piecesCell",
+    JSON.stringify(piecesCell.getAsLink(), null, 2),
   );
 
-  const charms = charmsCell.get() || [];
+  const pieces = piecesCell.get() || [];
 
-  const existingCharmIndex = charms.findIndex(
-    (charm: Cell<BGCharmEntry>) =>
-      charm.get().space === space && charm.get().pieceId === pieceId,
+  const existingPieceIndex = pieces.findIndex(
+    (piece: Cell<BGPieceEntry>) =>
+      piece.get().space === space && piece.get().pieceId === pieceId,
   );
 
-  if (existingCharmIndex === -1) {
-    console.log("[setBGCharm] Adding charm to BGUpdater charms cell");
+  if (existingPieceIndex === -1) {
+    console.log("[setBGPiece] Adding piece to BGUpdater pieces cell");
     runtime.editWithRetry((tx) => {
-      charmsCell.withTx(tx).push({
+      piecesCell.withTx(tx).push({
         [ID]: `${space}/${pieceId}`,
         space,
         pieceId,
@@ -100,16 +100,16 @@ export async function setBGCharm({
         disabledAt: undefined,
         lastRun: 0,
         status: "Initializing",
-      } as unknown as Cell<BGCharmEntry>);
+      } as unknown as Cell<BGPieceEntry>);
     });
 
     await runtime.storageManager.synced();
     return true;
   } else {
-    console.log("[setBGCharm] Charm already exists, re-enabling");
-    const existingCharm = charms[existingCharmIndex];
+    console.log("[setBGPiece] Piece already exists, re-enabling");
+    const existingPiece = pieces[existingPieceIndex];
     runtime.editWithRetry((tx) => {
-      existingCharm.withTx(tx).update({
+      existingPiece.withTx(tx).update({
         disabledAt: 0,
         updatedAt: Date.now(),
         status: "Re-initializing",
@@ -120,14 +120,14 @@ export async function setBGCharm({
   }
 }
 
-export async function getBGCharms(
+export async function getBGPieces(
   { bgSpace, bgCause, runtime }: {
     bgSpace?: MemorySpace;
     bgCause?: string;
     runtime: Runtime;
   },
 ): Promise<
-  Cell<Cell<BGCharmEntry>[]>
+  Cell<Cell<BGPieceEntry>[]>
 > {
   bgSpace = bgSpace ?? BG_SYSTEM_SPACE_ID;
   bgCause = bgCause ?? BG_CELL_CAUSE;
@@ -135,13 +135,13 @@ export async function getBGCharms(
   const schema = {
     type: "array",
     items: {
-      ...BGCharmEntrySchema,
+      ...BGPieceEntrySchema,
       asCell: ["cell"],
     },
     default: [],
   } as const satisfies JSONSchema;
 
-  const charmsCell = runtime.getCell(bgSpace, bgCause, schema);
+  const piecesCell = runtime.getCell(bgSpace, bgCause, schema);
 
   // Ensure the cell is synced
   // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
@@ -150,8 +150,8 @@ export async function getBGCharms(
     ...schema,
     ifc: { confidentiality: ["secret"] },
   } as const satisfies JSONSchema;
-  await charmsCell.asSchema(privilegedSchema).sync();
+  await piecesCell.asSchema(privilegedSchema).sync();
   await runtime.storageManager.synced();
 
-  return charmsCell;
+  return piecesCell;
 }

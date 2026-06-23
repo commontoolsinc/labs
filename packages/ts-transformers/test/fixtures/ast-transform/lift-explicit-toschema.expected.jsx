@@ -11,29 +11,29 @@ import { lift, Cell, toSchema } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-interface CharmEntry {
+interface PieceEntry {
     id: string;
     name: string;
 }
 // Test: Explicit toSchema, function-first order.
 // This overload pattern: lift(fn, toSchema<T>())  (result schema omitted)
-const logCharmsList = lift(({ charmsList }) => {
-    console.log("logCharmsList: ", charmsList.get());
-    return charmsList;
+const logPiecesList = lift(({ piecesList }) => {
+    console.log("logPiecesList: ", piecesList.get());
+    return piecesList;
 }, {
     type: "object",
     properties: {
-        charmsList: {
+        piecesList: {
             type: "array",
             items: {
-                $ref: "#/$defs/CharmEntry"
+                $ref: "#/$defs/PieceEntry"
             },
             asCell: ["cell"]
         }
     },
-    required: ["charmsList"],
+    required: ["piecesList"],
     $defs: {
-        CharmEntry: {
+        PieceEntry: {
             type: "object",
             properties: {
                 id: {
@@ -65,13 +65,13 @@ const getStatus = lift(({ status }) => status, {
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
-//   lift(fn, toSchema<{ charmsList: Cell<CharmEntry[]> }>()) → lift(fn, generatedSchema)
+//   lift(fn, toSchema<{ piecesList: Cell<PieceEntry[]> }>()) → lift(fn, generatedSchema)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
-export default __cfHelpers.__cf_data({ logCharmsList, getStatus });
+export default __cfHelpers.__cf_data({ logPiecesList, getStatus });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
-    logCharmsList,
+    logPiecesList,
     getStatus
 });

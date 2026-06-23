@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import { decode, encode } from "@commonfabric/utils/encoding";
 
 export const ALL_DISABLED = [
-  "background-charm-service", // no tests yet
+  "background-piece-service",
   "vendor-astral", // no tests yet
 ];
 
