@@ -1,16 +1,7 @@
+import { isPlainObject } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricSpecialObject, type FabricValue } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
-
-/**
- * Is the value a plain record — an object whose prototype is `Object.prototype`
- * or `null`? This rejects arrays, class instances, and built-ins like `Map` /
- * `Date`, none of which are representable as a `FabricValue` record.
- */
-function isPlainRecord(value: object): boolean {
-  const proto = Object.getPrototypeOf(value);
-  return (proto === Object.prototype) || (proto === null);
-}
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.
@@ -109,7 +100,7 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
       // stray class instance (`Map`, `Date`, a user class, …) is reachable only
       // via an unsound cast; reject it explicitly rather than treating it as an
       // empty record.
-      if (!isPlainRecord(a) || !isPlainRecord(b)) {
+      if (!isPlainObject(a) || !isPlainObject(b)) {
         throw new Error("Cannot compare a non-record object value.");
       }
       if (Object.keys(a).length !== Object.keys(b).length) return false;
