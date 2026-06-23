@@ -194,7 +194,18 @@ export function createQueryResultProxy<T>(
   // directly, exactly as for JS primitives above; wrapping one in a live proxy
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
-  if (!isRecord(value) || value instanceof FabricPrimitive) return value;
+  if (!isRecord(value) || value instanceof FabricPrimitive) {
+    // The SHAPE_READ above tracks only the container's shape, but a
+    // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
+    // back directly, like a JS primitive), not a container whose shape it
+    // inspects. Register a recursive value read so an in-place change to the
+    // primitive (e.g. a FabricBytes updated to different bytes) re-triggers
+    // consumers — a nonRecursive read is compared shape-only and would miss it.
+    if (value instanceof FabricPrimitive) {
+      readTx.readValueOrThrow(link);
+    }
+    return value;
+  }
 
   // TODO(danfuzz): This may have to do something special to handle concrete
   // instances of `FabricInstance` so that they get perceived as such by the
