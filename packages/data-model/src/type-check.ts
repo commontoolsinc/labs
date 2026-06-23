@@ -1,6 +1,12 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { type Immutable, isPlainObject } from "@commonfabric/utils/types";
 
-import { FabricSpecialObject, type FabricValueLayer } from "./interface.ts";
+import {
+  type FabricObject,
+  FabricSpecialObject,
+  type FabricValue,
+  type FabricValueLayer,
+} from "./interface.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`
@@ -51,4 +57,22 @@ export function isFabricValueLayer(
       return false;
     }
   }
+}
+
+/**
+ * Narrows to the plain-record arm of `FabricValue` (`FabricObject`): an object
+ * whose prototype is `Object.prototype` or `null`. This rejects arrays,
+ * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
+ * which are representable as a `FabricObject`. Unlike a bare `isRecord()` check,
+ * it preserves the value type — `FabricObject`'s string index of `FabricValue`
+ * keeps an indexed value typed as a `FabricValue`.
+ */
+export function isFabricPlainObject(
+  value: FabricValue,
+): value is FabricObject;
+export function isFabricPlainObject(
+  value: Immutable<FabricValue>,
+): value is Immutable<FabricObject>;
+export function isFabricPlainObject(value: unknown): boolean {
+  return isPlainObject(value);
 }

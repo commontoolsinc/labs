@@ -1,6 +1,7 @@
 // Inline scheduler idempotency check tests.
 
 import { findDifferingWriteKeys } from "../src/scheduler/diagnosis.ts";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   afterEach,
   beforeEach,
@@ -209,10 +210,10 @@ describe("inline idempotency check mode", () => {
   });
 
   it("treats removed undefined writes as differing", () => {
-    const previousWrites = new Map<string, unknown>([
+    const previousWrites = new Map<string, FabricValue>([
       ["missing-output", undefined],
     ]);
-    const latestWrites = new Map<string, unknown>();
+    const latestWrites = new Map<string, FabricValue>();
 
     expect(findDifferingWriteKeys(previousWrites, latestWrites)).toEqual([
       "missing-output",
