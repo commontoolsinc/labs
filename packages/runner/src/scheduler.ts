@@ -2127,6 +2127,7 @@ export class Scheduler {
       eventQueue: this.eventQueue,
       dirty: this.staleness.dirty,
       pending: this.pending,
+      backpressure: this.runtime.commitBackpressure,
       get eventPreflightTelemetryEnabled() {
         return getEventPreflightTelemetryEnabled();
       },

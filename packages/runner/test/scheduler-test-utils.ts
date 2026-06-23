@@ -52,6 +52,7 @@ function createSchedulerTestRuntime(
     experimental?: ExperimentalOptions;
     cfcEnforcementMode?: RuntimeOptions["cfcEnforcementMode"];
     storageManager?: SchedulerTestStorageManager;
+    commitBackpressure?: RuntimeOptions["commitBackpressure"];
   } = {},
 ): SchedulerTestRuntime {
   const storageManager = options.storageManager ??
@@ -62,6 +63,9 @@ function createSchedulerTestRuntime(
     ...(options.experimental ? { experimental: options.experimental } : {}),
     ...(options.cfcEnforcementMode
       ? { cfcEnforcementMode: options.cfcEnforcementMode }
+      : {}),
+    ...(options.commitBackpressure
+      ? { commitBackpressure: options.commitBackpressure }
       : {}),
   });
 
