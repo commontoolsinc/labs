@@ -972,6 +972,225 @@ Deno.test("memory v2 engine: nonRecursive shape read conflicts with array move a
   }
 });
 
+Deno.test("memory v2 engine: leaf-only matcher does NOT conflict on a synthetic indexed-array add (intentional; runner never emits one)", async () => {
+  // DIVERGENCE MARKER. The recursive commit matcher is leaf-only, so an indexed
+  // array `add` (which the engine accepts but the runner never produces) touches
+  // ONLY the added index — it does not conflict a reader of a sibling index.
+  // This is intentional: it keeps commit-conflict aligned with the leaf-only
+  // scheduler reader-dirty index (the invariant #4210 relies on). Production
+  // safety comes from the diff generator never emitting an indexed-array add (see
+  // packages/runner/test/memory-v2-native-commit.test.ts and the
+  // `assertNoIndexedArrayStructuralOps` guard in storage/v2-transaction.ts), NOT
+  // from the matcher conflicting it. Ben's #4307 deliberately diverges here (its
+  // "keeps array add conflicts conservative" test asserts the opposite); that
+  // extra conservatism is what makes #4307 incompatible with #4210, because the
+  // reader-dirty index would not re-trigger the conflicted reader.
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const id = "entity:array-leaf-only";
+
+  try {
+    // seq 1: array seed.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({ poll: { answers: ["bob"] } }),
+        }],
+      },
+    });
+
+    // seq 2: a (synthetic) indexed-array add inserting at index 1.
+    applyCommit(engine, {
+      sessionId: "session:other",
+      principal: "did:key:other",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/poll/answers/1",
+            value: "alice",
+          }],
+        }],
+      },
+    });
+
+    // A reader of the sibling index `answers/0` observed at seq 1 is NOT rejected
+    // by the leaf-only matcher: the seq-2 add touched only `answers/1`. (Here
+    // `answers/0` is in fact unchanged by an insert at index 1, so allowing it is
+    // also semantically correct; the general point is that leaf-only conflicts no
+    // sibling-index reader on an indexed add — hence the runner must never emit
+    // one.)
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{
+            id,
+            path: toDocumentPath(["value", "poll", "answers", "0"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:derived",
+          value: toEntityDocument({ firstAnswer: "bob" }),
+        }],
+      },
+    });
+    assertEquals(read(engine, { id: "entity:derived" }), {
+      value: { firstAnswer: "bob" },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine: leaf-only matcher conflicts conservatively with array splice and whole-array replace (the shapes the runner DOES emit)", async () => {
+  // The runner encodes every array length change as a `splice` on the array path
+  // or a whole-array `replace` (never an indexed add/remove). Both carry the
+  // ARRAY's own path, which the leaf-only matcher treats as touching every index
+  // below it — so a recursive reader of any sibling index conflicts. This pins
+  // that leaf-only stays conservative (no false-negative) for the array ops that
+  // actually occur in production, which is what makes #4220 safe given the
+  // divergence-marker test above.
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const id = "entity:array-conservative";
+
+  try {
+    // seq 1: array seed.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({ arr: ["a", "b", "c"] }),
+        }],
+      },
+    });
+
+    // seq 2: a SPLICE on the array path (how the runner encodes a length change).
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "splice",
+            path: "/value/arr",
+            index: 0,
+            remove: 1,
+            add: ["z"],
+          }],
+        }],
+      },
+    });
+
+    // A recursive reader of the sibling index `arr/0` observed at seq 1 MUST
+    // conflict with the seq-2 splice (the splice's array path prefix-matches the
+    // index read) — leaf-only stays conservative for shifts encoded as splice.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 3,
+            reads: {
+              confirmed: [{
+                id,
+                path: toDocumentPath(["value", "arr", "0"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkSplice",
+              value: toEntityDocument("s"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    // seq 3: a whole-array REPLACE (the runner's fallback for messy shifts).
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "replace",
+            path: "/value/arr",
+            value: ["p", "q"],
+          }],
+        }],
+      },
+    });
+
+    // A recursive reader of `arr/1` observed at seq 2 MUST conflict with the
+    // seq-3 whole-array replace (replace's array path prefix-matches the read).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [{
+                id,
+                path: toDocumentPath(["value", "arr", "1"]),
+                seq: 2,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:sinkReplace",
+              value: toEntityDocument("r"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
 
