@@ -55,13 +55,22 @@ decision (D-W3-PRECISION, below)**:
 - **C: inline container + coarse (smeared) labels** — O(1) docs but a precision
   regression vs legacy (rejected earlier in D-SEQ as precision-first).
 
-## D-W3-PRECISION — OPEN, needs the user (2026-06-23)
+## D-W3-PRECISION — RESOLVED = A (user, 2026-06-23)
 
-Given D-OQ4-FINDING, which collection strategy for W3? Recommendation: **A now**
-(real ~3× win, sound, pointwise, unblocks collections immediately) with **B as a
-follow-on** if the O(1) footprint is required and the new CFC primitive is worth
-the cost. This supersedes the earlier assumption (D-SEQ) that OQ-4 would deliver
-O(1)+pointwise together — that combination needs B.
+Decision: **Option A — pointwise via per-element docs, built now.** Collections
+drop per-element child PATTERNS but keep one result doc + one scheduled effect
+per element (read-isolated → structurally pointwise), container holds links. ~3×
+fewer docs + fewer nodes than legacy (`~1+N` vs `~3N` docs), still O(N), sound,
+pointwise, no CFC-core risk. **Option B** (the new per-path emit for O(1)+pointwise)
+is a deferred follow-on if the O(1) footprint becomes worth the CFC-core cost.
+This supersedes D-SEQ's assumption that OQ-4 delivers O(1)+pointwise together.
+
+W3 mechanism = generalize the W2 prototype's "isolated" mode (per-element
+scheduled effect, own tx reading only element i, own result doc, no child
+pattern) from a hardcoded leaf to the element **ROG** evaluated via `evalRog`
+(reusing W1b-bridge leaf resolution). Acceptance: differential oracle — output
+parity with legacy `map` AND pointwise label parity, with the footprint measured
+(`~1+N` docs vs legacy `~3N`).
 
 ## Open / load-bearing
 
