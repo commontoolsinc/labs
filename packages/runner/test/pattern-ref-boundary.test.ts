@@ -16,7 +16,7 @@ import {
   resolveStoredPattern,
   resolveStoredPatternAsync,
 } from "../src/builtins/op-pattern-ref.ts";
-import type { Opaque } from "../src/builder/types.ts";
+import type { FactoryInput } from "../src/builder/types.ts";
 
 /**
  * Identity E4 (docs/specs/content-addressed-action-identity.md §7): the JSON
@@ -122,7 +122,7 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect(Array.isArray((internal as { nodes: unknown }).nodes)).toBe(true);
 
     const viaLegacyAliases = toJSONWithLegacyAliases(
-      compiled as unknown as Opaque<unknown>,
+      compiled as unknown as FactoryInput<unknown>,
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);
     expect(Array.isArray(viaLegacyAliases.nodes)).toBe(true);

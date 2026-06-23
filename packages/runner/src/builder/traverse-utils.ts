@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { isOpaqueRef, isPattern, type Opaque } from "./types.ts";
+import { type FactoryInput, isOpaqueRef, isPattern } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
@@ -18,9 +18,9 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * codec contents.
  */
 export function traverseValue(
-  unprocessedValue: Opaque<any>,
+  unprocessedValue: FactoryInput<any>,
   fn: (value: any) => any,
-  seen: Set<Opaque<any>> = new Set(),
+  seen: Set<FactoryInput<any>> = new Set(),
 ): any {
   // Perform operation, replaces value if non-undefined is returned
   const result = fn(unprocessedValue);

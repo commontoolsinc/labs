@@ -7,7 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema, type Opaque } from "../src/builder/types.ts";
+import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -166,7 +166,7 @@ describe("Pattern Runner - Core", () => {
     const multipliedArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const multiplied = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             ((({ x }: any, index: any, array: any) => {
               return { multiplied: multiply({ x, index, array }) };
             }) as any)(element, index, array)
@@ -211,7 +211,7 @@ describe("Pattern Runner - Core", () => {
     const doubleArray = pattern<{ values?: number[] }>(
       ({ values }) => {
         const doubled = (values as any)?.mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             (((x: any) => double(x)) as any)(element, index, array)
           ),
           {},
@@ -244,7 +244,7 @@ describe("Pattern Runner - Core", () => {
     const doubleArray = pattern<{ values: number[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             (((x: any) => double(x)) as any)(element, index, array)
           ),
           {},

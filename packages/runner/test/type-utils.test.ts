@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type FactoryInput,
   isModule,
   isPattern,
-  type Opaque,
   type OpaqueRef,
 } from "../src/builder/types.ts";
 import { isWriteRedirectLink } from "../src/link-utils.ts";
@@ -11,7 +11,10 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
-    const { foo, bar }: { foo: Opaque<string>; bar: Opaque<string> } = {
+    const { foo, bar }: {
+      foo: FactoryInput<string>;
+      bar: FactoryInput<string>;
+    } = {
       foo: "foo",
       bar: "bar",
     } as OpaqueRef<{

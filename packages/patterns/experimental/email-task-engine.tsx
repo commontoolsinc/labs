@@ -20,10 +20,10 @@
 import {
   computed,
   Default,
+  type FactoryInput,
   generateObject,
   handler,
   NAME,
-  type Opaque,
   pattern,
   Stream,
   TILE_UI,
@@ -586,7 +586,7 @@ Respond with the most appropriate action.`;
     });
 
     const llmAnalysis = generateObject<SuggestionResult>({
-      prompt: prompt as Opaque<string>,
+      prompt: prompt as FactoryInput<string>,
       schema: SUGGESTION_SCHEMA,
       model: "anthropic:claude-sonnet-4-5",
     });

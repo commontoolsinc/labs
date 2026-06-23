@@ -161,11 +161,10 @@ const initializeRecord = lift<{
 
     // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
     // NOTE: Cells must be top-level, not nested in a context object!
-    // deno-lint-ignore no-explicit-any
     const typePickerPiece = TypePickerModule({
       entries: subPieces,
       trashedEntries: trashedSubPieces,
-    } as any);
+    });
 
     // Capture schema for dynamic discovery
     const typePickerSchema = getResultSchema(typePickerPiece);

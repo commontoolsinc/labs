@@ -143,15 +143,13 @@ const joinChat = handler<
     "[joinChat] Navigating to chat room with session:",
     currentSessionId,
   );
-  // `as any`: the cell-link `profile` inside `User` defeats the Opaque<>
-  // input mapping (same workaround as battleship's lobby bindings).
   const roomInstance = GroupChatRoom({
     messages,
     users,
     myName: displayName,
     mySessionId: currentSessionId,
     currentSessionId: sessionId,
-  } as any);
+  });
 
   return navigateTo(roomInstance);
 });
@@ -179,8 +177,6 @@ export default pattern<LobbyInput, LobbyOutput>(
 
     const userCount = computed(() => users.get().length);
 
-    // `as any`: the cell-link `profile` inside `User` defeats the Opaque<>
-    // state mapping (same workaround as battleship's lobby bindings).
     const join = joinChat({
       messages,
       users,
@@ -188,7 +184,7 @@ export default pattern<LobbyInput, LobbyOutput>(
       profile: profileWish.result,
       name: myName,
       avatar: myAvatar,
-    } as any);
+    });
 
     return {
       [NAME]: computed(() => `${chatName} - Lobby`),
@@ -354,7 +350,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                 border: "none",
                 cursor: "pointer",
               }}
-              onClick={resetLobby({ messages, users, sessionId } as any)}
+              onClick={resetLobby({ messages, users, sessionId })}
             >
               Reset
             </button>

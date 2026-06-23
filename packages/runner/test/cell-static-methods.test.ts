@@ -229,6 +229,20 @@ describe("Cell Static Methods", () => {
       });
     });
 
+    it("rejects direct array callback helpers", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const cell = Cell.of([1, 2, 3]) as any;
+
+        expect(() => cell.map(() => 1)).toThrow("OpaqueRef.map(fn)");
+        expect(() => cell.filter(() => true)).toThrow(
+          "OpaqueRef.filter(fn)",
+        );
+        expect(() => cell.flatMap(() => [1])).toThrow(
+          "OpaqueRef.flatMap(fn)",
+        );
+      });
+    });
+
     it("should allow updating the cell after creation", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const cell = Cell.of(10);

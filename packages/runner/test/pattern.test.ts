@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type FactoryInput,
   type Frame,
   isModule,
   isPattern,
   type JSONSchema,
   type Module,
-  type Opaque,
   type Pattern,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
@@ -310,7 +310,7 @@ describe("pattern", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: Opaque<any>) =>
+          pattern(({ element, index, array }: FactoryInput<any>) =>
             ((({ x }: any) => {
               const double = lift<number>((x) => x * 2);
               return { doubled: double(x) };

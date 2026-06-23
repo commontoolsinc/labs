@@ -2,9 +2,9 @@ import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
 import type {
+  FactoryInput,
   JSONSchema,
   NodeFactory,
-  Opaque,
   OpaqueRef,
   PatternFactory,
   Schema,
@@ -100,14 +100,14 @@ export const compileAndRun = createNodeFactory({
   type: "ref",
   implementation: "compileAndRun",
 }) as <T = any, S = any>(
-  params: Opaque<BuiltInCompileAndRunParams<T>>,
+  params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
 }) as (
-  params: Opaque<BuiltInLLMParams>,
+  params: FactoryInput<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState>;
 
 export const llmDialog = createNodeFactory({
@@ -116,28 +116,28 @@ export const llmDialog = createNodeFactory({
   resultSchema: LLMDialogResultSchema,
   propagateInputIfc: false,
 }) as (
-  params: Opaque<BuiltInLLMParams>,
+  params: FactoryInput<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMDialogState>;
 
 export const generateObject = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
 }) as <T = any>(
-  params: Opaque<BuiltInGenerateObjectParams>,
+  params: FactoryInput<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
 export const generateText = createNodeFactory({
   type: "ref",
   implementation: "generateText",
 }) as (
-  params: Opaque<BuiltInGenerateTextParams>,
+  params: FactoryInput<BuiltInGenerateTextParams>,
 ) => OpaqueRef<BuiltInGenerateTextState>;
 
 export const fetchData = createNodeFactory({
   type: "ref",
   implementation: "fetchData",
 }) as <T>(
-  params: Opaque<{
+  params: FactoryInput<{
     url: string;
     mode?: "json" | "text";
     options?: FetchOptions;
@@ -149,7 +149,7 @@ export const fetchProgram = createNodeFactory({
   type: "ref",
   implementation: "fetchProgram",
 }) as (
-  params: Opaque<{ url: string }>,
+  params: FactoryInput<{ url: string }>,
 ) => OpaqueRef<{
   pending: boolean;
   result: {
@@ -163,7 +163,7 @@ export const streamData = createNodeFactory({
   type: "ref",
   implementation: "streamData",
 }) as <T>(
-  params: Opaque<{
+  params: FactoryInput<{
     url: string;
     options?: FetchOptions;
     result?: T;
@@ -183,13 +183,13 @@ export const sqliteQuery =
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function ifElse<T = unknown, U = unknown, V = unknown>(
-  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
-  ifTrueSchemaOrIfTrue: JSONSchema | Opaque<U>,
-  ifFalseSchemaOrIfFalse: JSONSchema | Opaque<V>,
-  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
-  condition?: Opaque<T>,
-  ifTrue?: Opaque<U>,
-  ifFalse?: Opaque<V>,
+  conditionSchemaOrCondition: JSONSchema | FactoryInput<T>,
+  ifTrueSchemaOrIfTrue: JSONSchema | FactoryInput<U>,
+  ifFalseSchemaOrIfFalse: JSONSchema | FactoryInput<V>,
+  resultSchemaOrCondition?: JSONSchema | FactoryInput<T>,
+  condition?: FactoryInput<T>,
+  ifTrue?: FactoryInput<U>,
+  ifFalse?: FactoryInput<V>,
 ): OpaqueRef<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
@@ -231,11 +231,11 @@ let ifElseFactory:
 // when(condition, value) - returns value if condition is truthy, else condition
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function when<T = unknown, U = unknown>(
-  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
-  valueSchemaOrValue: JSONSchema | Opaque<U>,
-  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
-  condition?: Opaque<T>,
-  value?: Opaque<U>,
+  conditionSchemaOrCondition: JSONSchema | FactoryInput<T>,
+  valueSchemaOrValue: JSONSchema | FactoryInput<U>,
+  resultSchemaOrCondition?: JSONSchema | FactoryInput<T>,
+  condition?: FactoryInput<T>,
+  value?: FactoryInput<U>,
 ): OpaqueRef<T | U> {
   whenFactory ||= createNodeFactory({
     type: "ref",
@@ -272,11 +272,11 @@ let whenFactory:
 // unless(condition, fallback) - returns condition if truthy, else fallback
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function unless<T = unknown, U = unknown>(
-  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
-  fallbackSchemaOrFallback: JSONSchema | Opaque<U>,
-  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
-  condition?: Opaque<T>,
-  fallback?: Opaque<U>,
+  conditionSchemaOrCondition: JSONSchema | FactoryInput<T>,
+  fallbackSchemaOrFallback: JSONSchema | FactoryInput<U>,
+  resultSchemaOrCondition?: JSONSchema | FactoryInput<T>,
+  condition?: FactoryInput<T>,
+  fallback?: FactoryInput<U>,
 ): OpaqueRef<T | U> {
   unlessFactory ||= createNodeFactory({
     type: "ref",
@@ -326,7 +326,7 @@ let unlessFactory:
  * `piece[TILE_UI]`), which yields `undefined` and renders nothing when absent.
  */
 export function uiVariant(
-  piece: Opaque<unknown>,
+  piece: FactoryInput<unknown>,
   kind: UIVariantKind = "full",
 ): VNode {
   return h("cf-render", { variant: kind, $cell: piece });
@@ -338,14 +338,14 @@ export const navigateTo = createNodeFactory({
 }) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
 
 export function wish<T = unknown>(
-  target: Opaque<WishParams>,
+  target: FactoryInput<WishParams>,
 ): OpaqueRef<WishState<T>>;
 export function wish<T = unknown>(
-  target: Opaque<WishParams>,
+  target: FactoryInput<WishParams>,
   schema: JSONSchema,
 ): OpaqueRef<WishState<T>>;
 export function wish<T = unknown>(
-  target: Opaque<WishParams>,
+  target: FactoryInput<WishParams>,
   schema?: JSONSchema,
 ): OpaqueRef<WishState<T>> {
   let param;
@@ -455,7 +455,7 @@ export const patternTool = (<
   // `patternTool(pattern(fn), extraParams?)` — so the unit is addressable and
   // hoistable; the runtime no longer coerces a bare function into a pattern.
   pattern: PatternFactory<T, any>,
-  extraParams?: Opaque<E>,
+  extraParams?: FactoryInput<E>,
 ): PatternToolResult<E> => {
   return {
     pattern,
