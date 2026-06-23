@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { TwoLevelWeakCache } from "@commonfabric/utils/cache";
 import { traverseTypeHierarchy } from "./type-traversal.ts";
 
 export type CellBrand =
@@ -89,9 +90,10 @@ function findCellBrandSymbol(
 // type. Keyed first by checker so a type identity is never read against a
 // foreign checker; the inner WeakMap lets per-program types be collected once
 // their checker is gone.
-const cellBrandCache = new WeakMap<
+const cellBrandCache = new TwoLevelWeakCache<
   ts.TypeChecker,
-  WeakMap<ts.Type, CellBrand | undefined>
+  ts.Type,
+  CellBrand | undefined
 >();
 
 function computeCellBrand(
@@ -117,16 +119,11 @@ export function getCellBrand(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): CellBrand | undefined {
-  let byType = cellBrandCache.get(checker);
-  if (byType === undefined) {
-    byType = new WeakMap();
-    cellBrandCache.set(checker, byType);
-  } else if (byType.has(type)) {
-    return byType.get(type);
-  }
-  const brand = computeCellBrand(type, checker);
-  byType.set(type, brand);
-  return brand;
+  return cellBrandCache.getOrCompute(
+    checker,
+    type,
+    () => computeCellBrand(type, checker),
+  );
 }
 
 export function isCellType(type: ts.Type, checker: ts.TypeChecker): boolean {

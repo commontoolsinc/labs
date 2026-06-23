@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { LRUCache } from "@commonfabric/utils/cache";
+import { LRUCache, TwoLevelWeakCache } from "@commonfabric/utils/cache";
 
 describe("LRUCache", () => {
   describe("basic operations", () => {
@@ -169,6 +169,85 @@ describe("LRUCache", () => {
       expect(cache.has("b")).toBe(true);
       expect(cache.has("c")).toBe(true);
       expect(cache.has("d")).toBe(true);
+    });
+  });
+});
+
+describe("TwoLevelWeakCache", () => {
+  describe("getOrCompute", () => {
+    it("computes once per (outer, inner) and reuses the result", () => {
+      const cache = new TwoLevelWeakCache<object, object, number>();
+      const outer = {};
+      const inner = {};
+      let calls = 0;
+      const compute = () => {
+        calls++;
+        return 42;
+      };
+
+      expect(cache.getOrCompute(outer, inner, compute)).toBe(42);
+      expect(cache.getOrCompute(outer, inner, compute)).toBe(42);
+      expect(calls).toBe(1);
+    });
+
+    it("caches an undefined result without recomputing", () => {
+      const cache = new TwoLevelWeakCache<object, object, number | undefined>();
+      const outer = {};
+      const inner = {};
+      let calls = 0;
+      const compute = () => {
+        calls++;
+        return undefined;
+      };
+
+      expect(cache.getOrCompute(outer, inner, compute)).toBe(undefined);
+      expect(cache.getOrCompute(outer, inner, compute)).toBe(undefined);
+      expect(calls).toBe(1);
+    });
+
+    it("keys independently on the inner key under one outer", () => {
+      const cache = new TwoLevelWeakCache<object, object, string>();
+      const outer = {};
+      const a = {};
+      const b = {};
+
+      expect(cache.getOrCompute(outer, a, () => "a")).toBe("a");
+      expect(cache.getOrCompute(outer, b, () => "b")).toBe("b");
+      // Re-reading does not collapse to a shared entry.
+      expect(cache.getOrCompute(outer, a, () => "recompute")).toBe("a");
+    });
+
+    it("isolates entries across outer keys for the same inner key", () => {
+      const cache = new TwoLevelWeakCache<object, object, string>();
+      const outerA = {};
+      const outerB = {};
+      const inner = {};
+
+      expect(cache.getOrCompute(outerA, inner, () => "from-a")).toBe("from-a");
+      // Same inner object, different outer: a separate compute, no bleed.
+      expect(cache.getOrCompute(outerB, inner, () => "from-b")).toBe("from-b");
+      expect(cache.getOrCompute(outerA, inner, () => "ignored")).toBe("from-a");
+    });
+  });
+
+  describe("innerFor", () => {
+    it("returns a stable inner map per outer key", () => {
+      const cache = new TwoLevelWeakCache<object, object, number>();
+      const outer = {};
+      expect(cache.innerFor(outer)).toBe(cache.innerFor(outer));
+    });
+
+    it("returns distinct inner maps for distinct outer keys", () => {
+      const cache = new TwoLevelWeakCache<object, object, number>();
+      expect(cache.innerFor({})).not.toBe(cache.innerFor({}));
+    });
+
+    it("shares state with getOrCompute under the same outer key", () => {
+      const cache = new TwoLevelWeakCache<object, object, number>();
+      const outer = {};
+      const inner = {};
+      cache.innerFor(outer).set(inner, 7);
+      expect(cache.getOrCompute(outer, inner, () => 99)).toBe(7);
     });
   });
 });

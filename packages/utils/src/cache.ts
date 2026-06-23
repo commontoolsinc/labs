@@ -170,3 +170,55 @@ export class LRUCache<K, V> implements Cache<K, V> {
     this.#removeNode(node);
   }
 }
+
+/**
+ * A memo keyed by a pair of garbage-collectable keys, `(outer, inner)`, with a
+ * `WeakMap` at each level. An entry is reclaimed as soon as either key becomes
+ * unreachable, so the cache never keeps its keys (or the values hanging off
+ * them) alive.
+ *
+ * The canonical use is memoizing a pure function of `(ts.TypeChecker, ts.Type)`
+ * or `(ts.TypeChecker, ts.Expression)` across a compile. Keying by the checker
+ * first means a key minted by one checker is never read against another, and
+ * lets a whole program's entries fall away once its checker is gone — while the
+ * inner `WeakMap` collects individual types/nodes as they themselves die.
+ * Several hot transformer/schema-generation paths share this shape; this is its
+ * one implementation.
+ */
+export class TwoLevelWeakCache<
+  Outer extends object,
+  Inner extends object,
+  V,
+> {
+  readonly #buckets = new WeakMap<Outer, WeakMap<Inner, V>>();
+
+  /**
+   * The inner cache for `outer`, created on first access. Use this when a
+   * single logical entry is read or written from several branches and a single
+   * `getOrCompute` call doesn't fit; operate on the returned map's
+   * `has`/`get`/`set` directly. Both levels stay weak.
+   */
+  innerFor(outer: Outer): WeakMap<Inner, V> {
+    let bucket = this.#buckets.get(outer);
+    if (bucket === undefined) {
+      bucket = new WeakMap<Inner, V>();
+      this.#buckets.set(outer, bucket);
+    }
+    return bucket;
+  }
+
+  /**
+   * Return the cached value for `(outer, inner)`, computing it with `compute`
+   * on the first miss. A stored `undefined` is a real cached result and is not
+   * recomputed — the `has` check distinguishes "cached undefined" from "absent".
+   */
+  getOrCompute(outer: Outer, inner: Inner, compute: () => V): V {
+    const bucket = this.innerFor(outer);
+    if (bucket.has(inner)) {
+      return bucket.get(inner) as V;
+    }
+    const value = compute();
+    bucket.set(inner, value);
+    return value;
+  }
+}
