@@ -31,13 +31,16 @@ describe("fabric-value", () => {
 
     it("throws when given a function (not a `FabricValue`)", () => {
       // A function is reachable only via an unsound cast; the comparison
-      // rejects it rather than silently mis-answering. Two distinct functions
-      // are needed so the `Object.is()` fast path doesn't short-circuit before
-      // the type switch is reached.
+      // rejects it rather than silently mis-answering, and does so regardless
+      // of which argument is the function. (Distinct values are used so the
+      // `Object.is()` fast path doesn't short-circuit before the check.)
       const fn = (() => {}) as unknown as FabricValue;
       const fn2 = (() => {}) as unknown as FabricValue;
       expect(() => valueEqual(fn, fn2)).toThrow();
       expect(() => valueEqual(fn, 1)).toThrow();
+      expect(() => valueEqual(fn, { a: 1 })).toThrow();
+      // The function on the right (`b`) is rejected symmetrically.
+      expect(() => valueEqual({ a: 1 }, fn)).toThrow();
     });
 
     it("returns `true` for structurally-equal objects", () => {

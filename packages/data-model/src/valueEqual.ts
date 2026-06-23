@@ -45,8 +45,15 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   }
 
   // `a` is a non-`null` object; `b` may be a primitive or a differently-shaped
-  // object. The canonical content hash is the general object comparator, but
-  // it's worth a few cheap checks first.
+  // object. A function `b` is not a `FabricValue` (reachable only via an unsound
+  // cast); reject it here so invalid input fails the same way regardless of
+  // argument order.
+  if (typeof b === "function") {
+    throw new Error("Cannot compare a function value.");
+  }
+
+  // The canonical content hash is the general object comparator, but it's worth
+  // a few cheap checks first.
 
   // When both sides are deep-frozen, the hash is cacheable (frozen ≈
   // non-ephemeral), so hashing pays for itself even on a repeat — take it early.
