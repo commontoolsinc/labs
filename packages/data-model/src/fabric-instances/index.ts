@@ -12,7 +12,7 @@ export { ProblematicValue } from "./ProblematicValue.ts";
 export { UnknownValue } from "./UnknownValue.ts";
 export { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 export { FabricError, type FabricErrorState } from "./FabricError.ts";
-export { FabricLink, type FabricLinkPayload } from "./FabricLink.ts";
+export { FabricLink } from "./FabricLink.ts";
 export { FabricMap } from "./FabricMap.ts";
 export { FabricSet } from "./FabricSet.ts";
 

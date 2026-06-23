@@ -23,20 +23,12 @@ import {
 import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
- * The payload of a {@link FabricLink}: the record a link wraps — its addressing
- * fields (`id`, `space`, `scope`, `path`, `overwrite`) plus an optional
- * `schema`. It is a {@link FabricObject}, i.e. an arbitrary record of
- * `FabricValue`s, because a link's `schema` is itself an arbitrary `FabricValue`
- * (a narrowing lens that, when present, is the only durable copy of its
- * information). The data-model layer does not constrain the field set; that is a
- * consumer concern (e.g. runner's `CellLinkRefPayload`).
- */
-export type FabricLinkPayload = FabricObject;
-
-/**
  * A link value in the fabric type system: the modern, object-shaped form of a
- * `{ "/": { "link@1": … } }` link reference. It wraps the link's
- * {@link FabricLinkPayload} as its sole nested value.
+ * `{ "/": { "link@1": … } }` link reference. It wraps the link's payload — a
+ * {@link FabricObject} of addressing fields (`id`, `space`, `scope`, `path`,
+ * `overwrite`) plus an optional `schema` — as its sole nested value. The
+ * data-model layer does not constrain the field set; that is a consumer concern
+ * (e.g. runner's `CellLinkRefPayload`).
  *
  * It is a {@link FabricInstance} (not a `FabricPrimitive`) precisely because the
  * payload is an **outgoing reference**: a link may carry a `schema`, an arbitrary
@@ -47,7 +39,7 @@ export type FabricLinkPayload = FabricObject;
  */
 export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   /** The wrapped addressing payload (this link's sole outgoing reference). */
-  #payload: FabricLinkPayload;
+  #payload: FabricObject;
 
   /**
    * Constructs a `FabricLink` wrapping `payload`. The payload must be a plain
@@ -58,7 +50,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
    *
    * @param payload - The addressing payload to wrap.
    */
-  constructor(payload: FabricLinkPayload) {
+  constructor(payload: FabricObject) {
     super();
     assertValidPayload(payload);
     this.#payload = payload;
@@ -69,7 +61,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   /** The wrapped addressing payload. */
-  get payload(): FabricLinkPayload {
+  get payload(): FabricObject {
     return this.#payload;
   }
 
@@ -107,7 +99,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
     // structure with the original; already-deep-frozen subtrees are shared).
     const payload = cloneIfNecessary(this.#payload, {
       frozen,
-    }) as FabricLinkPayload;
+    }) as FabricObject;
     const result = new FabricLink(payload);
     return frozen ? deepFreeze(result) as FabricLink : result;
   }
@@ -138,7 +130,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
         // The constructor validates the shape and throws on any violation, so
         // bad state falls into the `catch`.
         try {
-          const result = new FabricLink(state as FabricLinkPayload);
+          const result = new FabricLink(state as FabricObject);
           return context.shouldDeepFreeze ? deepFreeze(result) : result;
         } catch (e) {
           return new ProblematicValue(
@@ -158,13 +150,13 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
 }
 
 /**
- * Validates that `payload` is a well-formed {@link FabricLinkPayload}: a plain
+ * Validates that `payload` is a well-formed {@link FabricObject}: a plain
  * object with no prototype-pollution keys. Throws otherwise. (Values are
  * arbitrary `FabricValue`s and are not constrained here.)
  */
 function assertValidPayload(
-  payload: FabricLinkPayload,
-): asserts payload is FabricLinkPayload {
+  payload: FabricObject,
+): asserts payload is FabricObject {
   if (!isPlainObject(payload)) {
     throw new Error("Link payload must be a plain object.");
   }
