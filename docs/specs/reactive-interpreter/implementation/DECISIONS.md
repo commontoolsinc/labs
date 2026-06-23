@@ -84,6 +84,56 @@ parity with legacy `map` AND pointwise label parity, with the footprint measured
   sub-transactions. This is W3. Status: design open; the oracle's read-isolated +
   sibling-bug cases are the executable acceptance test.
 
+## D-PROD-PATH — shortest path to the production seam + what "run the full suite" means (recon, 2026-06-23)
+
+User directive: "shortest path to production-path so we can run the full suite,
+then close gaps to get it green." Recon (`wr3vqtz8m`, 2 parallel readers +
+synthesis, cited to landed code) established:
+
+- **Honest framing.** With the interpreter feature-complete only for a subset
+  (leaf/access/construct/control + Option-A `map`), the ONLY short path to a
+  green full suite is **interpreter-on-the-prod-path WITH legacy fallback behind
+  a default-off flag**: the suite stays green because anything unsupported falls
+  back to legacy. "Green via fallback" = no regression; "green with zero
+  fallback" = the multi-milestone endpoint. The real progress metric is the
+  **fallback rate**, not a binary green.
+- **Wiring seam = `instantiatePattern`** in `RecipeManager.startCore`
+  (`packages/runner/src/runner.ts:1173-1212`) — the single choke point all three
+  start paths funnel through. Fallback is a try/catch on `NotInterpretedHere` →
+  the byte-for-byte unchanged legacy `for (const node of pattern.nodes)` loop.
+  Materialize into the `$result` derived-internal cell (`runner.ts:1099-1115`).
+- **Flag = `experimentalInterpreter`** added to `ExperimentalOptions`
+  (`runtime.ts:160-167`, propagated `:329-333`), mirroring the
+  `cfcEnforcementMode` precedent (`:190`/`:406`). **Default OFF.**
+- **HARD INVARIANT (no leak): pure extract + `evalRog` probe BEFORE any tx
+  write.** Never partially materialize then fall back. The pure evaluator
+  (`interpret.ts:5-10`) is decoupled from the runtime, so the dry probe is cheap.
+- **Census via instrumentation (better than a synthetic corpus).** Instrument
+  `runViaInterpreter` to count `{interpreted_ok, fallback_by_reason}`; then a
+  **flag-on full runner-suite run becomes the real corpus census** across 316
+  test files of actual patterns. (The synthetic corpus-gap-map agent delivered
+  formatting-only — no real tally — so this replaces it.)
+- **Runnable suite reality.** Runner unit suite (316 files) is feasible headless:
+  `cd packages/runner && deno task test`. `scheduler-events.test.ts` type-checks
+  clean on this branch (the old `Timeout` `--no-check` gotcha does NOT reproduce
+  here). Full cross-package = feasible but long. **Integration/browser tier needs
+  the local dev stack → out of this environment** (beware the stale `:8000`
+  toolshed version-skew gotcha). So "run the full suite" here = runner unit suite
+  green flag-off (== baseline) + flag-on census; cross-package when time allows;
+  browser/integration deferred to the dev stack.
+- **Staged gap-closing order** (raise interpreter coverage, each behind the same
+  flag + fallback, zero default-path risk): (1) `collection` beyond Option-A map
+  (`filter`/`flatMap`), (2) nested `pattern` instantiation (W5), (3)
+  `effect`/serialized-`$implRef` SES leaf invocation (W1b production leaf path).
+  R-SEAM-2 (per-trigger delta) and R-SEAM-3 (per-path label emit / OQ-4) ride
+  along with whichever gap first needs correct incremental reactive re-eval.
+
+Step 1 (flagged dispatch for the non-collection subset + instrumentation +
+differential/reactivity/fallback test) is delegated as workflow `wjvg8vak9`
+(impl + perspective-diverse safety/correctness review); coordinator gates on the
+full flag-off suite (== baseline) + the flag-on census run + a runner.ts diff
+audit before committing.
+
 ## D-SEAM — scheduler/runtime seam, re-verified against landed code (W0.5, 2026-06-23)
 
 From the `reverify-scheduler-seam` workflow (4 parallel readers + synthesis,
