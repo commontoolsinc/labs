@@ -3,7 +3,8 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
-  hasReactiveCollectionProvenance,
+  getTypeAtLocationWithFallback,
+  isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
@@ -912,6 +913,41 @@ export function isArrayMethodValueLiftOwner(
     owner === "array-method-callback-value";
 }
 
+/**
+ * CT-1779: does a `array-method-callback-value` candidate RESOLVE to a collection?
+ *
+ * The lift must be declined only for COLLECTION-valued callback returns: a
+ * `flatMap(i => i.tags ?? [])` whose `??` resolves to an array MUST stay
+ * structural (`i.key("tags") ?? []`) so the runtime `*WithPattern` flattens the
+ * reactive collection. Keying on the RESULT type — rather than operand provenance,
+ * the CT-1777 stopgap (`hasReactiveCollectionProvenance`, which fired for *any*
+ * `??` over a reactive operand) — is what lets a SCALAR `??` through: a
+ * `map(v => v.name ?? "default")` resolves to `string`, so it is lifted and the
+ * `?? default` fallback runs on the resolved value instead of going inert.
+ * Comparison/arithmetic/unary results are never collections, so they are
+ * unaffected, exactly as before.
+ *
+ * Resolution uses `getTypeAtLocationWithFallback` (not a bare `getTypeAtLocation`)
+ * so the synthetic destructure-lowered lift params the checker types as `any`
+ * (#4244) still resolve; the collection test itself — including the union-of-arrays
+ * case a bare `isArrayType` would miss — is shared with the sibling lowering and
+ * provenance sites via `isCollectionType`.
+ */
+function arrayMethodCallbackValueResolvesToCollection(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  return isCollectionType(
+    getTypeAtLocationWithFallback(
+      expression,
+      context.checker,
+      context.options.state?.typeRegistry,
+      context.options.logger,
+    ),
+    context.checker,
+  );
+}
+
 function classifyHelperOwnedExpressionSiteHandling(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -1140,16 +1176,20 @@ export function classifyExpressionSiteHandling(
   // lowered (the runtime *WithPattern flatten/map depends on it):
   //   - control flow: `!controlFlowRewriteRoot` drops conditionals and logical
   //     `&&`/`||` (they lower via ifElse/unless, which already lift);
-  //   - provenance: `!hasReactiveCollectionProvenance` drops `??` fallbacks whose
-  //     result is a reactive collection (e.g. `flatMap(i => i.tags ?? [])`, which
-  //     must stay `i.key("tags") ?? []`). Comparison/arithmetic/unary results are
-  //     never collections, so this never blocks them.
+  //   - result type (CT-1779): `!arrayMethodCallbackValueResolvesToCollection`
+  //     drops only `??` fallbacks whose RESULT is a reactive collection (e.g.
+  //     `flatMap(i => i.tags ?? [])`, which must stay `i.key("tags") ?? []`), while
+  //     still lifting a SCALAR `??` (`map(v => v.name ?? "default")` resolves to
+  //     `string`, so the `?? default` fallback runs on the resolved value). CT-1777
+  //     keyed this on operand provenance (`hasReactiveCollectionProvenance`), which
+  //     over-excluded scalar `??`; comparison/arithmetic/unary results are never
+  //     collections, so this never blocks them either way.
   if (
     siteInfo.arrayMethodOwned &&
     !siteInfo.controlFlowRewriteRoot &&
     isValueComputationExpressionKind(expression) &&
     hasReactiveComputationToLift(getAnalysis()) &&
-    !hasReactiveCollectionProvenance(expression, context.checker)
+    !arrayMethodCallbackValueResolvesToCollection(expression, context)
   ) {
     return ownedDecision("array-method-callback-value", true);
   }
