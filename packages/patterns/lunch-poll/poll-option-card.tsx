@@ -1,8 +1,5 @@
 import {
   computed,
-  Default,
-  fetchData,
-  generateText,
   NAME,
   pattern,
   type Stream,
@@ -15,74 +12,12 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
-  SetOptionUrlEvent,
   Vote,
   VoteColor,
 } from "./main.tsx";
 
 /** Shared per-session target cell used for one open option editor at a time. */
 export type PollOptionLinkTargetCell = Writable<string | null>;
-
-/** Shared per-session draft text cell used by the option link editor. */
-export type PollOptionNameCell = Writable<string | Default<"">>;
-
-/** Parent-owned counter cell that retriggers admin homepage lookup. */
-export type PollOptionHomePageRefreshCell = Writable<number>;
-
-interface WebSearchResponse {
-  results?: Array<{ title?: string; url?: string; description?: string }>;
-}
-
-const trimmedName = (n: string | undefined) => (n ?? "").trim();
-
-const homePageLookupUrlFor = (
-  isAdmin: boolean,
-  _refresh: number,
-  storedUrl: string | undefined,
-  overrideUrl: string | undefined,
-  endpoint: string,
-): string =>
-  isAdmin && !trimmedName(storedUrl) && !trimmedName(overrideUrl)
-    ? endpoint
-    : "";
-
-const homePageVerifierSystem =
-  "You verify restaurant website search results. Choose the restaurant's own " +
-  "official website only when it is clear from the candidate URL, title, and " +
-  "description. Reject directories, review sites, delivery apps, reservation " +
-  "sites, social media, maps, unrelated restaurants, and similarly named " +
-  "businesses. Answer with exactly one candidate number, or NONE.";
-
-const homePageVerifierPrompt = (
-  title: string,
-  city: string,
-  refresh: number,
-  candidates: WebSearchResponse["results"],
-): string => {
-  const rows = (candidates ?? [])
-    .map((candidate, index) =>
-      typeof candidate?.url === "string" && candidate.url.length > 0
-        ? (
-          `${index + 1}. URL: ${candidate.url}\n` +
-          `   Title: ${candidate.title ?? ""}\n` +
-          `   Description: ${(candidate.description ?? "").slice(0, 300)}`
-        )
-        : ""
-    )
-    .filter((row) => row !== "");
-  if (rows.length === 0) return "";
-  return `Restaurant: ${title}\nCity: ${city}\nRefresh: ${refresh}\n\nCandidates:\n${
-    rows.join("\n")
-  }\n\nReturn only the candidate number, or NONE.`;
-};
-
-function toHomepage(url: string): string {
-  try {
-    return new URL(url).origin + "/";
-  } catch {
-    return url;
-  }
-}
 
 const myVoteFor = (
   votes: readonly Vote[],
@@ -99,9 +34,9 @@ const myVoteFor = (
  * PollOptionCard renders one complete ranked restaurant option row.
  *
  * Use it when a parent pattern already owns option, vote, viewer, and admin
- * state and wants composed UI for voting, homepage display/edit/lookup, and
- * admin-only remove/history actions. This is not a standalone vote engine;
- * durable mutations happen through the input streams supplied by the parent.
+ * state and wants composed UI for voting and admin-only remove/history actions.
+ * This is not a standalone vote engine; durable mutations happen through the
+ * input streams supplied by the parent.
  */
 
 /**
@@ -114,7 +49,7 @@ const myVoteFor = (
  * cell.
  */
 export interface PollOptionCardInput {
-  /** Option record to render and enrich. */
+  /** Option record to render. */
   option: Option;
 
   /** One-based display rank supplied by the parent's ranking computation. */
@@ -123,7 +58,7 @@ export interface PollOptionCardInput {
   /** Resolved current viewer name; required for per-option vote styling. */
   me: string;
 
-  /** Whether the current viewer is allowed to vote and edit links. */
+  /** Whether the current viewer is allowed to vote. */
   isJoined: boolean;
 
   /** Whether the current viewer owns admin-only actions. */
@@ -131,21 +66,6 @@ export interface PollOptionCardInput {
 
   /** Shared vote list used to compute this viewer's selected vote. */
   votes: readonly Vote[];
-
-  /** Human-readable city label used for homepage lookup and map fallback. */
-  cityLabel: string;
-
-  /** Endpoint used by admins to search for official restaurant homepages. */
-  searchEndpoint: string;
-
-  /** Parent-owned counter cell; increments force homepage lookup to rerun. */
-  homePageRefresh: PollOptionHomePageRefreshCell;
-
-  /** Per-session option id whose homepage editor is open. */
-  linkEditTarget: PollOptionLinkTargetCell;
-
-  /** Per-session homepage URL draft shared across option editors. */
-  linkDraft: PollOptionNameCell;
 
   /** Per-session option id awaiting admin remove confirmation. */
   removeConfirmTarget: PollOptionLinkTargetCell;
@@ -158,19 +78,12 @@ export interface PollOptionCardInput {
 
   /** Parent-owned admin stream that records this option in visit history. */
   logVisit: Stream<LogVisitEvent>;
-
-  /** Parent-owned stream that saves a viewer-edited homepage override. */
-  setOptionUrl: Stream<SetOptionUrlEvent>;
-
-  /** Parent-owned admin stream that persists an auto-discovered homepage. */
-  setOptionHomePageUrl: Stream<SetOptionUrlEvent>;
 }
 
 /**
  * Outputs for one rendered ranked option row.
  *
- * Parents normally embed this sub-pattern with JSX. Use function-call
- * instantiation only when reading `homePageUrl`.
+ * Parents normally embed this sub-pattern with JSX.
  */
 export interface PollOptionCardOutput {
   /** Human-readable pattern name, matching the option title. */
@@ -178,9 +91,6 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
-
-  /** Display homepage URL after stored, edited, or verified lookup resolution. */
-  homePageUrl: string;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -192,124 +102,16 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       isJoined,
       isAdmin,
       votes,
-      cityLabel,
-      searchEndpoint,
-      homePageRefresh,
-      linkEditTarget,
-      linkDraft,
       removeConfirmTarget,
       castVote,
       removeOption,
       logVisit,
-      setOptionUrl,
-      setOptionHomePageUrl,
     },
   ) => {
     const oid = option.id;
     const optionTitle = option.title;
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
-    const refresh = computed(() => Number(homePageRefresh.get() ?? 0));
-
-    const homePageSearch = fetchData<WebSearchResponse>({
-      url: computed(() =>
-        homePageLookupUrlFor(
-          isAdmin,
-          refresh,
-          option.homePageUrl,
-          option.homePageUrlOverride,
-          searchEndpoint,
-        )
-      ),
-      mode: "json",
-      options: {
-        method: "POST",
-        mutexTimeoutMs: 30_000,
-        headers: computed(() => ({
-          "Content-Type": "application/json",
-          "X-Lunch-Poll-Refresh": String(refresh),
-        })),
-        body: computed(() => ({
-          query:
-            `official website of the restaurant "${option.title}" in ${cityLabel}`,
-          max_results: 4,
-        })),
-      },
-    });
-
-    const homePageVerifier = generateText({
-      system: homePageVerifierSystem,
-      prompt: computed(() => {
-        if (
-          !homePageLookupUrlFor(
-            isAdmin,
-            refresh,
-            option.homePageUrl,
-            option.homePageUrlOverride,
-            searchEndpoint,
-          )
-        ) return "";
-        if (homePageSearch.pending) return "";
-        return homePageVerifierPrompt(
-          option.title,
-          cityLabel,
-          refresh,
-          homePageSearch.result?.results,
-        );
-      }),
-    });
-
-    const fetchedHomePageUrl = computed(() => {
-      if (
-        !homePageLookupUrlFor(
-          isAdmin,
-          refresh,
-          option.homePageUrl,
-          option.homePageUrlOverride,
-          searchEndpoint,
-        )
-      ) return "";
-      if (homePageSearch.pending || homePageVerifier.pending) {
-        return "";
-      }
-      const choice = Number(trimmedName(homePageVerifier.result));
-      const url = Number.isInteger(choice) && choice > 0
-        ? homePageSearch.result?.results?.[choice - 1]?.url
-        : "";
-      return typeof url === "string" && url ? toHomepage(url) : "";
-    });
-
-    const displayHomePageUrl = computed(() => {
-      const stored = trimmedName(option.homePageUrl);
-      if (stored) return stored;
-      const fetched = fetchedHomePageUrl;
-      if (fetched) {
-        setOptionHomePageUrl.send({
-          optionId: oid,
-          url: fetched,
-        });
-        return fetched;
-      }
-      return "";
-    });
-
-    const homeUrl = computed(() => {
-      const o = trimmedName(option.homePageUrlOverride);
-      if (o) return o;
-      const stored = trimmedName(option.homePageUrl);
-      if (stored) return stored;
-      return `https://www.google.com/maps/search/?api=1&query=${
-        encodeURIComponent(`${option.title} ${cityLabel}`)
-      }`;
-    });
-
-    const isEditingLink = computed(() => linkEditTarget.get() === option.id);
-    const homeLabel = computed(() => {
-      if (trimmedName(option.homePageUrlOverride)) {
-        return "🔗 Website (edited)";
-      }
-      return trimmedName(option.homePageUrl) ? "🔗 Website" : "🔎 Find on Maps";
-    });
 
     return {
       [NAME]: optionTitle,
@@ -325,7 +127,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             alignItems: "center",
             gap: "10px",
           }}
-          data-homepage-sync={displayHomePageUrl}
         >
           <span
             style={{
@@ -353,97 +154,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             >
               {optionTitle}
             </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: "8px",
-                marginTop: "2px",
-                flexWrap: "wrap",
-              }}
-            >
-              <a
-                href={homeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  fontSize: "11px",
-                  color: "#2f6f4e",
-                  textDecoration: "underline",
-                }}
-              >
-                {homeLabel}
-              </a>
-              {isJoined
-                ? (
-                  <button
-                    type="button"
-                    aria-label="Edit homepage link"
-                    title="Edit link"
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: "#9ca3af",
-                      cursor: "pointer",
-                      fontSize: "11px",
-                      padding: 0,
-                    }}
-                    onClick={() => linkEditTarget.set(option.id)}
-                  >
-                    ✎ edit
-                  </button>
-                )
-                : null}
-            </div>
-            {isEditingLink
-              ? (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "6px",
-                    alignItems: "center",
-                    marginTop: "4px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <cf-input
-                    $value={linkDraft}
-                    placeholder="Paste a homepage URL…"
-                    aria-label="Homepage URL"
-                    timing-strategy="immediate"
-                    style="flex:1; min-width:160px;"
-                  />
-                  <cf-button
-                    size="sm"
-                    variant="primary"
-                    onClick={() =>
-                      setOptionUrl.send({
-                        optionId: option.id,
-                      })}
-                  >
-                    Save
-                  </cf-button>
-                  <cf-button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      setOptionUrl.send({
-                        optionId: option.id,
-                        url: "",
-                      })}
-                  >
-                    Clear
-                  </cf-button>
-                  <cf-button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => linkEditTarget.set(null)}
-                  >
-                    Cancel
-                  </cf-button>
-                </div>
-              )
-              : null}
             <div
               style={{
                 fontSize: "11px",
@@ -600,7 +310,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
-      homePageUrl: displayHomePageUrl,
     };
   },
 );
