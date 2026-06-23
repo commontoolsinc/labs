@@ -521,6 +521,7 @@ export class XHeaderView extends BaseView {
   private accessor _localIsFavorite: boolean | undefined = undefined;
 
   private _unsubscribeFavorites: (() => void) | undefined;
+  private _favoritesSubscriptionRequested = false;
 
   /** Subscribe to the favorites list so the menu reflects current state. */
   private _setupFavoritesSubscription(): void {
@@ -533,6 +534,22 @@ export class XHeaderView extends BaseView {
         this._localIsFavorite = undefined;
         this.requestUpdate();
       });
+  }
+
+  /**
+   * Subscribe to favorites the first time a surface that shows them is opened.
+   * Reading favorites resolves the home space's default pattern, which on a
+   * fresh space the runtime has to create — a one-time cost that, run eagerly
+   * at login, lands in the same worker as the user's first write to a piece
+   * and delays it. Deferring the subscription to the first menu open keeps that
+   * work off the first-write path; the favorite toggle creates the pattern on
+   * demand when the user actually favorites something.
+   */
+  private _ensureFavoritesSubscription(): void {
+    if (this._favoritesSubscriptionRequested) return;
+    if (!this.rt) return;
+    this._favoritesSubscriptionRequested = true;
+    this._setupFavoritesSubscription();
   }
 
   /** Unsubscribe from favorites when component disconnects or runtime changes. */
@@ -561,7 +578,6 @@ export class XHeaderView extends BaseView {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this._setupFavoritesSubscription();
     this.addEventListener("keydown", this._handleKeyDown);
     globalThis.addEventListener("resize", this._handleResize);
     globalThis.addEventListener("click", this._closeHeaderPieceDropdown);
@@ -612,7 +628,11 @@ export class XHeaderView extends BaseView {
       this._serverFavorites = [];
       this._localIsFavorite = undefined;
       this._piecesCache = undefined;
-      this._setupFavoritesSubscription();
+      this._cleanupFavoritesSubscription();
+      this._favoritesSubscriptionRequested = false;
+      // If the menu is already open when a runtime arrives, the favorites
+      // surface is showing, so subscribe now; otherwise wait for the first open.
+      if (this.menuOpen) this._ensureFavoritesSubscription();
     }
     // One runtime serves every space, so a space switch no longer
     // replaces rt — the per-space pieces cache must invalidate on the
@@ -730,6 +750,7 @@ export class XHeaderView extends BaseView {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = true;
+    this._ensureFavoritesSubscription();
     this.updateComplete.then(() => {
       this.renderRoot.querySelector<HTMLElement>(".menu-close")?.focus();
     });
@@ -871,6 +892,9 @@ export class XHeaderView extends BaseView {
     const currentlyFavorite = this._isFavorite();
     this._localIsFavorite = !currentlyFavorite;
     this._isFavoriteLoading = true;
+    // Favoriting touches the home pattern anyway; start reflecting server
+    // state from here on if the menu was never opened.
+    this._ensureFavoritesSubscription();
 
     try {
       if (currentlyFavorite) {
