@@ -171,6 +171,16 @@ export type RuntimeTelemetryMarker = {
   writesTruncated?: boolean;
   error?: string;
   permanentRejection?: "origin-committed" | "receipt-exists";
+  /** Backpressure attempt count (1-based) for a transient-conflict retry. */
+  retryAttempt?: number;
+  /** Backoff delay applied before the next retry, in milliseconds. */
+  backoffMs?: number;
+  /**
+   * Set when the commit reached a terminal outcome: `permanent` for a
+   * never-retried precondition failure, `convergence` for a transient conflict
+   * that exhausted the retry window and surfaced a terminal error.
+   */
+  terminal?: "permanent" | "convergence";
 } | {
   type: "scheduler.event.preflight";
   handlerId: string;

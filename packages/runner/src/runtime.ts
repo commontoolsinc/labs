@@ -47,6 +47,10 @@ import {
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
+import {
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
@@ -203,6 +207,12 @@ export interface RuntimeOptions {
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
+  /**
+   * Tuning for committed-write backpressure under contention. Unset fields fall
+   * back to DEFAULT_COMMIT_BACKPRESSURE; tests use this to shrink the backoff
+   * and retry window. See scheduler/backpressure.ts.
+   */
+  commitBackpressure?: Partial<CommitBackpressurePolicy>;
 }
 
 export interface CfcRuntimeStats {
@@ -313,6 +323,8 @@ export class Runtime {
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
+  /** Resolved committed-write backpressure policy (all fields present). */
+  readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
@@ -357,6 +369,10 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+
+    this.commitBackpressure = resolveCommitBackpressure(
+      options.commitBackpressure,
+    );
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);

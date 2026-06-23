@@ -16,6 +16,12 @@ export function isPermanentRejection(
  * the compute's (still-subscribed) reads, so normal reader-dirty propagation
  * re-runs it with the latest state. Other non-permanent errors are not
  * re-triggered that way and still warrant a retry.
+ *
+ * The event-handler commit path treats the same rejection as the signal to
+ * apply committed-write backpressure: re-running the handler against fresh
+ * confirmed state and committing again can succeed, so a conflict is retried
+ * with backoff rather than dropped. Handler-initiated aborts and system errors
+ * are not conflicts and keep their bounded retry budget.
  */
 export function isConflictRejection(
   error: { name?: string } | undefined | null,
