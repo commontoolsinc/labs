@@ -1,7 +1,13 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricSpecialObject, type FabricValue } from "./interface.ts";
+import {
+  type FabricArray,
+  type FabricObject,
+  FabricSpecialObject,
+  type FabricValue,
+} from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
+import { toCompactDebugString } from "./value-debug.ts";
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.
@@ -68,44 +74,77 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   // The canonical content hash is the general object comparator, but it's worth
   // a few cheap checks first.
 
-  // When both sides are deep-frozen, the hash is cacheable (frozen ≈
-  // non-ephemeral), so hashing pays for itself even on a repeat — take it early.
   if (isDeepFrozen(a) && isDeepFrozen(b)) {
+    // Both sides are deep-frozen, the hash is cacheable (frozen ~==
+    // non-ephemeral), so hashing can be reasonably assumed to pay for itself.
     return hashStringOf(a) === hashStringOf(b);
   }
 
   // Otherwise, short-circuit the mismatched subtypes that can never be equal,
   // without paying for a hash.
-  const aIsSpecial = a instanceof FabricSpecialObject;
-  const bIsSpecial = b instanceof FabricSpecialObject;
-  if (aIsSpecial || bIsSpecial) {
-    // A special object and a plain object can never share a hash (distinct type
-    // tags), so a subtype mismatch is unequal outright.
-    if (aIsSpecial !== bIsSpecial) return false;
-    // Both special: two different concrete classes have distinct type tags and
-    // can never hash-equal, so short-circuit without hashing. Same-class
-    // instances fall through to the hash compare below.
-    if (a.constructor !== b.constructor) return false;
-  } else {
-    // Both are non-`null`, non-special objects. An array and a non-array can't
-    // be equal, nor can two arrays of differing length or two records of
-    // differing key count.
-    const aIsArray = Array.isArray(a);
-    const bIsArray = Array.isArray(b);
-    if (aIsArray !== bIsArray) return false;
-    if (aIsArray && bIsArray) {
-      if (a.length !== b.length) return false;
-    } else {
-      // A non-array object here must be a plain record to be a `FabricValue`. A
-      // stray class instance (`Map`, `Date`, a user class, …) is reachable only
-      // via an unsound cast; reject it explicitly rather than treating it as an
-      // empty record.
-      if (!isPlainObject(a) || !isPlainObject(b)) {
-        throw new Error("Cannot compare a non-record object value.");
+
+  const subtype = objectSubtypeOf(a);
+  const bSubtype = objectSubtypeOf(b);
+
+  if (subtype !== bSubtype) {
+    // Different subtypes can't possibly be equal.
+    return false;
+  }
+
+  switch (subtype) {
+    case "array": {
+      // Alas, casts are required because TS doesn't know the correspondence
+      // between subtype names and type restrictions.
+      const aArray = a as FabricArray;
+      const bArray = b as FabricArray;
+      if (aArray.length !== bArray.length) {
+        // Arrays can't possibly be equal if lengths are different.
+        return false;
       }
-      if (Object.keys(a).length !== Object.keys(b).length) return false;
+      break;
+    }
+
+    case "plain": {
+      // Alas, casts are required because TS doesn't know the correspondence
+      // between subtype names and type restrictions.
+      const aObject = a as FabricObject;
+      const bObject = a as FabricObject;
+      if (Object.keys(aObject).length !== Object.keys(bObject).length) {
+        // Plain objects can't possibly be equal if they have different numbers
+        // of properties.
+        return false;
+      }
+      break;
+    }
+
+    case "special": {
+      if (a.constructor !== b.constructor) {
+        // `FabricSpecialObject`s (instances in general, really) can't possibly
+        // be equal if they are of different concrete classes.
+        return false;
+      }
+      break;
     }
   }
 
+  // No quick check managed to disqualify full-scale comparison. So it goes.
   return hashStringOf(a) === hashStringOf(b);
+}
+
+/**
+ * Helper for {@link #valueEqual}, which classifies object subtypes. This
+ * `throw`s given an object that shouldn't have been passed as a `FabricValue`.
+ */
+function objectSubtypeOf(
+  value: FabricObject | FabricArray | FabricSpecialObject,
+): "array" | "plain" | "special" {
+  if (value instanceof FabricSpecialObject) {
+    return "special";
+  } else if (Array.isArray(value)) {
+    return "array";
+  } else if (isPlainObject(value)) {
+    return "plain";
+  } else {
+    throw new Error(`Cannot compare value ${toCompactDebugString(value)}`);
+  }
 }
