@@ -93,7 +93,7 @@ const PROGRAM = {
 
 /** Synthesize the engine's `CacheableModule[]` from an authored program. */
 function toModules(
-  program: typeof PROGRAM,
+  program: RuntimeProgram,
 ): { modules: CacheableModule[]; entryIdentity: string } {
   const ids = computeModuleHashes(program);
   const edges = resolveModuleImports(program);
@@ -879,5 +879,61 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     wtxB2.prepareCfc();
     const result = await wtxB2.commit();
     expect(result.error).toBe(undefined);
+  });
+
+  it("cold writeback recovers from a partial source cache already committed by another replica", async () => {
+    const { modules, entryIdentity } = toModules(E2E_PROGRAM);
+    const utilModule = modules.find((module) => module.filename === "/util.ts");
+    expect(utilModule).toBeDefined();
+
+    // A partially committed cache graph: only an imported source doc is present
+    // in the shared space. Runtime B has not pulled it yet, so its local replica
+    // would otherwise build the writeback transaction from a stale seq-0 view.
+    const partialTx = rtA.edit();
+    writeSourceDocs(
+      rtA,
+      sharedSpace,
+      [utilModule!],
+      utilModule!.identity,
+      partialTx,
+    );
+    rtA.prepareTxForCommit(partialTx);
+    const partialResult = await partialTx.commit();
+    expect(partialResult.error).toBe(undefined);
+    await smA.synced();
+
+    const txB = rtB.edit();
+    const compiled = await rtB.patternManager.compilePattern(E2E_PROGRAM, {
+      space: sharedSpace,
+      tx: txB,
+    });
+    await txB.commit();
+    expect(typeof compiled).toBe("function");
+    expect(rtB.patternManager.getCompileCacheStats()).toEqual({
+      hits: 0,
+      misses: 1,
+      byIdentityHits: 0,
+    });
+
+    const readTx = rtB.edit();
+    const source = await loadVerifiedSourceClosure(
+      rtB,
+      sharedSpace,
+      entryIdentity,
+      readTx,
+    );
+    const compiledClosure = await loadCompiledClosure(
+      rtB,
+      sharedSpace,
+      entryIdentity,
+      { runtimeVersion: RTVER },
+      readTx,
+    );
+    readTx.abort?.();
+
+    expect(source?.has(entryIdentity)).toBe(true);
+    expect(source?.has(utilModule!.identity)).toBe(true);
+    expect(compiledClosure.has(entryIdentity)).toBe(true);
+    expect(compiledClosure.has(utilModule!.identity)).toBe(true);
   });
 });

@@ -300,15 +300,25 @@ describe("PiecesController.recreateDefaultPattern", () => {
   });
 
   it("should explain storage transaction errors when updating defaultPattern fails", async () => {
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     const storageError = {
       name: "StorageTransactionAborted" as const,
       message: "commit rejected for test",
       reason: new Error("storage reason"),
     };
-    runtime.editWithRetry = (() =>
-      Promise.resolve({
+    let editWithRetryCalls = 0;
+    runtime.editWithRetry = ((fn, maxRetries) => {
+      editWithRetryCalls++;
+      // recreateDefaultPattern first unlinks any existing default, then cold
+      // compile writes its cache. This test targets the following transaction:
+      // linking the newly-created piece as defaultPattern.
+      if (editWithRetryCalls < 3) {
+        return originalEditWithRetry(fn, maxRetries);
+      }
+      return Promise.resolve({
         error: storageError,
-      })) as typeof runtime.editWithRetry;
+      });
+    }) as typeof runtime.editWithRetry;
 
     try {
       await controller.recreateDefaultPattern({
@@ -324,6 +334,8 @@ describe("PiecesController.recreateDefaultPattern", () => {
         "StorageTransactionAborted",
       );
       expect((error as Error).cause).toBe(storageError);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
     }
   });
 });
