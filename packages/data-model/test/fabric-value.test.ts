@@ -6,6 +6,7 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 
 describe("fabric-value", () => {
@@ -235,8 +236,8 @@ describe("fabric-value", () => {
         });
       });
 
-      describe("given two distinct Fabric* subtypes", () => {
-        it("are never equal", () => {
+      describe("given two distinct `FabricPrimitive` subtypes", () => {
+        it("returns `false`", () => {
           expect(
             valueEqual(
               new FabricBytes(new Uint8Array([1])),
@@ -245,6 +246,18 @@ describe("fabric-value", () => {
           )
             .toBe(false);
           expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
+            .toBe(false);
+        });
+      });
+
+      describe("given two distinct mutable `FabricInstance` subtypes", () => {
+        it("returns `false`", () => {
+          expect(
+            valueEqual(
+              FabricError.fromNativeError(new Error("eek")),
+              new UnknownValue("Unknownie@123", null),
+            ),
+          )
             .toBe(false);
         });
       });
