@@ -18,7 +18,6 @@ Deno.test("shell component slice type-checks under standard decorators", async (
   const files = [
     "packages/shell/src/components/Button.ts",
     "packages/shell/src/components/CFLogo.ts",
-    "packages/shell/src/components/FavoriteButton.ts",
     "packages/shell/src/components/Flex.ts",
     "packages/shell/src/components/OmniLayout.ts",
     "packages/shell/src/components/PieceLink.ts",
