@@ -143,13 +143,52 @@ interpreter mode):
   [06](./06-migration-plan.md) §4 oracle), with zero label *narrowing* that lacks
   a passing trust gate.
 
-## 6. Measurement plan during implementation
+## 6. Spike validation (measured, 2026-06-23)
+
+A throwaway spike (`packages/runner/test/spike-map-interpreted.test.ts`)
+implemented `mapInterpreted` — a test-only builtin that collapses `map`-of-leaf
+into one coordinator node computing the leaf inline and holding results in one
+inline container (no per-element child pattern). Measured against legacy `map`
+in the same harness:
+
+| | docs | sched nodes (computation) | load | edit (nodes / docs) |
+| --- | --- | --- | --- | --- |
+| legacy `map` N=500 | 1505 | 2008 (501) | 948 ms | 4 / 2 |
+| `mapInterpreted` N=500 | **5** | **508 (1)** | **87 ms** | 3 / 2 |
+
+- **Documents: slope `3.0/element → 0.0`** — flat at 5 regardless of N (1505 → 5
+  at N=500). The scaffolding explosion is eliminated. **T-DOCS validated.**
+- **Computation nodes: N → 1** (one coordinator). **T-NODES validated** for the
+  computation tier. The residual total-node slope (~1.0/element) is the **N
+  genuine input cells** (the read-index), *exactly* the `O(distinct external
+  reads)` the design predicts stays — not scaffolding.
+- **Load ~11× faster** at N=500 (948 → 87 ms). **T-LOAD** directionally validated
+  (cold load is now leaf-CPU + input reads, no per-element instantiation).
+- **Edit stays `O(1)`** (3 nodes / 2 docs at every N). **T-EDIT preserved.**
+- **Falsifier disproven, empirically:** the container edit wrote at **pathLen 2**
+  — a path-scoped array patch at the index, not a whole-container rewrite. With
+  `buildPatchOperation` emitting array-aware patches and `patchOverlapsRead`
+  scoping conflicts by path, inline-value containers are viable even for large
+  values.
+
+**Not validated by the spike (deliberately):** CFC per-element labels — the naive
+coordinator reads the whole list in one transaction and would *smear* labels;
+pointwise soundness requires the read-isolation mechanism (§[01](./01-requirements.md)
+OQ-4), which is an implementation effort, not a spike. So **CFC soundness reduces
+entirely to OQ-4**; the footprint/load win and basic feasibility are confirmed.
+Also out of spike scope: filter/flatMap, control flow, nested patterns, scoped
+cells, the op passed in (leaf hardcoded), and externally-referenced element
+results.
+
+## 7. Measurement plan during implementation
 
 - Extend the harness with an **interpreter mode** so every row of §2 is measured
   for both models on identical patterns, producing the before/after table as a CI
-  artifact.
+  artifact (the spike §6 is the prototype of this).
 - Add the three spectrum workloads (§3) as fixtures: an unbounded-growth importer
   simulation (append M items, measure footprint + resume at M = 1k, 10k), a notes
   list, and a multi-user lunch-vote.
 - Track the per-document cost-model axes (§4) that change: observation row counts,
   conflict participants, sync FactSet size — not just raw document count.
+- Build the CFC differential oracle on a read-isolated `mapInterpreted` once OQ-4
+  has a mechanism: assert per-index labels match legacy (conf ⊇, integrity ⊆).
