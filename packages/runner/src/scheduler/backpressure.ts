@@ -37,6 +37,16 @@ export interface CommitBackpressurePolicy {
    * conflict for a given intent.
    */
   retryWindowMs: number;
+  /**
+   * Number of conflict retries attempted with no delay before backoff begins.
+   * A stale-basis conflict usually clears as soon as the fresh confirmed state
+   * arrives, so the first few retries fire immediately — the fast path the
+   * runtime had before backoff existed. Backoff (and its delays) only kick in
+   * once these immediate retries are exhausted, i.e. under sustained
+   * contention, where spacing retries out is what keeps the scheduler from
+   * busy-looping.
+   */
+  immediateRetries: number;
 }
 
 export const DEFAULT_COMMIT_BACKPRESSURE: CommitBackpressurePolicy = {
@@ -44,6 +54,7 @@ export const DEFAULT_COMMIT_BACKPRESSURE: CommitBackpressurePolicy = {
   maxDelayMs: 1_000,
   jitter: 0.5,
   retryWindowMs: 30_000,
+  immediateRetries: 5,
 };
 
 /**
@@ -65,7 +76,8 @@ export function resolveCommitBackpressure(
   const maxDelayMs = Math.max(baseDelayMs, merged.maxDelayMs);
   const jitter = Math.min(1, Math.max(0, merged.jitter));
   const retryWindowMs = Math.max(0, merged.retryWindowMs);
-  return { baseDelayMs, maxDelayMs, jitter, retryWindowMs };
+  const immediateRetries = Math.max(0, Math.floor(merged.immediateRetries));
+  return { baseDelayMs, maxDelayMs, jitter, retryWindowMs, immediateRetries };
 }
 
 /**

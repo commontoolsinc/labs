@@ -311,6 +311,55 @@ describe("committed-write backpressure", () => {
   );
 
   it(
+    "clears a small conflict burst on the immediate fast path without backoff",
+    async () => {
+      // A conflict that clears within the immediate-retry budget must converge
+      // without being parked for backoff. Delaying such a retry can keep it from
+      // landing inside a settle, which is what a multi-user settle relies on.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-fastpath-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+      // Three conflicts — within the default immediateRetries (5).
+      const injector = rejectServerTransacts(storageManager, 3, {
+        name: "ConflictError",
+        message: "forced small conflict burst",
+      });
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-fastpath:0:backpressure-fastpath-root",
+        );
+
+        await waitFor(
+          runtime,
+          () => piece.total() === 4,
+          `write did not land on the fast path ` +
+            `(total=${piece.total()}, rejected=${injector.rejected()})`,
+        );
+
+        expect(piece.total()).toBe(4);
+        expect(injector.rejected()).toBe(3);
+        // Every retry was immediate: no commit marker carried a backoff delay.
+        const backedOff = commitTelemetry.markers.some((marker) =>
+          ((marker as { backoffMs?: number }).backoffMs ?? 0) > 0
+        );
+        expect(backedOff).toBe(false);
+      } finally {
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
     "does not retry a permanent rejection and keeps it observable",
     async () => {
       const piece = buildCounterPiece(
