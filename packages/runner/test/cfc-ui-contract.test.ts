@@ -692,7 +692,6 @@ describe("CFC trusted UI event enforcement", () => {
                 $ctx: {
                   savedTitle: {
                     $alias: {
-                      cell: { "/": "cfc-ui-contract-context-document" },
                       path: ["argument", "savedTitle"],
                       schema: {
                         $ref: "#/$defs/TrustedAction",
@@ -772,7 +771,6 @@ describe("CFC trusted UI event enforcement", () => {
                 $ctx: {
                   messages: {
                     $alias: {
-                      cell: { "/": "cfc-ui-contract-context-array-document" },
                       path: ["argument", "messages"],
                       schema: {
                         type: "array",
