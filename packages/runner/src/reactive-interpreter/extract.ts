@@ -29,6 +29,7 @@ import type {
   ValueRef,
 } from "./rog.ts";
 import type { LeafImpl } from "./interpret.ts";
+import { isLegacyAlias } from "../link-types.ts";
 
 // The in-memory Pattern shape we read (a structural subset; see builder/types).
 interface RawModule {
@@ -108,6 +109,32 @@ function aliasToValueRef(
   alias: Record<string, unknown>,
   unrecognized: Set<string>,
 ): ValueRef | null {
+  // FAIL CLOSED on `defer` — a non-zero defer level means the alias resolves
+  // through one or more levels of nested-pattern indirection that the
+  // interpreter does NOT model (see builder/json-utils.ts:87-98, where `defer`
+  // is incremented during shadow-ref / nested-pattern serialization). Resolving
+  // it as if it were a level-0 (non-deferred) ref would silently point at the
+  // WRONG cell (not a throw, so the eligibility probe would not catch it).
+  // Record it as unrecognized so the pattern falls back to the legacy path,
+  // which handles deferred resolution.
+  //
+  // NOTE on `scope`: the fresh in-memory builder attaches `scope` to ordinary
+  // top-level argument/internal aliases (builder/pattern.ts:349) at the
+  // ELIGIBLE tier; that scope is the ambient/default frame the interpreter
+  // already resolves against, and the prod-wire oracle confirms those patterns
+  // interpret correctly. Failing closed on `scope` would regress real eligible
+  // patterns, so we do NOT — only `defer` is the unmodeled, production-reachable
+  // indirection that must fail closed here. `defer` is never emitted by the
+  // fresh top-level builder, so this never regresses a currently-eligible
+  // pattern.
+  // Type-agnostic: any present, non-zero `defer` fails closed (the builder only
+  // ever emits it as a number `(defer ?? 0) + 1`, but a hand-built / arbitrarily
+  // serialized alias could carry a non-number `defer` — that too must not be
+  // resolved as level-0).
+  if ("defer" in alias && alias.defer !== 0) {
+    unrecognized.add(JSON.stringify(Object.keys(alias).sort()));
+    return null;
+  }
   const path = ((alias.path as string[]) ?? []).map(String);
   if (alias.cell === "argument") return { kind: "argument", path };
   if (typeof alias.partialCause === "string") {
@@ -124,7 +151,32 @@ function aliasToValueRef(
   return null;
 }
 
-/** Best-effort: pull the first recognizable ValueRef out of a value/alias tree. */
+/** Marker recorded into `unrecognized` for a value that bears a `$alias` key but
+ * is NOT a canonical legacy alias (non-record / non-array-path payload) or that
+ * mixes `$alias` with sibling keys. Either makes the value unrepresentable as a
+ * structured input. Recorded → the pattern is ineligible → legacy fallback. */
+const MALFORMED_ALIAS_MARKER = '["$alias:malformed"]';
+
+/** True iff `obj` has a `$alias` own-key AND at least one OTHER own-key. Such an
+ * object is not a representable structured input: resolving the alias would
+ * silently discard the siblings. */
+function hasAliasMixedWithSiblings(obj: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(obj, "$alias")) return false;
+  for (const k of Object.keys(obj)) {
+    if (k !== "$alias") return true;
+  }
+  return false;
+}
+
+/** Best-effort: pull the first recognizable ValueRef out of a value/alias tree.
+ * Scalars become `const`; a canonical `$alias` payload becomes the recognized
+ * ValueRef (or null + an `unrecognized` entry). A value that bears a `$alias`
+ * key but is NOT canonical — a malformed payload (e.g. `{$alias:"str"}`,
+ * `{$alias:null}`) or `$alias` mixed with sibling keys — is RECORDED into
+ * `unrecognized` and returns null (never collapsed to const/partial construct).
+ * A plain *structured* (object/array) value with no `$alias` key returns null
+ * WITHOUT recording — `buildStructuredRef` handles those recursively and is
+ * responsible for recording any leaf it cannot represent. */
 function valueToRef(
   v: unknown,
   unrecognized: Set<string>,
@@ -133,23 +185,133 @@ function valueToRef(
     return { kind: "const", value: v };
   }
   const obj = v as Record<string, unknown>;
-  if (obj.$alias && typeof obj.$alias === "object") {
+  // Canonical legacy alias (sole concern of the interpreter): a record bearing
+  // `$alias` whose payload is itself a record with an array `path`. Use the
+  // SAME predicate the rest of the runtime uses so we never diverge.
+  if (isLegacyAlias(v)) {
+    // A canonical alias mixed with sibling keys is still not a representable
+    // single structured input — resolving it would drop the siblings.
+    if (hasAliasMixedWithSiblings(obj)) {
+      unrecognized.add(MALFORMED_ALIAS_MARKER);
+      return null;
+    }
     return aliasToValueRef(obj.$alias as Record<string, unknown>, unrecognized);
   }
-  return null; // structured input (object/array of refs) — W1 handles templates
+  // Bears a `$alias` key but is NOT a canonical alias (truthy non-record /
+  // missing-or-non-array path, e.g. `{$alias:"str"}`, `{$alias:null}`,
+  // `{$alias:{}}`). Unrepresentable — record, do not collapse.
+  if (Object.hasOwn(obj, "$alias")) {
+    unrecognized.add(MALFORMED_ALIAS_MARKER);
+    return null;
+  }
+  return null; // structured input (object/array of refs) — see buildStructuredRef
 }
 
-/** Collect ValueRefs from a node's input tree (one level of object/alias). */
-function inputRefs(inputs: unknown, unrecognized: Set<string>): ValueRef[] {
-  const out: ValueRef[] = [];
-  if (!inputs || typeof inputs !== "object") return out;
-  const top = valueToRef(inputs, unrecognized);
-  if (top) return [top];
-  for (const v of Object.values(inputs as Record<string, unknown>)) {
-    const r = valueToRef(v, unrecognized);
-    if (r) out.push(r);
+/**
+ * Reconstruct an arbitrary input value tree into a SINGLE ValueRef, LOSSLESSLY.
+ *
+ * Legacy passes a leaf ONE resolved structured value (`{a:<v>, b:<v>}` for
+ * `add({a,b})`). The ROG has no "structured" ValueRef kind, so we synthesize a
+ * `construct` op (object/array assembly) and reference its output — the same
+ * representation the pattern result uses. This way the leaf receives the exact
+ * keyed object/array legacy passes, not a positional alias list.
+ *
+ * Handles: scalars/consts, a single `$alias`, object-of-refs (keys preserved),
+ * array-of-refs, and arbitrary nesting / `$alias`-mixed-with-literals.
+ *
+ * FAIL-CLOSED CONTRACT (holds universally, not just for in-memory builder
+ * output): any value that cannot be faithfully represented as a ValueRef is
+ * recorded into `unrecognized` (via `valueToRef`/`aliasToValueRef`) and is NEVER
+ * silently dropped or collapsed to a `const undefined` / partial construct. A
+ * recorded entry makes the pattern ineligible → legacy fallback. This covers,
+ * in addition to the canonical-builder shapes:
+ *   - a malformed `$alias` payload (truthy non-record, or missing/non-array
+ *     `path` — e.g. `{$alias:"str"}`, `{$alias:null}`, `{$alias:{}}`),
+ *   - `$alias` mixed with sibling keys (resolving would drop the siblings),
+ *   - a canonical alias carrying a non-zero `defer` (serialized / nested-pattern
+ *     indirection the interpreter does not yet model — resolving as level-0
+ *     would point at the wrong cell). (`scope` is NOT a fail-closed trigger: the
+ *     fresh builder emits it on ordinary eligible-tier aliases and the
+ *     interpreter resolves against the ambient frame — see `aliasToValueRef`.)
+ * Plain scalars, incl. functions/symbols, become `const`, exactly the value
+ * legacy would pass. The canonical alias predicate (`isLegacyAlias`) is the same
+ * one the rest of the runtime uses, so eligibility never diverges from it.
+ */
+function buildStructuredRef(
+  v: unknown,
+  unrecognized: Set<string>,
+  ops: Op[],
+  nextSynthId: () => OpId,
+  bump: (k: OpKind | "unknown") => void,
+): ValueRef {
+  const direct = valueToRef(v, unrecognized);
+  if (direct) return direct;
+  // `direct` is null in exactly two cases:
+  //   1. a plain structured object/array (NO `$alias` own-key) — assemble below;
+  //   2. a value bearing a `$alias` own-key that `valueToRef` already RECORDED
+  //      into `unrecognized` (malformed payload, defer/scope, or alias mixed
+  //      with siblings). For (2) the graph is already ineligible; we must NOT
+  //      fall through to the object/array assembly below (that would emit a
+  //      bogus `{$alias: const(...)}` / partial construct). Surface a placeholder
+  //      so the type-checks before fallback hold — the recorded entry, not this
+  //      const, is what drives the (correct) legacy fallback.
+  const obj = v as Record<string, unknown>;
+  if (Object.hasOwn(obj, "$alias")) {
+    return { kind: "const", value: undefined };
   }
-  return out;
+
+  if (Array.isArray(v)) {
+    const items = v.map((el) =>
+      buildStructuredRef(el, unrecognized, ops, nextSynthId, bump)
+    );
+    const id = nextSynthId();
+    ops.push({
+      id,
+      kind: "construct",
+      inputs: items,
+      outSchema: true as unknown as Op["outSchema"],
+      detail: { kind: "construct", template: { shape: "array", items } },
+    });
+    bump("construct");
+    return { kind: "opOut", op: id, path: [] };
+  }
+
+  const fields: Record<string, ValueRef> = {};
+  for (const [k, el] of Object.entries(obj)) {
+    fields[k] = buildStructuredRef(el, unrecognized, ops, nextSynthId, bump);
+  }
+  const id = nextSynthId();
+  ops.push({
+    id,
+    kind: "construct",
+    inputs: Object.values(fields),
+    outSchema: true as unknown as Op["outSchema"],
+    detail: { kind: "construct", template: { shape: "object", fields } },
+  });
+  bump("construct");
+  return { kind: "opOut", op: id, path: [] };
+}
+
+/**
+ * Build the single structured input ValueRef for a node, LOSSLESSLY.
+ *
+ * A node's `inputs` is the structured value its module receives. We reconstruct
+ * it into one ValueRef (synthesizing construct ops for object/array shapes) so
+ * the evaluator can pass the leaf the exact value legacy passes. Returns a
+ * single-element array (one structured input) so the existing `op.inputs` shape
+ * and the single-input leaf contract are preserved. An empty/undefined input
+ * tree yields no inputs (a zero-arg leaf, called with undefined).
+ */
+function inputRefs(
+  inputs: unknown,
+  unrecognized: Set<string>,
+  ops: Op[],
+  nextSynthId: () => OpId,
+  bump: (k: OpKind | "unknown") => void,
+): ValueRef[] {
+  if (inputs === undefined || inputs === null) return [];
+  const ref = buildStructuredRef(inputs, unrecognized, ops, nextSynthId, bump);
+  return [ref];
 }
 
 /** Map an `outputs` alias to the internal-cell name it writes (the producing
@@ -193,6 +355,12 @@ export function extractRog(pattern: RawPattern): ExtractResult {
     byKind[k] = (byKind[k] ?? 0) + 1;
   };
 
+  // Synthesized ops (result construct + per-leaf structured-input constructs)
+  // are NOT Pattern nodes; they get unique negative ids so they never collide
+  // with node ids (== node index, >= 0) in the topo/byId maps.
+  let synthCounter = 0;
+  const nextSynthId = (): OpId => --synthCounter; // -1, -2, -3, ...
+
   function build(p: RawPattern, depth: number): Rog {
     const ops: Op[] = [];
     const nodes = p.nodes ?? [];
@@ -207,10 +375,34 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       // `internal` ValueRefs (result/input refs to derived cells) resolve.
       if (depth === 0) {
         const outName = outputInternalName(node.outputs);
-        if (outName !== null) internalToOp.set(outName, i);
+        if (outName !== null) {
+          internalToOp.set(outName, i);
+        } else if (
+          node.outputs && typeof node.outputs === "object" &&
+          Object.hasOwn(node.outputs as object, "$alias") &&
+          !isLegacyAlias(node.outputs)
+        ) {
+          // FAIL CLOSED: the output bears a `$alias` key but is not a canonical
+          // alias (malformed payload, e.g. `{$alias:"str"}`). Its internal name
+          // can't be resolved, so any `internal` ref to this node's output would
+          // silently resolve to `undefined` (interpret.ts) with no throw — a
+          // silent mis-eval the dry-run probe can't catch. Record it so the
+          // pattern is ineligible → legacy fallback. (Canonical builder outputs
+          // are always `{$alias:{partialCause,…}}`, so this never fires on a real
+          // pattern.)
+          unrecognized.add(MALFORMED_ALIAS_MARKER);
+        }
       }
 
-      const inputs = inputRefs(node.inputs, unrecognized);
+      // Leaf nodes (and the conservative-default leaf) receive a SINGLE
+      // structured input — reconstruct it losslessly (synthesizing construct
+      // ops for object/array shapes) so the evaluator passes the leaf the exact
+      // value legacy passes. Collection/control/pattern/effect carry their
+      // meaningful refs in `detail`, so their flat `inputs` stays empty (the
+      // `detail` refs alone drive ordering + read-set derivation).
+      const inputs = (c.kind === "leaf")
+        ? inputRefs(node.inputs, unrecognized, ops, nextSynthId, bump)
+        : [];
       const op: Op = {
         id: i,
         kind: c.kind,
@@ -225,8 +417,15 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         // The op's element pattern is the `op` input (inline Pattern in memory,
         // or a $patternRef once serialized). Recurse if inline.
         const inObj = (node.inputs ?? {}) as Record<string, unknown>;
-        const listRef = valueToRef(inObj.list, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef);
+        const listRef = inObj.list === undefined
+          ? ({ kind: "const", value: undefined } as ValueRef)
+          : buildStructuredRef(
+            inObj.list,
+            unrecognized,
+            ops,
+            nextSynthId,
+            bump,
+          );
         let elementImpl: ImplRef = { identity: "<inline>", symbol: "op" };
         if (isPatternLike(inObj.op)) {
           nested++;
@@ -245,15 +444,16 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         };
       } else if (c.kind === "control") {
         const inObj = (node.inputs ?? {}) as Record<string, unknown>;
-        const pred = valueToRef(inObj.condition ?? inObj.if, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef);
+        const branchRef = (v: unknown): ValueRef =>
+          v === undefined
+            ? ({ kind: "const", value: undefined } as ValueRef)
+            : buildStructuredRef(v, unrecognized, ops, nextSynthId, bump);
+        const pred = branchRef(inObj.condition ?? inObj.if);
         // Branches must be exactly [then, else] in that order — NOT the flat
         // `inputs` list (which also carries the condition). The builder names
         // them ifTrue/ifFalse (with then/else as legacy fallbacks).
-        const thenRef = valueToRef(inObj.ifTrue ?? inObj.then, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef);
-        const elseRef = valueToRef(inObj.ifFalse ?? inObj.else, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef);
+        const thenRef = branchRef(inObj.ifTrue ?? inObj.then);
+        const elseRef = branchRef(inObj.ifFalse ?? inObj.else);
         op.detail = {
           kind: "control",
           op: c.ctrlOp!,
@@ -272,9 +472,13 @@ export function extractRog(pattern: RawPattern): ExtractResult {
     }
 
     // The pattern result is usually an object/array literal of refs (a
-    // construct), not a single alias. Recognize that and synthesize a construct
-    // op so the result resolves instead of silently dropping to const.
-    const resultRef = buildResultRef(p.result, ops, unrecognized);
+    // construct), not a single alias. Reconstruct it losslessly (the same
+    // structured-ref synthesis leaf inputs use) so the result resolves instead
+    // of silently dropping to const — and any non-representable result leaf is
+    // recorded as unrecognized, not dropped.
+    const resultRef = p.result === undefined
+      ? ({ kind: "const", value: undefined } as ValueRef)
+      : buildStructuredRef(p.result, unrecognized, ops, nextSynthId, bump);
     return {
       // deno-lint-ignore no-explicit-any
       argumentSchema: (p.argumentSchema ?? true) as any,
@@ -283,49 +487,6 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       result: resultRef,
       ops,
     };
-  }
-
-  function buildResultRef(
-    result: unknown,
-    ops: Op[],
-    unrecognized: Set<string>,
-  ): ValueRef {
-    const direct = valueToRef(result, unrecognized);
-    if (direct) return direct;
-    if (result && typeof result === "object" && !Array.isArray(result)) {
-      const fields: Record<string, ValueRef> = {};
-      for (const [k, v] of Object.entries(result as Record<string, unknown>)) {
-        fields[k] = valueToRef(v, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef);
-      }
-      const id = -1; // synthesized result construct (not a Pattern node)
-      ops.push({
-        id,
-        kind: "construct",
-        inputs: Object.values(fields),
-        outSchema: true as unknown as Op["outSchema"],
-        detail: { kind: "construct", template: { shape: "object", fields } },
-      });
-      bump("construct");
-      return { kind: "opOut", op: id, path: [] };
-    }
-    if (Array.isArray(result)) {
-      const items = result.map((v) =>
-        valueToRef(v, unrecognized) ??
-          ({ kind: "const", value: undefined } as ValueRef)
-      );
-      const id = -1;
-      ops.push({
-        id,
-        kind: "construct",
-        inputs: items,
-        outSchema: true as unknown as Op["outSchema"],
-        detail: { kind: "construct", template: { shape: "array", items } },
-      });
-      bump("construct");
-      return { kind: "opOut", op: id, path: [] };
-    }
-    return { kind: "const", value: result };
   }
 
   const rog = build(pattern, 0);

@@ -92,6 +92,17 @@ import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  type ExtractResult,
+  extractRog,
+  type ImplRefResolver,
+  resolveLeafImpls,
+} from "./reactive-interpreter/extract.ts";
+import {
+  evalRog,
+  NotInterpretedHere,
+} from "./reactive-interpreter/interpret.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -535,6 +546,19 @@ function dedupeNormalizedLinks(
   return deduped;
 }
 
+/** Reason a pattern fell back from the interpreter to the legacy path. */
+export type InterpreterFallbackReason =
+  | "ineligible_opkind"
+  | "unrecognized_alias"
+  | "unresolved_leaf"
+  | "eval_threw";
+
+/** Census of reactive-interpreter dispatch outcomes (see Runner field). */
+export interface InterpreterCensus {
+  interpreted_ok: number;
+  fallback_by_reason: Record<InterpreterFallbackReason, number>;
+}
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -560,6 +584,32 @@ export class Runner {
     IExtendedStorageTransaction,
     MemorySpace[]
   >();
+
+  /**
+   * Reactive-interpreter dispatch census (only mutated when the
+   * `experimentalInterpreter` flag is on). Tallies how the corpus actually maps:
+   * `interpreted_ok` counts patterns instantiated through the interpreter, and
+   * each `fallback_by_reason` bucket counts the precise reason a pattern fell
+   * back to the legacy path. A flag-on suite run reveals real coverage. Cheap
+   * and off-path when the flag is off (the dispatch branch is never entered).
+   */
+  private readonly interpreterCensus: InterpreterCensus = {
+    interpreted_ok: 0,
+    fallback_by_reason: {
+      ineligible_opkind: 0,
+      unrecognized_alias: 0,
+      unresolved_leaf: 0,
+      eval_threw: 0,
+    },
+  };
+
+  /** Read-only snapshot of the reactive-interpreter dispatch census. */
+  getInterpreterCensus(): InterpreterCensus {
+    return {
+      interpreted_ok: this.interpreterCensus.interpreted_ok,
+      fallback_by_reason: { ...this.interpreterCensus.fallback_by_reason },
+    };
+  }
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -1174,6 +1224,26 @@ export class Runner {
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
     ) => {
+      // Reactive-interpreter dispatch (default OFF). When the flag is off this
+      // branch is never entered, so there is ZERO behavior change. When on, an
+      // *eligible* pattern is rewritten to a single interpreter node and then
+      // instantiated through the SAME legacy node loop below (so it inherits all
+      // binding / scheduling / reactivity machinery). The rewrite (probe) is
+      // PURE: it never writes to a tx, so on `NotInterpretedHere` we simply use
+      // the original pattern and fall through with no side effect — the hard
+      // no-partial-materialize invariant.
+      let effectivePattern = pattern;
+      let viaInterpreter = false;
+      if (this.runtime.experimental.experimentalInterpreter) {
+        try {
+          effectivePattern = this.buildInterpreterPattern(pattern, resultCell);
+          viaInterpreter = true;
+        } catch (e) {
+          if (!(e instanceof NotInterpretedHere)) throw e;
+          effectivePattern = pattern; // legacy fallback, nothing materialized
+        }
+      }
+
       // Create new cancel group for nodes
       const [nodeCancel, addNodeCancel] = useCancelGroup();
       cancelNodes = nodeCancel;
@@ -1190,7 +1260,30 @@ export class Runner {
           options.awaitSyncBeforeInitialRun,
         );
       try {
-        for (const node of pattern.nodes) {
+        // The synthetic interpreter pattern has its own single `$ri-result`
+        // derived cell + single-alias result tree. Setup projected the ORIGINAL
+        // pattern's (multi-alias) result tree, so re-materialize the synthetic
+        // pattern's derived cell and re-project its result onto the result cell
+        // here, inside the same tx, before wiring the interpreter node. This is
+        // the only interpreter write and it happens after the pure probe in
+        // `buildInterpreterPattern` has already succeeded.
+        if (viaInterpreter) {
+          const baseCell = resultCell.withTx(actualTx);
+          const previousInternal = baseCell.getMetaRaw("internal", {
+            meta: ignoreReadForScheduling,
+          });
+          const internalManifest = this.materializeDerivedInternalCells(
+            actualTx,
+            effectivePattern,
+            baseCell,
+            previousInternal,
+          );
+          baseCell.setMetaRaw("internal", internalManifest);
+          this.updateResultProjection(actualTx, effectivePattern, baseCell, {
+            preserveName: true,
+          });
+        }
+        for (const node of effectivePattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
           this.instantiateNode(
             actualTx,
@@ -1199,7 +1292,7 @@ export class Runner {
             node.outputs,
             baseCell,
             addNodeCancel,
-            pattern,
+            effectivePattern,
             schedulerRehydration,
           );
         }
@@ -1891,6 +1984,172 @@ export class Runner {
     this.resultPatternCache.clear();
     this.locallyPreparedResults.clear();
     this.locallyStoppedResults.clear();
+  }
+
+  /**
+   * Resolve a serialized leaf's `$implRef` to a live callable, backed by the
+   * runtime's verified-implementation index. Used by `resolveLeafImpls` when a
+   * leaf's `module.implementation` is no longer a live function (a graph read
+   * back from a cell keeps only its content-addressed ref). Mirrors
+   * `resolveByImplRef`'s harness fallback, normalized to a plain function.
+   */
+  private readonly interpreterImplRefResolver: ImplRefResolver = (
+    identity,
+    symbol,
+  ) => {
+    const artifact = this.runtime.patternManager.artifactFromIdentitySync(
+      identity,
+      symbol,
+    );
+    const fromArtifact = artifact &&
+        typeof (artifact as { implementation?: unknown }).implementation ===
+          "function"
+      ? (artifact as { implementation: (input: unknown) => unknown })
+        .implementation
+      : typeof artifact === "function"
+      ? (artifact as (input: unknown) => unknown)
+      : undefined;
+    if (fromArtifact) return fromArtifact;
+    const verified = this.runtime.harness.getVerifiedImplementation?.(
+      identity,
+      symbol,
+    );
+    return typeof verified === "function"
+      ? (verified as (input: unknown) => unknown)
+      : undefined;
+  };
+
+  /**
+   * Reactive-interpreter eligibility probe + rewrite (PURE — no tx writes).
+   *
+   * Extracts the pattern to a ROG, checks it is fully covered and uses only the
+   * non-collection vocabulary this step interprets ({leaf, access, construct,
+   * control}), resolves every leaf impl, and DRY-RUNS `evalRog` on a snapshot of
+   * the current argument. If any check fails it bumps the census and throws
+   * `NotInterpretedHere` so the caller falls back to the legacy path with NO
+   * side effect (the hard no-partial-materialize invariant: nothing here writes
+   * to a tx — the only interpreter write happens in the caller, after this
+   * returns successfully).
+   *
+   * On success it returns a synthetic single-node Pattern: one `raw` interpreter
+   * node (argument → ROG eval → result) writing into one `$ri-result` derived
+   * cell, with the result aliased to it. Instantiated through the same legacy
+   * node loop, so it inherits reactivity (the argument read is tracked, so the
+   * node re-runs on input change) and result materialization for free.
+   */
+  private buildInterpreterPattern(
+    pattern: Pattern,
+    resultCell: Cell<any>,
+  ): Pattern {
+    const bumpAndThrow = (reason: InterpreterFallbackReason): never => {
+      this.interpreterCensus.fallback_by_reason[reason]++;
+      throw new NotInterpretedHere(reason);
+    };
+
+    // --- 1. Extract + coverage (pure structural classification) ------------
+    const extracted: ExtractResult = extractRog(
+      pattern as unknown as Parameters<typeof extractRog>[0],
+    );
+    if (extracted.coverage.unrecognizedAliases.length > 0) {
+      bumpAndThrow("unrecognized_alias");
+    }
+    // This step interprets ONLY the non-collection vocabulary. `leaf` (opaque
+    // sandboxed JS) plus the interpreted kinds access/construct/control are
+    // eligible; collection/pattern/effect (which `INTERPRETED_KINDS` also
+    // contains) are out of scope → fall back. The result construct synthesized
+    // by extraction (id < 0) is a `construct`, so it is eligible.
+    const ELIGIBLE_KINDS = new Set(["leaf", "access", "construct", "control"]);
+    for (const op of extracted.rog.ops) {
+      if (!ELIGIBLE_KINDS.has(op.kind)) bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- 2. Resolve every leaf impl (live fn or $implRef index) ------------
+    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+      pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
+      extracted.rog,
+      this.interpreterImplRefResolver,
+    );
+    if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
+
+    const { rog, internalToOp } = extracted;
+
+    // --- 3. Dry-run probe on a snapshot of the current argument ------------
+    // Pure: reads the argument value WITHOUT a scheduling tx (untracked) and
+    // never writes. If the evaluator throws (NotInterpretedHere for an
+    // unexpected op, or any runtime error from a leaf body), fall back.
+    const argSnapshot = this.readArgumentSnapshot(resultCell);
+    try {
+      evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
+    } catch {
+      bumpAndThrow("eval_threw");
+    }
+
+    // --- 4. Build the synthetic single-node interpreter pattern ------------
+    const resultSchema = pattern.resultSchema ?? {};
+    const internedResult = internSchema(resultSchema as JSONSchema);
+    const argumentSchema = pattern.argumentSchema ?? {};
+    const internedArg = internSchema(argumentSchema as JSONSchema);
+
+    const interpreterImpl = (
+      inputsCell: Cell<unknown>,
+      sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+      _addCancel: AddCancel,
+      _cause: unknown,
+      _parentCell: Cell<unknown>,
+      _runtime: Runtime,
+      _outputBinding?: NormalizedFullLink,
+    ): Action => {
+      return (tx: IExtendedStorageTransaction) => {
+        // Read the argument THROUGH the tx so the read is tracked: the node then
+        // re-runs reactively whenever the argument changes (parity with legacy).
+        const argument = inputsCell.asSchema(internedArg).withTx(tx).get();
+        const { result } = evalRog(rog, { argument, leafImpls, internalToOp });
+        sendResult(tx, result);
+      };
+    };
+
+    // Probe succeeded: this pattern WILL be instantiated through the interpreter.
+    this.interpreterCensus.interpreted_ok++;
+
+    const RESULT_CAUSE = "$ri-result";
+    return {
+      argumentSchema: argumentSchema as JSONSchema,
+      resultSchema: resultSchema as JSONSchema,
+      derivedInternalCells: [{
+        partialCause: RESULT_CAUSE,
+        schema: internedResult,
+      }],
+      result: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+      nodes: [
+        {
+          module: {
+            type: "raw",
+            implementation: interpreterImpl as (...args: any[]) => any,
+            resultSchema: internedResult,
+          } as Module,
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+        },
+      ],
+    } satisfies Pattern;
+  }
+
+  /**
+   * Read a snapshot of the result cell's argument value for the interpreter's
+   * pure dry-run probe. Untracked (no scheduling tx) and read-only — it must
+   * never write, since the probe runs before the fallback decision. Returns
+   * `undefined` if the argument cell is not resolvable yet (the probe then runs
+   * evalRog against `undefined`, which is a valid input for the eligible
+   * vocabulary).
+   */
+  private readArgumentSnapshot(resultCell: Cell<any>): unknown {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (!argumentLink) return undefined;
+    try {
+      return this.runtime.getCellFromLink(argumentLink).get();
+    } catch {
+      return undefined;
+    }
   }
 
   private instantiateNode(

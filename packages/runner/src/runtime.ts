@@ -164,6 +164,15 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Route eligible (non-collection, fully-resolvable) patterns through the
+   * Reactive Interpreter instead of the legacy per-node materialization.
+   * Default OFF. When off the interpreter dispatch branch is never entered, so
+   * there is ZERO behavior change. Unlike the other flags this one is read only
+   * in the runner (`this.runtime.experimental.experimentalInterpreter`), so it
+   * has no ambient config setter — it is stored directly on `this.experimental`.
+   */
+  experimentalInterpreter?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -330,6 +339,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      experimentalInterpreter: undefined,
       ...options.experimental,
     };
 

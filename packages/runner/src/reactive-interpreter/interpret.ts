@@ -124,11 +124,15 @@ export function evalRog(
       case "leaf": {
         const impl = ctx.leafImpls.get(op.id);
         if (!impl) throw new Error(`no leaf impl for op ${op.id}`);
-        // A leaf takes its single structured input (built by a preceding
-        // construct, or a direct ref). With no inputs it takes undefined.
-        const input = op.inputs.length === 1
-          ? resolve(op.inputs[0])
-          : op.inputs.map(resolve);
+        // A leaf takes its SINGLE structured input — the exact resolved value
+        // legacy passes (a keyed object/array assembled by a preceding
+        // synthesized construct, or a direct ref). Extraction guarantees a leaf
+        // has at most one input ref; with none, the leaf is called with
+        // undefined. NEVER a positional array (that would feed `add({a,b})` an
+        // array and silently yield NaN/`{}`).
+        const input = op.inputs.length === 0
+          ? undefined
+          : resolve(op.inputs[0]);
         return impl(input);
       }
       case "access":

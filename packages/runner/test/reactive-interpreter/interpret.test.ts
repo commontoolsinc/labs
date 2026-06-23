@@ -80,6 +80,73 @@ describe("W1a ROG evaluator core", () => {
     expect(result).toEqual({ sum: 7 });
   });
 
+  it("multi-input leaf receives the structured (keyed) value, not a positional array", () => {
+    // Mirrors extraction output for `add({a,b})`: a synthesized object construct
+    // (negative id) re-keys {a,b}, and the leaf's SINGLE input is that construct.
+    // The leaf body reads i.a / i.b — a positional array would yield NaN.
+    const ops: Op[] = [
+      {
+        id: -1,
+        kind: "construct",
+        inputs: [],
+        outSchema: T,
+        detail: {
+          kind: "construct",
+          template: {
+            shape: "object",
+            fields: {
+              a: { kind: "argument", path: ["a"] },
+              b: { kind: "argument", path: ["b"] },
+            },
+          },
+        },
+      },
+      {
+        id: 0,
+        kind: "leaf",
+        inputs: [{ kind: "opOut", op: -1, path: [] }],
+        outSchema: T,
+        detail: { kind: "leaf" },
+      },
+    ];
+    const rog: Rog = {
+      argumentSchema: T,
+      resultSchema: T,
+      result: { kind: "opOut", op: 0, path: [] },
+      ops,
+    };
+    const add: LeafImpl = (input) => {
+      const { a, b } = input as { a: number; b: number };
+      return a + b;
+    };
+    const { result } = evalRog(rog, {
+      argument: { a: 3, b: 4 },
+      leafImpls: new Map([[0, add]]),
+    });
+    expect(result).toBe(7); // NOT NaN
+  });
+
+  it("zero-input leaf is called with undefined (not an empty array)", () => {
+    const rog: Rog = {
+      argumentSchema: T,
+      resultSchema: T,
+      result: { kind: "opOut", op: 0, path: [] },
+      ops: [{
+        id: 0,
+        kind: "leaf",
+        inputs: [],
+        outSchema: T,
+        detail: { kind: "leaf" },
+      }],
+    };
+    const probe: LeafImpl = (input) => input === undefined ? "undef" : "other";
+    const { result } = evalRog(rog, {
+      argument: {},
+      leafImpls: new Map([[0, probe]]),
+    });
+    expect(result).toBe("undef");
+  });
+
   it("access navigates a nested path", () => {
     const rog: Rog = {
       argumentSchema: T,
