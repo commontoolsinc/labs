@@ -13,17 +13,16 @@ export function applyPullExecuteContinuation(
   // effect-demanded computations to execute.
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
-    !isHeadEventParked(state.eventQueueWakeState) &&
+    !isHeadEventParked(state) &&
     !hasPendingLineageHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
-    (isHeadEventParked(state.eventQueueWakeState) ||
-      hasPendingLineageHeadEvent);
+    (isHeadEventParked(state) || hasPendingLineageHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 
   const continuation = planPullExecuteContinuation({
     pending: state.pending,
-    dirty: state.dirty,
+    nodes: state.nodes,
     effects: state.effects,
     shouldRerunAfterCurrentExecute,
     hasQueuedEventReadyNow,

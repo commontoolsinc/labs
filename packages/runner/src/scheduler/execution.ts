@@ -1,27 +1,17 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import { type Frame } from "../builder/types.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
-  CYCLE_DEBOUNCE_MIN_RUNS,
-  CYCLE_DEBOUNCE_MULTIPLIER,
-  CYCLE_DEBOUNCE_THRESHOLD_MS,
-  MAX_ITERATIONS_PER_RUN,
+  BACKOFF_BASE_MS,
+  BACKOFF_MAX_MS,
+  PASS_RUN_BUDGET,
 } from "./constants.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
-import type { NodeRegistry } from "./node-record.ts";
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import type {
   Action,
-  PopulateDependenciesEntry,
   ReactivityLog,
   SettleIterationStats,
   SettleStats,
-  SpaceScopeAndURI,
 } from "./types.ts";
-
-const logger = getLogger("scheduler", {
-  enabled: true,
-  level: "warn",
-});
 
 export interface SettlingTracker {
   windowStart: number;
@@ -99,224 +89,57 @@ export function recordExecuteEnd(
   };
 }
 
+export function markNonSettlingEpisode(
+  tracker: SettlingTracker,
+  now = performance.now(),
+): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
+  if (tracker.nonSettlingDetected) return undefined;
+
+  const windowStart = tracker.windowStart || now;
+  const inFlightBusyTime = tracker.isExecuting
+    ? Math.max(0, now - tracker.lastExecuteStart)
+    : 0;
+  const busyTime = tracker.busyTime + inFlightBusyTime;
+  const windowDuration = Math.max(1, now - windowStart);
+  tracker.nonSettlingDetected = true;
+
+  return {
+    busyTime,
+    windowDuration,
+    busyRatio: Math.min(1, busyTime / windowDuration),
+  };
+}
+
 export function buildPullInitialSeeds(state: {
-  readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
-  readonly newActionsWithoutDependencies: Iterable<Action>;
   readonly eventBlockingDeps: Iterable<Action>;
-  readonly computationDebounceFlushSeeds: Iterable<Action>;
 }): Set<Action> {
   const initialSeeds = new Set<Action>();
 
-  // Pending effects are demand roots. Computations stay lazy unless pulled.
-  for (const action of state.pending) {
-    if (state.effects.has(action)) {
-      initialSeeds.add(action);
-    }
-  }
-
-  // Dirty effects may have been skipped by throttling or cycle detection.
-  for (const action of state.dirty) {
-    if (state.effects.has(action)) {
-      initialSeeds.add(action);
-    }
-  }
-
-  for (const action of state.newActionsWithoutDependencies) {
-    initialSeeds.add(action);
-  }
   for (const action of state.eventBlockingDeps) {
-    initialSeeds.add(action);
-  }
-  for (const action of state.computationDebounceFlushSeeds) {
     initialSeeds.add(action);
   }
 
   return initialSeeds;
 }
 
-export interface ExecuteDependencyCollectionState {
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly effects: ReadonlySet<Action>;
-  readonly getSchedulingWrites: (
-    action: Action,
-  ) => readonly unknown[] | undefined;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      readonly errorLogLabel: string;
-      readonly errorMessage: (target: Action, error: unknown) => string;
-      readonly useRawReadsForTriggers?: boolean;
-    },
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
-  readonly getActionId: (action: Action) => string;
-  readonly scheduleAffectedEffects?: (action: Action) => void;
-}
-
-export function collectInitialExecuteDependencies(
-  state: ExecuteDependencyCollectionState,
-): {
-  collectedActions: Action[];
-  newActionsWithoutDependencies: Action[];
-} {
-  logger.timeStart("scheduler", "execute", "depCollect");
-  try {
-    // Find computation actions whose writes are still unknown. We run them on
-    // the first cycle to capture writes that cannot be inferred from declared
-    // outputs.
-    //
-    // TODO(seefeld): Once we more reliably capture what they can write via
-    // WriteableCell or so, then we can treat this more deliberately via the
-    // dependency collection process above. We'll have to re-run it whenever
-    // inputs change, as they might change what they can write to. We hope that
-    // for now this will be sufficiently captured in mightWrite.
-    return collectPendingDependencyActions({
-      pendingDependencyCollection: state.pendingDependencyCollection,
-      populateDependenciesCallbacks: state.populateDependenciesCallbacks,
-      effects: state.effects,
-      getSchedulingWrites: state.getSchedulingWrites,
-      collectDependenciesForAction: (action, populateDependencies) =>
-        state.collectDependenciesForAction(action, populateDependencies, {
-          errorLogLabel: "schedule-dep-error",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              state.getActionId(target)
-            }: ${error}`,
-        }),
-      onCollected: (action, { log, entities }) =>
-        logger.debug("schedule-dep-collect", () => [
-          `Collected dependencies for ${
-            state.getActionId(action)
-          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-        ]),
-      scheduleAffectedEffects: state.scheduleAffectedEffects,
-    });
-  } finally {
-    logger.timeEnd("scheduler", "execute", "depCollect");
-  }
-}
-
-export function collectPostEventDependencies(
-  state: ExecuteDependencyCollectionState,
-): void {
-  // Process any newly subscribed actions that were added during event handling.
-  // This handles cases like event handlers that create sub-patterns whose
-  // computations need their dependencies discovered before we build the workSet.
-  if (state.pendingDependencyCollection.size === 0) return;
-
-  collectPendingDependencyActions({
-    pendingDependencyCollection: state.pendingDependencyCollection,
-    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
-    effects: state.effects,
-    getSchedulingWrites: state.getSchedulingWrites,
-    collectDependenciesForAction: (action, populateDependencies) =>
-      state.collectDependenciesForAction(action, populateDependencies, {
-        errorLogLabel: "schedule-dep-error-post-event",
-        errorMessage: (target, error) =>
-          `Error populating dependencies for ${
-            state.getActionId(target)
-          }: ${error}`,
-      }),
-    onCollected: (action) =>
-      logger.debug("schedule-dep-collect-post-event", () => [
-        `Collected dependencies for ${state.getActionId(action)}`,
-      ]),
-  });
-}
-
-export function collectPendingDependencyActions(state: {
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly effects: ReadonlySet<Action>;
-  readonly getSchedulingWrites: (
-    action: Action,
-  ) => readonly unknown[] | undefined;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
-  readonly onCollected?: (
-    action: Action,
-    result: { log: ReactivityLog; entities: Set<SpaceScopeAndURI> },
-  ) => void;
-  readonly scheduleAffectedEffects?: (action: Action) => void;
-  readonly clearAfterCollect?: boolean;
-}): {
-  collectedActions: Action[];
-  newActionsWithoutDependencies: Action[];
-} {
-  const collectedActions: Action[] = [];
-
-  // Snapshot the collection before any callbacks can mutate the underlying set.
-  for (const action of [...state.pendingDependencyCollection]) {
-    const populateDependencies = state.populateDependenciesCallbacks.get(
-      action,
-    );
-    if (!populateDependencies) continue;
-
-    const result = state.collectDependenciesForAction(
-      action,
-      populateDependencies,
-    );
-    state.onCollected?.(action, result);
-    collectedActions.push(action);
-  }
-
-  // Now mark downstream nodes as dirty if we introduced new dependencies for them.
-  if (state.scheduleAffectedEffects) {
-    for (const action of collectedActions) {
-      state.scheduleAffectedEffects(action);
-    }
-  }
-
-  const newActionsWithoutDependencies = [...state.pendingDependencyCollection]
-    .filter((action) =>
-      !state.effects.has(action) &&
-      (state.getSchedulingWrites(action)?.length ?? 0) === 0
-    );
-
-  if (state.clearAfterCollect ?? true) {
-    state.pendingDependencyCollection.clear();
-  }
-
-  return { collectedActions, newActionsWithoutDependencies };
-}
-
 export type SchedulerSettleResult = {
   settledEarly: boolean;
-  lastWorkSet: Set<Action>;
-  earlyIterationComputations: Set<Action>;
   maxSettleIterations: number;
+  backoffApplied: boolean;
+  backoffActionCount: number;
+  backoffUntil?: number;
   settleStats?: SettleStats;
 };
 
 export interface SchedulerSettleLoopState {
   readonly getCollectSettleStats: () => boolean;
-  readonly pendingDependencyCollection: Set<Action>;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly dirty: ReadonlySet<Action>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly nodes: NodeRegistry;
   readonly dependents: WeakMap<Action, Set<Action>>;
-  readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly filterStats: { filtered: number; executed: number };
-  readonly getLoopCounter: () => WeakMap<Action, number>;
-  readonly runsThisExecute: Map<Action, number>;
   readonly materializerIndex: MaterializerIndexState;
   readonly getSchedulingWrites: (
     action: Action,
@@ -325,74 +148,23 @@ export interface SchedulerSettleLoopState {
     Action,
     IMemorySpaceAddress[]
   >;
-  readonly collectDependenciesForAction: (
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      readonly errorLogLabel: string;
-      readonly errorMessage: (target: Action, error: unknown) => string;
-      readonly useRawReadsForTriggers?: boolean;
-    },
-  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
-  readonly collectDirtyDependencies: (
-    seed: Action,
-    targetWorkSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
-  readonly collectDirtyDependenciesFromTraversalRoot: (
-    seed: Action,
-    targetWorkSet: Set<Action>,
-    memo: Map<Action, boolean>,
-  ) => boolean;
   readonly getActionId: (action: Action) => string;
-  readonly clearDirty: (action: Action) => void;
-  readonly markDirectDirty: (action: Action) => void;
   readonly isThrottled: (action: Action) => boolean;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly clearComputationDebounceState: (action: Action) => void;
-  readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
-  readonly handleError: (error: Error, action: Action) => void;
+  readonly isLiveAction: (action: Action) => boolean;
   readonly runAction: (action: Action) => Promise<unknown>;
 }
 
 export function recordSettleActionRun(
   state: SchedulerSettleLoopState,
   fn: Action,
-): boolean {
-  const loopCounter = state.getLoopCounter();
-  loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
-  // Track runs for cycle-aware debounce
-  state.runsThisExecute.set(fn, (state.runsThisExecute.get(fn) ?? 0) + 1);
-  if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-    const error = new Error(
-      `Too many iterations: ${loopCounter.get(fn)} ${state.getActionId(fn)}`,
-    );
-    // Attach the last frame from the action so handleError can
-    // extract piece/spell metadata (CT-1316: fixes message:null).
-    const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
-    if (lastFrame) {
-      (error as Error & { frame?: Frame }).frame = lastFrame;
-    }
-    state.handleError(error, fn);
-    return false;
-  }
-
-  return true;
-}
-
-export function recordEarlyIterationComputations(state: {
-  readonly settleIter: number;
-  readonly threshold: number;
-  readonly workSet: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
-  readonly earlyIterationComputations: Set<Action>;
-}): void {
-  if (state.settleIter >= state.threshold) return;
-  for (const action of state.workSet) {
-    if (!state.effects.has(action)) {
-      state.earlyIterationComputations.add(action);
-    }
+): void {
+  const record = state.nodes.get(fn);
+  if (record) {
+    record.passRuns++;
   }
 }
 
@@ -475,83 +247,92 @@ export function pushBoundedHistory<T>(
   }
 }
 
-export interface CycleBreakPlan {
-  shouldBreak: boolean;
-  computationsToClear: Action[];
-  dirtyEffectsToRun: Action[];
+export interface BudgetBackoffPlan {
+  readonly actions: Action[];
+  readonly backoffUntil?: number;
 }
 
-export function planPullCycleBreak(state: {
-  readonly settledEarly: boolean;
-  readonly lastWorkSet: ReadonlySet<Action>;
-  readonly earlyIterationComputations: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
-  readonly runsThisExecute: ReadonlyMap<Action, number>;
-  readonly isThrottled: (action: Action) => boolean;
-}): CycleBreakPlan {
-  const shouldBreak = !state.settledEarly && state.lastWorkSet.size > 0;
-  if (!shouldBreak) {
-    return { shouldBreak, computationsToClear: [], dirtyEffectsToRun: [] };
-  }
-
-  const computationsToClear: Action[] = [];
-  for (const computation of state.earlyIterationComputations) {
-    if (
-      state.lastWorkSet.has(computation) &&
-      state.dirty.has(computation) &&
-      !state.isThrottled(computation) &&
-      (state.runsThisExecute.get(computation) ?? 0) > 1
-    ) {
-      computationsToClear.push(computation);
-    }
-  }
-
-  const dirtyEffectsToRun = [...state.effects].filter((effect) =>
-    state.dirty.has(effect) && !state.isThrottled(effect)
-  );
-
-  return { shouldBreak, computationsToClear, dirtyEffectsToRun };
-}
-
-export interface CycleDebounceUpdate {
-  action: Action;
-  runs: number;
-  delayMs: number;
-}
-
-export function planPullAdaptiveCycleDebounce(state: {
-  readonly executeStartTime: number;
-  readonly runsThisExecute: ReadonlyMap<Action, number>;
-  readonly canAutomaticallyDebounce: (action: Action) => boolean;
-  readonly getCurrentDebounce: (action: Action) => number | undefined;
+export function planBudgetBackoff(state: {
+  readonly workSet: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
+  readonly pending: ReadonlySet<Action>;
+  readonly isLiveAction: (action: Action) => boolean;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly reason: "iteration-cap" | "pass-budget";
+  readonly requirePassRunBudget?: boolean;
   readonly now?: number;
-}): {
-  elapsedMs: number;
-  updates: CycleDebounceUpdate[];
-} {
+}): BudgetBackoffPlan {
   const now = state.now ?? performance.now();
-  const elapsedMs = now - state.executeStartTime;
-  if (elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
-    return { elapsedMs, updates: [] };
-  }
+  const actions: Action[] = [];
+  let backoffUntil: number | undefined;
 
-  const updates: CycleDebounceUpdate[] = [];
-  for (const [action, runs] of state.runsThisExecute) {
-    if (
-      !state.canAutomaticallyDebounce(action) ||
-      runs < CYCLE_DEBOUNCE_MIN_RUNS
-    ) {
+  for (const action of state.workSet) {
+    const record = state.nodes.get(action);
+    if (!record || !isBudgetBackoffCandidate(state, record, now)) {
       continue;
     }
-    const delayMs = Math.round(CYCLE_DEBOUNCE_MULTIPLIER * elapsedMs);
-    const currentDebounce = state.getCurrentDebounce(action) ?? 0;
-    if (delayMs > currentDebounce) {
-      updates.push({ action, runs, delayMs });
-    }
+
+    const delayMs = nextBackoffDelayMs(record);
+    record.gate.backoffStreak++;
+    record.gate.backoffUntil = now + delayMs;
+    actions.push(action);
+    backoffUntil = minDefined(backoffUntil, record.gate.backoffUntil);
   }
 
-  return { elapsedMs, updates };
+  return {
+    actions,
+    ...(backoffUntil !== undefined ? { backoffUntil } : {}),
+  };
+}
+
+function isBudgetBackoffCandidate(
+  state: {
+    readonly pending: ReadonlySet<Action>;
+    readonly isLiveAction: (action: Action) => boolean;
+    readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+    readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+    readonly reason: "iteration-cap" | "pass-budget";
+    readonly requirePassRunBudget?: boolean;
+  },
+  record: SchedulerNode,
+  now: number,
+): boolean {
+  if (!isInvalidActionRecord(record)) return false;
+  if (!state.isLiveAction(record.action) && !state.pending.has(record.action)) {
+    return false;
+  }
+  // NOTE(scheduler-v2): the iteration-cap backoff is NOT merely a perf pause
+  // for deep chains — it is the escape valve that lets idle() resolve when a
+  // live subgraph has not settled within MAX_ITERS. `backoffUntil` feeds
+  // getNextEligibleRunTime, which defers the action out of hasDirtyPullWork
+  // (idle resolves) and schedules a retry wake. Gating iteration-cap backoff
+  // on cycle evidence (as Codex P2 #4103 suggested) removes that valve for
+  // any sub-budget chain that repeatedly hits the cap under load — idle then
+  // never resolves (observed: rapid-notebook-create + reload integration
+  // tests timed out on `runtime:idle`). Kept as-is; the pass-budget gate only
+  // applies to the pass-budget reason.
+  if (
+    state.reason === "pass-budget" &&
+    state.requirePassRunBudget !== false &&
+    record.passRuns < PASS_RUN_BUDGET
+  ) {
+    return false;
+  }
+  if (state.isDebouncedComputationWaiting(record.action)) return false;
+
+  const nextEligibleAt = state.getNextEligibleRunTime(record.action);
+  if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+    return false;
+  }
+  return true;
+}
+
+function nextBackoffDelayMs(record: SchedulerNode): number {
+  return Math.min(
+    BACKOFF_BASE_MS * 2 ** record.gate.backoffStreak,
+    BACKOFF_MAX_MS,
+  );
 }
 
 export interface ExecuteContinuationPlan {
@@ -565,8 +346,8 @@ export interface ExecuteContinuationPlan {
   shouldQueueAnotherTick: boolean;
 }
 
-export function planEventDirtyDependencyScheduling(state: {
-  readonly dirtyDeps: Iterable<Action>;
+export function planEventInvalidDependencyScheduling(state: {
+  readonly invalidDeps: Iterable<Action>;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -578,7 +359,7 @@ export function planEventDirtyDependencyScheduling(state: {
   let nextEligibleAt: number | undefined;
   const runnableDeps: Action[] = [];
 
-  for (const dep of state.dirtyDeps) {
+  for (const dep of state.invalidDeps) {
     if (state.isDebouncedComputationWaiting(dep)) {
       const depNextDebounceAt = state.getNextDebounceRunTime(dep);
       if (depNextDebounceAt !== undefined) {
@@ -607,7 +388,7 @@ export function planEventDirtyDependencyScheduling(state: {
 
 export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly effects: ReadonlySet<Action>;
   readonly materializerIndex: MaterializerIndexState;
   readonly shouldRerunAfterCurrentExecute: boolean;
@@ -623,16 +404,60 @@ export function planPullExecuteContinuation(state: {
   readonly now?: number;
 }): ExecuteContinuationPlan {
   const now = state.now ?? performance.now();
-  const hasPendingPullWork = [...state.pending].some((action) =>
+  let nextDirtyPullRunAt: number | undefined;
+  let nextDirtyPullRunWaitsForIdle = false;
+  // A deferred run keeps idle() blocked when its eventual run is something an
+  // idle waiter expects to observe: effects and materializers (side effects),
+  // and a never-ran demanded computation whose FIRST run is still awaited
+  // (e.g. a debounced child created under a live parent's provisional demand).
+  // Deferring such an action removes it from hasPendingPullWork, so its future
+  // run must be tracked here or idle() returns before the gate opens. Limited
+  // to the first run: once the computation has produced output, subsequent
+  // debounce/throttle-deferred reruns are not awaited (idle must not block
+  // through a throttle window and re-run a recently-run action).
+  const futureRunWaitsForIdle = (action: Action): boolean =>
+    state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action);
+  const noteFutureEligibility = (action: Action) => {
+    if (state.isDebouncedComputationWaiting(action)) {
+      const nextDebounceAt = state.getNextDebounceRunTime(action);
+      if (nextDebounceAt !== undefined) {
+        nextDirtyPullRunAt = minDefined(
+          nextDirtyPullRunAt,
+          nextDebounceAt,
+        );
+        nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
+        return true;
+      }
+    }
+
+    const nextEligibleAt = state.getNextEligibleRunTime(action);
+    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
+      nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
+      return true;
+    }
+
+    return false;
+  };
+
+  const pendingPullWork = [...state.pending].filter((action) =>
     state.effects.has(action) ||
     state.materializerIndex.isMaterializer(action) ||
     state.isDemandedPullComputation(action) ||
     state.shouldRunFirstPullComputationInDemandContext(action)
   );
+  const hasPendingPullWork = pendingPullWork.some((action) =>
+    !noteFutureEligibility(action)
+  );
 
-  let nextDirtyPullRunAt: number | undefined;
-  let nextDirtyPullRunWaitsForIdle = false;
-  const hasDirtyPullWork = [...state.dirty].some((action) => {
+  // Dirty pull work is by definition invalid — scan the invalid-node index
+  // rather than every registered node.
+  const hasDirtyPullWork = [...state.nodes.getInvalidNodes()].some((action) => {
+    if (!isInvalidAction(state.nodes, action)) {
+      return false;
+    }
     if (
       !state.effects.has(action) &&
       !state.isDemandedPullComputation(action) &&
@@ -641,24 +466,7 @@ export function planPullExecuteContinuation(state: {
       return false;
     }
 
-    if (state.isDebouncedComputationWaiting(action)) {
-      const nextDebounceAt = state.getNextDebounceRunTime(action);
-      if (nextDebounceAt !== undefined) {
-        nextDirtyPullRunAt = minDefined(
-          nextDirtyPullRunAt,
-          nextDebounceAt,
-        );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-          state.materializerIndex.isMaterializer(action);
-      }
-      return false;
-    }
-
-    const nextEligibleAt = state.getNextEligibleRunTime(action);
-    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
-      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
-        state.materializerIndex.isMaterializer(action);
+    if (noteFutureEligibility(action)) {
       return false;
     }
 
@@ -682,6 +490,15 @@ export function planPullExecuteContinuation(state: {
     nextDirtyPullRunWaitsForIdle,
     shouldQueueAnotherTick,
   };
+}
+
+function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
+  const record = nodes.get(action);
+  return record !== undefined && isInvalidActionRecord(record);
+}
+
+function isInvalidActionRecord(record: SchedulerNode): boolean {
+  return record.status === "invalid" || record.status === "never-ran";
 }
 
 function minDefined(

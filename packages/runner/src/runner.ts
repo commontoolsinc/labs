@@ -3,7 +3,10 @@ import {
   type FabricValue,
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import {
+  getPersistentSchedulerStateConfig,
+  type SchedulerActionSnapshotCursor,
+} from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
@@ -33,9 +36,14 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+} from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
+  opaqueArgumentKeys,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -50,6 +58,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
@@ -62,10 +71,7 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
-import {
-  ignoreReadForScheduling,
-  markReadAsAttemptedWrite,
-} from "./scheduler.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
@@ -510,16 +516,16 @@ type SchedulerRehydrationSubscriptionOptions = {
     space: MemorySpace;
     pieceId: string;
     processGeneration: number;
-    awaitSync?: boolean;
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >;
   };
 };
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
-  // Resumed-from-synced-state: hold each action's initial rehydration/run until
-  // the space has finished syncing, so consumers don't race the data.
-  awaitSyncBeforeInitialRun?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -1140,9 +1146,7 @@ export class Runner {
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
-      // Resumed-from-synced-state: hold each action's initial rehydration/run
-      // until the space has finished syncing, so consumers don't race the data.
-      awaitSyncBeforeInitialRun?: boolean;
+      schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1182,13 +1186,12 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
-      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
-          false
-        ? {}
-        : this.schedulerRehydrationOptions(
-          resultCell,
-          options.awaitSyncBeforeInitialRun,
-        );
+      const schedulerRehydration = options.schedulerRehydration ??
+        (options.rehydrateSchedulerFromStorage === false
+          ? {}
+          : this.schedulerRehydrationOptions(
+            resultCell,
+          ));
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -1419,10 +1422,18 @@ export class Runner {
     // Fast path for pieces prepared in the current runtime via setup()/run() or
     // explicitly restarted after stop(). Those writes are already present
     // locally, so we should preserve the historical synchronous start()
-    // behavior even if an earlier read flipped the cell's generic `synced`
-    // flag. The dependency sync below is specifically for resumed pieces that
-    // came from storage.
-    if (!wasSyncedAtEntry || wasPreparedLocally || wasStoppedLocally) {
+    // behavior. The dependency sync + snapshot resume below is specifically for
+    // pieces resumed from storage in a fresh runtime.
+    //
+    // We gate on the locally-assembled signals (`wasPreparedLocally` /
+    // `wasStoppedLocally`) rather than the cell's `synced` flag: a fresh-runtime
+    // resume reaches here past Step 3 with `getRaw()` populated, so it is not
+    // locally assembled iff neither flag is set. The `synced` flag is no longer
+    // reliably set for a storage-loaded cell, which would otherwise drop the
+    // resume path and re-run the piece from scratch (`wasSyncedAtEntry` kept for
+    // diagnostics).
+    void wasSyncedAtEntry;
+    if (wasPreparedLocally || wasStoppedLocally) {
       try {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
@@ -1439,7 +1450,8 @@ export class Runner {
     // scheduler back up in a fresh runtime. Without this, resumed pieces can
     // observe the last persisted result but miss subsequent input updates.
     return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
-      .then(() => {
+      .then(() => this.loadSchedulerRehydrationSnapshots(rootCell))
+      .then((snapshotsByActionId) => {
         // we may already be in the midst of starting this, so don't start again
         if (this.cancels.has(this.getDocKey(rootCell))) {
           return true;
@@ -1448,11 +1460,10 @@ export class Runner {
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
-            // This pattern is resumed from a synced state (it just awaited
-            // syncCellsForRunningPattern): hold each action's initial run until
-            // the space finishes syncing so we don't race the data (e.g. maps
-            // reconciling an empty array, then re-running once it streams in).
-            awaitSyncBeforeInitialRun: true,
+            schedulerRehydration: this.schedulerRehydrationOptions(
+              rootCell,
+              snapshotsByActionId,
+            ),
           });
         } catch (err) {
           return Promise.reject(err);
@@ -1475,7 +1486,6 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
-      awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }
 
@@ -1775,7 +1785,10 @@ export class Runner {
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
-    awaitSync?: boolean,
+    snapshotsByActionId?: ReadonlyMap<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >,
   ): SchedulerRehydrationSubscriptionOptions {
     if (!getPersistentSchedulerStateConfig()) {
       return {};
@@ -1786,9 +1799,59 @@ export class Runner {
         space,
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
-        ...(awaitSync ? { awaitSync: true } : {}),
+        ...(snapshotsByActionId !== undefined ? { snapshotsByActionId } : {}),
       },
     };
+  }
+
+  private async loadSchedulerRehydrationSnapshots(
+    resultCell: Cell<any>,
+  ): Promise<
+    | ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    | undefined
+  > {
+    if (!getPersistentSchedulerStateConfig()) {
+      return undefined;
+    }
+
+    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return undefined;
+    }
+
+    const snapshotsByActionId = new Map<
+      string,
+      PersistedSchedulerObservationSnapshot
+    >();
+    let cursor: SchedulerActionSnapshotCursor | undefined;
+    do {
+      const page = await listSnapshots.call(provider, {
+        ownerSpace: space,
+        pieceId: `${scope}:${id}`,
+        processGeneration: 0,
+        ...(cursor ? { cursor } : {}),
+      });
+      for (const snapshot of page.snapshots) {
+        if (!isSchedulerActionObservation(snapshot.observation)) continue;
+        snapshotsByActionId.set(snapshot.observation.actionId, {
+          observation: snapshot.observation,
+          ...(snapshot.directDirtySeq !== undefined
+            ? { directDirtySeq: snapshot.directDirtySeq }
+            : {}),
+          ...(snapshot.staleSeq !== undefined
+            ? { staleSeq: snapshot.staleSeq }
+            : {}),
+          ...(snapshot.unknownReason !== undefined
+            ? { unknownReason: snapshot.unknownReason }
+            : {}),
+        });
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+
+    return snapshotsByActionId;
   }
 
   private async syncCellsForRunningPattern(
@@ -1975,7 +2038,6 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
-            schedulerRehydration,
           );
           break;
         default:
@@ -3440,35 +3502,8 @@ export class Runner {
       pattern,
     });
 
-    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      logger.timeStart("action", "populateDependencies");
-      try {
-        if (reads.length > 0) {
-          this.populateDeclaredSchedulerReads(reads, depTx);
-        } else if (module.argumentSchema !== undefined) {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            inputs,
-            undefined,
-            depTx,
-          );
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        }
-
-        for (const output of writes) {
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsAttemptedWrite,
-          });
-        }
-      } finally {
-        logger.timeEnd("action", "populateDependencies");
-      }
-    };
-
     addCancel(
-      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies, {
+      this.runtime.scheduler.subscribe(wrappedAction, {
         ...schedulerRehydration,
       }),
     );
@@ -3674,13 +3709,22 @@ export class Runner {
     // identity instead of deserializing the embedded graph.
     this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
 
+    // Opaque forwarded references (argument keys the module's schema marks
+    // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
+    // never value-read by the builtin, so they must not become declared reads
+    // that pull their (possibly unselected) writer. Drop those top-level keys
+    // when building inputCells only; outputCells and other callers keep the
+    // full surface.
+    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
       processCell,
+      opaqueInputKeys.size > 0
+        ? { skipTopLevelKeys: opaqueInputKeys }
+        : undefined,
     );
-    // outputCells tracks what cells this action writes to. This is needed for
-    // pull-based scheduling so collectDirtyDependencies() can find computations
-    // that write to cells being read by effects.
+    // outputCells tracks the static write surface for dependency ordering and
+    // event preflight.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
       processCell,
@@ -3774,12 +3818,6 @@ export class Runner {
               },
             }
             : {}),
-          // Propagate the resumed-from-synced-state flag so container-minting
-          // builtins (map/filter/flatmap) defer their per-element sub-pattern
-          // runs until sync completes too.
-          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
-            ? { awaitSync: true }
-            : {}),
         },
         processCell,
         this.runtime,
@@ -3796,9 +3834,6 @@ export class Runner {
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
       ? builtinResult.isEffect
       : undefined;
-    const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
-      ? builtinResult.populateDependencies
-      : undefined;
     const builtinDebounce = isRawBuiltinResult(builtinResult)
       ? builtinResult.debounce
       : undefined;
@@ -3808,6 +3843,12 @@ export class Runner {
     const builtinThrottle = isRawBuiltinResult(builtinResult)
       ? builtinResult.throttle
       : undefined;
+    const builtinDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.dependencies
+      : undefined;
+    const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.useDeclaredReadsAsDependencies
+      : false;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -3850,8 +3891,8 @@ export class Runner {
       this.applyImplementationHash(action, impl.src);
     }
 
-    // Seed raw actions with their pattern/module/write metadata so pull-mode
-    // scheduling can discover pending computations before their first run.
+    // Annotate raw actions with their pattern/module/write metadata so
+    // scheduler registration can derive static surfaces and ordering hints.
     const staticRedirectWriteTargets = module.materializerWriteEnvelopes
       ? []
       : this.collectStaticRedirectWriteTargets(tx, outputCells);
@@ -3869,55 +3910,36 @@ export class Runner {
       pattern,
     });
 
-    // Create populateDependencies callback.
-    // If builtin provides custom reads, use that; otherwise read all inputs.
-    // Always register output writes so collectDirtyDependencies() can find this
-    // computation when an effect needs its outputs.
-    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      logger.timeStart("raw", "populateDependencies");
-      try {
-        // Capture read dependencies - use custom if provided, otherwise read all inputs
-        if (builtinPopulateDependencies) {
-          if (typeof builtinPopulateDependencies === "function") {
-            builtinPopulateDependencies(depTx);
-          } else {
-            // It's a ReactivityLog - reads are already captured, nothing to do
-            for (const read of builtinPopulateDependencies.reads) {
-              depTx.readOrThrow(read);
-            }
-          }
-        } else {
-          // Default: read all inputs
-          for (const input of inputCells) {
-            this.runtime.getCellFromLink(input, undefined, depTx)?.get();
-          }
-        }
-        // Always capture write dependencies by marking outputs as attempted writes
-        for (const output of outputCells) {
-          // Reading with markReadAsAttemptedWrite registers this as a write dependency
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsAttemptedWrite,
-          });
-        }
-      } finally {
-        logger.timeEnd("raw", "populateDependencies");
-      }
-    };
-
     // isEffect can come from module options or from the builtin result
     const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;
 
+    const schedulerDependencies = builtinDependencies ??
+      (useDeclaredReadsAsDependencies
+        ? {
+          reads: inputCells.map(toMemorySpaceAddress),
+          shallowReads: [],
+          writes: [],
+        }
+        : undefined);
+    const schedulerOptions = {
+      isEffect,
+      debounce,
+      noDebounce,
+      throttle,
+      ...schedulerRehydration,
+    };
+
     addCancel(
-      this.runtime.scheduler.subscribe(action, populateDependencies, {
-        isEffect,
-        debounce,
-        noDebounce,
-        throttle,
-        ...schedulerRehydration,
-      }),
+      schedulerDependencies
+        ? this.runtime.scheduler.subscribe(
+          action,
+          schedulerDependencies,
+          schedulerOptions,
+        )
+        : this.runtime.scheduler.subscribe(action, schedulerOptions),
     );
   }
 
@@ -3964,7 +3986,6 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
-    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -4101,10 +4122,7 @@ export class Runner {
         parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
-        ?.awaitSync,
-    });
+    this.run(tx, patternImpl, inputs, childResultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

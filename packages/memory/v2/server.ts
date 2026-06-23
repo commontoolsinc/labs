@@ -149,12 +149,15 @@ const schedulerObservationFromValue = (
 ): Engine.SchedulerActionObservation | undefined => {
   if (
     !isRecord(observation) ||
-    observation.version !== 1 ||
+    (observation.version !== 1 && observation.version !== 2) ||
     typeof observation.pieceId !== "string" ||
     typeof observation.actionId !== "string" ||
     typeof observation.processGeneration !== "number" ||
     !Array.isArray(observation.reads) ||
-    !Array.isArray(observation.shallowReads)
+    !Array.isArray(observation.shallowReads) ||
+    (observation.version === 1 &&
+      (!Array.isArray(observation.currentKnownWrites) ||
+        !Array.isArray(observation.declaredWrites)))
   ) {
     return undefined;
   }

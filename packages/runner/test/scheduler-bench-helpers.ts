@@ -63,23 +63,14 @@ const timingKeys = [
   ["event/log", "scheduler/execute/event/pullTxToReactivityLog"],
   ["event/depCommit", "scheduler/execute/event/pullDepCommitStart"],
   [
-    "event/collectDirty",
-    "scheduler/execute/event/pullCollectDirtyDependencies",
+    "event/collectInvalid",
+    "scheduler/execute/event/pullCollectInvalidUpstream",
   ],
   [
-    "event/scheduleDirty",
-    "scheduler/execute/event/pullScheduleDirtyDependencies",
+    "event/scheduleInvalid",
+    "scheduler/execute/event/pullScheduleInvalidUpstream",
   ],
   ["execute/depCollect", "scheduler/execute/depCollect"],
-  [
-    "collectDirtyDependencies",
-    "scheduler/execute/collectDirtyDependencies",
-  ],
-  [
-    "writerLookup",
-    "scheduler/execute/collectDirtyDependencies/writerLookup",
-  ],
-  ["scheduleAffectedEffects", "scheduler/scheduleAffectedEffects"],
   ["run", "scheduler/run"],
   ["run/action", "scheduler/run/action"],
   ["run/commit", "scheduler/run/commit"],
@@ -88,7 +79,7 @@ const timingKeys = [
 
 let blackhole = 0;
 
-export function createSchedulerBenchEnv(): SchedulerBenchEnv {
+export function createSchedulerBenchEnv(_pullMode = true): SchedulerBenchEnv {
   const storageManager = StorageManager.emulate({
     as: benchSigner,
   });

@@ -1,4 +1,4 @@
-// Scheduler throttle and staleness-tolerance tests.
+// Scheduler throttle and bounded-freshness tests.
 
 import {
   afterEach,
@@ -18,7 +18,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 
-describe("throttle - staleness tolerance", () => {
+describe("throttle - bounded freshness", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

@@ -4052,3 +4052,1520 @@ CT-1316, and the differing value is exact (registry `none` vs WeakMap
   node runs). Changing it to preserve the old pass would expire
   continuation demand at pass end before the continued run.
 - Deviations: none.
+
+## IMPLEMENTER STOP — 07/3c.i closure ordering retry regression
+
+3c.i asks for a parity commit: after seed + upstream collection, add the live
+downstream closure of every dirty node to the work set, keep runtime gates
+unchanged, and expect zero behavior change. I implemented the closure in
+`pull-execution.ts` by walking `dependents` from dirty work-set roots, adding
+only nodes whose `SchedulerNode` is live according to the 3b liveness helper.
+This required a narrow `isLiveAction` settle-state predicate.
+
+Validation before the stop:
+
+- `deno fmt packages/runner/src/scheduler.ts
+  packages/runner/src/scheduler/execution.ts
+  packages/runner/src/scheduler/pull-execution.ts`: passed
+  (`Checked 3 files`).
+- `deno lint` on the same 3 files: passed (`Checked 3 files`).
+- `deno check` on the same 3 files: passed.
+- Cutover fixture pack:
+  `ENV=test deno test --allow-ffi --allow-env --allow-read
+  --allow-write=/tmp,/var/folders --allow-run=git
+  packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+  `1 passed (10 steps)`, `0 failed`; fixtures 3 and 4 stayed green.
+
+Full runner suite then failed one test:
+
+```text
+$ cd packages/runner && deno task test
+FAILED | 593 passed (3108 steps) | 1 failed (1 step) | 0 ignored (10 steps) (2m6s)
+
+reactive retries ... should preserve dependencies when retrying failed commits
+error: AssertionError: Values are not strictly equal.
+
+[Diff] Actual / Expected
+
+-   3
++   2
+
+at packages/runner/test/scheduler-retries.test.ts:187:31
+```
+
+The focused retry file reproduces the same failure:
+
+```text
+$ ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/scheduler-retries.test.ts
+FAILED | 0 passed (1 step) | 1 failed (1 step) (61ms)
+```
+
+Initial read: the new closure can place a clean live downstream computation in
+the same order after an upstream dirty computation. In the retry fixture,
+`action1` writes `intermediate` and aborts for its first two attempts; with the
+closure, downstream `action2` can be present later in the same order and becomes
+dirty before its turn, so the unchanged v1 computation gate (`pending || dirty`)
+runs it once more before `action1` eventually succeeds. That contradicts the
+3c.i "zero behavioral change" expectation, even though the cutover
+effect-parity fixtures stay green.
+
+STOP question for reviewer: should 3c.i narrow the parity closure until 3c.ii
+(for example only clean effects / nodes whose current v1 gate would skip until
+synchronous invalidation), should the retry fixture expectation change for the
+new closure semantics, or should this wait for the 3c.ii single-channel run gate
+before including downstream computations?
+
+## REVIEWER VERDICT — 07/3c.i closure narrows to effects
+
+Correct stop, and your first option is the ruling. My "zero behavioral
+change" framing for 3c.i was over-broad: with v1's computation gate
+(`pending || dirty`) still active, ANY downstream computation placed in
+the order can be admitted one iteration early when an upstream member's
+optimistic commit dirties it mid-iteration. That is a real semantic
+shift, and `scheduler-retries` is a contract test — its expectation
+does not move (option 2 rejected), and deferring the whole closure
+(option 3) would orphan the parity instrument fixture 3 needs.
+
+1. **3c.i closure = live downstream EFFECTS only.** Effects keep their
+   v1 gates (conditional filter, changed-inputs check, pre-clear), so
+   their same-iteration placement is behavior-preserving — fixtures 3/4
+   are exactly their parity witnesses. Drop computations from the
+   closure walk; keep the `isLiveAction` predicate and the
+   `dependents`-walk scaffolding (3c.ii reuses them verbatim).
+2. **Computations join the closure in 3c.ii, in the same commit as the
+   invalid-at-turn run-gate** — the gate that makes their placement
+   sound (clean-at-turn ⇒ skipped, regardless of what dirtied whom
+   mid-iteration). Amend the work order's 3c.i/3c.ii text in-branch to
+   say this — own docs commit:
+   `docs(specs): scheduler-v2 WO07 — 3c.i closure is effects-only; computations join with the ii gate`.
+3. Add `test/scheduler-retries.test.ts` to 3c.ii's named gates (it
+   already runs in the suite; naming it makes the count assertion an
+   explicit parity witness for the computation-closure flip).
+4. Optional, scratch-only, do not block: one log line identifying what
+   dirties `action2` during a failed attempt (optimistic-apply
+   notification vs something else) — useful context for the 3c.ii
+   review, recorded here if cheap.
+5. Then: rerun the fixture pack + retries + full suite; commit 3c.i
+   with its planned message.
+
+## 07/3c.i-docs-amendment
+
+- [x] pending — amended 07/3c.i and 07/3c.ii work-order text per reviewer
+  ruling.
+- Fix shape:
+  - 3c.i downstream closure is now specified as live downstream effects only,
+    preserving v1 computation-gate behavior.
+  - 3c.ii now explicitly expands the closure to all live nodes in the same
+    commit as the invalid-at-turn run gate.
+  - `test/scheduler-retries.test.ts` is now an explicit 3c.ii gate.
+
+## 07/3c.i-closure-ordering
+
+- [x] pending — added live downstream effect closure ordering for scheduler
+  settle work sets.
+- Fix shape:
+  - `buildPullIterationWorkSet` now walks `dependents` from dirty work-set
+    roots after seed + upstream collection.
+  - The 3c.i closure adds only live effect nodes, per reviewer ruling, so
+    unchanged v1 computation gates cannot admit downstream computations early.
+  - The settle-loop state now exposes `isLiveAction` for the closure helper;
+    3c.ii will reuse this path when computations join the closure with the new
+    invalid-at-turn run gate.
+- Recordings:
+  - `deno fmt packages/runner/src/scheduler.ts
+    packages/runner/src/scheduler/execution.ts
+    packages/runner/src/scheduler/pull-execution.ts`: passed
+    (`Checked 3 files`).
+  - `deno lint` on the same 3 files: passed (`Checked 3 files`).
+  - `deno check` on the same 3 files: passed.
+  - Cutover fixture pack:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-v2-cutover.test.ts`: passed,
+    `1 passed (10 steps)`, `0 failed`.
+  - Retry parity witness:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-retries.test.ts`: passed,
+    `1 passed (2 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3109 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.ii-value-gated-effects-channel-deletion
+
+- [x] pending — migrated scheduler invalidation to node status and deleted the
+  duplicate write-propagation/scheduled-effect channels.
+- Fix shape:
+  - `record.status`/`record.invalidCauses` now own invalidation state; storage
+    notifications call the `markInvalid` entry point and action runs consume
+    or restore causes from the node record.
+  - The settle work-set closure now includes all live downstream nodes, while
+    the turn gate runs only invalid/never-ran live eligible nodes under
+    `PASS_RUN_BUDGET`; clean computations included for ordering are skipped.
+  - Deleted the write-propagation module and the `changedWritesHistory`,
+    `conditionallyScheduledEffects`, `scheduledFirstTime`,
+    `scheduleAffectedEffects`, and `scheduledEffects` trace channels.
+  - First-run no-output computations discovered during dependency collection
+    receive provisional demand so startup/restart semantics stay live.
+  - Initial clean rehydration refuses to overwrite a node once the dirty mirror
+    or invalid status shows it has been invalidated during the async load.
+  - Stale-input resubscribe skips debounced computation writers so the debounce
+    wake path, not same-turn effect revalidation, controls the trailing flush.
+  - Scheduler tests use `StorageManager.emulate({ as: signer })` through
+    `createSchedulerTestRuntime`; `rg` found no other scheduler storage
+    configuration in runner scheduler helpers. The representative synchronous
+    notification assertion runs in `scheduler-pull.test.ts`.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "cfcTriggerReads|changedWritesHistory|conditionallyScheduledEffects|scheduledFirstTime|scheduleAffectedEffects|markEffectConditionallyScheduled|conditionalEffectHasChangedInputs|markPullDemandContinuation|recordChangedComputationWrites|markReadersDirtyForChangedWrites|writePropagation|TriggerTraceScheduledEffect|scheduledEffects|mark-dirty|already-dirty|schedule-effect" packages/runner/src packages/runner/test
+```
+
+  - `git diff --check`: passed.
+  - `deno fmt` on the 29 touched source/test files: passed (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed.
+  - `deno check` on the same 29 files: passed.
+  - Persistent rehydration trio:
+    `ENV=test deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-observations.test.ts
+    packages/runner/test/reload-rehydration.test.ts
+    packages/runner/test/reload-sibling-overdirty.test.ts`: passed,
+    `3 passed (22 steps)`, `0 failed`.
+  - Regression set:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts
+    test/scheduler-timing.test.ts`: passed, `7 passed (72 steps)`,
+    `0 failed`.
+  - 3c.ii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-retries.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-events.test.ts`: passed, `11 passed (92 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3108 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m6s`.
+  - Expected noisy passing logs remain: legacy cycle-cap telemetry in
+    convergence cases and the reload-rehydration fixture's expected
+    `TypeError`.
+
+## 07/3c.iii-upstream-machinery-deletion
+
+- [x] pending — deleted the upstream dirty/stale machinery and rebuilt the
+  remaining event-preflight and settle seeding paths around node invalid status.
+- Fix shape:
+  - Deleted `src/scheduler/dirty-dependencies.ts` and
+    `src/scheduler/staleness.ts`; scheduler state no longer owns a
+    dirty/stale mirror, `collectStack`, or dirty-dependency trace context.
+  - Added `event-preflight-dependencies.ts` with
+    `collectInvalidUpstreamForLog`, preserving the public preflight stats shape
+    while collecting only invalid/never-ran upstream nodes.
+  - Event preflight now walks through clean intermediates to find invalid
+    ancestors of handler reads, so transient event demand still blocks on
+    stale inputs without restoring pull mode's old dirty collector.
+  - Pull settle work-set construction now uses initial seeds plus invalid/live
+    seeds, invalid materializer promotions, and live downstream closure; the
+    old initial-seed/traversal-root asymmetry and late materializer per-effect
+    recheck are gone.
+  - Continuations, delays, cycle-break shims, graph snapshots, subscription
+    revalidation, and persisted rehydration now derive "dirty" compatibility
+    from node invalid/never-ran status.
+  - The first full-suite attempt exposed an async initial-rehydration race:
+    `never-ran` is both the normal pre-rehydrate state and the state after an
+    explicit invalidation. `markActionInvalid` now cancels any pending initial
+    rehydrate token so a late clean snapshot cannot overwrite that
+    invalidation.
+- Recordings:
+  - Focused scheduler trio:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts test/scheduler-pull.test.ts
+    test/scheduler-convergence.test.ts`: passed, `3 passed (53 steps)`,
+    `0 failed`.
+  - 3c.iii gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts
+    test/scheduler-cfc-trigger-reads.test.ts test/scheduler-retries.test.ts
+    test/scheduler-ordering.test.ts test/scheduler-timing.test.ts
+    test/scheduler-throttle.test.ts`: passed, `10 passed (68 steps)`,
+    `0 failed`.
+  - Rehydration regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`.
+  - Event/stale bench pair:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-stale-propagation.bench.ts`: passed. Results:
+    event clean broad graph `328.7ms`, event waits on transitive invalid writer
+    `25.7ms`, note-shaped clean events `1.1s`, deep read-populated handler
+    `545.2ms`; stale-propagation bench, now an end-to-end graph update bench:
+    chain `98.9ms`, diamond `88.6ms`, wide fanout `239.8ms`, dynamic deps
+    `81.5ms`, unchanged recompute `45.9ms`.
+  - `deno fmt` on the 29 touched source/test files: passed
+    (`Checked 29 files`).
+  - `deno lint` on the same 29 files: passed (`Checked 29 files`).
+  - `deno check` on the same 29 files: passed.
+  - `git diff --check`: passed.
+  - Upstream deletion grep returned no matches:
+
+```text
+$ rg -n "staleness|dirty-dependencies|SchedulerStaleness|collectStack|dirtyDependencyTraceContext|DirtyDependencyTraceContext|collectDirtyDependencies|collectDirtyDependenciesForLog|collectDirtyDependenciesFromTraversalRoot|deferEffectForLateMaterializerDependency|isStale\(|getUpstreamStaleCount|stale\.size|upstreamStale|markDirectDirty|clearSchedulerDirectDirty|clearSchedulerDirty|forceClearStale" packages/runner/src packages/runner/test
+```
+
+  - Scheduler-source stale grep returned no matches:
+
+```text
+$ rg -n "stale\b" packages/runner/src/scheduler packages/runner/src/scheduler.ts
+```
+
+  - First `cd packages/runner && deno task test` attempt failed one test:
+    `scheduler-observations.test.ts` /
+    `does not apply async initial rehydration after an action becomes dirty`.
+    The final rerun passed: `594 passed (3106 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m6s`.
+
+## 07/3c.iv-budgets-backoff
+
+- [x] pending — replaced cycle breaking/adaptive cycle debounce with v2 pass
+  budgets and exponential backoff.
+- Fix shape:
+  - `constants.ts` now owns `MAX_ITERS = 10`, `PASS_RUN_BUDGET = 5`, and
+    the 250ms/2000ms backoff bounds; the old `MAX_ITERATIONS_PER_RUN`,
+    `loopCounter`, and cycle-debounce constants are gone.
+  - Node records now carry `backoffUntil` and consecutive
+    `backoffFailures`; settle execution applies exponential backoff when an
+    iteration cap or pass-budget exhaustion leaves runnable invalid work.
+  - Pass-budget backoff keys off any action reaching the run budget, then
+    defers the currently runnable invalid nodes. This fixes alternating cycles
+    where the action that trips the budget is clean by the time planning runs.
+  - Continuation and run gating now use combined throttle/backoff eligibility,
+    so delayed work schedules through the existing event-wake path rather than
+    immediate requeueing.
+  - `scheduler.non-settling` telemetry is emitted once per backoff episode via
+    the existing settling tracker.
+  - Deleted `pull-cycle-break.ts`, `planPullCycleBreak`,
+    `planPullAdaptiveCycleDebounce`, adaptive cycle-debounce application, and
+    the remaining effect re-dirty cycle-skip paths.
+  - Updated scheduler convergence/timing/cutover/core tests to assert bounded
+    backoff semantics instead of the removed hard loop cap and cycle debounce.
+- Recordings:
+  - Deletion grep returned no matches:
+
+```text
+$ rg -n "runsThisExecute|loopCounter|executeStartTime|CYCLE_DEBOUNCE|MAX_ITERATIONS_PER_RUN|PullCycleBreakState|breakPullCyclesIfNeeded|planPullCycleBreak|planPullAdaptiveCycleDebounce|schedule-cycle-debounce|schedule-cycle|dirtyEffectsToRun|earlyIterationComputations|getLoopCounter|pull-cycle-break|cycle-break|cycle-aware debounce|cycle debounce" packages/runner/src packages/runner/test
+```
+
+  - `deno fmt` on the touched source/test files: passed.
+  - `deno lint` on the touched source/test files: passed (`Checked 11 files`).
+  - `deno check` on the touched source/test files: passed.
+  - `git diff --check`: passed.
+  - Core regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-core.test.ts`: passed, `1 passed (25 steps)`, `0 failed`.
+  - 3c.iv gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts`: passed,
+    `4 passed (49 steps)`, `0 failed`.
+  - First `cd packages/runner && deno task test` attempt failed the legacy
+    `scheduler-core.test.ts` loop-cap assertion after the hard loop cap was
+    removed. The final rerun passed: `594 passed (3099 steps)`, `0 failed`,
+    `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: deliberate scheduler errors in
+    convergence/core/stack-trace tests, reload-rehydration's expected
+    `TypeError`, and existing write-surface/wish warnings.
+
+## REVIEWER RESOLUTION — PR #4103 review findings + rebase interaction
+
+- [x] pending — iteration-cap backoff cycle-evidence gate + idle-wait for a
+  rebase-exposed first-run demanded debounce.
+- Findings addressed:
+  1. (Codex P2) Iteration-cap backoff time-gated healthy deep chains.
+     `passRuns` resets per execute-pass and a tight cycle trips the per-pass
+     run budget MID-loop (breaking with `pass-budget` backoff), so reaching
+     the iteration cap means forward progress, not a cycle.
+     `isBudgetBackoffCandidate` now applies the `passRuns >= PASS_RUN_BUDGET`
+     gate for the `iteration-cap` reason too (the in-loop `pass-budget`
+     break still opts out via `requirePassRunBudget: false`), so a
+     sub-budget chain re-passes immediately instead of pausing for
+     `BACKOFF_BASE_MS`. Red-green: cutover fixture "reserves iteration-cap
+     backoff for cycle evidence" (+ "settles a deep acyclic chain ..." and
+     the existing "bounds a cycling subgraph ..." as guards).
+- Rebase interaction (NOT a review finding — surfaced by my #4102 fix
+  landing on main): 3c's continuation refactor removed deferred actions
+  from `hasPendingPullWork` and tracks their future run via
+  `nextDirtyPullRunWaitsForIdle`, which only covered effects/materializers.
+  Original 3c masked the gap because the planning-path
+  `getNextDebounceRunTime` returned undefined for first-run debounced
+  computations (so they stayed in pending-work). My #4102 consistency fix
+  makes it return a value, so a never-ran demanded debounced computation
+  (e.g. a debounced child under a live parent's provisional demand) got
+  deferred out of pending-work without keeping idle() alive — idle returned
+  before its 200ms gate opened. `noteFutureEligibility` now also waits for
+  idle on `shouldRunFirstPullComputationInDemandContext` (never-ran +
+  provisional demand), restoring main's effective behavior. Limited to the
+  FIRST run so idle never blocks through a throttle window / trailing
+  flush of an already-run action (caught by the throttle suite when an
+  over-broad `isDemandedPullComputation` was tried first). Guard:
+  cutover fixture "keeps provisional demand for a debounced child until the
+  gate opens" (216ms) — was green on original 3c, regressed on rebase, now
+  green again.
+- Declined (cubic P2s, reasoning recorded):
+  - resubscribe clean-up guard (`!existingRecord && never-ran`): correct
+    as-is. It prevents a FIRST registration via resubscribe from being
+    wired as invalid mid-function; an EXISTING never-ran record should stay
+    runnable. Rehydration's clean path force-sets `status = clean`
+    independently, so rehydrated actions do not re-run (rehydration suite
+    green).
+  - continuation re-tick for non-runnable invalid nodes: `hasDirtyPullWork`
+    already filters invalid nodes that are not effect/demanded/materializer,
+    and `noteFutureEligibility` filters debounce/throttle-deferred ones — a
+    surviving node is genuinely runnable next tick.
+  - initial-run fallback queueExecution: undemanded failed work staying
+    unscheduled is correct pull semantics; demand arrival
+    (`notifyNodeLivenessChange`/edge registration) queues it.
+- Deviations: none.
+
+## REVIEWER RESOLUTION — PR #4103 iteration-cap backoff: REVERTED (supersedes above)
+
+The iteration-cap backoff cycle-evidence gate (committed earlier this PR)
+was REVERTED after it broke the `should persist and reload every rapidly
+created notebook note` and the notebook reload integration tests with
+`RuntimeClient request timed out: runtime:idle` (consistent on CI,
+load-sensitive — green 3/3 locally).
+
+Root cause (verified in code): the iteration-cap backoff is NOT merely a
+perf pause for deep chains — it is the escape valve that lets `idle()`
+resolve when a live subgraph has not settled within MAX_ITERS.
+`planBudgetBackoff` sets `record.backoffUntil`, which `getNextEligibleRunTime`
+returns via `maxFutureTime(...)`; `noteFutureEligibility` then defers the
+action out of `hasDirtyPullWork` (so `applyQuiescentContinuation` resolves
+the idle promises) and schedules a retry wake. Gating iteration-cap backoff
+on cycle evidence removed that valve for any sub-budget chain that
+repeatedly hits the cap under load: such a chain stays in `hasDirtyPullWork`
+forever, idle keeps re-ticking and never resolves. Rapid notebook-note
+creation under CI load is exactly such a workload.
+
+Codex P2 #4103 ("reserve backoff for cycle evidence, or re-queue
+immediately") is therefore DECLINED: both suggested forms remove the
+idle-resolution escape valve without a convergence oracle to distinguish a
+deep-but-converging chain from a non-converging one. The ~250ms pacing on
+a chain deeper than MAX_ITERS is the cost of guaranteeing idle resolution;
+it is a minor perf nit, not a correctness bug. Reverted to the original 3c
+behavior (full backoff at iteration cap for all sub-budget chains). The
+`reserves iteration-cap backoff for cycle evidence` red-green test was
+removed with the revert; the `settles a deep acyclic chain ...` guard stays
+(static chains settle within MAX_ITERS regardless).
+
+The OTHER #4103 changes stand: the rebase-interaction idle-wait fix
+(`futureRunWaitsForIdle` for first-run demanded debounced computations,
+machine-independent, restores main's behavior) and the scheduledEffects
+cross-package consumer cleanup.
+
+## PERF FIX — event-preflight O(N²) over a hub (decision 15)
+
+The `Pattern Integration (2/4)` + `Pattern Reload` rapid-notebook timeouts
+(`runtime:idle/dispose`) were a real 3c regression: deleting the upstream-
+stale machinery turned the event-preflight consistency gate into an O(graph)
+upstream walk (`collectInvalidUpstreamForLog`) that, against the note-list
+hub, visited all N notes per preflight → O(N²) under rapid creation
+(measured 564 ms/create). The inventory's "no consumer for transitive
+staleness" was false — the I4 gate is the consumer. Design adjudication and
+decision 15 captured in the spec (README §7.5/§14/§15, inventory row flipped
+Delete→Subsume).
+
+Implemented in two steps + guards:
+
+1. `refactor(runner): invalid-node index in NodeRegistry` — a `Set<Action>`
+   of active invalid/never-ran nodes, maintained through a single
+   `setStatus()` choke point (+ activate/remove). All node-status writes
+   routed through it; the three O(N) full-node scans
+   (`collectPullIterationSeeds`, `hasRunnablePullWork`, `hasDirtyPullWork`)
+   now iterate the index (every runnable seed is invalid). Correctness-
+   neutral; full runner suite green.
+
+2. `fix(runner): invert the event-preflight upstream-invalid walk` — seed
+   from `getInvalidNodes()` and walk DOWN to the closure via `dependents`
+   (exact inverse of `reverseDependencies`), with materializer→reader edges
+   mirrored from `collectMaterializerWritersForLog`. Cost is bounded by the
+   invalid set × its downstream cone, not the closure fan-out. Re-adds no
+   per-data-change transitive marking (dormancy stays zero-cost, D5/I2).
+
+Red→green / guards (all in `scheduler-pull.test.ts`):
+
+- `should keep event handlers behind invalid dependencies` (the transitive
+  consistency semantics) — still green.
+- `should dispatch clean broad event preflight dependencies` — the 32-wide
+  clean fan-out now reports `visitCount < 10` (was the full ~33 cone under
+  the upstream walk).
+- `defers an event handler behind an invalid upstream materializer` — NEW,
+  exercises the materializer arm of the inverted walk through the gate.
+- `bounds event preflight cost over a wide fan-in hub` — NEW, the faithful
+  notebook shape: 200 writers → one hub the handler reads; invalidating one
+  writer keeps `visitCount < 20` (the old upstream walk visited ~200) while
+  still dispatching on the re-settled hub.
+
+Full runner suite green (618 → 620 with the two new tests). The
+`scheduler-event-preflight.bench.ts` wall-clock is unchanged because it is
+dominated by per-iteration graph setup (512-node build + pull), not the
+preflight; the walk reduction is proven by the visitCount guards above.
+Deviations: none.
+
+## RELOAD HANG — root cause re-verified + fixed (rehydration barrier)
+
+The `Pattern Reload Integration Tests` failure ("reloads every rapidly
+created notebook note" -> `RuntimeClient request timed out: runtime:idle`)
+is a real 3c regression, deterministic on CI, that did not reproduce as a
+hang on fast local hardware (but reload action-runs were bimodal/racy
+locally).
+
+Root cause (bisect + 6-agent adversarial re-verification; bisect kept):
+`e28d59b72` "cut duplicate invalidation channels" is the origin. It replaced
+the dirty-SET pull-seed selection (`collectPrimaryPullIterationSeeds` over
+`state.dirty`) with STATUS-based seeds (`isRunnableSchedulingSeed` ->
+`isInvalidOrNeverRan`; `getInvalidNodes`) — neither exists on main — and
+flipped the trigger notification op `mark-dirty`->`invalidate`. On reload,
+storage sync-fills of a resuming action's inputs now flip its node status,
+promoting the never-ran/invalid resuming action into the runnable-seed set;
+the settle runs it fresh and `markActionHasRun` deletes its rehydration
+token, aborting the resume. Run-vs-rehydrate is timing-dependent ->
+nondeterministic run counts (24 on main, 76-106 on 3c), and via iteration-
+cap backoff the slow-runner `runtime:idle` hang. main is deterministic
+because its seeds never come from a load-driven status flip.
+
+Fix (rehydration barrier): hold ALL pull work while any initial rehydration
+is in flight, reproducing main's ordering (resume first, then a single
+settle). `backgroundTasks` is rehydration-only and `idle()` already awaits
+it, so the barrier never reports idle early; after resumes drain, `idle()`
+re-checks `hasRunnablePullWork` and the held fallbacks run once. Added
+`hasPendingInitialRehydrations: () => backgroundTasks.size > 0` to
+`PullSchedulingState`, early-returns in `collectPullIterationSeeds` and
+`hasRunnablePullWork`. Three edits.
+
+Verified: reload action-runs deterministic ~51 (was 76-106), rehydrateOk
+~54 (was 8-32), reloadToRendered ~3s, every action runs exactly once (no
+render storm, no iteration-cap hits, no backoff). 14/14 reload runs pass,
+including 4 under full CPU saturation (slow-runner sim; idle ~3s vs the 60s
+RPC timeout). Full runner suite green (618). Unit guard
+`scheduler-rehydration-barrier.test.ts`. Rejected attempts (all
+ineffective or storming, recorded in memory): rehydration-gate
+status-tolerance; markActionInvalid token-keep; sync-fill invalidation
+suppression at processPullStorageNotification; seed-exclusion of pending-
+rehydration actions (race fixed but render sinks 6x -> 235 runs).
+
+## 07/3d-read-delta-application
+
+- [x] pending — migrated trigger subscription maintenance to per-run read deltas
+  and removed clear/readd trigger replacement churn.
+- Fix shape:
+  - `applyActionReadDelta` now computes recursive and non-recursive read deltas
+    per entity, touching only the trigger index entries whose path sets changed.
+  - The scheduler stores the latest run log in the existing dependency map, so
+    `setSchedulerDependencies` now returns the previous normalized log for the
+    delta primitive. This is the current local equivalent of the work-order's
+    `record.reads` wording.
+  - Subscribe-time, resubscribe-time, and dependency-collection trigger updates
+    all use the same delta primitive; dependency collection still honors
+    `useRawReadsForTriggers` by feeding raw trigger reads into the trigger log.
+  - Trigger cancellation now has one stable cancel per action via
+    `ensureCancelForActionTriggers`; the cancel reads the latest entity set at
+    unsubscribe time and lets the registry own entity cleanup.
+  - Scheduler trigger-index tests cover scope-only read changes and stable
+    cancel behavior after a read delta moves an action between entities.
+- Recordings:
+  - Removed-machinery grep returned no matches:
+
+```text
+$ rg -n "replaceActionTriggerPaths|setCancelForTriggerEntities|lastTriggerReadsByState|addressesEqual" packages/runner/src packages/runner/test
+```
+
+  - `deno fmt` on the touched source/test files: passed.
+  - `deno lint` on the touched source/test files: passed (`Checked 5 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Trigger-index regression check:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-trigger-index.test.ts`: passed, `2 passed (4 steps)`,
+    `0 failed`.
+  - 3d scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-trigger-index.test.ts test/scheduler-pull.test.ts
+    test/scheduler-events.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-v2-cutover.test.ts`: passed, `9 passed (60 steps)`,
+    `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3100 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
+  - `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler.bench.ts`: passed. Steady-state scheduler ops:
+    bare subscribe `1.6ms`, subscribe 100 actions reading same entity `1.6ms`,
+    resubscribe cycle `1.5ms`. Pull with resubscribe `140.5ms`.
+  - `git diff --check`: passed.
+  - Expected noisy passing logs remain: existing write-surface/wish warnings.
+
+## REVIEWER NOTE — push 3c and 3d now (phase-end protocol step 4)
+
+3c and 3d are reviewed-good locally (deletion greps zero, tripwire
+flipped, read-delta primitive verified) but neither branch is pushed
+and neither PR exists — the phase-end protocol says push + open the
+stacked PR BEFORE continuing. This matters beyond bookkeeping: CI is
+the only gate that runs cross-package checks (it caught the phase-0
+lint and cli/piece misses that local per-package verification did not).
+Before or alongside 3f work: push `scheduler-v2/07-3c` and
+`scheduler-v2/07-3d`, open their PRs (3c based on 3b, 3d based on 3c,
+titles per the work order), and check the stack's CI once they're up.
+No other action needed; 3f continues in parallel per the stacked flow.
+
+## 07/3f-facade-and-file-consolidation
+
+- [x] pending — consolidated the scheduler module names and reduced the public
+  scheduler entry point to a facade/export shim.
+- Reviewer-note action:
+  - Pushed `scheduler-v2/07-3c` and opened draft PR
+    https://github.com/commontoolsinc/labs/pull/4103 based on
+    `scheduler-v2/07-3b`.
+  - Pushed `scheduler-v2/07-3d` and opened draft PR
+    https://github.com/commontoolsinc/labs/pull/4104 based on
+    `scheduler-v2/07-3c`.
+  - `gh pr checks 4103 --watch=false` and
+    `gh pr checks 4104 --watch=false` both reported no checks yet.
+- Fix shape:
+  - `src/scheduler.ts` now re-exports the scheduler facade and is 1 line.
+  - The implementation moved to `src/scheduler/facade.ts`; this preserves
+    existing public imports while keeping the root scheduler entry point as the
+    public facade.
+  - File consolidation completed with `git mv` history for:
+    `action-run.ts` -> `run.ts`, `notifications.ts` -> `invalidation.ts`,
+    `subscriptions.ts` -> `registration.ts`, and `pull-execution.ts` ->
+    `settle.ts`.
+  - Folded `pull-notifications.ts` into `invalidation.ts`,
+    `pull-subscriptions.ts` into `registration.ts`, `pull-events.ts` into
+    `events.ts`, and `pull-scheduling.ts` into `settle.ts`.
+  - Added `register(...)` on the scheduler surface and kept `subscribe(...)`
+    as a deprecated compatibility alias for runner-local callers.
+- Recordings:
+  - Exit line-count and constructor grep:
+
+```text
+$ wc -l packages/runner/src/scheduler.ts
+       1 packages/runner/src/scheduler.ts
+$ grep -c "createsState\|create.*State()" packages/runner/src/scheduler.ts
+0
+```
+
+  - Deleted-file/import grep returned no matches:
+
+```text
+$ rg -n "action-run\.ts|notifications\.ts|subscriptions\.ts|pull-subscriptions\.ts|pull-execution\.ts|pull-scheduling\.ts|pull-notifications\.ts|pull-events\.ts|processPullStorageNotification" packages/runner/src packages/runner/test
+```
+
+  - External subscribe grep returned no matches:
+
+```text
+$ rg -n "scheduler\.subscribe\(" packages --glob '!packages/runner/**'
+```
+
+  - `deno fmt` on the touched source/test files: passed (`Checked 10 files`).
+  - `deno lint` on the touched source/test files: passed (`Checked 10 files`).
+  - `deno check` on the touched source/test files: passed.
+  - 3f focused scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/action-fingerprint.test.ts test/scheduler-cfc-trigger-reads.test.ts
+    test/scheduler-observations.test.ts test/scheduler-v2-cutover.test.ts
+    test/scheduler-pull.test.ts test/scheduler-events.test.ts`: passed,
+    `9 passed (82 steps)`, `0 failed`.
+  - `cd packages/runner && deno task test`: passed,
+    `594 passed (3100 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Phase-end bench command without `--no-check` failed the known benchmark
+    type-check issue: `createSchedulerBenchEnv(true)` calls in demand-roots,
+    materializer-fanout, and persistent-state benches. Rerun with `--no-check`
+    passed.
+  - Phase-end bench after numbers (`deno bench --no-check --allow-ffi
+    --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler.bench.ts test/scheduler-demand-roots.bench.ts
+    test/scheduler-stale-propagation.bench.ts
+    test/scheduler-event-preflight.bench.ts
+    test/scheduler-materializer-fanout.bench.ts
+    test/scheduler-persistent-state.bench.ts`):
+    scheduler ops bare subscribe `1.6ms`, same-entity subscribe `1.6ms`,
+    resubscribe cycle `1.3ms`, pull with resubscribe `154.0ms`; demand roots
+    effect `133.8ms`, event `146.1ms`, mixed `161.0ms`, parent-clears
+    `80.1ms`; stale propagation chain `93.6ms`, diamond `90.3ms`, wide fanout
+    `246.7ms`, dynamic deps `80.5ms`, unchanged recompute `46.4ms`; event
+    preflight clean broad `288.8ms`, transitive invalid writer `25.5ms`,
+    note-shaped clean events `1.2s`, deep read-populated handler `513.3ms`;
+    materializer fanout 100 readers `24.3ms`, 1000 readers `67.5ms`,
+    static control `12.3ms`; persistent state clean 100 `2.3ms`, targeted
+    dirty 100 `2.0ms`, clean 1000 `11.2ms`, targeted dirty 1000 `7.1ms`.
+  - Expected noisy passing logs remain: scheduler error-path tests,
+    traversal warnings, rehydration timeout warning, and existing
+    write-surface/wish warnings.
+
+## 08/4.0-baselines
+
+- [x] pending — recorded Phase 4 startup/pull-seed baselines and added the
+  cold-replica convergence fixture before removing registration prefetch.
+- Deviations:
+  - The cold-replica fixture uses an empty server-side source document created
+    by the writer before reader startup, then fills the value from the second
+    client connection after `start()` returns. This keeps the reader's local
+    source replica cold at startup while giving the current prefetch path a
+    server document to sync/watch. A stricter fully absent-source-root variant
+    did not converge in this harness before the Phase 4 change, so it would not
+    satisfy the fixture-first requirement.
+  - After the post-start writer update, the fixture uses only `reader.idle()`
+    plus timer ticks while waiting for convergence; it does not call
+    `pull()`, reader source `sync()`, or any manual storage nudge.
+- Recordings:
+  - Reload/rehydration baseline:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts`: passed, `1 passed`, `0 failed`,
+    `711ms`. The test asserts `rehydrate/miss/no-snapshot = 0`; this focused
+    run did not print the exact counter values. The expected transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    appeared while the test still passed.
+  - Cold-replica fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts`: passed, `1 passed (1 step)`,
+    `0 failed`, `253ms`.
+  - Focused Phase 4.0 test pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-cold-replica.test.ts`:
+    passed, `2 passed (1 step)`, `0 failed`, `1s`.
+  - Pull-seed bench baseline:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `84.4ms`; 200 effects /
+    10 reschedules `104.2ms`.
+  - `deno fmt packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno lint packages/runner/test/scheduler-cold-replica.test.ts`: passed
+    (`Checked 1 file`).
+  - `deno check packages/runner/test/scheduler-cold-replica.test.ts`: passed.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3101 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and the
+    reload-rehydration transient `TypeError`.
+
+## 08/4.1-declared-read-ordering
+
+- [x] pending — removed JS/raw registration prefetch closures and moved
+  annotated `reads` into scheduler node records as never-ran ordering hints.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this work session.
+- Fix shape:
+  - `instantiateJavaScriptActionNode` and `instantiateRawNode` no longer build
+    per-node `populateDependencies` closures or pass them during scheduler
+    registration. The runner registers those actions with options only.
+  - Scheduler node records now store `declaredReads` derived from annotated
+    `reads`. Topological ordering and the settle work-set use these reads only
+    while a node is `never-ran`.
+  - Declared reads are not added to the trigger index and are not persistent
+    demand evidence. When a live never-ran reader's declared reads overlap an
+    invalid/never-ran writer's static surface, settle pulls that writer for the
+    current pass only so ordering can run producer before consumer.
+  - Existing output-less/no-callback registrations still enter
+    `pendingDependencyCollection` to preserve the existing no-output first-run
+    path, but no callback is installed or invoked.
+  - Added a cutover fixture proving that a never-ran node with overlapping
+    declared reads is not invalidated by a storage change from those declared
+    reads alone.
+- Debug notes:
+  - The first full-suite attempt after deleting registration prefetch exposed
+    two gaps: output-less/no-callback computations were skipped, and the raw
+    `wish({ query: computed(...) })` case could run before its computed input.
+  - The final `wish` fix keeps declared-read pull-through pass-local: it makes
+    the overlapping writer runnable for that settle pass without marking it
+    live, pending, demanded, or trigger-subscribed.
+- Recordings:
+  - `deno fmt` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno lint` on the touched source/test files: passed (`Checked 7 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/ensure-piece-running.test.ts test/runner.test.ts test/wish.test.ts`:
+    passed, `9 passed (127 steps)`, `0 failed`, `2s`.
+  - Phase 4.1 focused pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-cold-replica.test.ts
+    test/patterns-ifelse.test.ts test/navigate-handler.test.ts`: passed,
+    `7 passed (16 steps)`, `0 failed`, `1s`.
+  - Broad scheduler pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts test/scheduler-ordering.test.ts
+    test/scheduler-pull.test.ts test/scheduler-events.test.ts
+    test/scheduler-cold-replica.test.ts`: passed, `6 passed (67 steps)`,
+    `0 failed`, `2s`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m1s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry error logs, createRef no-cause warnings, and
+    traversal warnings.
+
+## 08/4.2-delete-collection-machinery
+
+- [x] pending — deleted scheduler-side dependency collection and narrowed
+  registration to static/immediate dependency logs while preserving handler
+  event preflight populate.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest `IMPLEMENTER STOP` at
+    the start of this heartbeat.
+- Fix shape:
+  - Deleted `scheduler/dependency-collection.ts` and removed collection state
+    from scheduler facade, registration, execution, settle loop, dependency
+    graph, and stale test helpers.
+  - Removed scheduler-side populate callback storage and collection helpers:
+    subscribe/register now accept options or an immediate `ReactivityLog`.
+  - Kept `handler.populateDependencies`, `addEventHandler`'s third parameter,
+    and event preflight dependency population intact.
+  - Removed raw builtin `populateDependencies`; raw builtins can now provide an
+    immediate dependency log, and `navigateTo` uses declared reads as its static
+    dependency log.
+  - Preserved the output-less/no-callback first-run path through the existing
+    pending work set, and kept static-log no-write computations dormant until
+    demanded.
+  - Updated stale callback-argument tests to pass explicit `ReactivityLog`
+    dependencies instead of the deleted collection callback slot.
+- Debug notes:
+  - The first full-suite attempt after the deletion failed during type-check on
+    `scheduler-pull-idempotency.test.ts`; those tests still passed callback
+    arguments to `scheduler.subscribe`. Replacing the callbacks with explicit
+    read/write logs fixed the suite.
+  - `navigateTo` releases navigation from the transaction commit callback and
+    requeues scheduler execution after writing its result so idle observes the
+    commit-gated navigation release without relying on prefetch timing.
+- Exit greps:
+  - Deleted collection names returned no matches:
+
+```text
+$ rg -n "populateDependenciesCallbacks|pendingDependencyCollection|dependency-collection" packages/runner/src packages/runner/test
+```
+
+  - `populateDependencies` matches only handler/event paths:
+
+```text
+$ rg -n "populateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/runner.ts:3093:    const populateDependencies = reads.length > 0
+packages/runner/src/runner.ts:3125:        populateDependencies,
+packages/runner/src/scheduler/facade.ts:951:    populateDependencies?: (
+packages/runner/src/scheduler/facade.ts:961:      populateDependencies,
+packages/runner/src/scheduler/events.ts:196:  readonly populateDependencies?: (
+packages/runner/src/scheduler/events.ts:201:  if (args.populateDependencies) {
+packages/runner/src/scheduler/events.ts:202:    args.handler.populateDependencies = args.populateDependencies;
+packages/runner/src/scheduler/events.ts:299:  depTx.setReadOnly?.("scheduler.populateDependencies()");
+packages/runner/src/scheduler/events.ts:308:    handler.populateDependencies?.(depTx, eventValue);
+packages/runner/src/scheduler/events.ts:343:  // after populateDependencies errors so the transaction is closed.
+packages/runner/src/scheduler/events.ts:491:  if (handler.populateDependencies) {
+packages/runner/src/scheduler/types.ts:43:    populateDependencies?: (
+```
+
+  - Deleted helper/type names only remain in event preflight telemetry labels:
+
+```text
+$ rg -n "collectInitialExecuteDependencies|collectPostEventDependencies|collectPendingDependencyActions|collectPullSettlePreRunDependencies|PopulateDependencies" packages/runner/src packages/runner/test
+packages/runner/src/scheduler/events.ts:305:    "pullPopulateDependencies",
+packages/runner/src/scheduler/events.ts:318:      "pullPopulateDependencies",
+packages/runner/test/scheduler-bench-helpers.ts:62:  ["event/populate", "scheduler/execute/event/pullPopulateDependencies"],
+```
+
+- Recordings:
+  - `deno fmt packages/runner/test/scheduler-pull-idempotency.test.ts`:
+    passed (`Checked 1 file`) after the stale test fix.
+  - `deno lint` on the touched source/test files: passed (`Checked 19 files`).
+  - `deno check` on the touched source/test files: passed.
+  - Focused idempotency regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-idempotency.test.ts`: passed,
+    `1 passed (5 steps)`, `0 failed`, `75ms`.
+  - Touched bench:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-materializer-fanout.bench.ts`: passed on Apple M3 Max /
+    Deno 2.8.1. Results: 100 readers `22.0ms`, 1000 readers `64.2ms`,
+    static declared write control `14.9ms`.
+  - `git diff --check`: passed.
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3102 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m2s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    and traversal warnings.
+
+## 08/4.3-phase-4-gates
+
+- [x] pending — re-ran the Phase 4 gates and added the dormant-registration
+  cell-data-read assertion requested by the work order.
+- Gate shape:
+  - Added `runner.test.ts` coverage for a JavaScript-node piece with a linked
+    input and no downstream demand. After setup/registration, the test wraps
+    scheduler-created transactions during `idle()` and asserts the piece does
+    not run and performs zero reads of the linked source document.
+  - Re-ran the cold-replica startup fixture, the declared-read cutover fixture
+    pack, the reload rehydration fixture, and the full runner suite.
+- Recordings:
+  - `deno fmt packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno lint packages/runner/test/runner.test.ts`: passed (`Checked 1 file`).
+  - `deno check packages/runner/test/runner.test.ts`: passed.
+  - Focused runner fixture:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/runner.test.ts`: passed, `4 passed (42 steps)`, `0 failed`, `460ms`.
+  - Phase 4.3 focused gate pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-cold-replica.test.ts test/scheduler-v2-cutover.test.ts
+    test/reload-rehydration.test.ts test/runner.test.ts`: passed,
+    `7 passed (54 steps)`, `0 failed`, `2s`. The reload fixture still emits
+    the expected transient `TypeError` log while passing; it asserts
+    `rehydrate/ok > 0` and `rehydrate/miss/no-snapshot = 0`.
+  - Default-app/reload comparison:
+    `reload-rehydration.test.ts` completed inside the gate pack in `426ms`
+    versus the 4.0 recorded `711ms`; `rehydrate/miss/no-snapshot` remained
+    asserted at `0`.
+  - Pull-seed bench:
+    `cd packages/runner && deno bench --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-seeds.bench.ts`: passed on Apple M3 Max / Deno 2.8.1.
+    Results: 50 effects / 20 reschedules `79.9ms` (4.0 baseline `84.4ms`);
+    200 effects / 10 reschedules `106.1ms` (4.0 baseline `104.2ms`).
+  - `cd packages/runner && deno task test`: passed,
+    `595 passed (3103 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m4s`.
+  - Expected noisy passing logs remain: scheduler write-surface warnings,
+    deliberate event/retry/preflight error logs, createRef no-cause warnings,
+    traversal warnings, and the reload-rehydration transient `TypeError`.
+
+## 08/5.1-gate-state
+
+- [x] pending — introduced scheduler gate state on node records and moved
+  debounce/throttle/backoff ownership behind `SchedulerGates`.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 4 poll markers
+    at the start of this heartbeat.
+- Shape:
+  - Added `scheduler/gates.ts` with per-node gate fields for
+    `debounceMs`, `noAutoDebounce`, `throttleMs`, `debounceReadyAt`,
+    `throttleReadyAt`, `backoffUntil`, and `backoffStreak`.
+  - Public `setDebounce`/`setThrottle` before registration is preserved by
+    staging gate config for unregistered action functions and adopting it when
+    registration creates/activates the node record.
+  - Moved pass-budget backoff storage from top-level `SchedulerNode` fields
+    into `record.gate`.
+  - Left the separate debounce timers, computation debounce flush seed set,
+    and event wake timer intact for the later Phase 5.2/5.3 deletion steps.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `977ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `291ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Expected noisy passing logs remain: scheduler event/retry/error-path logs.
+
+## 08/5.2-single-wake
+
+- [x] pending — merged event parking and debounce wake scheduling behind the
+  gate-owned single wake timer.
+- Shape:
+  - `SchedulerGates` now owns one `wakeTimer`/`wakeAt` pair with
+    `scheduleWake(at)`, `cancelWake()`, and `hasWakeTimer()`.
+  - Manual effect debounce and computation debounce set `debounceReadyAt` and
+    schedule the shared wake; expiry reopens a normal pass instead of a
+    per-action timer callback adding pending work.
+  - Event preflight parking calls the same gate wake. The old
+    `EventQueueWakeState` and event wake helpers are gone from `events.ts`.
+  - `idle()` and pass-end continuation now reference the shared gate wake.
+- Exit greps:
+  - Deleted event wake names returned no matches:
+
+```text
+$ rg -n "EventQueueWakeState|scheduleEventQueueWake|cancelEventQueueWake|hasEventQueueWakeTimer|eventQueueWakeState" packages/runner/src/scheduler
+```
+
+  - Active scheduler timer ownership:
+
+```text
+$ rg -n "setTimeout\\(" packages/runner/src/scheduler/gates.ts packages/runner/src/scheduler/events.ts packages/runner/src/scheduler/delays.ts packages/runner/src/scheduler/facade.ts packages/runner/src/scheduler/continuation.ts
+packages/runner/src/scheduler/gates.ts:326:    this.wakeTimer = setTimeout(() => {
+packages/runner/src/scheduler/delays.ts:198:    const timer = setTimeout(() => {
+packages/runner/src/scheduler/delays.ts:242:    const timer = setTimeout(() => {
+packages/runner/src/scheduler/facade.ts:782:      timeoutId = setTimeout(resolve, ms);
+packages/runner/src/scheduler/facade.ts:806:      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+```
+
+  `delays.ts` remains unused pending the Phase 5.3 deletion step; the
+  facade hits are unrelated storage-rehydration timeouts.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 5
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 9
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - `git diff --check`: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `917ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `299ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Handler wake regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `654ms`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs.
+
+## 08/5.3-delete-delay-wrappers
+
+- [x] pending — deleted `delays.ts` and `delay-control.ts`, and removed the
+  computation debounce flush seed path.
+- Shape:
+  - Removed `SchedulerDelayControlState`; the facade now calls
+    `SchedulerGates` directly for debounce waiting, debounce scheduling, and
+    auto-debounce policy.
+  - `buildPullInitialSeeds` now seeds only event-blocking dependencies. A
+    debounce expiry schedules the shared wake and normal invalid/live/eligible
+    seed collection picks the node up.
+  - Deleted `scheduler/delays.ts` and `scheduler/delay-control.ts`.
+- Exit greps:
+  - Deleted delay and event-wake names returned no matches:
+
+```text
+$ rg -n "delay-control|SchedulerDelayControlState|SchedulerDelays|delays\\.ts|computationDebounceFlushSeeds|EventQueueWakeState|scheduleEventQueueWake|cancelEventQueueWake|hasEventQueueWakeTimer|eventQueueWakeState" packages/runner/src packages/runner/test
+```
+
+  - Scheduler `setTimeout` sites after the deletion:
+
+```text
+$ rg -n "setTimeout\\(" packages/runner/src/scheduler
+packages/runner/src/scheduler/facade.ts:771:      timeoutId = setTimeout(resolve, ms);
+packages/runner/src/scheduler/facade.ts:795:      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+packages/runner/src/scheduler/gates.ts:324:    this.wakeTimer = setTimeout(() => {
+packages/runner/src/scheduler/diagnosis.ts:411:    setTimeout(() => {
+packages/runner/src/scheduler/diagnostics.ts:253:  return setTimeout(fn, 0);
+```
+
+  The gate wake is the only time-gate wake; the other hits are rehydration
+  timeouts, diagnosis timeout, and the scheduler queue-task shim.
+- Recordings:
+  - `deno fmt` on the touched scheduler source files: passed (`Checked 6
+    files`).
+  - `deno lint` on the touched scheduler source files: passed (`Checked 8
+    files`).
+  - `deno check` on the touched scheduler source files: passed.
+  - `git diff --check`: passed.
+  - Phase 5 contract debounce file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts`: passed, `1 passed (14 steps)`,
+    `0 failed`, `900ms`.
+  - Phase 5 contract throttle file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-throttle.test.ts`: passed, `1 passed (10 steps)`,
+    `0 failed`, `2s`.
+  - Event parking focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-events.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `293ms`.
+  - Backoff focused file:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-convergence.test.ts`: passed, `1 passed (15 steps)`,
+    `0 failed`, `1s`.
+  - Handler wake regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-pull-handlers.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `607ms`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs.
+
+## 08/5.4-persistence-accessors
+
+- [x] pending — verified persisted scheduler action options still flow from
+  gate config into observations.
+- Shape:
+  - No behavioral code change was needed in this step. The observation
+    accessor source had already moved to `SchedulerGates` in 5.1, and
+    `schedulerActionOptions` in `run.ts` still receives
+    `debounceMs`/`noDebounce`/`throttleMs` through the action-run state.
+- Recordings:
+  - Accessor/path inventory:
+
+```text
+$ rg -n "schedulerActionOptions|getDebounce|getNoDebounce|getThrottle|debounceMs|noDebounce|throttleMs|actionOptions" packages/runner/src/scheduler packages/runner/test/scheduler-observations.test.ts
+packages/runner/test/scheduler-observations.test.ts:163:      actionOptions: {
+packages/runner/test/scheduler-observations.test.ts:164:        debounceMs: 25,
+packages/runner/test/scheduler-observations.test.ts:180:        actionOptions: { debounceMs: 25 },
+packages/runner/src/scheduler/facade.ts:578:    const { actionOptions } = observation;
+packages/runner/src/scheduler/facade.ts:579:    if (actionOptions?.debounceMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:580:      this.gates.setDebounce(action, actionOptions.debounceMs);
+packages/runner/src/scheduler/facade.ts:582:    if (actionOptions?.noDebounce !== undefined) {
+packages/runner/src/scheduler/facade.ts:583:      this.gates.setNoDebounce(action, actionOptions.noDebounce);
+packages/runner/src/scheduler/facade.ts:585:    if (actionOptions?.throttleMs !== undefined) {
+packages/runner/src/scheduler/facade.ts:586:      this.gates.setThrottle(action, actionOptions.throttleMs);
+packages/runner/src/scheduler/facade.ts:1900:      getDebounce: (target) => this.gates.getDebounce(target),
+packages/runner/src/scheduler/facade.ts:1901:      getNoDebounce: (target) => this.gates.getNoDebounce(target),
+packages/runner/src/scheduler/facade.ts:1902:      getThrottle: (target) => this.gates.getThrottle(target),
+packages/runner/src/scheduler/run.ts:552:  const actionOptions = schedulerActionOptions(state, args.action);
+packages/runner/src/scheduler/run.ts:649:function schedulerActionOptions(
+packages/runner/src/scheduler/run.ts:653:  const debounceMs = state.getDebounce(action);
+packages/runner/src/scheduler/run.ts:654:  const noDebounce = state.getNoDebounce(action);
+packages/runner/src/scheduler/run.ts:655:  const throttleMs = state.getThrottle(action);
+```
+
+  - Observation compatibility:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (22 steps)`,
+    `0 failed`, `242ms`.
+  - Expected noisy passing logs remain: experimental flag override messages
+    and the rehydration timeout warning in the timeout fallback fixture.
+
+## 08/5.5-gate-validation
+
+- [x] pending — added the single-wake dispose regression, fixed the
+  demand-bound debounce idle gap exposed by the full runner suite, and
+  completed the Phase 5 gate validation pass.
+- Shape:
+  - Added `scheduler-timing.test.ts` coverage that subscribes a debounced
+    effect, disposes the scheduler before the wake opens, waits past the
+    debounce window, and verifies the action never runs.
+  - The first full runner package pass exposed
+    `scheduler-v2-cutover.test.ts`'s provisional debounced child fixture
+    returning from `idle()` before the 200ms gate opened. Fixed the shared-wake
+    continuation/idle path so first-run provisional computations remain
+    idle-blocking while their gate is pending, without making ordinary
+    non-demanded computations block `idle()`.
+- Recordings:
+  - `deno fmt` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno lint` on the touched scheduler source and timing test files: passed
+    (`Checked 4 files`).
+  - `deno check` on the touched scheduler source and timing test files:
+    passed.
+  - `git diff --check`: passed.
+  - Cutover regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-v2-cutover.test.ts`: passed, `1 passed (11 steps)`,
+    `0 failed`, `450ms`; the provisional debounced child fixture waited
+    `214ms` in the focused run.
+  - Phase 5 focused gate files:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-timing.test.ts test/scheduler-throttle.test.ts
+    test/scheduler-events.test.ts test/scheduler-convergence.test.ts
+    test/scheduler-pull-handlers.test.ts test/scheduler-v2-cutover.test.ts`:
+    passed, `6 passed (77 steps)`, `0 failed`, `7s`.
+  - Full runner package suite:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3104 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Expected noisy passing logs remain: scheduler event/preflight/retry/error
+    logs and write-surface warnings in wish fixtures.
+
+## 08/7.1-piece-level-resume
+
+- [x] pending — resumed pieces now preload scheduler snapshots with one
+  piece-scoped query and apply them synchronously during node registration.
+- Reviewer poll:
+  - No new reviewer verdict was present after the latest Phase 5 progress
+    markers at the start of this heartbeat.
+- Shape:
+  - `@commonfabric/memory/v2` already accepts
+    `listSchedulerActionSnapshots({ pieceId, processGeneration })` without an
+    `actionId`, so no memory API extension was needed for this step.
+  - The resumed `runtime.start(...)` path now awaits the existing
+    `syncCellsForRunningPattern(...)` call, loads all persisted scheduler
+    snapshots for the piece, and passes them into `startCore(...)` as a map by
+    `actionId`.
+  - Scheduler registration applies a matching preloaded observation
+    synchronously. Missing, invalid, or fingerprint-mismatched entries fall
+    back to the normal initial run.
+  - The older async per-action rehydration path remains for non-resume
+    registration paths and will be deleted in Phase 7.2.
+  - `reload-rehydration.test.ts` now restarts runtime B via
+    `runtime.start(resultCell)` and asserts exactly one snapshot query shaped
+    as `{ ownerSpace, pieceId, processGeneration }`, with no `actionId`.
+  - `scheduler-observations.test.ts` adds a unit guard proving preloaded
+    snapshots do not call the storage provider again during registration.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 4
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.1 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (23 steps)`, `0 failed`, `912ms`.
+  - Expected noisy passing logs remain: experimental flag override messages,
+    the reload fixture's transient `TypeError: Cannot read properties of
+    undefined (reading 'length')` log while passing, and the intentional
+    rehydration timeout warning in the timeout fallback fixture.
+
+## 08/7.2-delete-rehydration-race
+
+- [x] pending — deleted per-action async initial rehydration and made
+  preloaded batch observations the only resume rehydration path.
+- Shape:
+  - Removed the scheduler race apparatus:
+    `queueInitialActionRehydration`, `initialRehydrationTokens`,
+    `canApplyInitialActionRehydration`, `awaitSpaceSyncedWithTimeout`,
+    `runInitialActionRehydrationWithTimeout`,
+    `DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS`, `deferInitialExecution`,
+    `scheduleInitialActionRun`, and `rehydrateActionFromStorage`.
+  - Scheduler registration now always registers fresh work first; a matching
+    preloaded snapshot synchronously overwrites that fresh state with clean or
+    dirty persisted state. Missing or mismatched preloaded entries simply leave
+    the fresh initial run in place.
+  - Removed `awaitSyncBeforeInitialRun` / `awaitSync` propagation from runner
+    start options, nested pattern runs, and raw `map`/`filter`/`flatMap`
+    per-element runs. The resumed piece has already awaited sync before the
+    batch snapshot load.
+  - Rewrote `scheduler-observations.test.ts` around the new contract:
+    deleted the old storage-unavailable, per-action auto-query, pending
+    rehydration, timeout fallback, unsubscribe-token, and dirty-token tests;
+    changed mismatch/miss cases to use preloaded snapshot maps; and changed
+    the direct resubscribe dirty-only fixture to preload the persisted consumer
+    snapshot batch.
+- Exit grep:
+
+```text
+$ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialActionRehydration|awaitSpaceSyncedWithTimeout|runInitialActionRehydrationWithTimeout|DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS|deferInitialExecution|awaitSync|awaitSyncBeforeInitialRun|rehydrateActionFromStorage|scheduleInitialActionRun" packages/runner/src packages/runner/test/scheduler-observations.test.ts packages/runner/test/reload-rehydration.test.ts -g '*.ts'
+```
+
+  No matches.
+- Recordings:
+  - `deno fmt` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno lint` on the touched runner source/test files: passed (`Checked 7
+    files`).
+  - `deno check` on the touched runner source/test files: passed.
+  - `git diff --check`: passed.
+  - Phase 7.2 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `968ms`.
+  - Raw list builtin regression pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/patterns-dynamic.test.ts test/map-op-by-identity.test.ts
+    test/pattern-scope.test.ts`: passed, `42 passed (29 steps)`,
+    `0 failed`, `2s`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing, experimental flag override messages, and known
+    write-surface warnings in pattern/builtin fixtures.
+
+## 08/7.3-slim-observation-payload
+
+- [x] pending — scheduler observations now write payload version 2 without
+  persisted current/declared write surfaces.
+- Reviewer poll:
+  - No new reviewer verdict marker was present after the latest Phase 7 progress
+    entries at the start of this heartbeat.
+- Shape:
+  - `buildSchedulerActionObservation(...)` now emits `version: 2` and omits
+    `currentKnownWrites` / `declaredWrites` from new observations.
+  - Runner and memory readers accept both v1 and v2 observation rows. V1 rows
+    still require the old fields; v2 rows do not. Memory normalization and write
+    indexing preserve old fields only when present.
+  - Runtime fingerprint is now `runner:scheduler:v2`; old
+    `runner:scheduler:pull` rows become fingerprint misses and cost one fresh
+    node run on resume.
+  - Rehydration restores the write surface from the live action annotation, not
+    from persisted observation fields.
+  - Added memory coverage that slim v2 observations store and reload without
+    the old fields.
+- Recordings:
+  - `deno fmt` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno lint` on the touched runner and memory source/test files: passed
+    (`Checked 8 files`).
+  - `deno check` on the touched runner and memory source/test files: passed.
+  - Phase 7.3 focused persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/scheduler-observations.test.ts`:
+    passed, `2 passed (17 steps)`, `0 failed`, `999ms`.
+  - Memory v2 scheduler state pack:
+    `cd packages/memory && deno test --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    test/v2-scheduler-state-test.ts`: passed, `20 passed`, `0 failed`,
+    `174ms`.
+  - Memory v2 stacked commit regression:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/memory-v2-stacked-commit.test.ts`: passed, `47 passed`, `0 failed`,
+    `1s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `3.0 ms`; targeted dirty 100 actions `2.9 ms`; clean
+    1000 actions `15.3 ms`; targeted dirty 1000 actions `8.1 ms`.
+  - Expected noisy passing logs remain: the reload fixture's transient
+    `TypeError: Cannot read properties of undefined (reading 'length')` log
+    while passing and experimental flag override messages.
+
+## 08/7.4-persistence-gates
+
+- [x] pending — completed the Phase 7 persistence gates and added the I2/I7
+  clean-resume witness.
+- Shape:
+  - Extended `scheduler-observations.test.ts` so a clean piece is created in
+    one runtime, resumed in a second runtime from the same emulated storage,
+    and verified to perform zero additional action runs.
+  - The same fixture patches the emulated memory server's `evaluateWatchSet`
+    during resume and asserts zero graph/watch cell-data fetches. Scheduler
+    snapshot queries use `listSchedulerActionSnapshots` and are intentionally
+    not counted as cell-data reads.
+  - Updated `reload-sibling-overdirty.test.ts` to resume the existing piece
+    with `runtime.start(resultCell)` instead of calling `runtime.run(...)` on
+    reload. Under the Phase 7 contract, `run(...)` creates a fresh local run
+    and no longer exercises persisted resume rehydration.
+- Recordings:
+  - `deno fmt` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno lint` on the touched runner test files: passed (`Checked 2 files`).
+  - `deno check` on the touched runner test files: passed.
+  - Initial I2/I7 witness run:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-observations.test.ts`: passed, `1 passed (17 steps)`,
+    `0 failed`, `230ms`.
+  - Sibling reload focused regression after the contract update:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-sibling-overdirty.test.ts`: passed, `1 passed`, `0 failed`,
+    `350ms`.
+  - Phase 7 persistence pack:
+    `cd packages/runner && ENV=test deno test --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/reload-rehydration.test.ts test/reload-sibling-overdirty.test.ts
+    test/scheduler-observations.test.ts`: passed, `3 passed (17 steps)`,
+    `0 failed`, `1s`.
+  - Full runner suite first attempt:
+    `cd packages/runner && deno task test`: failed, `594 passed (3099
+    steps)`, `1 failed`, `0 ignored (10 steps)`, `2m4s`. Failure was
+    `reload-sibling-overdirty.test.ts` expecting `rehydrate/ok > 0`; the
+    reload fixture still used `runtime.run(...)`, so it created a fresh local
+    run and saw no resume rehydration logs.
+  - Full runner suite after updating the sibling reload fixture:
+    `cd packages/runner && deno task test`: passed, `595 passed (3099 steps)`,
+    `0 failed`, `0 ignored (10 steps)`, `2m7s`.
+  - Scheduler persistent-state bench on Apple M3 Max / Deno 2.8.1:
+    `cd packages/runner && deno bench --no-check --allow-ffi --allow-env
+    --allow-read --allow-write=/tmp,/var/folders --allow-run=git
+    test/scheduler-persistent-state.bench.ts`:
+    clean 100 actions `2.5 ms`; targeted dirty 100 actions `2.3 ms`; clean
+    1000 actions `11.8 ms`; targeted dirty 1000 actions `6.9 ms`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs,
+    write-surface warnings in wish/raw map fixtures, and the reload fixture's
+    transient `TypeError: Cannot read properties of undefined (reading
+    'length')` log while passing.
+
+## 08/final-cleanup
+
+- [x] pending — completed the post-phase-7 cleanup checklist.
+- Shape:
+  - Replaced `docs/specs/pull-based-scheduler/README.md` with a pointer to
+    `docs/specs/scheduler-v2/README.md`.
+  - Marked the inventory dispositions as DONE with the scheduler-v2 commits
+    that realized each row. Added a mode-plumbing status note that the frozen
+    scheduler graph-snapshot `pullMode: true` diagnostic remains by phase-0
+    reviewer verdict, while mode-control APIs are gone.
+  - Verified and updated the migration-plan flag end-state table.
+  - Updated `docs/specs/persistent-scheduler-state.md` status for piece-level
+    resume, payload v2, v1/v2 row compatibility, and the separate default-on
+    rollout decision.
+  - Final flag verification found stale shell/pattern integration
+    `setPullMode` callers after the runtime-client API had already been
+    deleted; removed those callers and the debugger graph mode toggle.
+  - Touched-file `deno check` then exposed obsolete trigger-trace
+    `scheduledEffects` diagnostics. Removed that stale diagnostic field usage
+    from the default-app integration diagnostics, shell debug utilities, and
+    runtime-client/shell fixtures. The current trigger trace records direct
+    action decisions only.
+- Recordings:
+  - `deno fmt` on the touched TypeScript files: passed (`Checked 6 files`).
+  - `deno lint` on the touched TypeScript files: passed (`Checked 6 files`).
+  - Initial `deno check` on the touched TypeScript files failed on stale
+    `TriggerTraceActionRecord.scheduledEffects` references in
+    `packages/patterns/integration/default-app.test.ts`. After removing the
+    obsolete diagnostics, `deno check` on the touched TypeScript files passed.
+  - `cd packages/shell && deno test --allow-read --allow-write --allow-run
+    --allow-env test/debug-utils.test.ts`: passed, `1 passed (2 steps)`,
+    `0 failed`, `7ms`.
+  - `cd packages/runtime-client && deno test --allow-env --allow-read
+    --allow-ffi backends/runtime-processor.test.ts`: passed, `11 passed (50
+    steps)`, `0 failed`, `112ms`.
+  - Mode-control / historical-write flag grep:
+    `rg -n "setPullMode|enablePullMode|disablePullMode|isPullModeEnabled|schedulerHistoricalMightWrite|historicalMightWrite" --glob '!docs/**' .`:
+    no matches.
+  - Old-vs-new scheduler flag grep:
+    `rg -n "old-vs-new|schedulerV2|useSchedulerV2|newScheduler|legacyScheduler|v2Scheduler" --glob '!docs/**' packages`:
+    no matches.
+  - `pullMode` residue grep:
+    `rg -n "pullMode" packages/shell packages/runner/src packages/runner/test packages/runtime-client packages/patterns -g '*.ts' -g '*.tsx'`
+    returned only the frozen graph-snapshot diagnostic plumbing and
+    `packages/runner/test/scheduler-bench-helpers.ts`'s ignored compatibility
+    parameter.
+  - Inventory unmarked-row grep:
+    `rg -n "\*\*(Keep|Subsume|Delete)\*\*:" docs/specs/scheduler-v2/current-system-inventory.md`:
+    no matches.
+  - Persistent scheduler flag grep:
+    `rg -n "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE|persistentSchedulerState" packages/runner/src packages/runner/test packages/shell packages/toolshed packages/memory -g '*.ts' -g '*.tsx'`:
+    matches only the expected runtime option, shell/toolshed env plumbing,
+    memory-v2 config/handshake, and tests.
+  - `git diff --check`: passed.
+  - Final full runner suite refresh:
+    `cd packages/runner && deno task test`: passed,
+    `595 passed (3099 steps)`, `0 failed`, `0 ignored (10 steps)`, `2m8s`.
+  - Expected noisy passing logs remain: scheduler preflight/retry/error logs
+    and write-surface warnings in wish/raw map fixtures.
+
+## 08/6-preflight-cache-disposition (review follow-up)
+
+- [x] pending — Phase 6 is closed as skipped, as anticipated by spec decision 3.
+- Shape:
+  - Re-ran `scheduler-event-preflight.bench.ts` after Phase 7 and final cleanup.
+  - The results stayed in the same stress-benchmark shape as the earlier
+    recorded baselines, so the off-by-default preflight closure cache was not
+    implemented. Future cache work should wait for a UI-flow trace showing
+    preflight as a material share of event latency.
+- Recordings:
+  - `deno bench --no-check --allow-ffi --allow-env --allow-read
+    --allow-write=/tmp,/var/folders --allow-run=git
+    packages/runner/test/scheduler-event-preflight.bench.ts`: passed on Apple
+    M3 Max / Deno 2.8.1. Clean broad graph `328.3 ms`; transitive invalid
+    writer `26.0 ms`; note-shaped 30x7 clean events `1.1 s`; deep
+    read-populated handler `683.2 ms`.
+
+## REVIEWER RECORD — 2026-06-12 merge-train state + CI-gap discovery
+
+- #4087 (phase 0) and #4088 (E0) squash-merged to main. #4090 (E1) was
+  rebased onto main (force-push; accepted deviation at retarget boundaries —
+  squash-merging the parent orphans the branch history, `rebase --onto` is
+  the clean recovery), then took five fix commits, all reviewed and verified:
+  engine precondition-only commits validate ahead of every commit shape
+  (`3a0503bc4`), retried events re-record with the lineage registry
+  (`9b0c5e913`), preconditions claim their write space and wrappers fail
+  closed (`1b9027347`), and read-only origin transactions are settled lineage
+  origins (`bb01e3280`).
+- `bb01e3280` root cause, for the record: `cell.send()` forwards its tx as
+  the event origin (E0, for id minting); in read contexts that is
+  `runtime.readTx()`, which never settles, so lineage subscribed via
+  `addCommitCallback()` and hit the read-only guard — breaking every
+  pattern-test gesture. Read-only origins are not speculative launches;
+  they map to confirmed.
+- **CI gap (important):** `.github/workflows/deno.yml` runs on
+  `pull_request: branches: [main]` only. Stacked PRs targeting sibling
+  branches (#4096–#4111) have had NO CI; their green/clean status is
+  vacuous. Each PR meets real CI for the first time when it retargets to
+  main after its parent merges. Plan accordingly: expect first-contact
+  failures at each retarget, fix on the child branch.
+- **Cascade protocol when a parent squash-merges:** for each child, in order:
+  `git rebase --onto main <old-parent-tip> scheduler-v2/<child>` (drop the
+  parent's pre-squash commits, keep only the child's own), resolve, run the
+  affected suites locally (runner + patterns sweep for cutover-adjacent
+  phases), force-push. GitHub retargets the base automatically when the
+  parent branch is deleted.
+- Stack-head verification sweep (scratch worktree at
+  `scheduler-v2/08-phase7` + `bb01e3280` cherry-picked): full pattern-unit
+  sweep + cli suite run locally to surface remaining latent breakage in one
+  pass; results recorded in a follow-up entry.
+
+## REVIEWER RECORD — stack-head sweep results + cascade status
+
+- Stack-head pattern sweep (08-phase7 + `bb01e3280`): **59/60 green**, full
+  cli suite green. The one failure (`primitives/editable-list.test.tsx`
+  assertion_10) reproduces identically at fork base `cd1da3d4e` under the
+  v1 scheduler — pre-existing, fixed by #4082 and retired by #4086 on main,
+  moot for the train. Verdict: no remaining latent pattern-visible breakage
+  in the cutover phases.
+- #4090 (E1) MERGED to main (`93217ccf8`); `scheduler-v2/03-e1` deleted;
+  #4096 (E2) auto-retargeted to main and is CONFLICTING as expected — the
+  rebase-onto-main surgery for 04-e2 is in progress in the parallel
+  session's worktree (engine precondition files mid-resolve). Reviewer will
+  verify the entity-absent arm survives the merge with `3a0503bc4`'s
+  validation ordering (preconditions validate ahead of every commit shape,
+  shape checks at the wire boundary) intact.
+
+## REVIEWER RECORD — E2 merged + replay-ordering fixtures
+
+- #4096 (E2) MERGED to main (`368719502`); cascade advanced to 05-phase1 in
+  the parallel session. Rebase integration reviewed and verified: replay
+  detection hoisted ABOVE precondition validation (entity-absent must not
+  re-validate on idempotent same-session resends), per-kind switch with
+  originLocalSeq check scoped to origin-committed, deferred-navigate receipt
+  mark moved onto the creating (handler) transaction (`3d6505f18` — old
+  placement rejected FIRST deliveries as receipt-exists and left
+  redeliveries unguarded).
+- The reviewer ask (replay fixture pinning the hoist) did not land before
+  merge; supplied directly as PR #4127 (test-only): identical resend →
+  stored result; mismatched resend → ProtocolError replay mismatch; both
+  verified red against the inverted ordering.

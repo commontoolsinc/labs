@@ -1,16 +1,21 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
+import { toMemorySpaceAddress } from "../link-utils.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
-import type { StorageNotificationState } from "./notifications.ts";
 import {
   type DependencyGraphState,
   isLive,
   notifyNodeLivenessChange,
-  pendingDependencyCollectionMightAffect,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
-import { type DependencyUpdateState } from "./dependency-updates.ts";
+import {
+  type DependencyUpdateState,
+  setSchedulerDependencies,
+} from "./dependency-updates.ts";
+import { filterIgnoredAddresses } from "./reactivity.ts";
 import {
   readsOverlapWrites,
   type WriterIndexState,
@@ -20,14 +25,23 @@ import {
   NodeRegistry,
   type SchedulerNode,
 } from "./node-record.ts";
-import { type TriggerSubscriptionState } from "./trigger-index.ts";
+import {
+  applyActionReadDelta,
+  ensureCancelForActionTriggers,
+  type TriggerSubscriptionState,
+} from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
   Action,
-  PopulateDependenciesEntry,
   ReactivityLog,
   SpaceScopeAndURI,
+  TelemetryAnnotations,
 } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 type SchedulerActionTypeState = {
   readonly nodes: NodeRegistry;
@@ -58,7 +72,6 @@ export interface SchedulerSubscribeOptions {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
-  deferInitialExecution?: boolean;
 }
 
 export interface SchedulerResubscribeOptions {
@@ -70,27 +83,11 @@ export interface SchedulerSubscribeActionState {
   readonly subscriptionState: SchedulerSubscriptionState;
   readonly dependencyUpdateState: DependencyUpdateState;
   readonly triggerSubscriptionState: TriggerSubscriptionState;
-  readonly pendingDependencyCollectionState: {
-    readonly pendingDependencyCollection: ReadonlySet<Action>;
-    readonly effects: ReadonlySet<Action>;
-    readonly isThrottled: (action: Action) => boolean;
-    readonly getSchedulingWrites: (
-      action: Action,
-    ) => readonly IMemorySpaceAddress[] | undefined;
-    readonly hasDependentPath: (from: Action, to: Action) => boolean;
-  };
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly pendingDependencyCollection: Set<Action>;
   readonly markProvisionalDemand: (node: SchedulerNode) => void;
   readonly pending: Set<Action>;
-  readonly scheduledFirstTime: Set<Action>;
   readonly effects: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly stale: ReadonlySet<Action>;
   readonly writeIndex: WriterIndexState;
+  readonly adoptGateConfig: (action: Action) => void;
   readonly setDebounce: (action: Action, ms: number) => void;
   readonly setNoDebounce: (action: Action, optOut: boolean) => void;
   readonly setThrottle: (action: Action, ms: number) => void;
@@ -98,15 +95,14 @@ export interface SchedulerSubscribeActionState {
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isThrottled: (action: Action) => boolean;
-  readonly isStale: (action: Action) => boolean;
-  readonly markDirectDirty: (action: Action) => void;
-  readonly markEffectConditionallyScheduled: (action: Action) => void;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly isInvalid: (action: Action) => boolean;
+  readonly markInvalid: (action: Action) => void;
   readonly updateDependents: (action: Action, log: ReactivityLog) => void;
   readonly registerWriterDependents: (
     action: Action,
     writes: readonly IMemorySpaceAddress[],
   ) => void;
-  readonly scheduleAffectedEffects: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly getActionId: (action: Action) => string;
   readonly unsubscribe: (action: Action) => void;
@@ -119,6 +115,197 @@ export interface SchedulerSubscribeActionState {
   ) => void;
 }
 
+export function subscribePullSchedulerAction(
+  state: SchedulerSubscribeActionState,
+  action: Action,
+  immediateLog: ReactivityLog | undefined,
+  options: SchedulerSubscribeOptions = {},
+): Cancel {
+  const {
+    isEffect = false,
+    debounce,
+    noDebounce,
+    throttle,
+  } = options;
+
+  updateSchedulerActionChangeGroup(
+    state.subscriptionState,
+    action,
+    options,
+  );
+
+  const actionIsEffect = updateSchedulerActionType(
+    state.subscriptionState,
+    action,
+    isEffect,
+    {
+      queueExecution: true,
+      queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
+    },
+  );
+  state.adoptGateConfig(action);
+
+  if (debounce !== undefined) {
+    state.setDebounce(action, debounce);
+  }
+  if (noDebounce !== undefined) {
+    state.setNoDebounce(action, noDebounce);
+  }
+  if (throttle !== undefined) {
+    state.setThrottle(action, throttle);
+  }
+
+  registerParentChildAction(state.subscriptionState, action);
+  const record = state.subscriptionState.nodes.get(action);
+  if (record) {
+    record.declaredReads = resolveDeclaredReads(action);
+  }
+  const parentRecord = state.subscriptionState.nodes.parentOf(action);
+  if (
+    !actionIsEffect &&
+    record &&
+    parentRecord &&
+    isLive(state.subscriptionState.dependencyGraphState, parentRecord)
+  ) {
+    state.markProvisionalDemand(record);
+    state.queueExecution();
+  }
+
+  logger.debug(
+    "schedule",
+    () => [
+      "Subscribing to action:",
+      action,
+      actionIsEffect ? "effect" : "computation",
+    ],
+  );
+
+  const surface = resolveRegistrationSurface(action, immediateLog);
+  if (!actionIsEffect && surface.length > 0) {
+    state.writeIndex.setSurface(action, surface);
+    state.registerWriterDependents(action, surface);
+  } else if (!actionIsEffect && !immediateLog) {
+    state.pending.add(action);
+  }
+
+  if (immediateLog) {
+    const { previousLog, log: schedulingLog } = setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      immediateLog,
+    );
+    state.updateDependents(action, schedulingLog);
+    applyActionReadDelta(
+      state.triggerSubscriptionState,
+      action,
+      previousLog,
+      schedulingLog,
+    );
+    ensureCancelForActionTriggers(
+      state.triggerSubscriptionState,
+      action,
+    );
+  }
+
+  state.markInvalid(action);
+
+  const actionId = state.getActionId(action);
+  state.submitSubscribeTelemetry({
+    type: "scheduler.subscribe",
+    actionId,
+    isEffect: actionIsEffect,
+  });
+
+  return () => state.unsubscribe(action);
+}
+
+export function resolveRegistrationSurface(
+  action: Action,
+  immediateLog: ReactivityLog | undefined,
+): IMemorySpaceAddress[] {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  const annotatedSurface = annotated.writes ?? [];
+  const surface = annotatedSurface.length > 0
+    ? annotatedSurface.map(toMemorySpaceAddress)
+    : (immediateLog?.writes ?? []);
+  return sortAndCompactPaths(
+    filterIgnoredAddresses(surface, annotated.ignoredSchedulingWrites ?? []),
+  );
+}
+
+export function resolveDeclaredReads(action: Action): IMemorySpaceAddress[] {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  return sortAndCompactPaths(
+    (annotated.reads ?? []).map(toMemorySpaceAddress),
+  );
+}
+
+export function resubscribePullSchedulerAction(
+  state: SchedulerSubscribeActionState,
+  action: Action,
+  log: ReactivityLog,
+  options: SchedulerResubscribeOptions = {},
+): void {
+  const { isEffect } = options;
+  const existingRecord = state.subscriptionState.nodes.get(action);
+
+  updateSchedulerActionChangeGroup(
+    state.subscriptionState,
+    action,
+    options,
+  );
+
+  const { previousLog, reads, shallowReads, log: schedulingLog } =
+    setSchedulerDependencies(
+      state.dependencyUpdateState,
+      action,
+      log,
+    );
+
+  const actionIsEffect = updateSchedulerActionType(
+    state.subscriptionState,
+    action,
+    isEffect,
+  );
+  const record = state.subscriptionState.nodes.get(action);
+  if (!existingRecord && record?.status === "never-ran") {
+    state.subscriptionState.nodes.setStatus(action, "clean");
+  }
+  const actionId = state.getActionId(action);
+
+  state.updateDependents(action, schedulingLog);
+
+  registerParentChildAction(state.subscriptionState, action, {
+    allowExisting: false,
+  });
+
+  const { triggerPathsByEntity } = applyActionReadDelta(
+    state.triggerSubscriptionState,
+    action,
+    previousLog,
+    schedulingLog,
+  );
+
+  logger.debug("schedule-resubscribe", () => [
+    `Action: ${actionId}`,
+    `Entities: ${triggerPathsByEntity.size}`,
+    `Reads: ${reads.length}`,
+  ]);
+
+  ensureCancelForActionTriggers(
+    state.triggerSubscriptionState,
+    action,
+  );
+
+  markEffectDirtyIfStaleInputs(
+    state,
+    action,
+    actionIsEffect,
+    reads,
+    shallowReads,
+  );
+}
+
 export function markEffectDirtyIfStaleInputs(
   state: SchedulerSubscribeActionState,
   action: Action,
@@ -126,33 +313,30 @@ export function markEffectDirtyIfStaleInputs(
   reads: readonly IMemorySpaceAddress[],
   shallowReads: readonly IMemorySpaceAddress[],
 ): void {
-  // In pull mode: When an effect resubscribes, check if any non-throttled dirty
+  // In pull mode: When an effect resubscribes, check if any non-throttled invalid
   // computations write to what it reads. If so, mark the effect dirty so it can
   // pull those computations and see fresh data.
-  // Skip throttled computations - they'll trigger via storage changes when unthrottled.
+  // Skip delayed computations; their own wake path will re-open demand later.
   // Use the returned action kind instead of active effects because
   // unsubscribe() clears active membership before run().
-  if (!actionIsEffect || state.stale.size === 0) {
+  if (!actionIsEffect) {
     return;
   }
 
-  const shouldMarkDirty = pendingDependencyCollectionMightAffect(
-    state.pendingDependencyCollectionState,
+  const shouldMarkDirty = hasInvalidWriterForEffectReads(
+    state,
     action,
     reads,
     shallowReads,
-  ) ||
-    hasStaleWriterForEffectReads(state, action, reads, shallowReads);
+  );
 
-  if (shouldMarkDirty && !state.dirty.has(action)) {
-    state.markEffectConditionallyScheduled(action);
-    state.markDirectDirty(action);
-    state.pending.add(action);
+  if (shouldMarkDirty && !state.isInvalid(action)) {
+    state.markInvalid(action);
     state.queueExecution();
   }
 }
 
-function hasStaleWriterForEffectReads(
+function hasInvalidWriterForEffectReads(
   state: SchedulerSubscribeActionState,
   action: Action,
   effectReads: readonly IMemorySpaceAddress[],
@@ -173,9 +357,10 @@ function hasStaleWriterForEffectReads(
 
     for (const writer of writers) {
       if (writer === action) continue;
-      if (!state.isStale(writer)) continue;
+      if (!state.isInvalid(writer)) continue;
       if (state.effects.has(writer)) continue; // Only check computations
-      if (state.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
+      if (state.isThrottled(writer)) continue;
+      if (state.isDebouncedComputationWaiting(writer)) continue;
 
       // Check path overlap.
       const writerWrites = state.getSchedulingWrites(writer) ?? [];
@@ -271,26 +456,16 @@ export function registerParentChildAction(
 export interface SchedulerUnsubscribeActionState {
   readonly cancels: WeakMap<Action, Cancel>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
-  // Pending CFC trigger reads (§8.9.2); cleared so a later re-subscription
-  // of the same action object starts without stale taint.
-  readonly cfcTriggerReads: StorageNotificationState["cfcTriggerReads"];
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
   readonly pending: Set<Action>;
-  readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencyGraphState: DependencyGraphState;
   readonly nodes: NodeRegistry;
   readonly writeIndex: WriterIndexState;
-  readonly populateDependenciesCallbacks: WeakMap<
-    Action,
-    PopulateDependenciesEntry
-  >;
-  readonly pendingDependencyCollection: Set<Action>;
   readonly getActionId: (action: Action) => string;
-  readonly clearDirectDirty: (action: Action) => void;
-  readonly forceClearStale: (action: Action) => void;
+  readonly clearInvalid: (action: Action) => void;
   readonly cancelDebounceTimer: (action: Action) => void;
   readonly clearComputationDebounceState: (
     action: Action,
@@ -318,7 +493,6 @@ export function unsubscribeSchedulerAction(
   // when parent is re-running). They'll be cleaned up when parent is
   // garbage collected (WeakMap).
   clearActionDelayState(state, action);
-  clearDependencyCollectionState(state, action);
 }
 
 function cancelActionSubscription(
@@ -352,12 +526,11 @@ function clearActionSchedulingState(
   action: Action,
 ): void {
   state.pending.delete(action);
-  state.cfcTriggerReads.delete(action);
-  state.conditionallyScheduledEffects.delete(action);
-  // Clear direct/stale state before removing outgoing edges so downstream
-  // stale counts are decremented through normal propagation.
-  state.clearDirectDirty(action);
-  state.forceClearStale(action);
+  const record = state.nodes.get(action);
+  if (record) {
+    record.invalidCauses = [];
+  }
+  state.clearInvalid(action);
 }
 
 function removeReverseDependencyEdges(
@@ -403,12 +576,4 @@ function clearActionDelayState(
 ): void {
   state.cancelDebounceTimer(action);
   state.clearComputationDebounceState(action, { cancelTimer: false });
-}
-
-function clearDependencyCollectionState(
-  state: SchedulerUnsubscribeActionState,
-  action: Action,
-): void {
-  state.populateDependenciesCallbacks.delete(action);
-  state.pendingDependencyCollection.delete(action);
 }

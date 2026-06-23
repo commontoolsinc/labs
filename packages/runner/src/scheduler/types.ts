@@ -57,16 +57,6 @@ export type EventHandler =
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
- * Callback to populate a transaction with an action's read dependencies.
- * Called by the scheduler to discover what cells the action will read.
- * The callback should read all cells (using .get({ traverseCells: true })) that
- * the action will access, so the transaction captures all dependencies.
- * The transaction will be aborted after this callback returns, so it's safe
- * to simulate writes.
- */
-export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
-
-/**
  * Reactivity log.
  *
  * Used to log reads and writes to docs. Used by scheduler to keep track of
@@ -79,9 +69,7 @@ export type ReactivityLog = {
   writes: IMemorySpaceAddress[];
 };
 
-export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
-
-export type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
+export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   depth: number;
   actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
   rootDirectWriterActions: Set<Action>;
@@ -147,29 +135,20 @@ export interface TriggerTraceValueSummary {
   preview?: string | number | boolean | null;
 }
 
-export interface TriggerTraceScheduledEffect {
-  actionId: string;
-  pendingBefore: boolean;
-  dirtyBefore: boolean;
-  debounceMs?: number;
-}
-
 export interface TriggerTraceActionRecord {
   actionId: string;
   actionType: "effect" | "computation";
   mode: "pull" | "push";
   decision:
     | "schedule-push"
-    | "schedule-effect"
-    | "mark-dirty"
-    | "already-dirty"
+    | "mark-invalid"
+    | "already-invalid"
     | "skip-own-commit-source"
     | "skip-same-change-group";
   pendingBefore: boolean;
   pendingAfter: boolean;
   dirtyBefore: boolean;
   dirtyAfter: boolean;
-  scheduledEffects: TriggerTraceScheduledEffect[];
 }
 
 export interface TriggerTraceEntry {

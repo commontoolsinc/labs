@@ -1,11 +1,11 @@
 import { createNodeFactory } from "./builder/module.ts";
-import { Module, type ModuleFactory } from "./builder/types.ts";
+import {
+  type JSONSchema,
+  Module,
+  type ModuleFactory,
+} from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
-import type {
-  Action,
-  PopulateDependencies,
-  ReactivityLog,
-} from "./scheduler.ts";
+import type { Action, ReactivityLog } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -16,15 +16,15 @@ import type { NormalizedFullLink } from "./link-types.ts";
  *
  * - action: The action to be scheduled
  * - isEffect: If true, this action is side-effectful (optional, can also be passed via RawModuleOptions)
- * - populateDependencies: Customizes what cells this action depends on for its initial run.
- *   If not provided, dependencies are automatically discovered from input bindings.
- *   Can be a ReactivityLog (static) or a PopulateDependencies function (dynamic).
+ * - dependencies: Optional static scheduler dependencies for first-run demand/ordering.
+ * - useDeclaredReadsAsDependencies: Register binding links as static read evidence.
  * - debounce/throttle/noDebounce: Optional scheduler timing controls.
  */
 export interface RawBuiltinResult {
   action: Action;
   isEffect?: boolean;
-  populateDependencies?: PopulateDependencies | ReactivityLog;
+  dependencies?: ReactivityLog;
+  useDeclaredReadsAsDependencies?: boolean;
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;
@@ -33,7 +33,7 @@ export interface RawBuiltinResult {
 /**
  * A raw builtin implementation can return either:
  * - Just an Action (legacy format, for backwards compatibility)
- * - A RawBuiltinResult object with action, optional isEffect, and optional populateDependencies
+ * - A RawBuiltinResult object with action, optional isEffect, and scheduler timing options
  */
 export type RawBuiltinReturnType = Action | RawBuiltinResult;
 
@@ -103,6 +103,13 @@ export interface RawModuleOptions {
   noDebounce?: boolean;
   /** Optional scheduler throttle period in milliseconds */
   throttle?: number;
+  /**
+   * Optional argument schema for the raw module's inputs. Threaded into input
+   * binding resolution so the emitted links carry per-key schema annotations
+   * (e.g. an `asCell: ["opaque"]` marker on a forwarded reference), which the
+   * scheduler uses to decide whether an input is a declared read.
+   */
+  argumentSchema?: JSONSchema;
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.
@@ -134,5 +141,8 @@ export function raw<T, R>(
     debounce: options?.debounce,
     noDebounce: options?.noDebounce,
     throttle: options?.throttle,
+    ...(options?.argumentSchema !== undefined
+      ? { argumentSchema: options.argumentSchema }
+      : {}),
   });
 }

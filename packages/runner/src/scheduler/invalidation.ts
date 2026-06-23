@@ -3,16 +3,17 @@ import type {
   ChangeGroup,
   IMemoryChange,
   IMemorySpaceAddress,
+  StorageNotification,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
+import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
 import type {
   Action,
   SpaceScopeAndURI,
   TriggerTraceActionRecord,
   TriggerTraceEntry,
-  TriggerTraceScheduledEffect,
 } from "./types.ts";
 
 export type SchedulerMode = "pull" | "push";
@@ -21,6 +22,127 @@ export function hasRegisteredTriggers(
   state: TriggerIndexState,
 ): boolean {
   return state.hasRegisteredTriggers();
+}
+
+export function processStorageNotification(
+  state: StorageNotificationState,
+  notification: StorageNotification,
+): void {
+  const space = notification.space;
+
+  if (!("changes" in notification)) {
+    return;
+  }
+
+  const sourceChangeGroup = notification.type === "commit"
+    ? notification.source?.changeGroup
+    : undefined;
+  const hasSourceChangeGroup = notification.type === "commit" &&
+    sourceChangeGroup !== undefined;
+  const collectTriggerTrace = state.getCollectTriggerTrace();
+  const diagnosisEnabled = state.getDiagnosisEnabled();
+
+  let changeIndex = 0;
+  for (const change of notification.changes) {
+    changeIndex++;
+    state.recordCellUpdate(change);
+
+    if (!hasRegisteredTriggers(state.triggerIndex)) {
+      continue;
+    }
+
+    const {
+      entity: spaceAndURI,
+      hasMatchingTriggerPaths,
+      triggeredActions,
+    } = collectTriggeredActionsForChange(
+      state.triggerIndex,
+      space,
+      change,
+    );
+
+    if (!hasMatchingTriggerPaths) {
+      continue;
+    }
+
+    const writerActionId = hasSourceChangeGroup &&
+        sourceChangeGroup !== undefined
+      ? state.changeGroupToActionId.get(sourceChangeGroup)
+      : undefined;
+    const triggerTraceEntry: TriggerTraceEntry | null = collectTriggerTrace
+      ? createTriggerTraceEntry({
+        notificationType: notification.type,
+        changeIndex,
+        matchedActionCount: triggeredActions.length,
+        mode: "pull",
+        writerActionId,
+        space,
+        change,
+      })
+      : null;
+
+    for (const action of triggeredActions) {
+      if (
+        diagnosisEnabled && hasSourceChangeGroup &&
+        sourceChangeGroup !== undefined
+      ) {
+        const writerActionId = state.changeGroupToActionId.get(
+          sourceChangeGroup,
+        );
+        if (writerActionId) {
+          state.recordCausalEdge({
+            writer: writerActionId,
+            cell: spaceAndURI,
+            triggered: state.getActionId(action),
+            timestamp: performance.now(),
+          });
+        }
+      }
+
+      const actionChangeGroup = state.actionChangeGroups.get(action);
+      const actionId = state.getActionId(action);
+      const actionIsEffect = state.effects.has(action);
+      const actionType = actionIsEffect ? "effect" : "computation";
+      const pendingBefore = state.pending.has(action);
+      const dirtyBefore = state.isInvalid(action);
+      const isOwnCommitSource = notification.type === "commit" &&
+        notification.source !== undefined &&
+        notification.source.sourceAction === action;
+      const plan = planPullTriggeredAction({
+        invalidBefore: dirtyBefore,
+        isOwnCommitSource,
+        hasSourceChangeGroup,
+        actionChangeGroup,
+        sourceChangeGroup,
+      });
+      applyPullTriggeredActionPlan(
+        state,
+        action,
+        plan,
+        { ...change.address, space },
+      );
+
+      triggerTraceEntry?.triggered.push(
+        createTriggerTraceActionRecord({
+          actionId,
+          actionType,
+          mode: "pull",
+          decision: plan.decision,
+          pendingBefore,
+          pendingAfter: state.pending.has(action),
+          dirtyBefore,
+          dirtyAfter: state.isInvalid(action),
+        }),
+      );
+    }
+
+    if (
+      triggerTraceEntry &&
+      shouldRecordTriggerTraceEntry(triggerTraceEntry)
+    ) {
+      state.recordTriggerTrace(triggerTraceEntry);
+    }
+  }
 }
 
 export function collectTriggeredActionsForChange(
@@ -36,27 +158,34 @@ export function collectTriggeredActionsForChange(
 }
 
 /**
- * Record the address whose change scheduled `action` (§8.9.2 trigger
- * reads). Consumed by the action's next run, whose transaction joins the
- * addresses' labels into the flow-label derivation: the decision to run
- * now was influenced by the changed values even if that run's branch never
- * re-reads them.
+ * Record an invalidating address on `record`. Consumed by the next run,
+ * whose transaction joins the addresses' labels into the flow-label
+ * derivation: the decision to run now was influenced by the changed values
+ * even if that run's branch never re-reads them.
  */
-export function recordCfcTriggerRead(
-  state: Pick<StorageNotificationState, "cfcTriggerReads">,
+export function markInvalid(
+  nodes: NodeRegistry,
   action: Action,
-  space: MemorySpace,
-  change: IMemoryChange,
+  cause?: IMemorySpaceAddress,
 ): void {
-  addCfcTriggerRead(state, action, { ...change.address, space });
+  const record = nodes.get(action);
+  if (!record) return;
+  if (cause !== undefined) {
+    addInvalidCause(record, cause);
+  }
+  // Status transition goes through the registry so the invalid-node index
+  // stays in lockstep; never-ran nodes keep their status (already indexed).
+  if (record.status === "clean") {
+    nodes.setStatus(action, "invalid");
+  }
 }
 
 /**
- * Dedup key for a pending trigger-read address. Scope participates (an
+ * Dedup key for a pending invalid cause. Scope participates (an
  * omitted scope normalizes to `space`, matching storage), and JSON keeps
  * path segments unambiguous: ["a","b"] never collides with ["a/b"].
  */
-function cfcTriggerReadKey(address: IMemorySpaceAddress): string {
+function invalidCauseKey(address: IMemorySpaceAddress): string {
   return JSON.stringify([
     address.space,
     address.scope ?? "space",
@@ -66,27 +195,37 @@ function cfcTriggerReadKey(address: IMemorySpaceAddress): string {
 }
 
 /**
- * Add a pending trigger-read address for `action`, deduping repeats of the
- * same address across notifications. Also restores consumed addresses when
- * an aborted run is retried: the retry still exists only because of these
- * triggers, so its writes must carry their labels.
+ * Add a pending invalid cause, deduping repeats of the same address across
+ * notifications and retry restoration.
  */
-export function addCfcTriggerRead(
-  state: Pick<StorageNotificationState, "cfcTriggerReads">,
-  action: Action,
+export function addInvalidCause(
+  record: SchedulerNode,
   address: IMemorySpaceAddress,
 ): void {
-  let pending = state.cfcTriggerReads.get(action);
-  if (pending === undefined) {
-    pending = { addresses: [], keys: new Set() };
-    state.cfcTriggerReads.set(action, pending);
-  }
-  const key = cfcTriggerReadKey(address);
-  if (pending.keys.has(key)) {
+  const key = invalidCauseKey(address);
+  if (record.invalidCauses.some((cause) => invalidCauseKey(cause) === key)) {
     return;
   }
-  pending.keys.add(key);
-  pending.addresses.push(address);
+  record.invalidCauses.push(address);
+}
+
+export function takeInvalidCauses(
+  record: SchedulerNode,
+): readonly IMemorySpaceAddress[] | undefined {
+  if (record.invalidCauses.length === 0) return undefined;
+  const causes = record.invalidCauses;
+  record.invalidCauses = [];
+  return causes;
+}
+
+export function restoreInvalidCauses(
+  nodes: NodeRegistry,
+  action: Action,
+  addresses: readonly IMemorySpaceAddress[],
+): void {
+  for (const address of addresses) {
+    markInvalid(nodes, action, address);
+  }
 }
 
 export function createTriggerTraceEntry(state: {
@@ -117,7 +256,7 @@ export function createTriggerTraceEntry(state: {
 
 export interface TriggeredActionPlan {
   decision: TriggerTraceActionRecord["decision"];
-  operation: "none" | "schedule" | "mark-dirty";
+  operation: "none" | "schedule" | "invalidate";
 }
 
 interface TriggeredActionSkipState {
@@ -158,20 +297,15 @@ export function planPushTriggeredAction(
 
 export function planPullTriggeredAction(
   state: TriggeredActionSkipState & {
-    readonly isEffect: boolean;
-    readonly dirtyBefore: boolean;
+    readonly invalidBefore: boolean;
   },
 ): TriggeredActionPlan {
   const skipped = planSkippedTriggeredAction(state);
   if (skipped) return skipped;
 
-  if (state.isEffect) {
-    return { decision: "schedule-effect", operation: "schedule" };
-  }
-
   return {
-    decision: state.dirtyBefore ? "already-dirty" : "mark-dirty",
-    operation: "mark-dirty",
+    decision: state.invalidBefore ? "already-invalid" : "mark-invalid",
+    operation: "invalidate",
   };
 }
 
@@ -184,7 +318,6 @@ export function createTriggerTraceActionRecord(state: {
   readonly pendingAfter: boolean;
   readonly dirtyBefore: boolean;
   readonly dirtyAfter: boolean;
-  readonly scheduledEffects: TriggerTraceScheduledEffect[];
 }): TriggerTraceActionRecord {
   return {
     actionId: state.actionId,
@@ -195,7 +328,6 @@ export function createTriggerTraceActionRecord(state: {
     pendingAfter: state.pendingAfter,
     dirtyBefore: state.dirtyBefore,
     dirtyAfter: state.dirtyAfter,
-    scheduledEffects: state.scheduledEffects,
   };
 }
 
@@ -218,27 +350,17 @@ export function applyPushTriggeredActionPlan(
 export function applyPullTriggeredActionPlan(
   state: StorageNotificationState,
   action: Action,
-  isEffect: boolean,
   plan: TriggeredActionPlan,
-): TriggerTraceScheduledEffect[] {
+  cause: IMemorySpaceAddress,
+): void {
   if (plan.operation === "schedule") {
-    if (isEffect) {
-      state.conditionallyScheduledEffects.delete(action);
-    }
     state.scheduleWithDebounce(action);
-    return [];
+    return;
   }
 
-  if (plan.operation === "mark-dirty") {
-    state.markDirty(action);
-    const scheduledEffects = state.scheduleAffectedEffects(action);
-    if (state.materializerIndex.isMaterializer(action)) {
-      state.queueExecution();
-    }
-    return scheduledEffects;
+  if (plan.operation === "invalidate") {
+    state.markInvalid(action, cause);
   }
-
-  return [];
 }
 
 interface CausalEdge {
@@ -250,14 +372,7 @@ interface CausalEdge {
 
 export interface StorageNotificationState {
   readonly triggerIndex: TriggerIndexState;
-  // Pending CFC trigger reads per dirtied action (§8.9.2): the addresses
-  // whose invalidating writes scheduled it. Consumed when the action next
-  // runs; that run's transaction joins their labels into the flow-label
-  // derivation. `keys` dedups addresses across notifications.
-  readonly cfcTriggerReads: WeakMap<
-    Action,
-    { addresses: IMemorySpaceAddress[]; keys: Set<string> }
-  >;
+  readonly nodes: NodeRegistry;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getCollectTriggerTrace: () => boolean;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
@@ -265,16 +380,15 @@ export interface StorageNotificationState {
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly effects: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly getActionId: (action: Action) => string;
   readonly recordCellUpdate: (change: IMemoryChange) => void;
   readonly recordTriggerTrace: (entry: TriggerTraceEntry) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
-  readonly markDirty: (action: Action) => void;
+  readonly markInvalid: (
+    action: Action,
+    cause: IMemorySpaceAddress,
+  ) => void;
+  readonly isInvalid: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;
   readonly queueExecution: () => void;
-  readonly scheduleAffectedEffects: (
-    action: Action,
-  ) => TriggerTraceScheduledEffect[];
 }

@@ -48,7 +48,6 @@ type BrowserTriggerTraceEntry = {
     pendingAfter: boolean;
     dirtyBefore: boolean;
     dirtyAfter: boolean;
-    scheduledEffects: Array<{ actionId: string }>;
   }>;
 };
 
@@ -1267,7 +1266,6 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
       writerActionId?: string;
       change: string;
       decision: string;
-      scheduledEffects: string[];
     };
 
     const counts = new Map<string, number>();
@@ -1313,18 +1311,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           writerActionId: entry.writerActionId,
           change,
           decision: action.decision,
-          scheduledEffects: action.scheduledEffects.map((effect: {
-            actionId: string;
-          }) => effect.actionId),
         });
-        for (const effect of action.scheduledEffects) {
-          pushSample(effect.actionId, {
-            writerActionId: entry.writerActionId,
-            change,
-            decision: `scheduled-by:${action.actionId}`,
-            scheduledEffects: [],
-          });
-        }
       }
     }
 
@@ -1881,9 +1868,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
         typeof appState.view.pieceId === "string"
       ? appState.view.pieceId
       : undefined;
-    const resultEntityId = resultPieceId
-      ? resultPieceId.startsWith("of:") ? resultPieceId : `of:${resultPieceId}`
-      : undefined;
 
     const markers = (api?.__eventInvocationTrace ?? []) as Array<{
       type?: string;
@@ -1982,9 +1966,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           pendingAfter: triggered.pendingAfter,
           dirtyBefore: triggered.dirtyBefore,
           dirtyAfter: triggered.dirtyAfter,
-          scheduledEffects: triggered.scheduledEffects.map((effect) =>
-            effect.actionId
-          ),
         })),
       }));
     const notebookNotesTriggersByPath = triggerTrace
@@ -2007,63 +1988,10 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
             pendingAfter: triggered.pendingAfter,
             dirtyBefore: triggered.dirtyBefore,
             dirtyAfter: triggered.dirtyAfter,
-            scheduledEffects: triggered.scheduledEffects.map((effect) =>
-              effect.actionId
-            ),
           })),
       }));
     const finalNotebookNotesTriggers = notebookNotesTriggers.slice(-2);
-    const finalScheduledEffectIds = new Set(
-      finalNotebookNotesTriggers.flatMap((entry) =>
-        entry.triggered.flatMap((triggered) => triggered.scheduledEffects)
-      ),
-    );
-    const finalScheduledSinkIds = [...finalScheduledEffectIds].filter((id) =>
-      id.startsWith("sink:")
-    );
     const graph = await rt?.getGraphSnapshot?.();
-    const finalScheduledSinkNodes = (graph?.nodes ?? [])
-      .filter((node: any) =>
-        typeof node.id === "string" && finalScheduledSinkIds.includes(node.id)
-      )
-      .map((node: any) => ({
-        id: node.id,
-        isPending: node.isPending,
-        isDirty: node.isDirty,
-        isDemanded: node.isDemanded,
-        isConditionallyScheduled: node.isConditionallyScheduled,
-        reads: (node.reads ?? []).filter((read: string) =>
-          notebookEntityId === undefined ||
-          read.includes(notebookEntityId) ||
-          read.includes("/value/internal/noteCount") ||
-          read.includes("/value/internal/$NAME")
-        ).slice(0, 8),
-        writes: (node.writes ?? []).filter((write: string) =>
-          write.includes("/noteCount") ||
-          write.includes("/mentionable") ||
-          write.includes("/showNewNotePrompt") ||
-          write.includes("/usedCreateAnotherNote")
-        ).slice(0, 8),
-      }));
-    const interestingFinalScheduledSinkIds = new Set(
-      finalScheduledSinkNodes
-        .filter((node) =>
-          (resultEntityId !== undefined && node.id.includes(resultEntityId)) ||
-          node.reads.some((read: string) =>
-            read.includes("/value/argument/notes") ||
-            read.includes("/value/internal/noteCount") ||
-            read.includes("/value/internal/showNewNotePrompt") ||
-            read.includes("/value/internal/usedCreateAnotherNote")
-          ) ||
-          node.writes.some((write: string) =>
-            write.includes("/noteCount") ||
-            write.includes("/mentionable") ||
-            write.includes("/showNewNotePrompt") ||
-            write.includes("/usedCreateAnotherNote")
-          )
-        )
-        .map((node) => node.id),
-    );
     const notebookCoreNodes = (graph?.nodes ?? [])
       .filter((node: any) =>
         typeof node.id === "string" &&
@@ -2125,22 +2053,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           `${write.space}/${write.entityId}/${write.path.join("/")}`
         ),
       }));
-    const finalScheduledSinkRuns = trace
-      .filter((entry) => interestingFinalScheduledSinkIds.has(entry.actionId))
-      .map((entry) => ({
-        actionId: entry.actionId,
-        actionType: entry.actionType,
-        actualWrites: entry.actualWrites.map((write) =>
-          `${write.space}/${write.entityId}/${write.path.join("/")}`
-        ),
-      }));
-    const finalScheduledSinkRunCounts = new Map<string, number>();
-    for (const entry of finalScheduledSinkRuns) {
-      finalScheduledSinkRunCounts.set(
-        entry.actionId,
-        (finalScheduledSinkRunCounts.get(entry.actionId) ?? 0) + 1,
-      );
-    }
 
     const byNotebookHandler = new Map<string, number>();
     for (const marker of notebookInvocations) {
@@ -2203,20 +2115,8 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           pendingAfter: triggered.pendingAfter,
           dirtyBefore: triggered.dirtyBefore,
           dirtyAfter: triggered.dirtyAfter,
-          scheduledEffectCount: triggered.scheduledEffects.length,
-          scheduledSinkCount: triggered.scheduledEffects.filter((id) =>
-            id.startsWith("sink:")
-          ).length,
         })),
       })),
-      finalScheduledSinkCount: finalScheduledSinkIds.length,
-      interestingFinalScheduledSinkCount: interestingFinalScheduledSinkIds.size,
-      finalScheduledSinkRunCounts: [...finalScheduledSinkRunCounts.entries()]
-        .map(([actionId, count]) => ({ actionId, count })),
-      finalScheduledSinkRunTail: finalScheduledSinkRuns.slice(-30),
-      finalScheduledSinkNodes: finalScheduledSinkNodes.filter((node) =>
-        interestingFinalScheduledSinkIds.has(node.id)
-      ),
       notebookNotesTriggersByPath: notebookNotesTriggersByPath.slice(-3),
       notebookCoreNodes,
       notebookActionCount: notebookActions.length,

@@ -1,5 +1,5 @@
-// Cycle-aware convergence tests: verifying that the scheduler correctly
-// detects and handles circular dependencies between reactive computations.
+// Bounded convergence tests: verifying that the scheduler handles circular
+// dependencies without unbounded reactive work.
 
 import {
   afterEach,
@@ -19,8 +19,9 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
 
-describe("cycle-aware convergence", () => {
+describe("bounded convergence", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -283,7 +284,7 @@ describe("cycle-aware convergence", () => {
     expect(doubled.get()).toBe(10);
   });
 
-  it("should enforce iteration limit for non-converging cycles", async () => {
+  it("should apply pass budget backoff for non-converging cycles", async () => {
     // Create a non-converging cycle (always increments)
     const cellA = runtime.getCell<number>(
       space,
@@ -364,26 +365,14 @@ describe("cycle-aware convergence", () => {
       { isEffect: true },
     );
 
-    // Let the cycle run - it should stop after hitting the limit
-    // Multiple idle() calls allow async storage notifications to trigger re-runs
-    for (let i = 0; i < 30; i++) {
-      await runtime.scheduler.idle();
-      // Small delay to let async storage notifications fire
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await runtime.scheduler.idle();
 
-    // The cycle should have stopped due to iteration limit
-    // (either via MAX_ITERATIONS_PER_RUN or MAX_CYCLE_ITERATIONS)
-    // Total runs should be bounded, not infinite
-    expect(runCountA + runCountB).toBeLessThan(500);
-
-    // The cycle ran and should have been bounded
-    // Note: With implicit cycle detection, errors may or may not be thrown
-    // depending on timing. The key invariant is that runs are bounded.
+    expect(runCountA).toBeLessThanOrEqual(PASS_RUN_BUDGET);
+    expect(runCountB).toBeLessThanOrEqual(PASS_RUN_BUDGET);
     expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
-  it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
+  it("should preserve dirty effects after pass budget exhaustion", async () => {
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;
       pendingQueueTaskTimer: number | null;
@@ -398,7 +387,7 @@ describe("cycle-aware convergence", () => {
     const selfDirtyingEffect: Action = () => {
       effectRuns++;
       if (effectRuns <= reDirtyLimit) {
-        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
+        staleSchedulerInternal.markDirty(selfDirtyingEffect);
       }
     };
 
@@ -421,14 +410,11 @@ describe("cycle-aware convergence", () => {
       schedulerInternal.scheduled = false;
     }
 
-    // The settle loop runs the dirty effect for each bounded iteration, then
-    // cycle-break gets one snapshot entry. A live Set iteration would revisit
-    // the effect as it re-subscribes and re-dirties itself.
-    expect(effectRuns).toBe(11);
+    expect(effectRuns).toBe(PASS_RUN_BUDGET);
     expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
   });
 
-  it("should not create infinite loops in collectDirtyDependencies", async () => {
+  it("should not create infinite loops while resubscribing dependencies", async () => {
     // Create a simple dependency structure
     const source = runtime.getCell<number>(
       space,
@@ -489,7 +475,7 @@ describe("cycle-aware convergence", () => {
     expect(result.get()).toBe(18); // 9 * 2
   });
 
-  it("should handle cycles during dependency collection without infinite recursion", async () => {
+  it("should handle cycles during dependency collection without non-convergence", async () => {
     // Create cells that form a cycle
     const cellA = runtime.getCell<number>(
       space,
@@ -567,8 +553,7 @@ describe("cycle-aware convergence", () => {
     );
     await cellC.pull();
 
-    // The cycle should converge (value reaches 3)
-    // This tests that collectDirtyDependencies doesn't infinitely recurse
+    // The cycle should converge (value reaches 3).
     expect(cellC.get()).toBeLessThanOrEqual(3);
   });
 

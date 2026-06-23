@@ -19,13 +19,6 @@ const sourceAddress = (index: number): IMemorySpaceAddress => ({
   path: ["value"],
 });
 
-const targetAddress = (index: number): IMemorySpaceAddress => ({
-  space: benchSpace,
-  scope: "space",
-  id: `scheduler-persistent-target:${index}`,
-  path: ["value"],
-});
-
 const createAction = (index: number): Action =>
   Object.assign((_tx: unknown) => {}, {
     src: `scheduler-persistent-action:${index}`,
@@ -47,7 +40,6 @@ const createObservation = (index: number) =>
       shallowReads: [],
       writes: [],
     },
-    currentKnownWrites: [targetAddress(index)],
   });
 
 for (const actionCount of ACTION_COUNTS) {

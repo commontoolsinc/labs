@@ -11,8 +11,8 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type {
   Action,
   ActionRunTraceAddress,
-  DirtyDependencyTraceContext,
   EventHandler,
+  EventPreflightTraceContext,
   TelemetryAnnotations,
   TriggerTraceEntry,
   TriggerTraceValueSummary,
@@ -95,7 +95,7 @@ export function recordTriggerTrace(
   }
 }
 
-export function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
+export function createEventPreflightTraceContext(): EventPreflightTraceContext {
   return {
     visitCount: 0,
     memoHitCount: 0,

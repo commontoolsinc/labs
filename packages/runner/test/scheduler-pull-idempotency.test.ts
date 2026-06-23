@@ -11,10 +11,12 @@ import {
   it,
   Runtime,
   space,
+  toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
   IExtendedStorageTransaction,
+  ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 
@@ -31,6 +33,15 @@ describe("inline idempotency check mode", () => {
 
   afterEach(async () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+  });
+
+  const logFor = (
+    reads: ReturnType<typeof toMemorySpaceAddress>[],
+    writes: ReturnType<typeof toMemorySpaceAddress>[],
+  ): ReactivityLog => ({
+    reads,
+    shallowReads: [],
+    writes,
   });
 
   it("detects non-idempotent via inline mode", async () => {
@@ -56,7 +67,7 @@ describe("inline idempotency check mode", () => {
     ).writes = [output.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
       randomWriter,
-      () => {},
+      logFor([], [toMemorySpaceAddress(output.getAsNormalizedFullLink())]),
       {},
     );
     await output.pull();
@@ -96,9 +107,10 @@ describe("inline idempotency check mode", () => {
     ).writes = [output.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
       doubler,
-      (tx) => {
-        input.withTx(tx).get();
-      },
+      logFor(
+        [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
+        [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      ),
       {},
     );
     expect(await output.pull()).toBe(10);
@@ -153,9 +165,10 @@ describe("inline idempotency check mode", () => {
     ).writes = [output.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
       doubler,
-      (tx) => {
-        input.withTx(tx).get();
-      },
+      logFor(
+        [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
+        [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      ),
       {},
     );
     await output.pull();
@@ -195,9 +208,10 @@ describe("inline idempotency check mode", () => {
     ).writes = [log.getAsNormalizedFullLink()];
     runtime.scheduler.subscribe(
       accumulator,
-      (tx) => {
-        log.withTx(tx).get();
-      },
+      logFor(
+        [toMemorySpaceAddress(log.getAsNormalizedFullLink())],
+        [toMemorySpaceAddress(log.getAsNormalizedFullLink())],
+      ),
       {},
     );
     await log.pull();

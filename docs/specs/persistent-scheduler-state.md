@@ -2,12 +2,30 @@
 
 ## Status
 
-Initial implementation in progress. The branch currently implements internal
-memory-v2 scheduler observation tables, no-op observation commits, same-space
-durable dirty marking, cross-space read-index mirrors, a snapshot query API,
-runner-side rehydration primitives, and subscription-time rehydration for
-actions recreated during piece startup. Durable process graph generations and
-stronger implementation/runtime fingerprints remain version-1 placeholders.
+Implemented behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` /
+`Runtime.experimental.persistentSchedulerState`; the default-on rollout remains
+a separate decision.
+
+The landed implementation includes internal memory-v2 scheduler observation
+tables, no-op observation commits, same-space durable dirty marking,
+cross-space read-index mirrors, and snapshot query APIs. Resumed pieces now
+await space sync once, load all scheduler action snapshots for the piece in one
+batch, and apply matching observations synchronously as actions register.
+Missing, invalid, or fingerprint-mismatched observations fall back to fresh
+registration.
+
+Observation payloads are now versioned. Payload v2 persists reads, shallow
+reads, changed writes, materializer envelopes, action options, status markers,
+and identity/fingerprints, but no longer persists `currentKnownWrites` or
+`declaredWrites`; those write surfaces come from live action annotations during
+registration. Readers accept both v1 and v2 rows. The runtime fingerprint is
+`runner:scheduler:v2`, so old `runner:scheduler:pull` rows miss once and
+rebuild conservatively.
+
+The old subscription-time per-action rehydration race apparatus
+(`awaitSpaceSyncedWithTimeout`, per-action tokens, shared timeout fallback, and
+deferred initial execution) has been deleted; piece-level resume is the only
+storage rehydration path for resumed pieces.
 
 ## Summary
 

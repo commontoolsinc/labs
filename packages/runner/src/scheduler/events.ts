@@ -9,7 +9,6 @@ import {
 import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
   IPreconditionFailedError,
   MemorySpace,
 } from "../storage/interface.ts";
@@ -18,21 +17,21 @@ import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
-import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
+import { createEventPreflightTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
-import { planEventDirtyDependencyScheduling } from "./execution.ts";
+import { planEventInvalidDependencyScheduling } from "./execution.ts";
 import type { OriginStatus } from "./lineage.ts";
+import type { NodeRegistry } from "./node-record.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
-import { collectChangedWritesForTransaction } from "./write-propagation.ts";
 import type {
   Action,
-  DirtyDependencyTraceContext,
   EventHandler,
+  EventPreflightTraceContext,
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
@@ -43,51 +42,8 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
-export interface EventQueueWakeState {
-  timer: ReturnType<typeof setTimeout> | null;
-  wakeAt: number | null;
-  readonly eventQueue: readonly QueuedEvent[];
-  readonly isDisposed: () => boolean;
-  readonly queueExecution: () => void;
-}
-
-export function scheduleEventQueueWake(
-  state: EventQueueWakeState,
-  notBefore: number,
-): void {
-  if (state.isDisposed()) return;
-  if (
-    state.wakeAt !== null && state.wakeAt <= notBefore &&
-    state.timer !== null
-  ) {
-    return;
-  }
-
-  cancelEventQueueWake(state);
-
-  const delay = Math.max(0, notBefore - performance.now());
-  state.wakeAt = notBefore;
-  state.timer = setTimeout(() => {
-    state.timer = null;
-    state.wakeAt = null;
-    state.queueExecution();
-  }, delay);
-}
-
-export function cancelEventQueueWake(state: EventQueueWakeState): void {
-  if (state.timer !== null) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
-  state.wakeAt = null;
-}
-
-export function hasEventQueueWakeTimer(state: EventQueueWakeState): boolean {
-  return state.timer !== null;
-}
-
 export function isHeadEventParked(
-  state: Pick<EventQueueWakeState, "eventQueue">,
+  state: { readonly eventQueue: readonly QueuedEvent[] },
   now: number = performance.now(),
 ): boolean {
   const headEvent = state.eventQueue[0];
@@ -97,8 +53,8 @@ export function isHeadEventParked(
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
   deps: ReactivityLog;
-  dirtyDeps: Set<Action>;
-  hasDirtyDependencies: boolean;
+  invalidDeps: Set<Action>;
+  hasInvalidDependencies: boolean;
   dirtySizeBefore: number;
   pendingSizeBefore: number;
   populateMs: number;
@@ -106,7 +62,7 @@ export interface EventDependencyPreflightResult {
   depCommitMs: number;
   collectMs: number;
   scheduleMs: number;
-  preflightStats: DirtyDependencyTraceContext;
+  preflightStats: EventPreflightTraceContext;
 }
 
 export interface SchedulerEventQueueState {
@@ -224,7 +180,7 @@ export function addSchedulerEventHandler(state: {
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly pending: Set<Action>;
   readonly eventPreflightTelemetryEnabled: boolean;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
@@ -237,18 +193,17 @@ export interface SchedulerEventExecutionState {
     action: Action | EventHandler,
   ) => void;
   readonly queueExecution: () => void;
-  readonly setDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext | undefined,
+  readonly setEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext | undefined,
   ) => void;
-  readonly collectDirtyDependenciesForLog: (
+  readonly collectInvalidUpstreamForLog: (
     deps: ReactivityLog,
-    dirtyDeps: Set<Action>,
-    memo: Map<Action, boolean>,
+    invalidDeps: Set<Action>,
   ) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly scheduleWake: (notBefore: number) => void;
   readonly lineageStatus: (
     originTx: IExtendedStorageTransaction,
   ) => OriginStatus;
@@ -264,39 +219,36 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
-  readonly snapshotDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext,
+  readonly snapshotEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext,
   ) => SchedulerEventPreflightStats;
-  readonly onEventCommitWrites?: (
-    sourceAction: Action,
-    writes: readonly IMemorySpaceAddress[],
-  ) => void;
 }
 
 export function preflightQueuedEventDependencies(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
-  readonly dirty: ReadonlySet<Action>;
+  readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
   readonly pendingActions: Set<Action>;
   readonly eventBlockingDeps: Set<Action>;
   readonly handleError: (error: Error, handler: EventHandler) => void;
-  readonly setDirtyDependencyTraceContext: (
-    trace: DirtyDependencyTraceContext | undefined,
+  readonly setEventPreflightTraceContext: (
+    trace: EventPreflightTraceContext | undefined,
   ) => void;
-  readonly collectDirtyDependenciesForLog: (
+  readonly collectInvalidUpstreamForLog: (
     deps: ReactivityLog,
-    dirtyDeps: Set<Action>,
-    memo: Map<Action, boolean>,
+    invalidDeps: Set<Action>,
   ) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly scheduleWake: (notBefore: number) => void;
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
-  const preflightStats = createDirtyDependencyTraceContext();
-  const dirtySizeBefore = state.dirty.size;
+  const preflightStats = createEventPreflightTraceContext();
+  // Diagnostic-only stat: read the maintained invalid-node index (O(1)) rather
+  // than scanning every node per queued event (was O(N) on a hot path).
+  const dirtySizeBefore = state.nodes.getInvalidNodes().size;
   const pendingSizeBefore = state.pending.size;
   let populateMs = 0;
   let txToLogMs = 0;
@@ -368,45 +320,43 @@ export function preflightQueuedEventDependencies(state: {
   );
   depCommitMs = performance.now() - stepStart;
 
-  const dirtyDeps = new Set<Action>();
-  const dirtyDepMemo = new Map<Action, boolean>();
+  const invalidDeps = new Set<Action>();
   stepStart = performance.now();
   logger.timeStart(
     "scheduler",
     "execute",
     "event",
-    "pullCollectDirtyDependencies",
+    "pullCollectInvalidUpstream",
   );
-  let hasDirtyDependencies = false;
-  state.setDirtyDependencyTraceContext(preflightStats);
+  let hasInvalidDependencies = false;
+  state.setEventPreflightTraceContext(preflightStats);
   try {
-    hasDirtyDependencies = state.collectDirtyDependenciesForLog(
+    hasInvalidDependencies = state.collectInvalidUpstreamForLog(
       deps,
-      dirtyDeps,
-      dirtyDepMemo,
+      invalidDeps,
     );
   } finally {
-    state.setDirtyDependencyTraceContext(undefined);
+    state.setEventPreflightTraceContext(undefined);
     logger.timeEnd(
       "scheduler",
       "execute",
       "event",
-      "pullCollectDirtyDependencies",
+      "pullCollectInvalidUpstream",
     );
   }
   collectMs = performance.now() - stepStart;
 
-  if (!shouldSkipEvent && hasDirtyDependencies) {
+  if (!shouldSkipEvent && hasInvalidDependencies) {
     stepStart = performance.now();
     logger.timeStart(
       "scheduler",
       "execute",
       "event",
-      "pullScheduleDirtyDependencies",
+      "pullScheduleInvalidUpstream",
     );
     try {
-      const eventDirtyPlan = planEventDirtyDependencyScheduling({
-        dirtyDeps,
+      const eventDirtyPlan = planEventInvalidDependencyScheduling({
+        invalidDeps,
         isDebouncedComputationWaiting: (dep) =>
           state.isDebouncedComputationWaiting(dep),
         getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
@@ -420,7 +370,7 @@ export function preflightQueuedEventDependencies(state: {
         shouldSkipEvent = true;
       } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
         queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
-        state.scheduleEventQueueWake(eventDirtyPlan.nextEligibleAt);
+        state.scheduleWake(eventDirtyPlan.nextEligibleAt);
         shouldSkipEvent = true;
       }
     } finally {
@@ -428,7 +378,7 @@ export function preflightQueuedEventDependencies(state: {
         "scheduler",
         "execute",
         "event",
-        "pullScheduleDirtyDependencies",
+        "pullScheduleInvalidUpstream",
       );
     }
     scheduleMs = performance.now() - stepStart;
@@ -437,8 +387,8 @@ export function preflightQueuedEventDependencies(state: {
   return {
     shouldSkipEvent,
     deps,
-    dirtyDeps,
-    hasDirtyDependencies,
+    invalidDeps,
+    hasInvalidDependencies,
     dirtySizeBefore,
     pendingSizeBefore,
     populateMs,
@@ -448,6 +398,118 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs,
     preflightStats,
   };
+}
+
+export async function processPullQueuedEventDuringExecute(
+  state: SchedulerEventExecutionState,
+  eventBlockingDeps: Set<Action>,
+): Promise<void> {
+  const queuedEvent = state.eventQueue[0];
+  if (!queuedEvent) return;
+
+  if (queuedEvent.originTx !== undefined) {
+    const originStatus = state.lineageStatus(queuedEvent.originTx);
+    const sameSpace = state.getOriginLocalSeq(
+      queuedEvent.originTx,
+      queuedEvent.eventLink.space,
+    ) !== undefined;
+    if (originStatus === "failed") {
+      state.eventQueue.shift();
+      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      logger.debug("scheduler-lineage", () => [
+        "Dropping event from failed lineage origin",
+        { eventId: queuedEvent.id },
+      ]);
+      return;
+    }
+    if (!sameSpace && originStatus === "pending") {
+      return;
+    }
+  }
+
+  if (
+    queuedEvent.notBefore !== undefined &&
+    queuedEvent.notBefore > performance.now()
+  ) {
+    state.scheduleWake(queuedEvent.notBefore);
+    return;
+  }
+
+  delete queuedEvent.notBefore;
+
+  const { handler } = queuedEvent;
+  const handlerId = state.getActionId(handler);
+
+  let shouldSkipEvent = false;
+  if (handler.populateDependencies) {
+    const preflight = preflightQueuedEventDependencies({
+      runtime: state.runtime,
+      eventQueue: state.eventQueue,
+      nodes: state.nodes,
+      pending: state.pending,
+      pendingActions: state.pending,
+      eventBlockingDeps,
+      handleError: (error, target) => state.handleError(error, target),
+      setEventPreflightTraceContext: (trace) => {
+        state.setEventPreflightTraceContext(trace);
+      },
+      collectInvalidUpstreamForLog: (deps, invalidDeps) =>
+        state.collectInvalidUpstreamForLog(
+          deps,
+          invalidDeps,
+        ),
+      isDebouncedComputationWaiting: (dep) =>
+        state.isDebouncedComputationWaiting(dep),
+      getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+      getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+      scheduleWake: (notBefore) => state.scheduleWake(notBefore),
+    }, queuedEvent);
+    shouldSkipEvent = preflight.shouldSkipEvent;
+
+    if (state.eventPreflightTelemetryEnabled) {
+      state.runtime.telemetry.submit({
+        type: "scheduler.event.preflight",
+        handlerId,
+        handlerInfo: state.getActionTelemetryInfo(handler),
+        readCount: preflight.deps.reads.length,
+        shallowReadCount: preflight.deps.shallowReads.length,
+        dirtySizeBefore: preflight.dirtySizeBefore,
+        pendingSizeBefore: preflight.pendingSizeBefore,
+        dirtyDependencyCount: preflight.invalidDeps.size,
+        hasDirtyDependencies: preflight.hasInvalidDependencies,
+        skipped: shouldSkipEvent,
+        populateMs: preflight.populateMs,
+        txToLogMs: preflight.txToLogMs,
+        depCommitMs: preflight.depCommitMs,
+        collectMs: preflight.collectMs,
+        scheduleMs: preflight.scheduleMs,
+        stats: state.snapshotEventPreflightTraceContext(
+          preflight.preflightStats,
+        ),
+      });
+    }
+  }
+
+  if (shouldSkipEvent) return;
+
+  await dispatchQueuedEvent({
+    runtime: state.runtime,
+    eventQueue: state.eventQueue,
+    setRunningPromise: (promise) => {
+      state.setRunningPromise(promise);
+    },
+    getActionId: (target) => state.getActionId(target),
+    getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
+    handleError: (error, target) => state.handleError(error, target),
+    queueExecution: () => state.queueExecution(),
+    lineageStatus: (originTx) => state.lineageStatus(originTx),
+    releaseLineageEvent: (originTx, event) =>
+      state.releaseLineageEvent(originTx, event),
+    recordLineageEvent: (originTx, event) =>
+      state.recordLineageEvent(originTx, event),
+    getOriginLocalSeq: (originTx, space) =>
+      state.getOriginLocalSeq(originTx, space),
+  }, queuedEvent);
 }
 
 export async function dispatchQueuedEvent(state: {
@@ -475,10 +537,6 @@ export async function dispatchQueuedEvent(state: {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
-  readonly onEventCommitWrites?: (
-    sourceAction: Action,
-    writes: readonly IMemorySpaceAddress[],
-  ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retriesLeft, onCommit } =
     queuedEvent;
@@ -602,7 +660,6 @@ export async function dispatchQueuedEvent(state: {
 
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
-    const changedWrites = collectChangedWritesForTransaction(tx, log);
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
@@ -618,16 +675,13 @@ export async function dispatchQueuedEvent(state: {
         result.error && isPermanentRejection(result.error)
           ? (result.error as IPreconditionFailedError).precondition
           : undefined;
-      if (!result.error && changedWrites.length > 0) {
-        state.onEventCommitWrites?.(action, changedWrites);
-      }
       state.runtime.telemetry.submit({
         type: "scheduler.event.commit",
         handlerId,
         handlerInfo: state.getActionTelemetryInfo(handler),
         readCount: log.reads.length + log.shallowReads.length,
         writeCount: log.writes.length,
-        changedWriteCount: changedWrites.length,
+        changedWriteCount: log.writes.length,
         writes: telemetryWrites,
         ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
           ? { writesTruncated: true }
