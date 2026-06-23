@@ -22,6 +22,47 @@ date + the evidence. This replaces ad-hoc tracking in agent memory.
   Soundness rests on interpreter correctness (the formal obligations), and trusting
   it does not require trusting the ROG.
 
+## D-OQ4-FINDING — pointwise and O(1) footprint are incompatible without new CFC machinery (W2, 2026-06-23)
+
+The W2 implement+review workflow (coordinator-verified green: oracle batch SMEAR
+/ isolated POINTWISE `[alice]`,`[bob]`,`[]`,`[]` / sibling-bug CAUGHT; cfc-flow
+suite green; **no CFC core changed**) established the decisive result:
+
+- **A single inline-value container CANNOT carry pointwise `derived` (content)
+  labels.** A container `[]`/array write prefixes and **clears every child slot's
+  `derived` entry** under it, so the per-element content label cannot survive on
+  the container. (Demonstrated; rooted in how `prepare.ts` stamps `derived`.)
+- **Pointwise therefore requires a per-element result DOCUMENT** (each element's
+  label lives on its own doc, which a container re-write never clears) — i.e.
+  per-element transaction decomposition, exactly how legacy `map` gets pointwise.
+- The interpreter's structural win that REMAINS available with pointwise: drop
+  per-element child **patterns** (legacy `3 docs + 4 nodes`/element) for a
+  per-element **scheduled effect + 1 result doc**/element. That is a ~3× doc
+  reduction and a node reduction, but still **O(N) docs**, NOT the O(1)
+  inline-container dream.
+- **So the O(1) footprint win and pointwise CFC precision are in fundamental
+  tension under current CFC machinery.** Having BOTH requires building a new
+  trusted **per-path content-label emit that survives container writes**
+  (R-SEAM-3) — which was *not* built (no CFC core changed) and is real CFC-core
+  work.
+
+This reframes the collection (W3) decision into three options — **a user
+decision (D-W3-PRECISION, below)**:
+- **A (buildable now): pointwise via per-element docs** — `~1 doc + 1 effect`/
+  element (vs legacy `3 docs + 4 nodes`); sound, pointwise, ~3× win, still O(N).
+- **B (the O(1) dream): build the new per-path content-label emit** — O(1)
+  inline container + pointwise; needs new CFC-core machinery, more work + review.
+- **C: inline container + coarse (smeared) labels** — O(1) docs but a precision
+  regression vs legacy (rejected earlier in D-SEQ as precision-first).
+
+## D-W3-PRECISION — OPEN, needs the user (2026-06-23)
+
+Given D-OQ4-FINDING, which collection strategy for W3? Recommendation: **A now**
+(real ~3× win, sound, pointwise, unblocks collections immediately) with **B as a
+follow-on** if the O(1) footprint is required and the new CFC primitive is worth
+the cost. This supersedes the earlier assumption (D-SEQ) that OQ-4 would deliver
+O(1)+pointwise together — that combination needs B.
+
 ## Open / load-bearing
 
 - **D-OQ4 — Per-path content-label emit (the one open soundness gap).** The CFC

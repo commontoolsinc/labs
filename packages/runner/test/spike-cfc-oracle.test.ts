@@ -20,9 +20,15 @@
  *
  * This spike pins:
  *   1. naive mapInterpreted (one coordinator tx, whole-list read) => SMEAR.
- *   2. read-isolated mapInterpreted (per-element sub-transaction) => POINTWISE,
- *      matching what legacy gets structurally — WITHOUT per-element child
- *      patterns or per-element documents.
+ *   2. read-isolated mapInterpreted => POINTWISE. The coordinator reads only
+ *      the list's link structure (identity-only, no element content) and
+ *      `scheduler.subscribe`s one effect per element; each runs in its OWN tx
+ *      reading ONLY its element, so its per-tx flow-join is that element's
+ *      label alone. This reproduces legacy map's per-element transaction
+ *      decomposition WITHOUT per-element child PATTERNS — but, like legacy, it
+ *      DOES write a per-element result document (the structural fix; a single
+ *      inline container cannot hold pointwise `derived` labels because a
+ *      container [] write prefixes and clears every child's derived entry).
  *   3. the oracle has teeth: a sibling-reading element op is caught (its label
  *      picks up the sibling's taint).
  *
@@ -47,6 +53,13 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import { setResultCell } from "../src/result-utils.ts";
 import { outputSpotFromBinding } from "../src/builtins/scope-policy.ts";
+import {
+  isPrimitiveCellLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
+import { resolveLink } from "../src/link-resolution.ts";
+import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("spike-cfc-oracle");
 const space = signer.did();
@@ -60,15 +73,42 @@ const RESULT_SCHEMA = internSchema({
   type: "array",
   items: { type: "number" },
 });
+// Links-only view of the result container: slots stay cell links (never
+// write-redirected into / materialized through the per-element docs), so the
+// coordinator's container write is genuinely pure link structure.
+const RESULT_PRESENCE_SCHEMA = internSchema({
+  type: "array",
+  items: { asCell: ["cell"] },
+});
 
 /**
  * Two variants of the coordinator builtin:
  *  - "batch": read the whole list in ONE transaction (the naive interpreter).
- *  - "isolated": read+write each element in its OWN sub-transaction (read
- *    isolation — the OQ-4 fix). Each sub-tx reads only element i, so its flow
- *    join is element i's label alone => pointwise, structurally.
- *  - "sibling-bug": like isolated, but element i's sub-tx also reads element
- *    i+1 — a deliberate read-isolation VIOLATION the oracle must catch.
+ *  - "isolated": each element is evaluated by its OWN scheduled child action
+ *    (read isolation — the OQ-4 fix). The coordinator's tx reads only the list's
+ *    link STRUCTURE (identity-only, like legacy map's getRaw()+resolveLink under
+ *    the linkResolutionProbe scope); it never reads any element's content, so
+ *    its J is empty. Each child action runs in its own scheduler transaction
+ *    reading ONLY element i, so that tx's flow-join is element i's label alone
+ *    => pointwise, structurally — exactly how legacy `map` gets pointwise
+ *    precision (per-element transaction decomposition). Like legacy, each child
+ *    writes its OWN per-element result document (path []); the container holds
+ *    cell LINKS to them. A single inline container CANNOT carry pointwise
+ *    `derived` labels, because a container [] write prefixes and clears every
+ *    child's derived entry under it — the per-element doc is the structural fix
+ *    (the 1-doc-per-element cost legacy also pays). NO per-element child
+ *    PATTERN, though — the child is a plain scheduled effect.
+ *  - "sibling-bug": like isolated, but element i's child also reads element
+ *    i+1 — a deliberate read-isolation VIOLATION the oracle must catch (its tx
+ *    join now also contains the sibling's label, so output[i] picks it up).
+ *
+ * Why scheduled child actions and not `runtime.edit()` sub-transactions: a node
+ * cannot cleanly commit mid-run sub-transactions to a cell it created in its
+ * own still-open tx (that produced mapped=undefined). `scheduler.subscribe`ing
+ * each element op as an effect is the supported way to get the runtime to run
+ * a labeled write in its own isolated transaction that the harness awaits via
+ * `idle()`/`pull()` — the same primitive `runtime.runner.run` uses for legacy
+ * per-element pattern runs.
  */
 type Mode = "batch" | "isolated" | "sibling-bug";
 
@@ -76,13 +116,16 @@ function makeMapInterpreted(mode: Mode, leaf: (x: number) => number) {
   return function mapInterpreted(
     inputsCell: Cell<{ list: number[] }>,
     sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-    _addCancel: AddCancel,
+    addCancel: AddCancel,
     _cause: any,
     parentCell: Cell<any>,
     runtime: Runtime,
     outputBinding?: NormalizedFullLink,
   ): Action {
     let result: Cell<number[]> | undefined;
+    // Per-element child actions are subscribed exactly once (by index), like
+    // legacy map's `elementRuns`.
+    const elementActions = new Set<number>();
 
     return (tx: IExtendedStorageTransaction) => {
       if (!result) {
@@ -100,44 +143,118 @@ function makeMapInterpreted(mode: Mode, leaf: (x: number) => number) {
         setResultCell(result, parentCell);
         sendResult(tx, result);
       }
-      const listCell = inputsCell.asSchema(MAP_INPUT_SCHEMA).key("list");
-      // length: read shape only (links), no element content — keep it out of J.
-      const lenProbe = listCell.withTx(tx).get() as number[] | undefined;
-      const len = Array.isArray(lenProbe) ? lenProbe.length : 0;
+      const resultCell = result;
 
       if (mode === "batch") {
         // NAIVE: read all element values in THIS one transaction, then write
         // the whole result. All element labels join into this tx's J and smear
         // onto every output slot.
-        const arr = (listCell.withTx(tx).get() as number[]) ?? [];
+        const arr =
+          (inputsCell.asSchema(MAP_INPUT_SCHEMA).key("list").withTx(tx)
+            .get() as number[]) ?? [];
         const out = arr.map((v) => leaf(v));
-        result.withTx(tx).set(out);
+        resultCell.withTx(tx).set(out);
         return;
       }
 
-      // READ-ISOLATED: each element gets its own transaction reading only that
-      // element. The main `tx` only learns the length (shape). Per-element J is
-      // that element's label alone => pointwise.
-      for (let i = 0; i < len; i++) {
-        const sub = runtime.edit();
-        const elemView = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(sub).key(
-          "list",
+      // READ-ISOLATED: mirror legacy `map`'s per-element transaction
+      // decomposition. Each element gets its OWN result CELL (its own doc),
+      // computed by its OWN scheduled child action that reads only element i in
+      // its own scheduler transaction. The container holds CELL LINKS to those
+      // per-element docs — a pure-link-structure write whose J is empty (the
+      // coordinator reads only the list's link STRUCTURE, never element
+      // content), so the container carries only `structure` stamps, never a
+      // smearing `derived` one. Each per-element doc's path-[] `derived` label =
+      // element i's label alone (its child's tx read only element i), and lives
+      // on a SEPARATE doc, so a container re-write never clears it. That is
+      // exactly why legacy map is pointwise (and why an inline single-container
+      // write is NOT — a container [] write prefixes and clears every child's
+      // derived entry; the per-element doc is the structural fix, at the
+      // 1-doc-per-element cost legacy also pays).
+      //
+      // Identity-only list materialization (copied from legacy map): read the
+      // RAW slots under the `linkResolutionProbe` scope so link-following reads
+      // are flow-excluded and NO element value is loaded into the coordinator's
+      // tx. We build each element's slot link from the raw slot directly.
+      const listCell = tx.runWithAmbientReadMeta(
+        linkResolutionProbe,
+        () => inputsCell.key("list").withTx(tx).resolveAsCell(),
+      );
+      const listBase = listCell.getAsNormalizedFullLink();
+      const rawList = tx.runWithAmbientReadMeta(
+        linkResolutionProbe,
+        () => listCell.withTx(tx).getRaw() as unknown,
+      );
+      const len = Array.isArray(rawList) ? rawList.length : 0;
+      const slotLink = (i: number): NormalizedFullLink => {
+        const slot = (rawList as unknown[])[i];
+        const link: NormalizedFullLink = isPrimitiveCellLink(slot)
+          ? parseLink(slot, listBase)
+          : { ...listBase, path: [...listBase.path, String(i)] };
+        return tx.runWithAmbientReadMeta(
+          linkResolutionProbe,
+          () => resolveLink(runtime, tx, link, "value"),
         );
-        const v = elemView.key(String(i)).get() as unknown as number;
-        let acc = v;
-        if (mode === "sibling-bug" && i + 1 < len) {
-          // VIOLATION: read a sibling element too. Its taint must show up in
-          // output[i] — the oracle should catch this.
-          const sibling = elemView.key(String(i + 1))
-            .get() as unknown as number;
-          acc = v + sibling * 0; // value unchanged; the READ is the leak
+      };
+
+      const resultPresence = resultCell.asSchema(RESULT_PRESENCE_SCHEMA);
+      const slots = new Array<Cell<number>>(len);
+      for (let i = 0; i < len; i++) {
+        const index = i;
+        const elemResult = runtime.getCell<number>(
+          parentCell.space,
+          { mapInterpretedCfcElem: resultCell.entityId, index },
+          undefined,
+          tx,
+        );
+        slots[index] = elemResult;
+        if (elementActions.has(index)) continue;
+        elementActions.add(index);
+        const elementAction: Action = (childTx) => {
+          // Read ONLY element `index` by resolving its slot link to its own
+          // cell and reading that cell's value — the coordinator passed the
+          // resolved slot links, so this is the one content read element i's
+          // label enters J through, in this child's own isolated tx.
+          const readElem = (i: number): number =>
+            runtime.getCellFromLink(slotLink(i), undefined, childTx)!
+              .withTx(childTx).get() as unknown as number;
+          const v = readElem(index);
+          let acc = v;
+          if (mode === "sibling-bug" && index + 1 < len) {
+            // VIOLATION: read a sibling element too. Its taint must show up in
+            // output[index] — the oracle should catch this.
+            const sibling = readElem(index + 1);
+            acc = v + sibling * 0; // value unchanged; the READ is the leak.
+          }
+          elemResult.withTx(childTx).set(leaf(acc));
+        };
+        const reads = [slotLink(index)];
+        if (mode === "sibling-bug" && index + 1 < len) {
+          reads.push(slotLink(index + 1));
         }
-        result.withTx(sub).key(String(i)).set(leaf(acc));
-        // commit the per-element sub-transaction synchronously-ish; we await in
-        // the test via runtime.idle() / pull(). Fire-and-forget here is fine for
-        // the spike because the harness awaits settle before probing.
-        sub.commit();
+        setResultCell(elemResult, parentCell);
+        addCancel(
+          runtime.scheduler.subscribe(
+            elementAction,
+            {
+              reads: reads.map(toMemorySpaceAddress),
+              shallowReads: [],
+              writes: [
+                toMemorySpaceAddress(elemResult.getAsNormalizedFullLink()),
+              ],
+            },
+            // isEffect so the scheduler runs each child eagerly in its own tx
+            // (the harness awaits via idle()); the labeled write to the
+            // per-element doc gets a `derived` stamp from that tx's flow-join =
+            // element index's label alone.
+            { isEffect: true },
+          ),
+        );
       }
+      // The container write is pure link structure (cell links to per-element
+      // docs, stored as links via the presence schema); under the empty
+      // coordinator J it gets only `structure` stamps — never a `derived` one.
+      resultPresence.withTx(tx).set(slots as unknown as unknown[]);
     };
   };
 }
@@ -291,29 +408,29 @@ describe("SPIKE CFC oracle: mapInterpreted pointwise vs smear (OQ-4)", () => {
     expect(confs[2]).toContainEqual("bob-secret");
   });
 
-  // PENDING the read-isolation mechanism (OQ-4). Skipped, kept as the
-  // executable target. FINDING (confirmed at the code level, not just here):
-  //  - `deriveFlowJoin` computes ONE per-tx flow label and stamps it as the
-  //    `derived` (content) component on EVERY value-write target in that tx
-  //    (prepare.ts valueWriteTargets / ~:1462). So all of one batched
-  //    coordinator tx's outputs get the same content label = the smear above.
-  //  - Carried `cfcLabelView`s are LINK-ONLY (data-updating.ts
-  //    cfcLabelViewForPrimitiveLink requires isSigilLink). An inline number
-  //    value cannot carry its own per-path content label.
-  //  - The naive per-element sub-transaction (runtime.edit() inside the action +
-  //    fire-and-forget commit) does NOT work: the container comes back
-  //    undefined (a node can't cleanly commit sub-txs to a cell it created in
-  //    its own still-open tx).
-  // => An INLINE-value container written by one batched node tx cannot get
-  //    pointwise CONTENT labels with today's machinery. Pointwise content needs
-  //    EITHER per-element transactions (legacy gets this via per-element result
-  //    CELLS — the 3N cost) OR a NEW trusted per-path label-attachment mechanism
-  //    (the §8.9.1 trusted-claim path, extended to emit per-path derived labels).
-  //    The `structure` (membership) channel IS already per-path; only the
-  //    `derived` (content) channel smears. This is exactly OQ-4, now sharpened
-  //    from "enforce read isolation" to "the runtime needs a trusted per-path
-  //    label-emit for batched nodes (or label-isolated sub-transactions)."
-  it.skip("read-isolated coordinator keeps POINTWISE labels (the OQ-4 fix)", async () => {
+  // RESOLVED (OQ-4, structural fix — Approach (a)). The smear above is NOT a
+  // limit of the CFC machinery; it is a limit of doing the work in ONE
+  // coordinator transaction. `deriveFlowJoin` is per-tx, so the fix is to make
+  // each element's content read+write happen in its OWN transaction — exactly
+  // what legacy `map` does via per-element result CELLS. The "isolated"
+  // coordinator below reproduces that decomposition WITHOUT per-element child
+  // patterns:
+  //  - The coordinator reads only the list's link STRUCTURE (raw slots under
+  //    the `linkResolutionProbe` scope — identity-only, like legacy map), never
+  //    any element value, so ITS tx J is empty and the container gets only
+  //    `structure` stamps.
+  //  - Each element op is `scheduler.subscribe`d as an effect; the runtime runs
+  //    it in its own isolated transaction reading ONLY element i (the resolved
+  //    slot link the coordinator passed it). That tx's J = element i's label
+  //    alone, stamped `derived` on element i's OWN result doc — which a
+  //    container re-write cannot clear (different doc). That is genuine
+  //    per-element read isolation; the pointwise labels below flow from real
+  //    per-element reads, not from anything hard-coded.
+  // The earlier dead-end (a node committing `runtime.edit()` sub-txs mid-run →
+  // mapped=undefined) was the wrong primitive: `scheduler.subscribe` is the
+  // supported way for a builtin to get the runtime to run a labeled write in
+  // its own transaction (the same primitive `runtime.runner.run` uses).
+  it("read-isolated coordinator keeps POINTWISE labels (the OQ-4 fix)", async () => {
     const { mapped, confs } = await runVariant("isolated", [
       "alice-secret",
       "bob-secret",
@@ -333,10 +450,10 @@ describe("SPIKE CFC oracle: mapInterpreted pointwise vs smear (OQ-4)", () => {
     expect(confs[2]).not.toContainEqual("bob-secret");
   });
 
-  // Depends on the read-isolated variant (skipped above). The oracle's "teeth"
-  // are the isolated-read lower-bound check: once read isolation exists, an
-  // element op that reads a sibling must show the sibling's taint in its output.
-  it.skip("oracle has teeth: a sibling-reading element op is caught", async () => {
+  // The oracle's "teeth": with genuine read isolation in place, an element op
+  // that illegally reads a sibling must show the sibling's taint in its output
+  // (its isolated tx's J now contains the sibling's label).
+  it("oracle has teeth: a sibling-reading element op is caught", async () => {
     const { confs } = await runVariant("sibling-bug", [
       "alice-secret",
       "bob-secret",
