@@ -191,12 +191,19 @@ describe("W1a ROG evaluator core", () => {
     const run = (rog: Rog, show: boolean) =>
       evalRog(rog, { argument: { show }, leafImpls: new Map() }).result;
 
+    // Real builtin semantics (built-in.ts), with branches=[then="yes",
+    // else="no"] and pred=`show`:
+    //   ifElse(cond, then, else) = cond ? then : else
+    //   when(cond, value=then)   = cond ? then : cond  (ELSE returns the COND)
+    //   unless(cond, fallback=else) = cond ? cond : else  (THEN returns the COND)
+    // The previous expectations encoded the WRONG semantics (off-branch =>
+    // undefined), which silently mis-evaluated when/unless vs legacy.
     expect(run(mk("ifElse"), true)).toBe("yes");
     expect(run(mk("ifElse"), false)).toBe("no");
     expect(run(mk("when"), true)).toBe("yes");
-    expect(run(mk("when"), false)).toBe(undefined);
-    expect(run(mk("unless"), true)).toBe(undefined);
-    expect(run(mk("unless"), false)).toBe("yes");
+    expect(run(mk("when"), false)).toBe(false); // ELSE returns the condition
+    expect(run(mk("unless"), true)).toBe(true); // THEN returns the condition
+    expect(run(mk("unless"), false)).toBe("no"); // ELSE = elseRef ("no")
   });
 
   it("resolves `internal` refs via internalToOp wiring", () => {

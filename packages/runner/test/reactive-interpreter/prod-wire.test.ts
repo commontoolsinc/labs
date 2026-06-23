@@ -127,6 +127,63 @@ const cases: OracleCase[] = [
     args: [{ x: 5, show: true }, { x: 5, show: false }],
   },
   {
+    // CORRECTNESS (control vocabulary): when(condition, value) =
+    //   condition ? value : condition. The ELSE branch returns the CONDITION,
+    //   NOT undefined. Before the extract/interpret fix, `value` (the THEN
+    //   branch) was never extracted (only ifTrue/then read) and the off-branch
+    //   returned undefined — both branches silently WRONG vs legacy.
+    name: "control (when) — both branches",
+    argumentSchema: {
+      type: "object",
+      properties: { x: num, show: { type: "boolean" } },
+      required: ["x", "show"],
+    },
+    resultSchema: { type: "object", properties: { maybe: num } },
+    build: (cf) =>
+      cf.pattern(
+        ({ x, show }: { x: number; show: boolean }) => ({
+          maybe: cf.when(show, x),
+        }),
+        {
+          type: "object",
+          properties: { x: num, show: { type: "boolean" } },
+          required: ["x", "show"],
+        },
+        { type: "object", properties: { maybe: num } },
+      ),
+    // when(true, 5) = 5 ; when(false, 5) = false (the condition)
+    args: [{ x: 5, show: true }, { x: 5, show: false }],
+  },
+  {
+    // CORRECTNESS (control vocabulary): unless(condition, fallback) =
+    //   condition ? condition : fallback. The THEN branch returns the
+    //   CONDITION, NOT undefined; the ELSE branch is `fallback`. Before the fix
+    //   `fallback` (the ELSE branch) was never extracted (only ifFalse/else
+    //   read) and the on-branch returned undefined — both branches silently
+    //   WRONG vs legacy.
+    name: "control (unless) — both branches",
+    argumentSchema: {
+      type: "object",
+      properties: { x: num, hide: { type: "boolean" } },
+      required: ["x", "hide"],
+    },
+    resultSchema: { type: "object", properties: { maybe: num } },
+    build: (cf) =>
+      cf.pattern(
+        ({ x, hide }: { x: number; hide: boolean }) => ({
+          maybe: cf.unless(hide, x),
+        }),
+        {
+          type: "object",
+          properties: { x: num, hide: { type: "boolean" } },
+          required: ["x", "hide"],
+        },
+        { type: "object", properties: { maybe: num } },
+      ),
+    // unless(true, 5) = true (the condition) ; unless(false, 5) = 5
+    args: [{ x: 5, hide: true }, { x: 5, hide: false }],
+  },
+  {
     // REGRESSION (structured-input blocker): a multi-input leaf whose `inputs`
     // is an object-of-aliases `{a, b}`. Legacy passes the leaf ONE structured
     // value `{a:<v>, b:<v>}`; extraction must reconstruct that losslessly (NOT a

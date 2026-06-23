@@ -151,13 +151,20 @@ export function evalRog(
       case "control": {
         const cond = resolve(op.detail.pred);
         const [thenRef, elseRef] = op.detail.branches;
+        // Real builtin semantics (built-in.ts):
+        //   ifElse(condition, ifTrue, ifFalse) = cond ? ifTrue : ifFalse
+        //   when(condition, value)   = cond ? value : condition
+        //   unless(condition, fallback) = cond ? condition : fallback
+        // thenRef = ifTrue/value branch, elseRef = ifFalse/fallback branch.
+        // The off-branch of when/unless returns the CONDITION (the resolved
+        // `pred`), NOT undefined.
         switch (op.detail.op) {
           case "ifElse":
             return cond ? resolve(thenRef) : resolve(elseRef);
           case "when":
-            return cond ? resolve(thenRef) : undefined;
+            return cond ? resolve(thenRef) : cond;
           case "unless":
-            return cond ? undefined : resolve(thenRef);
+            return cond ? cond : resolve(elseRef);
         }
         return undefined;
       }

@@ -351,7 +351,15 @@ const SPECS: Spec[] = [
         },
         { type: "object", properties: { maybe: num } },
       ),
-      arg: { x: 9, show: false },
+      // when(true, 9) = 9 (the THEN branch = `value`). Use the truthy case here
+      // because the falsy case returns the CONDITION (`false`), and legacy
+      // persists that against the `{maybe: number}` result schema as nothing
+      // (.pull() → {}), while the pure corpus interpreter keeps `{maybe:false}`
+      // — a result-schema materialization artifact of this measurement harness,
+      // not an interpreter divergence. The prod-wire differential oracle covers
+      // BOTH branches through the real runtime (schema filtering applies
+      // symmetrically), so when(false)=condition is gated there.
+      arg: { x: 9, show: true },
       resultSchema: { type: "object", properties: { maybe: num } },
     }),
   },

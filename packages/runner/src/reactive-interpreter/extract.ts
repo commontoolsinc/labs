@@ -451,9 +451,21 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         const pred = branchRef(inObj.condition ?? inObj.if);
         // Branches must be exactly [then, else] in that order — NOT the flat
         // `inputs` list (which also carries the condition). The builder names
-        // them ifTrue/ifFalse (with then/else as legacy fallbacks).
-        const thenRef = branchRef(inObj.ifTrue ?? inObj.then);
-        const elseRef = branchRef(inObj.ifFalse ?? inObj.else);
+        // the inputs per builtin (verified empirically against the real
+        // builder, built-in.ts):
+        //   - ifElse(condition, ifTrue, ifFalse) → {condition, ifTrue, ifFalse}
+        //   - when(condition, value)             → {condition, value}
+        //     (semantics: cond ? value : cond — THEN is `value`, ELSE = pred)
+        //   - unless(condition, fallback)        → {condition, fallback}
+        //     (semantics: cond ? cond : fallback — THEN = pred, ELSE = `fallback`)
+        // So the THEN ref is the value/ifTrue branch and the ELSE ref is the
+        // fallback/ifFalse branch. The interpreter uses `pred` for the
+        // condition-returning branch of when/unless. (then/else are legacy
+        // ifElse fallbacks.)
+        const thenRef = branchRef(inObj.ifTrue ?? inObj.then ?? inObj.value);
+        const elseRef = branchRef(
+          inObj.ifFalse ?? inObj.else ?? inObj.fallback,
+        );
         op.detail = {
           kind: "control",
           op: c.ctrlOp!,
