@@ -249,12 +249,24 @@ describe("valueEqual()", () => {
       });
     });
 
-    describe("given two distinct mutable `FabricInstance` subtypes", () => {
+    describe("given two distinct mutable `FabricInstance`s of different concrete classes", () => {
       it("returns `false`", () => {
         expect(
           valueEqual(
             FabricError.fromNativeError(new Error("eek")),
             new UnknownValue("Unknownie@123", null),
+          ),
+        )
+          .toBe(false);
+      });
+    });
+
+    describe("given non-equal mutable `FabricInstance`s of the same concrete class", () => {
+      it("returns `false`", () => {
+        expect(
+          valueEqual(
+            new UnknownValue("Unknownie@123", "yes"),
+            new UnknownValue("Unknownie@123", ["no"]),
           ),
         )
           .toBe(false);
