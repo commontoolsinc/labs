@@ -198,7 +198,7 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
   assertEquals(Object.keys(compressed.schemaTable), [schemaHash]);
   assertEquals(
     (compressedAliases[0].$alias as Record<string, unknown>).schema,
-    `schema-ref@1:${schemaHash}`,
+    `schema-ref@2:${schemaHash}`,
   );
   assertEquals(
     (compressedAliases[1].$alias as Record<string, unknown>).schema,
@@ -212,6 +212,71 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
     ).schema,
     undefined,
   );
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
+Deno.test("sync schema table continues through sibling fields after link payloads", () => {
+  const primarySchema: JSONSchema = {
+    type: "object",
+    properties: { title: { type: "string" } },
+  };
+  const siblingSchema: JSONSchema = {
+    type: "object",
+    properties: { count: { type: "number" } },
+  };
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:link-with-sibling",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          compound: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: "of:primary",
+                path: [],
+                schema: primarySchema,
+              },
+            },
+            sibling: linkRefFrom({
+              id: "of:sibling",
+              path: [],
+              schema: siblingSchema,
+            }),
+          },
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const compressedCompound =
+    (compressed.upserts[0].doc?.value as Record<string, unknown>)
+      .compound as Record<string, unknown>;
+  const compressedPayload =
+    (compressedCompound["/"] as Record<string, unknown>)[
+      LINK_V1_TAG
+    ] as Record<string, unknown>;
+  const compressedSiblingPayload =
+    ((compressedCompound.sibling as Record<string, unknown>)[
+      "/"
+    ] as Record<string, unknown>)[LINK_V1_TAG] as Record<string, unknown>;
+  const primaryHash = internSchema(primarySchema, true).taggedHashString;
+  const siblingHash = internSchema(siblingSchema, true).taggedHashString;
+
+  assertExists(compressed.schemaTable);
+  assertEquals(
+    Object.keys(compressed.schemaTable).sort(),
+    [primaryHash, siblingHash].sort(),
+  );
+  assertEquals(compressedPayload.schema, `schema-ref@2:${primaryHash}`);
+  assertEquals(compressedSiblingPayload.schema, `schema-ref@2:${siblingHash}`);
   assertEquals(expandSessionSyncSchemas(compressed), sync);
 });
 
@@ -329,7 +394,7 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
                   [LINK_V1_TAG]: {
                     id: "of:bad-ref-target",
                     path: [],
-                    schema: "schema-ref@1:sha256:missing",
+                    schema: "schema-ref@2:sha256:missing",
                   },
                 },
               },
@@ -357,7 +422,7 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
                   [LINK_V1_TAG]: {
                     id: "of:poisoned-ref-target",
                     path: [],
-                    schema: `schema-ref@1:${schemaHash}`,
+                    schema: `schema-ref@2:${schemaHash}`,
                   },
                 },
               },
@@ -437,27 +502,31 @@ Deno.test("server schema table helpers expand response sync payloads", () => {
   assertEquals(expanded.ok?.sync, sync);
 });
 
-Deno.test("memory server negotiates schema-table sync frames per connection", async () => {
+Deno.test("memory server negotiates schema-table v2 sync frames per connection", async () => {
   const flags = getMemoryProtocolFlags();
-  const run = async (syncSchemaTable: boolean) => {
+  const run = async (
+    mode: "v2" | "legacy" | "off",
+  ) => {
     const server = new Server({
       store: new URL(
-        `memory://sync-schema-table-negotiation-${syncSchemaTable}`,
+        `memory://sync-schema-table-negotiation-${mode}`,
       ),
     });
     const messages: ServerMessage[] = [];
     const connection = server.connect((message) => messages.push(message));
-    const space = `did:key:z6Mk-sync-schema-table-${syncSchemaTable}`;
+    const space = `did:key:z6Mk-sync-schema-table-${mode}`;
+    const clientFlags = mode === "v2" ? flags : {
+      modernCellRep: flags.modernCellRep,
+      persistentSchedulerState: flags.persistentSchedulerState,
+      commitPreconditions: flags.commitPreconditions,
+      ...(mode === "legacy" ? { syncSchemaTable: true } : {}),
+    };
 
     try {
       await connection.receive(encodeMemoryBoundary({
         type: "hello",
         protocol: MEMORY_PROTOCOL,
-        flags: syncSchemaTable ? flags : {
-          modernCellRep: flags.modernCellRep,
-          persistentSchedulerState: flags.persistentSchedulerState,
-          commitPreconditions: flags.commitPreconditions,
-        },
+        flags: clientFlags,
       }));
       shiftMessage(messages);
 
@@ -519,6 +588,7 @@ Deno.test("memory server negotiates schema-table sync frames per connection", as
     }
   };
 
-  assertExists(await run(true));
-  assertEquals(await run(false), undefined);
+  assertExists(await run("v2"));
+  assertEquals(await run("legacy"), undefined);
+  assertEquals(await run("off"), undefined);
 });

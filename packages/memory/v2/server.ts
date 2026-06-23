@@ -454,9 +454,10 @@ class Connection {
       if (response.type !== "hello.ok") {
         return;
       }
-      this.#syncSchemaTable =
-        parseMemoryProtocolFlags(parsed.flags)?.syncSchemaTable === true &&
-        parseMemoryProtocolFlags(response.flags)?.syncSchemaTable === true;
+      const clientFlags = parseMemoryProtocolFlags(parsed.flags);
+      const serverFlags = parseMemoryProtocolFlags(response.flags);
+      this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
+        serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
       return;
     }

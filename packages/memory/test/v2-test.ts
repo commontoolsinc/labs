@@ -140,6 +140,7 @@ describe("memory v2 flags", () => {
       persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTable: false,
+      syncSchemaTableV2: false,
     });
 
     setModernCellRepConfig(true);
@@ -151,7 +152,8 @@ describe("memory v2 flags", () => {
       modernCellRep: true,
       persistentSchedulerState: true,
       commitPreconditions: true,
-      syncSchemaTable: true,
+      syncSchemaTable: false,
+      syncSchemaTableV2: true,
     });
 
     resetModernCellRepConfig();
@@ -167,12 +169,14 @@ describe("memory v2 flags", () => {
         persistentSchedulerState: true,
         commitPreconditions: true,
         syncSchemaTable: true,
+        syncSchemaTableV2: true,
       },
       {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTable: false,
+        syncSchemaTableV2: false,
       },
     ));
   });
@@ -185,12 +189,14 @@ describe("parseMemoryProtocolFlags", () => {
       persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTable: false,
+      syncSchemaTableV2: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
       persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTable: false,
+      syncSchemaTableV2: false,
     });
   });
 
@@ -204,6 +210,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: true,
         commitPreconditions: false,
         syncSchemaTable: false,
+        syncSchemaTableV2: false,
       },
     );
   });
@@ -218,11 +225,12 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: true,
         syncSchemaTable: false,
+        syncSchemaTableV2: false,
       },
     );
   });
 
-  it("accepts the canonical syncSchemaTable key", () => {
+  it("accepts the legacy syncSchemaTable key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
         syncSchemaTable: true,
@@ -232,6 +240,22 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTable: true,
+        syncSchemaTableV2: false,
+      },
+    );
+  });
+
+  it("accepts the canonical syncSchemaTableV2 key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        syncSchemaTableV2: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: true,
       },
     );
   });
@@ -243,6 +267,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags([true]), null);
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTable: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

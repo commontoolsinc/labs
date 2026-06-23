@@ -9,7 +9,7 @@ import type {
 } from "../v2.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-const SCHEMA_REF_PREFIX = "schema-ref@1:";
+const SCHEMA_REF_PREFIX = "schema-ref@2:";
 
 type SchemaTable = Record<string, JSONSchema>;
 
@@ -118,18 +118,21 @@ const rewriteValue = (value: unknown, state: RewriteState): unknown => {
   }
 
   const linkEnvelope = value["/"];
+  let rewrittenValue = value;
+  let changed = false;
   if (isPlainRecord(linkEnvelope)) {
     const payload = linkEnvelope[LINK_V1_TAG];
     if (isPlainRecord(payload)) {
       const nextPayload = rewriteLinkPayload(payload, state);
       if (nextPayload !== payload) {
-        return {
-          ...value,
+        rewrittenValue = {
+          ...rewrittenValue,
           "/": {
             ...linkEnvelope,
             [LINK_V1_TAG]: nextPayload,
           },
         };
+        changed = true;
       }
     }
   }
@@ -138,13 +141,13 @@ const rewriteValue = (value: unknown, state: RewriteState): unknown => {
   if (isPlainRecord(legacyAlias)) {
     const nextAlias = rewriteLinkPayload(legacyAlias, state);
     if (nextAlias !== legacyAlias) {
-      return { ...value, $alias: nextAlias };
+      rewrittenValue = { ...rewrittenValue, $alias: nextAlias };
+      changed = true;
     }
   }
 
-  let changed = false;
   const rewritten: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
+  for (const [key, child] of Object.entries(rewrittenValue)) {
     const next = rewriteValue(child, state);
     changed ||= next !== child;
     rewritten[key] = next;
@@ -171,18 +174,21 @@ const expandValue = (
   }
 
   const linkEnvelope = value["/"];
+  let expandedValue = value;
+  let changed = false;
   if (isPlainRecord(linkEnvelope)) {
     const payload = linkEnvelope[LINK_V1_TAG];
     if (isPlainRecord(payload)) {
       const nextPayload = expandLinkPayload(payload, schemas);
       if (nextPayload !== payload) {
-        return {
-          ...value,
+        expandedValue = {
+          ...expandedValue,
           "/": {
             ...linkEnvelope,
             [LINK_V1_TAG]: nextPayload,
           },
         };
+        changed = true;
       }
     }
   }
@@ -191,13 +197,13 @@ const expandValue = (
   if (isPlainRecord(legacyAlias)) {
     const nextAlias = expandLinkPayload(legacyAlias, schemas);
     if (nextAlias !== legacyAlias) {
-      return { ...value, $alias: nextAlias };
+      expandedValue = { ...expandedValue, $alias: nextAlias };
+      changed = true;
     }
   }
 
-  let changed = false;
   const expanded: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
+  for (const [key, child] of Object.entries(expandedValue)) {
     const next = expandValue(child, schemas);
     changed ||= next !== child;
     expanded[key] = next;
