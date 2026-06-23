@@ -1,8 +1,10 @@
 import {
+  type FabricObject,
+  FabricSpecialObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { type Immutable, isRecord } from "@commonfabric/utils/types";
+import { type Immutable } from "@commonfabric/utils/types";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -25,8 +27,8 @@ import { mapsEqual } from "./topology.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export type DiagnosisRecord = {
-  readValues: Map<string, unknown>;
-  writeValues: Map<string, unknown>;
+  readValues: Map<string, FabricValue>;
+  writeValues: Map<string, FabricValue>;
   timestamp: number;
 };
 
@@ -67,24 +69,39 @@ export function makeAddressKey(addr: IMemorySpaceAddress): string {
   return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
 }
 
-function unwrapTransactionDetailValue(value: unknown): unknown {
-  return isRecord(value) && "value" in value ? value.value : value;
+/**
+ * Narrows to the plain-record arm of `FabricValue` (`FabricObject`): a
+ * non-`null` object that is neither an array nor a `FabricSpecialObject`. Unlike
+ * a bare `isRecord()` check, this preserves the value type — `FabricObject`'s
+ * string index of `FabricValue` keeps `value.value` typed as a `FabricValue`.
+ */
+function isFabricObject(
+  value: Immutable<FabricValue> | undefined,
+): value is Immutable<FabricObject> {
+  return (typeof value === "object") && (value !== null) &&
+    !Array.isArray(value) && !(value instanceof FabricSpecialObject);
+}
+
+function unwrapTransactionDetailValue(
+  value: Immutable<FabricValue> | undefined,
+): Immutable<FabricValue> | undefined {
+  return isFabricObject(value) && "value" in value ? value.value : value;
 }
 
 export function captureTransactionWrites(
   tx: IExtendedStorageTransaction,
   writes: readonly IMemorySpaceAddress[],
-  options: { errorValue?: unknown } = {},
-): Map<string, unknown> {
-  const writeValues = new Map<string, unknown>();
-  const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
+  options: { errorValue?: FabricValue } = {},
+): Map<string, FabricValue> {
+  const writeValues = new Map<string, FabricValue>();
+  const writeDetailsBySpace = new Map<string, Map<string, FabricValue>>();
 
   for (const write of writes) {
     const key = makeAddressKey(write);
     try {
       let details = writeDetailsBySpace.get(write.space);
       if (!details) {
-        details = new Map<string, unknown>();
+        details = new Map<string, FabricValue>();
         for (const detail of getTransactionWriteDetails(tx, write.space)) {
           details.set(
             makeAddressKey(detail.address),
@@ -106,8 +123,8 @@ export function captureTransactionWrites(
 export function captureCommittedReads(
   reads: readonly IMemorySpaceAddress[],
   createReadTx: () => IExtendedStorageTransaction,
-): Map<string, unknown> {
-  const readValues = new Map<string, unknown>();
+): Map<string, FabricValue> {
+  const readValues = new Map<string, FabricValue>();
 
   for (const read of reads) {
     const key = makeAddressKey(read);
@@ -134,8 +151,8 @@ export function captureCommittedReads(
 }
 
 export function findDifferingWriteKeys(
-  previousWrites: Map<string, unknown>,
-  latestWrites: Map<string, unknown>,
+  previousWrites: Map<string, FabricValue>,
+  latestWrites: Map<string, FabricValue>,
   options: { keySet?: "union" | "latest" } = {},
 ): string[] {
   const keys = options.keySet === "latest"
@@ -148,19 +165,7 @@ export function findDifferingWriteKeys(
       differingKeys.push(key);
       continue;
     }
-    // These come from `captureTransactionWrites()`, which routes each value
-    // through a structural `isRecord` unwrap (stripping a nested `{ value }`
-    // wrapper), so the captured type is `unknown` even though the underlying
-    // write detail is a `FabricValue`. The cast asserts what the type system
-    // can't verify across that boundary; a genuine `unknown` boundary
-    // ultimately warrants a runtime check, for which a recursive
-    // `isFabricValue()` predicate (not yet extracted) would be the right tool.
-    if (
-      !valueEqual(
-        previousWrites.get(key) as FabricValue,
-        latestWrites.get(key) as FabricValue,
-      )
-    ) {
+    if (!valueEqual(previousWrites.get(key), latestWrites.get(key))) {
       differingKeys.push(key);
     }
   }
