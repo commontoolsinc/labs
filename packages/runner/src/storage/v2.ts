@@ -2130,12 +2130,8 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     return {
-      confirmed: compactCommitReads(this.#space, confirmed).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
-      pending: compactCommitReads(this.#space, pending).map((
-        { nonRecursive: _skip, ...read },
-      ) => read),
+      confirmed: compactCommitReads(this.#space, confirmed),
+      pending: compactCommitReads(this.#space, pending),
     };
   }
 

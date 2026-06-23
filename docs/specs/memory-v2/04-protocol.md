@@ -276,6 +276,10 @@ type TransactResult =
 Path conventions on the wire:
 
 - `ClientCommit` reads and writes use full document paths.
+- `ClientCommit.reads.*[].nonRecursive` is optional and defaults to `false`.
+  When `true`, conflict validation treats the read as path-only/topology
+  evidence: writes to descendants of the read path do not invalidate it, while
+  writes to the path itself or ancestors still do.
 - `readValue` / `writeValue` style helpers are client-side conveniences that
   prepend `"value"` before constructing those commit paths.
 - Inline `data:` document reads are local-only. Clients may read them during

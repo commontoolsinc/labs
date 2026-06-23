@@ -1193,6 +1193,325 @@ Deno.test("memory v2 engine rejects stale confirmed reads and allows non-overlap
   }
 });
 
+Deno.test("memory v2 engine allows stale missing object-key read after sibling add", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({
+            poll: { answers: {} },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers", "alice"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{
+            op: "add",
+            path: "/value/poll/answers/alice",
+            value: "pizza",
+          }],
+        }],
+      },
+    });
+
+    const allowed = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers", "bob"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:derived",
+          value: toEntityDocument({ bobWasMissing: true }),
+        }],
+      },
+    });
+
+    assertEquals(allowed.seq, 3);
+    assertEquals(read(engine, { id: "entity:derived" }), {
+      value: { bobWasMissing: true },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine rejects stale recursive parent read after child add", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({
+            poll: { answers: {} },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers", "alice"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{
+            op: "add",
+            path: "/value/poll/answers/alice",
+            value: "pizza",
+          }],
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(2),
+          authorization,
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [{
+                id: "entity:source",
+                path: toDocumentPath(["value", "poll", "answers"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:derived",
+              value: toEntityDocument({ answersWereEmpty: true }),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    assertEquals(read(engine, { id: "entity:derived" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine allows stale non-recursive parent read after child add", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({
+            poll: { answers: {} },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers", "alice"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{
+            op: "add",
+            path: "/value/poll/answers/alice",
+            value: "pizza",
+          }],
+        }],
+      },
+    });
+
+    const allowed = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers"]),
+            seq: 1,
+            nonRecursive: true,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:derived",
+          value: toEntityDocument({ parentStillExists: true }),
+        }],
+      },
+    });
+
+    assertEquals(allowed.seq, 3);
+    assertEquals(read(engine, { id: "entity:derived" }), {
+      value: { parentStillExists: true },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine keeps array add conflicts conservative", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({
+            poll: { answers: ["bob"] },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "poll", "answers", "1"]),
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{
+            op: "add",
+            path: "/value/poll/answers/1",
+            value: "alice",
+          }],
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(2),
+          authorization,
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [{
+                id: "entity:source",
+                path: toDocumentPath(["value", "poll", "answers", "0"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:derived",
+              value: toEntityDocument({ firstAnswer: "bob" }),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    assertEquals(read(engine, { id: "entity:derived" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine resolves pending reads and rejects stale pending reads", async () => {
   const { engine, path } = await createEngine();
 

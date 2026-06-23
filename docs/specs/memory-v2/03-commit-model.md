@@ -144,17 +144,23 @@ interface ConfirmedRead {
   branch?: BranchId;
   path: ReadPath;
   seq: number;
+  nonRecursive?: boolean;
 }
 
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
   localSeq: number;
+  nonRecursive?: boolean;
 }
 ```
 
 Confirmed reads are validated against canonical history. Pending reads are
-resolved within the submitting logical session.
+resolved within the submitting logical session. By default, reads are recursive:
+a read of path `P` depends on `P` and descendants of `P`. A read with
+`nonRecursive: true` depends only on `P` itself and ancestors of `P`; descendant
+writes do not invalidate it. Clients use this for topology/schema probes that
+only need to know the container exists, not the container's contents.
 
 ## 3.5 Stacked Pending Commits
 
@@ -202,10 +208,15 @@ Validation is based on overlap, not just entity identity.
 - `delete` overlaps every read path on the same entity
 - `patch` overlaps when any patch op touches the read path, an ancestor of the
   read path, or a descendant of the read path
+- `patch` against a `nonRecursive` read overlaps only when an op touches the
+  read path itself or an ancestor of the read path
 - structural collection edits MAY be treated conservatively as overlapping the
   whole collection subtree in phase 1
 
 Implementations MAY over-approximate overlap. They MUST NOT miss a real overlap.
+Plain object sibling-key `add`/`remove` operations are not real overlaps for
+reads of unrelated sibling keys. Array index edits may remain conservative
+because insertion/removal shifts sibling meaning.
 
 ### 3.6.3 Pending-Read Resolution
 

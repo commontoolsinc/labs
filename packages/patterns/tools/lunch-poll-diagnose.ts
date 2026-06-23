@@ -10,6 +10,7 @@ interface PollOutputSummary {
   votes: readonly {
     voterName?: string;
     optionId?: string;
+    optionTitle?: string;
     voteType?: string;
   }[];
   history: readonly unknown[];
@@ -77,6 +78,8 @@ interface MatrixConfig {
   userCounts: readonly number[];
   voteRounds: number;
   includeHomepageRefresh: boolean;
+  eventMode: VoteEventMode;
+  joinMode: JoinMode;
 }
 
 interface CaseConfig {
@@ -84,6 +87,16 @@ interface CaseConfig {
   userCount: number;
   voteRounds: number;
   includeHomepageRefresh: boolean;
+  eventMode: VoteEventMode;
+  joinMode: JoinMode;
+}
+
+type VoteEventMode = "id" | "reference";
+type JoinMode = "concurrent" | "serial";
+
+interface VoteTarget {
+  optionId?: string;
+  option?: unknown;
 }
 
 interface CompactSessionSample {
@@ -156,6 +169,8 @@ interface CaseResult {
     options: number;
     voteRounds: number;
     includeHomepageRefresh: boolean;
+    eventMode: VoteEventMode;
+    joinMode: JoinMode;
   };
   churn: ChurnTotals;
   convergence: ConvergenceResult;
@@ -201,10 +216,10 @@ async function collectConvergence(
   sessions: readonly MultiRuntimeSession[],
 ): Promise<ConvergenceResult> {
   const states = await Promise.all(sessions.map(async (session) => {
-    const poll = pollSummary(await session.read());
+    const poll = await readPollSummary(session);
     const fingerprint = poll.votes
       .map((vote) =>
-        `${vote.voterName ?? "?"}|${vote.optionId ?? "?"}|${
+        `${vote.voterName ?? "?"}|${vote.optionId ?? vote.optionTitle ?? "?"}|${
           vote.voteType ?? "?"
         }`
       )
@@ -282,6 +297,59 @@ function pollSummary(value: unknown): PollOutputSummary {
     isAdmin: asBoolean(value.isAdmin),
     homePageLookupUrls: asStringArray(value.homePageLookupUrls),
   };
+}
+
+async function readPollSummary(
+  session: MultiRuntimeSession,
+): Promise<PollOutputSummary> {
+  const root = await session.read();
+  if (isRecord(root)) return pollSummary(root);
+
+  const [
+    users,
+    options,
+    votes,
+    history,
+    adminName,
+    myName,
+    userCount,
+    optionCount,
+    voteCount,
+    historyCount,
+    isJoined,
+    isAdmin,
+    homePageLookupUrls,
+  ] = await Promise.all([
+    session.read(["users"]),
+    session.read(["options"]),
+    session.read(["votes"]),
+    session.read(["history"]),
+    session.read(["adminName"]),
+    session.read(["myName"]),
+    session.read(["userCount"]),
+    session.read(["optionCount"]),
+    session.read(["voteCount"]),
+    session.read(["historyCount"]),
+    session.read(["isJoined"]),
+    session.read(["isAdmin"]),
+    session.read(["homePageLookupUrls"]),
+  ]);
+
+  return pollSummary({
+    users,
+    options,
+    votes,
+    history,
+    adminName,
+    myName,
+    userCount,
+    optionCount,
+    voteCount,
+    historyCount,
+    isJoined,
+    isAdmin,
+    homePageLookupUrls,
+  });
 }
 
 function pathKey(address: TraceAddressSummary): string {
@@ -556,7 +624,7 @@ async function samplePhase(
   await runActions();
   await harness.settle(3);
   const sessions = await Promise.all(harness.sessions.map(async (session) => {
-    const poll = pollSummary(await session.read());
+    const poll = await readPollSummary(session);
     const diagnostics = diagnosticsSummary(
       session.label,
       await session.diagnostics(),
@@ -578,11 +646,22 @@ async function samplePhase(
   return sample;
 }
 
-async function optionIds(session: MultiRuntimeSession): Promise<string[]> {
-  const poll = pollSummary(await session.read());
-  return poll.options.map((option) => option.id).filter((id): id is string =>
-    typeof id === "string" && id !== ""
-  );
+async function voteTargets(
+  session: MultiRuntimeSession,
+  eventMode: VoteEventMode,
+): Promise<VoteTarget[]> {
+  const poll = await readPollSummary(session);
+  if (eventMode === "reference") {
+    return await Promise.all(
+      poll.options.map((_option, index) =>
+        session.linkValue(["options", index]).then((option) => ({ option }))
+      ),
+    );
+  }
+  return poll.options
+    .map((option) => option.id)
+    .filter((id): id is string => typeof id === "string" && id !== "")
+    .map((optionId) => ({ optionId }));
 }
 
 async function createHarness(config: CaseConfig): Promise<MultiRuntimeHarness> {
@@ -620,11 +699,17 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
     phases.push(
       await samplePhase("all-users-join", harness, async () => {
         await host.send("joinAs", { name: "User 1" });
-        await Promise.all(
-          sessions.slice(1).map((session, index) =>
-            session.send("joinAs", { name: `User ${index + 2}` })
-          ),
-        );
+        if (config.joinMode === "serial") {
+          for (let index = 1; index < sessions.length; index++) {
+            await sessions[index].send("joinAs", { name: `User ${index + 1}` });
+          }
+        } else {
+          await Promise.all(
+            sessions.slice(1).map((session, index) =>
+              session.send("joinAs", { name: `User ${index + 2}` })
+            ),
+          );
+        }
       }),
     );
 
@@ -642,15 +727,18 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
           `concurrent-vote-round-${round + 1}`,
           harness,
           async () => {
-            const ids = await optionIds(host);
-            if (ids.length === 0) return;
+            const targets = await voteTargets(host, config.eventMode);
+            if (targets.length === 0) return;
             await Promise.all(
-              sessions.map((session, index) =>
-                session.send("castVote", {
-                  optionId: ids[(round + index) % ids.length],
-                  voteType: VOTE_COLORS[(round + index) % VOTE_COLORS.length],
-                })
-              ),
+              sessions.map((session, index) => {
+                const target = targets[(round + index) % targets.length];
+                return session.send("castVote", {
+                  ...target,
+                  voteType: VOTE_COLORS[
+                    (round + index) % VOTE_COLORS.length
+                  ],
+                });
+              }),
             );
           },
         ),
@@ -700,6 +788,8 @@ async function runCase(config: CaseConfig): Promise<CaseResult> {
         options: config.optionCount,
         voteRounds: config.voteRounds,
         includeHomepageRefresh: config.includeHomepageRefresh,
+        eventMode: config.eventMode,
+        joinMode: config.joinMode,
       },
       churn,
       convergence,
@@ -745,6 +835,18 @@ function stringArg(name: string, fallback: string): string {
   return arg ? arg.slice(prefix.length) : fallback;
 }
 
+function choiceArg<T extends string>(
+  name: string,
+  fallback: T,
+  choices: readonly T[],
+): T {
+  const value = stringArg(name, fallback);
+  if ((choices as readonly string[]).includes(value)) return value as T;
+  throw new Error(
+    `--${name} must be one of ${choices.join(",")}; got ${value}`,
+  );
+}
+
 function explicitCasesArg(
   config: MatrixConfig,
 ): CaseConfig[] | undefined {
@@ -762,6 +864,8 @@ function explicitCasesArg(
       userCount,
       voteRounds: config.voteRounds,
       includeHomepageRefresh: config.includeHomepageRefresh,
+      eventMode: config.eventMode,
+      joinMode: config.joinMode,
     }];
   });
   return cases.length > 0 ? cases : undefined;
@@ -784,6 +888,14 @@ function matrixConfigFromArgs(): MatrixConfig {
     userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
     includeHomepageRefresh: !Deno.args.includes("--skip-refresh"),
+    eventMode: choiceArg<VoteEventMode>("event-mode", "id", [
+      "id",
+      "reference",
+    ]),
+    joinMode: choiceArg<JoinMode>("join-mode", "concurrent", [
+      "concurrent",
+      "serial",
+    ]),
   };
 }
 
@@ -799,6 +911,8 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
         userCount,
         voteRounds: config.voteRounds,
         includeHomepageRefresh: config.includeHomepageRefresh,
+        eventMode: config.eventMode,
+        joinMode: config.joinMode,
       });
     }
   }
@@ -819,7 +933,8 @@ async function run(): Promise<void> {
   for (const caseConfig of cases) {
     console.error(
       `[lunch-poll diagnose] case ${caseConfig.optionCount} options x ` +
-        `${caseConfig.userCount} users, rounds=${caseConfig.voteRounds}`,
+        `${caseConfig.userCount} users, rounds=${caseConfig.voteRounds} ` +
+        `eventMode=${caseConfig.eventMode} joinMode=${caseConfig.joinMode}`,
     );
     try {
       results.push({ ok: true, result: await runCase(caseConfig) });
