@@ -917,7 +917,7 @@ http://localhost:9000/lunch-poll-perf-a587/lunch-poll-reference-runtime-a587
 Piece:
 
 ```text
-fid1:KMMXckIrcnJr7P8JdJWTe6nGkfZzPvo-G0pJJzwhO6s
+fid1:48HeF0KAyJ0uP14LVRaJMvO6jnYUq4dyCC0CPEOyPDw
 ```
 
 Current deployment target:
@@ -927,6 +927,27 @@ Current deployment target:
 - The browser check is for real UI smoke testing and event-path confidence.
 - The performance/correctness proof comes from the multi-runtime diagnostic
   harness, which drives the same handler workload across 10 clients.
+
+2026-06-23 browser verification:
+
+- The URL initially rendered only the shell/header in the in-app browser. CLI
+  inspection showed that the slug token resolved to the real piece, but the
+  hashed slug/proxy entity still exposed stale `$UI` at nested paths.
+- Repointed the slug with:
+
+  ```bash
+  CF_API_URL=http://localhost:9000 CF_IDENTITY=cf.key deno task cf piece set-slug \
+    -s lunch-poll-perf-a587 \
+    lunch-poll-reference-runtime-a587 \
+    fid1:48HeF0KAyJ0uP14LVRaJMvO6jnYUq4dyCC0CPEOyPDw
+  ```
+
+- Imported `cf.key` into `agent-browser`, reloaded the public URL, and walked
+  the composed/shadow DOM. The rendered text included `Where should we eat?`,
+  `Join the poll`, `No options yet`, and `Waiting for a host to join.`
+- Takeaway: if this URL shows title/header but no join widget, first verify the
+  slug target and browser identity. Do not treat a stale slug/proxy render as
+  evidence that the real `main.tsx` UI failed.
 
 Interpretation:
 
@@ -964,7 +985,8 @@ Current understanding:
 - Preserving `nonRecursive` through `ClientCommit` plus type-aware object-add
   validation makes the diagnostic keyed 10-user workload preserve all joins and
   votes.
-- Browser telemetry is wired up, but CLI multi-runtime diagnostics are still the
+- Browser render smoke is now verified for the public local URL after slug
+  repointing and CLI-key import. CLI multi-runtime diagnostics are still the
   most reliable stress driver.
 
 Most likely next step:

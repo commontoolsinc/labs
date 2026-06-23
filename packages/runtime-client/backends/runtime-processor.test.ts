@@ -13,6 +13,7 @@ import {
 import {
   type CellRef,
   type CfcLabelView,
+  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -21,7 +22,11 @@ import { cellRefToSigilLink } from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
-import { parseLink } from "../../runner/src/link-utils.ts";
+import {
+  createDataCellURI,
+  createSigilLinkFromParsedLink,
+  parseLink,
+} from "../../runner/src/link-utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -1541,6 +1546,62 @@ describe("runtime-client CellRef conversion", () => {
   });
 });
 
+describe("RuntimeProcessor cell value serialization", () => {
+  it("inlines data URI links before returning cell values to the client", () => {
+    const space = "did:key:z6Mk-runtime-processor-data-uri" as CellRef[
+      "space"
+    ];
+    const childLink = createSigilLinkFromParsedLink({
+      id: createDataCellURI({
+        type: "vnode",
+        name: "p",
+        props: {},
+        children: ["Join the poll"],
+      }),
+      space,
+      scope: "space",
+      path: [],
+    });
+    const value = {
+      type: "vnode",
+      name: "section",
+      props: {},
+      children: [childLink],
+    };
+    const ref: CellRef = {
+      id: "of:data-uri-root" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink(candidate: unknown) {
+          expect(candidate).toEqual(ref);
+          return { get: () => value };
+        },
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+
+    expect(response.value).toEqual({
+      type: "vnode",
+      name: "section",
+      props: {},
+      children: [{
+        type: "vnode",
+        name: "p",
+        props: {},
+        children: ["Join the poll"],
+      }],
+    });
+  });
+});
+
 describe("runtimeOptionsFromInitializationData", () => {
   it("threads CFC initialization settings into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
@@ -1826,7 +1887,7 @@ describe("RuntimeProcessor vdom mount render policy", () => {
     const originalPostMessage = (globalThis as any).postMessage;
     (globalThis as any).postMessage = () => {};
     try {
-      handleVDomMount.call(state, {
+      await handleVDomMount.call(state, {
         type: RequestType.VDomMount,
         mountId: 1,
         cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
@@ -1872,5 +1933,88 @@ describe("RuntimeProcessor vdom mount render policy", () => {
   it("keeps mounts unbounded when no ceiling is configured", async () => {
     const policy = await mountAndGetRootPolicy(undefined);
     expect(policy.maxConfidentiality).toBeUndefined();
+  });
+
+  it("pulls the mounted VNode cell before subscribing so the initial render emits", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const space = cfcSigner.did();
+    const tx = runtime.edit();
+
+    try {
+      const cell = runtime.getCell(
+        space,
+        "vdom mount initial vnode",
+        undefined,
+        tx,
+      );
+      cell.set({
+        type: "vnode",
+        name: "span",
+        props: {},
+        children: ["Join the poll"],
+      });
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+
+      const posted: unknown[] = [];
+      const state = {
+        runtime,
+        vdomMounts: new Map<
+          number,
+          { reconciler: unknown; cancel: () => void }
+        >(),
+        vdomBatchIdCounter: 0,
+        renderDeclassificationPolicy: "allow",
+        renderConfidentialityCeiling: undefined,
+        handleVDomUnmount,
+      };
+      const hadPostMessage = "postMessage" in globalThis;
+      const originalPostMessage = (globalThis as any).postMessage;
+      (globalThis as any).postMessage = (message: unknown) => {
+        posted.push(message);
+      };
+      try {
+        await handleVDomMount.call(state, {
+          type: RequestType.VDomMount,
+          mountId: 1,
+          cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
+        });
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const batches = posted.filter((message): message is {
+          type: NotificationType.VDomBatch;
+          ops: { op: string; text?: string }[];
+        } =>
+          typeof message === "object" &&
+          message !== null &&
+          (message as { type?: unknown }).type === NotificationType.VDomBatch
+        );
+        const textOps = batches.flatMap((batch) =>
+          batch.ops.filter((op) =>
+            (op.op === "create-text" || op.op === "update-text") &&
+            op.text === "Join the poll"
+          )
+        );
+        expect(textOps.length).toBeGreaterThan(0);
+      } finally {
+        if (state.vdomMounts.has(1)) {
+          handleVDomUnmount.call(state, {
+            type: RequestType.VDomUnmount,
+            mountId: 1,
+          });
+        }
+        if (hadPostMessage) {
+          (globalThis as any).postMessage = originalPostMessage;
+        } else {
+          delete (globalThis as any).postMessage;
+        }
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });

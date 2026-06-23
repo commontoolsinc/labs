@@ -2230,6 +2230,185 @@ Deno.test("ifElse output follows condition scope", async () => {
   }
 });
 
+Deno.test("child pattern UI materializes null-vs-VNode branch selected by user-scoped condition", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { h, ifElse, pattern, UI } = createTrustedBuilder(runtime)
+      .commonfabric;
+
+    const joinedBase = runtime.getCell<boolean>(
+      space,
+      "child pattern user scoped join condition",
+      undefined,
+      tx,
+    );
+    const isJoined = createCell<boolean>(
+      runtime,
+      { ...joinedBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    isJoined.set(false);
+
+    const Child = pattern<{ isJoined: boolean }>(({ isJoined }) => ({
+      [UI]: h(
+        "div",
+        { style: "display:contents" },
+        ifElse(
+          isJoined,
+          null,
+          h("span", { "data-testid": "join-widget" }, "Join the poll"),
+        ),
+      ),
+      isJoined,
+    }));
+
+    const Root = pattern<{ isJoined: boolean }>(({ isJoined }) => {
+      const child = Child({ isJoined });
+      return {
+        [UI]: h("section", null, child[UI]),
+      };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "child pattern user scoped join ui",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { isJoined }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const ui = result.key(UI).get() as any;
+    assertEquals(
+      ui.children?.[0]?.children?.[0]?.children?.[0],
+      "Join the poll",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("embedded child pattern UI materializes scoped input derived join branch", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { h, ifElse, lift, pattern, UI } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    const Child = pattern<{ myName: Cell<string> }>(
+      ({ myName }) => {
+        const isJoined = lift(
+          (name: string | undefined) => (name ?? "").trim() !== "",
+        )(myName);
+        const booleanSchema = { type: "boolean" } as const;
+        const nullSchema = { type: "null" } as const;
+        const vnodeLikeSchema = {
+          anyOf: [{}, { type: "object", properties: {} }],
+        } as const;
+        const maybeVNodeSchema = {
+          anyOf: [{ type: "null" }, {}, { type: "object", properties: {} }],
+        } as const;
+        const ifElseWithSchemas = ifElse as any;
+        return {
+          [UI]: h(
+            "div",
+            { style: "display:contents" },
+            ifElseWithSchemas(
+              booleanSchema,
+              nullSchema,
+              vnodeLikeSchema,
+              maybeVNodeSchema,
+              isJoined,
+              null,
+              h("span", { "data-testid": "join-widget" }, "Join the poll"),
+            ),
+          ),
+          isJoined,
+        };
+      },
+      {
+        type: "object",
+        properties: {
+          myName: { type: "string", default: "", asCell: ["cell"] },
+        },
+        required: ["myName"],
+      },
+    );
+
+    const Root = pattern<{ myName: Cell<string> }>(
+      ({ myName }) => {
+        const child = Child({ myName });
+        return {
+          [UI]: h("section", null, child[UI]),
+        };
+      },
+      {
+        type: "object",
+        properties: {
+          myName: {
+            type: "string",
+            default: "",
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+        },
+        required: ["myName"],
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "embedded child pattern scoped join ui",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rootRawUi = result.key(UI).getRaw() as any;
+    const childUiLink = parseLink(rootRawUi.children?.[0], result.key(UI));
+    const childUiCell = runtime.getCellFromLink(childUiLink!);
+    const childRawUi = childUiCell.getRaw() as any;
+    const joinOutputLink = parseLink(childRawUi.children?.[0], childUiCell);
+    const joinOutputCell = runtime.getCellFromLink(joinOutputLink!);
+    const selectedJoinLink = parseLink(
+      joinOutputCell.getRaw(),
+      joinOutputCell,
+    );
+    assertEquals(selectedJoinLink?.scope, "user");
+
+    const ui = result.key(UI).get() as any;
+    assertEquals(
+      ui.children?.[0]?.children?.[0]?.children?.[0],
+      "Join the poll",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("session scoped derived chains update when broad inputs change", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

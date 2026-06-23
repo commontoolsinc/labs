@@ -3748,17 +3748,27 @@ export class Runner {
             tx,
             result,
           );
+          const outputValue = resultForRawBuiltinOutputBinding(
+            result,
+            outputBindingSchema,
+            builtinIdentity,
+          );
+          const outputScope = isCell(result)
+            ? narrowestScope([
+              tx.getNarrowestReadScope(),
+              result.getAsNormalizedFullLink().scope,
+            ])
+            : tx.getNarrowestReadScope();
           sendValueToBinding(
             tx,
             resultCell,
             argumentCellLink!,
             mappedOutputBindings,
-            resultForRawBuiltinOutputBinding(
-              result,
-              outputBindingSchema,
-              builtinIdentity,
-            ),
-            { preserveLinkOutput: true },
+            outputValue,
+            {
+              preserveLinkOutput: true,
+              narrowestReadScope: outputScope,
+            },
           );
         },
         addCancel,
@@ -3808,6 +3818,9 @@ export class Runner {
     const builtinThrottle = isRawBuiltinResult(builtinResult)
       ? builtinResult.throttle
       : undefined;
+    const builtinMaterializerWriteEnvelopes = isRawBuiltinResult(builtinResult)
+      ? builtinResult.materializerWriteEnvelopes
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -3852,7 +3865,11 @@ export class Runner {
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
-    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ??
+      builtinMaterializerWriteEnvelopes;
+    const hasMaterializerWriteEnvelopes =
+      (materializerWriteEnvelopes?.length ?? 0) > 0;
+    const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []
       : this.collectStaticRedirectWriteTargets(tx, outputCells);
     const schedulingWrites = dedupeNormalizedLinks([
@@ -3862,9 +3879,7 @@ export class Runner {
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
-      ...(module.materializerWriteEnvelopes
-        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
-        : {}),
+      ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       module,
       pattern,
     });

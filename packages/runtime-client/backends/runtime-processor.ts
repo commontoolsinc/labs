@@ -35,6 +35,7 @@ import {
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
+  findAndInlineDataURILinks,
   getMetaLink,
   type NormalizedFullLink,
   parseLink,
@@ -134,6 +135,15 @@ import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
+
+function serializeCellValueForClient(value: unknown): JSONValue | undefined {
+  return convertCellsToLinks(findAndInlineDataURILinks(value), {
+    includeSchema: true,
+    keepAsCell: true,
+    doNotConvertCellResults: true,
+    includeCfcLabelView: true,
+  }) as JSONValue | undefined;
+}
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -660,13 +670,7 @@ export class RuntimeProcessor {
         };
       }
     }
-    const value = cell.get();
-    const converted = convertCellsToLinks(value, {
-      includeSchema: true,
-      keepAsCell: true,
-      doNotConvertCellResults: true,
-      includeCfcLabelView: true,
-    });
+    const converted = serializeCellValueForClient(cell.get());
     if (!request.includeCfcLabel) {
       return { value: converted };
     }
@@ -725,12 +729,7 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      const converted = convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: true,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      });
+      const converted = serializeCellValueForClient(value);
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel
@@ -1371,7 +1370,7 @@ export class RuntimeProcessor {
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:
-        return this.handleVDomMount(request);
+        return await this.handleVDomMount(request);
       case RequestType.VDomUnmount:
         return this.handleVDomUnmount(request);
       case RequestType.VDomBatchApplied:
@@ -1404,7 +1403,9 @@ export class RuntimeProcessor {
    * Handle a request to start VDOM rendering for a cell.
    * Creates a WorkerReconciler, subscribes to the cell, and sends VDomBatch notifications.
    */
-  handleVDomMount(request: VDomMountRequest): VDomMountResponse {
+  async handleVDomMount(
+    request: VDomMountRequest,
+  ): Promise<VDomMountResponse> {
     const { mountId, cell: cellRef } = request;
 
     // Check if already mounted
@@ -1412,10 +1413,9 @@ export class RuntimeProcessor {
       this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
     }
 
-    // Get the cell from the runtime and apply rendererVDOMSchema
-    // The schema has a [UI] property definition that handles VDOM unwrapping
     const rawCell = getCell(this.runtime, cellRef);
     const cell = rawCell.asSchema(rendererVDOMSchema);
+    await cell.pull();
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({

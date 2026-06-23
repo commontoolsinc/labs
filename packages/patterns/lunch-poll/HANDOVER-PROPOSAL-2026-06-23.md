@@ -56,7 +56,7 @@ http://localhost:9000/lunch-poll-perf-a587/lunch-poll-reference-runtime-a587
 Current deployed piece:
 
 ```text
-fid1:KMMXckIrcnJr7P8JdJWTe6nGkfZzPvo-G0pJJzwhO6s
+fid1:48HeF0KAyJ0uP14LVRaJMvO6jnYUq4dyCC0CPEOyPDw
 ```
 
 Deployment source:
@@ -65,10 +65,23 @@ Deployment source:
 packages/patterns/lunch-poll/main.tsx
 ```
 
-Browser status: this URL should render the full lunch-poll UI from `main.tsx`,
-not the stripped diagnostic fixture. The measured performance evidence below
-comes from the headless multi-runtime harness, which is the reliable stress
-driver for this workload.
+Browser status: verified on 2026-06-23 after importing `cf.key` into an
+`agent-browser` session. A shadow-DOM text probe after reload found:
+
+- `Where should we eat?`
+- `Join the poll`
+- `No options yet`
+- `Waiting for a host to join.`
+
+Important failure mode from the smoke test: the public slug initially rendered
+only the shell/header because the browser route was observing stale slug/proxy
+state. Repointing `lunch-poll-reference-runtime-a587` with `cf piece set-slug`
+made the slug resolve to the real piece above. Keep this in mind if someone sees
+the title/header but no join widget: first compare the slug-resolved piece with
+the hashed slug cell before assuming the pattern UI is broken.
+
+The measured performance evidence below comes from the headless multi-runtime
+harness, which is the reliable stress driver for this workload.
 
 ## Evidence
 
@@ -193,17 +206,17 @@ documented identity model:
   compatibility/migration plan if we update an existing piece in place.
 - The real pattern still exposes `optionId` in the public contract. This PR
   improves the hot vote path without finishing the no-string-ID cleanup.
-- Browser manual multi-tab verification is still needed before promoting the
-  pattern change. The local URL now points at the real UI; the multi-runtime
-  harness is the durability proof.
+- Browser render smoke verification now confirms the public URL presents the
+  real join UI. A manual join/vote click-through across multiple tabs is still
+  useful before promoting the pattern change. The multi-runtime harness remains
+  the durability and contention proof.
 
 ## Recommended Next Steps
 
-1. Manually open the local URL and verify the real poll can be joined/voted in
-   normal browser tabs after refreshing the redeployed source. This should be a
-   browser event/durability check, not the main performance proof.
-2. Run a two-browser/two-identity smoke test if practical, after at least one
-   manual click confirms the UI event path is live.
+1. Manually click through join and vote in normal browser tabs. The local URL
+   now renders the real UI; this should be a browser event/durability check, not
+   the main performance proof.
+2. Run a two-browser/two-identity smoke test if practical.
 3. Promote the runtime patch with the focused engine and runner tests.
 4. Decide whether this PR's real-pattern improvement is enough to merge, or
    whether the option identity cleanup must land in the same PR.

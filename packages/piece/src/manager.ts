@@ -331,6 +331,10 @@ export class PieceManager {
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
+      await timePiecePhase(
+        "get.result.pull",
+        () => this.getResult(piece).asSchema(undefined).pull(),
+      );
     } else {
       // Just sync the cell if not running
       await timePiecePhase("get.piece.sync", () => piece.sync());

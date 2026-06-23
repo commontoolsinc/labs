@@ -6,6 +6,13 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import type { CellScope } from "../builder/types.ts";
+
+const CONDITIONAL_RESULT_SCOPES: readonly CellScope[] = [
+  "space",
+  "user",
+  "session",
+];
 
 export function ifElse(
   inputsCell: Cell<[any, any, any]>,
@@ -15,6 +22,15 @@ export function ifElse(
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): RawBuiltinResult {
+  const baseResultLink = runtime.getCell<any>(
+    parentCell.space,
+    { ifElse: cause },
+  ).getAsNormalizedFullLink();
+  const materializerWriteEnvelopes = CONDITIONAL_RESULT_SCOPES.map((scope) => ({
+    ...baseResultLink,
+    scope,
+  }));
+
   const readCondition = (
     tx: IExtendedStorageTransaction,
   ): { cell: Cell<any>; value: unknown } => {
@@ -63,5 +79,6 @@ export function ifElse(
   return {
     action,
     populateDependencies,
+    materializerWriteEnvelopes,
   };
 }

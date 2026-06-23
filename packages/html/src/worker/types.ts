@@ -87,6 +87,8 @@ export interface ChildrenState {
   cell: Cell<unknown> | undefined;
   /** Cancel function for the children subscription */
   cancel: Cancel;
+  /** Demand and render the current value without replacing the subscription. */
+  refresh?: () => void;
 }
 
 /**

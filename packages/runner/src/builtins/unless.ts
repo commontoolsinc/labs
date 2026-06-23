@@ -1,10 +1,18 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
+import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import type { CellScope } from "../builder/types.ts";
+
+const CONDITIONAL_RESULT_SCOPES: readonly CellScope[] = [
+  "space",
+  "user",
+  "session",
+];
 
 /**
  * unless(condition, fallback) - || semantics
@@ -17,8 +25,17 @@ export function unless(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
-): Action {
-  return (tx: IExtendedStorageTransaction) => {
+): RawBuiltinResult {
+  const baseResultLink = runtime.getCell<any>(
+    parentCell.space,
+    { unless: cause },
+  ).getAsNormalizedFullLink();
+  const materializerWriteEnvelopes = CONDITIONAL_RESULT_SCOPES.map((scope) => ({
+    ...baseResultLink,
+    scope,
+  }));
+
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     const conditionCell = inputsCell.key("condition");
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
     const baseResult = runtime.getCell<any>(
@@ -44,5 +61,10 @@ export function unless(
     });
 
     resultWithLog.setRawUntyped(serializedRef);
+  };
+
+  return {
+    action,
+    materializerWriteEnvelopes,
   };
 }

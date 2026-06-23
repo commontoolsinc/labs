@@ -25,6 +25,7 @@ export interface RawBuiltinResult {
   action: Action;
   isEffect?: boolean;
   populateDependencies?: PopulateDependencies | ReactivityLog;
+  materializerWriteEnvelopes?: readonly NormalizedFullLink[];
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;

@@ -818,6 +818,229 @@ export default pattern<Input, Output>(({ question, myName }) => {
       }
     });
 
+    it("renders PerUser-scoped ifElse default branch for a second reader", async () => {
+      const scopedIfElsePattern = `import {
+  action,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
+
+export default pattern(() => {
+  const name = Writable.perUser.of<string>("");
+  const isJoined = computed(() => (name.get() ?? "").trim() !== "");
+  const join = action(() => name.set("Browser user"));
+
+  return {
+    [NAME]: "scoped-ifelse-second-reader",
+    [UI]: (
+      <div>
+        <div>Shared static visible</div>
+        {isJoined
+          ? <div>Joined as {name}</div>
+          : <div>Scoped join visible <button onClick={join}>Join</button></div>}
+      </div>
+    ),
+  };
+});`;
+
+      const scopedIfElseProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: scopedIfElsePattern,
+        }],
+      };
+
+      const creatorSession = await createTestSession();
+      await using creator = await createRuntimeClient(creatorSession, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${creatorSession.as.did()}`,
+          actingPrincipal: creatorSession.as.did(),
+        },
+      });
+      const page = await creator.createPage(
+        scopedIfElseProgram,
+        creatorSession.space,
+        { run: true },
+      );
+
+      const readerIdentity = await Identity.fromPassphrase(
+        `second-reader-${globalThis.crypto.randomUUID()}`,
+        keyConfig,
+      );
+      const readerSession = {
+        ...creatorSession,
+        as: readerIdentity,
+      } as Session;
+      await using reader = await createRuntimeClient(readerSession, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${readerSession.as.did()}`,
+          actingPrincipal: readerSession.as.did(),
+        },
+      });
+      const pageForReader = await reader.getPage(
+        page.id(),
+        creatorSession.space,
+        true,
+      );
+      assertExists(pageForReader);
+
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const cancel = render(
+        root,
+        pageForReader.cell() as CellHandle<VNode>,
+        renderOptions,
+      );
+
+      try {
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("Shared static visible") &&
+                html.includes("Scoped join visible"),
+            );
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("renders embedded child pattern UI with a PerUser-scoped default branch", async () => {
+      const embeddedChildPattern = `import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  type PerUser,
+  UI,
+  type VNode,
+} from "commonfabric";
+
+interface ChildInput {
+  name?: PerUser<string | Default<"">>;
+}
+
+interface ChildOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  isJoined: boolean;
+}
+
+const Child = pattern<ChildInput, ChildOutput>(({ name }) => {
+  const isJoined = computed(() => (name ?? "").trim() !== "");
+  return {
+    [NAME]: "embedded-child",
+    isJoined,
+    [UI]: (
+      <div>
+        {isJoined
+          ? <div>Child joined as {name}</div>
+          : <div>Child join visible</div>}
+      </div>
+    ),
+  };
+});
+
+interface ParentInput {
+  name?: PerUser<string | Default<"">>;
+}
+
+export default pattern<ParentInput>(({ name }) => {
+  const child = Child({ name });
+  return {
+    [NAME]: "parent-with-embedded-child",
+    [UI]: (
+      <div>
+        <div>Parent static visible</div>
+        {child[UI]}
+      </div>
+    ),
+  };
+});`;
+
+      const embeddedChildProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: embeddedChildPattern,
+        }],
+      };
+
+      const creatorSession = await createTestSession();
+      await using creator = await createRuntimeClient(creatorSession, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${creatorSession.as.did()}`,
+          actingPrincipal: creatorSession.as.did(),
+        },
+      });
+      const page = await creator.createPage(
+        embeddedChildProgram,
+        creatorSession.space,
+        { run: true },
+      );
+
+      const readerIdentity = await Identity.fromPassphrase(
+        `embedded-child-reader-${globalThis.crypto.randomUUID()}`,
+        keyConfig,
+      );
+      const readerSession = {
+        ...creatorSession,
+        as: readerIdentity,
+      } as Session;
+      await using reader = await createRuntimeClient(readerSession, {
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshot: {
+          id: `principal:${readerSession.as.did()}`,
+          actingPrincipal: readerSession.as.did(),
+        },
+      });
+      const pageForReader = await reader.getPage(
+        page.id(),
+        creatorSession.space,
+        true,
+      );
+      assertExists(pageForReader);
+
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+      const cancel = render(
+        root,
+        pageForReader.cell() as CellHandle<VNode>,
+        renderOptions,
+      );
+
+      try {
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("Parent static visible") &&
+                html.includes("Child join visible"),
+            );
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
     it("dispatches click events through rendered page handlers", async () => {
       const clickPattern =
         `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";

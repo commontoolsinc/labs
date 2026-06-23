@@ -171,6 +171,37 @@ export class WorkerReconciler {
     }
   }
 
+  private demandCell<T>(
+    cell: Cell<T>,
+    onResolved?: (value: Readonly<T>) => void,
+  ): void {
+    try {
+      const promise = cell.pull();
+      if (onResolved) {
+        void promise.then((value) => {
+          onResolved(value);
+        }).catch((error) => {
+          logger.warn("demand-cell", () => [
+            "cell pull failed",
+            error instanceof Error ? error.message : String(error),
+          ]);
+        });
+        return;
+      }
+      void promise.catch((error) => {
+        logger.warn("demand-cell", () => [
+          "cell pull failed",
+          error instanceof Error ? error.message : String(error),
+        ]);
+      });
+    } catch (error) {
+      logger.warn("demand-cell", () => [
+        "cell pull failed",
+        error instanceof Error ? error.message : String(error),
+      ]);
+    }
+  }
+
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
@@ -2159,6 +2190,7 @@ export class WorkerReconciler {
       ) {
         // Same Cell, leave subscription in place
         logger.debug("children-same-cell", () => ({ nodeId: state.nodeId }));
+        existingState.refresh?.();
         return;
       }
 
@@ -2168,30 +2200,41 @@ export class WorkerReconciler {
       }
 
       // Set up new subscription
-      const cancel = (children as Cell<WorkerRenderNode | WorkerRenderNode[]>)
-        .sink(
-          (resolvedChildren) => {
-            logger.debug("children-update", () => ({
-              nodeId: state.nodeId,
-              count: Array.isArray(resolvedChildren)
-                ? resolvedChildren.length
-                : 1,
-            }));
-            this.updateChildren(
-              ctx,
-              state,
-              resolvedChildren,
-              visited,
-              policy,
-              forceReplace,
-            );
-          },
+      let active = true;
+      const updateResolvedChildren = (
+        resolvedChildren: Readonly<WorkerRenderNode | WorkerRenderNode[]>,
+      ) => {
+        if (!active) return;
+        logger.debug("children-update", () => ({
+          nodeId: state.nodeId,
+          count: Array.isArray(resolvedChildren) ? resolvedChildren.length : 1,
+        }));
+        this.updateChildren(
+          ctx,
+          state,
+          resolvedChildren,
+          visited,
+          policy,
+          forceReplace,
         );
+      };
+      const cancel = (children as Cell<WorkerRenderNode | WorkerRenderNode[]>)
+        .sink(updateResolvedChildren);
 
       state.childrenState = {
         cell: children as Cell<unknown>,
-        cancel,
+        cancel: () => {
+          active = false;
+          cancel();
+        },
       };
+      state.childrenState.refresh = () => {
+        this.demandCell(
+          children as Cell<WorkerRenderNode | WorkerRenderNode[]>,
+          updateResolvedChildren,
+        );
+      };
+      state.childrenState.refresh();
     } else {
       // Static children - cancel any existing Cell subscription
       if (state.childrenState) {
@@ -2809,16 +2852,32 @@ export class WorkerReconciler {
 
     // Handle Cell<children>
     if (isCell(children)) {
+      let active = true;
+      const updateResolvedChildren = (
+        resolvedChildren: Readonly<WorkerRenderNode | WorkerRenderNode[]>,
+      ) => {
+        if (!active) return;
+        this.updateChildren(ctx, state, resolvedChildren, visited, policy);
+      };
       const sinkCancel = (
         children as Cell<WorkerRenderNode | WorkerRenderNode[]>
-      ).sink((resolvedChildren) => {
-        this.updateChildren(ctx, state, resolvedChildren, visited, policy);
-      });
+      ).sink(updateResolvedChildren);
       addCancel(sinkCancel);
+      addCancel(() => {
+        active = false;
+      });
+      const refresh = () => {
+        this.demandCell(
+          children as Cell<WorkerRenderNode | WorkerRenderNode[]>,
+          updateResolvedChildren,
+        );
+      };
+      refresh();
       // Track the children Cell for diffing
       state.childrenState = {
         cell: children as Cell<unknown>,
         cancel: sinkCancel,
+        refresh,
       };
     } else {
       // Static children
@@ -3029,259 +3088,264 @@ export class WorkerReconciler {
     };
 
     let currentCancel: Cancel | undefined;
+    let active = true;
 
-    addCancel(
-      cell.sink((resolvedChild) => {
-        const isInitialRender = childState.nodeId === -1;
+    const renderResolvedChild = (resolvedChild: Readonly<unknown>) => {
+      if (!active) return;
+      const isInitialRender = childState.nodeId === -1;
 
-        // Dedupe updates
-        if (!isInitialRender && resolvedChild === childState.currentValue) {
-          return;
-        }
-        childState.currentValue = resolvedChild;
+      // Dedupe updates
+      if (!isInitialRender && resolvedChild === childState.currentValue) {
+        return;
+      }
+      childState.currentValue = resolvedChild;
 
-        if (!this.canRenderCellUnderPolicy(cell, policy)) {
-          if (!isInitialRender) {
-            if (currentCancel) {
-              currentCancel();
-              currentCancel = undefined;
-            }
-            this.cleanupNodeHandlers(childState);
-            this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
-          }
-
-          childState.nodeId = -1;
-          childState.elementState = undefined;
-          childState.isText = false;
-
-          const blockedState = this.createBlockedPlaceholder(ctx, policy);
-          childState.nodeId = blockedState.nodeId;
-          childState.elementState = blockedState;
-          childState.isText = false;
-          currentCancel = blockedState.cancel;
-
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([{
-            op: "insert-child",
-            parentId: parentState.nodeId,
-            childId: blockedState.nodeId,
-            beforeId,
-          }]);
-          return;
-        }
-
-        if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
-          if (!isInitialRender) {
-            if (currentCancel) {
-              currentCancel();
-              currentCancel = undefined;
-            }
-            this.cleanupNodeHandlers(childState);
-            this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
-          }
-
-          childState.nodeId = -1;
-          childState.elementState = undefined;
-          childState.isText = false;
-
-          const blockedState = this.createBlockedPlaceholder(
-            ctx,
-            policy,
-            "integrity",
-          );
-          childState.nodeId = blockedState.nodeId;
-          childState.elementState = blockedState;
-          childState.isText = false;
-          currentCancel = blockedState.cancel;
-
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([{
-            op: "insert-child",
-            parentId: parentState.nodeId,
-            childId: blockedState.nodeId,
-            beforeId,
-          }]);
-          return;
-        }
-
-        // Try to update in place if not initial render
-        if (
-          !isInitialRender &&
-          childState.nodeId !== -1
-        ) {
-          // Case 1: Text update
-          if (
-            childState.isText &&
-            (typeof resolvedChild === "string" ||
-              typeof resolvedChild === "number")
-          ) {
-            this.queueOps([{
-              op: "update-text",
-              nodeId: childState.nodeId,
-              text: String(resolvedChild),
-            }]);
-            return;
-          }
-
-          // Case 2: VNode in-place update (same tag)
-          if (childState.elementState) {
-            const newVNode = this.extractVNode(
-              resolvedChild as WorkerRenderNode,
-            );
-            if (newVNode) {
-              const sanitized = this.sanitizeNode(newVNode);
-              if (
-                sanitized &&
-                sanitized.name === childState.elementState.tagName
-              ) {
-                const childPolicy = this.childRenderPolicyForNode(
-                  sanitized,
-                  policy,
-                  childState.elementState.nodeId,
-                );
-                const policyChildren = this.childrenForRenderPolicy(
-                  sanitized,
-                  childPolicy,
-                );
-                const policyChanged = !this.renderPolicyEquals(
-                  childState.elementState.childRenderPolicy,
-                  childPolicy,
-                ) ||
-                  childState.elementState.childrenBlockedByPolicy !==
-                    policyChildren.blocked;
-                childState.elementState.renderPolicy = policy;
-                childState.elementState.childRenderPolicy = childPolicy;
-                childState.elementState.childrenBlockedByPolicy =
-                  policyChildren.blocked;
-                childState.elementState.sourceChildren = sanitized.children;
-                childState.elementState.sourceProps = sanitized.props;
-                // Same tag - update props in place
-                this.updatePropsInPlace(
-                  ctx,
-                  childState.elementState,
-                  sanitized.props,
-                );
-
-                // Check children: if same, do nothing (sinks active);
-                // if different, tear down and rebuild
-                if (policyChildren.children !== undefined) {
-                  const childrenSame = this.areChildrenSame(
-                    childState.elementState,
-                    policyChildren.children,
-                  );
-                  if (!childrenSame || policyChanged) {
-                    this.resetTextIntegrityBoundary(
-                      childState.elementState,
-                      childPolicy,
-                    );
-                    this.updateChildrenInPlace(
-                      ctx,
-                      childState.elementState,
-                      policyChildren.children,
-                      new Set(),
-                      childPolicy,
-                      policyChanged,
-                    );
-                  }
-                }
-                return;
-              }
-            }
-          }
-        }
-
-        // Fallback: Replace (existing logic)
-        // Clean up previous (skip if initial render - nothing to clean)
+      if (!this.canRenderCellUnderPolicy(cell, policy)) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
             currentCancel = undefined;
           }
-          // Clean up event handlers before removing node
           this.cleanupNodeHandlers(childState);
-          // Log replacement
-          logger.debug(
-            "reconcile-cell-child",
-            () => ({
-              id: childState.nodeId,
-              cellId: this.getCellDebugId(cell),
-              type: "replace",
-              reason: "fallback",
-            }),
-          );
           this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
         }
 
-        // Reset nodeId
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
 
-        if (resolvedChild === null || resolvedChild === undefined) {
+        const blockedState = this.createBlockedPlaceholder(ctx, policy);
+        childState.nodeId = blockedState.nodeId;
+        childState.elementState = blockedState;
+        childState.isText = false;
+        currentCancel = blockedState.cancel;
+
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([{
+          op: "insert-child",
+          parentId: parentState.nodeId,
+          childId: blockedState.nodeId,
+          beforeId,
+        }]);
+        return;
+      }
+
+      if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
+        if (!isInitialRender) {
+          if (currentCancel) {
+            currentCancel();
+            currentCancel = undefined;
+          }
+          this.cleanupNodeHandlers(childState);
+          this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+        }
+
+        childState.nodeId = -1;
+        childState.elementState = undefined;
+        childState.isText = false;
+
+        const blockedState = this.createBlockedPlaceholder(
+          ctx,
+          policy,
+          "integrity",
+        );
+        childState.nodeId = blockedState.nodeId;
+        childState.elementState = blockedState;
+        childState.isText = false;
+        currentCancel = blockedState.cancel;
+
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([{
+          op: "insert-child",
+          parentId: parentState.nodeId,
+          childId: blockedState.nodeId,
+          beforeId,
+        }]);
+        return;
+      }
+
+      // Try to update in place if not initial render
+      if (
+        !isInitialRender &&
+        childState.nodeId !== -1
+      ) {
+        // Case 1: Text update
+        if (
+          childState.isText &&
+          (typeof resolvedChild === "string" ||
+            typeof resolvedChild === "number")
+        ) {
+          this.queueOps([{
+            op: "update-text",
+            nodeId: childState.nodeId,
+            text: String(resolvedChild),
+          }]);
           return;
         }
 
-        // Render new content. Primitive text from a Cell has already passed
-        // source-cell text integrity verification above, so do not reclassify
-        // it as an untrusted literal.
-        const newState = this.hasVisibleTextValue(resolvedChild) &&
-            (typeof resolvedChild === "string" ||
-              typeof resolvedChild === "number" ||
-              typeof resolvedChild === "boolean")
-          ? {
-            nodeId: this.createTextNode(
-              ctx,
-              this.stringifyText(resolvedChild),
-              policy,
-              { trustedText: true },
-            ).nodeId,
-            isText: true,
-            cancel: () => {},
-          }
-          : this.renderChildContent(
-            ctx,
-            resolvedChild,
-            new Set(visited),
-            policy,
+        // Case 2: VNode in-place update (same tag)
+        if (childState.elementState) {
+          const newVNode = this.extractVNode(
+            resolvedChild as WorkerRenderNode,
           );
-        if (newState) {
-          childState.nodeId = newState.nodeId;
-          childState.elementState = newState.elementState;
-          childState.isText = newState.isText;
-          currentCancel = newState.cancel;
+          if (newVNode) {
+            const sanitized = this.sanitizeNode(newVNode);
+            if (
+              sanitized &&
+              sanitized.name === childState.elementState.tagName
+            ) {
+              const childPolicy = this.childRenderPolicyForNode(
+                sanitized,
+                policy,
+                childState.elementState.nodeId,
+              );
+              const policyChildren = this.childrenForRenderPolicy(
+                sanitized,
+                childPolicy,
+              );
+              const policyChanged = !this.renderPolicyEquals(
+                childState.elementState.childRenderPolicy,
+                childPolicy,
+              ) ||
+                childState.elementState.childrenBlockedByPolicy !==
+                  policyChildren.blocked;
+              childState.elementState.renderPolicy = policy;
+              childState.elementState.childRenderPolicy = childPolicy;
+              childState.elementState.childrenBlockedByPolicy =
+                policyChildren.blocked;
+              childState.elementState.sourceChildren = sanitized.children;
+              childState.elementState.sourceProps = sanitized.props;
+              // Same tag - update props in place
+              this.updatePropsInPlace(
+                ctx,
+                childState.elementState,
+                sanitized.props,
+              );
 
-          // Always insert the child into its parent. On initial render,
-          // updateChildren also emits insert-child but may see nodeId=-1
-          // (Cell hasn't resolved yet), making that op a no-op. This
-          // ensures the node is inserted once it actually exists.
-          // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([
-            {
-              op: "insert-child",
-              parentId: parentState.nodeId,
-              childId: newState.nodeId,
-              beforeId,
-            },
-          ]);
+              // Refresh child bindings even when the key shape is unchanged:
+              // an existing Cell<children> subscription may still need an
+              // explicit pull-result render for its converged initial value.
+              if (policyChildren.children !== undefined) {
+                const childrenSame = this.areChildrenSame(
+                  childState.elementState,
+                  policyChildren.children,
+                );
+                if (!childrenSame || policyChanged) {
+                  this.resetTextIntegrityBoundary(
+                    childState.elementState,
+                    childPolicy,
+                  );
+                }
+                this.updateChildrenInPlace(
+                  ctx,
+                  childState.elementState,
+                  policyChildren.children,
+                  new Set(),
+                  childPolicy,
+                  policyChanged,
+                );
+              }
+              return;
+            }
+          }
         }
-      }),
-    );
+      }
+
+      // Fallback: Replace (existing logic)
+      // Clean up previous (skip if initial render - nothing to clean)
+      if (!isInitialRender) {
+        if (currentCancel) {
+          currentCancel();
+          currentCancel = undefined;
+        }
+        // Clean up event handlers before removing node
+        this.cleanupNodeHandlers(childState);
+        // Log replacement
+        logger.debug(
+          "reconcile-cell-child",
+          () => ({
+            id: childState.nodeId,
+            cellId: this.getCellDebugId(cell),
+            type: "replace",
+            reason: "fallback",
+          }),
+        );
+        this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+      }
+
+      // Reset nodeId
+      childState.nodeId = -1;
+      childState.elementState = undefined;
+      childState.isText = false;
+
+      if (resolvedChild === null || resolvedChild === undefined) {
+        return;
+      }
+
+      // Render new content. Primitive text from a Cell has already passed
+      // source-cell text integrity verification above, so do not reclassify
+      // it as an untrusted literal.
+      const newState = this.hasVisibleTextValue(resolvedChild) &&
+          (typeof resolvedChild === "string" ||
+            typeof resolvedChild === "number" ||
+            typeof resolvedChild === "boolean")
+        ? {
+          nodeId: this.createTextNode(
+            ctx,
+            this.stringifyText(resolvedChild),
+            policy,
+            { trustedText: true },
+          ).nodeId,
+          isText: true,
+          cancel: () => {},
+        }
+        : this.renderChildContent(
+          ctx,
+          resolvedChild,
+          new Set(visited),
+          policy,
+        );
+      if (newState) {
+        childState.nodeId = newState.nodeId;
+        childState.elementState = newState.elementState;
+        childState.isText = newState.isText;
+        currentCancel = newState.cancel;
+
+        // Always insert the child into its parent. On initial render,
+        // updateChildren also emits insert-child but may see nodeId=-1
+        // (Cell hasn't resolved yet), making that op a no-op. This
+        // ensures the node is inserted once it actually exists.
+        // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: parentState.nodeId,
+            childId: newState.nodeId,
+            beforeId,
+          },
+        ]);
+      }
+    };
+
+    addCancel(cell.sink(renderResolvedChild));
+    this.demandCell(cell, renderResolvedChild);
 
     // When the cancel group fires (parent teardown), also cancel the current
     // rendered content. Without this, deeper sinks (e.g. children/props of the
     // rendered content) leak because currentCancel is only called on re-fire
     // inside the sink callback, not on teardown.
     addCancel(() => {
+      active = false;
       if (currentCancel) {
         currentCancel();
         currentCancel = undefined;
