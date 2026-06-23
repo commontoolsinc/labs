@@ -272,5 +272,3 @@ export class CFInputOTP extends BaseElement {
     this.focus();
   }
 }
-
-globalThis.customElements.define("cf-input-otp", CFInputOTP);

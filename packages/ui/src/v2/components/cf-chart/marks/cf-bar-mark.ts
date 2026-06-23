@@ -28,8 +28,6 @@ export class CFBarMark extends MarkElement {
   }
 }
 
-customElements.define("cf-bar-mark", CFBarMark);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-bar-mark": CFBarMark;

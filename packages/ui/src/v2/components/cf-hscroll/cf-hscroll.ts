@@ -261,5 +261,3 @@ export class CFHScroll extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-hscroll", CFHScroll);

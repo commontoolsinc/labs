@@ -124,5 +124,3 @@ export class CFHGroup extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-hgroup", CFHGroup);

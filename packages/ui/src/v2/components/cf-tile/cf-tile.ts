@@ -162,5 +162,3 @@ export class CFTile extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-tile", CFTile);

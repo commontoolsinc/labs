@@ -368,5 +368,3 @@ export class CFToolCall extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-tool-call", CFToolCall);

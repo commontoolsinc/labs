@@ -327,5 +327,3 @@ export class CFSwitch extends BaseElement {
     super.blur();
   }
 }
-
-globalThis.customElements.define("cf-switch", CFSwitch);

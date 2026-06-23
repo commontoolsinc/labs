@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFTabList } from "./cf-tab-list.ts";
+import { CFTabList } from "./index.ts";
 
 describe("CFTabList", () => {
   it("should have default properties", () => {

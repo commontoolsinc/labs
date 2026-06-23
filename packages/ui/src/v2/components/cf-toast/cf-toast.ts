@@ -390,5 +390,3 @@ export class CFToast extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-toast", CFToast);

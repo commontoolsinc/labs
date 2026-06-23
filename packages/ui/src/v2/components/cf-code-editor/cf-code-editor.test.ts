@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFCodeEditor, MimeType } from "./cf-code-editor.ts";
+import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
   it("should create element instance", () => {

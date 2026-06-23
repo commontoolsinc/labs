@@ -177,5 +177,3 @@ export class CFToastProvider extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-toast-provider", CFToastProvider);

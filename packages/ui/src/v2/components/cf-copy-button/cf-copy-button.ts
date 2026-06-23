@@ -196,5 +196,3 @@ export class CFCopyButton extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-copy-button", CFCopyButton);

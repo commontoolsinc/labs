@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { initialsForName } from "../cf-avatar/cf-avatar.ts";
+import { initialsForName } from "../cf-avatar/index.ts";
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
@@ -878,10 +878,6 @@ export class CFCFCAuthorship extends BaseElement {
       </section>
     `;
   }
-}
-
-if (!globalThis.customElements.get("cf-cfc-authorship")) {
-  globalThis.customElements.define("cf-cfc-authorship", CFCFCAuthorship);
 }
 
 declare global {

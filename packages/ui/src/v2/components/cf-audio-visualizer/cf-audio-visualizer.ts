@@ -197,5 +197,3 @@ export class CFAudioVisualizer extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-audio-visualizer", CFAudioVisualizer);

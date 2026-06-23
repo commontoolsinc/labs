@@ -469,5 +469,3 @@ export class CFTabs extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-tabs", CFTabs);

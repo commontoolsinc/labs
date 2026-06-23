@@ -305,5 +305,3 @@ export class CFLoader extends BaseElement {
     this._elapsedMs = 0;
   }
 }
-
-globalThis.customElements.define("cf-loader", CFLoader);

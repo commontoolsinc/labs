@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFCopyButton } from "./cf-copy-button.ts";
+import { CFCopyButton } from "./index.ts";
 
 describe("CFCopyButton", () => {
   it("should be defined", () => {

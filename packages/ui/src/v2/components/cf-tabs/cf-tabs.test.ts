@@ -144,7 +144,7 @@ import {
   pushUpdate,
 } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFTabs } from "./cf-tabs.ts";
+import { CFTabs } from "./index.ts";
 
 /**
  * Build a CFTabs instance wired to fake tabs/panels and a mock cell, with its

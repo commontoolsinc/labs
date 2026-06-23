@@ -4,10 +4,7 @@ import {
   createMockCellHandle,
   pushUpdate,
 } from "../../test-utils/mock-cell-handle.ts";
-import {
-  subscribeToThemeCellValues,
-  unwrapThemeCellValues,
-} from "./cf-theme.ts";
+import { subscribeToThemeCellValues, unwrapThemeCellValues } from "./index.ts";
 
 describe("cf-theme reactive theme values", () => {
   it("unwraps top-level CellHandle values before theme merge", () => {

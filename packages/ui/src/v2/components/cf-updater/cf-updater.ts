@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { CFPiece } from "../cf-piece/cf-piece.ts";
+import { CFPiece } from "../cf-piece/index.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
 
 /**
@@ -160,5 +160,3 @@ export class CFUpdater extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-updater", CFUpdater);

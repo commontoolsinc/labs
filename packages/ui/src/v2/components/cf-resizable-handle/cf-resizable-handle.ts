@@ -248,5 +248,3 @@ export class CFResizableHandle extends BaseElement {
     this.emit("cf-handle-adjust", { delta });
   }
 }
-
-globalThis.customElements.define("cf-resizable-handle", CFResizableHandle);

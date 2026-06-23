@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-chip/cf-chip.ts";
+import "../cf-chip/index.ts";
 import type { DID } from "@commonfabric/identity";
 import { navigate } from "@commonfabric/shell/shared";
 
@@ -80,8 +80,6 @@ export class CFSpaceLink extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-space-link", CFSpaceLink);
 
 declare global {
   interface HTMLElementTagNameMap {

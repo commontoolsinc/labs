@@ -24,7 +24,7 @@ import type {
   MapPolyline,
   MapValue,
 } from "./types.ts";
-import "../cf-render/cf-render.ts";
+import "../cf-render/index.ts";
 
 // Default map configuration
 const DEFAULT_CENTER: LatLng = { lat: 37.7749, lng: -122.4194 }; // San Francisco

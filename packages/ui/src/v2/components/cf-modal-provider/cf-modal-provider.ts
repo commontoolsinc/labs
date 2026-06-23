@@ -154,5 +154,3 @@ export class CFModalProvider extends LitElement {
     `;
   }
 }
-
-customElements.define("cf-modal-provider", CFModalProvider);

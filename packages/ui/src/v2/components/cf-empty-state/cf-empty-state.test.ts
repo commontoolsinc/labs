@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFEmptyState } from "./cf-empty-state.ts";
+import { CFEmptyState } from "./index.ts";
 
 describe("CFEmptyState", () => {
   it("should be defined", () => {

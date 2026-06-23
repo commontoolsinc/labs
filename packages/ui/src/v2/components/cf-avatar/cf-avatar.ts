@@ -215,10 +215,6 @@ export class CFAvatar extends BaseElement {
   };
 }
 
-if (!globalThis.customElements.get("cf-avatar")) {
-  globalThis.customElements.define("cf-avatar", CFAvatar);
-}
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-avatar": CFAvatar;

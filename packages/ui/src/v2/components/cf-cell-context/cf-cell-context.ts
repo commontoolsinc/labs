@@ -302,8 +302,6 @@ export class CFCellContext extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-cell-context", CFCellContext);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-cell-context": CFCellContext;

@@ -291,5 +291,3 @@ export class CFRadio extends BaseElement {
     super.blur();
   }
 }
-
-globalThis.customElements.define("cf-radio", CFRadio);

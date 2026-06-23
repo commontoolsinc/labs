@@ -118,5 +118,3 @@ export class CFToolbar extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-toolbar", CFToolbar);

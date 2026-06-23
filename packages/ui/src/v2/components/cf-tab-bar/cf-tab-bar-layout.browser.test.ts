@@ -1,7 +1,5 @@
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import "../cf-screen/cf-screen.ts";
-import "./cf-tab-bar.ts";
-import "./cf-tab-bar-item.ts";
+import "../cf-screen/index.ts";
 
 type UpdatingElement = HTMLElement & {
   updateComplete: Promise<unknown>;

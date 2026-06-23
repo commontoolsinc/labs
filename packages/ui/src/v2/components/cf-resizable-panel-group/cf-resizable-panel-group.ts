@@ -397,8 +397,3 @@ export class CFResizablePanelGroup extends BaseElement {
     });
   }
 }
-
-globalThis.customElements.define(
-  "cf-resizable-panel-group",
-  CFResizablePanelGroup,
-);

@@ -247,5 +247,3 @@ export class CFToggleGroup extends BaseElement {
     this.value = values;
   }
 }
-
-globalThis.customElements.define("cf-toggle-group", CFToggleGroup);

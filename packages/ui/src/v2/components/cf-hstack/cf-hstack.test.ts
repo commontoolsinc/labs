@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFHStack } from "./cf-hstack.ts";
+import { CFHStack } from "./index.ts";
 
 /**
  * Extracts the class info object passed to classMap in render().

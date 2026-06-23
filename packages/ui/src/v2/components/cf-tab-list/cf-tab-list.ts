@@ -191,5 +191,3 @@ export class CFTabList extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-tab-list", CFTabList);

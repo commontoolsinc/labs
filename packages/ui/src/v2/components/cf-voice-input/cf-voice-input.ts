@@ -13,7 +13,7 @@ import {
   defaultTheme,
 } from "../theme-context.ts";
 import { classMap } from "lit/directives/class-map.js";
-import "../cf-audio-visualizer/cf-audio-visualizer.ts";
+import "../cf-audio-visualizer/index.ts";
 import type { CFAudioVisualizer } from "../cf-audio-visualizer/cf-audio-visualizer.ts";
 import { convertToWav } from "../../utils/audio-conversion.ts";
 
@@ -780,5 +780,3 @@ export class CFVoiceInput extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-voice-input", CFVoiceInput);

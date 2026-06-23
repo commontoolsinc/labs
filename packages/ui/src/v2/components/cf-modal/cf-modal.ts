@@ -510,5 +510,3 @@ export class CFModal extends BaseElement {
     `;
   }
 }
-
-customElements.define("cf-modal", CFModal);

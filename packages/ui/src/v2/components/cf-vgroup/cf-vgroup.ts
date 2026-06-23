@@ -107,5 +107,3 @@ export class CFVGroup extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-vgroup", CFVGroup);

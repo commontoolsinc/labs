@@ -441,8 +441,6 @@ export class CFRadioGroup extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-radio-group", CFRadioGroup);
-
 /** Simple value equality for comparing radio values (strings, numbers, etc.) */
 function areLinksSame(a: any, b: any): boolean {
   if (a === b) return true;

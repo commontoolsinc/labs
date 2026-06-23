@@ -2,10 +2,10 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-tool-call/cf-tool-call.ts";
-import "../cf-button/cf-button.ts";
-import "../cf-copy-button/cf-copy-button.ts";
-import "../cf-markdown/cf-markdown.ts";
+import "../cf-tool-call/index.ts";
+import "../cf-button/index.ts";
+import "../cf-copy-button/index.ts";
+import "../cf-markdown/index.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -409,5 +409,3 @@ export class CFChatMessage extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-chat-message", CFChatMessage);

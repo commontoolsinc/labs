@@ -1,8 +1,7 @@
 import { css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
-@customElement("cf-canvas")
 export class CFCanvas extends BaseElement {
   @property({ type: Number })
   accessor width = 800;

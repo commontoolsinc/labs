@@ -183,5 +183,3 @@ export class CFToggle extends BaseElement {
     super.blur();
   }
 }
-
-globalThis.customElements.define("cf-toggle", CFToggle);

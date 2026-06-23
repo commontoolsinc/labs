@@ -33,5 +33,3 @@ export class CFRouter extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-router", CFRouter);
