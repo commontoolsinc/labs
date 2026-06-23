@@ -225,6 +225,16 @@ type SchedulerStorageRehydrationOptions =
     awaitSync?: boolean;
   };
 
+// Defer an action's initial run until its space has finished syncing, without
+// restoring any persisted scheduler observation. Used when persistent scheduler
+// state is disabled and the pattern is resumed from a synced state: the action
+// re-runs, but only once the space is synced, so it reads confirmed-loaded
+// inputs.
+type SchedulerAwaitSyncOptions = {
+  space: MemorySpace;
+  timeoutMs?: number;
+};
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 export type {
@@ -516,19 +526,24 @@ export class Scheduler {
       throttle?: number;
       changeGroup?: ChangeGroup;
       rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
+      awaitSyncBeforeInitialRun?: SchedulerAwaitSyncOptions;
     } = {},
   ): Cancel {
-    const { rehydrateFromStorage } = options;
+    const { rehydrateFromStorage, awaitSyncBeforeInitialRun } = options;
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
     }
+    // Hold the initial run when either restoring persisted scheduler state
+    // (rehydrate) or waiting for the space to finish syncing. Both defer so the
+    // action's first execution reads confirmed-loaded inputs.
     const subscribeOptions = {
       isEffect: options.isEffect,
       debounce: options.debounce,
       noDebounce: options.noDebounce,
       throttle: options.throttle,
       changeGroup: options.changeGroup,
-      deferInitialExecution: rehydrateFromStorage !== undefined,
+      deferInitialExecution: rehydrateFromStorage !== undefined ||
+        awaitSyncBeforeInitialRun !== undefined,
     };
     this.updateMaterializerRegistration(action);
     const cancel = subscribePullSchedulerAction(
@@ -539,6 +554,8 @@ export class Scheduler {
     );
     if (rehydrateFromStorage) {
       this.queueInitialActionRehydration(action, rehydrateFromStorage);
+    } else if (awaitSyncBeforeInitialRun) {
+      this.queueInitialActionRunAfterSync(action, awaitSyncBeforeInitialRun);
     }
     return cancel;
   }
@@ -786,6 +803,43 @@ export class Scheduler {
         return;
       }
       this.scheduleInitialActionRun(action);
+    });
+
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+      if (this.initialRehydrationTokens.get(action) === token) {
+        this.initialRehydrationTokens.delete(action);
+      }
+    });
+  }
+
+  // Defer an action's first run until its space has finished syncing, then
+  // schedule it. No persisted observation is consulted (that is the rehydration
+  // path); the action always runs, just once the space is synced so it derives
+  // from confirmed-loaded inputs. A stuck sync is bounded by the timeout, after
+  // which the action runs anyway. Shares the initial-rehydration token so a
+  // superseding run cancels this deferral.
+  private queueInitialActionRunAfterSync(
+    action: Action,
+    options: SchedulerAwaitSyncOptions,
+  ): void {
+    const token = Symbol("scheduler-initial-await-sync");
+    this.initialRehydrationTokens.set(action, token);
+    const task = (async () => {
+      await this.awaitSpaceSyncedWithTimeout(options.space, options.timeoutMs);
+      if (this.canApplyInitialActionRehydration(action, token)) {
+        this.scheduleInitialActionRun(action);
+      }
+    })().catch((error) => {
+      logger.warn("scheduler-rehydrate", () => [
+        "Failed to await sync before initial run; running now",
+        this.getActionId(action),
+        error,
+      ]);
+      if (this.canApplyInitialActionRehydration(action, token)) {
+        this.scheduleInitialActionRun(action);
+      }
     });
 
     this.backgroundTasks.add(task);
