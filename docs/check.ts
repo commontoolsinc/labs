@@ -378,25 +378,43 @@ export function render(ctx: Context, rawBody: string, docDir: string): string {
 
 // --- runner ----------------------------------------------------------------
 
-async function denoCheck(paths: string[]): Promise<number> {
-  const { code } = await new Deno.Command("deno", {
-    args: ["check", "--no-lock", ...paths],
-    cwd: dirname(DOCS_DIR),
-    stdout: "null",
-    stderr: "null",
-  }).output();
-  return code;
-}
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const PARSE_ABORT =
+  /SyntaxError|Expression expected|Declaration or statement expected|cannot be used outside of modules/;
 
-async function checkFile(path: string): Promise<string> {
+async function denoCheck(paths: string[]): Promise<{ code: number; out: string }> {
   const { code, stdout, stderr } = await new Deno.Command("deno", {
-    args: ["check", "--no-lock", path],
+    args: ["check", "--no-lock", ...paths],
     cwd: dirname(DOCS_DIR),
     stdout: "piped",
     stderr: "piped",
   }).output();
-  if (code === 0) return "";
-  return new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr);
+  const out = new TextDecoder().decode(stdout) +
+    new TextDecoder().decode(stderr);
+  return { code, out };
+}
+
+async function checkFile(path: string): Promise<string> {
+  const { code, out } = await denoCheck([path]);
+  return code === 0 ? "" : out;
+}
+
+// Group a batched `deno check` output's errors by the temp file (`bN`) they
+// reference, so a failure can be attributed without re-checking each file.
+function attribute(out: string): Map<string, string[]> {
+  const byId = new Map<string, string[]>();
+  let lastMsg = "";
+  for (const line of out.replace(ANSI, "").split("\n")) {
+    const mm = line.match(/^(TS\d+ \[ERROR\]:.*|error: (?!Type checking).*)$/);
+    if (mm) lastMsg = mm[1];
+    const am = line.match(/at file:\/\/.*\/(b\d+)\.(?:ts|tsx):/);
+    if (am && lastMsg) {
+      const arr = byId.get(am[1]) ?? [];
+      if (!arr.includes(lastMsg)) arr.push(lastMsg);
+      byId.set(am[1], arr);
+    }
+  }
+  return byId;
 }
 
 async function pool<T, R>(
@@ -421,6 +439,7 @@ interface Job {
   block: Block;
   ctx: Context;
   tmp: string;
+  id: string;
 }
 
 async function run(tmpDir: string): Promise<number> {
@@ -437,42 +456,61 @@ async function run(tmpDir: string): Promise<number> {
   blocks.forEach((block, idx) => {
     const { ctx, body } = detectContext(block.body);
     if (ctx === "skip") return;
-    const tmp = join(tmpDir, `b${idx}.${extFor(block.lang, ctx, body)}`);
+    const id = `b${idx}`;
+    const tmp = join(tmpDir, `${id}.${extFor(block.lang, ctx, body)}`);
     Deno.writeTextFileSync(tmp, render(ctx, body, block.docDir));
-    jobs.push({ block, ctx, tmp });
+    jobs.push({ block, ctx, tmp, id });
   });
+  const byId = new Map(jobs.map((j) => [j.id, j]));
 
-  // Fast path: type-check the temp files in a few batched invocations (the
-  // framework graph is then resolved once and shared). Only if a batch reports
-  // an error do we re-check its files individually, to attribute it precisely.
-  const CHUNK = 120;
+  // Type-check the temp files in a few large batched invocations: the framework
+  // graph is resolved once per batch and shared across its files. A failure is
+  // attributed by parsing the batch's output; only if a failed batch yields no
+  // attributable error (e.g. a parse abort hides later files) do we fall back to
+  // re-checking that batch's files one at a time.
+  const CHUNK = 250;
   const chunks: Job[][] = [];
   for (let i = 0; i < jobs.length; i += CHUNK) {
     chunks.push(jobs.slice(i, i + CHUNK));
   }
-  const codes = await pool(chunks, 4, (c) => denoCheck(c.map((j) => j.tmp)));
+  const results = await pool(chunks, 3, (c) => denoCheck(c.map((j) => j.tmp)));
 
   let failures = 0;
-  const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
-  if (codes.some((c) => c !== 0)) {
-    const outputs = await pool(jobs, 8, (j) => checkFile(j.tmp));
-    jobs.forEach((job, i) => {
-      const out = outputs[i];
-      if (!out) return;
-      failures++;
-      const clean = out.replace(ansi, "").split("\n")
-        .filter((l) => /TS\d+|error:|SyntaxError|^\s+at /.test(l))
-        .slice(0, 12).join("\n");
-      console.error(
-        `\n✗ ${job.block.file}:${job.block.fenceLine} (context: ${job.ctx})\n${clean}`,
-      );
+  const report = (job: Job, msgs: string[]) => {
+    failures++;
+    console.error(
+      `\n✗ ${job.block.file}:${job.block.fenceLine} (context: ${job.ctx})\n${
+        msgs.slice(0, 8).join("\n")
+      }`,
+    );
+  };
+  const perFile = async (chunk: Job[]) => {
+    const outs = await pool(chunk, 8, (j) => checkFile(j.tmp));
+    chunk.forEach((job, i) => {
+      if (outs[i]) {
+        report(
+          job,
+          outs[i].replace(ANSI, "").split("\n").filter((l) =>
+            /TS\d+|error:|SyntaxError/.test(l)
+          ),
+        );
+      }
     });
-    if (!failures) {
-      console.error(
-        "A batched check reported an error that did not reproduce per-file; " +
-          "re-run to diagnose.",
-      );
-      return 1;
+  };
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (results[ci].code === 0) continue;
+    const out = results[ci].out;
+    const errs = attribute(out);
+    // A parse error aborts the whole batch and hides the other files' errors, so
+    // re-check the chunk one file at a time to report them all. Pure type errors
+    // do not abort, so the batch output already names every failing block.
+    if (errs.size === 0 || PARSE_ABORT.test(out)) {
+      await perFile(chunks[ci]);
+    } else {
+      for (const [id, msgs] of errs) {
+        const job = byId.get(id);
+        if (job) report(job, msgs);
+      }
     }
   }
 
