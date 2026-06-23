@@ -62,8 +62,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     (poll.options ?? []).length === 1 &&
     poll.options?.[0]?.title === "Sushi" &&
     poll.options?.[0]?.homePageUrl === "" &&
-    poll.options?.[0]?.homePageUrlOverride === "" &&
-    poll.options?.[0]?.imageUrl === ""
+    poll.options?.[0]?.homePageUrlOverride === ""
   );
   const assert_own_vote = computed(() =>
     (poll.votes ?? []).length === 1 &&

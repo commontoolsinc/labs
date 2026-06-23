@@ -78,8 +78,6 @@ export interface Option {
   // can refresh it. `homePageUrlOverride` is a human-supplied link that wins.
   homePageUrl?: string;
   homePageUrlOverride?: string;
-  // Host-generated dish illustration, shared after the host receives it.
-  imageUrl?: string;
 }
 
 const WEB_SEARCH_URL = "/api/agent-tools/web-search";
@@ -242,13 +240,6 @@ const safeHttpUrl = (raw: string | undefined): string => {
   return httpsOrNull(s) ?? httpsOrNull(`https://${s}`) ?? "";
 };
 
-const safeImageUrl = (raw: string | undefined): string => {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  if (s.startsWith("data:image/")) return s;
-  return safeHttpUrl(s);
-};
-
 const homePageLookupUrlFor = (
   isAdmin: boolean,
   _refresh: number,
@@ -332,7 +323,6 @@ const addOption = handler<AddOptionEvent, {
     addedByName: me,
     homePageUrl: "",
     homePageUrlOverride: "",
-    imageUrl: "",
   });
   optionDraft.set("");
 });
@@ -417,27 +407,6 @@ const setOptionUrl = handler<SetOptionUrlEvent, {
   options.key(idx).key("homePageUrlOverride").set(safe);
   linkDraft.set("");
   linkEditTarget.set(null);
-});
-
-export interface SetOptionImageEvent {
-  optionId: string;
-  imageUrl?: string;
-}
-
-const setOptionImage = handler<SetOptionImageEvent, {
-  options: OptionsCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>(({ optionId, imageUrl }, { options, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  const cur = options.get();
-  const idx = cur.findIndex((o) => o.id === optionId);
-  if (idx < 0) return;
-  const safe = safeImageUrl(imageUrl);
-  if (!safe || trimmedName(cur[idx]?.imageUrl) === safe) return;
-  options.key(idx).key("imageUrl").set(safe);
 });
 
 const removeOption = handler<RemoveOptionEvent, {
@@ -823,11 +792,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       linkEditTarget,
     });
     const boundSetOptionHomePageUrl = setOptionHomePageUrl({
-      options,
-      myName,
-      adminName,
-    });
-    const boundSetOptionImage = setOptionImage({
       options,
       myName,
       adminName,
@@ -1245,7 +1209,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     addedByName: option.addedByName,
                     homePageUrl: option.homePageUrl,
                     homePageUrlOverride: option.homePageUrlOverride,
-                    imageUrl: option.imageUrl,
                   };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
@@ -1272,7 +1235,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       logVisit={boundLogVisit}
                       setOptionUrl={boundSetOptionUrl}
                       setOptionHomePageUrl={boundSetOptionHomePageUrl}
-                      setOptionImage={boundSetOptionImage}
                     />
                   );
                 })}

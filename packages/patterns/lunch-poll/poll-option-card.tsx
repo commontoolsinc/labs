@@ -10,17 +10,11 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import {
-  FOOD_FALLBACK_IMAGE,
-  type GeneratedArtFetchState,
-  generatedImageUrlFor,
-} from "./generated-art.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
-  SetOptionImageEvent,
   SetOptionUrlEvent,
   Vote,
   VoteColor,
@@ -35,38 +29,11 @@ export type PollOptionNameCell = Writable<string | Default<"">>;
 /** Parent-owned counter cell that retriggers admin homepage lookup. */
 export type PollOptionHomePageRefreshCell = Writable<number>;
 
-/** Admin-side generated art persistence state exposed for tests and observers. */
-export type PollOptionArtSyncState = GeneratedArtFetchState;
-
 interface WebSearchResponse {
   results?: Array<{ title?: string; url?: string; description?: string }>;
 }
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
-
-const httpsOrNull = (candidate: string): string | null => {
-  try {
-    const u = new URL(candidate);
-    return (u.protocol === "http:" || u.protocol === "https:")
-      ? u.toString()
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const safeHttpUrl = (raw: string | undefined): string => {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  return httpsOrNull(s) ?? httpsOrNull(`https://${s}`) ?? "";
-};
-
-const safeImageUrl = (raw: string | undefined): string => {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  if (s.startsWith("data:image/")) return s;
-  return safeHttpUrl(s);
-};
 
 const homePageLookupUrlFor = (
   isAdmin: boolean,
@@ -132,10 +99,9 @@ const myVoteFor = (
  * PollOptionCard renders one complete ranked restaurant option row.
  *
  * Use it when a parent pattern already owns option, vote, viewer, and admin
- * state and wants composed UI for voting, homepage display/edit/lookup,
- * admin-only remove/history actions, and generated-art persistence. This is
- * not a standalone vote engine; durable mutations happen through the input
- * streams supplied by the parent.
+ * state and wants composed UI for voting, homepage display/edit/lookup, and
+ * admin-only remove/history actions. This is not a standalone vote engine;
+ * durable mutations happen through the input streams supplied by the parent.
  */
 
 /**
@@ -198,16 +164,13 @@ export interface PollOptionCardInput {
 
   /** Parent-owned admin stream that persists an auto-discovered homepage. */
   setOptionHomePageUrl: Stream<SetOptionUrlEvent>;
-
-  /** Parent-owned admin stream that persists generated art for other viewers. */
-  setOptionImage: Stream<SetOptionImageEvent>;
 }
 
 /**
  * Outputs for one rendered ranked option row.
  *
  * Parents normally embed this sub-pattern with JSX. Use function-call
- * instantiation only when reading `artSyncState` or `homePageUrl`.
+ * instantiation only when reading `homePageUrl`.
  */
 export interface PollOptionCardOutput {
   /** Human-readable pattern name, matching the option title. */
@@ -215,19 +178,6 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
-
-  /** Admin-side generated art persistence state. */
-  artSyncState: PollOptionArtSyncState;
-
-  /**
-   * The art-generation request URL the host-only gate produces: the
-   * `/api/ai/img` endpoint when a host views an option with no stored image,
-   * and `""` otherwise (non-host, or a stored image already present). Unlike
-   * `artSyncState` this does not depend on the `fetchData` result, so it is the
-   * directly-observable signal that the `isAdmin` gate opened — exposed so tests
-   * can guard the dependency-capture fix without a live image endpoint.
-   */
-  generatedArtRequestUrl: string;
 
   /** Display homepage URL after stored, edited, or verified lookup resolution. */
   homePageUrl: string;
@@ -253,7 +203,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       logVisit,
       setOptionUrl,
       setOptionHomePageUrl,
-      setOptionImage,
     },
   ) => {
     const oid = option.id;
@@ -261,38 +210,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
     const refresh = computed(() => Number(homePageRefresh.get() ?? 0));
-    const storedImageDisplay = computed(() =>
-      safeImageUrl(option.imageUrl) ? "block" : "none"
-    );
-    const generatedArtRequestUrl = computed(() => {
-      if (safeImageUrl(option.imageUrl)) return "";
-      if (!isAdmin) return "";
-      return generatedImageUrlFor(option.title);
-    });
-    const generatedArt = fetchData<string>({
-      url: generatedArtRequestUrl,
-      mode: "dataUrl",
-      options: {
-        mutexTimeoutMs: 30_000,
-      },
-    });
-
-    // Host persists the generated image returned by the image route as a data
-    // URL. Other viewers render the stored value without running image-gen.
-    const artSyncState = computed(() => {
-      if (safeImageUrl(option.imageUrl)) return "stored";
-      if (!isAdmin) return "";
-      const generatedUrl = safeImageUrl(generatedArt.result ?? "");
-      if (generatedUrl) {
-        setOptionImage.send({
-          optionId: oid,
-          imageUrl: generatedUrl,
-        });
-        return "stored";
-      }
-      if (generatedArt.pending) return "pending";
-      return generatedArt.error ? "error" : "requested";
-    });
 
     const homePageSearch = fetchData<WebSearchResponse>({
       url: computed(() =>
@@ -408,38 +325,8 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             alignItems: "center",
             gap: "10px",
           }}
-          data-art-sync={artSyncState}
           data-homepage-sync={displayHomePageUrl}
         >
-          {/* Pen-and-ink cuisine illustration (~1in square). */}
-          <div
-            style={{
-              width: "96px",
-              height: "96px",
-              flexShrink: 0,
-              borderRadius: "8px",
-              overflow: "hidden",
-              backgroundColor: "#f9fafb",
-              backgroundImage: `url("${FOOD_FALLBACK_IMAGE}")`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-              border: "1px solid #eee",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <img
-              src={option.imageUrl}
-              alt=""
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: storedImageDisplay,
-              }}
-            />
-          </div>
           <span
             style={{
               minWidth: "28px",
@@ -713,8 +600,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
-      artSyncState,
-      generatedArtRequestUrl,
       homePageUrl: displayHomePageUrl,
     };
   },
