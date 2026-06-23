@@ -1,6 +1,6 @@
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
-import { FabricCellLink } from "./FabricCellLink.ts";
+import { FabricLink } from "./FabricLink.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
@@ -8,10 +8,7 @@ import { FabricRegExp } from "./FabricRegExp.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { FabricBytes } from "./FabricBytes.ts";
-export {
-  FabricCellLink,
-  type FabricCellLinkPayload,
-} from "./FabricCellLink.ts";
+export { FabricLink, type FabricLinkPayload } from "./FabricLink.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";
 export { FabricEpochNsec } from "./FabricEpochNsec.ts";
@@ -31,7 +28,7 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
 
 const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   FabricBytes,
-  FabricCellLink,
+  FabricLink,
   FabricHash,
   FabricEpochNsec,
   FabricEpochDays,

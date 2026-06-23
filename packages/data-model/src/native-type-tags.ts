@@ -2,7 +2,7 @@ import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricCellLink } from "@/fabric-primitives/FabricCellLink.ts";
+import { FabricLink } from "@/fabric-primitives/FabricLink.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
@@ -35,7 +35,7 @@ export const NATIVE_TAGS = Object.freeze(
     HasToJSON: "HasToJSON",
     Hash: "Hash",
     FabricBytes: "FabricBytes",
-    FabricCellLink: "FabricCellLink",
+    FabricLink: "FabricLink",
     FabricRegExp: "FabricRegExp",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
@@ -87,8 +87,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.RegExp;
     case FabricBytes:
       return NATIVE_TAGS.FabricBytes;
-    case FabricCellLink:
-      return NATIVE_TAGS.FabricCellLink;
+    case FabricLink:
+      return NATIVE_TAGS.FabricLink;
     case FabricEpochNsec:
       return NATIVE_TAGS.EpochNsec;
     case FabricEpochDays:

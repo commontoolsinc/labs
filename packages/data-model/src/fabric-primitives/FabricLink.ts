@@ -1,6 +1,6 @@
 import type {
-  FabricCellLink as ApiFabricCellLink,
-  FabricCellLinkConstructor as ApiFabricCellLinkConstructor,
+  FabricLink as ApiFabricLink,
+  FabricLinkConstructor as ApiFabricLinkConstructor,
 } from "@commonfabric/api";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
@@ -17,30 +17,30 @@ import {
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
- * The payload of a {@link FabricCellLink}: a map of string keys to values that
+ * The payload of a {@link FabricLink}: a map of string keys to values that
  * are each either a `string` or an array of `string`s.
  *
  * This is structurally identical to cell-rep's `WireLinkRefPayload` — the
- * provably-plain-JSON addressing fields of a cell link (`id`, `space`, `scope`,
+ * provably-plain-JSON addressing fields of a link (`id`, `space`, `scope`,
  * `path`, `overwrite`). The two are kept as independent declarations rather than
  * one importing the other: `WireLinkRefPayload` names the subset that crosses a
  * *string* boundary, while this names the in-memory primitive's slot; they
  * coincide today but answer to different layers. `@commonfabric/api` mirrors
  * this shape too, pinned to the class via `implements` / `satisfies` below.
  */
-export type FabricCellLinkPayload = {
+export type FabricLinkPayload = {
   readonly [key: string]: string | readonly string[];
 };
 
 /**
- * Immutable cell-link value in the fabric type system: the modern,
- * primitive-shaped form of a `{ "/": { "link@1": … } }` link reference. It holds
+ * Immutable link value in the fabric type system: the modern, primitive-shaped
+ * form of a `{ "/": { "link@1": … } }` link reference. It holds
  * the link's addressing payload — a flat map of string keys to `string` or
- * `string[]` values (see {@link FabricCellLinkPayload}).
+ * `string[]` values (see {@link FabricLinkPayload}).
  *
  * **No outgoing references.** Although the payload is map-shaped, its values are
  * leaf data (strings and arrays of strings), not nested `FabricValue`s with an
- * independent reference life. So a `FabricCellLink` is a leaf with respect to the
+ * independent reference life. So a `FabricLink` is a leaf with respect to the
  * reference graph — which is why it is a `FabricPrimitive` (no `[DEEP_FREEZE]`
  * recursion to perform) rather than a `FabricInstance`.
  *
@@ -51,13 +51,12 @@ export type FabricCellLinkPayload = {
  * freezes `this`. The caller retains no mutable shared structure with the
  * instance.
  */
-export class FabricCellLink extends BaseFabricPrimitive
-  implements ApiFabricCellLink {
+export class FabricLink extends BaseFabricPrimitive implements ApiFabricLink {
   /** The deeply-frozen addressing payload. */
-  readonly #payload: FabricCellLinkPayload;
+  readonly #payload: FabricLinkPayload;
 
   /**
-   * Constructs a `FabricCellLink` from an addressing payload. The payload must
+   * Constructs a `FabricLink` from an addressing payload. The payload must
    * be a plain object whose every value is a `string` or an array of `string`s,
    * with no prototype-pollution keys; otherwise the constructor throws (death
    * before confusion). The (validated) input is passed through
@@ -67,7 +66,7 @@ export class FabricCellLink extends BaseFabricPrimitive
    * @param payload - The addressing payload (not mutated; copied only if not
    *   already deep-frozen).
    */
-  constructor(payload: FabricCellLinkPayload) {
+  constructor(payload: FabricLinkPayload) {
     super();
     assertValidPayload(payload);
     this.#payload = cloneIfNecessary(payload);
@@ -83,7 +82,7 @@ export class FabricCellLink extends BaseFabricPrimitive
    * index directly; every value (and any array value) is frozen, so there is
    * nothing to defensively copy.
    */
-  get payload(): FabricCellLinkPayload {
+  get payload(): FabricLinkPayload {
     return this.#payload;
   }
 
@@ -92,13 +91,13 @@ export class FabricCellLink extends BaseFabricPrimitive
   //
 
   static #codec = Object.freeze(
-    new (class CellLinkCodec extends BaseFabricCodec {
+    new (class LinkCodec extends BaseFabricCodec {
       constructor() {
-        super(CODEC_TYPE_TAGS.CellLink, FabricCellLink);
+        super(CODEC_TYPE_TAGS.Link, FabricLink);
       }
 
       /** @inheritDoc */
-      encode(value: FabricCellLink): FabricValue {
+      encode(value: FabricLink): FabricValue {
         // The payload is already a deeply-frozen plain object of `string` /
         // `string[]` values -- itself a valid `FabricValue` -- so it serializes
         // as-is.
@@ -115,12 +114,12 @@ export class FabricCellLink extends BaseFabricPrimitive
         // every value `string` / `string[]`) and throws on any violation, so
         // bad state simply falls into the `catch` below.
         try {
-          return new FabricCellLink(state as FabricCellLinkPayload);
+          return new FabricLink(state as FabricLinkPayload);
         } catch (e) {
           return new ProblematicValue(
             typeTag,
             state,
-            `CellLink: ${e instanceof Error ? e.message : String(e)}`,
+            `Link: ${e instanceof Error ? e.message : String(e)}`,
           );
         }
       }
@@ -134,33 +133,33 @@ export class FabricCellLink extends BaseFabricPrimitive
 }
 
 /**
- * Validates that `payload` is a well-formed {@link FabricCellLinkPayload}: a
+ * Validates that `payload` is a well-formed {@link FabricLinkPayload}: a
  * plain object with no prototype-pollution keys whose every value is a `string`
  * or an array of `string`s. Throws otherwise. This guards only the shape;
  * producing the deep-frozen slot is left to `cloneIfNecessary()`.
  */
 function assertValidPayload(
-  payload: FabricCellLinkPayload,
-): asserts payload is FabricCellLinkPayload {
+  payload: FabricLinkPayload,
+): asserts payload is FabricLinkPayload {
   if (!isPlainObject(payload)) {
-    throw new Error("Cell-link payload must be a plain object.");
+    throw new Error("Link payload must be a plain object.");
   }
   for (const [key, value] of Object.entries(payload)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cell-link payload has a forbidden key: "${key}".`);
+      throw new Error(`Link payload has a forbidden key: "${key}".`);
     }
     const ok = typeof value === "string" ||
       (Array.isArray(value) && value.every((e) => typeof e === "string"));
     if (!ok) {
       throw new Error(
-        `Cell-link payload field "${key}" must be a \`string\` or ` +
+        `Link payload field "${key}" must be a \`string\` or ` +
           `\`string[]\`.`,
       );
     }
   }
 }
 
-// Compile-time check that the exported `FabricCellLink` constructor matches the
-// `FabricCellLinkConstructor` declared in `@commonfabric/api`. This catches
+// Compile-time check that the exported `FabricLink` constructor matches the
+// `FabricLinkConstructor` declared in `@commonfabric/api`. This catches
 // drift between the public type contract and this implementation.
-FabricCellLink satisfies ApiFabricCellLinkConstructor;
+FabricLink satisfies ApiFabricLinkConstructor;

@@ -116,29 +116,28 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
- * The payload of a `FabricCellLink`: a flat map of string keys to `string` or
- * `string[]` values (a cell link's addressing fields).
+ * The payload of a `FabricLink`: a flat map of string keys to `string` or
+ * `string[]` values (a link's addressing fields).
  */
-export interface FabricCellLinkPayload {
+export interface FabricLinkPayload {
   readonly [key: string]: string | readonly string[];
 }
 
 /**
- * The modern, primitive-shaped form of a cell-link reference, holding the
- * link's addressing payload. Extends `FabricPrimitive` -- treated like a
- * primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
+ * The modern, primitive-shaped form of a link reference, holding the link's
+ * addressing payload. Extends `FabricPrimitive` -- treated like a primitive in
+ * the fabric type system (always frozen, passes through conversion unchanged).
  */
-export interface FabricCellLink extends FabricPrimitive {
-  readonly payload: FabricCellLinkPayload;
+export interface FabricLink extends FabricPrimitive {
+  readonly payload: FabricLinkPayload;
 }
 
-export interface FabricCellLinkConstructor {
-  new (payload: FabricCellLinkPayload): FabricCellLink;
-  prototype: FabricCellLink;
+export interface FabricLinkConstructor {
+  new (payload: FabricLinkPayload): FabricLink;
+  prototype: FabricLink;
 }
 
-export declare const FabricCellLink: FabricCellLinkConstructor;
+export declare const FabricLink: FabricLinkConstructor;
 
 /**
  * The full set of values that the fabric storage layer can represent.

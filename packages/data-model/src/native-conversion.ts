@@ -101,7 +101,7 @@ export function shallowFabricFromNativeValue(
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
     case NATIVE_TAGS.FabricBytes:
-    case NATIVE_TAGS.FabricCellLink:
+    case NATIVE_TAGS.FabricLink:
     case NATIVE_TAGS.FabricRegExp:
     case NATIVE_TAGS.Hash:
       return value as FabricValueLayer;
