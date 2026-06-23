@@ -116,19 +116,19 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
- * The payload of a `FabricLink`: a flat map of string keys to `string` or
- * `string[]` values (a link's addressing fields).
+ * The payload of a `FabricLink`: the record a link wraps (its addressing fields
+ * plus an optional `schema`). A `FabricObject`, since a link's `schema` is an
+ * arbitrary `FabricValue`.
  */
-export interface FabricLinkPayload {
-  readonly [key: string]: string | readonly string[];
-}
+export type FabricLinkPayload = FabricObject;
 
 /**
- * The modern, primitive-shaped form of a link reference, holding the link's
- * addressing payload. Extends `FabricPrimitive` -- treated like a primitive in
- * the fabric type system (always frozen, passes through conversion unchanged).
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload. Extends `FabricInstance` (not `FabricPrimitive`): the
+ * payload is an outgoing reference (it may carry an arbitrary-`FabricValue`
+ * `schema`), so a link is a small object graph, not a leaf.
  */
-export interface FabricLink extends FabricPrimitive {
+export interface FabricLink extends FabricInstance {
   readonly payload: FabricLinkPayload;
 }
 

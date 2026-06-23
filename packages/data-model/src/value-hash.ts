@@ -20,7 +20,6 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricLink } from "@/fabric-primitives/FabricLink.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
@@ -53,7 +52,6 @@ const TAG_EPOCH_DAYS = 0x28;
 const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
-const TAG_LINK = 0x2c;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -79,7 +77,6 @@ const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
-const TAG_LINK_BYTES = new Uint8Array([TAG_LINK]);
 
 //
 // Core: recursive value feeding
@@ -320,16 +317,6 @@ function feedObjectValue(
       feedValue(hasher, fab.source);
       feedValue(hasher, fab.flags);
       feedValue(hasher, fab.flavor);
-      return;
-    }
-
-    case NATIVE_TAGS.FabricLink: {
-      const fab = value as FabricLink;
-      hasher.update(TAG_LINK_BYTES);
-      // The payload is a plain object of `string` / `string[]` values; feed it
-      // as such. The leading tag keeps the result distinct from a bare plain
-      // object with the same fields.
-      feedValue(hasher, fab.payload);
       return;
     }
 

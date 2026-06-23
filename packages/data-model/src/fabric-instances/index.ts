@@ -1,5 +1,6 @@
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
+import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
 import { FabricSet } from "./FabricSet.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
@@ -11,6 +12,7 @@ export { ProblematicValue } from "./ProblematicValue.ts";
 export { UnknownValue } from "./UnknownValue.ts";
 export { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 export { FabricError, type FabricErrorState } from "./FabricError.ts";
+export { FabricLink, type FabricLinkPayload } from "./FabricLink.ts";
 export { FabricMap } from "./FabricMap.ts";
 export { FabricSet } from "./FabricSet.ts";
 
@@ -33,6 +35,7 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
 
 const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   FabricError,
+  FabricLink,
   FabricMap,
   FabricSet,
   ProblematicValue,
