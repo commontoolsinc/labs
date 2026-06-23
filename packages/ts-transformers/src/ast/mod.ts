@@ -85,6 +85,7 @@ export {
   isAnyOrUnknownType,
   isAnyType,
   isCellLikeType,
+  isCollectionType,
   isUnknownType,
   isUnresolvedSchemaType,
   registerSyntheticCallType,

@@ -4,6 +4,7 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   getTypeAtLocationWithFallback,
+  isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
@@ -926,38 +927,25 @@ export function isArrayMethodValueLiftOwner(
  * Comparison/arithmetic/unary results are never collections, so they are
  * unaffected, exactly as before.
  *
- * `getTypeAtLocationWithFallback` (not a bare `getTypeAtLocation`) consults the
- * typeRegistry so the synthetic destructure-lowered lift params the checker types
- * as `any` (#4244) still resolve. The union arm mirrors `isArrayLikeReceiverType`
- * in expression-site-lowering.ts: a homogeneous `i.tags ?? []` collapses to a
- * single `string[]` (caught by the array/tuple arm), but a `??` between
- * differently-typed arrays — `map(i => i.primary ?? i.fallback)` over
- * `string[]` / `number[]` — resolves to a union of array members
- * (`string[] | number[]`) that a bare `isArrayType` returns false for, which
- * would wrongly lift a collection-valued return.
+ * Resolution uses `getTypeAtLocationWithFallback` (not a bare `getTypeAtLocation`)
+ * so the synthetic destructure-lowered lift params the checker types as `any`
+ * (#4244) still resolve; the collection test itself — including the union-of-arrays
+ * case a bare `isArrayType` would miss — is shared with the sibling lowering and
+ * provenance sites via `isCollectionType`.
  */
 function arrayMethodCallbackValueResolvesToCollection(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  const { checker } = context;
-  const type = getTypeAtLocationWithFallback(
-    expression,
-    checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+  return isCollectionType(
+    getTypeAtLocationWithFallback(
+      expression,
+      context.checker,
+      context.options.state?.typeRegistry,
+      context.options.logger,
+    ),
+    context.checker,
   );
-  if (!type) {
-    return false;
-  }
-  if (checker.isArrayType(type) || checker.isTupleType(type)) {
-    return true;
-  }
-  return type.isUnion() &&
-    type.types.length > 0 &&
-    type.types.every((member) =>
-      checker.isArrayType(member) || checker.isTupleType(member)
-    );
 }
 
 function classifyHelperOwnedExpressionSiteHandling(
