@@ -61,8 +61,11 @@ subset**, emit an **operator op** into the graph instead of `createLiftAppliedCa
 - **binary** (`+ - * / % ** | & ^ << >>`, `< > <= >= == === != !==`) →
   one `expr` op per operator (today: `emitBinaryExpression` →
   lift-applied leaf, `binary-expression.ts:218`).
-- **unary** (`! - + ~ typeof`) → `expr` op (today: `prefix-unary-expression.ts` →
-  leaf).
+- **unary** → `expr` op. ⚠️ Correction (review E-3): only `!` has a dedicated
+  emitter today (`prefix-unary-expression.ts`); `-x`/`+x`/`~x`/`typeof x` fall
+  through to the enclosing-site wrapper, so migration *adds* coverage for those,
+  it does not swap a leaf. **Exclude `typeof` from the v1 supported set** (it
+  clashes with the evaluator's `undefined`-on-unresolved convention).
 - **conditional `?:`** → a native ternary `expr` op (today: → `ifElse` builtin,
   `conditional-expression.ts:175`).
 - **logical `&&` / `||`** → native `expr` ops (today: → `when`/`unless`,
@@ -196,3 +199,65 @@ eligibility predicate over the seven expression-site kinds, minus literal
 `computed`/`lift` calls). The measurement answers: **how much of a real loaded
 pattern's computation moves from opaque-SES-leaf to natively-interpreted operator
 ops** — i.e. how much the serialized boundary shrinks.
+
+## 9. Prototype + adversarial review findings (2026-06-24)
+
+A coverage prototype (`packages/patterns/tools/expr-interp-coverage-probe.ts`,
+pre-transform AST over 10 real patterns) + an independent design review returned
+**GO-WITH-FIXES** and **materially refined the scope**.
+
+### 9.1 Coverage — the scope lever is *single-expression computes*, not "auto"
+
+| metric | value |
+| --- | --- |
+| (A) auto-generated expression sites → operator ops (no SES) | **37** |
+| (B) explicit `computed`/`lift`/`derive` | **80** |
+| A/(A+B) — §08-as-scoped off-SES fraction (lower bound) | **31.6%** |
+| of B, single-expression bodies already in the subset | **45 (56%)** |
+| off-SES fraction if those are also interpreted | **~70%** |
+
+**The auto-vs-explicit split is a coding-style artifact, not a semantic boundary**
+— `computed(() => a+b)` is the same shape as an auto-wrapped `a+b`. §08-as-written
+(interpret only auto sites) leaves most of the win on the table. **The real
+interpret-vs-blackbox line should be "is the compute body a *single expression in
+the supported subset*?" (auto OR explicit) vs "does it have statements?"** — which
+is exactly the line `validateSupportedPatternStatements` already draws for pattern
+bodies. (Scope decision for the coordinator.)
+
+### 9.2 Priority — access + ternary dominate, and both reuse EXISTING ops
+
+By share of A: **access 43% · ternary 32% (cumulative 76%)** · call 14% · binary
+**5%** · logical 5% · unary 0%. Two consequences:
+
+- The arithmetic operators (`+ - * /`) are a **thin 5% tail** in real patterns; the
+  bulk is **member access + ternary**.
+- Both high-coverage forms map to **existing interpreter ops** (`access`,
+  `control`) — *no new semantics, no semantic-fidelity risk*. So the
+  **high-coverage, low-risk v1 is "stop wrapping access/ternary expression sites
+  in lift leaves; emit them as the `access`/`control` ops they already are."** The
+  new `expr` operator ops (arithmetic/logical/unary — where the §4 fidelity risk
+  lives) are a small, incremental, oracle-gated tail.
+- Next growth target after v1: **method calls** (`.slice`/`.join`/`.toFixed` — 38
+  occurrences, the dominant out-of-subset fallback leaf).
+
+### 9.3 Design punch-list (GO-WITH-FIXES; resolve before building)
+
+| # | Finding | Sev | Fix |
+| --- | --- | --- | --- |
+| E-1 | **`&&`/`||` must return the resolved OPERAND** under truthiness (`cond ? RHS : cond` / `cond ? cond : RHS`), reusing a single `pred` ValueRef (like `when`/`unless`). A boolean-coercing op silently diverges on falsy-but-defined operands (`0`/`""`/`NaN`/`null`). | **HIGH** | §3/§4 — pin the operand-return contract + oracle rows with falsy-but-defined operands. |
+| E-2 | **Fallback is NOT fail-closed by construction.** The emitter dispatch returns the first emitter that claims a node; a half-implemented `expr` branch emits a *wrong op* and bypasses the leaf fallback at the bottom of that emitter. | MED | §2.1/OQ-E2 — an explicit `SUPPORTED_EXPR_OPERATORS` allow-list consulted at the top of the `expr` emitter, provably ⊆ the oracle-verified set; red test that every non-set op → leaf. |
+| E-3 | §2 factual error: only `!` has a unary emitter; `-x/+x/~x/typeof x` fall through to the enclosing wrapper today → migration *adds* coverage, not swaps. `typeof` clashes with the `undefined`-on-unresolved convention. | MED | §2/§4 — correct the baseline; **exclude `typeof` from v1**. |
+| E-4 | Short-circuit vs CFC: a short-circuiting `&&` reads only `a` when `a` falsy → drops `b`'s label vs the leaf it replaced (under-label under enforce). | MED | §4.1/OQ-E5 — compute the label join over the **static** operand set even when value-evaluation short-circuits; if unified under enforce, short-circuit is blocked. |
+| E-5 | §3 `expr` op sketch omits `outSchema` (`Op` requires it, `rog.ts:118`); native ops bypass `registerSyntheticCallType`, losing the downstream result type that drives traversal/capability/label structure. | MED | §3 — source `outSchema` from `checker.getTypeAtLocation(expression)`; note the `typeRegistry`/schema-gen interaction in OQ-E1. |
+
+**Highest-risk before building (E-1 + E-2 together):** make the supported-operator
+set an explicit dispatch-level allow-list provably ⊆ the oracle-verified set, AND
+pin the `&&`/`||` operand-return value-identity — both as invariants with red
+tests *before* any emitter code, because nothing in the current emitter
+architecture enforces fail-closed, so a partially-correct operator ships a wrong
+op rather than degrading to a leaf.
+
+**No NO-GO.** The thesis holds; all findings are fidelity/scope corrections. The
+review independently confirmed the §2.1 interpret-vs-blackbox boundary is real
+(`validateSupportedPatternStatements`) and that access/construct reuse + per-op
+throw isolation are sound.
