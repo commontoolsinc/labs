@@ -346,7 +346,8 @@ export interface SchedulerSettleLoopState {
     memo: Map<Action, boolean>,
   ) => boolean;
   readonly getActionId: (action: Action) => string;
-  readonly clearDirty: (action: Action) => void;
+  readonly getDirectDirtySeq: (action: Action) => number | undefined;
+  readonly clearDirty: (action: Action, expectedSeq?: number) => void;
   readonly markDirectDirty: (action: Action) => void;
   readonly isThrottled: (action: Action) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;

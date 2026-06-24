@@ -4,6 +4,8 @@ import type { MaterializerIndexState } from "./materializers.ts";
 export class SchedulerStaleness {
   readonly dirty = new Set<Action>();
   readonly stale = new Set<Action>();
+  private directDirtySeq = new WeakMap<Action, number>();
+  private nextDirectDirtySeq = 1;
   private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
   private upstreamStaleCount = new WeakMap<Action, number>();
 
@@ -25,16 +27,29 @@ export class SchedulerStaleness {
     return this.upstreamStaleCount.get(action) ?? 0;
   }
 
+  getDirectDirtySeq(action: Action): number | undefined {
+    return this.directDirtySeq.get(action);
+  }
+
   markDirectDirty(action: Action): boolean {
-    if (this.dirty.has(action)) return false;
+    const wasDirty = this.dirty.has(action);
+    this.directDirtySeq.set(action, this.nextDirectDirtySeq++);
+    if (wasDirty) return false;
 
     this.dirty.add(action);
     this.setStaleFromInputs(action);
     return true;
   }
 
-  clearDirectDirty(action: Action): boolean {
+  clearDirectDirty(action: Action, expectedSeq?: number): boolean {
+    if (
+      expectedSeq !== undefined &&
+      this.directDirtySeq.get(action) !== expectedSeq
+    ) {
+      return false;
+    }
     if (!this.dirty.delete(action)) return false;
+    this.directDirtySeq.delete(action);
     this.setStaleFromInputs(action);
     return true;
   }
@@ -48,6 +63,7 @@ export class SchedulerStaleness {
 
   clearAll(): void {
     this.dirty.clear();
+    this.directDirtySeq = new WeakMap();
     this.stale.clear();
     this.resetUpstreamStaleState();
   }
@@ -139,6 +155,13 @@ export function getUpstreamStaleCount(
   return staleness.getUpstreamStaleCount(action);
 }
 
+export function getDirectDirtySeq(
+  staleness: SchedulerStaleness,
+  action: Action,
+): number | undefined {
+  return staleness.getDirectDirtySeq(action);
+}
+
 export function markDirectDirty(
   staleness: SchedulerStaleness,
   action: Action,
@@ -163,12 +186,19 @@ export function markSchedulerDirty(
 export function clearSchedulerDirectDirty(
   state: DirtySchedulingState,
   action: Action,
+  expectedSeq?: number,
 ): boolean {
   if (!state.staleness.isDirty(action)) return false;
+  if (
+    expectedSeq !== undefined &&
+    state.staleness.getDirectDirtySeq(action) !== expectedSeq
+  ) {
+    return false;
+  }
   if (state.computations.has(action)) {
     state.clearComputationDebounceState(action);
   }
-  return state.staleness.clearDirectDirty(action);
+  return state.staleness.clearDirectDirty(action, expectedSeq);
 }
 
 export function clearSchedulerDirty(
