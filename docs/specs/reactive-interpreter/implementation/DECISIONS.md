@@ -347,3 +347,27 @@ Wave landing (all on #4298): R5/R6 `d8fb41cdd`, R4 `1c6325fa8`, Wave 0
 `46335bd98`, Wave 2a `91c2c720b`, Wave 1 `7fe8ec724`+`702cf2aff` — flag-ON
 42 -> 8 failed, flag-off 658/0 throughout. Remaining: Wave 2b (probe memoize)
 + residual fallback gaps + Wave 3 (conservative emission).
+
+## Superseded / confirmed (2026-06-24, post-implementation)
+
+- **D-PROBE-MEMOIZE → SUPERSEDED by pure-structural eligibility (user-confirmed).**
+  Memoize-and-reuse was implemented first but had a correctness hole: when a child
+  pattern RE-INSTANTIATES as a fresh object (e.g. a derive's returned pattern
+  changes on a mode switch), the closure/WeakMap memo misses, the argument is
+  already committed so the tx-less probe read returns a value, the undefined-arg
+  run-gate no longer skips, and the side-effecting leaf body re-runs (run-count
+  2 vs legacy 1). Root tension: running a leaf body to REACH an eligibility verdict
+  IS the double-run, so memoize-then-reuse cannot be made airtight against
+  re-instantiation. FINAL (green): the dry-run runs in PROBE MODE (`evalRog`
+  `probe:true`) — leaf bodies are NEVER invoked, the verdict is purely structural —
+  and the async/Pattern/cross-space detection that the value-executing probe used
+  to provide (R5/R6 + dry.errors net) moved to a STATIC SOURCE SCAN over each live
+  leaf's function source: `liveLeafCanInstantiatePattern` (bare-identifier factory
+  call, excluding member/pure-global calls) + leading-`async` (Promise return) +
+  `.inSpace(`/`.asScope(` (cross-space/scope routing). All structural gates are
+  always sound (a false positive only adds a correct legacy fallback). Tradeoff
+  accepted by @berni: runtime async detection → syntactic; a missed async leaf is
+  a LOUD "Cannot store Promise" crash (not silent corruption), and async work
+  normally flows through effect builtins (separate ops), not leaf bodies, so
+  exposure is low. This is the sounder architecture (deterministic, no staleness,
+  no double-run).
