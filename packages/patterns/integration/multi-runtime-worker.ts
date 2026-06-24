@@ -93,12 +93,16 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics }) {
+  async init({ rawIdentity, spaceName, apiUrl, diagnostics, experimental }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     cc = await PiecesController.initialize({
       apiUrl: new URL(apiUrl as string),
       identity,
       spaceName: spaceName as string,
+      // Forward experimental runtime feature flags (e.g.
+      // `experimentalInterpreter`) so a harness can A/B the same workload with
+      // a flag flipped. Undefined ⇒ production default (all flags off).
+      ...(isRecord(experimental) ? { experimental } : {}),
     });
     if (diagnostics === true) {
       const scheduler = controller().manager().runtime.scheduler;
@@ -202,6 +206,19 @@ const handlers: Record<
     return {};
   },
 
+  /**
+   * Like `idle`, but also waits for every in-flight async builtin operation
+   * (sqlite commit barrier, fetch*, llm) AND the reactive cascade its writeback
+   * triggers. The right barrier before reading state a workload produced via
+   * async builtins (lunch-poll's sqlite handlers), where `idle()` can return
+   * before the post-commit outbox flush lands.
+   */
+  async settled() {
+    await controller().manager().runtime.settled();
+    await controller().manager().synced();
+    return {};
+  },
+
   async diagnostics() {
     await idle();
     const scheduler = controller().manager().runtime.scheduler;
@@ -217,6 +234,20 @@ const handlers: Record<
   async loggerCounts() {
     await idle();
     return getLoggerCountsBreakdown();
+  },
+
+  /**
+   * Reactive-interpreter dispatch census for this runtime: how many pattern
+   * instantiations went through the interpreter vs fell back to the legacy
+   * path (and why). All zeros when `experimentalInterpreter` is off (the
+   * dispatch branch is never entered).
+   */
+  async interpreterCensus() {
+    await idle();
+    const runner = controller().manager().runtime.runner as unknown as {
+      getInterpreterCensus?: () => unknown;
+    };
+    return sanitizeForTransfer(runner.getInterpreterCensus?.() ?? null);
   },
 
   async dispose() {

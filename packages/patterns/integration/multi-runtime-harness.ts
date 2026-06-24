@@ -32,6 +32,17 @@ import type {
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
 
+/**
+ * Reactive-interpreter dispatch census: how many pattern instantiations went
+ * through the interpreter vs fell back to the legacy path (and why). Mirrors
+ * `InterpreterCensus` in the runner; duplicated here to avoid a runner-internal
+ * import from the patterns package.
+ */
+export interface InterpreterCensus {
+  interpreted_ok: number;
+  fallback_by_reason: Record<string, number>;
+}
+
 export interface MultiRuntimeSessionSpec {
   /** Label used in error messages and as the identity passphrase seed. */
   label: string;
@@ -58,6 +69,23 @@ export interface MultiRuntimeHarnessOptions {
    * self-hosted in-process storage server.
    */
   apiUrl?: URL;
+  /**
+   * Optional experimental runtime feature flags forwarded to every session's
+   * Runtime (e.g. `{ experimentalInterpreter: true }`). Undefined ⇒ production
+   * default (all flags off). Lets a bench run the same workload twice with one
+   * flag flipped for a controlled A/B.
+   */
+  experimental?: Record<string, boolean>;
+  /**
+   * Optional per-commit tap forwarded to the in-process memory server (only
+   * applies when the harness self-hosts storage, i.e. no `apiUrl`). Invoked
+   * read-only with the parsed operations of each inbound commit — used by
+   * benches to count distinct documents a workload writes. Undefined ⇒ no tap.
+   */
+  onCommitOperations?: (
+    operations: readonly Record<string, unknown>[],
+    connectionTag: number,
+  ) => void;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -179,6 +207,15 @@ export class MultiRuntimeSession {
     await this.#client.call("idle");
   }
 
+  /**
+   * Like `idle`, but also waits for in-flight async builtin work (sqlite,
+   * fetch*, llm) and the cascade its writeback triggers. The right barrier
+   * before reading state produced through async builtins.
+   */
+  async settled(): Promise<void> {
+    await this.#client.call("settled");
+  }
+
   /** Capture scheduler graph, settle stats history, and action run trace. */
   async diagnostics(): Promise<RuntimeDiagnosticsSnapshot> {
     return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
@@ -194,6 +231,17 @@ export class MultiRuntimeSession {
         Record<string, { total: number }>
       >
       & { total: number };
+  }
+
+  /**
+   * Reactive-interpreter dispatch census for this session's runtime:
+   * `{ interpreted_ok, fallback_by_reason: {...} }`. All zeros (or null on an
+   * older worker) when `experimentalInterpreter` is off.
+   */
+  async interpreterCensus(): Promise<InterpreterCensus | null> {
+    return await this.#client.call("interpreterCensus") as
+      | InterpreterCensus
+      | null;
   }
 
   async disposeSession(): Promise<void> {
@@ -232,7 +280,11 @@ export class MultiRuntimeHarness {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
     const spaceName = options.spaceName ?? crypto.randomUUID();
-    const server = options.apiUrl ? undefined : StandaloneMemoryServer.start();
+    const server = options.apiUrl ? undefined : StandaloneMemoryServer.start(
+      options.onCommitOperations
+        ? { onCommitOperations: options.onCommitOperations }
+        : {},
+    );
     const apiUrl = (options.apiUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
@@ -253,6 +305,9 @@ export class MultiRuntimeHarness {
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
+          ...(options.experimental
+            ? { experimental: options.experimental }
+            : {}),
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
@@ -270,6 +325,7 @@ export class MultiRuntimeHarness {
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
+        ...(options.experimental ? { experimental: options.experimental } : {}),
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
@@ -308,6 +364,19 @@ export class MultiRuntimeHarness {
     for (let i = 0; i < rounds; i++) {
       await Promise.all(this.sessions.map((session) => session.idle()));
       // Give subscription pushes a macrotask to land before the next round.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  /**
+   * Like `settle`, but each round uses `settled()` (waits for in-flight async
+   * builtin work + writeback cascade), not just `idle()`. Use before reading
+   * state a workload produced via async builtins (e.g. lunch-poll's sqlite
+   * handlers), where `idle()` can return before the post-commit flush lands.
+   */
+  async settled(rounds = 2): Promise<void> {
+    for (let i = 0; i < rounds; i++) {
+      await Promise.all(this.sessions.map((session) => session.settled()));
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
