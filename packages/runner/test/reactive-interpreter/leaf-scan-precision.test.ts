@@ -61,7 +61,9 @@ function leafPattern(
   resultSchema: unknown,
 ): { nodes: Array<{ module: Record<string, unknown> }> } {
   return {
-    nodes: [{ module: { type: "javascript", implementation: impl, resultSchema } }],
+    nodes: [{
+      module: { type: "javascript", implementation: impl, resultSchema },
+    }],
   };
 }
 
