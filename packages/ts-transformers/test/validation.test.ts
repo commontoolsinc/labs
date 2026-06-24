@@ -1949,6 +1949,95 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "errors on class expression with reactive-capturing method in pattern body",
+    async () => {
+      const source = `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        const C = class { read() { return value?.token; } };
+        return { C };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:function-creation");
+    },
+  );
+
+  await t.step("errors on class declaration in pattern body", async () => {
+    const source = `      import { pattern } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        class Helper { double() { return item.price * 2; } }
+        return { Helper };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertHasErrorType(errors, "pattern-context:function-creation");
+  });
+
+  await t.step("allows class expression inside computed()", async () => {
+    const source = `      import { pattern, computed } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const doubled = computed(() => {
+          const Doubler = class { run() { return item.price * 2; } };
+          return new Doubler().run();
+        });
+        return { doubled };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Class expression inside computed() should be allowed",
+    );
+  });
+
+  await t.step("allows class at module scope", async () => {
+    const source = `      import { pattern } from "commonfabric";
+
+      interface Item { price: number; }
+
+      class Doubler {
+        constructor(private price: number) {}
+        run() { return this.price * 2; }
+      }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        return { item };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Class declared at module scope should be allowed",
+    );
+  });
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {

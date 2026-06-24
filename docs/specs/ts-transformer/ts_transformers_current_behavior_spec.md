@@ -378,6 +378,8 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
+  - class expression or declaration in pattern context unless inside compute
+    wrappers; the whole class is flagged once with a class-specific message
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
