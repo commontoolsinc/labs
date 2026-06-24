@@ -134,6 +134,42 @@ differential/reactivity/fallback test) is delegated as workflow `wjvg8vak9`
 full flag-off suite (== baseline) + the flag-on census run + a runner.ts diff
 audit before committing.
 
+## D-COALESCE — interpreter = pure-region coalescing pass; all-or-nothing eligibility superseded (2026-06-24)
+
+**Decision (user-directed):** the all-or-nothing eligibility model is a
+fundamental flaw — I/O builtins (`fetch*`/`llm`/`generate*`/`sqlite*`/`wish`) and
+handlers are ubiquitous, so "contains any ineligible op → fall back the whole
+pattern" makes the interpreter help almost nothing real (measured: lunch-poll
+~18% of instances, ~4% of nodes). Redesign: the interpreter becomes a **pure-region
+coalescing pass** — replace each maximal pure subgraph with one interpreter
+**segment** node, and **preserve every I/O/effect/handler node as a boundary**
+(real scheduler node + real I/O docs, which they need anyway). Eligibility flips
+from "is the whole pattern pure?" to "can it be partitioned?" (≈ always yes). Full
+design: [../07-coalescing-architecture.md](../07-coalescing-architecture.md).
+
+- **Option 2 (split into segment nodes) chosen over Option 1 (one node + give the
+  scheduler the topo order).** Option 1 is unschedulable as stated — one node
+  spanning computation on both sides of a builtin forms a 2-cycle with it
+  (`interp ⇄ fetch`); "stage the node from the interpreter's topo sort" *is*
+  splitting, and additionally needs a scheduler change + a re-entrant node +
+  re-implementing per-node invalidation/CFC/materialization inside the
+  interpreter. Option 2 is a clean DAG the existing scheduler runs **unchanged**,
+  with precise per-segment/per-boundary re-execution.
+- **Handlers need NO execution support** — a handler is a boundary node (already
+  real in legacy); coalescing un-traps the pure nodes beside it. This dissolves
+  the "event-driven handler execution" lift and matches the node-breakdown
+  (handlers = 0 durable nodes; their only cost was trapping pure nodes).
+- **CFC gets finer** (per-segment flow join, not a whole-pattern smear) — a
+  precision gain. The VNODE-DOC-FRAGMENTATION fix folds into the segment-output
+  write.
+- The landed work is the **K-segment special cases**: pure non-collection = one
+  segment; pure `map`/nested = pure ops within a segment. Migration replaces the
+  all-or-nothing gate with the partitioner + multi-node emission; keeps `evalRog`
+  + the collection mechanism + the legacy `instantiateNode` path for boundaries.
+- Status: design landed; partition prototype (static, over real ROGs) to validate
+  the coverage/footprint jump before implementation. Open questions OQ-C1..C6 in
+  07-*.md.
+
 ## D-VNODE-DOC-FRAGMENTATION — the collection doc-win is element-RESULT-SHAPE-dependent (bench finding, 2026-06-24)
 
 The default-app notes bench measured the interpreter ADDING docs on a `map` whose
