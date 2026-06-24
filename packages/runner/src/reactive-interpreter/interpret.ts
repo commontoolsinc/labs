@@ -32,6 +32,18 @@ export interface EvalContext {
    * wiring; absent in pure hand-built tests that use `opOut` directly). */
   internalToOp?: Map<string, OpId>;
   /**
+   * Optional SEED of pre-computed op values (coalescing partition, step 3). When
+   * a ROG is evaluated as a SEGMENT — a sub-op-set of a larger graph — some of
+   * its `internal`/`opOut` refs name producers that live OUTSIDE the segment (an
+   * upstream boundary's output, or an earlier segment's materialized output). The
+   * partition dispatch feeds those external values in here keyed by their op id,
+   * so `resolve`'s `internal`/`opOut` lookups find them in `opValues` from the
+   * start (the segment never re-derives a producer it does not own). Empty /
+   * absent for the whole-pattern interpreter and pure hand-built tests — fully
+   * backward-compatible (no current caller passes a seed).
+   */
+  seed?: Map<OpId, unknown>;
+  /**
    * PROBE MODE (eligibility dry-run only). When true, leaf BODIES are NOT
    * invoked — every leaf op resolves to `undefined`. The eligibility verdict is
    * reached purely structurally (coverage gates + `resolveLeafImpls`'
@@ -129,7 +141,7 @@ export function evalRog(
    * re-throws and routes to legacy fallback. */
   errors: Array<{ opId: OpId; error: unknown }>;
 } {
-  const opValues = new Map<OpId, unknown>();
+  const opValues = new Map<OpId, unknown>(ctx.seed ?? []);
   const errors: Array<{ opId: OpId; error: unknown }> = [];
 
   const resolve = (ref: ValueRef): unknown => {

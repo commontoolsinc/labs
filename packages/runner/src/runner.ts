@@ -112,6 +112,7 @@ import {
 import { collectionInterpreter } from "./reactive-interpreter/collection-interpreter.ts";
 import { buildElementEvaluator } from "./reactive-interpreter/element-evaluator.ts";
 import type { Op, OpId, Rog, ValueRef } from "./reactive-interpreter/rog.ts";
+import { partition } from "./reactive-interpreter/partition.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 export {
   extractDefaultValues,
@@ -2331,6 +2332,53 @@ export class Runner {
       }
     }
 
+    // --- COALESCING SPIKE: partition into segment + boundary nodes ----------
+    // The upstream gates above (launched-child, cross-space, collection,
+    // unrecognized-alias, pattern-coverage) have already run, so their cases fall
+    // back exactly as today. We attempt the partition HERE — BEFORE the
+    // single-node ELIGIBLE_KINDS path below, which rejects any `effect` op
+    // outright (the all-or-nothing gate the spike is wired to bypass). The
+    // partition keeps a pattern's PURE regions as interpreted segments while its
+    // handlers/effects stay as legacy boundary nodes. It is gated to effect-only,
+    // no-fanout, no-bnd→bnd, no-write-back-cycle (see the helper); anything else
+    // returns null → we fall through to the existing single-node logic unchanged.
+    //
+    // Leaf impls are resolved here so the partition can build its segment evals;
+    // we reuse the resolved set on the single-node fall-through below (no
+    // double-resolution). A non-empty unresolved set means a serialized/untrusted
+    // leaf boundary → `unresolved_leaf` fallback, exactly as the single-node path.
+    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+      pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
+      extracted.rog,
+      this.interpreterImplRefResolver,
+      this.interpreterLiveLeafTrustCheck,
+    );
+    if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
+
+    // Only attempt the partition when the pattern actually HAS a boundary
+    // (effect) op — a fully-pure pattern has no boundaries to keep, so the
+    // single-node path is strictly simpler and equivalent. This keeps the spike
+    // additive: pure patterns are unaffected, handler-bearing patterns engage.
+    const hasEffectOp = extracted.rog.ops.some((op) => op.kind === "effect");
+    if (hasEffectOp) {
+      const internedArgForPartition = internSchema(
+        (pattern.argumentSchema ?? {}) as JSONSchema,
+      );
+      const partitioned = this.tryBuildPartitionedInterpreterPattern(
+        pattern,
+        extracted,
+        leafImpls,
+        extracted.internalToOp,
+        bumpAndThrow,
+        resultCell,
+        internedArgForPartition,
+      );
+      if (partitioned) {
+        this.interpreterCensus.interpreted_ok++;
+        return partitioned;
+      }
+    }
+
     // This step interprets the non-collection vocabulary plus a TOP-LEVEL,
     // in-memory, PURE-computation INLINED nested pattern. `leaf` (opaque
     // sandboxed JS) plus the interpreted kinds access/construct/control are
@@ -2504,15 +2552,9 @@ export class Runner {
     // trust-checkless `resolveLeafImpls` — which counts unresolved leaves as
     // boundaries — is unaffected. Complemented by the dry-run `dry.errors` net.
 
-    // --- 2. Resolve every leaf impl (live fn or $implRef index) ------------
-    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
-      pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
-      extracted.rog,
-      this.interpreterImplRefResolver,
-      this.interpreterLiveLeafTrustCheck,
-    );
-    if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
-
+    // --- 2. Leaf impls already resolved above (hoisted for the coalescing
+    // spike's partition attempt); reused here for the single-node path. The
+    // `unresolved_leaf` fallback already fired above if any leaf was unresolved.
     const { rog, internalToOp } = extracted;
 
     // --- 3. Dry-run probe on a snapshot of the current argument ------------
@@ -2792,6 +2834,300 @@ export class Runner {
         },
       ],
     } satisfies Pattern;
+  }
+
+  /**
+   * COALESCING SPIKE (coalescing track, step 3 — partition into dispatch).
+   *
+   * Wires the (previously unused) `partition` into the interpreter dispatch so a
+   * pattern's PURE regions are interpreted (one segment node per maximal pure
+   * region) while its HANDLERS/EFFECTS stay as legacy boundary nodes. The mix of
+   * segment + boundary nodes is emitted into ONE synthetic Pattern that flows
+   * through the SAME legacy `instantiateNode` loop, so segments inherit
+   * reactivity/scheduling and boundaries instantiate exactly as legacy.
+   *
+   * This is the seam that makes the interpreter ENGAGE on real (handler-bearing)
+   * patterns rather than only on whole-pure ones. It is DELIBERATELY narrow: the
+   * gates below are scope CUTS for the spike (effect-only boundaries, no fan-out,
+   * no boundary→boundary read-through, no handler write-back cycle). Anything
+   * outside that envelope returns `null` → the caller continues to the existing
+   * single-node path unchanged. NEVER widens fallback — it only ADDS a path.
+   *
+   * Returns the synthetic mixed Pattern on success, or `null` to fall through to
+   * the existing single-node logic (no census mutation here; the caller bumps
+   * `interpreted_ok` on a non-null return).
+   */
+  private tryBuildPartitionedInterpreterPattern(
+    pattern: Pattern,
+    extracted: ExtractResult,
+    leafImpls: Map<OpId, (input: unknown) => unknown>,
+    internalToOp: Map<string, OpId>,
+    // The spike falls back by RETURNING NULL (not throwing), so the caller's
+    // `bumpAndThrow` / result cell are part of the spec signature but unused
+    // here; kept for parity with the single-node path's parameter shape.
+    _bumpAndThrow: (reason: InterpreterFallbackReason) => never,
+    _resultCell: Cell<any>,
+    internedArg: JSONSchema,
+  ): Pattern | null {
+    // (a) Partition the extracted ROG structurally. No `resolveInner` (the spike
+    // does not recurse into collection/pattern boundaries — those are gated out
+    // below). An unresolved leaf would be a boundary; we pass an empty set
+    // because `resolveLeafImpls` already ran in the caller and a non-empty
+    // unresolved set falls back via `unresolved_leaf` before we are reached.
+    const part = partition({
+      rog: extracted.rog,
+      internalToOp,
+      unresolvedLeafOps: new Set<OpId>(),
+    });
+    if (!part.partitionable) return null;
+
+    // (b) SPIKE GATES — deliberate scope cuts (NOT green-dodging). Any miss →
+    // null → caller falls through to the single-node path.
+
+    // Effect-only boundaries: handlers/effects only. A collection / pattern /
+    // unresolved-leaf boundary needs machinery this spike does not build.
+    if (part.boundaries.some((b) => b.kind !== "effect")) return null;
+
+    // No fan-out: a segment feeding >1 boundary needs a multi-output / container-
+    // of-links emission (§4.4). Defer.
+    if (part.fanoutSegmentIds.length > 0) return null;
+
+    // No boundary→boundary edge: an effect→effect hop is the §4.5 CFC read-
+    // through hazard (an unread labeled hop). Defer.
+    if (part.edges.some((e) => e.kind === "bnd->bnd")) return null;
+
+    // A boundary with no segment to interpret is just the whole-legacy pattern —
+    // nothing gained. Require at least one segment so the interpreter ENGAGES.
+    if (part.segments.length === 0) return null;
+
+    // F4 (coarse write-back-cycle gate): a handler whose ORIGINAL node writes a
+    // cell that ANY segment reads as an input would create a write-back cycle
+    // (the segment feeds the handler, the handler feeds the segment) that would
+    // deadlock the single-pass segment eval. Structural over-approximation: we
+    // compare each boundary's original-node OUTPUT internal-cell name against the
+    // set of internal-cell names any segment reads. Any overlap → fall through.
+    const segmentReadNames = new Set<string>();
+    for (const seg of part.segments) {
+      for (const ref of seg.inputs) {
+        if (ref.kind === "internal") segmentReadNames.add(ref.name);
+      }
+    }
+    for (const b of part.boundaries) {
+      const bNode = pattern.nodes?.[b.opId];
+      if (!bNode) continue;
+      const outName = outputInternalName(bNode.outputs);
+      if (outName !== null && segmentReadNames.has(outName)) return null;
+    }
+
+    // (c) Build one raw interpreter node per segment. `byId` indexes the
+    // extracted ROG's ops by id so a segment's sub-op-set is a real op list.
+    const byId = new Map<OpId, Op>();
+    for (const op of extracted.rog.ops) byId.set(op.id, op);
+
+    // Each declared output internal-cell name → its producing op id, reused from
+    // the single-node emission convention (a node writes its value into the
+    // internal cell its `outputs` alias names). The result tree / projection is
+    // preserved verbatim, so segments route per-field via the original aliases.
+    const outputNameToOpId = new Map<string, OpId>();
+    const nodeOutputsByName = new Map<string, JSONValue>();
+    for (const node of pattern.nodes ?? []) {
+      const outName = outputInternalName(node.outputs);
+      if (outName === null) continue; // boundary/handler outputs handled below
+      const opId = internalToOp.get(outName);
+      if (opId === undefined) continue;
+      outputNameToOpId.set(outName, opId);
+      nodeOutputsByName.set(outName, node.outputs as JSONValue);
+    }
+
+    const argumentSchema = (pattern.argumentSchema ?? {}) as JSONSchema;
+    const resultSchema = (pattern.resultSchema ?? {}) as JSONSchema;
+
+    const segmentNodes: Pattern["nodes"] = [];
+    for (const seg of part.segments) {
+      // The segment's own op set (real ops only; a malformed id → fall through).
+      const segOps: Op[] = [];
+      for (const id of seg.opIds) {
+        const op = byId.get(id);
+        if (!op) return null;
+        segOps.push(op);
+      }
+      const segOpIds = new Set<OpId>(seg.opIds);
+
+      // EXTERNAL `internal` reads: a name in this segment's inputs whose producer
+      // op is NOT in this segment (an upstream boundary output or an earlier
+      // segment's materialized output). These need wiring into the node `inputs`
+      // so the segment-eval can SEED their op values. argument/const refs need no
+      // wiring (the evaluator resolves them directly).
+      const externalNames: string[] = [];
+      const seenExt = new Set<string>();
+      for (const ref of seg.inputs) {
+        if (ref.kind !== "internal") continue;
+        const producerOp = internalToOp.get(ref.name);
+        if (producerOp === undefined) continue; // external/arg-like; no producer
+        if (segOpIds.has(producerOp)) continue; // produced WITHIN the segment
+        if (seenExt.has(ref.name)) continue;
+        seenExt.add(ref.name);
+        externalNames.push(ref.name);
+      }
+
+      // This segment's OUTPUT names = the declared output internal cells whose
+      // producing op lives in this segment. Each is routed to its original
+      // per-field output alias via `sendValueToBinding` (CFC labels preserved).
+      const segOutputNames: string[] = [];
+      const segOutputsBinding: Record<string, JSONValue> = {};
+      for (const [name, opId] of outputNameToOpId) {
+        if (!segOpIds.has(opId)) continue;
+        segOutputNames.push(name);
+        segOutputsBinding[name] = nodeOutputsByName.get(name)!;
+      }
+      // A segment that materializes nothing downstream-consumers read is dead
+      // weight (it would write an empty value object). Skip emitting it; its op
+      // values are recomputed by any consumer segment that seeds from it. (In the
+      // spike, a segment with no declared output but a boundary consumer cannot
+      // arise without fan-out/bnd edges already gated; defensively skip.)
+      if (segOutputNames.length === 0) continue;
+
+      // The sub-Rog this segment evaluates: its own ops + the parent argument
+      // schema. `result` is unused by the segment impl (it reads opValues
+      // directly), so any ref is fine; reuse the parent result ref.
+      const segRog: Rog = {
+        argumentSchema,
+        resultSchema,
+        result: extracted.rog.result,
+        ops: segOps,
+      };
+
+      // The node `inputs` binding: `$arg` aliases the argument cell; `$in` is an
+      // object aliasing each external internal cell by its `partialCause` name.
+      const inBinding: Record<string, JSONValue> = {};
+      for (const name of externalNames) {
+        inBinding[name] = {
+          $alias: { partialCause: name, path: [] },
+        } as unknown as JSONValue;
+      }
+      const inputsBinding = {
+        $arg: { $alias: { cell: "argument", path: [] } },
+        $in: inBinding,
+      } as unknown as JSONValue;
+
+      const segImpl = this.buildSegmentInterpreterImpl(
+        segRog,
+        leafImpls,
+        internalToOp,
+        externalNames,
+        segOutputNames,
+        outputNameToOpId,
+        internedArg,
+      );
+
+      segmentNodes.push({
+        module: {
+          type: "raw",
+          implementation: segImpl as (...args: any[]) => any,
+          resultSchema: internSchema(resultSchema),
+        } as Module,
+        inputs: inputsBinding,
+        outputs: segOutputsBinding as JSONValue,
+      });
+    }
+
+    // No segment actually materialized an output ⇒ nothing for the interpreter
+    // to do; let the legacy single-node path (or full legacy) handle it.
+    if (segmentNodes.length === 0) return null;
+
+    // (d) Keep boundary nodes verbatim (the original handler/effect nodes — their
+    // input aliases already reference the internal cells segments now write).
+    const boundaryNodes: Pattern["nodes"] = [];
+    for (const b of part.boundaries) {
+      const bNode = pattern.nodes?.[b.opId];
+      if (!bNode) return null; // boundary op id not a real node ⇒ fall through
+      boundaryNodes.push(bNode);
+    }
+
+    // (e) Assemble the synthetic mixed Pattern. The result tree +
+    // derivedInternalCells are preserved verbatim so projection/materialization
+    // is identical to legacy; only the COMPUTE nodes are replaced by segments,
+    // while boundaries pass through unchanged.
+    return {
+      argumentSchema,
+      resultSchema,
+      ...(pattern.derivedInternalCells !== undefined
+        ? { derivedInternalCells: pattern.derivedInternalCells }
+        : {}),
+      result: pattern.result,
+      nodes: [...segmentNodes, ...boundaryNodes],
+    } satisfies Pattern;
+  }
+
+  /**
+   * Build a SEGMENT interpreter impl (coalescing spike). Mirrors the single-node
+   * `interpreterImpl`, but: (1) reads the argument from the `$arg` slot and each
+   * external internal cell from the `$in[name]` slot of the node input cell, (2)
+   * SEEDS those external op values into `evalRog` (so the segment's `internal`
+   * refs to producers it does NOT own resolve), and (3) writes ONLY this
+   * segment's own output names. Errors are NOT routed here (the spike keeps the
+   * error-frame machinery on the single-node path); a throwing leaf isolates to
+   * `undefined` exactly as `evalRog` already does.
+   */
+  private buildSegmentInterpreterImpl(
+    segRog: Rog,
+    leafImpls: Map<OpId, (input: unknown) => unknown>,
+    internalToOp: Map<string, OpId>,
+    externalNames: string[],
+    segOutputNames: string[],
+    outputNameToOpId: Map<string, OpId>,
+    internedArg: JSONSchema,
+  ): (
+    inputsCell: Cell<unknown>,
+    sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+    addCancel: AddCancel,
+    cause: unknown,
+    parentCell: Cell<unknown>,
+    runtime: Runtime,
+    outputBinding?: NormalizedFullLink,
+  ) => Action {
+    return (
+      inputsCell: Cell<unknown>,
+      sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+    ): Action => {
+      return (tx: IExtendedStorageTransaction) => {
+        // Read `$arg` (the argument) and each external `$in[name]` THROUGH the tx
+        // so every read is tracked (the segment re-runs reactively when its
+        // argument OR any upstream boundary/segment output it reads changes).
+        // The `$arg` read is SCHEMA-DRIVEN (the argument schema) — identical to
+        // the single-node impl's `inputsCell.asSchema(internedArg)` — so the
+        // tracked read-set covers the deep argument paths the segment depends on
+        // (a shallow top-object read would miss a nested-field writeback, e.g. a
+        // handler boundary mutating `argument.counter.value`, and the segment
+        // would never re-derive).
+        const cellTx = inputsCell.withTx(tx);
+        const argument = cellTx.key("$arg").asSchema(internedArg).get();
+        const inObj = (cellTx.key("$in").get() ?? {}) as Record<string, unknown>;
+
+        // Seed the external op values so `internal` refs to producers OUTSIDE the
+        // segment resolve to the upstream-written value.
+        const seed = new Map<OpId, unknown>();
+        for (const name of externalNames) {
+          const opId = internalToOp.get(name);
+          if (opId !== undefined) seed.set(opId, inObj[name]);
+        }
+
+        const { opValues } = evalRog(segRog, {
+          argument,
+          leafImpls,
+          internalToOp,
+          seed,
+        });
+
+        // Write each of THIS segment's output names from its producing op value.
+        const out: Record<string, unknown> = {};
+        for (const name of segOutputNames) {
+          const opId = outputNameToOpId.get(name);
+          if (opId !== undefined) out[name] = opValues.get(opId);
+        }
+        sendResult(tx, out);
+      };
+    };
   }
 
   /**
