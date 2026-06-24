@@ -134,6 +134,42 @@ differential/reactivity/fallback test) is delegated as workflow `wjvg8vak9`
 full flag-off suite (== baseline) + the flag-on census run + a runner.ts diff
 audit before committing.
 
+## D-EXPR — interpret the expression subset (operator ops), don't black-box it as lift leaves (2026-06-24)
+
+**Decision (user-directed):** the ts-transformer wraps every pattern-body
+expression site into an opaque `lift`-applied leaf (`a+b → __cfHelpers.lift(({a,b})
+=> a+b)({a,b})`), which the interpreter runs as a black box needing SES resolution
+when serialized. Redesign: a new pattern-owned expression-site lowering emits the
+**expression subset** (`+ - * / % ?: && || ! comparisons`, member access, literals,
+calls) directly as ROG **operator ops** the meta-node evaluates natively; explicit
+`computed()`/`lift()` are left opaque. Full design:
+[../08-expression-interpretation.md](../08-expression-interpretation.md).
+
+- **The win is the serialized boundary:** operator ops need no function to resolve
+  and no sandbox, so a *loaded* pattern's expression computation interprets
+  natively (only explicit lifts stay `$implRef` leaves). Patterns are usually
+  loaded → large coverage gain coalescing alone can't reach.
+- **The decision must be made in the transformer:** auto-generated expression-
+  computeds are **indistinguishable from explicit `computed()` post-transform**
+  (both lower to the identical `lift`-applied shape; the synthetic markers are
+  compile-time-only WeakSets). `extract.ts` cannot tell them apart.
+- **Control is already first-class ROG** (`?:`→ifElse, `&&`→when, `||`→unless are
+  `control` ops); the NEW work is the binary/unary/expression sites (today lift
+  leaves) → operator ops. Native `?:`/`&&`/`||` ops additionally remove the still-
+  opaque branch/predicate leaves the control ops wrap.
+- **Principled interpret-vs-blackbox line:** pattern body = provably the
+  expression subset (statements error: `validateSupportedPatternStatements`) →
+  operator ops; explicit compute bodies = arbitrary JS → opaque leaves.
+- **The risk is semantic fidelity** (operators must match JS exactly: `+` coercion,
+  `==`/`===`, `&&`/`||` return-the-operand, short-circuit-vs-eager read-set) —
+  gated by the differential oracle. The supported set = exactly what the evaluator
+  reproduces and the oracle verifies; everything else falls back to a leaf
+  (fail-closed, growable).
+- **Composition:** 07 (coalescing) un-traps the pure regions; 08 (this) lets those
+  regions run without SES. Together = the interpreter genuinely covering real
+  loaded patterns. Status: design landed; coverage prototype + adversarial review
+  next (OQ-E1..E5 in 08-*.md).
+
 ## D-COALESCE — interpreter = pure-region coalescing pass; all-or-nothing eligibility superseded (2026-06-24)
 
 **Decision (user-directed):** the all-or-nothing eligibility model is a
