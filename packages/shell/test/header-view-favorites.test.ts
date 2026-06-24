@@ -12,12 +12,12 @@ interface HeaderViewLike {
   space: unknown;
   pieceId: unknown;
   menuOpen: boolean;
-  _favoritesSubscriptionRequested: boolean;
   _isFavoriteLoading: boolean;
   _ensureFavoritesSubscription(): void;
   willUpdate(changed: Map<string, unknown>): void;
   handleLogoClick(e: Event): void;
   handleToggleFavorite(e: Event): Promise<void>;
+  disconnectedCallback(): void;
 }
 
 function installBrowserGlobals(): () => void {
@@ -78,11 +78,14 @@ function installBrowserGlobals(): () => void {
  */
 function makeRuntime(opts: { aborted?: boolean; failWrite?: boolean } = {}) {
   let subscribeCount = 0;
+  let unsubscribeCount = 0;
   const favorites = {
     subscribeFavorites(cb: (favorites: readonly unknown[]) => void) {
       subscribeCount++;
       cb([]);
-      return () => {};
+      return () => {
+        unsubscribeCount++;
+      };
     },
     addFavorite: () =>
       opts.failWrite
@@ -98,6 +101,9 @@ function makeRuntime(opts: { aborted?: boolean; failWrite?: boolean } = {}) {
     signal: { aborted: opts.aborted ?? false },
     get subscribeCount() {
       return subscribeCount;
+    },
+    get unsubscribeCount() {
+      return unsubscribeCount;
     },
   };
 }
@@ -115,13 +121,11 @@ Deno.test("favorites stay unsubscribed until a runtime exists and a surface open
     // No runtime yet: requesting the subscription is a no-op.
     view._ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 0);
-    assertFalse(view._favoritesSubscriptionRequested);
 
     // Runtime present: the first request subscribes exactly once.
     view.rt = rt;
     view._ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 1);
-    assert(view._favoritesSubscriptionRequested);
 
     // Idempotent: a repeat request does not subscribe again.
     view._ensureFavoritesSubscription();
@@ -143,8 +147,10 @@ Deno.test("a new runtime re-arms the lazy subscription", async () => {
     closed._ensureFavoritesSubscription();
     assertEquals(first.subscribeCount, 1);
 
+    // Swapping the runtime tears down the old subscription; with the menu
+    // closed nothing resubscribes yet, but the next open does.
     closed.willUpdate(new Map([["rt", undefined]]));
-    assertFalse(closed._favoritesSubscriptionRequested);
+    assertEquals(first.unsubscribeCount, 1);
     closed._ensureFavoritesSubscription();
     assertEquals(first.subscribeCount, 2);
 
@@ -154,7 +160,6 @@ Deno.test("a new runtime re-arms the lazy subscription", async () => {
     open.menuOpen = true;
     open.rt = second;
     open.willUpdate(new Map([["rt", undefined]]));
-    assert(open._favoritesSubscriptionRequested);
     assertEquals(second.subscribeCount, 1);
   } finally {
     restore();
@@ -190,7 +195,6 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     ok.pieceId = "piece-1";
     await ok.handleToggleFavorite(fakeEvent());
     assertEquals(okRt.subscribeCount, 1);
-    assert(ok._favoritesSubscriptionRequested);
     assertFalse(ok._isFavoriteLoading);
 
     // A write cancelled by a disposed runtime is swallowed, not surfaced.
@@ -201,6 +205,30 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     racing.pieceId = "piece-2";
     await racing.handleToggleFavorite(fakeEvent());
     assertFalse(racing._isFavoriteLoading);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("favorites re-subscribe after the header disconnects and reopens", async () => {
+  const restore = installBrowserGlobals();
+  try {
+    const { XHeaderView } = await import("../src/views/HeaderView.ts");
+    const view = new XHeaderView() as unknown as HeaderViewLike;
+    const rt = makeRuntime();
+    view.rt = rt;
+
+    // Opening the menu subscribes.
+    view._ensureFavoritesSubscription();
+    assertEquals(rt.subscribeCount, 1);
+
+    // Disconnecting tears the subscription down.
+    view.disconnectedCallback();
+    assertEquals(rt.unsubscribeCount, 1);
+
+    // Reopening after reconnect must subscribe again, not skip on stale state.
+    view._ensureFavoritesSubscription();
+    assertEquals(rt.subscribeCount, 2);
   } finally {
     restore();
   }

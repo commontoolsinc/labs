@@ -521,7 +521,6 @@ export class XHeaderView extends BaseView {
   private accessor _localIsFavorite: boolean | undefined = undefined;
 
   private _unsubscribeFavorites: (() => void) | undefined;
-  private _favoritesSubscriptionRequested = false;
 
   /** Subscribe to the favorites list so the menu reflects current state. */
   private _setupFavoritesSubscription(): void {
@@ -544,11 +543,13 @@ export class XHeaderView extends BaseView {
    * and delays it. Deferring the subscription to the first menu open keeps that
    * work off the first-write path; the favorite toggle creates the pattern on
    * demand when the user actually favorites something.
+   *
+   * Idempotent while a subscription is live. After teardown — a disconnect or
+   * a runtime swap clears `_unsubscribeFavorites` — the next call re-subscribes,
+   * so a reconnected header is not left without favorites.
    */
   private _ensureFavoritesSubscription(): void {
-    if (this._favoritesSubscriptionRequested) return;
-    if (!this.rt) return;
-    this._favoritesSubscriptionRequested = true;
+    if (this._unsubscribeFavorites) return;
     this._setupFavoritesSubscription();
   }
 
@@ -629,7 +630,6 @@ export class XHeaderView extends BaseView {
       this._localIsFavorite = undefined;
       this._piecesCache = undefined;
       this._cleanupFavoritesSubscription();
-      this._favoritesSubscriptionRequested = false;
       // If the menu is already open when a runtime arrives, the favorites
       // surface is showing, so subscribe now; otherwise wait for the first open.
       if (this.menuOpen) this._ensureFavoritesSubscription();
