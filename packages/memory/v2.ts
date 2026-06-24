@@ -202,6 +202,10 @@ export interface MemoryProtocolFlags {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
+  /** Legacy CT-1775 draft capability: index-keyed per-frame schema table. */
+  syncSchemaTable: boolean;
+  /** Hash-keyed per-frame schema table. */
+  syncSchemaTableV2: boolean;
 }
 
 /**
@@ -211,6 +215,8 @@ export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
+  syncSchemaTable?: boolean;
+  syncSchemaTableV2?: boolean;
 };
 
 export interface HelloMessage {
@@ -574,6 +580,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = false;
+let syncSchemaTableEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -608,10 +615,30 @@ export function resetCommitPreconditionsConfig(): void {
   commitPreconditionsEnabled = false;
 }
 
+/**
+ * Ambient protocol capability for hash-keyed frame-local schema tables in sync
+ * payloads. This is a wire-size optimization only; peers that do not advertise
+ * the v2 capability keep receiving the historical fully-expanded `SessionSync`
+ * shape.
+ */
+export function setSyncSchemaTableConfig(enabled?: boolean): void {
+  syncSchemaTableEnabled = enabled ?? true;
+}
+
+export function getSyncSchemaTableConfig(): boolean {
+  return syncSchemaTableEnabled;
+}
+
+export function resetSyncSchemaTableConfig(): void {
+  syncSchemaTableEnabled = true;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
+  syncSchemaTable: false,
+  syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
 /**
@@ -660,10 +687,28 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const syncSchemaTable = value.syncSchemaTable;
+  if (
+    syncSchemaTable !== undefined &&
+    typeof syncSchemaTable !== "boolean"
+  ) {
+    return null;
+  }
+
+  const syncSchemaTableV2 = value.syncSchemaTableV2;
+  if (
+    syncSchemaTableV2 !== undefined &&
+    typeof syncSchemaTableV2 !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
+    syncSchemaTable: syncSchemaTable === true,
+    syncSchemaTableV2: syncSchemaTableV2 === true,
   };
 };
 
@@ -676,6 +721,8 @@ export const wireMemoryProtocolFlags = (
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
+  syncSchemaTable: flags.syncSchemaTable,
+  syncSchemaTableV2: flags.syncSchemaTableV2,
 });
 
 export const encodeMemoryBoundary = (value: FabricValue): string =>
