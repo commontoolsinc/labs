@@ -56,22 +56,23 @@ The event-handler commit path classifies each commit result and acts on it
 (`packages/runner/src/scheduler/events.ts`, `classifyCommitDisposition`):
 
 - **Success** — done.
-- **Stale-basis `ConflictError`** — the backpressure path. A stale-basis conflict
-  usually clears the instant the fresh confirmed state arrives, so the first
-  `immediateRetries` retries (default 5) fire with no delay — the fast path the
-  runtime had before backoff existed, where a transient conflict converges within
-  a few rapid retries. This matters: the harness and the UI settle by waiting for
-  the event queue to drain, so spacing out a retry that would have cleared
-  immediately can keep a write from converging within a settle. Only once the
-  immediate retries are exhausted (sustained contention) does the event re-queue
-  parked via the existing `notBefore` mechanism with a capped exponential backoff
-  plus jitter (`scheduler/backpressure.ts`, `computeBackoffDelayMs`). Backoff
-  makes the scheduler slow down under contention instead of busy-looping; jitter
-  keeps concurrent writers contending for the same entity from retrying in
-  lockstep. The event keeps retrying for a bounded window (default 30 seconds),
-  measured from the first conflict, which is long enough to outlast a rehydration
-  burst. `idle()` and `settled()` already wait for a parked head event, so a write
-  that converges still completes within a settle.
+- **Stale-basis `ConflictError`** — the backpressure path. The event is re-queued
+  parked via the existing `notBefore` mechanism with a single capped exponential
+  backoff plus jitter (`scheduler/backpressure.ts`, `computeBackoffDelayMs`). The
+  curve is deliberately near-immediate at the start: the default `baseDelayMs` is
+  25/32 ms, so the first few delays are 0.78, 1.56, 3.125 ms — effectively
+  immediate. A stale-basis conflict usually clears the instant the fresh confirmed
+  state arrives, and these sub-5ms delays let it converge within a settle (the
+  harness and the UI settle by waiting for the event queue to drain, so a retry
+  that would have cleared immediately must not be spaced out). The delay only
+  grows into real spacing once a conflict persists: it reaches 25ms before the
+  seventh attempt and doubles to a 1-second cap. Backoff makes the scheduler slow
+  down under sustained contention instead of busy-looping; jitter keeps concurrent
+  writers contending for the same entity from retrying in lockstep. The event
+  keeps retrying for a bounded window (default 30 seconds), measured from the
+  first conflict, which is long enough to outlast a rehydration burst. `idle()`
+  and `settled()` already wait for a parked head event, so a write that converges
+  still completes within a settle.
 - **Window elapsed without converging** — a terminal `CommitConvergenceError` is
   surfaced through the scheduler error channel (`scheduler.onError`). The write
   fails loudly rather than disappearing. This is the bounded-resource backstop:
@@ -131,8 +132,7 @@ count no longer bounds conflict retries; the window does.
 
 `RuntimeOptions.commitBackpressure` tunes the policy
 (`scheduler/backpressure.ts`, `CommitBackpressurePolicy`): `baseDelayMs`,
-`maxDelayMs`, `jitter`, `retryWindowMs`, `immediateRetries`. Unset fields fall
-back to
+`maxDelayMs`, `jitter`, `retryWindowMs`. Unset fields fall back to
 `DEFAULT_COMMIT_BACKPRESSURE` and every field is clamped to a well-defined range
 (non-negative delays, a cap no lower than the base delay, jitter within [0, 1], a
 non-negative window). The clamps only keep the arithmetic sane; the

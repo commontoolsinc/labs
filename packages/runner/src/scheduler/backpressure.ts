@@ -20,7 +20,12 @@
  * surfaces as a terminal error rather than vanishing.
  */
 export interface CommitBackpressurePolicy {
-  /** Delay before the first retry, in milliseconds. */
+  /**
+   * Delay before the first retry, in milliseconds. Small by default so the
+   * first few retries are near-immediate — a stale-basis conflict usually
+   * clears as soon as the fresh confirmed state arrives, and the exponential
+   * curve only grows into real spacing once a conflict persists.
+   */
   baseDelayMs: number;
   /** Ceiling on the per-retry delay, in milliseconds. */
   maxDelayMs: number;
@@ -37,24 +42,18 @@ export interface CommitBackpressurePolicy {
    * conflict for a given intent.
    */
   retryWindowMs: number;
-  /**
-   * Number of conflict retries attempted with no delay before backoff begins.
-   * A stale-basis conflict usually clears as soon as the fresh confirmed state
-   * arrives, so the first few retries fire immediately — the fast path the
-   * runtime had before backoff existed. Backoff (and its delays) only kick in
-   * once these immediate retries are exhausted, i.e. under sustained
-   * contention, where spacing retries out is what keeps the scheduler from
-   * busy-looping.
-   */
-  immediateRetries: number;
 }
 
+// baseDelayMs is 25/32: the exponential reaches 25ms at the sixth step (the
+// park before the seventh attempt) and then continues 50, 100, 200, 400, 800,
+// 1000 (capped). The first retries — 0.78, 1.56, 3.125ms — are sub-5ms and so
+// effectively immediate, which is what lets a transient conflict converge fast,
+// without a separate immediate-retry count.
 export const DEFAULT_COMMIT_BACKPRESSURE: CommitBackpressurePolicy = {
-  baseDelayMs: 25,
+  baseDelayMs: 25 / 32,
   maxDelayMs: 1_000,
   jitter: 0.5,
   retryWindowMs: 30_000,
-  immediateRetries: 5,
 };
 
 /**
@@ -76,8 +75,7 @@ export function resolveCommitBackpressure(
   const maxDelayMs = Math.max(baseDelayMs, merged.maxDelayMs);
   const jitter = Math.min(1, Math.max(0, merged.jitter));
   const retryWindowMs = Math.max(0, merged.retryWindowMs);
-  const immediateRetries = Math.max(0, Math.floor(merged.immediateRetries));
-  return { baseDelayMs, maxDelayMs, jitter, retryWindowMs, immediateRetries };
+  return { baseDelayMs, maxDelayMs, jitter, retryWindowMs };
 }
 
 /**
