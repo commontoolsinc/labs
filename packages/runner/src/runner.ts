@@ -2565,7 +2565,10 @@ export class Runner {
       } catch {
         bumpAndThrow("eval_threw");
       }
-      this.interpreterProbeMemo.set(pattern, { argument: argSnapshot, dry: dry! });
+      this.interpreterProbeMemo.set(pattern, {
+        argument: argSnapshot,
+        dry: dry!,
+      });
     }
     // SAFETY NET (context-requiring lifts, run-gate divergences, etc.): the
     // per-op isolation in `evalRog` swallows a leaf's runtime TypeError into
