@@ -285,4 +285,117 @@ describe("W1a ROG evaluator core", () => {
     expect(() => evalRog(rog, { argument: { xs: [] }, leafImpls: new Map() }))
       .toThrow(NotInterpretedHere);
   });
+
+  it("an INLINED pattern op evaluates its sub-Rog against the resolved bound argument", () => {
+    // Hand-built proof of the evalRog pattern-op seam (Change D): the parent op
+    // carries an `inlined` sub-Rog `({v}) => ({ doubled: v*2 })` and a bound
+    // `argument` ref reading `arg.x`. evalRog must resolve the argument in the
+    // PARENT frame, run the sub-Rog with THAT value as its `argument`, and the
+    // sub-Rog's own `leafImpls` / `internalToOp` (NEVER the parent's).
+    const subOps: Op[] = [
+      {
+        id: 0, // a leaf doubling its (sub-)argument's `v`; reads the whole
+        // sub-argument object so the impl can pluck `.v` (structured-input form).
+        kind: "leaf",
+        inputs: [{ kind: "argument", path: [] }],
+        outSchema: T,
+        detail: { kind: "leaf" },
+      },
+    ];
+    const subRog: Rog = {
+      argumentSchema: T,
+      resultSchema: T,
+      // result: { doubled: <op0> } via a construct
+      result: { kind: "opOut", op: 1, path: [] },
+      ops: [
+        ...subOps,
+        {
+          id: 1,
+          kind: "construct",
+          inputs: [],
+          outSchema: T,
+          detail: {
+            kind: "construct",
+            template: {
+              shape: "object",
+              fields: { doubled: { kind: "opOut", op: 0, path: [] } },
+            },
+          },
+        },
+      ],
+    };
+    // The sub-Rog's OWN leafImpls (op id 0 — same id the parent's first op could
+    // use; per-detail isolation means they never collide).
+    const subLeafImpls = new Map<number, LeafImpl>([[
+      0,
+      (i) => (i as { v: number }).v * 2,
+    ]]);
+
+    const parentRog: Rog = {
+      argumentSchema: T,
+      resultSchema: T,
+      // result: { inner: <patternOp 0> }
+      result: { kind: "opOut", op: 1, path: [] },
+      ops: [
+        {
+          id: 0,
+          kind: "pattern",
+          inputs: [],
+          outSchema: T,
+          detail: {
+            kind: "pattern",
+            // bound argument the parent passes the child: { v: arg.x }
+            argument: { kind: "argument", path: [] },
+            inlined: {
+              rog: subRog,
+              internalToOp: new Map(),
+              leafImpls: subLeafImpls,
+            },
+          },
+        },
+        {
+          id: 1,
+          kind: "construct",
+          inputs: [],
+          outSchema: T,
+          detail: {
+            kind: "construct",
+            template: {
+              shape: "object",
+              fields: { inner: { kind: "opOut", op: 0, path: [] } },
+            },
+          },
+        },
+      ],
+    };
+    // Parent argument is { v: 6 } (the bound arg ref reads the whole argument).
+    // The PARENT has an EMPTY leafImpls map — the sub-Rog must use its OWN.
+    const { result } = evalRog(parentRog, {
+      argument: { v: 6 },
+      leafImpls: new Map(),
+    });
+    expect(result).toEqual({ inner: { doubled: 12 } });
+  });
+
+  it("a pattern op with NO `inlined` (serialized) throws NotInterpretedHere → fail closed", () => {
+    const rog: Rog = {
+      argumentSchema: T,
+      resultSchema: T,
+      result: { kind: "opOut", op: 0, path: [] },
+      ops: [{
+        id: 0,
+        kind: "pattern",
+        inputs: [],
+        outSchema: T,
+        detail: {
+          kind: "pattern",
+          impl: { identity: "cf:module/x", symbol: "y" },
+          argument: { kind: "const", value: { v: 1 } },
+          // inlined intentionally undefined (serialized $patternRef) → fail closed
+        },
+      }],
+    };
+    expect(() => evalRog(rog, { argument: {}, leafImpls: new Map() }))
+      .toThrow(NotInterpretedHere);
+  });
 });

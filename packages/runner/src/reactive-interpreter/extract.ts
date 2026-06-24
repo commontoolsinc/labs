@@ -43,7 +43,20 @@ interface RawModule {
   $patternRef?: { identity: string; symbol: string };
   argumentSchema?: unknown;
   resultSchema?: unknown;
+  /** Set to `true` on a `type:"javascript"` module the builder marks as an
+   * effect (side-effecting, not a value computation). A module carrying
+   * `isEffect:true` is NOT a pure value-leaf. (Note: the registry-level
+   * `isEffect` of effect *builtins* like llm/sqlite is NOT propagated onto the
+   * in-memory `type:"ref"` module object — those are classified by name via
+   * `EFFECT_REFS`; the ref-branch `isEffect` check below is a fail-closed
+   * backstop for any ref that does happen to carry it.) */
   isEffect?: boolean;
+  /** A `type:"javascript"` module built by `cf.handler` carries `wrapper:
+   * "handler"` (builder/module.ts). A handler is an EVENT-STREAM SINK, not a
+   * pure value computation: applying it produces a stream link the result
+   * references. Interpreting it as a pure leaf evaluates the handler body and
+   * silently DROPS the stream — so it must NOT classify as `leaf`. */
+  wrapper?: "handler";
 }
 interface RawNode {
   module?: RawModule | RawPattern;
@@ -86,6 +99,23 @@ function classifyModule(
   if (m.$patternRef) return { kind: "pattern", impl: m.$patternRef };
   if (m.type === "pattern") return { kind: "pattern", impl: m.$patternRef };
   if (m.type === "javascript") {
+    // FAIL CLOSED: a `type:"javascript"` module is a PURE value-leaf ONLY when
+    // it carries NO effect markers. The two markers that make it non-pure are
+    // readable directly on the in-memory module object:
+    //   - `wrapper === "handler"`: a `cf.handler` node. It is an event-stream
+    //     SINK — applying it yields a stream link the pattern result references.
+    //     Evaluating its body as a pure leaf SILENTLY DROPS that stream (legacy
+    //     emits `{increment:<stream link>}`, a leaf-interpretation emits `{}`).
+    //   - `isEffect === true`: a `type:"javascript"` module the builder marked
+    //     as an effect (side-effecting, not a value computation).
+    // Either marker → classify as `effect` → ineligible (effect is not in the
+    // runner's ELIGIBLE_KINDS, and `byKind.effect>0` trips the collection and
+    // nested-pattern coverage gates) → legacy fallback, which models the stream.
+    // A bare lift/computed/derive/str-lowered module (no wrapper, no isEffect)
+    // is the genuine pure leaf and stays `leaf` so real coverage is preserved.
+    if (m.wrapper === "handler" || m.isEffect === true) {
+      return { kind: "effect" };
+    }
     return { kind: "leaf", impl: m.$implRef };
   }
   if (m.type === "ref") {
@@ -98,40 +128,62 @@ function classifyModule(
       return { kind: "control", ctrlOp: ref as ControlOp };
     }
     if (EFFECT_REFS.has(ref)) return { kind: "effect" };
-    // Other builtins (fetch, llm, sqlite, str, ...) are opaque leaves.
+    // A ref module the builder marked as an effect (`raw(..., {isEffect:true})`
+    // lowerings may surface it on the in-memory module) is a side-effecting /
+    // stream-producing builtin — fail closed to `effect`, never an opaque leaf.
+    if (m.isEffect === true) return { kind: "effect" };
+    // Other PURE builtins (str, …) are opaque value leaves.
     return { kind: "leaf" };
   }
-  return { kind: "leaf" }; // conservative default; recorded as classified-leaf
+  // Non-javascript / non-ref module types (`raw`, `isolated`, `passthrough`) are
+  // NOT provably pure value-leaves. A `type:"javascript"` leaf is the only shape
+  // whose pure-ness we can read off the module; anything else fails closed to
+  // `effect` so an unmodeled side-effecting/stream-bearing module is rejected by
+  // the eligibility gates rather than silently mis-evaluated as a pure leaf.
+  return { kind: "effect" };
 }
 
-/** Map a single `$alias` payload to a ValueRef, or null if unrecognized. */
+/** Map a single `$alias` payload to a ValueRef, or null if unrecognized.
+ *
+ * `expectedDefer` is the recursion depth of the (sub-)Rog this alias lives in
+ * (0 = top-level). The builder increments `defer` once per nesting level it
+ * serializes an alias through (builder/json-utils.ts:87-98), so an alias that
+ * resolves to ITS OWN frame carries `defer === depth` at depth `d` (empirically
+ * confirmed: a 2-level nest carries defer 0/1/2 at depths 0/1/2). Within the
+ * sub-Rog's own frame that alias is a LOCAL (level-0-relative) reference, so we
+ * treat `defer === expectedDefer` as resolvable and strip the level. */
 function aliasToValueRef(
   alias: Record<string, unknown>,
   unrecognized: Set<string>,
+  expectedDefer: number,
 ): ValueRef | null {
-  // FAIL CLOSED on `defer` — a non-zero defer level means the alias resolves
-  // through one or more levels of nested-pattern indirection that the
-  // interpreter does NOT model (see builder/json-utils.ts:87-98, where `defer`
-  // is incremented during shadow-ref / nested-pattern serialization). Resolving
-  // it as if it were a level-0 (non-deferred) ref would silently point at the
-  // WRONG cell (not a throw, so the eligibility probe would not catch it).
-  // Record it as unrecognized so the pattern falls back to the legacy path,
-  // which handles deferred resolution.
+  // FAIL CLOSED on an UNEXPECTED `defer` level. At depth `d` a local alias (one
+  // pointing at this frame's own argument/internal) carries `defer === d`. Any
+  // OTHER defer level means the alias resolves through a DIFFERENT number of
+  // nested-pattern indirections than this frame models — resolving it as if it
+  // were local would silently point at the WRONG cell (not a throw, so the
+  // eligibility probe would not catch it). Record it as unrecognized so the
+  // pattern falls back to the legacy path, which handles deferred resolution.
+  //
+  // At the top level (`expectedDefer === 0`) a `defer`-bearing alias is the
+  // serialized / cross-frame indirection that must fail closed — preserving the
+  // original top-level contract (`defer` absent or 0 = local).
   //
   // NOTE on `scope`: the fresh in-memory builder attaches `scope` to ordinary
   // top-level argument/internal aliases (builder/pattern.ts:349) at the
   // ELIGIBLE tier; that scope is the ambient/default frame the interpreter
   // already resolves against, and the prod-wire oracle confirms those patterns
   // interpret correctly. Failing closed on `scope` would regress real eligible
-  // patterns, so we do NOT — only `defer` is the unmodeled, production-reachable
-  // indirection that must fail closed here. `defer` is never emitted by the
-  // fresh top-level builder, so this never regresses a currently-eligible
-  // pattern.
-  // Type-agnostic: any present, non-zero `defer` fails closed (the builder only
-  // ever emits it as a number `(defer ?? 0) + 1`, but a hand-built / arbitrarily
-  // serialized alias could carry a non-number `defer` — that too must not be
-  // resolved as level-0).
-  if ("defer" in alias && alias.defer !== 0) {
+  // patterns, so we do NOT — only an UNEXPECTED `defer` is the unmodeled,
+  // production-reachable indirection that must fail closed here.
+  // Type-agnostic: any `defer` that is not exactly the expected number fails
+  // closed (the builder only ever emits it as a number `(defer ?? 0) + 1`, but a
+  // hand-built / arbitrarily serialized alias could carry a non-number `defer`
+  // — that too must not be resolved as local).
+  const localDefer = expectedDefer === 0
+    ? !("defer" in alias) || alias.defer === 0
+    : alias.defer === expectedDefer;
+  if (!localDefer) {
     unrecognized.add(JSON.stringify(Object.keys(alias).sort()));
     return null;
   }
@@ -180,6 +232,7 @@ function hasAliasMixedWithSiblings(obj: Record<string, unknown>): boolean {
 function valueToRef(
   v: unknown,
   unrecognized: Set<string>,
+  expectedDefer: number,
 ): ValueRef | null {
   if (v === null || typeof v !== "object") {
     return { kind: "const", value: v };
@@ -195,7 +248,11 @@ function valueToRef(
       unrecognized.add(MALFORMED_ALIAS_MARKER);
       return null;
     }
-    return aliasToValueRef(obj.$alias as Record<string, unknown>, unrecognized);
+    return aliasToValueRef(
+      obj.$alias as Record<string, unknown>,
+      unrecognized,
+      expectedDefer,
+    );
   }
   // Bears a `$alias` key but is NOT a canonical alias (truthy non-record /
   // missing-or-non-array path, e.g. `{$alias:"str"}`, `{$alias:null}`,
@@ -243,8 +300,9 @@ function buildStructuredRef(
   ops: Op[],
   nextSynthId: () => OpId,
   bump: (k: OpKind | "unknown") => void,
+  expectedDefer: number,
 ): ValueRef {
-  const direct = valueToRef(v, unrecognized);
+  const direct = valueToRef(v, unrecognized, expectedDefer);
   if (direct) return direct;
   // `direct` is null in exactly two cases:
   //   1. a plain structured object/array (NO `$alias` own-key) — assemble below;
@@ -262,7 +320,14 @@ function buildStructuredRef(
 
   if (Array.isArray(v)) {
     const items = v.map((el) =>
-      buildStructuredRef(el, unrecognized, ops, nextSynthId, bump)
+      buildStructuredRef(
+        el,
+        unrecognized,
+        ops,
+        nextSynthId,
+        bump,
+        expectedDefer,
+      )
     );
     const id = nextSynthId();
     ops.push({
@@ -278,7 +343,14 @@ function buildStructuredRef(
 
   const fields: Record<string, ValueRef> = {};
   for (const [k, el] of Object.entries(obj)) {
-    fields[k] = buildStructuredRef(el, unrecognized, ops, nextSynthId, bump);
+    fields[k] = buildStructuredRef(
+      el,
+      unrecognized,
+      ops,
+      nextSynthId,
+      bump,
+      expectedDefer,
+    );
   }
   const id = nextSynthId();
   ops.push({
@@ -308,9 +380,17 @@ function inputRefs(
   ops: Op[],
   nextSynthId: () => OpId,
   bump: (k: OpKind | "unknown") => void,
+  expectedDefer: number,
 ): ValueRef[] {
   if (inputs === undefined || inputs === null) return [];
-  const ref = buildStructuredRef(inputs, unrecognized, ops, nextSynthId, bump);
+  const ref = buildStructuredRef(
+    inputs,
+    unrecognized,
+    ops,
+    nextSynthId,
+    bump,
+    expectedDefer,
+  );
   return [ref];
 }
 
@@ -346,7 +426,6 @@ export interface ExtractResult {
 export function extractRog(pattern: RawPattern): ExtractResult {
   const unrecognized = new Set<string>();
   const byKind = {} as Record<OpKind | "unknown", number>;
-  const internalToOp = new Map<string, OpId>();
   let nodeCount = 0;
   let classified = 0;
   let nested = 0;
@@ -357,13 +436,31 @@ export function extractRog(pattern: RawPattern): ExtractResult {
 
   // Synthesized ops (result construct + per-leaf structured-input constructs)
   // are NOT Pattern nodes; they get unique negative ids so they never collide
-  // with node ids (== node index, >= 0) in the topo/byId maps.
+  // with node ids (== node index, >= 0) in the topo/byId maps. Counter is shared
+  // across the whole extraction so synth ids are globally unique; per-Rog node
+  // ids still start at 0 (the node index), so a sub-Rog's leaf ops and the
+  // parent's leaf ops both begin at 0 — they must NEVER share one flat map (R2),
+  // which is why `internalToOp` and `leafImpls` are PER-Rog / per-detail.
   let synthCounter = 0;
   const nextSynthId = (): OpId => --synthCounter; // -1, -2, -3, ...
 
-  function build(p: RawPattern, depth: number): Rog {
+  // `build` returns the Rog plus the LOCAL `internalToOp` for that (sub-)Rog's
+  // node space. The top-level call's map becomes `ExtractResult.internalToOp`
+  // (public surface unchanged); each sub-Rog's map rides on its inlined detail.
+  function build(
+    p: RawPattern,
+    depth: number,
+  ): { rog: Rog; internalToOp: Map<string, OpId> } {
     const ops: Op[] = [];
     const nodes = p.nodes ?? [];
+    // PER-Rog internal-cell wiring. The sub-pattern's internal refs are LOCAL to
+    // the child node space and MUST resolve within the sub-Rog — never share the
+    // parent's map (Change B).
+    const internalToOp = new Map<string, OpId>();
+    // At recursion depth `d` a LOCAL alias (one resolving to this frame's own
+    // argument/internal) carries `defer === d`; the builder increments `defer`
+    // once per nesting level it serializes through (json-utils.ts:87-98).
+    const expectedDefer = depth;
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       nodeCount++;
@@ -371,9 +468,11 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       bump(c.kind);
       classified++; // every node classifies (leaf is the sound default)
 
-      // Wire this node's output alias → its op id (top-level only for now), so
-      // `internal` ValueRefs (result/input refs to derived cells) resolve.
-      if (depth === 0) {
+      // Wire this node's output alias → its op id into THIS Rog's LOCAL map, so
+      // `internal` ValueRefs (result/input refs to derived cells) resolve within
+      // the same node space. Wired at EVERY depth now (Change B): a sub-Rog's
+      // internal cells must resolve against the sub-Rog's own nodes.
+      {
         const outName = outputInternalName(node.outputs);
         if (outName !== null) {
           internalToOp.set(outName, i);
@@ -401,7 +500,14 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       // meaningful refs in `detail`, so their flat `inputs` stays empty (the
       // `detail` refs alone drive ordering + read-set derivation).
       const inputs = (c.kind === "leaf")
-        ? inputRefs(node.inputs, unrecognized, ops, nextSynthId, bump)
+        ? inputRefs(
+          node.inputs,
+          unrecognized,
+          ops,
+          nextSynthId,
+          bump,
+          expectedDefer,
+        )
         : [];
       const op: Op = {
         id: i,
@@ -425,11 +531,15 @@ export function extractRog(pattern: RawPattern): ExtractResult {
             ops,
             nextSynthId,
             bump,
+            expectedDefer,
           );
         let elementImpl: ImplRef = { identity: "<inline>", symbol: "op" };
         if (isPatternLike(inObj.op)) {
           nested++;
-          build(inObj.op as RawPattern, depth + 1); // recurse for coverage
+          // Recurse for COVERAGE only — the element graph is interpreted by the
+          // collection element evaluator (re-extracted fresh at depth 0), not
+          // inlined here, so the returned sub-Rog is intentionally discarded.
+          build(inObj.op as RawPattern, depth + 1);
         } else if (
           inObj.op && typeof inObj.op === "object" &&
           (inObj.op as { $patternRef?: ImplRef }).$patternRef
@@ -447,7 +557,14 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         const branchRef = (v: unknown): ValueRef =>
           v === undefined
             ? ({ kind: "const", value: undefined } as ValueRef)
-            : buildStructuredRef(v, unrecognized, ops, nextSynthId, bump);
+            : buildStructuredRef(
+              v,
+              unrecognized,
+              ops,
+              nextSynthId,
+              bump,
+              expectedDefer,
+            );
         const pred = branchRef(inObj.condition ?? inObj.if);
         // Branches must be exactly [then, else] in that order — NOT the flat
         // `inputs` list (which also carries the condition). The builder names
@@ -473,9 +590,46 @@ export function extractRog(pattern: RawPattern): ExtractResult {
           branches: [thenRef, elseRef],
         };
       } else if (c.kind === "pattern") {
+        // Reconstruct the BOUND argument the parent passes the sub-pattern — the
+        // pattern node's `inputs`, resolved losslessly in the PARENT frame
+        // (`expectedDefer = depth`). This is the lossless leaf-input path; the
+        // evaluator resolves it and hands the value to the sub-Rog as its
+        // `argument`. An empty/undefined input tree → `const undefined`.
+        const argumentRef = node.inputs === undefined || node.inputs === null
+          ? ({ kind: "const", value: undefined } as ValueRef)
+          : buildStructuredRef(
+            node.inputs,
+            unrecognized,
+            ops,
+            nextSynthId,
+            bump,
+            expectedDefer,
+          );
+        // The in-memory nested pattern's live sub-Pattern (with `.nodes`) lives
+        // at `module.implementation` (an inline Pattern object). A SERIALIZED
+        // nested pattern has no live sub-Pattern there (only a `$patternRef`),
+        // so `inlined` stays undefined → the interpreter throws
+        // NotInterpretedHere → fail closed → legacy (which models serialized /
+        // deferred resolution).
+        const childPattern =
+          (node.module as { implementation?: unknown } | undefined)
+            ?.implementation;
+        let inlined: { rog: Rog; internalToOp: Map<string, OpId> } | undefined;
+        if (isPatternLike(childPattern)) {
+          nested++; // coverage sees the sub-graph (Change A; load-bearing w/ E)
+          // RECURSE and KEEP the returned Rog (unlike the collection branch,
+          // which discards it). The recursion at `depth + 1` makes the closure-
+          // level `byKind`/`nested` counters account for the sub-pattern's
+          // op-kinds — which `rog.ops` is BLIND to (each build returns a fresh
+          // ops[]). The gate (Change E) reads those counters, so this recursion
+          // and the gate are MUTUALLY LOAD-BEARING (R1).
+          inlined = build(childPattern as RawPattern, depth + 1);
+        }
         op.detail = {
           kind: "pattern",
-          rog: c.impl ?? { identity: "<inline>", symbol: "pattern" },
+          impl: c.impl,
+          argument: argumentRef,
+          inlined,
         };
       } else if (c.kind === "effect") {
         op.detail = { kind: "effect", sink: "handler" };
@@ -490,18 +644,28 @@ export function extractRog(pattern: RawPattern): ExtractResult {
     // recorded as unrecognized, not dropped.
     const resultRef = p.result === undefined
       ? ({ kind: "const", value: undefined } as ValueRef)
-      : buildStructuredRef(p.result, unrecognized, ops, nextSynthId, bump);
+      : buildStructuredRef(
+        p.result,
+        unrecognized,
+        ops,
+        nextSynthId,
+        bump,
+        expectedDefer,
+      );
     return {
-      // deno-lint-ignore no-explicit-any
-      argumentSchema: (p.argumentSchema ?? true) as any,
-      // deno-lint-ignore no-explicit-any
-      resultSchema: (p.resultSchema ?? true) as any,
-      result: resultRef,
-      ops,
+      rog: {
+        // deno-lint-ignore no-explicit-any
+        argumentSchema: (p.argumentSchema ?? true) as any,
+        // deno-lint-ignore no-explicit-any
+        resultSchema: (p.resultSchema ?? true) as any,
+        result: resultRef,
+        ops,
+      },
+      internalToOp,
     };
   }
 
-  const rog = build(pattern, 0);
+  const { rog, internalToOp } = build(pattern, 0);
   return {
     rog,
     coverage: {
@@ -557,6 +721,34 @@ export function resolveLeafImpls(
   const unresolvedLeafOps: OpId[] = [];
   const nodes = pattern.nodes ?? [];
   for (const op of rog.ops) {
+    // INLINED nested pattern: resolve the child's live leaf impls against the
+    // child's OWN `module.implementation.nodes`, and attach them to the child's
+    // detail. PER-DETAIL — the child's leaf op ids start at 0 just like the
+    // parent's, so they must NEVER merge into this flat parent map (R2). A child
+    // with any unresolved leaf bubbles up here (we surface ONE sentinel for this
+    // pattern op) so the caller's `unresolved_leaf` gate falls the whole pattern
+    // back to legacy. Serialized child leaves hit this same boundary.
+    if (op.detail.kind === "pattern" && op.detail.inlined) {
+      const node = op.id >= 0 ? nodes[op.id] : undefined;
+      const childPattern =
+        (node?.module as { implementation?: unknown } | undefined)
+          ?.implementation;
+      const childResolved = resolveLeafImpls(
+        (childPattern ?? {}) as RawPattern,
+        op.detail.inlined.rog,
+        implRefResolver,
+      );
+      // Attach the child's resolved leaf impls onto its inlined detail (the
+      // evaluator reads them from there, NOT from the parent map).
+      op.detail.inlined.leafImpls = childResolved.leafImpls;
+      if (childResolved.unresolvedLeafOps.length > 0) {
+        // Surface the pattern op's id as the unresolved sentinel (the parent's
+        // own id space), so the `unresolved_leaf` gate trips on a child boundary
+        // without conflating child and parent op ids in the flat map.
+        unresolvedLeafOps.push(op.id);
+      }
+      continue;
+    }
     if (op.detail.kind !== "leaf") continue;
     // Synthesized ops (id < 0) are never leaves; real leaf ops map 1:1 to nodes.
     const node = op.id >= 0 ? nodes[op.id] : undefined;

@@ -866,14 +866,16 @@ describe("Reactive Interpreter — corpus differential gap-map", () => {
       if (r.status === "UNHANDLED") {
         const m = reason.match(/NotInterpretedHere[^"]*"([a-z]+)"/);
         if (m) return `NotInterpretedHere: op kind "${m[1]}"`;
-        // Handler-wrapper class: a `handler` module is classified as a plain
-        // `leaf` (module.type==="javascript"), but it is an event-driven effect
-        // with a 2-arg (event, state) convention and `{$event,$ctx}` structured
-        // input — not a synchronous single-input value leaf. evalRog calls it as
-        // impl(singleInput) → the body dereferences the missing `state`.
+        // Handler-wrapper class: a `cf.handler` module (`type:"javascript"`,
+        // `wrapper:"handler"`) is classified as `effect` by `classifyModule`
+        // (NOT a pure value leaf), so `evalRog` throws `NotInterpretedHere`
+        // ("effect") and the pattern falls back to legacy — which preserves the
+        // event stream. (This row therefore normally matches the generic
+        // `NotInterpretedHere: op kind "effect"` bucket above; this branch is a
+        // backstop for any handler reason that does not.)
         if (r.feature.includes("handler")) {
-          return "handler classified as leaf: effect/2-arg (event,state) " +
-            "convention + {$event,$ctx} input, not a value leaf";
+          return "handler classified as effect (wrapper:handler) → " +
+            "NotInterpretedHere → legacy fallback (stream preserved)";
         }
         // The structured-leaf-input class: a leaf whose builder input is a
         // multi-key / nested-array object (e.g. str's {strings,values}) —

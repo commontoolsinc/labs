@@ -70,6 +70,7 @@ export function topoOrder(ops: Op[]): Op[] {
     };
     for (const r of op.inputs) collect(r);
     if (op.detail.kind === "collection") collect(op.detail.listInput);
+    if (op.detail.kind === "pattern") collect(op.detail.argument);
     if (op.detail.kind === "control") {
       collect(op.detail.pred);
       op.detail.branches.forEach(collect);
@@ -183,8 +184,24 @@ export function evalRog(
       }
       case "collection":
         throw new NotInterpretedHere("collection"); // W3
-      case "pattern":
-        throw new NotInterpretedHere("pattern"); // W5
+      case "pattern": {
+        // INLINED, in-memory, PURE-COMPUTATION nested pattern: evaluate its
+        // sub-Rog directly, in this same action, against the parent-resolved
+        // bound argument. No child docs are minted (the doc-explosion legacy
+        // cost being removed) — the value flows through the parent's single
+        // result egress. A SERIALIZED ($patternRef, no `.nodes`) nested pattern
+        // has `inlined === undefined`: throw NotInterpretedHere so it propagates
+        // (the per-op isolation RE-THROWS NotInterpretedHere) → legacy fallback
+        // before any write, exactly as before.
+        const { inlined, argument } = op.detail;
+        if (!inlined) throw new NotInterpretedHere("pattern");
+        const { result } = evalRog(inlined.rog, {
+          argument: resolve(argument),
+          leafImpls: inlined.leafImpls ?? new Map(),
+          internalToOp: inlined.internalToOp,
+        });
+        return result;
+      }
       case "effect":
         throw new NotInterpretedHere("effect");
     }

@@ -532,6 +532,162 @@ describe("prod-wire: structured-input regression (add({a,b}))", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// TOP-LEVEL EFFECT-CLASS NEGATIVES (the pre-existing admit-and-mis-evaluate
+// hole). A `cf.handler` builds a `type:"javascript"` module with
+// `wrapper:"handler"` and NO `isEffect`. The classifier USED to map every
+// `type:"javascript"` module to `leaf`, so the handler node passed the
+// eligibility gate (leaf is eligible, `byKind.effect` stayed 0), was
+// INTERPRETED, and the interpreter evaluated the handler body as a pure leaf —
+// SILENTLY DROPPING the event stream (legacy emits `{increment:<stream link>}`,
+// the leaf-interpretation emits `{}`). The fix classifies `wrapper:"handler"`
+// (and `isEffect:true`) as `effect`, so the per-op `ELIGIBLE_KINDS` gate rejects
+// it → legacy fallback, which preserves the stream. A `[UI]`/render pattern is
+// guarded the same way: an interactive render carries a handler node (the
+// onClick sink), which now trips the same gate.
+// ---------------------------------------------------------------------------
+
+const handlerResultSchema = {
+  type: "object",
+  properties: { count: num, increment: { asStream: true } },
+} as JSONSchema;
+
+// ({count}) => ({count, increment: <handler stream>}). The result references the
+// handler's stream link — exactly the value a leaf-interpretation would drop.
+// deno-lint-ignore no-explicit-any
+function buildHandler(cf: any) {
+  return cf.pattern(
+    ({ count }: any) => {
+      const increment = cf.handler(
+        { type: "object" },
+        { type: "object", properties: { count: num } },
+        (_e: any, s: any) => {
+          s.count = s.count + 1;
+        },
+      );
+      return { count, increment: increment({ count }) };
+    },
+    { type: "object", properties: { count: num } },
+    handlerResultSchema,
+  );
+}
+
+// ({label}) => ({label, [UI]: <button onClick={handler}>}). An INTERACTIVE
+// render: the vnode binds an event handler, so the pattern carries a handler
+// node (wrapper:"handler") alongside the render. The render value itself is a
+// plain vnode object, but the handler node is what must keep this pattern OUT of
+// the interpreter (and its stream-bearing vnode out of a leaf mis-eval).
+const str = { type: "string" } as const satisfies JSONSchema;
+const uiResultSchema = {
+  type: "object",
+  properties: { label: str },
+} as const satisfies JSONSchema;
+// deno-lint-ignore no-explicit-any
+function buildInteractiveUI(cf: any) {
+  return cf.pattern(
+    ({ label }: any) => {
+      const onClick = cf.handler(
+        { type: "object" },
+        { type: "object", properties: { label: str } },
+        (_e: any, s: any) => {
+          s.label = s.label + "!";
+        },
+      );
+      return {
+        label,
+        [cf.UI]: cf.h("button", { onClick: onClick({ label }) }, label),
+      };
+    },
+    { type: "object", properties: { label: str }, required: ["label"] },
+    uiResultSchema,
+  );
+}
+
+describe("prod-wire: TOP-LEVEL handler falls back (flag ON) + matches legacy", () => {
+  it("a handler-bearing pattern does NOT interpret (effect class) and preserves the event stream", async () => {
+    const off = makeEnv(false);
+    const on = makeEnv(true);
+    try {
+      const legacy = await runAndPull(
+        off,
+        buildHandler,
+        { count: 0 },
+        handlerResultSchema,
+        "legacy:handler",
+      );
+      const beforeOk = on.census().interpreted_ok;
+      const beforeFb = on.census().fallback_by_reason.ineligible_opkind;
+      const interp = await runAndPull(
+        on,
+        buildHandler,
+        { count: 0 },
+        handlerResultSchema,
+        "interp:handler",
+      );
+      const after = on.census();
+
+      // The handler classified as `effect` → ELIGIBLE_KINDS gate rejected it →
+      // fallback bumped, NOT interpreted (no silent admit-and-mis-evaluate).
+      expect(after.interpreted_ok).toBe(beforeOk);
+      expect(after.fallback_by_reason.ineligible_opkind)
+        .toBe(beforeFb + 1);
+
+      // STREAM PRESERVED: legacy resolves `increment` to the handler's event
+      // stream; the interpreter (pre-fix) dropped it, yielding a bare `{count}`.
+      // Both legacy (fallback path) and the flag-on run (same fallback path) now
+      // carry the stream. The stream cell's internal identity differs across the
+      // two separate runtimes, so we assert PRESENCE (not a cross-runtime deep
+      // identity) plus value-field parity. The pre-fix bug made `increment`
+      // ABSENT under the flag — exactly what this guards.
+      const l = legacy as { count?: unknown; increment?: unknown };
+      const i = interp as { count?: unknown; increment?: unknown };
+      expect(l.increment).toBeDefined();
+      expect(i.increment).toBeDefined();
+      expect(i.count).toEqual(l.count);
+    } finally {
+      await off.dispose();
+      await on.dispose();
+    }
+  });
+});
+
+describe("prod-wire: TOP-LEVEL [UI] render falls back (flag ON) + matches legacy", () => {
+  it("an interactive [UI] render does NOT interpret (carries a handler node) and preserves the vnode", async () => {
+    const off = makeEnv(false);
+    const on = makeEnv(true);
+    try {
+      const legacy = await runAndPull(
+        off,
+        buildInteractiveUI,
+        { label: "hi" },
+        uiResultSchema,
+        "legacy:ui",
+      );
+      const beforeOk = on.census().interpreted_ok;
+      const beforeFb = on.census().fallback_by_reason.ineligible_opkind;
+      const interp = await runAndPull(
+        on,
+        buildInteractiveUI,
+        { label: "hi" },
+        uiResultSchema,
+        "interp:ui",
+      );
+      const after = on.census();
+
+      // The render result (incl. the bound vnode) deep-eqs legacy — the
+      // interpreter never mis-evaluated the handler-bearing render.
+      expect(interp).toEqual(legacy);
+      // Fell back via the effect-class gate, did NOT interpret.
+      expect(after.interpreted_ok).toBe(beforeOk);
+      expect(after.fallback_by_reason.ineligible_opkind)
+        .toBe(beforeFb + 1);
+    } finally {
+      await off.dispose();
+      await on.dispose();
+    }
+  });
+});
+
 describe("prod-wire: collection map dispatch (flag ON, single map)", () => {
   // A single top-level `map` over a bare scalar element op is now the ELIGIBLE
   // collection shape — it dispatches through the registered `$ri-collection-map`

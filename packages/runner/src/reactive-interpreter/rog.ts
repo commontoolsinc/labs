@@ -57,10 +57,40 @@ export type CollectionOp = "map" | "filter" | "flatMap";
 export type ControlOp = "ifElse" | "when" | "unless";
 export type EffectSink = "render" | "pull" | "handler";
 
+/** An inlined, in-memory nested pattern: the sub-pattern's own ROG plus the
+ * local wiring needed to evaluate it in isolation against a resolved argument.
+ * `internalToOp` is LOCAL to the sub-Rog (its internal-cell names resolve within
+ * the child's own node space, never the parent's). `leafImpls` is filled in by
+ * the `resolveLeafImpls` pass (per-detail; parent + child op ids both start at 0
+ * — they are never merged into one flat map). Absent (`undefined` on the detail)
+ * ⇒ the nested pattern was serialized ($patternRef, no in-memory `.nodes`) ⇒
+ * fail closed → legacy. */
+export interface InlinedPattern {
+  rog: Rog;
+  /** Internal-cell name → producing op id, LOCAL to this sub-Rog's nodes. */
+  internalToOp: Map<string, OpId>;
+  /** Leaf op id → its live implementation (the LeafImpl shape), filled by the
+   * resolve pass. Structurally `(input: unknown) => unknown` to avoid a cyclic
+   * import from the evaluator; identical to `interpret.ts`'s `LeafImpl`. */
+  leafImpls?: Map<OpId, (input: unknown) => unknown>;
+}
+
 /** Kind-specific detail. */
 export type KindDetail =
   | { kind: "leaf" }
-  | { kind: "pattern"; rog: ImplRef }
+  | {
+    kind: "pattern";
+    /** Serialized nested pattern's content-addressed handle (when not inlined). */
+    impl?: ImplRef;
+    /** The bound argument the parent passes the sub-pattern (the pattern node's
+     * `inputs`, reconstructed losslessly as a single ValueRef in the PARENT
+     * frame). Resolved by the evaluator and handed to the sub-Rog as its
+     * `argument`. */
+    argument: ValueRef;
+    /** Present iff the nested pattern is an in-memory PURE computation that was
+     * inlined; absent ⇒ serialized / out-of-scope ⇒ fail closed. */
+    inlined?: InlinedPattern;
+  }
   | {
     kind: "collection";
     op: CollectionOp;
@@ -121,6 +151,7 @@ export const INTERPRETED_KINDS: ReadonlySet<OpKind> = new Set([
 export function inputsOf(op: Op): ValueRef[] {
   const extra: ValueRef[] = [];
   if (op.detail.kind === "collection") extra.push(op.detail.listInput);
+  if (op.detail.kind === "pattern") extra.push(op.detail.argument);
   if (op.detail.kind === "control") {
     extra.push(op.detail.pred, ...op.detail.branches);
   }

@@ -2141,14 +2141,77 @@ export class Runner {
       bumpAndThrow("unrecognized_alias");
     }
 
-    // This step interprets ONLY the non-collection vocabulary. `leaf` (opaque
+    // --- PATTERN gate (mirror the collection gate; MUTUALLY LOAD-BEARING with
+    // the extraction recursion, R1). A top-level INLINED nested pattern (the
+    // `pattern` op) is now eligible — BUT only when it is a PURE computation
+    // (its sub-ROG is leaf/access/construct/control only), in-memory, top-level,
+    // and unscoped. The coverage counters (`byKind`/`nested`) account for the
+    // recursed-into sub-graph that `rog.ops` is BLIND to (each `build` returns a
+    // fresh ops[] the recursion discards from the parent ops list). A gate on
+    // `rog.ops` alone would silently MIS-EVALUATE a nested pattern whose sub-ROG
+    // contains a collection/effect/deeper-nest — so we gate on the COVERAGE.
+    if ((extracted.coverage.byKind.pattern ?? 0) > 0) {
+      const byKind = extracted.coverage.byKind;
+      // Sub-ROG must be PURE: no collection / effect anywhere in the closure.
+      if ((byKind.collection ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+      if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+      // Exactly the single OUTER pattern op — >1 means a DEEPER nest (a nested
+      // pattern inside the nested pattern) which this first cut does not model.
+      if ((byKind.pattern ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+      // The extractor recurses into the inline sub-pattern exactly once; >1 is a
+      // deeper / multiple nested graph beyond the single top-level inline.
+      if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+      // A serialized $patternRef element (no in-memory `.nodes`) is recorded as
+      // an unrecognized alias / leaves `inlined` undefined; either way it falls
+      // back. Unrecognized aliases anywhere → fall back.
+      if (extracted.coverage.unrecognizedAliases.length > 0) {
+        bumpAndThrow("unrecognized_alias");
+      }
+      // Any non-default (PerUser/PerSession) scope in the pattern node's bound
+      // argument or the sub-pattern graph → out of scope for this cut.
+      const patternNode = (pattern.nodes ?? []).find((n) =>
+        (n.module as { type?: string } | undefined)?.type === "pattern"
+      );
+      if (patternNode && hasNonDefaultScope(patternNode.inputs)) {
+        bumpAndThrow("scoped");
+      }
+      if (
+        patternNode &&
+        hasNonDefaultScope(
+          (patternNode.module as { implementation?: unknown } | undefined)
+            ?.implementation,
+        )
+      ) {
+        bumpAndThrow("scoped");
+      }
+    }
+
+    // This step interprets the non-collection vocabulary plus a TOP-LEVEL,
+    // in-memory, PURE-computation INLINED nested pattern. `leaf` (opaque
     // sandboxed JS) plus the interpreted kinds access/construct/control are
-    // eligible; collection/pattern/effect (which `INTERPRETED_KINDS` also
-    // contains) are out of scope → fall back. The result construct synthesized
-    // by extraction (id < 0) is a `construct`, so it is eligible.
-    const ELIGIBLE_KINDS = new Set(["leaf", "access", "construct", "control"]);
+    // eligible; an inlined `pattern` op is eligible AFTER passing the coverage
+    // gate above (which guarantees its sub-ROG is pure and unscoped).
+    // collection/effect remain out of scope → fall back. The result construct
+    // synthesized by extraction (id < 0) is a `construct`, so it is eligible.
+    const ELIGIBLE_KINDS = new Set([
+      "leaf",
+      "access",
+      "construct",
+      "control",
+      "pattern",
+    ]);
     for (const op of extracted.rog.ops) {
       if (!ELIGIBLE_KINDS.has(op.kind)) bumpAndThrow("ineligible_opkind");
+      // A `pattern` op that did NOT inline (serialized $patternRef, no `.nodes`)
+      // fails closed: the evaluator would throw NotInterpretedHere at eval time,
+      // but we reject it up front for a precise reason so it never reaches the
+      // dry-run probe. (Defense-in-depth; `inlined === undefined` ⇒ legacy.)
+      if (
+        op.kind === "pattern" && op.detail.kind === "pattern" &&
+        !op.detail.inlined
+      ) {
+        bumpAndThrow("ineligible_opkind");
+      }
     }
 
     // --- 2. Resolve every leaf impl (live fn or $implRef index) ------------
