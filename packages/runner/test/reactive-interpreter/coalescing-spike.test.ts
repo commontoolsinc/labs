@@ -41,7 +41,9 @@ interface RunOutcome {
 /** Run the counter pattern (handler boundary + pure `double` segment) through a
  * fresh runtime with the interpreter flag on or off, and report the census plus
  * the `doubled` value before and after firing the handler. */
-async function runCounter(experimentalInterpreter: boolean): Promise<RunOutcome> {
+async function runCounter(
+  experimentalInterpreter: boolean,
+): Promise<RunOutcome> {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
@@ -77,7 +79,12 @@ async function runCounter(experimentalInterpreter: boolean): Promise<RunOutcome>
 
     const resultCell = runtime.getCell(space, "coalescing-spike", undefined);
     const tx = runtime.edit();
-    const r = runtime.run(tx, counterPattern, { counter: { value: 3 } }, resultCell);
+    const r = runtime.run(
+      tx,
+      counterPattern,
+      { counter: { value: 3 } },
+      resultCell,
+    );
     await tx.commit();
     await runtime.idle();
     r.sink(() => {});

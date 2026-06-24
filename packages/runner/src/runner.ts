@@ -3102,7 +3102,10 @@ export class Runner {
         // would never re-derive).
         const cellTx = inputsCell.withTx(tx);
         const argument = cellTx.key("$arg").asSchema(internedArg).get();
-        const inObj = (cellTx.key("$in").get() ?? {}) as Record<string, unknown>;
+        const inObj = (cellTx.key("$in").get() ?? {}) as Record<
+          string,
+          unknown
+        >;
 
         // Seed the external op values so `internal` refs to producers OUTSIDE the
         // segment resolve to the upstream-written value.
