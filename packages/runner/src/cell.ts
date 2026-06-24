@@ -1811,11 +1811,17 @@ export class CellImpl<T extends FabricValue>
     // When asked to write only on change, read the current raw value and bail
     // out if it already deep-equals what we'd write. `readValueOrThrow` mirrors
     // the `writeValueOrThrow` below (same transaction and address, no link
-    // resolution), and `ignoreReadForScheduling` keeps the read from
-    // registering a self-dependency that would re-trigger the writer.
+    // resolution). The read is purely an internal write-elision decision, so
+    // it is marked `ignoreReadForScheduling` (it must not register a
+    // self-dependency that would re-trigger the writer) and `internalVerifierRead`
+    // (it must not taint the transaction's CFC labels with this cell's own
+    // value). Note `deepEqual` is not `Fabric`-aware (same-class
+    // `FabricPrimitive`s compare equal regardless of value), matching the
+    // existing no-op write gate in `setValueAtPath`; current callers write
+    // links / plain objects, for which it is exact.
     if (onlyIfDifferent) {
       const current = this.tx.readValueOrThrow(this.link, {
-        meta: ignoreReadForScheduling,
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       });
       if (deepEqual(current, inlined)) return;
     }
