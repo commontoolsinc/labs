@@ -79,6 +79,36 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   }
   const patternFactory = await runtime.patternManager.compilePattern(program);
 
+  // Trust the harness-compiled pattern as host-provided code, exactly as a
+  // production host (shell / system code that compiles a pattern in-process)
+  // does via `runtime.unsafeTrustPattern`. This walks the built pattern's node
+  // module implementations and admits each into THIS runtime's harness
+  // verified-implementation index (with a content-addressed entry ref), so the
+  // reactive interpreter's live-leaf trust gate
+  // (`getVerifiedProvenance(impl)` OR a harness-resolvable entry ref) resolves
+  // them as trusted leaves — the same gate production patterns satisfy through
+  // their verified module-eval provenance.
+  //
+  // Authored leaves (handlers / lifts / computeds defined in the pattern
+  // source) already carry verified provenance from `compilePattern`'s
+  // `evaluateRecordGraph` → `recordModuleProvenance`, so this is a no-op for
+  // them (first-write-wins). The functions it newly trusts are the framework
+  // BUILTIN helper bodies that `recordModuleProvenance` never sees because they
+  // are unexported runtime-module closures created at builder-run time (e.g.
+  // the `str` interpolation lift defined inside `built-in.ts`). Those are
+  // trusted-by-construction framework code, not user closures.
+  //
+  // FAITHFUL / SECURITY: this is the EXISTING production host-trust path, NOT a
+  // change to the product trust gate and NOT an env override. Host trust is an
+  // EXECUTION grant only — it records NO CFC provenance, so policy-facing
+  // identity resolution still fails closed. It is scoped to THIS harness
+  // Runtime's executable registry, so a genuinely untrusted live leaf (one not
+  // reachable from a pattern the harness explicitly compiled and trusted) is
+  // still rejected by the gate and falls back to the legacy SES path.
+  runtime.unsafeTrustPattern(patternFactory, {
+    reason: "generated-patterns integration harness: host-compiled pattern",
+  });
+
   const tx = runtime.edit();
   const resultCell = runtime.getCell<any>(
     space,
