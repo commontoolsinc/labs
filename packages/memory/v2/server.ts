@@ -1587,6 +1587,15 @@ export class Server {
       if (retryAfterSeq !== undefined) {
         responseError.retryAfterSeq = retryAfterSeq;
       }
+      if (
+        error instanceof Engine.ConflictError &&
+        error.conflictingRead !== undefined
+      ) {
+        responseError.conflictingRead = {
+          ...error.conflictingRead,
+          space: message.space,
+        };
+      }
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         responseError,

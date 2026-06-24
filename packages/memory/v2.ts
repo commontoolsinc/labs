@@ -135,6 +135,28 @@ export interface PendingRead {
   nonRecursive?: boolean;
 }
 
+export type ConflictReadIdentity =
+  | {
+    kind: "confirmed";
+    space?: string;
+    id: EntityId;
+    scope?: CellScope;
+    branch?: BranchName;
+    path: readonly string[];
+    seq: number;
+    nonRecursive?: boolean;
+  }
+  | {
+    kind: "pending";
+    space?: string;
+    id: EntityId;
+    scope?: CellScope;
+    branch?: BranchName;
+    path: readonly string[];
+    localSeq: number;
+    nonRecursive?: boolean;
+  };
+
 export interface SchedulerObservationCommit {
   localSeq: number;
   reads: {
@@ -543,6 +565,7 @@ export interface V2Error {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+  conflictingRead?: ConflictReadIdentity;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };

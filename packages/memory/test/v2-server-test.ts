@@ -1993,6 +1993,15 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:doc:1",
+        scope: "space",
+        branch: "",
+        path: [],
+        seq: 1,
+      },
     });
     assertEquals(messages.length, 0);
 
@@ -2226,6 +2235,15 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:doc:1",
+        scope: "space",
+        branch: "",
+        path: [],
+        seq: 1,
+      },
     });
     assertEquals(messages.length, 0);
 

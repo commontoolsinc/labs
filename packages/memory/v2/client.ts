@@ -165,6 +165,11 @@ export class Client {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
       }
+      if (result.error.conflictingRead !== undefined) {
+        (error as Error & {
+          conflictingRead?: typeof result.error.conflictingRead;
+        }).conflictingRead = result.error.conflictingRead;
+      }
       throw error;
     }
     return result.ok as Result;
