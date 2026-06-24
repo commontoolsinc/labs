@@ -298,6 +298,50 @@ describe("trigger reads survive failed runs", () => {
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
+  it("re-queues a conflict even when the readyToRetry catch-up rejects", async () => {
+    // The catch-up readiness gate rejects by design when the session is closed,
+    // revoked, or replaced mid-wait. That abort must not strand the action: it is
+    // swallowed and the action is re-queued anyway (restore + resubscribe + dirty
+    // + queue) so it re-runs on the next input change or pull.
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      readyToRetry: () => Promise.reject(new Error("session replaced")),
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    // The rejected readiness gate adds microtask hops before the re-queue; a
+    // macrotask flush drains them so the assertion sees the final state.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("re-queues a conflict when readyToRetry throws synchronously", async () => {
+    // A readyToRetry that throws synchronously is handled the same as a rejected
+    // one — swallowed, and the action re-queued.
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      readyToRetry: () => {
+        throw new Error("gate threw");
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
   it("requeues primitive retryable errors without retry readiness", async () => {
     let restored = 0;
     let queued = 0;

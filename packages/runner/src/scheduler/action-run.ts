@@ -150,21 +150,21 @@ export function watchReactiveActionCommit(state: {
       // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreCfcTriggerReads();
       state.resubscribe(state.action, state.log);
-      const readyToRetry = readyToRetryPromise(error);
-      if (readyToRetry !== undefined) {
+      const readyToRetry =
+        (error as { readyToRetry?: () => unknown }).readyToRetry;
+      if (typeof readyToRetry === "function") {
         // The readiness gate rejects by design when the session is closed,
         // revoked, or replaced while we wait — an expected control-flow signal,
         // not an error. Swallow it and re-queue anyway: the action stays live
-        // and re-runs on the next input change or pull.
+        // and re-runs on the next input change or pull. A `readyToRetry` that
+        // throws synchronously is handled the same way.
         try {
-          await readyToRetry;
+          await readyToRetry();
         } catch (readyError) {
           logger.debug(
             "conflict-retry-readiness-aborted",
-            () => [
-              "conflict catch-up readiness aborted; re-queuing action anyway",
-              readyError,
-            ],
+            "conflict catch-up readiness aborted; re-queuing action anyway",
+            readyError,
           );
         }
       }
@@ -202,23 +202,6 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
-}
-
-function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
-  if (typeof error !== "object" || error === null) {
-    return undefined;
-  }
-  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
-  if (typeof candidate !== "function") {
-    return undefined;
-  }
-  try {
-    return Promise.resolve(candidate.call(error));
-  } catch (thrown) {
-    // A readyToRetry that throws synchronously is treated the same as one that
-    // returns a rejected promise; the caller swallows the rejection.
-    return Promise.reject(thrown);
-  }
 }
 
 export function appendActionRunTrace(state: {
