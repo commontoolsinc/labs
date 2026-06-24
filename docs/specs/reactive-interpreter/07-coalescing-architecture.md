@@ -31,6 +31,15 @@ interpreter collapses only ~4% of the graph, because the node-heavy
 handful of co-located `fetchData`/`generateText`/handler ops. The pure nodes are
 not ineligible — they are **trapped** beside a few effects.
 
+**Measured (static partition prototype, `packages/patterns/tools/coalescing-partition-probe.ts`,
+over 7 real fall-back-today patterns):** boundaries are only **6.7%** of ops
+(100/1496); **93.3%** are pure and would coalesce into **33 segments**; projected
+**node** footprint **133 vs 246 legacy = 45.9% reduction**. The marquee trapped
+case — lunch-poll's `PollOptionCard` — is **166/180 ops pure → 15 vs 50 nodes
+(70% collapse)**, versus **0%** interpreted under today's all-or-nothing gate.
+(Node reduction is the validated claim; see §4.3 / §4.8 on the separate, gated
+doc-win.)
+
 ## 2. The reframe
 
 **The interpreter must not execute the I/O builtins.** They are — and must remain
@@ -121,9 +130,17 @@ Given the pattern's ROG with the boundary set marked:
    becomes available in the segment *after* that boundary runs. Pure ops reachable
    only from pattern args land in `seg0`; ops transitively dependent on
    `builtinₖ`'s output land in a segment after `builtinₖ`.
-4. Each segment is the set of pure ops at one layer with no boundary between them
-   in the dataflow — a maximal pure region. A segment becomes **one interpreter
-   node** evaluating its sub-ROG via `evalRog`.
+4. Each layer's pure ops become interpreter segment(s) evaluating their sub-ROG
+   via `evalRog`. **Segment granularity (decide before implementation, ties to
+   OQ-C4):** a single layer may contain *disconnected* pure regions (one feeding
+   boundary A, another feeding boundary B). Two choices: **(i) one segment per
+   layer** (coarser — simpler, but a change to A's inputs may spuriously re-run
+   B's computation in the same node), or **(ii) one segment per maximal connected
+   component within a layer** (finer read/write-sets → tighter value-accurate
+   invalidation, more nodes). Default to **(ii)** unless the node-count cost
+   outweighs the invalidation precision; the prototype (`coalescing-partition-probe.ts`)
+   counts under **(i)** (layer = segment), so its segment counts are an upper
+   bound on coalescing and a lower bound on segment count under (ii).
 
 The partition is computed **statically at extract/transform time** — the
 interpreter has the full ROG and the boundary set, so this is a one-pass layered
@@ -143,8 +160,19 @@ The pure values *inside* a segment are never materialized (the footprint win). T
 
 So total materialization = boundary I/O docs (unavoidable real I/O) + external
 outputs + (segment outputs that are themselves boundary inputs). Every *internal*
-pure intermediate stays un-materialized — exactly the saving the interpreter
-exists for, now available even when the pattern contains I/O.
+pure intermediate stays un-materialized.
+
+**Scope of the doc-win (important — do not over-claim).** Eliminating internal
+pure intermediates is the doc-win for **scalar/object segment results**. It does
+**not** currently hold for **VNode/render element results**: per
+[DECISIONS §D-VNODE-DOC-FRAGMENTATION](./implementation/DECISIONS.md), the
+per-element result write today *fragments* a rendered VNode subtree into one doc
+per node, where legacy emits the subtree as one consolidated doc — a measured
+*doc regression* (+~2/element) on exactly the rendered `.map` shape coalescing
+most wants to help. So **the validated, safe claim of this architecture is the
+NODE reduction; the doc reduction is conditional on the VNode-consolidation
+precondition in §4.8** and must not be communicated as a doc-win for UI `.map`s
+until that lands and is oracle-verified.
 
 ### 4.4 Scheduling — no scheduler change
 
@@ -208,12 +236,19 @@ real I/O docs, pure computation coalesced around them.
   parts of each branch coalesce). Branch selection that gates a boundary is the
   main subtlety — see OQ-C3.
 
-### 4.8 VNode results
+### 4.8 VNode results — a GATING PRECONDITION for the doc-win
 
 The per-segment / per-element output write must **consolidate a VNode subtree into
 one document** (not fragment it per node — see DECISIONS
-§D-VNODE-DOC-FRAGMENTATION). This fold-in is what makes coalescing a doc win on
-rendered collections, not just a node win.
+§D-VNODE-DOC-FRAGMENTATION). This is **not a footnote: it is a gating precondition
+for the doc-win on rendered collections.** Today the interpreter's per-element
+result write fragments a rendered VNode subtree into one doc per node, a measured
++~2-docs/element regression. **Success criterion:** a rendered-element `.map`
+must, under coalescing, write each element result as a *single* consolidated VNode
+doc, and the differential oracle must show the coalesced doc count ≤ legacy on a
+rendered-element corpus pattern. Until this lands and is oracle-verified,
+coalescing is a **node win only** on rendered collections (the doc count can
+regress), and default-on for rendered collections is **blocked on this fix**.
 
 ## 5. The landed implementation is the K-segment special cases
 
@@ -244,14 +279,22 @@ path for boundary nodes.
   per-element-effect machinery (W3) generalized; cost is one boundary node per
   element per boundary (same as legacy already pays), with the pure element
   computation coalesced.
-- **OQ-C3 — control flow gating a boundary.** An `ifElse` whose branch contains a
-  boundary: is the boundary instantiated unconditionally (legacy behavior) or
-  gated? Match legacy semantics; likely the boundary node exists and is fed a
-  gated input.
-- **OQ-C4 — segment ↔ scheduler read/write precision.** Segment read/write sets
-  must be precise enough for value-accurate invalidation and not over-broad (or a
-  segment re-runs spuriously). The ROG partition gives exact per-segment
-  input/output sets; verify against the scheduler's expectations.
+- **OQ-C3 — control flow gating a boundary (DECIDE BEFORE IMPLEMENTATION).** An
+  `ifElse` whose branch contains a boundary: is the boundary instantiated
+  unconditionally or gated (does a non-taken branch's `fetch` fire)? This is a
+  real semantic question, not an implementation detail — **pin it to legacy
+  semantics as a decided pre-implementation invariant** (mirror exactly what the
+  legacy child-pattern/node does for a conditional builtin), don't leave it to be
+  discovered during coding.
+- **OQ-C4 — segment read/write-set precision (THE primary implementation risk —
+  a correctness gate, not the scheduler).** The scheduler claim (§4.4) is sound
+  given landed value-accurate invalidation; the real danger is **over-broad
+  segment read-sets** that defeat that invalidation (a segment re-runs when an
+  input it doesn't actually use changes) or **under-broad write-sets** (a
+  consumer misses an update). The ROG partition gives exact per-segment
+  input/output sets — make this an **oracle gate**: assert *segment re-runs ⊆
+  legacy re-runs* (no spurious re-execution) and outputs == legacy on every
+  corpus pattern under input mutation.
 - **OQ-C5 — incremental re-partition on edit.** When a pattern's graph changes
   (rare; pattern args change, not structure), the partition is static per pattern
   identity, so this is a non-issue unless structure is dynamic.
@@ -267,8 +310,13 @@ path for boundary nodes.
    preserve boundary nodes; wire boundary docs. Reuse `evalRog` per segment.
 2. **Differential oracle** as the gate (unchanged discipline): for each corpus
    pattern, the coalesced graph must produce outputs == legacy, with the boundary
-   nodes behaving identically; measure the node/doc footprint vs legacy and the
-   coverage (fraction of pure nodes coalesced).
+   nodes behaving identically. **Gate the two wins separately:** (a) **node
+   reduction** + coverage — validated by the static prototype (45.9% corpus,
+   70% on `PollOptionCard`), safe to gate on now; (b) **doc reduction** — gate
+   *separately and only after* the §4.8 VNode-consolidation fix, and do not claim
+   it for rendered collections until the oracle shows coalesced docs ≤ legacy on a
+   rendered-element pattern. Also add the OQ-C4 invalidation gate (segment re-runs
+   ⊆ legacy re-runs under input mutation).
 3. **VNode consolidation** fix folded into the segment-output write.
 4. **Per-segment CFC** parity on the oracle (per-segment join ⊇ legacy per-node;
    no under-label).
