@@ -1185,6 +1185,56 @@ Summary table; the full per-mechanism walkthrough with file references is in
     tier-1 clean readers) would need value-awareness or the maintained refcount
     and is not adopted.
 
+17. **Multi-user fan-out re-evaluation cost + push-pull completeness
+    (2026-06-24).** On a multi-runtime CFC workload
+    (`cfc-group-chat-demo/multi-user`) v2 runs ~2.2× the action invocations of v1
+    (165 vs 74). Decomposed (per-node delta sums to exactly +91): +13 apex
+    render-effect re-runs + ~78 read-closure re-pulls (~6 closure nodes per apex
+    re-render). Root: the apex render effect is re-demanded once per **inbound
+    cross-runtime sync-apply** (each received message is a distinct external
+    write), and every re-demand re-pulls its whole transitive read-closure.
+    `compRunsNoChange=0` — each re-run observes a genuinely distinct intermediate
+    state, so these are real separate logical updates, not redundant recomputes
+    (the kind even a classic signal graph re-runs per external setter without an
+    explicit `batch()`).
+
+    *Efficiency-only and accepted.* Final results are identical and single-runtime
+    / static-graph workloads are neutral-to-faster (note-create @128 −22%,
+    unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted via
+    `NEW_PERF_BASELINE`.
+
+    *Levers ruled out — do not re-try without new evidence.* The surplus is
+    cross-runtime write volume with **no writer node to gate against** (apex
+    read-set consults show `writers=0` for ~half its re-runs). Built and measured,
+    all refuted: forward run-gate (165→184), reverse read-set pull-gate on effects
+    (165→163) / +computations (165→181), effects-last (v2 already settles
+    per-handler, with *fewer* settles than v1 — 29/31 vs 34/34), pattern
+    read-granularity (0% — the count/membership closures genuinely depend on array
+    length, which changes on append), and a sync-path bug (refuted — a local
+    commit and a remote sync produce byte-identical invalidation). The only lever
+    that would move the number is **inbound sync-apply/commit batching at the
+    sync→settle boundary** — a deliberate latency/consistency tradeoff, out of
+    scope.
+
+    *Push-pull completeness (Track 1 — measured NO-GO).* v2 lacks the classic
+    3-color (clean/check/dirty) machinery — no CHECK color, no per-node output
+    cache/version (`NodeStatus = never-ran | clean | invalid`; `SchedulerNode`
+    carries no `cachedValue`). But it is **outcome-complete**: it performs the
+    value-check **eagerly at the write channel** (`determineTriggeredActions` / the
+    trigger-index emit a change-delta only for readers whose read value actually
+    changed) where classic signals do it **lazily at pull** via the CHECK color.
+    The storage cell *is* the cache; the write-gate *is* the check-resolution. A
+    probe measured the cached-reuse-**skippable** population (nodes v2 re-runs whose
+    direct upstreams' outputs are all unchanged) at **0** in every scenario
+    (reload-no-change demand-all, deep clean chain, sign-preserving input bump,
+    diamond). A node only becomes CHECK-skippable when an upstream is demanded
+    *without advancing* — which the eager write-gate guarantees never happens — so a
+    CHECK color would be **dead state**, and adding it + per-node output versions +
+    a transitive `markCheck` (re-introducing the decision-15 O(graph)-on-a-hub
+    walk) buys nothing. **Re-entry gate:** revisit only if a probe shows a
+    *non-zero* skippable count (e.g. non-`deepEqual`-comparable outputs where the
+    write-gate conservatively over-invalidates).
+
 ### Open
 
 1. **Lane relaxation beyond per-space.** Per-space is the agreed first step
