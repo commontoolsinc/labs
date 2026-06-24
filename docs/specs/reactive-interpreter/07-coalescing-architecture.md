@@ -32,17 +32,24 @@ handful of co-located `fetchData`/`generateText`/handler ops. The pure nodes are
 not ineligible — they are **trapped** beside a few effects.
 
 **Measured (static partition prototype, `packages/patterns/tools/coalescing-partition-probe.ts`,
-over 7 real fall-back-today patterns).** ⚠️ The first-pass numbers (corpus **93.3%**
-pure, **45.9%** projected node reduction; `PollOptionCard` 166/180 pure, 70%
-collapse) were computed on an **edge-less graph** (review F1 — boundaries had no
-input edges, so the partition under-counted segments and over-counted
-coalescing). They establish the *direction* (boundaries are a small minority;
-most ops are pure and trapped today) but **not the trustworthy magnitude** — the
-node-reduction figure is being **re-baselined with boundary-input edges modeled**
-(see §8/F1). The robust, edge-independent claim stands: every one of the 7
-patterns falls back **0%** today, and the boundary set is a small fraction of ops.
-(Node reduction is the headline once re-baselined; see §4.3 / §4.8 on the
-separate, gated doc-win.)
+over 7 real fall-back-today patterns — re-baselined WITH boundary-input edges
+modeled per review F1):** boundaries are only **6.7%** of ops (100/1496);
+**93.3%** are pure and coalesce into **39 segments** (was 33 on the over-optimistic
+edge-less graph); projected **node** footprint **139 vs 246 legacy = 43.5%
+reduction** (146 of 246 real nodes are pure regions the design collapses). The
+marquee trapped case — lunch-poll's `PollOptionCard` — is **166/180 ops pure → 16
+vs 50 nodes (68% collapse)**, versus **0%** interpreted under today's
+all-or-nothing gate. The F1 edge fix moved the headline only **−2.4 pts** (45.9%→
+43.5%): the dominant pure region in these patterns is the **render/VNode tree**,
+which is purely *downstream* of boundaries (it consumes their outputs and feeds
+nothing back), so boundaries don't fragment it; most boundary inputs come from
+args / external cells / *other boundary outputs* (boundary→boundary edges that
+don't cut pure regions). **Fan-out (F2):** only **3** segments corpus-wide feed
+>1 boundary — modest but real, so §4.4's container-of-links/fan-out must be
+supported. One pattern (`cfc-row-label-mailbox`, sqlite-dominated) goes
+net-*negative* on raw nodes (−7.7%) — its win is doc-level, not node-level (cf.
+§4.3). Node reduction is the validated headline; the doc-win is separate + gated
+(§4.3 / §4.8).
 
 ## 2. The reframe
 
@@ -360,9 +367,9 @@ So multi-segment emission is **net-new emission machinery on top of** the reused
 2. **Differential oracle** as the gate (unchanged discipline): for each corpus
    pattern, the coalesced graph must produce outputs == legacy, with the boundary
    nodes behaving identically. **Gate the two wins separately:** (a) **node
-   reduction** + coverage — projected by the static prototype (numbers being
-   re-baselined with boundary-input edges per F1), safe to gate on once the
-   re-baselined magnitude holds; (b) **doc reduction** — gate
+   reduction** + coverage — projected by the static prototype, re-baselined with
+   boundary-input edges (F1): **43.5% corpus**, 68% on `PollOptionCard`; safe to
+   gate on; (b) **doc reduction** — gate
    *separately and only after* the §4.8 VNode-consolidation fix, and do not claim
    it for rendered collections until the oracle shows coalesced docs ≤ legacy on a
    rendered-element pattern. Also add the OQ-C4 invalidation gate (segment re-runs

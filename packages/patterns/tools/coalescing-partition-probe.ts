@@ -51,6 +51,37 @@
  *     serialized element (`$patternRef`, no inline `.nodes`), or a nested
  *     `pattern` node is treated as a leaf boundary at this level (its sub-graph,
  *     if inline, is still recursed for the element census).
+ *
+ * BOUNDARY INPUT EDGES (measurement correction, 2026-06-24):
+ *   The production `extract.ts` gives `op.inputs` ONLY to leaf ops; effect ops
+ *   get `detail = {kind:"effect"}` with NO refs, and `rog.ts::inputsOf` returns
+ *   [] for an effect op. So an earlier version of this probe placed EVERY I/O
+ *   boundary (fetch / llm / sqlite / handler) at seg0 with no `boundary←producer`
+ *   edge — the layered partition had nothing to cut on, and the headline node
+ *   reductions were over-optimistic.
+ *
+ *   This probe now models the missing edges ITSELF (it does NOT touch production
+ *   extract.ts / rog.ts): for EVERY op it reads the RAW pattern node's `inputs`
+ *   tree (the same `node.inputs` alias tree leaf nodes use) and resolves every
+ *   canonical `$alias` leaf that names a producer in THIS (sub-)Rog's node space
+ *   to a `producer→op` edge (`producerOpIndicesFromRawInputs`). This supplies:
+ *     - the effect/handler boundary input edges that were entirely absent, and
+ *     - the internal-cell edges that `extractRog`'s `defer` fail-closed gate
+ *       drops when a sub-pattern is re-extracted standalone at depth 0 (its
+ *       serialized aliases carry their ORIGINAL nesting `defer`). For a STATIC
+ *       edge-count the producer edge exists iff the alias names a cell produced
+ *       in this graph, independent of `defer` (which is a runtime wrong-cell
+ *       safety gate, not a structural fact), so the walker is defer-agnostic.
+ *   Event-stream aliases (a handler's `$event`, `$kind:"stream"` / `{stream:[…]}`
+ *   payloads) are NOT value-producer edges (the handler fires on events, it does
+ *   not wait for a segment to produce the stream) and are excluded.
+ *
+ *   With the edges present a boundary lands in the segment AFTER the segment(s)
+ *   that produce its inputs, and pure ops consuming a boundary's output land
+ *   AFTER the boundary — so boundaries now CUT the pure regions into more pieces.
+ *   Expect MORE segments and a SMALLER projected reduction than the edge-less
+ *   version. The §4.4 R-SEAM-1 fan-out (a single pure segment feeding >1
+ *   boundary, finding F2) is also counted per pattern.
  */
 
 import { Runtime } from "@commonfabric/runner";
@@ -65,6 +96,7 @@ import {
   inputsOf,
   type Rog,
 } from "../../runner/src/reactive-interpreter/rog.ts";
+import { isLegacyAlias } from "../../runner/src/link-types.ts";
 
 // ---------------------------------------------------------------------------
 // Partition over a single ROG (the §4.2 layered topological assignment).
@@ -88,9 +120,88 @@ interface Partition {
   pureRealOps: number;
   /** Number of distinct segments that contain >=1 PURE op (interpreter nodes). */
   pureSegments: number;
+  /** R-SEAM-1 fan-out (finding F2): number of distinct PURE segments whose
+   * output feeds the input of MORE THAN ONE boundary in this graph. Each such
+   * segment is a coalesced interpreter node the §4.4 design must let multiple
+   * boundaries depend on simultaneously. */
+  fanoutSegments: number;
+  /** Total (segment, boundary) producer edges where the segment is a pure
+   * segment feeding a boundary — context for the fan-out count. */
+  segmentBoundaryEdges: number;
   /** Op ids (real, id>=0) of the collection `map` nodes whose element pattern
    * should be recursed into (§4.7) — index into the original Pattern's nodes. */
   recurseMapNodeIds: number[];
+}
+
+/**
+ * The producer-cell name a canonical `$alias` leaf references, or null if the
+ * alias is not a value-producer dependency (a pattern `argument`, an event
+ * stream, or an unrecognized payload). Mirrors `extract.ts::aliasToValueRef`'s
+ * name derivation, MINUS the `defer` fail-closed gate: for a STATIC edge the
+ * producer link exists iff the alias names a cell produced in THIS graph, which
+ * is `defer`-independent (`defer` is a runtime wrong-cell safety gate, not a
+ * structural fact, and a sub-pattern re-extracted standalone carries its
+ * ORIGINAL nesting `defer`). Event-stream aliases are excluded (a handler fires
+ * on events; it does not depend on a segment producing the stream value).
+ */
+function aliasProducerName(alias: Record<string, unknown>): string | null {
+  // A pattern argument is available at seg0 — no producer edge.
+  if (alias.cell === "argument") return null;
+  const pc = alias.partialCause;
+  // A handler's `$event` (or any `$kind:"stream"` payload) is an event source,
+  // not a value producer — exclude it.
+  if (typeof pc === "string") {
+    return pc; // internal-cell name (a derived cell this graph may produce)
+  }
+  if (pc && typeof pc === "object") {
+    const o = pc as Record<string, unknown>;
+    // Event-stream sinks: `{ $kind: "stream", ... }` or `{ stream: [...] }`.
+    if (o.$kind === "stream" || Array.isArray(o.stream)) return null;
+    if ("$generated" in o && typeof o.$generated === "number") {
+      return `$generated:${o.$generated}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Walk a RAW node `inputs` value tree and collect the array indices of the ops
+ * that PRODUCE its inputs (the `producer→thisOp` edges). For each canonical
+ * `$alias` leaf, resolve its producer-cell name to an op via THIS (sub-)Rog's
+ * `internalToOp`; an alias that names no producer in this graph (a pattern
+ * argument, an external/parent cell, or an event stream) yields no edge (its
+ * value is available at seg0). This is how the probe models the boundary input
+ * edges that production `extract.ts` drops for effect ops, plus the leaf
+ * internal edges the `defer` gate drops on a standalone-re-extracted sub-Rog.
+ */
+function producerOpIndicesFromRawInputs(
+  rawInputs: unknown,
+  internalToOp: Map<string, number>,
+  idToIdx: Map<number, number>,
+  into: Set<number>,
+): void {
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (isLegacyAlias(v)) {
+      const alias = (v as { $alias: Record<string, unknown> }).$alias;
+      const name = aliasProducerName(alias);
+      if (name !== null) {
+        const opId = internalToOp.get(name);
+        if (opId !== undefined) {
+          const idx = idToIdx.get(opId);
+          if (idx !== undefined) into.add(idx);
+        }
+      }
+      // Do NOT descend into the alias payload (path/schema are not inputs).
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const el of v) visit(el);
+      return;
+    }
+    for (const el of Object.values(v as Record<string, unknown>)) visit(el);
+  };
+  visit(rawInputs);
 }
 
 /** Classify which ops are boundaries. Returns a Set of op-array indices. */
@@ -117,15 +228,27 @@ function boundaryIndexSet(
 
 /**
  * Apply the §4.2 layered partition. The ROG is acyclic (a well-formed pattern);
- * we resolve each op's producing-op dependencies from its ValueRefs and assign
- * the earliest segment after all inputs are available. A boundary op's OUTPUT
- * becomes available in the segment AFTER it runs (the cut); a pure op's output is
- * available in its own segment.
+ * we resolve each op's producing-op dependencies and assign the earliest segment
+ * after all inputs are available. A boundary op's OUTPUT becomes available in the
+ * segment AFTER it runs (the cut); a pure op's output is available in its own
+ * segment.
+ *
+ * Producer edges come from TWO sources, unioned per op:
+ *   1. `inputsOf(op)` — the ValueRefs `extract.ts` populated (leaf `op.inputs`,
+ *      plus collection `listInput` / pattern `argument` / control refs carried in
+ *      `detail`).
+ *   2. `producerOpIndicesFromRawInputs(node.inputs)` — the raw node's input alias
+ *      tree, which is the ONLY source of input edges for `effect` ops (their
+ *      `detail` carries no refs, so source (1) is empty for them), and which also
+ *      recovers the internal-cell edges `extract.ts`'s `defer` gate drops on a
+ *      standalone-re-extracted sub-Rog. `nodes[op.id]` is the raw node (op id ==
+ *      node index for real ops; synth ops id<0 have no raw node).
  */
 function partition(
   rog: Rog,
   unresolvedLeafOps: Set<number>,
   internalToOp: Map<string, number>,
+  nodes: ReadonlyArray<{ inputs?: unknown }>,
 ): Partition {
   const ops = rog.ops;
   const boundary = boundaryIndexSet(rog, unresolvedLeafOps);
@@ -134,14 +257,9 @@ function partition(
   const idToIdx = new Map<number, number>();
   for (let i = 0; i < ops.length; i++) idToIdx.set(ops[i].id, i);
 
-  // The segment in which op[i]'s OUTPUT becomes available downstream.
-  const avail = new Array<number>(ops.length).fill(-1);
-  // The segment op[i] itself is placed in.
-  const placed = new Array<number>(ops.length).fill(-1);
-
   // Resolve a ValueRef to the array index of its producing op, or null if it is
   // a pattern arg / const (available at seg0, no producer dependency).
-  const producerIdx = (
+  const refProducerIdx = (
     ref: ReturnType<typeof inputsOf>[number],
   ): number | null => {
     if (ref.kind === "opOut") return idToIdx.get(ref.op) ?? null;
@@ -151,6 +269,38 @@ function partition(
     }
     return null; // argument | const
   };
+
+  // Per-op producer edge set (array indices). Union of the ValueRef producers
+  // and the raw-input alias producers (the boundary input edges + defer-dropped
+  // internal edges). A producer index === i (self) is impossible in an acyclic
+  // graph, but we guard anyway so a malformed self-ref can't deadlock the loop.
+  const producers: Set<number>[] = ops.map((op, i) => {
+    const set = new Set<number>();
+    for (const ref of inputsOf(op)) {
+      const p = refProducerIdx(ref);
+      if (p !== null && p !== i) set.add(p);
+    }
+    // Raw node input aliases (real ops only; synth construct ops have no node).
+    if (op.id >= 0) {
+      const node = nodes[op.id];
+      if (node) {
+        const raw = new Set<number>();
+        producerOpIndicesFromRawInputs(
+          node.inputs,
+          internalToOp,
+          idToIdx,
+          raw,
+        );
+        for (const p of raw) if (p !== i) set.add(p);
+      }
+    }
+    return set;
+  });
+
+  // The segment in which op[i]'s OUTPUT becomes available downstream.
+  const avail = new Array<number>(ops.length).fill(-1);
+  // The segment op[i] itself is placed in.
+  const placed = new Array<number>(ops.length).fill(-1);
 
   // Iterate to a fixpoint over the (acyclic) dependency relation. Topo order is
   // not guaranteed to be array order once synth ops interleave, so a bounded
@@ -163,9 +313,7 @@ function partition(
     for (let i = 0; i < ops.length; i++) {
       let seg = 0;
       let ready = true;
-      for (const ref of inputsOf(ops[i])) {
-        const p = producerIdx(ref);
-        if (p === null) continue; // arg/const -> available at seg0
+      for (const p of producers[i]) {
         if (avail[p] < 0) {
           ready = false;
           break;
@@ -192,6 +340,8 @@ function partition(
   let synthOps = 0;
   const recurseMapNodeIds: number[] = [];
 
+  const segOf = (i: number): number => (placed[i] < 0 ? 0 : placed[i]);
+
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     const isReal = op.id >= 0;
@@ -212,9 +362,33 @@ function partition(
       if (isReal) pureRealOps++;
       // A pure op with no placement (unreachable / disconnected) is dropped from
       // the segment count but still counted as pure; placed>=0 is the norm.
-      pureSegSet.add(placed[i] < 0 ? 0 : placed[i]);
+      pureSegSet.add(segOf(i));
     }
   }
+
+  // R-SEAM-1 fan-out (finding F2): a PURE segment that feeds >1 boundary. For
+  // each boundary, collect the distinct PURE segments among its producers; a
+  // segment feeding multiple boundaries is the simultaneous dependency §4.4 must
+  // support. Only PURE producers count — a boundary producer is a separate node
+  // already, not a coalesced segment.
+  const segToBoundaries = new Map<number, Set<number>>();
+  let segmentBoundaryEdges = 0;
+  for (let i = 0; i < ops.length; i++) {
+    if (!boundary.has(i)) continue;
+    const feederSegs = new Set<number>();
+    for (const p of producers[i]) {
+      if (boundary.has(p)) continue; // boundary producer is its own node
+      feederSegs.add(segOf(p));
+    }
+    for (const s of feederSegs) {
+      segmentBoundaryEdges++;
+      let bs = segToBoundaries.get(s);
+      if (!bs) segToBoundaries.set(s, bs = new Set<number>());
+      bs.add(i);
+    }
+  }
+  let fanoutSegments = 0;
+  for (const bs of segToBoundaries.values()) if (bs.size > 1) fanoutSegments++;
 
   return {
     totalOps: ops.length,
@@ -225,6 +399,8 @@ function partition(
     pureOps,
     pureRealOps,
     pureSegments: pureSegSet.size,
+    fanoutSegments,
+    segmentBoundaryEdges,
     recurseMapNodeIds,
   };
 }
@@ -235,7 +411,10 @@ function partition(
 
 interface RawNodeLike {
   module?: { implementation?: unknown };
-  inputs?: { op?: unknown };
+  /** The node's structured input value tree. For a collection the element
+   * pattern is under `.op`; for every node it is the raw alias tree the partition
+   * reads producer edges from (`producerOpIndicesFromRawInputs`). */
+  inputs?: { op?: unknown } & Record<string, unknown> | unknown;
 }
 interface RawPatternLike {
   nodes?: RawNodeLike[];
@@ -275,13 +454,22 @@ function partitionPattern(
     // measures structure; an SES resolution failure is a separate boundary we
     // surface via the recurse path, not by poisoning the whole count).
   }
-  const part = partition(ex.rog, unresolved, ex.internalToOp);
+  const nodes = (pattern.nodes ?? []) as RawNodeLike[];
+  // Pass the raw nodes so the partition can read each boundary op's input alias
+  // tree (`producerOpIndicesFromRawInputs`) — the boundary←producer edges that
+  // production `extract.ts` omits for effect ops. `op.id === node index` for
+  // real ops, so `nodes[op.id]` is the matching raw node.
+  const part = partition(
+    ex.rog,
+    unresolved,
+    ex.internalToOp,
+    nodes as ReadonlyArray<{ inputs?: unknown }>,
+  );
 
   const children: PartitionNode[] = [];
-  const nodes = (pattern.nodes ?? []) as RawNodeLike[];
   for (const nodeId of part.recurseMapNodeIds) {
     const node = nodes[nodeId];
-    const elementPattern = node?.inputs?.op;
+    const elementPattern = (node?.inputs as { op?: unknown } | undefined)?.op;
     if (isInlinePattern(elementPattern)) {
       children.push(
         partitionPattern(elementPattern, `${label}.map#${nodeId}.elem`),
@@ -317,6 +505,10 @@ interface Totals {
   pureRealOps: number;
   /** Projected interpreter SEGMENT nodes (sum of pure-segment counts). */
   pureSegments: number;
+  /** R-SEAM-1 fan-out segments (a pure segment feeding >1 boundary), summed. */
+  fanoutSegments: number;
+  /** (pure-segment → boundary) producer edges, summed. */
+  segmentBoundaryEdges: number;
   /** Distinct sub-graphs partitioned (top-level + recursed elements/patterns). */
   graphs: number;
 }
@@ -330,6 +522,8 @@ function emptyTotals(): Totals {
     pureOps: 0,
     pureRealOps: 0,
     pureSegments: 0,
+    fanoutSegments: 0,
+    segmentBoundaryEdges: 0,
     graphs: 0,
   };
 }
@@ -345,6 +539,8 @@ function fold(node: PartitionNode, into: Totals): void {
   into.pureOps += p.pureOps;
   into.pureRealOps += p.pureRealOps;
   into.pureSegments += p.pureSegments;
+  into.fanoutSegments += p.fanoutSegments;
+  into.segmentBoundaryEdges += p.segmentBoundaryEdges;
   into.graphs += 1;
   for (const c of node.children) fold(c, into);
 }
@@ -444,11 +640,17 @@ async function main(): Promise<void> {
   console.log(
     "0% interpreted for EVERY row below (each contains a boundary).",
   );
+  console.log(
+    "Boundary INPUT edges are modeled (effect/handler/collection/pattern), so",
+  );
+  console.log(
+    "boundaries CUT the pure regions. `fan>1` = pure segments feeding >1 boundary.",
+  );
   console.log("");
 
   const HDR = pad("PATTERN", 34) + padL("ops", 6) + padL("bound", 7) +
     padL("pure", 6) + padL("segs", 6) + padL("proj", 6) + padL("legacy", 8) +
-    padL("reduce", 8) + padL("cover", 7);
+    padL("reduce", 8) + padL("cover", 7) + padL("fan>1", 7);
   console.log(HDR);
   console.log("-".repeat(HDR.length));
 
@@ -473,7 +675,8 @@ async function main(): Promise<void> {
         padL(String(coalesced), 6) +
         padL(String(legacy), 8) +
         padL(pct(legacy - coalesced, legacy), 8) +
-        padL(pct(t.pureOps, t.totalOps), 7),
+        padL(pct(t.pureOps, t.totalOps), 7) +
+        padL(String(t.fanoutSegments), 7),
     );
     void reduce;
     void coverage;
@@ -485,6 +688,8 @@ async function main(): Promise<void> {
     agg.pureOps += t.pureOps;
     agg.pureRealOps += t.pureRealOps;
     agg.pureSegments += t.pureSegments;
+    agg.fanoutSegments += t.fanoutSegments;
+    agg.segmentBoundaryEdges += t.segmentBoundaryEdges;
     agg.graphs += t.graphs;
     aggLegacy += legacy;
     aggCoalesced += coalesced;
@@ -499,7 +704,8 @@ async function main(): Promise<void> {
       padL(String(aggCoalesced), 6) +
       padL(String(aggLegacy), 8) +
       padL(pct(aggLegacy - aggCoalesced, aggLegacy), 8) +
-      padL(pct(agg.pureOps, agg.totalOps), 7),
+      padL(pct(agg.pureOps, agg.totalOps), 7) +
+      padL(String(agg.fanoutSegments), 7),
   );
 
   // -------------------------------------------------------------------------
@@ -535,6 +741,28 @@ async function main(): Promise<void> {
   );
 
   // -------------------------------------------------------------------------
+  // R-SEAM-1 fan-out exposure (finding F2).
+  // -------------------------------------------------------------------------
+  console.log("");
+  console.log(
+    "=== R-SEAM-1 FAN-OUT (finding F2 — pure segment → >1 boundary) ===",
+  );
+  console.log(
+    `  With boundary input edges present, ${agg.fanoutSegments} pure segment(s)` +
+      ` across the corpus feed MORE THAN ONE boundary` +
+      ` (${agg.segmentBoundaryEdges} segment→boundary edges total).`,
+  );
+  console.log(
+    "  Each fan-out segment is one coalesced interpreter node that multiple",
+  );
+  console.log(
+    "  boundaries depend on simultaneously — the §4.4 dependency the design must",
+  );
+  console.log(
+    "  support. Per-pattern fan-out counts are the `fan>1` column above.",
+  );
+
+  // -------------------------------------------------------------------------
   // Per-pattern recursion breakdown (where the trapped pure regions live).
   // -------------------------------------------------------------------------
   console.log("");
@@ -558,7 +786,8 @@ async function main(): Promise<void> {
           ` segs=${padL(String(p.pureSegments), 3)}` +
           ` proj=${padL(String(coalesced), 4)}/legacy=${
             padL(String(legacy), 4)
-          }`,
+          }` +
+          ` fan>1=${padL(String(p.fanoutSegments), 2)}`,
       );
       for (const c of node.children) walk(c, depth + 1);
     };
