@@ -120,6 +120,15 @@ type RenderedPollSnapshot = {
   allOptionsRows: RenderedOptionSwatchSummary[];
 };
 
+type BrowserPollSnapshot = RenderedPollSnapshot & {
+  swatches: string[];
+  bodyText?: string;
+  deepText?: string;
+  normalizedText?: string;
+  tags?: string[];
+  labels?: string[];
+};
+
 type DebugVDomPollSnapshot = Omit<RenderedPollSnapshot, "allOptionsRows"> & {
   allOptionsRows: OptionSwatchSummary[];
   swatches: string[];
@@ -137,6 +146,45 @@ type BrowserRuntimeDiagnostics = {
   timingStats?: unknown;
   nonIdempotent?: unknown;
   error?: string;
+};
+
+type CdpPhasePayload = {
+  cdpTransport: "Runtime.bindingCalled";
+  phase: string;
+  expectedViewer: string;
+  href: string;
+  visibilityState: string;
+  performanceNow: number;
+  performanceMemory?: BrowserRuntimeDiagnostics["performanceMemory"];
+  loggerCounts?: unknown;
+  timingStats?: unknown;
+  snapshot: BrowserPollSnapshot;
+};
+
+type CdpPhasePageTrace = {
+  index: number;
+  expectedViewer: string;
+  state: PollCellSummary;
+  snapshot: BrowserPollSnapshot;
+  debugVDOM: DebugVDomPollSnapshot;
+  cdp: CdpPhasePayload;
+  expectations: {
+    stateMatches: boolean;
+    renderedMatches: boolean;
+  };
+};
+
+type CdpPhaseTrace = {
+  phase: string;
+  expected: ExpectedPollMatrix;
+  runtime: PollCellSummary;
+  memory: PollCellSummary;
+  runtimeMatches: boolean;
+  memoryMatches: boolean;
+  runtimeVDomSwatches: VDomSwatchSummary;
+  runtimeVDomMatches: boolean;
+  pages: CdpPhasePageTrace[];
+  meetsExpectation: boolean;
 };
 
 describe(
@@ -235,6 +283,26 @@ describe(
               await waitForDeepText(pages[index], names[index]);
               await settleAll(pages);
             }
+            const expected = {
+              names,
+              optionTitles: [],
+              adminName: names[0],
+              votersByTitle: {},
+            };
+            await waitForPollMatrixConvergence(
+              pages,
+              expected,
+              readRuntimePollSummary,
+              readMemoryPollSummary,
+            );
+            await traceCdpPhase(
+              pages,
+              "after join all profiles",
+              expected,
+              readRuntimePollSummary,
+              readMemoryPollSummary,
+              readVDomSwatches,
+            );
           },
         );
 
@@ -245,18 +313,27 @@ describe(
               if (index > 0) {
                 await clickButtonByText(pages[index], "Become host");
                 await settleAll(pages);
+                const expected = {
+                  names,
+                  optionTitles: optionTitles.slice(0, index),
+                  adminName: names[index],
+                  votersByTitle: emptyVotersByTitle(
+                    optionTitles.slice(0, index),
+                  ),
+                };
                 await waitForPollMatrixConvergence(
                   pages,
-                  {
-                    names,
-                    optionTitles: optionTitles.slice(0, index),
-                    adminName: names[index],
-                    votersByTitle: emptyVotersByTitle(
-                      optionTitles.slice(0, index),
-                    ),
-                  },
+                  expected,
                   readRuntimePollSummary,
                   readMemoryPollSummary,
+                );
+                await traceCdpPhase(
+                  pages,
+                  `after ${names[index]} claims host`,
+                  expected,
+                  readRuntimePollSummary,
+                  readMemoryPollSummary,
+                  readVDomSwatches,
                 );
               }
 
@@ -267,18 +344,27 @@ describe(
               );
               await clickButtonByText(pages[index], "Add");
               await settleAll(pages);
+              const expected = {
+                names,
+                optionTitles: optionTitles.slice(0, index + 1),
+                adminName: names[index],
+                votersByTitle: emptyVotersByTitle(
+                  optionTitles.slice(0, index + 1),
+                ),
+              };
               await waitForPollMatrixConvergence(
                 pages,
-                {
-                  names,
-                  optionTitles: optionTitles.slice(0, index + 1),
-                  adminName: names[index],
-                  votersByTitle: emptyVotersByTitle(
-                    optionTitles.slice(0, index + 1),
-                  ),
-                },
+                expected,
                 readRuntimePollSummary,
                 readMemoryPollSummary,
+              );
+              await traceCdpPhase(
+                pages,
+                `after ${names[index]} adds option`,
+                expected,
+                readRuntimePollSummary,
+                readMemoryPollSummary,
+                readVDomSwatches,
               );
             }
           },
@@ -309,24 +395,39 @@ describe(
                 );
               }
               await settleAll(pages);
+              const expected = {
+                names,
+                optionTitles,
+                adminName: names.at(-1)!,
+                votersByTitle: votersByTitleFor(
+                  optionTitles,
+                  names.slice(0, index + 1),
+                ),
+              };
               await waitForPollMatrixConvergence(
                 pages,
-                {
-                  names,
-                  optionTitles,
-                  adminName: names.at(-1)!,
-                  votersByTitle: votersByTitleFor(
-                    optionTitles,
-                    names.slice(0, index + 1),
-                  ),
-                },
+                expected,
                 readRuntimePollSummary,
                 readMemoryPollSummary,
+              );
+              await traceCdpPhase(
+                pages,
+                `after ${names[index]} votes all options`,
+                expected,
+                readRuntimePollSummary,
+                readMemoryPollSummary,
+                readVDomSwatches,
               );
             }
           },
         );
 
+        const finalExpected = {
+          names,
+          optionTitles,
+          adminName: names.at(-1)!,
+          votersByTitle: votersByTitleFor(optionTitles, names),
+        };
         await timer.run(
           "header/chips/cell convergence",
           async () => {
@@ -432,6 +533,14 @@ describe(
                 assertEquals(summaries[index].optionCount, optionTitles.length);
                 assertEquals(summaries[index].myName, names[index]);
               }
+              await traceCdpPhase(
+                pages,
+                "final header/chips/cell convergence",
+                finalExpected,
+                readRuntimePollSummary,
+                readMemoryPollSummary,
+                readVDomSwatches,
+              );
             } catch (error) {
               console.log("Convergence diagnostics:", {
                 summaries: await Promise.all(
@@ -447,6 +556,16 @@ describe(
                   ),
                 ),
                 debugVDOM: latestVDomSwatches,
+                cdpPhase: await collectCdpPhaseTrace(
+                  pages,
+                  "final header/chips/cell convergence failure",
+                  finalExpected,
+                  readRuntimePollSummary,
+                  readMemoryPollSummary,
+                  readVDomSwatches,
+                )
+                  .then(compactCdpPhaseTrace)
+                  .catch((cause) => ({ error: String(cause) })),
               });
               throw error;
             }
@@ -968,6 +1087,259 @@ async function waitForPollMatrixConvergence(
     );
     throw cause;
   }
+}
+
+async function traceCdpPhase(
+  pages: readonly Page[],
+  phase: string,
+  expected: ExpectedPollMatrix,
+  readRuntimePollSummary: () => PollCellSummary,
+  readMemoryPollSummary: () => PollCellSummary,
+  readVDomSwatches: () => VDomSwatchSummary,
+): Promise<void> {
+  const trace = await collectCdpPhaseTrace(
+    pages,
+    phase,
+    expected,
+    readRuntimePollSummary,
+    readMemoryPollSummary,
+    readVDomSwatches,
+  );
+  console.log(
+    "[lunch-poll CDP phase]",
+    JSON.stringify(compactCdpPhaseTrace(trace), null, 2),
+  );
+  assertEquals(trace.meetsExpectation, true, `${phase} CDP phase trace`);
+}
+
+async function collectCdpPhaseTrace(
+  pages: readonly Page[],
+  phase: string,
+  expected: ExpectedPollMatrix,
+  readRuntimePollSummary: () => PollCellSummary,
+  readMemoryPollSummary: () => PollCellSummary,
+  readVDomSwatches: () => VDomSwatchSummary,
+): Promise<CdpPhaseTrace> {
+  const [runtime, memory, runtimeVDomSwatches, pageTraces] = await Promise.all([
+    Promise.resolve().then(readRuntimePollSummary),
+    Promise.resolve().then(readMemoryPollSummary),
+    Promise.resolve().then(readVDomSwatches),
+    Promise.all(
+      pages.map((page, index) =>
+        collectCdpPhasePageTrace(
+          page,
+          phase,
+          expected,
+          expected.names[index] ?? `Profile ${index + 1}`,
+          index,
+        )
+      ),
+    ),
+  ]);
+  const runtimeMatches = pollStateMatches(runtime, expected);
+  const memoryMatches = pollStateMatches(memory, expected);
+  const runtimeVDomMatches = vdomSwatchesMatch(runtimeVDomSwatches, expected);
+  const meetsExpectation = runtimeMatches && memoryMatches &&
+    runtimeVDomMatches &&
+    pageTraces.every((page) =>
+      page.expectations.stateMatches && page.expectations.renderedMatches
+    );
+  return {
+    phase,
+    expected,
+    runtime,
+    memory,
+    runtimeMatches,
+    memoryMatches,
+    runtimeVDomSwatches,
+    runtimeVDomMatches,
+    pages: pageTraces,
+    meetsExpectation,
+  };
+}
+
+async function collectCdpPhasePageTrace(
+  page: Page,
+  phase: string,
+  expected: ExpectedPollMatrix,
+  expectedViewer: string,
+  index: number,
+): Promise<CdpPhasePageTrace> {
+  const [state, cdp, debugVDOMRoot] = await Promise.all([
+    readPollCellSummary(page),
+    emitCdpPhasePayload(page, phase, expectedViewer),
+    readPageDebugVDOM(page),
+  ]);
+  const debugVDOM = summarizeVDomForDiagnostics(debugVDOMRoot);
+  return {
+    index,
+    expectedViewer,
+    state,
+    snapshot: cdp.snapshot,
+    debugVDOM,
+    cdp,
+    expectations: {
+      stateMatches: pollStateMatches(state, expected),
+      renderedMatches: renderedPollMatches(
+        cdp.snapshot,
+        expected,
+        expectedViewer,
+      ),
+    },
+  };
+}
+
+async function emitCdpPhasePayload(
+  page: Page,
+  phase: string,
+  expectedViewer: string,
+): Promise<CdpPhasePayload> {
+  const bindingName = `__lunchPollPhase_${
+    crypto.randomUUID().replaceAll("-", "")
+  }`;
+  let bindingPayload: CdpPhasePayload | undefined;
+  let resolveSignal!: () => void;
+  const signalled = new Promise<void>((resolve) => {
+    resolveSignal = resolve;
+  });
+  const unsubscribe = page.onBindingCalled((name, payload) => {
+    if (name !== bindingName) return;
+    try {
+      const parsed: unknown = JSON.parse(payload);
+      if (isRecord(parsed)) bindingPayload = parsed as CdpPhasePayload;
+    } catch (error) {
+      console.warn(
+        `Unable to parse CDP phase payload for ${phase}: ${String(error)}`,
+      );
+    }
+    resolveSignal();
+  });
+  await page.addBinding(bindingName);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const evaluatedPayload = await page.evaluate(
+      async ([name, currentPhase, viewer]) => {
+        type PerformanceWithMemory = Performance & {
+          memory?: BrowserRuntimeDiagnostics["performanceMemory"];
+        };
+        const cf = (globalThis as typeof globalThis & {
+          commonfabric?: {
+            rt?: { idle?: () => Promise<void> };
+            viewSettled?: () => Promise<void>;
+            getLoggerCountsBreakdown?: () => unknown;
+            getTimingStatsBreakdown?: () => unknown;
+          };
+        }).commonfabric;
+        await cf?.rt?.idle?.();
+        await cf?.viewSettled?.();
+        const memory = (performance as PerformanceWithMemory).memory;
+        const payload: CdpPhasePayload = {
+          cdpTransport: "Runtime.bindingCalled",
+          phase: currentPhase,
+          expectedViewer: viewer,
+          href: location.href,
+          visibilityState: document.visibilityState,
+          performanceNow: performance.now(),
+          performanceMemory: memory
+            ? {
+              jsHeapSizeLimit: memory.jsHeapSizeLimit,
+              totalJSHeapSize: memory.totalJSHeapSize,
+              usedJSHeapSize: memory.usedJSHeapSize,
+            }
+            : undefined,
+          loggerCounts: cf?.getLoggerCountsBreakdown?.(),
+          timingStats: cf?.getTimingStatsBreakdown?.(),
+          snapshot: globalThis.__lunchPollProbe.snapshot(),
+        };
+        const binding =
+          (globalThis as typeof globalThis & Record<string, unknown>)[
+            name
+          ];
+        if (typeof binding !== "function") {
+          throw new Error(`CDP binding ${name} was not installed`);
+        }
+        const callBinding = binding as (payload: string) => void;
+        callBinding(JSON.stringify(payload));
+        return payload;
+      },
+      { args: [[bindingName, phase, expectedViewer]] },
+    );
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`CDP phase binding ${bindingName} timed out`)),
+        5_000,
+      );
+    });
+    await Promise.race([signalled, timedOut]);
+    return bindingPayload ?? evaluatedPayload;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    unsubscribe();
+    await page.removeBinding(bindingName).catch((error) => {
+      console.warn(
+        `Unable to remove CDP phase binding ${bindingName}: ${String(error)}`,
+      );
+    });
+  }
+}
+
+function compactCdpPhaseTrace(trace: CdpPhaseTrace): unknown {
+  return {
+    phase: trace.phase,
+    meetsExpectation: trace.meetsExpectation,
+    expected: {
+      users: trace.expected.names.length,
+      options: trace.expected.optionTitles.length,
+      votes: expectedVoteCount(trace.expected),
+      adminName: trace.expected.adminName,
+      votersByTitle: trace.expected.votersByTitle,
+    },
+    runtime: summarizeForDiagnostics(trace.runtime),
+    runtimeMatches: trace.runtimeMatches,
+    memory: summarizeForDiagnostics(trace.memory),
+    memoryMatches: trace.memoryMatches,
+    runtimeVDom: trace.runtimeVDomSwatches,
+    runtimeVDomMatches: trace.runtimeVDomMatches,
+    pages: trace.pages.map((page) => ({
+      index: page.index,
+      expectedViewer: page.expectedViewer,
+      expectations: page.expectations,
+      state: summarizeForDiagnostics(page.state),
+      dom: summarizeSnapshotForDiagnostics(page.snapshot),
+      debugVDOM: page.debugVDOM,
+      cdp: {
+        transport: page.cdp.cdpTransport,
+        href: page.cdp.href,
+        visibilityState: page.cdp.visibilityState,
+        performanceNow: Math.round(page.cdp.performanceNow),
+        performanceMemory: page.cdp.performanceMemory,
+        swatchCount: page.snapshot.swatches.length,
+        visibleSwatchCount: page.snapshot.allOptionsRows.reduce(
+          (total, row) => total + row.visibleSwatches.length,
+          0,
+        ),
+        rowChipCounts: page.snapshot.allOptionsRows.map((row) => ({
+          title: row.optionTitle,
+          swatches: row.swatches.length,
+          visibleSwatches: row.visibleSwatches.length,
+          chips: row.chips.length,
+        })),
+      },
+    })),
+  };
+}
+
+function vdomSwatchesMatch(
+  actual: VDomSwatchSummary,
+  expected: ExpectedPollMatrix,
+): boolean {
+  return actual.count === expectedVoteCount(expected) &&
+    sameStringSet(actual.names, expectedUniqueVoters(expected));
+}
+
+function expectedUniqueVoters(expected: ExpectedPollMatrix): string[] {
+  return [...new Set(Object.values(expected.votersByTitle).flat())];
 }
 
 async function drainRuntimeAndView(page: Page): Promise<void> {
