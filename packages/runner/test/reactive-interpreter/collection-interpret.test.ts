@@ -32,7 +32,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { setGlobalLogFloor } from "@commonfabric/utils/logger";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { createTrustedBuilder } from "../support/trusted-builder.ts";
@@ -40,22 +39,16 @@ import {
   attachDocRecorder,
   type DocRecorder,
 } from "../support/interpreter-measure.ts";
-import { buildElementEvaluator } from "../../src/reactive-interpreter/element-evaluator.ts";
+import { collectionInterpreter } from "../../src/reactive-interpreter/collection-interpreter.ts";
 import { raw } from "../../src/module.ts";
-import type { Action } from "../../src/scheduler.ts";
-import type { AddCancel } from "../../src/cancel.ts";
 import type { Cell, JSONSchema } from "../../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../../src/storage/interface.ts";
-import type { NormalizedFullLink } from "../../src/link-types.ts";
-import { setResultCell } from "../../src/result-utils.ts";
-import { outputSpotFromBinding } from "../../src/builtins/scope-policy.ts";
-import {
-  isPrimitiveCellLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../../src/link-utils.ts";
-import { resolveLink } from "../../src/link-resolution.ts";
-import { linkResolutionProbe } from "../../src/storage/reactivity-log.ts";
+
+// The W3 collection interpreter has been promoted to
+// `src/reactive-interpreter/collection-interpreter.ts`. This differential oracle
+// continues to exercise it end-to-end via a test-only `addModuleByRef`
+// registration (the prod-wire registration is flag-gated; see
+// `collection-prod-wire.test.ts` for the real-dispatch oracle).
+const mapInterpreted = collectionInterpreter("map");
 
 setGlobalLogFloor("error");
 const signer = await Identity.fromPassphrase("ri-collection-interpret");
@@ -68,169 +61,6 @@ const elementResultSchema = {
   type: "object",
   properties: { doubled: num },
 } as const satisfies JSONSchema;
-
-// Coordinator reads only `op` (the element pattern, raw) + the list's link
-// structure. `list` slots stay cells (identity-only); `op` is an opaque cell.
-const MAP_INPUT_SCHEMA = internSchema({
-  type: "object",
-  properties: {
-    list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
-    op: { asCell: ["cell"] },
-  },
-  required: ["op"],
-});
-const RESULT_SCHEMA = internSchema({
-  type: "array",
-  items: { type: "object" },
-});
-// Links-only view of the container: slots stay cell links so the coordinator's
-// container write is pure link structure (no element content read).
-const RESULT_PRESENCE_SCHEMA = internSchema({
-  type: "array",
-  items: { asCell: ["cell"], type: "unknown" },
-});
-
-/**
- * The W3 collection interpreter (prototype-grade, test-only — does NOT touch
- * builtins/map.ts or cfc/ core). Generalizes the spike's "isolated" mode: per
- * element, a scheduled effect reads ONLY element i and computes the element op
- * by running `evalRog` over the element pattern's ROG via `buildElementEvaluator`
- * (NOT a hardcoded leaf). Writes a per-element result doc; container holds links.
- */
-function mapInterpreted(
-  inputsCell: Cell<{ list: unknown[]; op: unknown }>,
-  // deno-lint-ignore no-explicit-any
-  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  addCancel: AddCancel,
-  _cause: unknown,
-  // deno-lint-ignore no-explicit-any
-  parentCell: Cell<any>,
-  runtime: Runtime,
-  outputBinding?: NormalizedFullLink,
-): Action {
-  // deno-lint-ignore no-explicit-any
-  let result: Cell<any> | undefined;
-  let evaluate: ReturnType<typeof buildElementEvaluator> | undefined;
-  const elementActions = new Set<number>();
-
-  return (tx: IExtendedStorageTransaction) => {
-    const mapped = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
-
-    if (!result) {
-      const outputSpot = outputSpotFromBinding(outputBinding);
-      if (!outputSpot) throw new Error("mapInterpreted: needs output binding");
-      // deno-lint-ignore no-explicit-any
-      result = runtime.getCell<any>(
-        parentCell.space,
-        { mapInterpreted: parentCell.entityId, outputSpot },
-        RESULT_SCHEMA,
-        tx,
-      );
-      result.send([]);
-      setResultCell(result, parentCell);
-      sendResult(tx, result);
-    }
-    const resultCell = result;
-
-    if (!evaluate) {
-      // Read the element pattern raw (the inline pattern graph; same idiom as
-      // legacy map's `op.getRaw()`), and build the per-element evaluator ONCE.
-      // This is the ROG path: extractRog + resolveLeafImpls + evalRog.
-      const opRaw = mapped.key("op").getRaw() as unknown;
-      // The graph read back from the cell is serialized: leaf bodies are no
-      // longer live callables (only `$implRef` survives). Resolve those through
-      // the harness's verified-implementation index — the W1b-bridge path for a
-      // serialized element graph. Still NOT a hardcoded leaf: it is the actual
-      // registered lift body, looked up by content-addressed ref.
-      // deno-lint-ignore no-explicit-any
-      const harness = (runtime as any).harness;
-      evaluate = buildElementEvaluator(
-        opRaw as Record<string, unknown>,
-        (identity: string, symbol: string) =>
-          harness?.getVerifiedImplementation?.(identity, symbol),
-      );
-      // Honest boundary check: an in-memory element pattern must fully resolve.
-      if (evaluate.unresolvedLeafOps.length > 0) {
-        throw new Error(
-          `mapInterpreted: unresolved element leaf ops ${
-            JSON.stringify(evaluate.unresolvedLeafOps)
-          } (serialized/SES boundary)`,
-        );
-      }
-    }
-    const evaluateElement = evaluate;
-
-    // Identity-only list materialization (copied from legacy map / the spike):
-    // read RAW slots under the linkResolutionProbe scope so no element value
-    // enters the coordinator's tx — its flow-join J stays empty.
-    const listCell = tx.runWithAmbientReadMeta(
-      linkResolutionProbe,
-      () => inputsCell.key("list").withTx(tx).resolveAsCell(),
-    );
-    const listBase = listCell.getAsNormalizedFullLink();
-    const rawList = tx.runWithAmbientReadMeta(
-      linkResolutionProbe,
-      () => listCell.withTx(tx).getRaw() as unknown,
-    );
-    const len = Array.isArray(rawList) ? rawList.length : 0;
-    const slotLink = (i: number): NormalizedFullLink => {
-      const slot = (rawList as unknown[])[i];
-      const link: NormalizedFullLink = isPrimitiveCellLink(slot)
-        ? parseLink(slot, listBase)
-        : { ...listBase, path: [...listBase.path, String(i)] };
-      return tx.runWithAmbientReadMeta(
-        linkResolutionProbe,
-        () => resolveLink(runtime, tx, link, "value"),
-      );
-    };
-
-    const resultPresence = resultCell.asSchema(RESULT_PRESENCE_SCHEMA);
-    // deno-lint-ignore no-explicit-any
-    const slots = new Array<Cell<any>>(len);
-    for (let i = 0; i < len; i++) {
-      const index = i;
-      // deno-lint-ignore no-explicit-any
-      const elemResult = runtime.getCell<any>(
-        parentCell.space,
-        { mapInterpretedElem: resultCell.entityId, index },
-        undefined,
-        tx,
-      );
-      slots[index] = elemResult;
-      if (elementActions.has(index)) continue;
-      elementActions.add(index);
-
-      const elementAction: Action = (childTx) => {
-        // Read ONLY element `index` (its own isolated tx → pointwise label).
-        const elemValue = runtime.getCellFromLink(
-          slotLink(index),
-          undefined,
-          childTx,
-        )!.withTx(childTx).get() as unknown;
-        // ELEMENT OP VIA evalRog over the element ROG (not a hardcoded leaf):
-        const out = evaluateElement(elemValue);
-        elemResult.withTx(childTx).set(out);
-      };
-      setResultCell(elemResult, parentCell);
-      addCancel(
-        runtime.scheduler.subscribe(
-          elementAction,
-          {
-            reads: [toMemorySpaceAddress(slotLink(index))],
-            shallowReads: [],
-            writes: [
-              toMemorySpaceAddress(elemResult.getAsNormalizedFullLink()),
-            ],
-          },
-          { isEffect: true },
-        ),
-      );
-    }
-    // Pure-link-structure container write (empty coordinator J → only
-    // `structure` stamps, never a smearing `derived` one).
-    resultPresence.withTx(tx).set(slots as unknown as unknown[]);
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Shared pattern builders.

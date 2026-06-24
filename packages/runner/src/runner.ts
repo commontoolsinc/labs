@@ -67,7 +67,11 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import {
+  isRawBuiltinResult,
+  raw,
+  type RawBuiltinReturnType,
+} from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
@@ -102,6 +106,9 @@ import {
   evalRog,
   NotInterpretedHere,
 } from "./reactive-interpreter/interpret.ts";
+import { collectionInterpreter } from "./reactive-interpreter/collection-interpreter.ts";
+import { buildElementEvaluator } from "./reactive-interpreter/element-evaluator.ts";
+import type { OpId, Rog, ValueRef } from "./reactive-interpreter/rog.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 export {
   extractDefaultValues,
@@ -551,12 +558,50 @@ export type InterpreterFallbackReason =
   | "ineligible_opkind"
   | "unrecognized_alias"
   | "unresolved_leaf"
-  | "eval_threw";
+  | "eval_threw"
+  // A collection op (map) carried a `scope` alias in its list input or element
+  // graph. The first-cut collection interpreter is unscoped-only, so any scope
+  // falls back. Distinct from `ineligible_opkind` so the oracle's negative axis
+  // can assert scoped collections fall back for THIS reason.
+  | "scoped";
 
 /** Census of reactive-interpreter dispatch outcomes (see Runner field). */
 export interface InterpreterCensus {
   interpreted_ok: number;
   fallback_by_reason: Record<InterpreterFallbackReason, number>;
+}
+
+/** True iff `m` is an inline Pattern (carries a `nodes` array) — the in-memory
+ * element-pattern shape the collection interpreter consumes (vs a serialized
+ * `$patternRef`). */
+function isPatternLike(m: unknown): m is { nodes: unknown[] } {
+  return !!m && typeof m === "object" &&
+    Array.isArray((m as { nodes?: unknown }).nodes);
+}
+
+/** Recursively scan a serialized value tree for ANY `scope` key carrying a
+ * NON-DEFAULT value (anything other than `"space"` / `"inherit"`), whether it
+ * sits on an alias payload (`$alias.scope`) or on an embedded schema
+ * (`$alias.schema.scope`, where a PerUser/PerSession argument records its
+ * narrowing). The fresh builder attaches the DEFAULT `scope: "space"` (the
+ * ambient frame) to ordinary aliases, which the interpreter resolves correctly;
+ * a `scope: "user" | "session"` narrowing ANYWHERE in the list-input / element
+ * graph is the unmodeled indirection the unscoped-only first cut rejects. (An
+ * earlier, alias-only check let a user-scoped list — whose narrowing lives on
+ * `$alias.schema.scope`, not `$alias.scope` — SLIP THROUGH and interpret to an
+ * empty result, a real mis-eval; this scans schemas too.) */
+function hasNonDefaultScope(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((v) => hasNonDefaultScope(v));
+  const obj = value as Record<string, unknown>;
+  const scope = obj.scope;
+  if (typeof scope === "string" && scope !== "space" && scope !== "inherit") {
+    return true;
+  }
+  for (const v of Object.values(obj)) {
+    if (hasNonDefaultScope(v)) return true;
+  }
+  return false;
 }
 
 export class Runner {
@@ -600,6 +645,7 @@ export class Runner {
       unrecognized_alias: 0,
       unresolved_leaf: 0,
       eval_threw: 0,
+      scoped: 0,
     },
   };
 
@@ -613,6 +659,16 @@ export class Runner {
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
+    // Reactive-interpreter collection dispatch: register the `map` collection
+    // interpreter builtin ONLY when the experimental flag is on. Flag-off ⇒ the
+    // ref is never registered, so the collection branch can never resolve it and
+    // behavior is byte-unchanged.
+    if (this.runtime.experimental.experimentalInterpreter) {
+      this.runtime.moduleRegistry.addModuleByRef(
+        "$ri-collection-map",
+        raw(collectionInterpreter("map")) as unknown as Module,
+      );
+    }
   }
 
   /**
@@ -2050,9 +2106,41 @@ export class Runner {
     const extracted: ExtractResult = extractRog(
       pattern as unknown as Parameters<typeof extractRog>[0],
     );
+    // --- 1b. COLLECTION branch (single top-level `map`) --------------------
+    // Placed BEFORE the unrecognizedAliases check because `extractRog` recurses
+    // into the inline element pattern sharing ONE `unrecognized` set, and the
+    // element's serialized aliases legitimately carry `defer:1` (nested-pattern
+    // serialization) — which pollutes the OUTER report. For a collection, the
+    // element internals are NOT the outer interpreter's concern: they are
+    // validated independently by `buildElementEvaluator` (which re-extracts the
+    // element pattern fresh, at depth 0, where its aliases are clean). So the
+    // collection probe validates only the OUTER surfaces (list-input alias +
+    // result shape) and must run before the element-internal `defer` aliases
+    // would (spuriously) trip the scalar `unrecognized_alias` gate.
+    //
+    // The probe is PURE — no tx writes — and on a matching, fully-resolvable
+    // single `map` it returns a synthetic node dispatching to the registered
+    // `$ri-collection-map` builtin. On ANY miss it either returns null (when
+    // there is no collection op at all → fall through to the scalar gates
+    // unchanged) or fails closed via `bumpAndThrow` (when there IS a collection
+    // op but it is not the eligible single-map shape).
+    const collectionPattern = this.tryBuildCollectionInterpreterPattern(
+      pattern,
+      extracted,
+      bumpAndThrow,
+    );
+    if (collectionPattern) {
+      this.interpreterCensus.interpreted_ok++;
+      return collectionPattern;
+    }
+
+    // Scalar path: the element-internal defer pollution does not apply (there is
+    // no collection op), so a non-empty unrecognized report is a real outer
+    // alias problem → fall back.
     if (extracted.coverage.unrecognizedAliases.length > 0) {
       bumpAndThrow("unrecognized_alias");
     }
+
     // This step interprets ONLY the non-collection vocabulary. `leaf` (opaque
     // sandboxed JS) plus the interpreted kinds access/construct/control are
     // eligible; collection/pattern/effect (which `INTERPRETED_KINDS` also
@@ -2132,6 +2220,202 @@ export class Runner {
         },
       ],
     } satisfies Pattern;
+  }
+
+  /**
+   * COLLECTION eligibility probe (PURE — no tx writes) for exactly ONE top-level
+   * `map`. Returns a synthetic single-node Pattern dispatching to the registered
+   * `$ri-collection-map` builtin when the pattern is the eligible single-map
+   * shape, or `null` when there is NO collection op at all (so the caller falls
+   * through to the scalar interpreter path). When there IS a collection op but it
+   * is not the eligible shape, it `bumpAndThrow`s a fail-closed reason (never
+   * returns null in that case) so the pattern falls back to legacy.
+   *
+   * Highest-risk soundness point: this consults `coverage.byKind` / `coverage`
+   * `.nested`, NOT just `rog.ops`. `extractRog` recurses into the element pattern
+   * with a FRESH per-recursion ops array THAT IS DISCARDED, so element-internal
+   * pattern/effect/nested-collection ops NEVER appear in `rog.ops`. A naive
+   * "loop rog.ops" gate would ADMIT a map whose element contains a nested
+   * pattern/effect and SILENTLY MIS-EVALUATE. We therefore reject any element
+   * graph carrying a `pattern`/`effect` op, any collection beyond the outer map,
+   * or more than one nested recursion (`coverage.nested > 1`).
+   */
+  private tryBuildCollectionInterpreterPattern(
+    pattern: Pattern,
+    extracted: ExtractResult,
+    bumpAndThrow: (reason: InterpreterFallbackReason) => never,
+  ): Pattern | null {
+    // --- Shape: exactly one non-structural op, and it is a `map` -----------
+    // Structural ops are the extraction-synthesized result/input constructs
+    // (`construct`) and `access`; the meaningful op must be the single map.
+    const nonStructural = extracted.rog.ops.filter(
+      (op) => op.kind !== "construct" && op.kind !== "access",
+    );
+    const collectionOps = extracted.rog.ops.filter(
+      (op) => op.kind === "collection",
+    );
+    if (collectionOps.length === 0) return null; // no collection → scalar path
+    // From here on there IS a collection op: every miss fails closed.
+    if (collectionOps.length !== 1) bumpAndThrow("ineligible_opkind");
+    const mapOp = collectionOps[0];
+    if (mapOp.detail.kind !== "collection" || mapOp.detail.op !== "map") {
+      // filter / flatMap and any multi-collection shape → fall back.
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // The OUTER list input must resolve to a recognized argument/internal link.
+    // If extraction could not represent it, it is a `const` placeholder (the
+    // outer alias was recorded as unrecognized) → fail closed. (Element-internal
+    // aliases are NOT consulted here; they are validated by the evaluator.)
+    if (mapOp.detail.listInput.kind === "const") {
+      bumpAndThrow("unrecognized_alias");
+    }
+    // The map op must be the ONLY non-structural op (no sibling leaves/controls
+    // running alongside the map in this first cut).
+    if (nonStructural.length !== 1 || nonStructural[0] !== mapOp) {
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- Result must be the bare map op, or a trivial one-field construct ---
+    // wrapping it (e.g. `{ mapped: <map> }`). Anything else (the result reads
+    // more than the single map output) → fall back.
+    if (
+      !this.resultIsBareOrTrivialWrap(
+        extracted.rog,
+        mapOp.id,
+        extracted.internalToOp,
+      )
+    ) {
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- CRITICAL element-internal gate: coverage.byKind / coverage.nested --
+    // (see method doc). `coverage` accounts for the element graph that
+    // `rog.ops` discards.
+    const byKind = extracted.coverage.byKind;
+    if ((byKind.pattern ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+    if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+    // Any collection op beyond the single outer map (a nested collection inside
+    // the element) → fall back.
+    if ((byKind.collection ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+    // The extractor recurses into the element pattern exactly once for a single
+    // inline map; >1 means a nested collection element graph we do not model.
+    if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+
+    // --- Locate the raw map node (to reuse its `{list, op}` inputs verbatim) -
+    const mapNode = this.findRawMapNode(pattern);
+    if (!mapNode) bumpAndThrow("ineligible_opkind");
+    const mapNodeInputs = mapNode.inputs as Record<string, unknown>;
+    const elementPattern = mapNodeInputs.op;
+    if (!isPatternLike(elementPattern)) {
+      // A serialized `$patternRef` element (not an inline pattern) is out of
+      // scope for the in-memory-element first cut → fall back.
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- Unscoped-only: reject any non-default scope in list/element graph --
+    // The fresh builder attaches the DEFAULT `scope: "space"` (the ambient
+    // frame) to ordinary aliases; that is fine. A PerUser/PerSession narrowing
+    // (`scope: "user" | "session"`) is the unmodeled indirection this first cut
+    // rejects → a distinct `scoped` reason for the oracle's negative axis.
+    if (
+      hasNonDefaultScope(mapNodeInputs.list) ||
+      hasNonDefaultScope(elementPattern)
+    ) {
+      bumpAndThrow("scoped");
+    }
+
+    // --- Element evaluator must fully resolve (no unresolved leaf ops) ------
+    const evaluator = buildElementEvaluator(
+      elementPattern as Record<string, unknown>,
+      this.interpreterImplRefResolver,
+    );
+    if (evaluator.unresolvedLeafOps.length > 0) {
+      bumpAndThrow("unresolved_leaf");
+    }
+
+    // --- Build the synthetic single-node collection pattern ----------------
+    // Reuse the ORIGINAL map node's `{list, op, params}` inputs and its output
+    // binding (which carries the author-declared scope + item schema downstream
+    // `.key(i)` consumers need) verbatim, swapping only the module ref to the
+    // registered `$ri-collection-map` builtin. Keeping the original result tree
+    // and output binding inherits the exact projection + reactivity for free.
+    return {
+      argumentSchema: pattern.argumentSchema as JSONSchema,
+      resultSchema: pattern.resultSchema as JSONSchema,
+      ...(pattern.derivedInternalCells !== undefined
+        ? { derivedInternalCells: pattern.derivedInternalCells }
+        : {}),
+      result: pattern.result,
+      nodes: [
+        {
+          module: {
+            type: "ref",
+            implementation: "$ri-collection-map",
+          } as Module,
+          inputs: mapNode.inputs,
+          outputs: mapNode.outputs,
+        },
+      ],
+    } satisfies Pattern;
+  }
+
+  /**
+   * True iff the ROG result is the bare map op's output, or a single-field
+   * object/array construct wrapping ONLY that map op's output (peeling a trivial
+   * one-field wrapper). Any result that references more than the single map op
+   * output is rejected by the caller.
+   */
+  private resultIsBareOrTrivialWrap(
+    rog: Rog,
+    mapOpId: OpId,
+    internalToOp: Map<string, OpId>,
+  ): boolean {
+    // A ValueRef "is the bare map output" if it is either an `opOut` of the map
+    // op, or an `internal` ref whose name maps (via `internalToOp`) to the map
+    // op id (the builder names the map node's output internal cell and the
+    // result references it by name, NOT as a positional opOut), with no path.
+    const isBareMapOut = (ref: ValueRef): boolean => {
+      if (ref.kind === "opOut") {
+        return ref.op === mapOpId && ref.path.length === 0;
+      }
+      if (ref.kind === "internal") {
+        return internalToOp.get(ref.name) === mapOpId && ref.path.length === 0;
+      }
+      return false;
+    };
+
+    const result = rog.result;
+    // Bare: result is the map op output directly.
+    if (isBareMapOut(result)) return true;
+    // Trivial wrap: result is a synthesized construct (id < 0) with exactly one
+    // field, whose value is the bare map op output.
+    if (result.kind === "opOut" && result.op < 0) {
+      const wrap = rog.ops.find((op) => op.id === result.op);
+      if (!wrap || wrap.detail.kind !== "construct") return false;
+      const tmpl = wrap.detail.template;
+      const refs = tmpl.shape === "object"
+        ? Object.values(tmpl.fields)
+        : tmpl.items;
+      if (refs.length !== 1) return false;
+      return isBareMapOut(refs[0]);
+    }
+    return false;
+  }
+
+  /** Find the single raw `map` ref node in a pattern (the node the collection
+   * branch rewrites). Returns undefined if not present (e.g. already lowered or
+   * not a top-level map). */
+  private findRawMapNode(
+    pattern: Pattern,
+  ): Pattern["nodes"][number] | undefined {
+    for (const node of pattern.nodes) {
+      const module = node.module as { type?: string; implementation?: unknown };
+      if (module?.type === "ref" && module.implementation === "map") {
+        return node;
+      }
+    }
+    return undefined;
   }
 
   /**

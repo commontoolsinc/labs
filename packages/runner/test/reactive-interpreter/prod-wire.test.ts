@@ -490,13 +490,15 @@ describe("prod-wire: structured-input regression (add({a,b}))", () => {
   });
 });
 
-describe("prod-wire: fallback safety (flag ON, collection)", () => {
-  // The OUTER collection (map) pattern is INELIGIBLE — its `collection` op kind
-  // is out of scope for this step — so it must fall back to the legacy path with
-  // no partial write. (Note: the per-element `inc(element)` SUB-patterns the map
-  // builtin instantiates ARE eligible leaf patterns, so they go through the
-  // interpreter — recursion is correct; the gate is just that the collection
-  // op itself never gets interpreted here.)
+describe("prod-wire: collection map dispatch (flag ON, single map)", () => {
+  // A single top-level `map` over a bare scalar element op is now the ELIGIBLE
+  // collection shape — it dispatches through the registered `$ri-collection-map`
+  // builtin (the collection branch) rather than falling back. Output parity with
+  // legacy is preserved and `interpreted_ok` rises by exactly one (the outer map
+  // interpreted once; per-element work is NOT done as sub-patterns). The richer
+  // collection oracle (footprint slope, pointwise labels, reactivity, and the
+  // filter/flatMap/scoped/nested-pattern NEGATIVE axes) lives in
+  // `collection-prod-wire.test.ts`.
   async function runMap(env: Env, cause: string): Promise<unknown> {
     const { runtime, cf, space } = env;
     const inc = cf.lift((x: number) => x + 1, num, num);
@@ -519,33 +521,26 @@ describe("prod-wire: fallback safety (flag ON, collection)", () => {
     return await r.pull();
   }
 
-  it("a map/collection pattern falls back to legacy and matches", async () => {
+  it("a single map dispatches through the collection interpreter and matches legacy", async () => {
     const off = makeEnv(false);
     const on = makeEnv(true);
     try {
       const legacy = await runMap(off, "legacy:map");
-      const sumFallbacks = (c: ReturnType<typeof on.census>) =>
-        Object.values(c.fallback_by_reason).reduce((a, b) => a + b, 0);
-      const before = on.census();
+      const before = on.census().interpreted_ok;
       const interp = await runMap(on, "interp:map");
       const after = on.census();
 
-      // Same materialized result — no corruption, no partial write.
+      // Same materialized result — element-for-element parity with legacy.
       expect(interp).toEqual(legacy);
       expect(interp).toEqual({ out: [2, 3, 4] });
-      // The outer collection pattern fell back (NOT interpreted), and did so via
-      // a fail-closed reason. Two reasons are valid and BOTH are correct here:
-      //   - `ineligible_opkind`: the collection op kind is out of scope, OR
-      //   - `unrecognized_alias`: the inline element sub-pattern's serialized
-      //     result carries a `defer:1` nested-pattern alias, which the extractor
-      //     now fails closed on (it is checked before the opkind gate). Either
-      //     way the outer pattern never interprets — assert the fail-closed
-      //     invariant (a fallback was recorded) rather than a specific bucket the
-      //     gate ordering happens to pick. (The per-element `inc(element)`
-      //     sub-patterns the map builtin instantiates ARE eligible leaves and DO
-      //     interpret — so interpreted_ok also rises; that is correct and not
-      //     asserted here.)
-      expect(sumFallbacks(after)).toBeGreaterThan(sumFallbacks(before));
+      // The outer map went THROUGH the collection interpreter (interpreted_ok
+      // rose by exactly one — the single map node), with NO fallback recorded.
+      expect(after.interpreted_ok).toBe(before + 1);
+      expect(after.fallback_by_reason.ineligible_opkind).toBe(0);
+      expect(after.fallback_by_reason.unrecognized_alias).toBe(0);
+      expect(after.fallback_by_reason.unresolved_leaf).toBe(0);
+      expect(after.fallback_by_reason.scoped).toBe(0);
+      expect(after.fallback_by_reason.eval_threw).toBe(0);
     } finally {
       await off.dispose();
       await on.dispose();
