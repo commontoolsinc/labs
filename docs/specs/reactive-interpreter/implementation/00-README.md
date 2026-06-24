@@ -40,23 +40,35 @@
 Dependency-ordered. Detailed per-order docs (`NN-*.md`) are written when each
 order begins; until then this table + the cited spec sections are the order.
 
-Order reflects **D-SEQ = OQ-4 precision parity first** (collections land pointwise,
-never coarse). See [DECISIONS](./DECISIONS.md).
+> **AS-BUILT NOTE — canonical status lives in [PROGRESS.md](./PROGRESS.md) +
+> [DECISIONS.md](./DECISIONS.md).** This table is the *original* dependency plan;
+> the implementation diverged. **D-SEQ (OQ-4 precision first) was superseded by
+> D-W3-PRECISION = Option A:** collections land pointwise via per-element
+> *documents* (the W3 mechanism), so the separate W2 "per-path content-label
+> emit" was NOT needed and is deferred as Option B (only for an O(1)-footprint
+> variant). The actual landed sequence: W0 → W1 evaluator → **W2 *finding*
+> (D-OQ4-FINDING, not the per-path mechanism)** → W3 collection prototype →
+> **production wiring behind the default-off flag (D-PROD-PATH)** →
+> control-semantics fix → `map`-into-dispatch → error-isolation → W5a nested
+> inlining → effect-classification fix → merge-readiness review. The Status
+> column is updated to match; the "Contents" cells still describe original intent.
 
-| # | Work order | Contents | Depends on | Status |
+| # | Work order | Contents | Depends on | Status (as-built) |
 | --- | --- | --- | --- | --- |
-| W0 | Substrate & instrument | Graduate the two spike harnesses into CI benches + the differential oracle; define the ROG type + a trusted `Pattern → ROG` extraction that round-trips the corpus; **re-verify the scheduler-v2 seam against landed code**. | — | ✅ done (harness + baseline + ROG type + extraction-first-pass + seam D-SEAM) |
-| W1 | Interpret leaf/access/construct/control | `InterpreterState`, `evalFull`/`evalIncremental` for non-collection ops; egress-based materialization boundary (R-MAT-1); flow-join labels (confidentiality union + integrity **meet**, not view union — coarse is *correct* here: a single computation legitimately depends on all its inputs); idempotency-recheck hook (Delta C1) + interior-non-convergence API (Delta E). | W0 | not started |
-| W2 | **OQ-4 — per-path content-label emit (precision mechanism)** | The trusted mechanism for a single batched node to emit per-path `derived` content labels computed from **read-isolated** per-element evaluation (extend the §8.9.1 trusted-claim path / `prepare.ts` `valueWriteTargets`). Acceptance = the oracle's read-isolated + sibling-bug cases pass (un-skip them). **Built before collections so they are pointwise from day one.** | W1 | not started |
-| W3 | **Collections — the win (pointwise)** | `evalCollection` inline (no child patterns/docs), identity keying, orphan release (R-MAT-5); per-element labels via the W2 mechanism (pointwise, parity with legacy — no coarse interim); `O(1)` edit + path-scoped container patch; scope carry-through to output effective scope (R-SCOPE). Measure footprint vs legacy on the W0 bench; CFC parity on the oracle. | W2 | not started |
-| W4 | Checkpoint tier | Checkpoint write/read; automatic cost/size policy + author override; derivation-tracked staleness (transitive external-read closure); resume-from-checkpoint. Measure importer-sim resume. | W3 | not started |
-| W5 | Nested patterns + addressability | `pattern` recursion in-interpreter (outermost owns persistence); causal carry-through ids for retained deep links (R-MAT-3); cross-pattern links + FUSE parity. | W3 | not started |
-| W6 | Default-on & retire materialization | Flip the interpreter to default; delete the per-element child-pattern instantiation path; migrate persistence (interpreter observation + checkpoints). | W4, W5 | not started |
+| W0 | Substrate & instrument | Graduate the two spike harnesses into CI benches + the differential oracle; define the ROG type + a trusted `Pattern → ROG` extraction that round-trips the corpus; **re-verify the scheduler-v2 seam against landed code**. | — | ✅ done (harness + baseline + ROG type + extraction + seam D-SEAM) |
+| W1 | Interpret leaf/access/construct/control | `InterpreterState`, `evalFull`/`evalIncremental` for non-collection ops; egress-based materialization boundary (R-MAT-1); flow-join labels (confidentiality union + integrity **meet**, not view union — coarse is *correct* here: a single computation legitimately depends on all its inputs); idempotency-recheck hook (Delta C1) + interior-non-convergence API (Delta E). | W0 | ✅ landed (evalRog + extraction + per-op error isolation; correct on the real path under the flag) |
+| W2 | **OQ-4 — per-path content-label emit (precision mechanism)** | The trusted mechanism for a single batched node to emit per-path `derived` content labels computed from **read-isolated** per-element evaluation. | W1 | ⛔ NOT built — **superseded.** The *finding* (D-OQ4-FINDING) showed pointwise needs per-element docs; collections took that route (W3/Option A). The per-path emit is **deferred = Option B** (only for an O(1) container). |
+| W3 | **Collections — the win (pointwise)** | `evalCollection` (per-element docs, no child patterns), pointwise per-element labels, scope carry-through. Measure footprint vs legacy; CFC parity. | W2 | ✅ `map` landed + wired into the dispatch (footprint 1 doc/el vs legacy 3, pointwise CFC). filter/flatMap fall back (need container-structure taint). |
+| PROD | **Production wiring (D-PROD-PATH, not in original plan)** | Flagged dispatch into `instantiatePattern` with legacy fallback; pure fail-closed eligibility probe; census instrumentation. | W1 | ✅ landed, default-OFF. The shortest path to running the real suite against the interpreter. |
+| W4 | Checkpoint tier | Checkpoint write/read; cost/size policy; derivation-tracked staleness; resume. | W3 | ⬜ not started |
+| W5 | Nested patterns + addressability | `pattern` recursion in-interpreter (outermost owns persistence); causal carry-through ids; cross-pattern links + FUSE parity. | W3 | 🟡 **W5a landed** (top-level pure-computation inline — 0 child docs). **W5b** (addressability / retained deep links / FUSE) ⬜ not started. |
+| W6 | Default-on & retire materialization | Flip the interpreter to default; delete the child-pattern instantiation path; migrate persistence. | W4, W5 | ⬜ not started (the flag stays default-off; this is the eventual cutover). |
 
-**Note:** W2 (OQ-4) is the long pole — it is real CFC runtime work (a new trusted
-per-path label-emit) and gates the collection win (W3). Its acceptance test
-already exists: the skipped read-isolated + sibling-bug cases in
-`spike-cfc-oracle.test.ts`.
+**Note (as-built):** W2 (OQ-4 per-path emit) is NOT the long pole that landed —
+it was sidestepped by Option A (per-element docs). The remaining big features are
+filter/flatMap (CFC container-structure taint), handler/effect support
+(per-effect scheduling), and W5b addressability. See PROGRESS for the ranked
+backlog.
 
 ## Global rules (mirroring the scheduler-v2 work-order discipline)
 

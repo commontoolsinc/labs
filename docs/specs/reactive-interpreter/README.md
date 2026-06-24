@@ -1,7 +1,17 @@
 # Reactive Interpreter — a trusted meta-node that executes a Reactive Operation Graph
 
-> **Status**: Proposal (requirements + design + phased plan). Not yet
-> implemented.
+> **Status**: **In progress — wired into the production runner behind the
+> default-off `experimentalInterpreter` flag.** The pure evaluator
+> (leaf/access/construct/control + per-op error isolation), `map` collections
+> (per-element docs, pointwise CFC), and top-level pure-computation nested
+> patterns are landed and interpret correctly on the real path; everything else
+> falls back to legacy, side-effect-free. The full suite is green flag-off (a
+> verified no-op on the default path). **The as-built record — including where
+> the implementation diverged from this design (e.g. collections via Option A
+> per-element docs rather than the OQ-4-first sequence) — lives in
+> [implementation/PROGRESS.md](./implementation/PROGRESS.md) and
+> [implementation/DECISIONS.md](./implementation/DECISIONS.md), which are
+> canonical; this design doc and `01-06` describe the intended end-state.**
 > **Substrate**: builds on `docs/specs/scheduler-v2/` (targets the v2 node
 > model and states the deltas it needs).
 > **Companion (formal)**: the CFC label semantics for this component are to be
