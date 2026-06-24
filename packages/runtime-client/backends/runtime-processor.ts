@@ -19,6 +19,7 @@ import {
   convertCellsToLinks,
   entityIdFrom,
   getCellOrThrow,
+  getPatternIdentityRef,
   isCell,
   isCellResult,
   Runtime,
@@ -946,7 +947,8 @@ export class RuntimeProcessor {
       });
       await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      const hasPattern = target.getMetaRaw("pattern") !== undefined;
+      const hasPattern = getPatternIdentityRef(target) !== undefined ||
+        target.getMetaRaw("pattern") !== undefined;
       if (!hasPattern || targetLink.path.length > 0) {
         const pageCell = hasPattern && targetLink.path.length > 0
           ? target.asSchemaFromLinks()
