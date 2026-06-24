@@ -161,14 +161,37 @@ const attachMemorySocketPipeline = (
     }
     socket.send(encodeMemoryBoundary(message));
   });
+  // CF_DEBUG_MEMORY_WRITES=1: per-commit write trace (id + scope), mirrors the
+  // standalone server's logging. Server-side, so it sees every client's commits
+  // — the fastest way to see which doc a storm actually keeps writing.
+  const debugMemWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+  const logMemWrites = (payload: string): void => {
+    if (!debugMemWrites) return;
+    try {
+      const parsed = MemoryServer.parseClientMessage(payload) as unknown as {
+        commit?: { operations?: Array<Record<string, any>> };
+      };
+      for (const op of parsed?.commit?.operations ?? []) {
+        console.error(
+          `[memwrite] op=${op?.op} id=${String(op?.id).slice(0, 28)} scope=${
+            op?.scope ?? "(space)"
+          }`,
+        );
+      }
+    } catch {
+      // Logging only.
+    }
+  };
   const closeConnection = () => {
     connection.close();
   };
   void (async () => {
     try {
+      logMemWrites(firstMessage);
       await connection.receive(firstMessage);
       negotiation.handoff({
         onMessage(message) {
+          logMemWrites(message);
           void connection.receive(message).catch(() => {
             safeSocketClose(1011, "Memory websocket receive failure");
             closeConnection();
