@@ -19,7 +19,6 @@
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",
     "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
-    "./integration": "./src/integration.ts",
     "./logger": "./src/logger.ts",
     "./path-key-map": "./src/path-key-map.ts",
     "./sandbox-contract": "./src/sandbox-contract.ts",
