@@ -6,6 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { Stream, VNode } from "commonfabric";
 import {
   isPatternRefSentinel,
   resolveOpPattern,
@@ -213,4 +214,784 @@ describe("map op passed by identity", () => {
     // Resolved from the live in-memory index — no cold recompile.
     expect(pm.getCompileCacheStats().misses).toBe(missesBefore);
   });
+
+  it("refreshes existing mapped rows when captured params change", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { handler, pattern, type Stream, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface SetViewerEvent { viewer: string; }",
+            "interface Output { labels: string[]; setViewer: Stream<SetViewerEvent>; }",
+            "const setViewer = handler<SetViewerEvent, { viewer: Writable<string> }>((event, { viewer }) => {",
+            "  viewer.set(event.viewer);",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string }, { label: string }>(({ item, viewer }) => {",
+            "  return { label: viewer === '' ? 'hidden' : `${viewer}:${item.v}` };",
+            "});",
+            "export default pattern<{ items: Item[] }, Output>(({ items }) => {",
+            "  const viewer = new Writable<string>('');",
+            "  return {",
+            "    labels: items.map((item) => {",
+            "      const child = Child({ item, viewer });",
+            "      return child.label;",
+            "    }),",
+            "    setViewer: setViewer({ viewer }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface SetViewerEvent {
+      viewer: string;
+    }
+    const resultCell = runtime.getCell<{
+      labels: string[];
+      setViewer: Stream<SetViewerEvent>;
+    }>(
+      space,
+      "map params refresh rows",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual(["hidden", "hidden"]);
+
+    result.key("setViewer").send({ viewer: "Bob" });
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual(["Bob:a", "Bob:b"]);
+    cancelSink();
+  });
+
+  it("refreshes existing filtered rows when captured params change", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { handler, pattern, type Stream, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface SetViewerEvent { viewer: string; }",
+            "interface Output { labels: string[]; setViewer: Stream<SetViewerEvent>; }",
+            "const setViewer = handler<SetViewerEvent, { viewer: Writable<string> }>((event, { viewer }) => {",
+            "  viewer.set(event.viewer);",
+            "});",
+            "const Identity = pattern<{ viewer: string }, { me: string }>(({ viewer }) => ({ me: viewer }));",
+            "export default pattern<{ items: Item[] }, Output>(({ items }) => {",
+            "  const viewer = new Writable<string>('');",
+            "  const identity = Identity({ viewer });",
+            "  return {",
+            "    labels: items.filter((item) => item.v === identity.me).map((item) => item.v),",
+            "    setViewer: setViewer({ viewer }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface SetViewerEvent {
+      viewer: string;
+    }
+    const resultCell = runtime.getCell<{
+      labels: string[];
+      setViewer: Stream<SetViewerEvent>;
+    }>(
+      space,
+      "filter params refresh rows",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual([]);
+
+    result.key("setViewer").send({ viewer: "b" });
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual(["b"]);
+    cancelSink();
+  });
+
+  it("refreshes existing flatMapped rows when captured params change", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { handler, pattern, type Stream, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface SetViewerEvent { viewer: string; }",
+            "interface Output { labels: string[]; setViewer: Stream<SetViewerEvent>; }",
+            "const setViewer = handler<SetViewerEvent, { viewer: Writable<string> }>((event, { viewer }) => {",
+            "  viewer.set(event.viewer);",
+            "});",
+            "const Identity = pattern<{ viewer: string }, { me: string }>(({ viewer }) => ({ me: viewer }));",
+            "export default pattern<{ items: Item[] }, Output>(({ items }) => {",
+            "  const viewer = new Writable<string>('');",
+            "  const identity = Identity({ viewer });",
+            "  return {",
+            "    labels: items.flatMap((item) => identity.me === '' ? [] : [`${identity.me}:${item.v}`]),",
+            "    setViewer: setViewer({ viewer }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface SetViewerEvent {
+      viewer: string;
+    }
+    const resultCell = runtime.getCell<{
+      labels: string[];
+      setViewer: Stream<SetViewerEvent>;
+    }>(
+      space,
+      "flatmap params refresh rows",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual([]);
+
+    result.key("setViewer").send({ viewer: "Bob" });
+    await runtime.idle();
+
+    expect(await result.key("labels").pull()).toEqual(["Bob:a", "Bob:b"]);
+    cancelSink();
+  });
+
+  it("refreshes existing mapped child conditional UI when captured params change", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { handler, pattern, type Stream, UI, type VNode, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface SetViewerEvent { viewer: string; }",
+            "interface Output { rows: VNode[]; setViewer: Stream<SetViewerEvent>; }",
+            "const setViewer = handler<SetViewerEvent, { viewer: Writable<string> }>((event, { viewer }) => {",
+            "  viewer.set(event.viewer);",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(({ item, viewer }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v}>",
+            "        {viewer === '' ? null : <button data-control={item.v}>Vote</button>}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<{ items: Item[] }, Output>(({ items }) => {",
+            "  const viewer = new Writable<string>('');",
+            "  return {",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer });",
+            "      return child[UI];",
+            "    }),",
+            "    setViewer: setViewer({ viewer }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface SetViewerEvent {
+      viewer: string;
+    }
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      setViewer: Stream<SetViewerEvent>;
+    }>(
+      space,
+      "map params refresh conditional ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.key("setViewer").send({ viewer: "Bob" });
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("refreshes existing mapped child UI when captured params are subpattern outputs", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { handler, pattern, type Stream, UI, type VNode, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface SetViewerEvent { viewer: string; }",
+            "interface Output { rows: VNode[]; setViewer: Stream<SetViewerEvent>; }",
+            "const setViewer = handler<SetViewerEvent, { viewer: Writable<string> }>((event, { viewer }) => {",
+            "  viewer.set(event.viewer);",
+            "});",
+            "const Identity = pattern<{ viewer: string }, { me: string }>(({ viewer }) => {",
+            "  return { me: viewer };",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(({ item, viewer }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v}>",
+            "        {viewer ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<{ items: Item[] }, Output>(({ items }) => {",
+            "  const viewer = new Writable<string>('');",
+            "  const identity = Identity({ viewer });",
+            "  return {",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer: identity.me });",
+            "      return child[UI];",
+            "    }),",
+            "    setViewer: setViewer({ viewer }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface SetViewerEvent {
+      viewer: string;
+    }
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      setViewer: Stream<SetViewerEvent>;
+    }>(
+      space,
+      "map params refresh subpattern output ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.key("setViewer").send({ viewer: "Bob" });
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("refreshes mapped child UI when subpattern output comes from PerUser input", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { Default, pattern, type PerUser, UI, type VNode } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface Input { items: Item[]; myName?: PerUser<string | Default<''>>; }",
+            "interface Output { rows: VNode[]; myName: string; }",
+            "const Identity = pattern<{ myName?: PerUser<string | Default<''>> }, { me: string }>(({ myName }) => {",
+            "  return { me: myName };",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(({ item, viewer }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v}>",
+            "        {viewer ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<Input, Output>(({ items, myName }) => {",
+            "  const identity = Identity({ myName });",
+            "  return {",
+            "    myName,",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer: identity.me });",
+            "      return child[UI];",
+            "    }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      myName: string;
+    }>(
+      space,
+      "map params refresh per-user subpattern output ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.withTx(tx).key("myName").asSchema<string>({
+      type: "string",
+      scope: "user",
+    }).set("Bob");
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("refreshes imported mapped child conditionals from scoped subpattern output", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { Default, pattern, type PerUser, UI, type VNode } from 'commonfabric';",
+            "import Child from './child.tsx';",
+            "interface Item { v: string; }",
+            "interface Input { items: Item[]; myName?: PerUser<string | Default<''>>; }",
+            "interface Output { rows: VNode[]; myName: string; }",
+            "const Identity = pattern<{ myName?: PerUser<string | Default<''>> }, { me: string }>(({ myName }) => {",
+            "  return { me: myName };",
+            "});",
+            "export default pattern<Input, Output>(({ items, myName }) => {",
+            "  const identity = Identity({ myName });",
+            "  return {",
+            "    myName,",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer: identity.me });",
+            "      return child[UI];",
+            "    }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+        {
+          name: "/child.tsx",
+          contents: [
+            "import { computed, pattern, UI, type VNode } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "export default pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(({ item, viewer }) => {",
+            "  const isJoined = computed(() => viewer !== '');",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v} data-viewer={viewer} data-joined={isJoined ? 'true' : 'false'}>",
+            "        {isJoined ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      myName: string;
+    }>(
+      space,
+      "map params refresh imported per-user child conditional",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }, { v: "b" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.withTx(tx).key("myName").asSchema<string>({
+      type: "string",
+      scope: "user",
+    }).set("Bob");
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("initializes appended mapped child UI from scoped subpattern output", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { Default, handler, pattern, type PerUser, type Stream, UI, type VNode, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface AddItemEvent { v: string; }",
+            "interface Input { myName?: PerUser<string | Default<''>>; }",
+            "interface Output { rows: VNode[]; myName: string; addItem: Stream<AddItemEvent>; }",
+            "const addItem = handler<AddItemEvent, { items: Writable<Item[]> }>((event, { items }) => {",
+            "  items.push({ v: event.v });",
+            "});",
+            "const Identity = pattern<{ myName?: PerUser<string | Default<''>> }, { me: string }>(({ myName }) => {",
+            "  return { me: myName };",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(({ item, viewer }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v}>",
+            "        {viewer ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<Input, Output>(({ myName }) => {",
+            "  const items = new Writable<Item[]>([{ v: 'a' }]);",
+            "  const identity = Identity({ myName });",
+            "  return {",
+            "    myName,",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer: identity.me });",
+            "      return child[UI];",
+            "    }),",
+            "    addItem: addItem({ items }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface AddItemEvent {
+      v: string;
+    }
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      myName: string;
+      addItem: Stream<AddItemEvent>;
+    }>(
+      space,
+      "map appended per-user subpattern output ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      {},
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.withTx(tx).key("myName").asSchema<string>({
+      type: "string",
+      scope: "user",
+    }).set("Bob");
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(1);
+
+    result.key("addItem").send({ v: "b" });
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("initializes appended mapped child UI from scoped computed subpattern output", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { computed, Default, handler, pattern, type PerUser, type Stream, UI, type VNode, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface AddItemEvent { v: string; }",
+            "interface Input { myName?: PerUser<string | Default<''>>; }",
+            "interface Output { rows: VNode[]; myName: string; addItem: Stream<AddItemEvent>; }",
+            "const addItem = handler<AddItemEvent, { items: Writable<Item[]> }>((event, { items }) => {",
+            "  items.push({ v: event.v });",
+            "});",
+            "const Identity = pattern<{ myName?: PerUser<string | Default<''>> }, { me: string; isJoined: boolean }>(({ myName }) => {",
+            "  const me = computed(() => (myName ?? '').trim());",
+            "  const isJoined = computed(() => me !== '');",
+            "  return { me, isJoined };",
+            "});",
+            "const Child = pattern<{ item: Item; isJoined: boolean }, { [UI]: VNode }>(({ item, isJoined }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v}>",
+            "        {isJoined ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<Input, Output>(({ myName }) => {",
+            "  const items = new Writable<Item[]>([{ v: 'a' }]);",
+            "  const identity = Identity({ myName });",
+            "  return {",
+            "    myName,",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, isJoined: identity.isJoined });",
+            "      return child[UI];",
+            "    }),",
+            "    addItem: addItem({ items }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface AddItemEvent {
+      v: string;
+    }
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      myName: string;
+      addItem: Stream<AddItemEvent>;
+    }>(
+      space,
+      "map appended per-user computed output ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      {},
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.withTx(tx).key("myName").asSchema<string>({
+      type: "string",
+      scope: "user",
+    }).set("Bob");
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(1);
+
+    result.key("addItem").send({ v: "b" });
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
+
+  it("initializes appended root-list mapped child UI from scoped computed subpattern output", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { computed, Default, handler, pattern, type PerSpace, type PerUser, type Stream, UI, type VNode, Writable } from 'commonfabric';",
+            "interface Item { v: string; }",
+            "interface AddItemEvent { v: string; }",
+            "interface Input { items?: PerSpace<Item[] | Default<[]>>; myName?: PerUser<string | Default<''>>; }",
+            "interface Output { rows: VNode[]; myName: string; addItem: Stream<AddItemEvent>; }",
+            "const addItem = handler<AddItemEvent, { items: Writable<Item[] | Default<[]>> }>((event, { items }) => {",
+            "  items.push({ v: event.v });",
+            "});",
+            "const Identity = pattern<{ myName?: PerUser<string | Default<''>> }, { me: string; isJoined: boolean }>(({ myName }) => {",
+            "  const me = computed(() => (myName ?? '').trim());",
+            "  const isJoined = computed(() => me !== '');",
+            "  return { me, isJoined };",
+            "});",
+            "const Child = pattern<{ item: Item; viewer: string; isJoined: boolean }, { [UI]: VNode }>(({ item, viewer, isJoined }) => {",
+            "  return {",
+            "    [UI]: (",
+            "      <div data-row={item.v} data-viewer={viewer} data-joined={isJoined ? 'true' : 'false'}>",
+            "        {isJoined ? <button data-control={item.v}>Vote</button> : null}",
+            "      </div>",
+            "    ),",
+            "  };",
+            "});",
+            "export default pattern<Input, Output>(({ items, myName }) => {",
+            "  const identity = Identity({ myName });",
+            "  return {",
+            "    myName,",
+            "    rows: items.map((item) => {",
+            "      const child = Child({ item, viewer: identity.me, isJoined: identity.isJoined });",
+            "      return child[UI];",
+            "    }),",
+            "    addItem: addItem({ items }),",
+            "  };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const compiled = await runtime.patternManager.compilePattern(program);
+
+    interface AddItemEvent {
+      v: string;
+    }
+    const resultCell = runtime.getCell<{
+      rows: VNode[];
+      myName: string;
+      addItem: Stream<AddItemEvent>;
+    }>(
+      space,
+      "map appended root-list per-user computed output ui",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      compiled,
+      { items: [{ v: "a" }] },
+      resultCell,
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(0);
+
+    result.withTx(tx).key("myName").asSchema<string>({
+      type: "string",
+      scope: "user",
+    }).set("Bob");
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(1);
+
+    result.key("addItem").send({ v: "b" });
+    await runtime.idle();
+
+    expect(controlCount(await result.key("rows").pull())).toBe(2);
+    cancelSink();
+  });
 });
+
+function controlCount(value: unknown): number {
+  if (Array.isArray(value)) {
+    return value.reduce((total, child) => total + controlCount(child), 0);
+  }
+  if (typeof value !== "object" || value === null) return 0;
+  const node = value as { props?: Record<string, unknown>; children?: unknown };
+  const self = node.props && "data-control" in node.props ? 1 : 0;
+  return self + controlCount(node.children);
+}

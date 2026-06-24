@@ -31,6 +31,10 @@ import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
+  linkResolutionProbe,
+  schedulerDependencyRead,
+} from "../storage/reactivity-log.ts";
+import {
   cellIdentityKey,
   narrowestCellScope,
   outputSpotFromBinding,
@@ -93,6 +97,11 @@ export function flatMap(
 
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    if (argumentUsage.usesParams) {
+      tx.runWithAmbientReadMeta(schedulerDependencyRead, () => {
+        inputsCell.key("params").withTx(tx).get();
+      });
+    }
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
       ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
@@ -132,6 +141,8 @@ export function flatMap(
     // every element's taint into the coordinator's per-tx join.
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
+    const probeScoped = <T>(fn: () => T): T =>
+      tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -139,11 +150,11 @@ export function flatMap(
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
 
-    if (resultWithLog.get() === undefined) {
-      resultWithLog.set([]);
+    if (probeScoped(() => resultWithLog.get()) === undefined) {
+      probeScoped(() => resultWithLog.set([]));
     }
     if (list === undefined) {
-      resultWithLog.set([]);
+      probeScoped(() => resultWithLog.set([]));
       for (const entry of elementRuns.values()) {
         runtime.runner.stop(entry.resultCell);
       }
@@ -159,6 +170,11 @@ export function flatMap(
 
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
+    const pendingExisting: {
+      element: Cell<any>;
+      index: number;
+      existing: { resultCell: Cell<any>; lastIndex: number };
+    }[] = [];
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
@@ -170,19 +186,7 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
-          runtime.runner.run(
-            tx,
-            opPattern,
-            createRunInput(list[i], i),
-            existing.resultCell,
-            {
-              doNotUpdateOnPatternChange: true,
-              awaitSyncBeforeInitialRun: elementAwaitSync,
-            },
-          );
-        }
-        existing.lastIndex = i;
+        pendingExisting.push({ element: list[i], index: i, existing });
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -221,7 +225,25 @@ export function flatMap(
         newArrayValue.push(elemResult);
       }
     }
-    resultWithLog.set(newArrayValue);
+    for (const { element, index, existing } of pendingExisting) {
+      if (
+        (argumentUsage.usesIndex && existing.lastIndex !== index) ||
+        argumentUsage.usesParams
+      ) {
+        runtime.runner.run(
+          tx,
+          opPattern,
+          createRunInput(element, index),
+          existing.resultCell,
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
+        );
+      }
+      existing.lastIndex = index;
+    }
+    probeScoped(() => resultWithLog.set(newArrayValue));
 
     // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.
   };
