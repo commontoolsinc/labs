@@ -34,8 +34,10 @@ export interface EvalContext {
 }
 
 export class NotInterpretedHere extends Error {
-  constructor(kind: string) {
-    super(`ROG evaluator (W1a) does not handle op kind "${kind}" yet`);
+  constructor(kind: string, message?: string) {
+    super(
+      message ?? `ROG evaluator (W1a) does not handle op kind "${kind}" yet`,
+    );
     this.name = "NotInterpretedHere";
   }
 }
@@ -123,7 +125,18 @@ export function evalRog(
     switch (op.detail.kind) {
       case "leaf": {
         const impl = ctx.leafImpls.get(op.id);
-        if (!impl) throw new Error(`no leaf impl for op ${op.id}`);
+        // A missing leaf impl is a STRUCTURAL "cannot interpret this op" wiring
+        // failure, not a runtime error — propagate it as NotInterpretedHere so
+        // the per-op isolation re-throws it and the caller falls back to legacy
+        // (never silently isolates it to `undefined`). Unreachable in production
+        // (resolveLeafImpls + the `unresolved_leaf` gate pre-empt it), but
+        // defense-in-depth: a wiring bug must fail closed, not mis-evaluate.
+        if (!impl) {
+          throw new NotInterpretedHere(
+            "leaf",
+            `no leaf impl for op ${op.id} (unresolved)`,
+          );
+        }
         // A leaf takes its SINGLE structured input — the exact resolved value
         // legacy passes (a keyed object/array assembled by a preceding
         // synthesized construct, or a direct ref). Extraction guarantees a leaf
@@ -181,7 +194,31 @@ export function evalRog(
     if (op.id < 0) {
       // synthesized result construct (from extraction) — evaluate it too.
     }
-    opValues.set(op.id, evalOp(op));
+    // PER-OP ERROR ISOLATION (legacy parity). Legacy materializes each node
+    // separately, so when a leaf/computed body THROWS a runtime error the
+    // failure is contained to that node: its value resolves to `undefined`,
+    // downstream nodes that read it get `undefined`, and the rest of the
+    // pattern still computes (verified empirically against legacy: an
+    // independent `safe` leaf still produces its value while the throwing
+    // `poisoned` leaf yields `undefined`). The interpreter evaluates the whole
+    // ROG in one action, so without this catch a single throwing leaf would
+    // throw the entire node and corrupt/miss the whole result. We mirror legacy
+    // by isolating the throw to this op's value (`undefined`) and continuing.
+    //
+    // CRITICAL: `NotInterpretedHere` is NOT a runtime error — it is a
+    // STRUCTURAL signal that this op kind cannot be interpreted (collection /
+    // pattern / effect, or an unexpected kind). It MUST propagate so the caller
+    // falls back to legacy. We re-throw it rather than isolate it.
+    let value: unknown;
+    try {
+      value = evalOp(op);
+    } catch (e) {
+      if (e instanceof NotInterpretedHere) throw e;
+      // Runtime error from a leaf body (or other op evaluation): isolate to
+      // `undefined`, matching legacy per-node containment, and continue.
+      value = undefined;
+    }
+    opValues.set(op.id, value);
   }
 
   return { result: resolve(rog.result), opValues };

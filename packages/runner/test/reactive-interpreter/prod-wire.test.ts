@@ -289,6 +289,48 @@ const cases: OracleCase[] = [
     args: [{ a: 2, b: 5 }],
   },
   {
+    // ERROR-ISOLATION (per-op containment, legacy parity). A pattern with a
+    // `poisoned` leaf that THROWS for some inputs alongside an INDEPENDENT
+    // `safe` leaf. Legacy materializes each node separately, so the throw is
+    // contained: `poisoned` resolves to `undefined` and `safe` still computes.
+    // The interpreter runs the whole ROG in one action, so before per-op
+    // isolation a single throwing leaf threw the entire node and the whole
+    // result diverged/was lost. With isolation, evalRog catches the leaf throw,
+    // sets that op's value to `undefined` (the probed legacy equivalent), and
+    // continues — so the interpreter result deep-eqs legacy: poisoned isolated,
+    // safe computed. The second arg (x:0) is the non-throwing steady state; the
+    // first (x:2) is the throwing case. Both must match legacy.
+    name: "error-isolation (throwing leaf + independent safe leaf)",
+    argumentSchema: {
+      type: "object",
+      properties: { x: num },
+      required: ["x"],
+    },
+    resultSchema: {
+      type: "object",
+      properties: { poisoned: num, safe: num },
+    },
+    build: (cf) => {
+      const boom = cf.lift(
+        (x: number) => {
+          if (x > 1) throw new Error("Poisoned!");
+          return x + 100;
+        },
+        num,
+        num,
+      );
+      const double = cf.lift((x: number) => x * 2, num, num);
+      return cf.pattern(
+        ({ x }: { x: number }) => ({ poisoned: boom(x), safe: double(x) }),
+        { type: "object", properties: { x: num }, required: ["x"] },
+        { type: "object", properties: { poisoned: num, safe: num } },
+      );
+    },
+    // x=2: boom throws → poisoned isolated to undefined, safe = 4.
+    // x=0: boom returns 100, safe = 0 (non-throwing steady state).
+    args: [{ x: 2 }, { x: 0 }],
+  },
+  {
     name: "multi-op (leaf + control + construct)",
     argumentSchema: {
       type: "object",
