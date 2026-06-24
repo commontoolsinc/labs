@@ -70,6 +70,13 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     (poll.options ?? []).length === 1 &&
     poll.myName === "Alice"
   );
+  const assert_bob_changed_without_clobbering_alice = computed(() =>
+    (poll.votes ?? []).length === 2 &&
+    poll.votes?.[0]?.voterName === "Alice" &&
+    poll.votes?.[0]?.voteType === "green" &&
+    poll.votes?.[1]?.voterName === "Bob" &&
+    poll.votes?.[1]?.voteType === "yellow"
+  );
   // Host takeover observed from the deposed host's runtime.
   const assert_deposed = computed(() =>
     poll.adminName === "Bob" && poll.isAdmin === false
@@ -86,6 +93,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "alice-set-up" },
       { await: "bob-voted" },
       { assertion: assert_sees_bob },
+      { await: "bob-changed-vote" },
+      { assertion: assert_bob_changed_without_clobbering_alice },
       { await: "bob-claimed-host" },
       { assertion: assert_deposed },
     ],
@@ -107,6 +116,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const action_vote_green = action(() => {
     const first = poll.options?.[0];
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+  const action_vote_yellow = action(() => {
+    const first = poll.options?.[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "yellow" });
   });
   const action_claim_host = action(() => {
     poll.claimHost.send({});
@@ -138,7 +151,16 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_both_votes = computed(() =>
     (poll.votes ?? []).length === 2 &&
     poll.votes?.[0]?.voterName === "Alice" &&
-    poll.votes?.[1]?.voterName === "Bob"
+    poll.votes?.[0]?.voteType === "green" &&
+    poll.votes?.[1]?.voterName === "Bob" &&
+    poll.votes?.[1]?.voteType === "green"
+  );
+  const assert_bob_changed_vote = computed(() =>
+    (poll.votes ?? []).length === 2 &&
+    poll.votes?.[0]?.voterName === "Alice" &&
+    poll.votes?.[0]?.voteType === "green" &&
+    poll.votes?.[1]?.voterName === "Bob" &&
+    poll.votes?.[1]?.voteType === "yellow"
   );
   const assert_is_host_now = computed(() =>
     poll.adminName === "Bob" && poll.isAdmin === true
@@ -157,6 +179,9 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { action: action_vote_green },
       { assertion: assert_both_votes },
       { label: "bob-voted" },
+      { action: action_vote_yellow },
+      { assertion: assert_bob_changed_vote },
+      { label: "bob-changed-vote" },
       { action: action_claim_host },
       { assertion: assert_is_host_now },
       { label: "bob-claimed-host" },

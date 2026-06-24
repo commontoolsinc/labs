@@ -196,9 +196,12 @@ export default pattern(() => {
 
   const assert_green_vote_recorded = computed(() => {
     const v = poll.votes[0];
+    const stored = poll.users[0]?.votes?.[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
-      v?.voterName === "Alex";
+      v?.voterName === "Alex" &&
+      stored?.optionId === v?.optionId &&
+      stored?.voteType === "green";
   });
 
   // The "All options" overview renders one swatch per voter, sourced from a
