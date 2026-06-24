@@ -688,6 +688,94 @@ describe("prod-wire: TOP-LEVEL [UI] render falls back (flag ON) + matches legacy
   });
 });
 
+// ---------------------------------------------------------------------------
+// TOP-LEVEL EFFECT-REF NEGATIVE (the by-NAME fail-closed axis). An effect /
+// stream / async ref builtin (llm, generateText, fetchData, sqliteQuery, …) used
+// as a value computation lowers to a `type:"ref"` module whose `implementation`
+// is the builtin name. The classifier now recognizes those names via
+// `EFFECT_REFS` → classifies the node as `effect` → the `byKind.effect>0`
+// eligibility gate rejects it with reason `ineligible_opkind` (fail closed BY
+// NAME). Before EFFECT_REFS listed these names the node classified as `leaf`,
+// passed the kind gate, and only fell back incidentally at the `unresolved_leaf`
+// gate (a ref builtin has no resolvable leaf body). Either way the pattern falls
+// back to legacy and the result deep-eqs legacy (nothing silently dropped); this
+// pins the census reason to the precise, named `ineligible_opkind`.
+//
+// `fetchData` is used because it constructs from a plain `{url}` value and there
+// is no fetch server in this env, so BOTH the legacy (flag-off) and flag-on runs
+// take the SAME fallback path and the result is identical (the in-flight fetch
+// shape — `pending` with no `result` yet — is the same on both sides).
+const fetchResultSchema = {
+  type: "object",
+  properties: {
+    data: {
+      type: "object",
+      properties: {
+        pending: { type: "boolean" },
+        result: {},
+        error: {},
+      },
+    },
+  },
+} as JSONSchema;
+
+// ({url}) => ({data: fetchData({url, mode:"json"})}). The result references the
+// fetchData ref builtin's output as a value computation — exactly the top-level
+// effect-ref-as-value shape EFFECT_REFS must fail closed on.
+// deno-lint-ignore no-explicit-any
+function buildFetchValue(cf: any) {
+  return cf.pattern(
+    ({ url }: any) => ({ data: cf.fetchData({ url, mode: "json" }) }),
+    { type: "object", properties: { url: str }, required: ["url"] },
+    fetchResultSchema,
+  );
+}
+
+describe("prod-wire: TOP-LEVEL effect-ref falls back (flag ON) + matches legacy", () => {
+  it("a fetchData value computation does NOT interpret (effect class, named in EFFECT_REFS) and matches legacy", async () => {
+    const off = makeEnv(false);
+    const on = makeEnv(true);
+    try {
+      const legacy = await runAndPull(
+        off,
+        buildFetchValue,
+        { url: "http://mock-test-server.local/api/test" },
+        fetchResultSchema,
+        "legacy:fetch",
+      );
+      const beforeOk = on.census().interpreted_ok;
+      const beforeIneligible = on.census().fallback_by_reason.ineligible_opkind;
+      const beforeUnresolved = on.census().fallback_by_reason.unresolved_leaf;
+      const interp = await runAndPull(
+        on,
+        buildFetchValue,
+        { url: "http://mock-test-server.local/api/test" },
+        fetchResultSchema,
+        "interp:fetch",
+      );
+      const after = on.census();
+
+      // Fell back, did NOT interpret (no silent admit-and-mis-evaluate of an
+      // effect/stream/async ref builtin as a pure leaf).
+      expect(after.interpreted_ok).toBe(beforeOk);
+      // The PRECISE, NAMED reason: `effect` class (via EFFECT_REFS) → the
+      // `byKind.effect>0` kind gate. NOT the incidental `unresolved_leaf` gate
+      // it used to hit when these refs mis-classified as `leaf`.
+      expect(after.fallback_by_reason.ineligible_opkind)
+        .toBe(beforeIneligible + 1);
+      expect(after.fallback_by_reason.unresolved_leaf)
+        .toBe(beforeUnresolved);
+
+      // PARITY: both runs took the same legacy fallback path, so the result deep-
+      // eqs — nothing about the fetchData op's value computation was dropped.
+      expect(interp).toEqual(legacy);
+    } finally {
+      await off.dispose();
+      await on.dispose();
+    }
+  });
+});
+
 describe("prod-wire: collection map dispatch (flag ON, single map)", () => {
   // A single top-level `map` over a bare scalar element op is now the ELIGIBLE
   // collection shape — it dispatches through the registered `$ri-collection-map`

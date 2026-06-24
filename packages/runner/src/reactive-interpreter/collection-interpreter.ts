@@ -177,7 +177,11 @@ export function collectionInterpreter(
           containerSchema,
           tx,
         );
-        result.send([]);
+        // Container write under the link-resolution-probe scope (mirrors legacy
+        // map.ts's `probeScoped(() => resultWithLog.set(...))`): the slot diffing
+        // materializes prior slot targets for identity comparison only, so no
+        // element content read journals into the coordinator's flow-join J.
+        tx.runWithAmbientReadMeta(linkResolutionProbe, () => result!.send([]));
         setResultCell(result, parentCell);
         sendResult(tx, result);
       }
@@ -268,8 +272,15 @@ export function collectionInterpreter(
         }
       }
       // Pure-link-structure container write (empty coordinator J → only
-      // `structure` stamps, never a smearing `derived` one).
-      resultPresence.withTx(tx).set(slots as unknown as unknown[]);
+      // `structure` stamps, never a smearing `derived` one). Under the
+      // link-resolution-probe scope (mirrors legacy map.ts's
+      // `probeScoped(() => resultWithLog.set(...))`): set() diffs prior slots as
+      // links for identity comparison only, so the diff never journals a content
+      // read of a prior element result into the coordinator's flow-join J.
+      tx.runWithAmbientReadMeta(
+        linkResolutionProbe,
+        () => resultPresence.withTx(tx).set(slots as unknown as unknown[]),
+      );
     };
   };
 }

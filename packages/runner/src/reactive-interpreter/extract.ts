@@ -47,9 +47,11 @@ interface RawModule {
    * effect (side-effecting, not a value computation). A module carrying
    * `isEffect:true` is NOT a pure value-leaf. (Note: the registry-level
    * `isEffect` of effect *builtins* like llm/sqlite is NOT propagated onto the
-   * in-memory `type:"ref"` module object — those are classified by name via
-   * `EFFECT_REFS`; the ref-branch `isEffect` check below is a fail-closed
-   * backstop for any ref that does happen to carry it.) */
+   * in-memory `type:"ref"` module object — the builder-side `ref` factories in
+   * builder/built-in.ts emit only `{type:"ref", implementation:<name>}`. Those
+   * effect/stream/async builtins are instead classified by their ref NAME via
+   * `EFFECT_REFS` below; the ref-branch `isEffect` check is a fail-closed
+   * backstop for any ref that does happen to carry the marker.) */
   isEffect?: boolean;
   /** A `type:"javascript"` module built by `cf.handler` carries `wrapper:
    * "handler"` (builder/module.ts). A handler is an EVENT-STREAM SINK, not a
@@ -72,7 +74,28 @@ interface RawPattern {
 
 const COLLECTION_OPS = new Set(["map", "filter", "flatMap"]);
 const CONTROL_OPS = new Set(["ifElse", "when", "unless"]);
-const EFFECT_REFS = new Set(["navigateTo", "streamData"]);
+// Effect / stream / async ref builtins, named explicitly so a top-level use as
+// a value computation classifies as `effect` → `ineligible_opkind` (fail closed
+// BY NAME, not via the incidental `unresolved_leaf` gate). These all do I/O,
+// produce streams, or write results back asynchronously — none is a pure value
+// leaf. The names are the registered builtin refs (the `implementation` string
+// each `createNodeFactory({type:"ref", implementation})` carries in
+// builder/built-in.ts, matching the `addModuleByRef` keys in builtins/index.ts).
+// Pure builtins (str, …) are deliberately NOT listed — they stay `leaf`.
+const EFFECT_REFS = new Set([
+  "navigateTo",
+  "streamData",
+  "llm",
+  "llmDialog",
+  "generateText",
+  "generateObject",
+  "fetchData",
+  "fetchProgram",
+  "compileAndRun",
+  "sqliteQuery",
+  "sqliteDatabase",
+  "wish",
+]);
 
 export interface CoverageReport {
   /** Total nodes seen (this graph + nested element graphs). */
