@@ -58,6 +58,12 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+  /**
+   * When true, forward the worker runtime's console output to the main
+   * thread so it reaches devtools and integration-test console capture.
+   * Off by default.
+   */
+  forwardWorkerConsole?: boolean;
   getBuildHash?: () => Promise<string | undefined>;
   workerUrl?: URL;
 };
@@ -111,6 +117,7 @@ export function createRuntimeClientOptions({
   experimental,
   cfcEnforcementMode = "enforce-explicit",
   trustSnapshot,
+  forwardWorkerConsole,
 }: {
   session: Session;
   apiUrl: URL;
@@ -118,6 +125,7 @@ export function createRuntimeClientOptions({
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+  forwardWorkerConsole?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? {
@@ -136,6 +144,7 @@ export function createRuntimeClientOptions({
     experimental,
     cfcEnforcementMode,
     trustSnapshot: resolvedTrustSnapshot,
+    forwardWorkerConsole,
   };
 }
 
@@ -462,6 +471,7 @@ export class RuntimeInternals extends EventTarget {
     experimental,
     cfcEnforcementMode,
     trustSnapshot,
+    forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
@@ -502,6 +512,7 @@ export class RuntimeInternals extends EventTarget {
         experimental,
         cfcEnforcementMode,
         trustSnapshot,
+        forwardWorkerConsole,
       }),
     );
 

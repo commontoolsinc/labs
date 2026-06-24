@@ -70,6 +70,25 @@ export class WebWorkerRuntimeTransport
   private _handleMessage = (event: MessageEvent): void => {
     const data = event.data;
 
+    // Worker-side console output forwarded by the bridge in
+    // `backends/web-worker/index.ts` (opt-in). Re-emit it on the page
+    // console so it reaches devtools and integration-test console capture,
+    // then stop: it is not an IPC response and carries no `msgId`.
+    if (
+      data && typeof data === "object" &&
+      (data as { __workerConsole?: unknown }).__workerConsole
+    ) {
+      const { level, text } = (data as {
+        __workerConsole: { level: string; text: string };
+      }).__workerConsole;
+      const sink = (console as unknown as Record<
+        string,
+        (message: string) => void
+      >)[level] ?? console.log;
+      sink(`[worker] ${text}`);
+      return;
+    }
+
     if (!this._ready && data === "READY") {
       this._ready = true;
       this._readyPromise.resolve();

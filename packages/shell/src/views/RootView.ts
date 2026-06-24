@@ -29,6 +29,7 @@ import {
   type ThemePreference,
 } from "../lib/theme-preference.ts";
 import { EXPERIMENTAL } from "../lib/env.ts";
+import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -107,6 +108,7 @@ export class XRootView extends BaseView {
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
+          forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
           // lib-shell emits address-shaped targets ({spaceDid, pieceId});
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.
