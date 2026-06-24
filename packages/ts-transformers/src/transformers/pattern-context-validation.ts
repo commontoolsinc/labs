@@ -132,6 +132,17 @@ export class PatternContextValidationTransformer
         }
       }
 
+      // Check for class creation in pattern context. A class created here has
+      // the same footgun as a function: a method or accessor capturing a
+      // reactive local reads it as a stale plain snapshot, since the body runs
+      // later, outside the reactive graph. Flag the class once and stop
+      // descending so its members don't produce cascading diagnostics.
+      if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
+        if (this.validateClassCreation(node, context, checker)) {
+          return node;
+        }
+      }
+
       // Check for optional chaining in reactive context
       // Note: isInRestrictedReactiveContext returns false for JSX expressions,
       // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
@@ -619,6 +630,40 @@ export class PatternContextValidationTransformer
         `Note: callbacks inside computed(), action(), and .map() are allowed.`,
       node,
     });
+  }
+
+  /**
+   * Validates that classes are not created directly in pattern context.
+   * A class method, getter, or setter that captures a reactive value from the
+   * pattern body reads it as a stale plain snapshot, because the body runs
+   * later, outside the reactive graph. Classes inside safe wrappers (computed,
+   * action, lift, handler) run in compute context and are allowed.
+   *
+   * Returns true when the class was rejected, so the caller can stop descending
+   * into its members and avoid cascading per-member diagnostics.
+   */
+  private validateClassCreation(
+    node: ts.ClassExpression | ts.ClassDeclaration,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): boolean {
+    // Skip if inside safe wrapper callback (computed, action, lift, handler)
+    if (isInsideSafeCallbackWrapper(node, checker, context)) return false;
+
+    // Only error if inside restricted context (pattern/render)
+    if (!isInsideRestrictedContext(node, checker, context)) return false;
+
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:function-creation",
+      message: `Class creation is not allowed in pattern context. ` +
+        `Move this class to module scope. Methods and accessors that read a ` +
+        `reactive value captured from the pattern body see a stale snapshot, ` +
+        `since they run later, outside the reactive graph. ` +
+        `Note: classes inside computed(), action(), lift(), and handler() are allowed.`,
+      node,
+    });
+    return true;
   }
 
   /**
