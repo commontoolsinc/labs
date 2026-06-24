@@ -913,6 +913,132 @@ function schemaNeedsCellContext(schema: unknown): boolean {
   return false;
 }
 
+/** Bare-identifier names a leaf body may CALL that are pure host globals — a call
+ * to one of these is NOT a pattern/sub-computation instantiation, so it must not
+ * trip the structural pattern-instantiation gate below. Members (`Array.from`,
+ * `JSON.parse`, `x.sample()`) are already excluded by the `(?<![.\w$])` lookbehind
+ * (they are preceded by `.`); this set covers the BARE forms (`Array(`, `Number(`,
+ * `parseInt(`, …) a pure lift legitimately calls and returns. Deliberately broad
+ * on the SAFE side: a name that is NOT here and is called bare is treated as a
+ * possible factory/lift application → fall back (always sound). */
+const PURE_GLOBAL_CALLEES = new Set([
+  // constructors / coercions
+  "Array",
+  "Object",
+  "String",
+  "Number",
+  "Boolean",
+  "BigInt",
+  "Symbol",
+  "Date",
+  "RegExp",
+  "Map",
+  "Set",
+  "WeakMap",
+  "WeakSet",
+  "Promise",
+  "Error",
+  "TypeError",
+  "RangeError",
+  // numeric / parsing host functions
+  "parseInt",
+  "parseFloat",
+  "isNaN",
+  "isFinite",
+  "encodeURIComponent",
+  "decodeURIComponent",
+  "encodeURI",
+  "decodeURI",
+  "structuredClone",
+  // control-flow keywords that the regex could see as `name(` (e.g. `if (`,
+  // `for (`, `while (`, `switch (`, `catch (`, `return (`, `typeof(`). These are
+  // NOT calls; excluding them keeps the gate precise.
+  "if",
+  "for",
+  "while",
+  "switch",
+  "catch",
+  "return",
+  "typeof",
+  "await",
+  "function",
+  "do",
+  "else",
+]);
+
+/**
+ * STRUCTURAL signal that a LIVE leaf body CAN return a Pattern / sub-computation
+ * instantiation (a `pattern(...)` factory call or a `lift(...)`-application). The
+ * eligibility dry-run's value guard (runner.ts: `isPattern`/`isCell`/`isOpaqueRef`
+ * on the evaluated values) MISSES these when the pattern is returned only on SOME
+ * arguments: the probe reads the argument TX-LESS (undefined for a not-yet-committed
+ * setup argument), and the evaluator's undefined-argument run-gate (interpret.ts)
+ * then SKIPS the leaf body entirely — so the conditional/recursive pattern branch
+ * never runs and the guard sees `undefined`, not the returned Cell. Calling such a
+ * factory at the synthetic node's RUNTIME (no builder frame) throws "no runtime
+ * context available" → the result materializes empty. These need the real reactive
+ * child instantiation legacy performs (D-EMISSION-SCOPE: permanent fallback).
+ *
+ * We detect it from the leaf's live function SOURCE (`fn.toString()`, real source
+ * for a trusted in-memory function): a BARE-identifier call expression `name(`
+ * (a `pattern`/`lift` factory closed over by the body) that is NOT a member call
+ * (`x.foo(`) and NOT a known pure host global (`Array(`, `parseInt(`, …). Member
+ * calls and pure-global calls are how an ordinary value-lift legitimately produces
+ * a value, so they do NOT trip this gate; only a bare call to a closed-over
+ * (factory/lift) identifier does. Conservative by construction: a false positive
+ * only causes an extra (always-sound) legacy fallback, never a mis-eval.
+ */
+function liveLeafCanInstantiatePattern(
+  impl: (input: unknown) => unknown,
+): boolean {
+  let src: string;
+  try {
+    src = Function.prototype.toString.call(impl);
+  } catch {
+    // A function whose source is unavailable (bound/native) cannot be statically
+    // inspected — do NOT gate on it here (other gates / the value guard cover it).
+    return false;
+  }
+  // Match a BARE-identifier call: an identifier not preceded by `.` or another
+  // identifier char (so `a.b(` and `xb(` inside `foox(` do not match the `x`),
+  // immediately followed by `(`. The `(?<![.\w$])` lookbehind excludes member
+  // expressions and mid-identifier matches.
+  const callRe = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+  for (const m of src.matchAll(callRe)) {
+    const name = m[1];
+    if (!PURE_GLOBAL_CALLEES.has(name)) return true;
+  }
+  return false;
+}
+
+/**
+ * STRUCTURAL signal that a LIVE leaf body needs a BUILDER FRAME / runtime context
+ * the interpreter's frameless synthetic node does not provide — specifically a
+ * `Cell.for(...)` named-cell mint (or any `.for(` factory used to create a named
+ * cell). Such a body calls `getTopFrame()` (cell.ts) which throws "Can't invoke
+ * Cell.for() outside of a pattern/handler/lift context" at the synthetic node's
+ * RUNTIME. The eligibility dry-run can MISS this because the probe happens to run
+ * inside the ambient setup builder frame (so `Cell.for` succeeds at probe time)
+ * while the scheduler action does not — the throw surfaces only at runtime. This
+ * complements `schemaNeedsCellContext` (which catches asCell/asStream INPUT
+ * handles): Cell.for mints a NEW named cell and is not visible on the argument
+ * schema, so it needs its own structural detector. Detected from the leaf source
+ * (`.for(` member call), a context-requiring lift → permanent legacy fallback.
+ */
+function liveLeafNeedsBuilderContext(
+  impl: (input: unknown) => unknown,
+): boolean {
+  let src: string;
+  try {
+    src = Function.prototype.toString.call(impl);
+  } catch {
+    return false;
+  }
+  // `Cell.for(` / `.for(` is the named-cell mint that requires a builder frame.
+  // The leading `.` distinguishes it from a bare `for (` control-flow keyword.
+  return /\.for\s*\(/.test(src);
+}
+
 export function resolveLeafImpls(
   pattern: RawPattern,
   rog: Rog,
@@ -981,6 +1107,26 @@ export function resolveLeafImpls(
       continue;
     }
     const impl = module?.implementation;
+    // STRUCTURAL PATTERN-INSTANTIATION / CONTEXT GATES (runner probe only, gated on
+    // `liveLeafTrustCheck`). Read off the leaf's live source, BEFORE resolving it as
+    // a callable leaf, so a body that CAN return a pattern/lift instantiation
+    // (`liveLeafCanInstantiatePattern`) or needs a builder frame (`Cell.for` —
+    // `liveLeafNeedsBuilderContext`) falls back even when the eligibility dry-run's
+    // value guard misses it (the conditional/recursive pattern branch is gated out
+    // at probe time on an undefined snapshot argument; `Cell.for` happens to run
+    // inside the ambient setup frame at probe time but throws at the frameless
+    // synthetic node at runtime). Per D-EMISSION-SCOPE these are permanent legacy
+    // fallback. Treat as UNRESOLVED → `unresolved_leaf` gate → legacy. Recurses into
+    // nested-pattern leaves via the inlined-pattern branch above. Always sound: a
+    // false positive only adds a (correct) legacy fallback, never a mis-eval.
+    if (
+      liveLeafTrustCheck && typeof impl === "function" &&
+      (liveLeafCanInstantiatePattern(impl as (input: unknown) => unknown) ||
+        liveLeafNeedsBuilderContext(impl as (input: unknown) => unknown))
+    ) {
+      unresolvedLeafOps.push(op.id);
+      continue;
+    }
     if (typeof impl === "function") {
       // SECURITY: only a TRUSTED live function may run as a raw leaf inside the
       // interpreter (see `LiveLeafTrustCheck`). An untrusted in-memory callback
