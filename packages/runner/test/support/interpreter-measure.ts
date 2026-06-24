@@ -164,6 +164,16 @@ export function derivedConfidentiality(
 export interface MeasureEnvOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   cfcFlowLabels?: CfcFlowLabelsMode;
+  /**
+   * Pin the reactive-interpreter flag for this env. Defaults to the ambient
+   * `envExperimentalInterpreterDefault()` (so a suite run under
+   * `CF_EXPERIMENTAL_INTERPRETER=1` interprets), but a LEGACY-baseline
+   * measurement must pass `false` so its footprint stays the genuine legacy
+   * "before" regardless of the ambient env flag — otherwise the baseline
+   * runtime interprets the map's element children and the per-element doc/node
+   * slope collapses, failing the law assertion.
+   */
+  experimentalInterpreter?: boolean;
 }
 
 export interface MeasureEnv {
@@ -187,6 +197,13 @@ export function createMeasureEnv(
       ? { cfcEnforcementMode: options.cfcEnforcementMode }
       : {}),
     ...(options.cfcFlowLabels ? { cfcFlowLabels: options.cfcFlowLabels } : {}),
+    ...(options.experimentalInterpreter !== undefined
+      ? {
+        experimental: {
+          experimentalInterpreter: options.experimentalInterpreter,
+        },
+      }
+      : {}),
   });
   const docs = attachDocRecorder(storageManager);
   const { commonfabric } = createTrustedBuilder(runtime);

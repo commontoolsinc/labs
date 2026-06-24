@@ -62,7 +62,11 @@ async function measureLegacyMap(
   prefix: string,
   N: number,
 ): Promise<LegacyMeasurement> {
-  const env = createMeasureEnv(signer);
+  // Pin the interpreter OFF: this measures the genuine LEGACY map law (the
+  // "before"). Without this the env-default flag (CF_EXPERIMENTAL_INTERPRETER=1)
+  // would make the baseline runtime interpret the map's element children,
+  // collapsing the per-element doc/node slope and failing the law assertion.
+  const env = createMeasureEnv(signer, { experimentalInterpreter: false });
   try {
     return await measureLegacyMapIn(env, prefix, N);
   } finally {

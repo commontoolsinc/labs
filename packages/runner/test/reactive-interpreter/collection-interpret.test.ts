@@ -122,6 +122,11 @@ async function measureLegacy(prefix: string, N: number): Promise<Measurement> {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
+    // Pin the interpreter OFF so this is the genuine LEGACY "before" baseline,
+    // regardless of the ambient CF_EXPERIMENTAL_INTERPRETER env flag (which
+    // would otherwise interpret the map's element children and collapse the
+    // per-element doc slope this differential oracle measures against).
+    experimental: { experimentalInterpreter: false },
   });
   const docs = attachDocRecorder(storageManager);
   // deno-lint-ignore no-explicit-any
