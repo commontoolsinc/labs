@@ -625,15 +625,22 @@ An action run:
 Reactive action commits are optimistic. The scheduler continues after starting
 the commit, assuming success. If the commit resolves with an error, the action
 is always resubscribed from the captured log so later input changes re-trigger
-it. A **conflict** (`ConflictError`, a stale read) is then a wait, not a retry:
-the write that caused it has dirtied this action's still-subscribed reads, so
-normal reader-dirty propagation re-runs it with the latest state — it is not
-re-queued and does **not** consume the retry budget. Other non-permanent errors
-are not re-triggered that way, so they are retried up to
-`MAX_RETRIES_FOR_REACTIVE` times by marking the action dirty, adding it to
-`pending`, and queuing execution; permanent (precondition) rejections are not
-retried. Retry state is cleared after a successful commit. The in-flight source
-record is removed after the commit promise settles.
+it. A **conflict** (`ConflictError`, a stale read) means the authoritative
+version is ahead of this replica: the action re-arms its subscription, waits for
+the conflict's `readyToRetry` catch-up, then re-queues itself (mark dirty, add to
+`pending`, queue execution) so it re-runs against the fresh state. A conflict is
+a wait-for-catch-up, not a failure, so it does **not** consume the retry budget —
+the budget cannot be exhausted by a contended compute and strand it as a zombie
+against rolled-back data. Reader-dirty propagation may also re-trigger the action
+when the catch-up write lands as a fresh notification, but that is a redundant
+fast path, not the recovery mechanism: it does not cover a conflict whose
+triggering write has already been delivered (no further dirty arrives), so the
+re-queue is what guarantees re-evaluation. Other non-permanent errors are not
+recovered that way, so they are retried up to `MAX_RETRIES_FOR_REACTIVE` times by
+marking the action dirty, adding it to `pending`, and queuing execution;
+permanent (precondition) rejections are not retried. Retry state is cleared after
+a successful commit. The in-flight source record is removed after the commit
+promise settles.
 
 If an action throws, the scheduler reports it through registered error handlers,
 still finalizes commit/resubscription state for the transaction, and resolves

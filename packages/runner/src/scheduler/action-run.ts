@@ -113,7 +113,7 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreCfcTriggerReads: () => void;
 }): void {
-  state.commitPromise.then(({ error }) => {
+  state.commitPromise.then(async ({ error }) => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
@@ -127,20 +127,50 @@ export function watchReactiveActionCommit(state: {
     );
 
     // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
-    // means one of its inputs moved; the write that moved it dirtied this
-    // action's still-subscribed reads, so reader-dirty propagation re-runs it
-    // with the latest state. (This holds because the commit-conflict matcher is
-    // a subset of the reader-dirty matcher — the leaf-only alignment in the
-    // memory engine; a parent-injecting commit matcher would conflict on
-    // disjoint siblings that reader-dirty does NOT re-trigger, stranding the
-    // write.) So a conflict is a WAIT, not a retry: keep the subscription fresh
-    // and return WITHOUT consuming the retry budget — otherwise sustained
-    // contention would exhaust the budget and strand the compute as a zombie
-    // against rolled-back data. Restore the consumed trigger reads (§8.9.2) so a
-    // reader-dirty re-run's transaction still carries their flow labels.
+    // means one of its inputs moved: the authoritative version is ahead of this
+    // replica, and the action's read set is stale until the replica catches up
+    // (the conflict's `readyToRetry` gates exactly that catch-up). Re-arm the
+    // subscription, wait for the catch-up, then re-run the action against the
+    // fresh state. A conflict is a WAIT, not a failure, so it does NOT consume
+    // the retry budget — otherwise sustained contention would exhaust the budget
+    // and strand the compute as a zombie against rolled-back data.
+    //
+    // Reader-dirty propagation also re-triggers the action when the catch-up
+    // write lands as a fresh notification, but that does not cover every
+    // conflict: when the write that caused the conflict has already been
+    // delivered (it is what triggered this run), no further dirty arrives, and
+    // relying on reader-dirty alone would leave the action stranded with its
+    // stale committed value. So the re-queue here is the recovery mechanism;
+    // reader-dirty is a redundant fast path (the re-dirty/pending/queue calls
+    // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
+    // transaction still carries their flow labels.
     if (isConflictRejection(error)) {
+      // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
+      // resubscribe) so the subscription stays fresh and a concurrent
+      // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreCfcTriggerReads();
       state.resubscribe(state.action, state.log);
+      const readyToRetry = readyToRetryPromise(error);
+      if (readyToRetry !== undefined) {
+        // The readiness gate rejects by design when the session is closed,
+        // revoked, or replaced while we wait — an expected control-flow signal,
+        // not an error. Swallow it and re-queue anyway: the action stays live
+        // and re-runs on the next input change or pull.
+        try {
+          await readyToRetry;
+        } catch (readyError) {
+          logger.debug(
+            "conflict-retry-readiness-aborted",
+            () => [
+              "conflict catch-up readiness aborted; re-queuing action anyway",
+              readyError,
+            ],
+          );
+        }
+      }
+      state.markDirectDirty(state.action);
+      state.pending.add(state.action);
+      state.queueExecution();
       return;
     }
 
@@ -172,6 +202,23 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
+  if (typeof candidate !== "function") {
+    return undefined;
+  }
+  try {
+    return Promise.resolve(candidate.call(error));
+  } catch (thrown) {
+    // A readyToRetry that throws synchronously is treated the same as one that
+    // returns a rejected promise; the caller swallows the rejection.
+    return Promise.reject(thrown);
+  }
 }
 
 export function appendActionRunTrace(state: {

@@ -1,16 +1,16 @@
 // Regression: a reactive EFFECT whose optimistic commit fails with a cross-replica
-// ConflictError is recovered by reader-dirty re-triggering — WITHOUT consuming the
+// ConflictError recovers and re-runs against fresh state — WITHOUT consuming the
 // reactive retry budget — exactly as a computation is.
 //
-// This pins #4210's (empirically established) scope. #4210 removes ConflictError
-// from the reactive retry path on the premise `commit-conflict ⊆ reader-dirty`
-// (established by #4220): the write that caused the conflict has already dirtied the
-// action's still-subscribed reads, so the scheduler re-runs it with fresh state. The
-// conflict-skip in watchReactiveActionCommit is intentionally NOT gated to
-// computations — effects recover the same way (the cross-replica ConflictError's
-// read-repair sync re-triggers the effect). A same-replica race is a
-// StorageTransactionInconsistent, which keeps its bounded retry; only the
-// cross-replica ConflictError reaches this path.
+// ConflictError is kept out of the reactive retry budget (a conflict is a wait for
+// catch-up, not a failure). Recovery is guaranteed by the catch-up re-queue in
+// watchReactiveActionCommit: re-arm the subscription, wait for the conflict's
+// `readyToRetry`, then re-run. The cross-replica ConflictError's read-repair sync
+// re-triggering the effect via reader-dirty is a redundant fast path. The
+// off-budget conflict-skip is intentionally NOT gated to computations — effects
+// take the same path. A same-replica race is a StorageTransactionInconsistent,
+// which keeps its bounded retry; only the cross-replica ConflictError reaches this
+// path.
 //
 // Coverage gap this fills: compute-conflict-recovery.test.ts asserts the reader-dirty
 // PREDICATE for computations; commit-conflict-reconcile.test.ts exercises read-repair
@@ -159,8 +159,9 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       .toBe(1);
 
     // Subscribe an effect on B that reads source and writes source*10 into result.
-    // Its first run reads the stale 1; its commit conflicts (server at 2); #4210
-    // skips the retry, and reader-dirty (via read-repair) must re-run it against 2.
+    // Its first run reads the stale 1; its commit conflicts (server at 2); the
+    // conflict is skipped from the retry budget, and the catch-up re-queue (with
+    // read-repair / reader-dirty as a fast path) re-runs it against 2.
     const seen: number[] = [];
     let runs = 0;
     const effect: Action = (actionTx) => {
@@ -187,7 +188,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
     ).toBeGreaterThanOrEqual(1);
     expect(
       recovered,
-      "effect re-ran against the post-conflict value via reader-dirty",
+      "effect re-ran against the post-conflict value after catch-up",
     ).toBe(true);
     expect(resB.get(), "effect's recovered write reflects fresh state").toBe(
       20,
@@ -196,7 +197,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       .toBeGreaterThanOrEqual(2);
   };
 
-  it("recovers a plain effect via reader-dirty, not the retry budget", async () => {
+  it("recovers a plain effect off the retry budget (not stranded)", async () => {
     await exerciseEffectConflict("plain", {});
   });
 

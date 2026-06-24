@@ -11,11 +11,15 @@ export function isPermanentRejection(
 
 /**
  * A conflict rejection is a stale-read / pending-dependency commit failure
- * (normalized to `ConflictError`, see storage/v2.ts). A reactive compute does
- * NOT need to immediately retry one: the write that caused the conflict dirtied
- * the compute's (still-subscribed) reads, so normal reader-dirty propagation
- * re-runs it with the latest state. Other non-permanent errors are not
- * re-triggered that way and still warrant a retry.
+ * (normalized to `ConflictError`, see storage/v2.ts): the authoritative version
+ * is ahead of this replica. A reactive compute or effect recovers from one by
+ * re-arming its subscription, waiting for the conflict's `readyToRetry`
+ * catch-up, and re-queuing — off the retry budget, since a conflict is a
+ * wait-for-catch-up, not a failure. (Reader-dirty propagation re-triggers it too
+ * when the catch-up write lands as a fresh notification, but that does not cover
+ * a conflict whose triggering write was already delivered, so the re-queue is
+ * what guarantees re-evaluation.) Other non-permanent errors are not
+ * catch-up-recoverable and keep their bounded retry instead.
  *
  * The event-handler commit path treats the same rejection as the signal to
  * apply committed-write backpressure: re-running the handler against fresh
