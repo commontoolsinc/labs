@@ -2229,11 +2229,23 @@ export class Runner {
     // never writes. If the evaluator throws (NotInterpretedHere for an
     // unexpected op, or any runtime error from a leaf body), fall back.
     const argSnapshot = this.readArgumentSnapshot(resultCell);
+    let dry: ReturnType<typeof evalRog> | undefined;
     try {
-      evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
+      dry = evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
     } catch {
       bumpAndThrow("eval_threw");
     }
+    // R6: an async leaf returns a Promise the interpreter cannot store (legacy
+    // awaits async leaves) — fall back. R5: a `derive`/`lift` returning a Pattern
+    // needs a real reactive child instantiation the interpreter does not do —
+    // fall back. Both surface in this dry-run: an async lift returns a Promise on
+    // every call, and a pattern-returning derive returns a Pattern. Conservative:
+    // any Promise/Pattern anywhere in the evaluated values → fall back to legacy.
+    const dryValues = [dry!.result, ...dry!.opValues.values()];
+    const isThenable = (v: unknown): boolean =>
+      typeof (v as { then?: unknown } | null | undefined)?.then === "function";
+    if (dryValues.some(isThenable)) bumpAndThrow("eval_threw");
+    if (dryValues.some(isPattern)) bumpAndThrow("ineligible_opkind");
 
     // --- 4. Build the synthetic single-node interpreter pattern ------------
     const resultSchema = pattern.resultSchema ?? {};
