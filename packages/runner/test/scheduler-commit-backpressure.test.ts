@@ -7,13 +7,15 @@
 //
 //   1. A burst of transient conflicts longer than the old fixed budget still
 //      lets the write land.
-//   2. A permanent rejection is not retried (no infinite loop) and stays
+//   2. The default backoff curve is near-immediate at first and reaches 25ms by
+//      the seventh attempt.
+//   3. A permanent rejection is not retried (no infinite loop) and stays
 //      observable.
-//   3. A transient conflict that never clears surfaces a terminal error within
+//   4. A transient conflict that never clears surfaces a terminal error within
 //      the retry window instead of vanishing.
-//   4. A zero-window policy fails the first conflict loudly without dropping it
+//   5. A zero-window policy fails the first conflict loudly without dropping it
 //      silently.
-//   5. Three array appends survive a conflict storm so the durable count reaches
+//   6. Three array appends survive a conflict storm so the durable count reaches
 //      three (the profile-append bug in miniature).
 
 import {
@@ -36,6 +38,10 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import {
+  computeBackoffDelayMs,
+  resolveCommitBackpressure,
+} from "../src/scheduler/backpressure.ts";
 
 type TransactMessage = { requestId: string };
 type TransactResponse = {
@@ -311,51 +317,25 @@ describe("committed-write backpressure", () => {
   );
 
   it(
-    "clears a small conflict burst on the immediate fast path without backoff",
-    async () => {
-      // A conflict that clears within the immediate-retry budget must converge
-      // without being parked for backoff. Delaying such a retry can keep it from
-      // landing inside a settle, which is what a multi-user settle relies on.
-      const piece = buildCounterPiece(
-        runtime,
-        tx,
-        "backpressure-fastpath-root",
-      );
-      await tx.commit();
-      tx = runtime.edit();
-      await runtime.idle();
+    "default backoff curve: first retries are sub-5ms, reaching 25ms by the seventh attempt",
+    () => {
+      // One exponential curve, no immediate-retry special case: the early steps
+      // are near-immediate (sub-5ms) so a transient conflict converges fast, and
+      // the delay before the seventh attempt is 25ms, then doubles to the cap.
+      // random() === 0 removes the jitter reduction so we read the nominal curve.
+      const policy = resolveCommitBackpressure();
+      const step = (attempt: number) =>
+        computeBackoffDelayMs(attempt, policy, () => 0);
 
-      const commitTelemetry = collectEventCommitMarkers(runtime);
-      // Three conflicts — within the default immediateRetries (5).
-      const injector = rejectServerTransacts(storageManager, 3, {
-        name: "ConflictError",
-        message: "forced small conflict burst",
-      });
-
-      try {
-        piece.queueAdd(
-          4,
-          "evt:backpressure-fastpath:0:backpressure-fastpath-root",
-        );
-
-        await waitFor(
-          runtime,
-          () => piece.total() === 4,
-          `write did not land on the fast path ` +
-            `(total=${piece.total()}, rejected=${injector.rejected()})`,
-        );
-
-        expect(piece.total()).toBe(4);
-        expect(injector.rejected()).toBe(3);
-        // Every retry was immediate: no commit marker carried a backoff delay.
-        const backedOff = commitTelemetry.markers.some((marker) =>
-          ((marker as { backoffMs?: number }).backoffMs ?? 0) > 0
-        );
-        expect(backedOff).toBe(false);
-      } finally {
-        injector.restore();
-        commitTelemetry.dispose();
-      }
+      // The park before attempt N is step(N - 1).
+      expect(step(1)).toBeLessThan(5); // before attempt 2
+      expect(step(2)).toBeLessThan(5); // before attempt 3
+      expect(step(3)).toBeLessThan(5); // before attempt 4
+      expect(step(6)).toBe(25); // before the 7th attempt
+      expect(step(7)).toBe(50);
+      expect(step(8)).toBe(100);
+      // Capped at maxDelayMs.
+      expect(step(20)).toBe(policy.maxDelayMs);
     },
   );
 

@@ -573,7 +573,6 @@ export async function dispatchQueuedEvent(state: {
     attempts: number,
     deadline: number,
     runAt: number,
-    delayMs: number,
   ) => {
     const retry: QueuedEvent = {
       id: queuedEvent.id,
@@ -586,10 +585,7 @@ export async function dispatchQueuedEvent(state: {
       onCommit,
       conflictAttempts: attempts,
       conflictDeadline: deadline,
-      // An immediate retry (delayMs 0) is not parked: it re-runs on the next
-      // execute cycle like the pre-backpressure fast path. Only a delayed retry
-      // sets notBefore to hold the head until its timer fires.
-      ...(delayMs > 0 ? { notBefore: runAt } : {}),
+      notBefore: runAt,
     };
     state.eventQueue.unshift(retry);
     if (retry.originTx !== undefined) {
@@ -728,19 +724,15 @@ export async function dispatchQueuedEvent(state: {
         case "backoff":
           logger.warn(
             "scheduler",
-            disposition.delayMs > 0
-              ? `Event handler commit conflicted; backing off ` +
-                `${Math.round(disposition.delayMs)}ms ` +
-                `(attempt ${disposition.attempts})`
-              : `Event handler commit conflicted; retrying immediately ` +
-                `(attempt ${disposition.attempts})`,
+            `Event handler commit conflicted; backing off ` +
+              `${Math.round(disposition.delayMs)}ms ` +
+              `(attempt ${disposition.attempts})`,
             { handlerId },
           );
           requeueForBackoff(
             disposition.attempts,
             disposition.deadline,
             disposition.runAt,
-            disposition.delayMs,
           );
           return;
         case "permanent":
@@ -908,13 +900,10 @@ function classifyCommitDisposition(
     const elapsedMs = policy.retryWindowMs + (now - deadline);
     return { kind: "convergence-failed", attempts, elapsedMs };
   }
-  // A stale-basis conflict usually clears the moment the fresh confirmed state
-  // arrives, so the first `immediateRetries` retries fire with no delay — the
-  // fast path that lets a transient conflict converge without stretching the
-  // wall-clock. Only once those are exhausted (sustained contention) does
-  // backoff begin, with its exponent counted from the first delayed retry.
-  const delayMs = attempts <= policy.immediateRetries
-    ? 0
-    : computeBackoffDelayMs(attempts - policy.immediateRetries, policy);
+  // Exponential backoff from the first conflict. The early steps are sub-5ms
+  // (near-immediate), so a transient conflict that clears once fresh state
+  // arrives converges fast; the delay only grows into real spacing once a
+  // conflict persists.
+  const delayMs = computeBackoffDelayMs(attempts, policy);
   return { kind: "backoff", attempts, deadline, delayMs, runAt: now + delayMs };
 }
