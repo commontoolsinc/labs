@@ -103,8 +103,18 @@ export function topoOrder(ops: Op[]): Op[] {
 export function evalRog(
   rog: Rog,
   ctx: EvalContext,
-): { result: unknown; opValues: Map<OpId, unknown> } {
+): {
+  result: unknown;
+  opValues: Map<OpId, unknown>;
+  /** Runtime errors caught (each isolated to `undefined`) per throwing op. The
+   * interpreter node reports these to `scheduler.onError` so a throwing leaf
+   * fires onError exactly as legacy's per-node materialization does (downstream
+   * still reads `undefined`). `NotInterpretedHere` is NOT collected here — it
+   * re-throws and routes to legacy fallback. */
+  errors: Array<{ opId: OpId; error: unknown }>;
+} {
   const opValues = new Map<OpId, unknown>();
+  const errors: Array<{ opId: OpId; error: unknown }> = [];
 
   const resolve = (ref: ValueRef): unknown => {
     switch (ref.kind) {
@@ -231,12 +241,15 @@ export function evalRog(
       value = evalOp(op);
     } catch (e) {
       if (e instanceof NotInterpretedHere) throw e;
-      // Runtime error from a leaf body (or other op evaluation): isolate to
-      // `undefined`, matching legacy per-node containment, and continue.
+      // Runtime error from a leaf body: isolate the op VALUE to `undefined`
+      // (downstream parity) AND surface the error so the interpreter node reports
+      // it to scheduler.onError — matching legacy per-node containment + error
+      // reporting (a throwing computed fires onError; downstream reads undefined).
+      errors.push({ opId: op.id, error: e });
       value = undefined;
     }
     opValues.set(op.id, value);
   }
 
-  return { result: resolve(rog.result), opValues };
+  return { result: resolve(rog.result), opValues, errors };
 }

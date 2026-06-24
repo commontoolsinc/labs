@@ -27,6 +27,7 @@ import {
   UI,
 } from "./builder/types.ts";
 import {
+  getTopFrame,
   patternFromFrame,
   popFrame,
   pushFrameFromCause,
@@ -2259,15 +2260,37 @@ export class Runner {
       _addCancel: AddCancel,
       _cause: unknown,
       _parentCell: Cell<unknown>,
-      _runtime: Runtime,
+      runtime: Runtime,
       _outputBinding?: NormalizedFullLink,
     ): Action => {
       return (tx: IExtendedStorageTransaction) => {
         // Read the argument THROUGH the tx so the read is tracked: the node then
         // re-runs reactively whenever the argument changes (parity with legacy).
         const argument = inputsCell.asSchema(internedArg).withTx(tx).get();
-        const { result } = evalRog(rog, { argument, leafImpls, internalToOp });
+        const { result, errors } = evalRog(rog, {
+          argument,
+          leafImpls,
+          internalToOp,
+        });
         sendResult(tx, result);
+        // The result is now written (a throwing leaf's field is `undefined`).
+        // Fire scheduler.onError for each throwing leaf WITHOUT failing the node,
+        // matching legacy's per-node error reporting (each legacy computed that
+        // throws fires onError; here the ops were collapsed into one node).
+        for (const { error } of errors) {
+          // Attach the current execution frame so handleSchedulerError can
+          // extract pieceId/patternId/space (legacy attaches `error.frame` on
+          // throw at runner.ts:~3889; the interpreter isolates the throw inside
+          // evalRog, so the frame never reaches the error — attach it here).
+          if (
+            error && typeof error === "object" &&
+            !(error as { frame?: unknown }).frame
+          ) {
+            const frame = getTopFrame();
+            if (frame) (error as Error & { frame?: Frame }).frame = frame;
+          }
+          runtime.scheduler.reportError(error as Error);
+        }
       };
     };
 

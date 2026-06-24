@@ -1009,6 +1009,15 @@ export class Scheduler {
     this.errorHandlers.add(fn);
   }
 
+  /** Surface an error to the registered `onError` handlers WITHOUT failing the
+   * current action. The reactive interpreter node uses this: it isolates a
+   * throwing leaf's value to `undefined` (so downstream reads `undefined` and
+   * sibling ops still compute) but must still fire `onError` for that leaf, the
+   * way legacy's per-node materialization does when a single computed throws. */
+  reportError(error: Error, action?: unknown): void {
+    this.handleError(error, action);
+  }
+
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
     this.eventPreflightTelemetryEnabled = enabled;
   }
