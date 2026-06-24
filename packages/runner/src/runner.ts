@@ -2942,6 +2942,51 @@ export class Runner {
     const argumentSchema = (pattern.argumentSchema ?? {}) as JSONSchema;
     const resultSchema = (pattern.resultSchema ?? {}) as JSONSchema;
 
+    // PRODUCER-LESS internal cells a segment may read: a `cell(…)` declared in
+    // the pattern body and written ONLY by a handler boundary (e.g. an `updates`
+    // counter), plus any `derivedInternalCells` default. No op produces them, so
+    // `internalToOp` has no entry — yet they are REAL cells the segment must read
+    // (schema-defaulted, or handler-written). We collect each such name (the
+    // `outputInternalName`-normalized key the ROG's `internal` refs use) with its
+    // ORIGINAL `partialCause` payload + declared schema from `derivedInternalCells`,
+    // falling back to a boundary's raw input alias. The segment node re-aliases by
+    // the original `partialCause` (a STRING — or a `{$generated:N}` object — never
+    // the normalized string key, which the binding layer cannot resolve).
+    const internalCellAliasByName = new Map<
+      string,
+      { partialCause: JSONValue; schema: JSONValue | undefined }
+    >();
+    for (const dic of pattern.derivedInternalCells ?? []) {
+      const name = outputInternalName({ $alias: dic });
+      if (name !== null && !internalCellAliasByName.has(name)) {
+        internalCellAliasByName.set(name, {
+          partialCause: (dic as { partialCause: JSONValue }).partialCause,
+          schema: (dic as { schema?: JSONValue }).schema,
+        });
+      }
+    }
+    // Recover any handler-input internal alias not in the manifest (defense-in-
+    // depth — the manifest is normally exhaustive).
+    const collectAliases = (v: unknown): void => {
+      if (!v || typeof v !== "object") return;
+      const alias = (v as { $alias?: Record<string, unknown> }).$alias;
+      if (alias && typeof alias === "object") {
+        const name = outputInternalName({ $alias: alias });
+        if (name !== null && !internalCellAliasByName.has(name)) {
+          internalCellAliasByName.set(name, {
+            partialCause: alias.partialCause as JSONValue,
+            schema: alias.schema as JSONValue,
+          });
+        }
+        return;
+      }
+      if (Array.isArray(v)) for (const el of v) collectAliases(el);
+      else for (const el of Object.values(v)) collectAliases(el);
+    };
+    for (const b of part.boundaries) {
+      collectAliases(pattern.nodes?.[b.opId]?.inputs);
+    }
+
     const segmentNodes: Pattern["nodes"] = [];
     for (const seg of part.segments) {
       // The segment's own op set (real ops only; a malformed id → fall through).
@@ -2954,18 +2999,33 @@ export class Runner {
       const segOpIds = new Set<OpId>(seg.opIds);
 
       // EXTERNAL `internal` reads: a name in this segment's inputs whose producer
-      // op is NOT in this segment (an upstream boundary output or an earlier
-      // segment's materialized output). These need wiring into the node `inputs`
-      // so the segment-eval can SEED their op values. argument/const refs need no
-      // wiring (the evaluator resolves them directly).
-      const externalNames: string[] = [];
+      // op is NOT in this segment. Two sub-cases, both wired into the node
+      // `inputs` so the segment-eval SEEDS them (argument/const refs need no
+      // wiring — the evaluator resolves them directly):
+      //   (1) OP-BACKED externals — an upstream boundary output or an earlier
+      //       segment's materialized output; seeded by OP ID.
+      //   (2) CELL-ONLY externals — a producer-LESS internal cell (a `cell(…)`
+      //       written only by a handler, or a `derivedInternalCells` default);
+      //       seeded by NAME, read from the live cell (schema-defaulted).
+      const externalNames: string[] = []; // op-backed (seed by op id)
+      const cellOnlyNames: string[] = []; // producer-less (seed by name)
       const seenExt = new Set<string>();
       for (const ref of seg.inputs) {
         if (ref.kind !== "internal") continue;
-        const producerOp = internalToOp.get(ref.name);
-        if (producerOp === undefined) continue; // external/arg-like; no producer
-        if (segOpIds.has(producerOp)) continue; // produced WITHIN the segment
         if (seenExt.has(ref.name)) continue;
+        const producerOp = internalToOp.get(ref.name);
+        if (producerOp === undefined) {
+          // Producer-less: only wire it if it is a REAL internal cell (in the
+          // manifest or referenced by a boundary input alias). An internal name
+          // backed by neither is genuinely dangling — leave it unwired (the
+          // dangling-internal gate already fell such patterns back on the
+          // single-node path; here it resolves to undefined, same as before).
+          if (!internalCellAliasByName.has(ref.name)) continue;
+          seenExt.add(ref.name);
+          cellOnlyNames.push(ref.name);
+          continue;
+        }
+        if (segOpIds.has(producerOp)) continue; // produced WITHIN the segment
         seenExt.add(ref.name);
         externalNames.push(ref.name);
       }
@@ -2998,13 +3058,26 @@ export class Runner {
       };
 
       // The node `inputs` binding: `$arg` aliases the argument cell; `$in` is an
-      // object aliasing each external internal cell by its `partialCause` name.
+      // object keyed by the segment's normalized internal-cell NAME, each value
+      // an alias to that cell by its ORIGINAL `partialCause` (a string, or a
+      // `{$generated:N}` object — never the normalized string key, which the
+      // binding layer cannot resolve). Each alias carries the cell's declared
+      // SCHEMA so a schema DEFAULT (e.g. a handler-written `cell(0)` not yet
+      // touched) surfaces as the default value rather than `undefined` — matching
+      // what legacy reads through the cell.
       const inBinding: Record<string, JSONValue> = {};
-      for (const name of externalNames) {
-        inBinding[name] = {
-          $alias: { partialCause: name, path: [] },
+      const aliasFor = (name: string): JSONValue => {
+        const meta = internalCellAliasByName.get(name);
+        const partialCause = meta?.partialCause ?? name;
+        const schema = meta?.schema;
+        return {
+          $alias: schema !== undefined
+            ? { partialCause, path: [], schema }
+            : { partialCause, path: [] },
         } as unknown as JSONValue;
-      }
+      };
+      for (const name of externalNames) inBinding[name] = aliasFor(name);
+      for (const name of cellOnlyNames) inBinding[name] = aliasFor(name);
       const inputsBinding = {
         $arg: { $alias: { cell: "argument", path: [] } },
         $in: inBinding,
@@ -3015,6 +3088,7 @@ export class Runner {
         leafImpls,
         internalToOp,
         externalNames,
+        cellOnlyNames,
         segOutputNames,
         outputNameToOpId,
         internedArg,
@@ -3063,17 +3137,20 @@ export class Runner {
    * Build a SEGMENT interpreter impl (coalescing spike). Mirrors the single-node
    * `interpreterImpl`, but: (1) reads the argument from the `$arg` slot and each
    * external internal cell from the `$in[name]` slot of the node input cell, (2)
-   * SEEDS those external op values into `evalRog` (so the segment's `internal`
-   * refs to producers it does NOT own resolve), and (3) writes ONLY this
-   * segment's own output names. Errors are NOT routed here (the spike keeps the
-   * error-frame machinery on the single-node path); a throwing leaf isolates to
-   * `undefined` exactly as `evalRog` already does.
+   * SEEDS those external values into `evalRog` — OP-BACKED externals by op id
+   * (`seed`), and producer-LESS internal cells (handler-written `cell(…)` /
+   * `derivedInternalCells` defaults) by NAME (`seedByName`) — so the segment's
+   * `internal` refs to producers it does NOT own resolve, and (3) writes ONLY
+   * this segment's own output names. Errors are NOT routed here (the spike keeps
+   * the error-frame machinery on the single-node path); a throwing leaf isolates
+   * to `undefined` exactly as `evalRog` already does.
    */
   private buildSegmentInterpreterImpl(
     segRog: Rog,
     leafImpls: Map<OpId, (input: unknown) => unknown>,
     internalToOp: Map<string, OpId>,
     externalNames: string[],
+    cellOnlyNames: string[],
     segOutputNames: string[],
     outputNameToOpId: Map<string, OpId>,
     internedArg: JSONSchema,
@@ -3114,12 +3191,17 @@ export class Runner {
           const opId = internalToOp.get(name);
           if (opId !== undefined) seed.set(opId, inObj[name]);
         }
+        // Seed producer-LESS internal cells by name (handler-written `cell(…)` /
+        // `derivedInternalCells` defaults) — these have no op id to key on.
+        const seedByName = new Map<string, unknown>();
+        for (const name of cellOnlyNames) seedByName.set(name, inObj[name]);
 
         const { opValues } = evalRog(segRog, {
           argument,
           leafImpls,
           internalToOp,
           seed,
+          seedByName,
         });
 
         // Write each of THIS segment's output names from its producing op value.
