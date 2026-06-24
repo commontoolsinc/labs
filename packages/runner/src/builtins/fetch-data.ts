@@ -9,6 +9,11 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
+  isProtectedToolshedFirstPartyRoute,
+  isToolshedApiOrigin,
+  signFirstPartyHttpRequest,
+} from "../toolshed-http-auth.ts";
+import {
   computeInputHashFromValue,
   internalSchema,
   tryClaimMutex,
@@ -386,6 +391,39 @@ export function fetchData(
   };
 }
 
+function headersToRecord(headers: Headers): Record<string, string> {
+  return Object.fromEntries(headers.entries());
+}
+
+async function signedToolshedFetchOptions(
+  runtime: Runtime,
+  url: URL,
+  apiBase: URL,
+  options: FetchRequestOptions | undefined,
+): Promise<FetchRequestOptions | undefined> {
+  const method = options?.method ?? "GET";
+  if (
+    !isToolshedApiOrigin(url, apiBase) ||
+    !isProtectedToolshedFirstPartyRoute(url, method)
+  ) {
+    return options;
+  }
+
+  const headers = await signFirstPartyHttpRequest({
+    url,
+    method,
+    headers: options?.headers,
+    body: options?.body as BodyInit | null | undefined,
+    signer: runtime.storageManager.as,
+  });
+
+  return {
+    ...options,
+    method,
+    headers: headersToRecord(headers),
+  };
+}
+
 async function startFetch(
   runtime: Runtime,
   inputsCell: Cell<FetchDataInputs>,
@@ -427,11 +465,19 @@ async function startFetch(
     // some deployments (toolshed) deliberately differs from the runtime's
     // default memory host, so hostForSpace's fallback is NOT used here.
     const mappedHost = runtime.mappedHostFor(inputsCell.space);
+    const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
+    const resolvedUrl = new URL(url, apiBase);
+    const requestOptions = await signedToolshedFetchOptions(
+      runtime,
+      resolvedUrl,
+      apiBase,
+      options,
+    );
     const response = await fetch(
-      new URL(url, mappedHost ?? getPatternEnvironment().apiUrl),
+      resolvedUrl,
       {
         signal: abortSignal,
-        ...options,
+        ...requestOptions,
       },
     );
 

@@ -86,6 +86,190 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/maxConfidentiality/i);
   });
 
+  it("merges compatible set-like ifc labels", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        secret: {
+          type: "string",
+          ifc: {
+            confidentiality: ["secret"],
+            addIntegrity: ["reviewed"],
+            requiredIntegrity: ["trusted"],
+            integrity: ["trusted", "narrow"],
+            maxConfidentiality: ["internal", "public"],
+          },
+        },
+      },
+    }, {
+      type: "object",
+      properties: {
+        secret: {
+          type: "string",
+          ifc: {
+            confidentiality: ["secret", "internal"],
+            addIntegrity: ["reviewed", "audited"],
+            requiredIntegrity: ["trusted", "operator"],
+            integrity: ["trusted"],
+            maxConfidentiality: ["internal"],
+          },
+        },
+      },
+    });
+
+    const ifc = (
+      (merged as JSONSchemaObj).properties?.secret as JSONSchemaObj
+    ).ifc;
+    expect(ifc?.confidentiality).toEqual(["secret", "internal"]);
+    expect(ifc?.addIntegrity).toEqual(["reviewed", "audited"]);
+    expect(ifc?.requiredIntegrity).toEqual(["trusted", "operator"]);
+    expect(ifc?.integrity).toEqual(["trusted"]);
+    expect(ifc?.maxConfidentiality).toEqual(["internal"]);
+  });
+
+  it("rejects unstable scalar ifc labels", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        ifc: { ownerPrincipal: "did:key:one" },
+      }, {
+        ifc: { ownerPrincipal: "did:key:two" },
+      })
+    ).toThrow(/ownerPrincipal must remain stable/);
+
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        ifc: { confidentiality: "secret" } as any,
+      }, {
+        ifc: { confidentiality: "internal" } as any,
+      })
+    ).toThrow(/confidentiality must remain stable/);
+
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        ifc: { writeAuthorizedBy: { notAClaim: true } } as any,
+      }, {
+        ifc: { writeAuthorizedBy: { notAClaim: false } } as any,
+      })
+    ).toThrow(/writeAuthorizedBy must remain stable/);
+  });
+
+  it("preserves stable copy and projection ifc metadata", () => {
+    const stableIfc = {
+      exactCopyOf: { source: "of:source" },
+      projection: { path: ["value"] },
+      collection: { id: "collection" },
+      ownerPrincipal: "did:key:owner",
+      flowPrecisionClaim: { path: ["legacy"] },
+    };
+
+    const merged = mergeCfcSchemaEnvelopes({
+      ifc: stableIfc as any,
+    }, {
+      ifc: stableIfc as any,
+    });
+
+    expect((merged as JSONSchemaObj).ifc).toMatchObject(stableIfc);
+  });
+
+  it("preserves equal scalar ifc labels", () => {
+    const claim = {
+      __ctWriterIdentityOf: {
+        file: "/system/profile-home.tsx",
+        path: ["save"],
+      },
+    };
+
+    const merged = mergeCfcSchemaEnvelopes({
+      ifc: {
+        confidentiality: "secret",
+        writeAuthorizedBy: claim,
+      } as any,
+    }, {
+      ifc: {
+        confidentiality: "secret",
+        writeAuthorizedBy: claim,
+      } as any,
+    });
+
+    expect((merged as JSONSchemaObj).ifc?.confidentiality).toBe("secret");
+    expect((merged as JSONSchemaObj).ifc?.writeAuthorizedBy).toEqual(claim);
+  });
+
+  it("preserves existing ifc when the candidate has none", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      ifc: { confidentiality: ["secret"] },
+    }, {
+      type: "object",
+    });
+
+    expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
+  });
+
+  it("rejects incompatible schema forms and types", () => {
+    expect(() => mergeCfcSchemaEnvelopes(false, {})).toThrow(
+      /unsupported schema form/,
+    );
+
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "string",
+      }, {
+        type: "number",
+      })
+    ).toThrow(/type changed incompatibly/);
+
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: ["string", "number"],
+      }, {
+        type: ["string", "boolean"],
+      })
+    ).toThrow(/type changed incompatibly/);
+  });
+
+  it("merges item schemas and object defaults", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+        },
+        default: { title: "Untitled" },
+      },
+    }, {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          done: { type: "boolean" },
+        },
+        default: { done: false },
+      },
+    });
+
+    const items = (merged as JSONSchemaObj).items as JSONSchemaObj;
+    expect(items.properties).toMatchObject({
+      title: { type: "string" },
+      done: { type: "boolean" },
+    });
+    expect(items.default).toEqual({
+      title: "Untitled",
+      done: false,
+    });
+  });
+
+  it("keeps candidate items when only the candidate declares them", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+    }, {
+      type: "array",
+      items: { type: "string" },
+    });
+
+    expect((merged as JSONSchemaObj).items).toEqual({ type: "string" });
+  });
+
   it("preserves uiContract metadata when merging schema envelopes", () => {
     const uiContract = {
       helper: "UiAction",
@@ -167,6 +351,47 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
 
     expect((merged as JSONSchemaObj).ifc?.confidentiality).toEqual(["secret"]);
+  });
+
+  it("rejects nested divergent branches with local ifc labels", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+            { type: "number" },
+          ],
+        },
+      }, {
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+            { type: "number" },
+          ],
+        },
+      })
+    ).toThrow(/divergent oneOf branches/);
+  });
+
+  it("allows non-object divergent branches without ifc labels", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      anyOf: [true, { type: "string" }],
+    }, {
+      anyOf: [true, { type: "string" }],
+    });
+
+    expect((merged as JSONSchemaObj).anyOf).toEqual([
+      true,
+      { type: "string" },
+    ]);
   });
 
   it("merges writeAuthorizedBy claims that differ only by the identity stamp", () => {
@@ -337,6 +562,31 @@ describe("mergeCfcSchemaEnvelopes", () => {
             },
           },
         },
+      })
+    ).toThrow(/writeAuthorizedBy must remain stable/);
+  });
+
+  it("rejects stamped writeAuthorizedBy claims with different bindings", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        ifc: {
+          writeAuthorizedBy: {
+            __ctWriterIdentityOf: {
+              file: "/system/profile-home.tsx",
+              path: ["save"],
+              moduleIdentity: "module-identity-hash",
+            },
+          },
+        } as any,
+      }, {
+        ifc: {
+          writeAuthorizedBy: {
+            __ctWriterIdentityOf: {
+              file: "/system/profile-home.tsx",
+              path: ["delete"],
+            },
+          },
+        } as any,
       })
     ).toThrow(/writeAuthorizedBy must remain stable/);
   });
