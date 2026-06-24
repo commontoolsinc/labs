@@ -197,7 +197,7 @@ export type FabricValue =
   | FabricSpecialObject
   // -- Containers --
   | FabricArray
-  | FabricObject
+  | FabricPlainObject
   // -- undefined --
   | undefined;
 
@@ -212,7 +212,7 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
-export interface FabricObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject extends Record<string, FabricValue> {}
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion

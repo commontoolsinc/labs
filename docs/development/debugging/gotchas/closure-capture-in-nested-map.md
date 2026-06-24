@@ -17,6 +17,7 @@ behind a `?? []` guard. The `?? []` should be a clear signal that you mean a
 plain array — if you mean the cell, just map the cell.
 
 ```tsx
+// Shown for illustration only.
 // 🚫 The anti-pattern: (reactiveCall() ?? plainFallback).map(…)
 //    inside an outer .map((row) => …)
 {rows.map((row) => (
@@ -34,6 +35,7 @@ plain array — if you mean the cell, just map the cell.
 ### A — Map the cell directly (preferred)
 
 ```tsx
+// Shown inside a pattern body.
 {rows.map((row) => (
   <div>
     {row.label}
@@ -53,6 +55,7 @@ When you need to *transform* the list first (filter empties, project to names,
 etc.) — do it at the top level once, not per row:
 
 ```tsx
+// Shown for illustration only.
 const peopleNames = computed(() =>
   (people.get() ?? []).map((p) => p.name).filter((n) => (n ?? "").trim() !== "")
 );
@@ -82,6 +85,7 @@ Note the contrast: the *top-level* `(people.get() ?? []).map(…)` inside a
 Only when neither A nor B is structurally possible:
 
 ```tsx
+// Shown inside a pattern body.
 {rows.map((row) => {
   const chips = computed(() => people.map((p) => p.name));
   return <div>{chips.map((n) => <button>{n}</button>)}</div>;

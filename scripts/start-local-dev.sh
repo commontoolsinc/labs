@@ -124,7 +124,7 @@ fi
 
 SHELL_LOG="$SCRIPT_DIR/../packages/shell/local-dev-shell.log"
 TOOLSHED_LOG="$SCRIPT_DIR/../packages/toolshed/local-dev-toolshed.log"
-BG_LOG="$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log"
+BG_LOG="$SCRIPT_DIR/../packages/background-piece-service/local-dev-bg.log"
 SHELL_PID=""
 TOOLSHED_PID=""
 BG_PID=""
@@ -343,13 +343,13 @@ if [[ "$BG_UPDATER" != "true" ]]; then
     echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
 fi
 
-# Optionally start background-charm-service for bgUpdater polling
+# Optionally start background-piece-service for bgUpdater polling
 if [[ "$BG_UPDATER" == "true" ]]; then
     echo ""
-    echo "Starting background-charm-service..."
+    echo "Starting background-piece-service..."
 
     # Kill any previously running bg service to avoid orphaned processes
-    BG_PID_FILE="$SCRIPT_DIR/../.bg-charm-service.pid"
+    BG_PID_FILE="$SCRIPT_DIR/../.bg-piece-service.pid"
     if [[ -f "$BG_PID_FILE" ]]; then
         OLD_BG_PID=$(cat "$BG_PID_FILE")
         if kill -0 "$OLD_BG_PID" 2>/dev/null; then
@@ -367,7 +367,7 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     echo "  Toolshed is ready."
 
     # Start the background service directly (not via deno task, for reliable PID tracking)
-    cd "$SCRIPT_DIR/../packages/background-charm-service"
+    cd "$SCRIPT_DIR/../packages/background-piece-service"
     OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
         deno run -A --unstable-worker-options src/main.ts \
         > "$BG_LOG" 2>&1 &
@@ -380,7 +380,7 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     echo "$BG_PID" > "$BG_PID_FILE"
 
     echo "  Background service: PID $BG_PID (polling bgUpdater every 60s)"
-    echo "  Log file: packages/background-charm-service/local-dev-bg.log"
+    echo "  Log file: packages/background-piece-service/local-dev-bg.log"
     echo ""
     echo "Development servers started successfully!"
     echo "  Shell:    http://localhost:$SHELL_PORT"

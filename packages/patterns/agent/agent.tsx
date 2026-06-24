@@ -99,7 +99,7 @@ export default pattern<AgentInput, AgentOutput>(
   }) => {
     // Discover activity-log (optional — null-checked before use)
     const activityLogWish = wish<ActivityLogPiece>({
-      query: "#activity-log",
+      query: "#activityLog",
       headless: true,
     });
     const activityLog = activityLogWish.result;

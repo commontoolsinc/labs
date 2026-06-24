@@ -84,12 +84,12 @@ You need your own Google OAuth credentials:
 
 Tokens expire after ~1 hour. Refresh happens automatically in two layers:
 
-**Layer 1: Automatic (background-charm-service)** When google-auth is registered
-with background-charm-service, the `bgUpdater` handler is polled every ~60
+**Layer 1: Automatic (background-piece-service)** When google-auth is registered
+with background-piece-service, the `bgUpdater` handler is polled every ~60
 seconds. If the token has < 10 minutes remaining, it refreshes proactively — no
 user action needed.
 
-To enable: register your google-auth piece with background-charm-service.
+To enable: register your google-auth piece with background-piece-service.
 
 **Layer 2: One-click (UI fallback)** If background refresh isn't running (e.g.,
 local dev), consuming patterns show a "Refresh Session" button when the token

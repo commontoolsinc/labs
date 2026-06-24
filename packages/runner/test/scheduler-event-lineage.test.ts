@@ -183,7 +183,19 @@ describe("scheduler event lineage", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { experimental: { commitPreconditions: true } },
+      {
+        experimental: { commitPreconditions: true },
+        // These tests assert lineage gating (which events run vs. drop), not
+        // backoff timing. A short retry window keeps the cases that inject an
+        // unending conflict from backing off for the full production window
+        // before they reach their terminal outcome.
+        commitBackpressure: {
+          baseDelayMs: 1,
+          maxDelayMs: 5,
+          jitter: 0,
+          retryWindowMs: 250,
+        },
+      },
     ));
   });
 
@@ -718,7 +730,7 @@ describe("scheduler event lineage", () => {
     expect(payloads.get()).toEqual([]);
   });
 
-  it("stops handler-result pieces when the handler commit fails permanently", async () => {
+  it("stops handler-result pieces when the handler commit never converges", async () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { cell, handler, lift, pattern } = commonfabric;
     const childPattern = pattern<{ source: number }>(({ source }) => {
@@ -763,10 +775,12 @@ describe("scheduler event lineage", () => {
     const restoreTransact = rejectServerTransacts(storageManager);
     try {
       root.key("launch").send({});
+      // The launch commit conflicts forever; backpressure retries it until the
+      // retry window elapses, then surfaces a terminal CommitConvergenceError.
       await waitForSchedulerCondition(
         runtime,
         () => handlerAttempts >= 6,
-        "handler did not exhaust retries",
+        "handler did not retry under sustained conflict",
       );
       await runtime.idle();
 

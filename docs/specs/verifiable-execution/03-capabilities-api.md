@@ -28,6 +28,7 @@ Atomically assert, retract, or claim facts in a space.
 **Request (shape):**
 
 ```typescript
+// Shown at module scope.
 type Transaction = {
   iss: DID;
   cmd: "/memory/transact";
@@ -60,6 +61,7 @@ Retrieve facts from a space, optionally at a specific logical time.
 **Request (shape):**
 
 ```typescript
+// Shown at module scope.
 type Query = {
   iss: DID;
   cmd: "/memory/query";

@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "./runtime-client.ts";
+import { RequestType } from "./protocol/mod.ts";
 import type { RuntimeTransport } from "./client/transport.ts";
 
 describe("RuntimeClient.initialize option validation", () => {
@@ -43,5 +44,43 @@ describe("RuntimeClient.signal", () => {
       new (conn: never, options: unknown): RuntimeClient;
     })(conn, {});
     expect(client.signal).toBe(signal);
+  });
+});
+
+describe("RuntimeClient.setForwardWorkerConsole", () => {
+  // The constructor only wires `on()` listeners and stores the connection, so a
+  // stub that records requests is enough to assert the IPC the method sends.
+  function clientWithRequestStub(): {
+    client: RuntimeClient;
+    requests: unknown[];
+  } {
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve(undefined);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    return { client, requests };
+  }
+
+  it("sends a SetForwardWorkerConsole request to enable forwarding", async () => {
+    const { client, requests } = clientWithRequestStub();
+    await client.setForwardWorkerConsole(true);
+    expect(requests).toEqual([
+      { type: RequestType.SetForwardWorkerConsole, enabled: true },
+    ]);
+  });
+
+  it("sends a SetForwardWorkerConsole request to disable forwarding", async () => {
+    const { client, requests } = clientWithRequestStub();
+    await client.setForwardWorkerConsole(false);
+    expect(requests).toEqual([
+      { type: RequestType.SetForwardWorkerConsole, enabled: false },
+    ]);
   });
 });

@@ -25,6 +25,7 @@
     "./sandbox-contract": "./src/sandbox-contract.ts",
     "./sleep": "./src/sleep.ts",
     "./strip-undefined-props": "./src/strip-undefined-props.ts",
+    "./two-level-weak-cache": "./src/two-level-weak-cache.ts",
     "./types": "./src/types.ts",
     "./utf8": "./src/utf8.ts",
     "./zod-utils": "./src/zod-utils.ts"

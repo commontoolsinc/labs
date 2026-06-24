@@ -63,14 +63,14 @@ class BuildConfig {
     return this.path("packages", "toolshed", "index.ts");
   }
 
-  bgCharmServiceEntryPath() {
-    return this.path("packages", "background-charm-service", "src", "main.ts");
+  bgPieceServiceEntryPath() {
+    return this.path("packages", "background-piece-service", "src", "main.ts");
   }
 
-  bgCharmServiceWorkerPath() {
+  bgPieceServiceWorkerPath() {
     return this.path(
       "packages",
-      "background-charm-service",
+      "background-piece-service",
       "src",
       "worker.ts",
     );
@@ -126,7 +126,7 @@ async function build(config: BuildConfig): Promise<void> {
     if (!config.cliOnly) await buildShell(config);
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
-    if (!config.cliOnly) await buildBgCharmService(config);
+    if (!config.cliOnly) await buildBgPieceService(config);
     await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
@@ -222,8 +222,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
   console.log("Toolshed binary built successfully");
 }
 
-async function buildBgCharmService(config: BuildConfig): Promise<void> {
-  console.log("Building background charm service binary...");
+async function buildBgPieceService(config: BuildConfig): Promise<void> {
+  console.log("Building background piece service binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
       ...lockedCompileArgs(config),
@@ -233,24 +233,24 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
       // prior to building.
       "--no-check",
       "--output",
-      config.distPath("bg-charm-service"),
+      config.distPath("bg-piece-service"),
       "--include",
-      config.bgCharmServiceWorkerPath(),
+      config.bgPieceServiceWorkerPath(),
       "--include",
       config.staticAssetsPath(),
       "-A", // All permissions
-      "--unstable-worker-options", // Required by bg-charm-service
-      config.bgCharmServiceEntryPath(),
+      "--unstable-worker-options", // Required by bg-piece-service
+      config.bgPieceServiceEntryPath(),
     ],
     cwd: config.root,
     stdout: "inherit",
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build background charm service binary");
+    console.error("Failed to build background piece service binary");
     Deno.exit(1);
   }
-  console.log("Background charm service binary built successfully");
+  console.log("Background piece service binary built successfully");
 }
 
 async function buildCli(config: BuildConfig): Promise<void> {
@@ -315,7 +315,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build background charm service binary");
+    console.error("Failed to build CLI binary");
     Deno.exit(1);
   }
   console.log("CLI binary built successfully");

@@ -11,6 +11,7 @@ navigation specially.
 ## List Pattern
 
 ```typescript
+// Shown at module scope.
 import { navigateTo, pattern, UI, Writable } from "commonfabric";
 import ItemDetail from "./item-detail.tsx";
 

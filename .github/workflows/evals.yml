@@ -9,7 +9,7 @@ on:
         type: string
       test_size:
         type: choice
-        description: "Number of charms to run"
+        description: "Number of pieces to run"
         options:
           - one
           - ten
@@ -45,7 +45,7 @@ jobs:
       - name: ✏️ Log Eval Run Metadata
         run: |
           echo "Running Evals:"
-          echo "- Size: ${{ env.test_size }} charms"
+          echo "- Size: ${{ env.test_size }} pieces"
           echo "- SHA: ${{ env.target_sha }}"
 
       # TODO Upload `seeder` as a deno executable to avoid
@@ -142,9 +142,9 @@ jobs:
             API_URL=http://localhost:8000/ \
             OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
             deno task start --name ${{ env.target_sha }} $FLAGS ; then
-            echo "All charms have been successfully verified!"
+            echo "All pieces have been successfully verified!"
           else
-            echo "Some charms have failed verification."
+            echo "Some pieces have failed verification."
           fi
 
       - name: ✏️ List LLM Cache Save

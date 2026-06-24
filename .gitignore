@@ -10,7 +10,7 @@ artifact
 coverage
 _deno.lock
 .claude-prompt.tmp
-.bg-charm-service.pid
+.bg-piece-service.pid
 .pr-desc.tmp
 dist/
 .claude/settings.local.json
@@ -47,3 +47,6 @@ ralph.yml
 .commands
 tour-screenshots
 CLAUDE.local.md
+
+# Temp dir created by docs/check.ts while type-checking doc code blocks
+docs/.doccheck*

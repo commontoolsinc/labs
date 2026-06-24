@@ -229,6 +229,45 @@ export class Page extends EventTarget {
     await this.page!.waitForFunction(func, evaluateOptions);
   }
 
+  // Expose a CDP binding named `name` on the page's global object. Calling
+  // `globalThis[name](payload)` in the page produces a `Runtime.bindingCalled`
+  // notification that `onBindingCalled` delivers to the test process. This is
+  // how an in-page notifier signals the moment a condition holds without the
+  // test polling the DOM.
+  async addBinding(name: string): Promise<void> {
+    this.checkIsOk();
+    await this.page!.unsafelyGetCelestialBindings().Runtime.addBinding({
+      name,
+    });
+  }
+
+  // Unsubscribe the current connection from a binding's notifications. The
+  // bound function may remain on the page's global object; the unique per-wait
+  // name keeps that harmless.
+  async removeBinding(name: string): Promise<void> {
+    this.checkIsOk();
+    await this.page!.unsafelyGetCelestialBindings().Runtime.removeBinding({
+      name,
+    });
+  }
+
+  // Subscribe to every `Runtime.bindingCalled` notification, invoking `listener`
+  // with the binding name and its payload. Returns an unsubscribe function.
+  onBindingCalled(
+    listener: (name: string, payload: string) => void,
+  ): () => void {
+    this.checkIsOk();
+    const celestial = this.page!.unsafelyGetCelestialBindings();
+    const handler: EventListener = (event) => {
+      const { name, payload } =
+        (event as CustomEvent<{ name: string; payload: string }>).detail;
+      listener(name, payload);
+    };
+    celestial.addEventListener("Runtime.bindingCalled", handler);
+    return () =>
+      celestial.removeEventListener("Runtime.bindingCalled", handler);
+  }
+
   // Passthru of `@astral/astral`'s `Page#$`
   async $(
     selector: string,

@@ -55,11 +55,11 @@ header, and a piece renderer around the runtime:
 
 ## Background execution
 
-The background piece service (`packages/background-charm-service` — charm =
-piece, Chapter 1) is the proof that a piece is *not* a UI artifact. It runs
-as a headless process with an operator identity, connects to the same
-WebSocket endpoint, and maintains a registry cell of pieces that asked for
-background updates (the `bgUpdater` convention from Chapter 5; registration
+The background piece service (`packages/background-piece-service`) is the proof
+that a piece is *not* a UI artifact. It runs as a headless process with an
+operator identity, connects to the same WebSocket endpoint, and maintains a
+registry cell of pieces that asked for background updates (the `bgUpdater`
+convention from Chapter 5; registration
 via the `cf-updater` component or the integrations API). Per space it
 spawns a worker that, on each poll tick (default 60 s), sends an event to
 each registered piece's `bgUpdater` stream — and from there it's just

@@ -13,7 +13,15 @@ import type {
   IPreconditionFailedError,
   MemorySpace,
 } from "../storage/interface.ts";
-import { isPermanentRejection } from "../storage/rejection.ts";
+import {
+  isConflictRejection,
+  isPermanentRejection,
+} from "../storage/rejection.ts";
+import {
+  type CommitBackpressurePolicy,
+  CommitConvergenceError,
+  computeBackoffDelayMs,
+} from "./backpressure.ts";
 import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
@@ -226,6 +234,7 @@ export interface SchedulerEventExecutionState {
   readonly eventQueue: QueuedEvent[];
   readonly dirty: ReadonlySet<Action>;
   readonly pending: Set<Action>;
+  readonly backpressure: CommitBackpressurePolicy;
   readonly eventPreflightTelemetryEnabled: boolean;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
@@ -453,6 +462,7 @@ export function preflightQueuedEventDependencies(state: {
 export async function dispatchQueuedEvent(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly backpressure: CommitBackpressurePolicy;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
   readonly getActionTelemetryInfo: (
@@ -552,6 +562,38 @@ export async function dispatchQueuedEvent(state: {
     state.queueExecution();
   };
 
+  // Re-queue a transient commit conflict for a later retry. The retry is parked
+  // via notBefore so the scheduler backs off (capped exponential delay) instead
+  // of busy-looping; idle()/settled() wait for the parked head, so a converging
+  // write still completes within a settle. The conflict attempt count and
+  // deadline are carried forward; retriesLeft is preserved untouched because it
+  // is the separate budget for inSpace-name resolution (RetryImmediately), not
+  // for conflicts.
+  const requeueForBackoff = (
+    attempts: number,
+    deadline: number,
+    runAt: number,
+  ) => {
+    const retry: QueuedEvent = {
+      id: queuedEvent.id,
+      originTx: queuedEvent.originTx,
+      action,
+      eventLink: queuedEvent.eventLink,
+      handler,
+      event: eventValue,
+      retriesLeft,
+      onCommit,
+      conflictAttempts: attempts,
+      conflictDeadline: deadline,
+      notBefore: runAt,
+    };
+    state.eventQueue.unshift(retry);
+    if (retry.originTx !== undefined) {
+      state.recordLineageEvent(retry.originTx, retry);
+    }
+    state.queueExecution();
+  };
+
   const runFinalCommitCallback = () => {
     if (!onCommit) {
       return;
@@ -621,6 +663,18 @@ export async function dispatchQueuedEvent(state: {
       if (!result.error && changedWrites.length > 0) {
         state.onEventCommitWrites?.(action, changedWrites);
       }
+
+      // Classify the commit outcome. A committed write that represents user
+      // intent must converge or fail loudly: a transient conflict backs off and
+      // retries within a bounded window rather than being dropped after a fixed
+      // budget; a permanent rejection is never retried; an unconverged write
+      // surfaces a terminal error.
+      const disposition = classifyCommitDisposition(
+        result.error,
+        queuedEvent,
+        state.backpressure,
+      );
+
       state.runtime.telemetry.submit({
         type: "scheduler.event.commit",
         handlerId,
@@ -634,39 +688,90 @@ export async function dispatchQueuedEvent(state: {
           : {}),
         ...(result.error ? { error: result.error.message } : {}),
         ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+        ...(disposition.kind === "backoff"
+          ? {
+            retryAttempt: disposition.attempts,
+            backoffMs: disposition.delayMs,
+          }
+          : {}),
+        ...(disposition.kind === "convergence-failed"
+          ? { retryAttempt: disposition.attempts, terminal: "convergence" }
+          : {}),
+        ...(disposition.kind === "permanent" ? { terminal: "permanent" } : {}),
       });
-      if (
-        result.error && retriesLeft > 0 &&
-        !isPermanentRejection(result.error)
-      ) {
-        logger.warn(
-          "scheduler",
-          `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-          { error: result.error, handlerId },
-        );
-        requeueForRetry();
-        return;
-      }
-      runFinalCommitCallback();
-      if (result.error) {
-        if (permanentRejection === "receipt-exists") {
+
+      switch (disposition.kind) {
+        case "success":
+          runFinalCommitCallback();
+          return;
+        case "bounded-retry":
           logger.warn(
-            "event-lost-race",
+            "scheduler",
+            `Event handler transaction failed, retrying ` +
+              `(${retriesLeft} retries left)`,
+            { error: result.error, handlerId },
+          );
+          requeueForRetry();
+          return;
+        case "give-up":
+          runFinalCommitCallback();
+          logger.error(
+            "schedule-error",
+            "Event handler transaction failed after exhausting all retries",
+            { error: result.error, handlerId, permanent: false },
+          );
+          return;
+        case "backoff":
+          logger.warn(
+            "scheduler",
+            `Event handler commit conflicted; backing off ` +
+              `${Math.round(disposition.delayMs)}ms ` +
+              `(attempt ${disposition.attempts})`,
+            { handlerId },
+          );
+          requeueForBackoff(
+            disposition.attempts,
+            disposition.deadline,
+            disposition.runAt,
+          );
+          return;
+        case "permanent":
+          runFinalCommitCallback();
+          if (permanentRejection === "receipt-exists") {
+            logger.warn(
+              "event-lost-race",
+              () => [
+                "Event handling lost the receipt race",
+                { eventId: queuedEvent.id, handlerId },
+              ],
+            );
+          }
+          logger.warn(
+            "scheduler",
+            "Event handler commit permanently rejected; not retrying",
+            { error: result.error, handlerId, permanentRejection },
+          );
+          return;
+        case "convergence-failed": {
+          runFinalCommitCallback();
+          logger.error(
+            "commit-convergence-failed",
             () => [
-              "Event handling lost the receipt race",
-              { eventId: queuedEvent.id, handlerId },
+              "Committed write did not converge within the retry window",
+              { handlerId, attempts: disposition.attempts },
             ],
           );
+          state.handleError(
+            new CommitConvergenceError({
+              handlerId,
+              attempts: disposition.attempts,
+              elapsedMs: disposition.elapsedMs,
+              cause: result.error,
+            }),
+            action,
+          );
+          return;
         }
-        logger.error(
-          "schedule-error",
-          "Event handler transaction failed after exhausting all retries",
-          {
-            error: result.error,
-            handlerId,
-            permanent: isPermanentRejection(result.error),
-          },
-        );
       }
     }).catch((error) => {
       logger.error(
@@ -733,4 +838,72 @@ function formatEventCommitAddress(address: {
   path: readonly string[];
 }): string {
   return `${address.space}/${address.id}/${address.path.join("/")}`;
+}
+
+type CommitDisposition =
+  | { kind: "success" }
+  | { kind: "permanent" }
+  | {
+    kind: "backoff";
+    attempts: number;
+    deadline: number;
+    delayMs: number;
+    runAt: number;
+  }
+  | { kind: "convergence-failed"; attempts: number; elapsedMs: number }
+  | { kind: "bounded-retry" }
+  | { kind: "give-up" };
+
+/**
+ * Decides what to do with an event-handler commit result.
+ *
+ *  - success: nothing more to do.
+ *  - permanent: a precondition failure; never retried.
+ *  - backoff / convergence-failed: a stale-basis ConflictError under
+ *    contention. It backs off and retries until it lands or the retry window
+ *    elapses, after which it fails terminally rather than being silently
+ *    dropped. This is the backpressure path.
+ *  - bounded-retry / give-up: any other transient error (a handler-initiated
+ *    abort, a system error). These are not contention, so backpressure would
+ *    not help; they keep the fixed retriesLeft budget and stop after it.
+ */
+function classifyCommitDisposition(
+  error: { name?: string } | undefined,
+  queuedEvent: QueuedEvent,
+  policy: CommitBackpressurePolicy,
+): CommitDisposition {
+  if (!error) {
+    return { kind: "success" };
+  }
+  if (isPermanentRejection(error)) {
+    return { kind: "permanent" };
+  }
+  if (!isConflictRejection(error)) {
+    return queuedEvent.retriesLeft > 0
+      ? { kind: "bounded-retry" }
+      : { kind: "give-up" };
+  }
+  // A caller that sent with retries:0 (a speculative lineage origin, an internal
+  // one-shot) opted out of retrying; honor that so a descendant of a failed
+  // origin drops deterministically. Any positive budget opts into retry-on-
+  // conflict, which the retry window then governs — the exact count no longer
+  // bounds conflict retries, the window does.
+  if (queuedEvent.retriesLeft <= 0) {
+    return { kind: "give-up" };
+  }
+  const attempts = (queuedEvent.conflictAttempts ?? 0) + 1;
+  const now = performance.now();
+  const deadline = queuedEvent.conflictDeadline ?? (now + policy.retryWindowMs);
+  if (now >= deadline) {
+    // The window is measured from the first conflict (deadline minus window);
+    // elapsed time is at least the full window.
+    const elapsedMs = policy.retryWindowMs + (now - deadline);
+    return { kind: "convergence-failed", attempts, elapsedMs };
+  }
+  // Exponential backoff from the first conflict. The early steps are sub-5ms
+  // (near-immediate), so a transient conflict that clears once fresh state
+  // arrives converges fast; the delay only grows into real spacing once a
+  // conflict persists.
+  const delayMs = computeBackoffDelayMs(attempts, policy);
+  return { kind: "backoff", attempts, deadline, delayMs, runAt: now + delayMs };
 }

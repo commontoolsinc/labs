@@ -205,6 +205,7 @@ field controls write behavior.
 #### TypeScript Definition
 
 ```typescript
+// Shown at module scope.
 type LinkSigil = {
   "link@1": {
     // defaults to the entity containing this link
@@ -470,6 +471,7 @@ references or mutable binary facts via link sigils.
 #### TypeScript Definition
 
 ```typescript
+// Shown for illustration only.
 type BlobSigil {
   "blob@1": {
     type?: MediaType
@@ -585,6 +587,7 @@ rules as blob sigils, plus an optional `name` field for filesystem metadata.
 #### TypeScript Definition
 
 ```typescript
+// Shown at module scope.
 type FileSigil = {
   "file@1": {
     type?: string; // Media type, same inference rules as blob sigil

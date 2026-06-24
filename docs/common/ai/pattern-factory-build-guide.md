@@ -71,6 +71,7 @@ are only for new pattern-owned cells initialized from static values.
 Wrong:
 
 ```tsx
+// Shown at module scope.
 export default pattern<DeviceInput>((input) => {
   const name = new Writable(input.name || ""); // input.name is reactive
   const capabilities = new Writable(input.capabilities || []);
@@ -92,6 +93,7 @@ Prefer one of these designs instead:
 Example:
 
 ```tsx
+// Shown at module scope.
 interface DeviceInput {
   name: Writable<string | Default<"">>;
 }

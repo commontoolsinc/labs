@@ -6,7 +6,9 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isSigilLink } from "../src/link-utils.ts";
+import { type SigilLink } from "../src/sigil-types.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -51,19 +53,19 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink();
 
     // Verify structure
-    expect(link["/"]).toBeDefined();
-    expect(link["/"][LINK_V1_TAG]).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].path).toBeDefined();
+    expect(isSigilLink(link)).toBe(true);
+    expect(linkRefPayload(link)).toBeDefined();
+    expect(linkRefPayload(link).id).toBeDefined();
+    expect(linkRefPayload(link).path).toBeDefined();
 
     // Verify id has of: prefix
-    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
+    expect(linkRefPayload(link).id).toMatch(/^of:/);
 
     // Verify path is empty array
-    expect(link["/"][LINK_V1_TAG].path).toEqual([]);
+    expect(linkRefPayload(link).path).toEqual([]);
 
     // Verify space is included if present
-    expect(link["/"][LINK_V1_TAG].space).toBe(space);
+    expect(linkRefPayload(link).space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
@@ -78,7 +80,7 @@ describe("getAsLink method", () => {
 
     const link = nestedCell.getAsLink();
 
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["nested", "value"]);
+    expect(linkRefPayload(link).path).toEqual(["nested", "value"]);
   });
 
   it("should return sigil format for both getAsLink and toJSON", () => {
@@ -95,15 +97,15 @@ describe("getAsLink method", () => {
 
     // getAsLink returns sigil format
     expect(link).toHaveProperty("/");
-    expect(link["/"][LINK_V1_TAG]).toBeDefined();
+    expect(linkRefPayload(link)).toBeDefined();
 
     // toJSON now also returns sigil format (includes space for cross-space references)
-    expect(json).toHaveProperty("/");
-    expect((json as any)["/"][LINK_V1_TAG]).toBeDefined();
-    expect((json as any)["/"][LINK_V1_TAG].id).toBeDefined();
-    expect((json as any)["/"][LINK_V1_TAG].path).toEqual([]);
+    expect(json).not.toBeNull();
+    const jsonPayload = linkRefPayload(json as SigilLink);
+    expect(jsonPayload.id).toBeDefined();
+    expect(jsonPayload.path).toEqual([]);
     // Verify space is included for cross-space resolution
-    expect((json as any)["/"][LINK_V1_TAG].space).toEqual(space);
+    expect(jsonPayload.space).toEqual(space);
   });
 
   it("should create relative links with base parameter - same document", () => {
@@ -120,9 +122,9 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: c });
 
     // Should omit id and space since they're the same
-    expect(link["/"][LINK_V1_TAG].id).toBeUndefined();
-    expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
+    expect(linkRefPayload(link).id).toBeUndefined();
+    expect(linkRefPayload(link).space).toBeUndefined();
+    expect(linkRefPayload(link).path).toEqual(["value"]);
   });
 
   it("should create relative links with base parameter - different document", () => {
@@ -146,10 +148,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: c2 });
 
     // Should include id but not space since space is the same
-    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
-    expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
+    expect(linkRefPayload(link).id).toBeDefined();
+    expect(linkRefPayload(link).id).toMatch(/^of:/);
+    expect(linkRefPayload(link).space).toBeUndefined();
+    expect(linkRefPayload(link).path).toEqual(["value"]);
   });
 
   it("should create relative links with base parameter - different space", () => {
@@ -175,10 +177,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: c2 });
 
     // Should include both id and space since they're different
-    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
-    expect(link["/"][LINK_V1_TAG].space).toBe(space);
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
+    expect(linkRefPayload(link).id).toBeDefined();
+    expect(linkRefPayload(link).id).toMatch(/^of:/);
+    expect(linkRefPayload(link).space).toBe(space);
+    expect(linkRefPayload(link).path).toEqual(["value"]);
   });
 
   it("should include schema when includeSchema is true", () => {
@@ -195,9 +197,9 @@ describe("getAsLink method", () => {
     // Link with schema included
     const link = cell.getAsLink({ includeSchema: true });
 
-    expect(link["/"][LINK_V1_TAG].schema).toEqual(schema);
-    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
+    expect(linkRefPayload(link).schema).toEqual(schema);
+    expect(linkRefPayload(link).id).toBeDefined();
+    expect(linkRefPayload(link).path).toEqual(["value"]);
   });
 
   it("should not include schema when includeSchema is false", () => {
@@ -214,7 +216,7 @@ describe("getAsLink method", () => {
     // Link without schema
     const link = cell.getAsLink({ includeSchema: false });
 
-    expect(link["/"][LINK_V1_TAG].schema).toBeUndefined();
+    expect(linkRefPayload(link).schema).toBeUndefined();
   });
 
   it("should not include schema when includeSchema is undefined", () => {
@@ -230,7 +232,7 @@ describe("getAsLink method", () => {
     // Link with default options (no schema)
     const link = cell.getAsLink();
 
-    expect(link["/"][LINK_V1_TAG].schema).toBeUndefined();
+    expect(linkRefPayload(link).schema).toBeUndefined();
   });
 
   it("should handle both base and includeSchema options together", () => {
@@ -254,10 +256,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: c2, includeSchema: true });
 
     // Should include id (different docs) but not space (same space)
-    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
-    expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
-    expect(link["/"][LINK_V1_TAG].schema).toEqual(schema);
+    expect(linkRefPayload(link).id).toBeDefined();
+    expect(linkRefPayload(link).space).toBeUndefined();
+    expect(linkRefPayload(link).path).toEqual(["value"]);
+    expect(linkRefPayload(link).schema).toEqual(schema);
   });
 
   it("should handle cell without schema when includeSchema is true", () => {
@@ -273,7 +275,7 @@ describe("getAsLink method", () => {
     // Link with includeSchema but cell has no schema
     const link = cell.getAsLink({ includeSchema: true });
 
-    expect(link["/"][LINK_V1_TAG].schema).toBeUndefined();
+    expect(linkRefPayload(link).schema).toBeUndefined();
   });
 });
 
@@ -312,20 +314,20 @@ describe("getAsWriteRedirectLink method", () => {
     const alias = cell.getAsWriteRedirectLink();
 
     // Verify structure
-    expect(alias["/"]).toBeDefined();
-    expect(alias["/"][LINK_V1_TAG]).toBeDefined();
-    expect(alias["/"][LINK_V1_TAG].id).toBeDefined();
-    expect(alias["/"][LINK_V1_TAG].path).toBeDefined();
-    expect(alias["/"][LINK_V1_TAG].overwrite).toBe("redirect");
+    expect(isSigilLink(alias)).toBe(true);
+    expect(linkRefPayload(alias)).toBeDefined();
+    expect(linkRefPayload(alias).id).toBeDefined();
+    expect(linkRefPayload(alias).path).toBeDefined();
+    expect(linkRefPayload(alias).overwrite).toBe("redirect");
 
     // Verify id has of: prefix
-    expect(alias["/"][LINK_V1_TAG].id).toMatch(/^of:/);
+    expect(linkRefPayload(alias).id).toMatch(/^of:/);
 
     // Verify path is empty array
-    expect(alias["/"][LINK_V1_TAG].path).toEqual([]);
+    expect(linkRefPayload(alias).path).toEqual([]);
 
     // Verify space is included if present
-    expect(alias["/"][LINK_V1_TAG].space).toBe(space);
+    expect(linkRefPayload(alias).space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
@@ -340,7 +342,7 @@ describe("getAsWriteRedirectLink method", () => {
 
     const alias = nestedCell.getAsWriteRedirectLink();
 
-    expect(alias["/"][LINK_V1_TAG].path).toEqual(["nested", "value"]);
+    expect(linkRefPayload(alias).path).toEqual(["nested", "value"]);
   });
 
   it("should omit space when baseSpace matches", () => {
@@ -355,7 +357,7 @@ describe("getAsWriteRedirectLink method", () => {
     const alias = cell.getAsWriteRedirectLink({ baseSpace: space });
 
     // Should omit space
-    expect(alias["/"][LINK_V1_TAG].space).toBeUndefined();
+    expect(linkRefPayload(alias).space).toBeUndefined();
   });
 });
 

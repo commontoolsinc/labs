@@ -329,7 +329,7 @@ export const backgroundIntegration = createRoute({
         "application/json": {
           schema: z
             .object({
-              pieceId: z.string().describe("The charm ID"),
+              pieceId: z.string().describe("The piece ID"),
               space: z.string().describe("The space DID"),
               integration: z.string().describe("The integration name"),
             })

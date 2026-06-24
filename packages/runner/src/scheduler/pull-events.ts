@@ -110,6 +110,7 @@ export async function processPullQueuedEventDuringExecute(
   await dispatchQueuedEvent({
     runtime: state.runtime,
     eventQueue: state.eventQueue,
+    backpressure: state.backpressure,
     setRunningPromise: (promise) => {
       state.setRunningPromise(promise);
     },

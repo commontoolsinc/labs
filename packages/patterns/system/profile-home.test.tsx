@@ -36,7 +36,7 @@ export default pattern(() => {
     profile.addElement.send({
       catalogId: "profile-card",
       title: "Profile card",
-      tag: "profile-card",
+      tag: "#profileCard",
       userTags: ["person"],
     });
   });
@@ -78,7 +78,7 @@ export default pattern(() => {
   const assert_added_element = computed(() => {
     const element = profile.elements[0];
     return profile.elements.length === 1 &&
-      element?.tag === "profile-card" &&
+      element?.tag === "#profileCard" &&
       element?.title === "Profile card" &&
       element?.userTags.includes("person") === true;
   });

@@ -23,6 +23,7 @@ Use the `$` prefix for explicit two-way sync. That is the normal authoring
 form for Common Fabric controls. No handler is needed for simple updates.
 
 ```tsx
+// Shown for illustration only.
 <cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
 <cf-input $value={title} />             // Auto-syncs text input
 <cf-select $value={category} items={[...]} />
@@ -35,6 +36,7 @@ Use camelCase for component properties — kebab-case JSX attributes don't map
 correctly:
 
 ```tsx
+// Shown for illustration only.
 // ❌ Kebab-case won't work
 <cf-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
 
@@ -205,6 +207,7 @@ All form-compatible fields (`cf-input`, `cf-select`, `cf-checkbox`,
 the bound cell immediately; **inside** `cf-form` they buffer until submit.
 
 ```tsx
+// Shown as JSX element children.
 <cf-form oncf-submit={handleSubmit}>
   <cf-input name="email" $value={data.key("email")} required />
   <cf-button type="submit">Save</cf-button>
@@ -216,6 +219,7 @@ the bound cell immediately; **inside** `cf-form` they buffer until submit.
 Bind fields to a staging cell, then copy to the collection on submit:
 
 ```tsx
+// Shown for illustration only.
 const formData = new Writable({ name: "", email: "" });
 
 <cf-form
@@ -242,6 +246,7 @@ Bind fields to a pointer (`Writable<Person>`) instead of using indices; on
 submit, values are flushed to the bound cell:
 
 ```tsx
+// Shown at module scope.
 export const EditPerson = pattern<{ person: Writable<Person> }, { [UI]: VNode }>(
   ({ person }) => ({
     [UI]: (
@@ -283,6 +288,7 @@ decisions) live in
 the hand-rolled label-above-control stack repeated throughout patterns:
 
 ```tsx
+// Shown for illustration only.
 // Before
 <cf-vstack gap="1">
   <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
@@ -308,6 +314,7 @@ The default slot takes any control (`cf-input`, `cf-select`, `cf-textarea`,
 ambient `cf-theme`.
 
 ```tsx
+// Shown as JSX element children.
 <cf-field label="Username" required error={usernameError}>
   <cf-input $value={username} placeholder="Pick a username" />
 </cf-field>
@@ -334,6 +341,7 @@ Notes:
 Renders pattern instances for composition.
 
 ```tsx
+// Shown at module scope.
 import SubPattern from "./sub-pattern.tsx";
 
 const subView = SubPattern({ items });
@@ -349,6 +357,7 @@ const subView = SubPattern({ items });
 Multiple patterns sharing data:
 
 ```tsx
+// Shown inside a pattern body.
 const listView = ListView({ items });
 const gridView = GridView({ items });
 
@@ -375,6 +384,7 @@ keys, addressed by symbols vended from `commonfabric`:
 Pick a variant with the `variant` attribute (default `"full"`):
 
 ```tsx
+// Shown as JSX element children.
 <cf-render $cell={piece} variant="full" />   // default — standalone
 <cf-render $cell={piece} variant="chip" />   // inline
 <cf-render $cell={piece} variant="tile" />   // gallery/grid tile
@@ -394,6 +404,7 @@ still renders correctly at `chip` and `tile`.
 A pattern exports the spectrum by returning the sibling keys:
 
 ```tsx
+// Shown for illustration only.
 import { CHIP_UI, NAME, pattern, TILE_UI, UI } from "commonfabric";
 
 export default pattern(({ title }) => ({
@@ -423,6 +434,7 @@ Content in the default slot scrolls automatically when it overflows. Use
 fade-edges, or a styled/hidden scrollbar.
 
 ```tsx
+// Shown for illustration only.
 // Simple case — main area scrolls automatically
 <cf-screen>
   <cf-heading slot="header" level={2}>Title</cf-heading>
@@ -452,6 +464,7 @@ The message comes from the `message` attribute (simple case) or the default
 slot. Optional `icon` and `action` slots render above and below the message.
 
 ```tsx
+// Shown inside a pattern body.
 // Simple case — message attribute
 {items.get().length === 0
   ? <cf-empty-state message="No items yet. Add one below!" />
@@ -488,6 +501,7 @@ control.
   truncates correctly inside flex rows like `cf-hstack`.
 
 ```tsx
+// Shown inside a pattern body.
 // Truncated note next to fixed-width siblings in a row
 <cf-hstack gap="2" align="center">
   <cf-text truncate tone="muted">{item.notes}</cf-text>
@@ -513,6 +527,7 @@ props (`px`/`py`) on their side, which override the uniform `padding`. Use
 these instead of inline `style="padding-top: ..."` overrides.
 
 ```tsx
+// Shown for illustration only.
 // Uniform padding, but tighter on top
 <cf-vstack gap="2" padding="4" pt="2">
   {items}
@@ -544,6 +559,7 @@ Interactive map component using Leaflet with OpenStreetMap tiles. No API key req
 ### Types
 
 ```tsx
+// Shown at module scope.
 interface LatLng { lat: number; lng: number; }
 interface Bounds { north: number; south: number; east: number; west: number; }
 
@@ -596,6 +612,7 @@ interface MapPolyline {
 ### Usage
 
 ```tsx
+// Shown for illustration only.
 // Simple: Display locations
 const mapData = {
   markers: stores.map(store => ({
@@ -716,6 +733,7 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 ### Usage
 
 ```tsx
+// Shown for illustration only.
 // Sparkline (inline, no axes)
 <cf-chart height={24} style="width: 80px;">
   <cf-line-mark $data={trend} color="green" />

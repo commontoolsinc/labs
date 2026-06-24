@@ -41,6 +41,7 @@ const TreeNode = pattern<TreeNodeInput, TreeNodeOutput>(
 `self` works inside `action()` closures, not just inline arrows:
 
 ```typescript
+// Shown for illustration only.
 const createChild = action(() => {
   children.push(Node({ label: "Child", parent: self, registry }));
 });
@@ -49,6 +50,7 @@ const createChild = action(() => {
 **Gotcha:** At runtime, `self` binds against the output schema. If any required output property is missing from the piece data, the binding resolves to `undefined`. This happens when input properties lack defaults:
 
 ```typescript
+// Shown as alternative snippets.
 // BAD: title might be missing from piece data → self binding fails
 interface Input { title?: string; }
 

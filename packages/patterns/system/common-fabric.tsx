@@ -415,7 +415,7 @@ type ListPatternIndexInput = Record<string, never>;
 export const listPatternIndex = pattern<ListPatternIndexInput>(
   ({ _ }) => {
     const patternIndexUrl = wish<{ url: Writable<string> }>({
-      query: "#pattern-index",
+      query: "#patternIndex",
     });
 
     const resolvedUrl = new Writable<string>("/api/patterns/index.md");

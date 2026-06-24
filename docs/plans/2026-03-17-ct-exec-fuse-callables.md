@@ -174,6 +174,7 @@ Do not move execution semantics into FUSE and do not add daemon RPC for lookup.
 `cf exec` only needs a narrow pattern-tool execution path:
 
 ```ts
+// Shown inside a pattern body.
 const pattern = callableCell.key("pattern").getRaw() as Pattern | undefined;
 const extraParams = callableCell.key("extraParams").get() ?? {};
 const result = manager.runtime.getCell(space, crypto.randomUUID(), pattern?.resultSchema, tx);
@@ -234,6 +235,7 @@ Expected: FAIL because mount-state helpers and shim generation do not exist yet.
 Implement:
 
 ```ts
+// Shown for illustration only.
 export interface MountStateEntry {
   mountpoint: string;
   apiUrl: string;
@@ -337,6 +339,7 @@ Expected: FAIL because the tree only knows handler nodes and the shared parser i
 Implement `packages/fuse/callable-path.ts` and replace the handler-only node shape with:
 
 ```ts
+// Shown for illustration only.
 type FsNode =
   | { kind: "dir"; ... }
   | { kind: "file"; ... }
@@ -435,6 +438,7 @@ Expected: FAIL because the parser/help layer does not exist yet.
 Build a focused dynamic CLI layer around a command spec like:
 
 ```ts
+// Shown at module scope.
 interface ExecCommandSpec {
   callableKind: "handler" | "tool";
   defaultVerb: "invoke" | "run";
@@ -515,6 +519,7 @@ Expected: FAIL because `cf exec` does not exist yet.
 Flow:
 
 ```ts
+// Shown inside a pattern body.
 const mount = await findMountForPath(absFilePath);
 const target = parseMountedCallablePath(relativePathWithinMount);
 const pieceMeta = await readMountedPieceMeta(absFilePath, target);

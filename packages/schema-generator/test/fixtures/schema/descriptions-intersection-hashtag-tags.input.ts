@@ -3,7 +3,7 @@ type RecipeBase = {
   ingredients: string[];
 };
 
-/** Schedulable on the #meal-plan. */
+/** Schedulable on the #mealPlan. */
 type Schedulable = {
   plannedFor: string;
 };

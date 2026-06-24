@@ -16,6 +16,7 @@ audit purposes. Every transaction that modifies state also creates a commit
 record.
 
 ```typescript
+// Shown at module scope.
 // The commit media type
 const COMMIT_LOG_TYPE = "application/commit+json";
 
@@ -39,6 +40,7 @@ type CommitFact = Assertion<
 When a transaction is processed:
 
 ```typescript
+// Shown inside a pattern body.
 // Create a commit record
 const commit = {
   the: "application/commit+json",
@@ -58,6 +60,7 @@ The **first commit** in a space has special significance:
 
 1. Its `cause` field points to the Unclaimed reference for the space:
    ```typescript
+   // Shown inside a pattern body.
    const genesisCause = refer({
      the: "application/commit+json",
      of: spaceDID,
@@ -94,6 +97,7 @@ This chain provides:
 The commit structure on the wire (e.g., in responses):
 
 ```typescript
+// Shown for illustration only.
 type Commit<Subject extends MemorySpace> = {
   [space in Subject]: {
     ["application/commit+json"]: {
@@ -125,6 +129,7 @@ The current implementation uses strict CAS (compare-and-swap) semantics at the
 entity level:
 
 ```typescript
+// Shown for illustration only.
 type Transaction = {
   cmd: "/memory/transact";
   sub: MemorySpace; // Space DID
@@ -271,6 +276,7 @@ When the server processes a transaction:
 3. **If all match**: Apply atomically, assign next `since`, record commit
 
 ```typescript
+// Shown for illustration only.
 // Server validation pseudocode
 for (const [of, types] of Object.entries(changes)) {
   for (const [the, revisions] of Object.entries(types)) {
@@ -314,6 +320,7 @@ CAS model.
 Future commits explicitly track confirmed vs pending references:
 
 ```typescript
+// Shown at module scope.
 interface ClientCommit {
   reads: {
     // From heap - confirmed, has real since
@@ -364,6 +371,7 @@ based on." Freshness is determined by `since`, not hash ancestry.
 The commit log preserves both original submission and server resolution:
 
 ```typescript
+// Shown at module scope.
 interface CommitLogEntry {
   original: SignedClientCommit;
   resolution: {

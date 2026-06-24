@@ -55,6 +55,7 @@ This is the question that makes or breaks embedding, and the answer is **yes**.
 When a parent writes:
 
 ```tsx
+// Shown inside a pattern body.
 const gate = SomePrimitive({ state: myCell }); // myCell: Writable<T>
 ```
 

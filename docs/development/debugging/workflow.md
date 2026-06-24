@@ -22,6 +22,7 @@ Fix all type errors before deploying. Most issues are caught here.
 Use `<cf-cell-context>` for on-demand value inspection:
 
 ```tsx
+// Shown as JSX element children.
 <cf-cell-context $cell={result} label="Result">
   <div>{result.value}</div>
 </cf-cell-context>
@@ -60,6 +61,7 @@ produces tagged output in the browser console, which is useful for tracing what
 the runtime is doing under the hood.
 
 ```javascript
+// Shown inside a pattern body.
 // Enable a logger and set it to debug level — this produces console output
 commonfabric.logger["runner"].disabled = false
 commonfabric.logger["runner"].level = "debug"
@@ -72,6 +74,7 @@ Even when loggers are disabled, call counts and timing stats are still tracked.
 You can inspect these without turning on console output:
 
 ```javascript
+// Shown inside a pattern body.
 // See which loggers exist and their call counts
 commonfabric.getLoggerCountsBreakdown()
 

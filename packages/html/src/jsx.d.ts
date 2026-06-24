@@ -2880,8 +2880,8 @@ type EventHandler<T> =
   | Stream<T>
   | Stream<void>;
 
-// `Charm` is not a pattern type.
-type Charm = any;
+// `Piece` is not a pattern type.
+type Piece = any;
 
 interface CFCellLinkElement extends CFHTMLElement {}
 interface CFSpaceLinkElement extends CFHTMLElement {}
@@ -3998,8 +3998,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
-  "$mentionable"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
-  "$mentioned"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
+  "$mentionable"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
+  "$mentioned"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;

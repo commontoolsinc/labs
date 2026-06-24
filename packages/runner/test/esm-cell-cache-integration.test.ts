@@ -6,11 +6,15 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "../src/storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
+  writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -79,7 +83,8 @@ describe("ESM compile via content-addressed cell cache", () => {
   it("cold compile writes back, warm compile is a hit, both run correctly", async () => {
     const pm = runtime.patternManager;
 
-    // Cold compile (miss): evaluates correctly and triggers write-back.
+    // Cold compile (miss): evaluates correctly and durably writes back before
+    // returning.
     const cold = await pm.compilePattern(PROGRAM, { space, tx });
     expect(await run(cold, 3)).toEqual({ result: 6 });
     expect(pm.getCompileCacheStats()).toEqual({
@@ -88,7 +93,8 @@ describe("ESM compile via content-addressed cell cache", () => {
       byIdentityHits: 0,
     });
 
-    // Wait for the fire-and-forget write-back to commit.
+    // The write-back is awaited by compilePattern; flushing remains harmless and
+    // keeps the test aligned with other cache paths.
     await pm.flushCompileCacheWrites();
 
     // Warm compile (hit): served from the cache, still evaluates correctly.
@@ -119,6 +125,75 @@ describe("ESM compile via content-addressed cell cache", () => {
     expect(stats.byIdentityHits).toBe(1);
     expect(stats.misses).toBe(1); // only the initial cold compile
     expect(await run(warm, 6)).toEqual({ result: 12 });
+  });
+
+  it("surfaces cold writeback failure instead of returning an unloadable pattern", async () => {
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = {
+      name: "StorageTransactionAborted" as const,
+      message: "forced compile cache writeback failure",
+      reason: "synthetic writeback failure",
+    } satisfies CommitError;
+
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: failure })) as typeof runtime.editWithRetry;
+
+    try {
+      let thrown: unknown;
+      try {
+        await runtime.patternManager.compilePattern(PROGRAM, { space, tx });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(
+        "forced compile cache writeback failure",
+      );
+      expect((thrown as Error & { cause?: unknown }).cause).toBe(failure);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("keeps source-free identity recovery best-effort when writeback fails", async () => {
+    const compiled = await (runtime.harness as Engine).compileToRecordGraph(
+      PROGRAM,
+    );
+    const sourceTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      sourceTx,
+    );
+    runtime.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const runtime2 = newRuntime();
+    const originalEditWithRetry = runtime2.editWithRetry.bind(runtime2);
+    const failure = {
+      name: "StorageTransactionAborted" as const,
+      message: "forced identity recovery writeback failure",
+      reason: "synthetic background writeback failure",
+    } satisfies CommitError;
+    runtime2.editWithRetry =
+      (() =>
+        Promise.resolve({ error: failure })) as typeof runtime2.editWithRetry;
+
+    try {
+      const loaded = await runtime2.patternManager.loadPatternByIdentity(
+        compiled.entryIdentity,
+        "default",
+        space,
+      );
+      expect(typeof loaded).toBe("function");
+      await runtime2.patternManager.flushCompileCacheWrites();
+    } finally {
+      runtime2.editWithRetry = originalEditWithRetry;
+      await runtime2.dispose();
+    }
   });
 
   it("warm hit reuses the cached body across a fresh runtime (cross-session)", async () => {

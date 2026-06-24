@@ -56,6 +56,7 @@ empty object:
   so concurrent writes serialize; patterns do not read it directly.
 
 ```ts
+// Shown at module scope.
 declare const __sqliteDb: unique symbol;
 /** Opaque database handle value (the SqliteDb cell's readable value). Patterns
  *  forward the SqliteDb cell to db.query / db.exec / reactOn; they do not read
@@ -116,6 +117,7 @@ source the handle binds to a cell the runtime allocates in the current pattern
 context (the default, cell-derived source).
 
 ```ts
+// Shown at module scope.
 export type SqliteDatabaseFunction = (
   options?: { tables?: SqliteTableSchemas },
   source?: SqliteDatabaseSource,
@@ -148,6 +150,7 @@ declaration, validating that `_cf_link` columns are `TEXT` and (later) attaching
 per-column CFC labels in one place.
 
 ```tsx
+// Shown at module scope.
 import { table, cfLink, sqliteDatabase } from "commonfabric";
 
 const db = sqliteDatabase({
@@ -184,6 +187,7 @@ older on-disk versions while still erroring by default. (See
 ## `db.query<Row>(sql, options?)` — reactive read
 
 ```ts
+// Shown for illustration only.
 db.query<Row = Record<string, unknown>>(
   sql: string,
   options?: {
@@ -203,6 +207,7 @@ single `SELECT` (or read-only CTE).
 A free function is equivalent:
 
 ```ts
+// Shown at module scope.
 export type SqliteQueryParams = {
   db: Opaque<SqliteDatabase | SqliteDb>;
   sql: string;
@@ -234,6 +239,7 @@ This handles projections the table schema can't: because `Cell<T>` lowers to
 is cell-bearing **even when an alias hides the `_cf_link` suffix**:
 
 ```tsx
+// Shown for illustration only.
 db.query<{ who: Cell<User>; n: number }>(
   "SELECT author_cf_link AS who, count(*) AS n FROM messages GROUP BY author_cf_link",
   { reactOn: db },
@@ -257,6 +263,7 @@ computed columns).
 ## `db.exec(sql, params?)` — imperative write
 
 ```ts
+// Shown for illustration only.
 db.exec(
   sql: string,
   /** A cell bound to a `_cf_link` column is encoded to a sigil link (Section 02);
@@ -320,6 +327,7 @@ records the op through the storage seam `recordSqliteWrite` → `getNativeCommit
   value. Parameter tuples remain author-annotated.
 
 ```ts
+// Shown at module scope.
 export type SqliteColumnSpec = string | JSONSchema;
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,

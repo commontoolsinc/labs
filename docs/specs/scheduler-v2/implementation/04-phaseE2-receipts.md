@@ -41,6 +41,7 @@ File: `src/runner.ts`, `instantiateJavaScriptHandlerNode` (~line 2995):
 Replace
 
 ```typescript
+// Shown inside a pattern body.
 const cause = {
   ...(inputs as Record<string, any>),
   $event: crypto.randomUUID(),
@@ -50,6 +51,7 @@ const cause = {
 with
 
 ```typescript
+// Shown inside a pattern body.
 // Spec scheduler-v2 §7.6 / decision 13: the handler's result cell — and
 // every id minted in this frame — derives from the durable event id, so
 // retries of the same event reuse the same ids and duplicate handlings
@@ -111,6 +113,7 @@ handlers that launch nothing.
    `extended-storage-transaction.ts`: add
 
    ```typescript
+   // Shown as interface or class members.
    /** Mark an entity this transaction creates as create-only: the commit
     *  fails with PreconditionFailedError("receipt-exists") if the entity
     *  already has a head (scheduler-v2 §7.6 receipts). */
@@ -137,6 +140,7 @@ handlers that launch nothing.
      create-only:
 
      ```typescript
+     // Shown inside a pattern body.
      // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
      // launched, but the result cell is still created — its create is the
      // exactly-once witness for this event id.

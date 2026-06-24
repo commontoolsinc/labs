@@ -9,6 +9,7 @@
 For most event handling, use `action()` which IS allowed inside patterns and automatically closes over pattern state:
 
 ```typescript
+// Shown at module scope.
 export default pattern<Input, Input>(({ items }) => {
   // action() works inside patterns - this is the recommended approach
   const addItem = action(() => {
@@ -27,6 +28,7 @@ Only use `handler()` when you need to reuse the same logic with different state 
 ## Wrong - handler() Inside Pattern
 
 ```typescript
+// Shown for illustration only.
 export default pattern<Input, Input>(({ items }) => {
   const addItem = handler((_, { items }) => {  // Error!
     items.push({ title: "New" });
@@ -43,6 +45,7 @@ export default pattern<Input, Input>(({ items }) => {
 If you need `handler()` specifically (for reusability or exports), define it outside the pattern:
 
 ```typescript
+// Shown at module scope.
 // Handler at module scope
 const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => {
@@ -62,6 +65,7 @@ export default pattern<Input, Input>(({ items }) => ({
 ## For Immediately-Invoked lift()
 
 ```typescript
+// Shown for illustration only.
 // WRONG - lift defined and invoked inside pattern
 const result = lift((args) => args.grouped[args.date])({ grouped, date });
 

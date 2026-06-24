@@ -3,10 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
-import { areNormalizedLinksSame } from "../src/link-utils.ts";
+import { areNormalizedLinksSame, isSigilLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
 
@@ -342,8 +343,8 @@ describe("link-resolution", () => {
       );
       const linkData = targetCell.getAsLink();
       // Manually set schema on the link
-      if (linkData["/"] && linkData["/"]["link@1"]) {
-        linkData["/"]["link@1"].schema = schema;
+      if (isSigilLink(linkData)) {
+        linkRefPayload(linkData).schema = schema;
       }
       sourceCell.setRaw({ link: linkData });
       tx.commit();

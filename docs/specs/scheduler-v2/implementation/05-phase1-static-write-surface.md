@@ -58,6 +58,7 @@ The conditional declared-write seeding block (~lines 110-127,
 becomes the unconditional surface registration:
 
 ```typescript
+// Shown inside a pattern body.
 // Static write surface (spec scheduler-v2 P4): the action's writes are
 // fixed at registration — declared outputs plus statically resolved
 // redirect targets, already computed by the runner, or a registration-time
@@ -92,6 +93,7 @@ File: `src/scheduler/dependency-updates.ts`. Replace the body of
 `setSchedulerDependencies` with:
 
 ```typescript
+// Shown at module scope.
 export function setSchedulerDependencies(
   state: DependencyUpdateState,
   action: Action,
@@ -134,6 +136,7 @@ Deletions in the same commit:
    nothing else. Add:
 
    ```typescript
+   // Shown for illustration only.
    /** Registers the action's static write surface (idempotent). */
    setSurface(action: Action, surface: IMemorySpaceAddress[]): void {
      this.currentKnownWrites.set(action, surface);

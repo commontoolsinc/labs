@@ -12,7 +12,7 @@ interface Attachment {
   name: string;
   type: "file" | "clipboard" | "mention";
   data?: any;
-  charm?: any;
+  piece?: any;
   removable?: boolean;
 }
 

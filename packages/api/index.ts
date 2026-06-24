@@ -117,17 +117,17 @@ export declare const FabricHash: FabricHashConstructor;
 
 /**
  * The modern, object-shaped form of a link reference, wrapping the link's
- * addressing payload (a `FabricObject`: its addressing fields plus an optional
+ * addressing payload (a `FabricPlainObject`: its addressing fields plus an optional
  * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
  * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
  * link is a small object graph, not a leaf.
  */
 export interface FabricLink extends FabricInstance {
-  readonly payload: FabricObject;
+  readonly payload: FabricPlainObject;
 }
 
 export interface FabricLinkConstructor {
-  new (payload: FabricObject): FabricLink;
+  new (payload: FabricPlainObject): FabricLink;
   prototype: FabricLink;
 }
 
@@ -144,14 +144,14 @@ export type FabricValue =
   | bigint
   | FabricSpecialObject
   | FabricArray
-  | FabricObject
+  | FabricPlainObject
   | undefined;
 
 /** An array of fabric values. */
 export interface FabricArray extends ArrayLike<FabricValue> {}
 
 /** An object/record of fabric values. */
-export interface FabricObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject extends Record<string, FabricValue> {}
 
 // ============================================================================
 // Runtime Constants
@@ -2721,7 +2721,7 @@ export declare function UiDisclosure(props: UiDisclosureProps): JSXElement;
  * Get the entity ID from a cell or value, or undefined if it has none. The
  * concrete reference form is dispatched on the "modern cell representation"
  * flag: a `{ "/": "id-string" }` object with the flag off, a `FabricHash` with
- * it on. Useful for extracting IDs from newly created charms for linking.
+ * it on. Useful for extracting IDs from newly created pieces for linking.
  */
 export type GetEntityIdFunction = (
   value: any,

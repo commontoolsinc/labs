@@ -74,6 +74,7 @@ wrapper classes (Section 1.4).
 > into builder exports.
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-value.ts
 
 /**
@@ -144,6 +145,7 @@ A separate type — **outside** the `FabricValue` hierarchy — defines the raw
 native JS object types that the conversion layer can handle:
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-value.ts
 
 /**
@@ -294,6 +296,7 @@ All native object wrappers share an abstract base class that extends
 to native form:
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-instances/FabricNativeWrapper.ts
 
 /**
@@ -381,6 +384,7 @@ form is a *projection*, produced on demand by `toNativeValue()` (and
 cached once the instance is frozen, when it can no longer go stale).
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-instances/FabricError.ts
 
 /**
@@ -568,6 +572,7 @@ each access; once frozen it is cached.
 > Section 1.4.1.
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-instances/FabricMap.ts
 // (Normative target -- the live codec is currently a throwing stub.)
 
@@ -627,6 +632,7 @@ export class FabricMap
 > Section 1.4.1.
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-instances/FabricSet.ts
 // (Normative target -- the live codec is currently a throwing stub.)
 
@@ -683,6 +689,7 @@ Section 6.3). Like every fabric class, it hosts its own `[CODEC]` (tag
 does not implement the `FabricInstance` members.
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-primitives/FabricRegExp.ts
 
 import { FabricPrimitive } from './interface';
@@ -769,6 +776,7 @@ union. It extends `FabricSpecialObject`.
   `FabricBytes`, `FabricRegExp`).
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/interface.ts
 
 /**
@@ -804,6 +812,7 @@ functions' freeze-bypass logic).
 #### 1.4.7 `FabricEpochNsec`
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-primitives/FabricEpochNsec.ts
 
 /**
@@ -831,6 +840,7 @@ export class FabricEpochNsec extends FabricPrimitive {
 #### 1.4.8 `FabricEpochDays`
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-primitives/FabricEpochDays.ts
 
 /**
@@ -854,6 +864,7 @@ export class FabricEpochDays extends FabricPrimitive {
 #### 1.4.9 `FabricHash`
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-primitives/FabricHash.ts
 
 /**
@@ -968,6 +979,7 @@ state. See Section 5 of `3-json-encoding.md` for the wire format.
 #### 1.4.10 `FabricBytes`
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-primitives/FabricBytes.ts
 
 /**
@@ -1208,6 +1220,7 @@ cloning. Serialization is **not** an instance concern: it lives on the
 class-side `[CODEC]` (Section 2.4).
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/interface.ts
 
 /**
@@ -1292,6 +1305,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 ```
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-instances/BaseFabricInstance.ts
 
 /**
@@ -1363,6 +1377,7 @@ source of truth** for how instances of that class are serialized; nothing
 about serialization lives on the instances themselves.
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/codec-common/interface.ts
 
 /**
@@ -1487,6 +1502,7 @@ Key contracts:
 ### 2.5 Reconstruction Context
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/codec-common/interface.ts
 
 /**
@@ -1540,6 +1556,7 @@ Because `FabricInstance` is an abstract class, the idiomatic brand check is
 `instanceof`:
 
 ```typescript
+// Shown at module scope.
 if (value instanceof FabricInstance) {
   // value is a FabricInstance
 }
@@ -1565,6 +1582,7 @@ A `Temperature` value type demonstrates why the protocol exists: without it, a
 serialization system can round-trip it back to a real `Temperature` instance.
 
 ```typescript
+// Shown for illustration only.
 // Illustrative example -- not from the codebase.
 
 import {
@@ -1731,6 +1749,7 @@ enabling a single `instanceof ExplicitTagValue` check where code needs to
 handle both subtypes uniformly (e.g., serialization dispatch).
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/fabric-instances/ExplicitTagValue.ts
 
 /**
@@ -1791,6 +1810,7 @@ stands in for.
 ### 3.3 `UnknownValue`
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-instances/UnknownValue.ts
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
@@ -1876,6 +1896,7 @@ preserved as a `ProblematicValue` with the original tag, state, and error
 information.
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/fabric-instances/ProblematicValue.ts
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
@@ -2021,6 +2042,7 @@ External callers use only `encode()` and `decode()`; all internal machinery
 implementation.
 
 ```typescript
+// Shown at module scope.
 // file: packages/data-model/codec-common/interface.ts
 
 /**
@@ -2088,6 +2110,7 @@ which tag (for decoding). Codecs are shallow: the context owns recursion
 and tag-wrapping, and each codec translates exactly one layer.
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/codec-json/CodecRegistry.ts
 
 /**
@@ -2285,7 +2308,7 @@ The boundaries where serialization occurs:
 |----------|----------|-----------|
 | **Persistence** | `memory` <-> database | read/write |
 | **Iframe sandbox** | `runner` <-> `iframe-sandbox` | `postMessage` |
-| **Background service** | `shell` <-> `background-charm-service` | worker messages |
+| **Background service** | `shell` <-> `background-piece-service` | worker messages |
 | **HTML reconciler** | `html` reconciler (runs in a web worker) | worker messages |
 | **Network sync** | `toolshed` <-> remote peers | WebSocket/HTTP |
 | **Cross-space** | space A <-> space B | if in separate processes |
@@ -2306,6 +2329,7 @@ functions live in a dedicated module
 (`packages/data-model/codec-json/json-encoding.ts`).
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/codec-json/json-encoding.ts
 
 /**
@@ -2366,6 +2390,7 @@ The module also provides a shallow conversion function
 `fabric-value.ts`, which also defines the comparison function `valueEqual()`.
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**
@@ -2499,6 +2524,7 @@ regardless of nibble range.
 ### 6.4 Hashing Algorithm
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/value-hash.ts
 
 /**
@@ -2799,6 +2825,7 @@ There are two directions:
 ### 8.2 `shallowFabricFromNativeValue()` and `fabricFromNativeValue()`
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**
@@ -2946,6 +2973,7 @@ All conversion functions accept an optional `freeze` parameter (default:
 but skips freezing:
 
 ```typescript
+// Shown inside a pattern body.
 // Frozen (default) -- immutable result, safe for sharing.
 const frozen = fabricFromNativeValue(input);
 
@@ -2963,6 +2991,7 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
 ### 8.3 `isFabricCompatible()`
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**
@@ -3022,6 +3051,7 @@ symbols.
 ### 8.4 `nativeFromFabricValue()`
 
 ```typescript
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**

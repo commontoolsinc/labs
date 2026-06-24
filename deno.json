@@ -1,7 +1,7 @@
 {
   "workspace": [
     "./packages/api",
-    "./packages/background-charm-service",
+    "./packages/background-piece-service",
     "./packages/piece",
     "./packages/cli",
     "./packages/content-hash",
@@ -40,6 +40,7 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
+    "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "cfcheck": "deno run -A ./tasks/cfcheck.ts",
     "check-skill-facts": "deno test --allow-read skills/cf-review/check-facts.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",
@@ -74,7 +75,8 @@
     "**/build/",
     "**/.cache/",
     "**/coverage/",
-    "./tutorials/"
+    "./tutorials/",
+    "**/.doccheck*"
   ],
   "lint": {
     "exclude": [

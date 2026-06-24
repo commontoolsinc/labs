@@ -9,6 +9,7 @@ index and makes the pattern visible to the knowledge graph.
 For leaf patterns (individual items), the summary is typically the main content:
 
 ```tsx
+// Shown at module scope.
 export default pattern<Input, Output>(({ title, content }) => {
   return {
     [NAME]: title,
@@ -41,6 +42,7 @@ children.
 ### Pattern
 
 ```tsx
+// Shown for illustration only.
 // Container with child pieces that have their own summaries
 const summary = computed(() => {
   const children = items.get() ?? [];
@@ -54,6 +56,7 @@ const summary = computed(() => {
 ### When children are simple data (not sub-patterns)
 
 ```tsx
+// Shown inside a pattern body.
 // Container with plain data items (no sub-pattern summaries)
 const summary = computed(() => {
   return items.get()
@@ -67,6 +70,7 @@ const summary = computed(() => {
 Limit the summary to avoid excessive length:
 
 ```tsx
+// Shown inside a pattern body.
 const summary = computed(() => {
   return items.get()
     .slice(0, 20)

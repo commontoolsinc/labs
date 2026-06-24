@@ -89,6 +89,7 @@ Every runtime operation that can resolve a scoped link or create a scoped cell
 must have a scope context:
 
 ```ts
+// Shown at module scope.
 type RuntimeScopeContext = {
   space: MemorySpace;
   userDid: string;
@@ -143,6 +144,7 @@ its target id.
 `link@1` gains an optional `scope` field:
 
 ```ts
+// Shown at module scope.
 type LinkV1Inner = {
   id?: URI;
   path?: readonly string[];
@@ -172,6 +174,7 @@ must serialize the narrower `scope` field explicitly.
 `NormalizedLink` gains an optional `scope` field:
 
 ```ts
+// Shown at module scope.
 type NormalizedLink = {
   id?: URI;
   path: readonly MemoryAddressPathComponent[];
@@ -192,6 +195,7 @@ converting from a normalized link.
 `NormalizedFullLink` must include a resolved cell scope:
 
 ```ts
+// Shown at module scope.
 type NormalizedFullLink = NormalizedLink & {
   id: URI;
   space: MemorySpace;
@@ -234,6 +238,7 @@ The link helpers must use these rules:
 Storage-address conversion extends the current value-address shape:
 
 ```ts
+// Shown at module scope.
 type ScopedMemorySpaceAddress = {
   space: MemorySpace;
   id: URI;
@@ -283,6 +288,7 @@ narrower scoped computation result.
 `JSONSchemaObj` gains an optional Common Fabric extension:
 
 ```ts
+// Shown at module scope.
 type AsCellEntry =
   | CellKind
   | {
@@ -343,6 +349,7 @@ of those outputs and the transformer can observe the type.
 Examples:
 
 ```ts
+// Shown at module scope.
 type SharedTodos = PerSpace<Writable<Todo[]>>;
 type UserPrefs = PerUser<Writable<Preferences>>;
 type Draft = PerSession<Writable<DraftState>>;
@@ -352,6 +359,7 @@ type AnyScopedValue = PerAny<Cell<Result>>;
 Local cell constructors can also declare scope directly:
 
 ```ts
+// Shown inside a pattern body.
 const sharedTodos = new Writable.perSpace<Todo[]>([]);
 const userPrefs = new Writable.perUser<Preferences>(DEFAULT_PREFS);
 const draft = new Writable.perSession<DraftState>(EMPTY_DRAFT);
@@ -562,6 +570,7 @@ transactions.
 ### Per-Session Draft Under Per-User Settings
 
 ```ts
+// Shown at module scope.
 type Settings = PerUser<Writable<{
   theme: string;
   activeDraft: Cell<PerSession<Draft>>;
@@ -574,6 +583,7 @@ sessions. Each session follows it to that session's draft instance.
 ### `map` Preserves Outer List Scope
 
 ```ts
+// Shown inside a pattern body.
 const results = items.map((item) => renderItem({ item, sessionContext }));
 ```
 
@@ -584,6 +594,7 @@ be a link to a session-scoped result cell from the invoked item pattern.
 ### `filter` Narrows Outer List Scope
 
 ```ts
+// Shown inside a pattern body.
 const visible = items.filter((item) => isVisibleInSession(item, sessionState));
 ```
 
@@ -593,6 +604,7 @@ session scoped because its cardinality differs per session.
 ### `ifElse` Keeps Condition Scope
 
 ```ts
+// Shown inside a pattern body.
 const selected = ifElse(condition, sharedLink, sessionLink);
 ```
 
@@ -602,6 +614,7 @@ link, following that stable output link resolves to data in the runtime scope.
 ### `navigateTo` Is Session State
 
 ```ts
+// Shown at module scope.
 navigateTo(piece);
 ```
 

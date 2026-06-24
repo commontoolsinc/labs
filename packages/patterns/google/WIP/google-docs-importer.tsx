@@ -39,7 +39,7 @@ import Note from "../../notes/note.tsx";
 //
 // This pattern requires Google OAuth with specific scopes and APIs enabled:
 //
-// 1. GOOGLE AUTH CHARM
+// 1. GOOGLE AUTH PIECE
 //    - Create and favorite a Google Auth piece with these scopes enabled:
 //      - Drive (read/write files & comments) - for fetching comments
 //      - Docs (read document content) - for fetching document content

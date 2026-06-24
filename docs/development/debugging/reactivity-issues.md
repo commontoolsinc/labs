@@ -7,6 +7,7 @@
 **Check 1:** Missing `$` prefix for bidirectional binding?
 
 ```typescript
+// Shown as JSX element children.
 // Not bidirectional - won't update automatically
 <cf-checkbox checked={item.done} />
 
@@ -17,6 +18,7 @@
 **Check 2:** Using handler when bidirectional binding would work?
 
 ```typescript
+// Shown as alternative snippets.
 // Unnecessary handler
 const toggle = handler(({ detail }, { item }) => {
   item.set.key("done").set(detail.checked);
@@ -32,6 +34,7 @@ const toggle = handler(({ detail }, { item }) => {
 Each component has specific event names. Check @common/components/COMPONENTS.md for the right event:
 
 ```typescript
+// Shown for illustration only.
 // Wrong event name
 <cf-checkbox onChange={...} />
 
@@ -46,12 +49,14 @@ Each component has specific event names. Check @common/components/COMPONENTS.md 
 **Problem:** Inline filtering/transformations in JSX don't create reactive dependencies
 
 ```typescript
+// Shown for illustration only.
 {items.filter(item => !item.done).map(...)}  {/* Won't update! */}
 ```
 
 **Solution:** Use `computed()` outside JSX, then map over the result
 
 ```typescript
+// Shown for illustration only.
 const activeItems = computed(() => items.filter(item => !item.done));
 {activeItems.map(...)}  {/* Updates reactively! */}
 ```
@@ -69,6 +74,7 @@ must receive a handler to run later, not the result of calling a stream or
 mutation immediately.
 
 ```tsx
+// Shown inside a pattern body.
 // Wrong - send runs while the row renders
 {items.map((item, index) => (
   <cf-button onClick={selectItem.send(index)}>Select</cf-button>
@@ -93,6 +99,7 @@ author `ifElse()` directly. See
 [Conditional Rendering](../../common/patterns/conditional.md).
 
 ```typescript
+// Shown inside a pattern body.
 // Preferred - the transformer handles this
 {showDetails ? <div>Details</div> : null}
 
@@ -121,6 +128,7 @@ If a conditional section still misbehaves, check:
 **Problem:** Variables from outer scopes aren't accessible in nested reactive contexts
 
 ```typescript
+// Shown inside a pattern body.
 {categories.map((category) => (
   <div>
     {computed(() =>
@@ -139,6 +147,7 @@ The safe pre-bake is a top-level computed of plain data — the `?? []`
 fallback below is a plain-array fallback, NOT a reactive-call wrapper:
 
 ```typescript
+// Shown inside a pattern body.
 const groupedItems = computed(() => {
   const groups: Record<string, Item[]> = {};
   for (const item of items) {

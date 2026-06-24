@@ -235,6 +235,7 @@ A callback is "direct" when it is:
 The following are allowed:
 
 ```typescript
+// Shown at module scope.
 import { pattern, lift, handler } from "commonfabric";
 
 export const MyPattern = pattern<Input, Output>((props) => {
@@ -257,6 +258,7 @@ export const myHandler = handler<Event, State>((event, state) => {
 The following are rejected:
 
 ```typescript
+// Shown for illustration only.
 const makeCallback = () => (input) => transform(input);
 
 // ❌ Callback is computed, not direct
@@ -271,6 +273,7 @@ callbacks may be left inline when already direct, or hoisted to a hardened
 binding when that makes verification simpler. For example:
 
 ```javascript
+// Shown for illustration only.
 const __cfModuleCallback_1 = __cfHardenFn(function (input) {
   return transform(input);
 });
@@ -310,6 +313,7 @@ must be module-safe data and pass a custom checker/freezer before it survives
 module load. This is the only category where an IIFE is acceptable.
 
 ```typescript
+// Shown inside a pattern body.
 const CONFIG = freezeVerifiedPlainData({
   maxItems: 100,
   labels: ["a", "b"],
@@ -326,6 +330,7 @@ const LOOKUP = freezeVerifiedPlainData((() => {
 Canonical emitted form:
 
 ```javascript
+// Shown inside a pattern body.
 const LOOKUP = __cfHelpers.__cf_data((() => {
   return {
     open: "Open",
@@ -440,6 +445,7 @@ The following are rejected unless they are normalized into `__cfHelpers.__cf_dat
 and the final escaping value passes module-safe-data validation:
 
 ```typescript
+// Shown for illustration only.
 // ❌ Arbitrary call result at module scope
 const result = someFunction();
 
@@ -530,6 +536,7 @@ This is the default behavior, not merely an optimization.
 - No `eval` or `Function` calls
 
 ```typescript
+// Shown for illustration only.
 // This stays inline (self-contained after normalization)
 const doubled = lift(({ value }) => value * 2)({ value: props.value });
 
@@ -541,6 +548,7 @@ const doubled = lift(({ value }) => value * multiplier)({ value: props.value });
 
 **Before (current):**
 ```typescript
+// Shown at module scope.
 export const MyPattern = pattern<Input, Output>((props) => {
   const doubled = computed(() => props.value * 2);
   return { doubled };
@@ -549,6 +557,7 @@ export const MyPattern = pattern<Input, Output>((props) => {
 
 **After transformation (current):**
 ```typescript
+// Shown at module scope.
 export const MyPattern = pattern<Input, Output>((props) => {
   const doubled = lift(({ value }) => value * 2)({ value: props.value });
   return { doubled };
@@ -573,6 +582,7 @@ Concretely, the lift-applied shape splits into a factory and an application:
 
 **After transformation (new, when hoisting is required):**
 ```typescript
+// Shown at module scope.
 // Hoisted to module scope
 const __computed_1 = lift<{ value: number }, number>(
   ({ value }) => value * 2
@@ -588,6 +598,7 @@ export const MyPattern = pattern<Input, Output>((props) => {
 
 **Before (current):**
 ```typescript
+// Shown at module scope.
 export const MyPattern = pattern<Input, Output>((props) => {
   const doSomething = action(() => {
     props.count = props.count + 1;
@@ -614,6 +625,7 @@ Concretely:
 
 **After transformation (when hoisting is required):**
 ```typescript
+// Shown at module scope.
 // Hoisted to module scope
 const __action_1 = handler<void, { count: Cell<number> }>(
   (_, { count }) => {
@@ -636,6 +648,7 @@ explicitly and are not the target of the module-hoisting rule above.
 
 **Before:**
 ```typescript
+// Shown for illustration only.
 export const MyPattern = pattern<Input, Output>((props) => {
   const total = computed(() => props.items.reduce((a, b) => a + b, 0));
   return { total };
@@ -654,6 +667,7 @@ module-hoisting rule.
 
 **After transformation:**
 ```typescript
+// Shown at module scope.
 const __derive_1 = lift<number[], number>(
   items => items.reduce((a, b) => a + b, 0)
 );
@@ -693,6 +707,7 @@ export interface SandboxConfig {
 Default config:
 
 ```typescript
+// Shown inside a pattern body.
 function getDefaultSandboxConfig(): SandboxConfig {
   return {
     enabled: true,
@@ -704,6 +719,7 @@ function getDefaultSandboxConfig(): SandboxConfig {
 Lockdown options are derived from `debug`:
 
 ```typescript
+// Shown for illustration only.
 lockdown({
   errorTaming: debug ? "unsafe" : "safe",
   stackFiltering: debug ? "verbose" : "concise",
@@ -738,6 +754,7 @@ The verified runtime path evaluates that bundle inside the pattern's
 Compartment:
 
 ```typescript
+// Shown for illustration only.
 preflightCompiledBundle(compiledBundle);
 const entrypoint = patternCompartment.evaluate(compiledBundle);
 const result = entrypoint(runtimeDeps);
@@ -950,6 +967,7 @@ Future v2 requirements, if dynamic imports are reintroduced:
 Closures can capture references to user data, leaking it between invocations:
 
 ```typescript
+// Shown for illustration only.
 // DANGEROUS: Closure captures `userData`
 let userData: any;
 
@@ -973,6 +991,7 @@ The verifier enforces that surviving module-scope bindings:
 - Are either trusted direct functions or verified module-safe data
 
 ```typescript
+// Shown for illustration only.
 // ❌ REJECTED: let at module scope
 let counter = 0;
 
@@ -989,6 +1008,7 @@ const CONFIG = freezeVerifiedPlainData({ key: "value" });
 When `pattern()` is called, the inner function executes immediately:
 
 ```typescript
+// Shown for illustration only.
 export const MyPattern = pattern((props) => {
   // This code runs at LOAD TIME, not invocation time
   // At load time, `props` is a schema placeholder, not user data
@@ -1019,6 +1039,7 @@ This spec introduces a runtime helper dedicated to non-function top-level
 values:
 
 ```typescript
+// Shown for illustration only.
 interface ModuleSafeRecordV1 {
   [key: string]: ModuleSafeValueV1;
   [key: symbol]: ModuleSafeValueV1;
@@ -1155,6 +1176,7 @@ Executed in Compartment
 
 **Original source (MyPattern.tsx:23):**
 ```typescript
+// Shown for illustration only.
 export const MyPattern = pattern((props) => {
   const doubled = computed(() => props.value.map(x => x * 2));  // Line 23
   return { doubled };
@@ -1163,6 +1185,7 @@ export const MyPattern = pattern((props) => {
 
 **After transformation (compiled.js:5, 47):**
 ```javascript
+// Shown for illustration only.
 // Hoisted to line 5
 const __computed_1 = lift(({ value }) => value.map(x => x * 2));
 
@@ -1230,6 +1253,7 @@ Each stage produces and consumes source maps:
 The hoisting transformer must generate accurate source maps:
 
 ```typescript
+// Shown for illustration only.
 // packages/ts-transformers/src/hoisting.ts
 
 class HoistingTransformer {
@@ -1260,6 +1284,7 @@ class HoistingTransformer {
 The existing js-compiler already supports source maps. Ensure chaining:
 
 ```typescript
+// Shown for illustration only.
 // packages/js-compiler/typescript/compiler.ts
 
 const compilerOptions: ts.CompilerOptions = {
@@ -1289,6 +1314,7 @@ rather than introducing a second parallel `ErrorMapper` object model.
 The existing shared surface is the right baseline:
 
 ```typescript
+// Shown at module scope.
 interface StackMapper {
   loadSourceMap(filename: string, sourceMap: SourceMap): void;
   mapPosition(
@@ -1319,6 +1345,7 @@ Implementation guidance:
 #### 8.4.2 ErrorMappingOptions and MappedError
 
 ```typescript
+// Shown at module scope.
 interface ErrorMappingOptions {
   readonly debug?: boolean;
   readonly patternId?: string;
@@ -1349,6 +1376,7 @@ The synchronous helper must operate on the shared mapper rather than allocate a
 fresh mapper per error:
 
 ```typescript
+// Shown inside a pattern body.
 function mapError(
   mapper: StackMapper,
   error: Error,
@@ -1371,6 +1399,7 @@ per-call cache container.
 Execution wrappers are required for both sync and async pattern callbacks:
 
 ```typescript
+// Shown for illustration only.
 interface ExecutionWrapperOptions {
   readonly patternId: string;
   readonly functionName?: string;
@@ -1435,6 +1464,7 @@ Original source (MyPattern.tsx:23):
 #### 8.5.2 Enhanced Error Display
 
 ```typescript
+// Shown for illustration only.
 // packages/runner/src/sandbox/error-display.ts
 
 interface ErrorDisplayOptions {
@@ -1578,6 +1608,7 @@ Pattern: my-pattern-id
 #### 8.6.3 Implementation
 
 ```typescript
+// Shown at module scope.
 // packages/runner/src/sandbox/stack-filter.ts
 
 interface StackFilterOptions {
@@ -1920,6 +1951,7 @@ surface, but the target module split should live under `packages/runner/src/sand
 Replace direct eval with the authoritative verified SES execution path:
 
 ```typescript
+// Shown for illustration only.
 // packages/runner/src/runner.ts
 
 private instantiateJavaScriptNode(
@@ -1993,6 +2025,7 @@ default.
 The runtime may expose an explicit, runtime-scoped opt-in for those cases:
 
 ```typescript
+// Shown inside a pattern body.
 const trust = runtime.createUnsafeHostTrust({
   reason: "unit test fixture",
 });
@@ -2040,6 +2073,7 @@ callback Compartment. Any missing lexical capture must therefore fail closed at
 runtime rather than silently preserving host state.
 
 ```typescript
+// Shown for illustration only.
 // Before
 fn = this.runtime.harness.getInvocation(module.implementation);
 
@@ -2065,6 +2099,7 @@ and must preserve fresh-instantiation and verification guarantees.
 #### 6.1 Security Tests
 
 ```typescript
+// Shown at module scope.
 // packages/runner/test/sandbox/security.test.ts
 
 describe('SES Sandbox Security', () => {
@@ -2195,6 +2230,7 @@ describe('SES Sandbox Security', () => {
 #### 6.2 Performance Tests
 
 ```typescript
+// Shown inside a pattern body.
 // packages/runner/test/sandbox/performance.test.ts
 
 describe('SES Sandbox Performance', () => {
@@ -2230,6 +2266,7 @@ const startTime = Date.now();  // Side effect at module scope
 
 **After:**
 ```typescript
+// Shown at module scope.
 import { safeDateNow } from "commonfabric";
 
 const getStartTime = lift(() => safeDateNow());
@@ -2239,6 +2276,7 @@ const getStartTime = lift(() => safeDateNow());
 
 **Before (breaks):**
 ```typescript
+// Shown at module scope.
 let counter = 0;
 export const MyPattern = pattern(() => {
   counter++;
@@ -2248,6 +2286,7 @@ export const MyPattern = pattern(() => {
 
 **After:**
 ```typescript
+// Shown at module scope.
 // Use Cell for state
 export const MyPattern = pattern(() => {
   const counter = cell(0);
@@ -2259,6 +2298,7 @@ export const MyPattern = pattern(() => {
 ### 10.2 Runtime API Changes
 
 ```typescript
+// Shown for illustration only.
 // Before
 const resultCell = runtime.getCell(space, "pattern-result");
 const runner = new Runner(runtime);

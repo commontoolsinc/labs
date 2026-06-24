@@ -17,6 +17,7 @@ Add `cf-cell-context` sparingly—typically 1-2 per pattern at most. Use it for 
 This is better than adding a `computed` with `console.log` because inspection is conditional—users can watch and unwatch values on demand rather than flooding the console.
 
 ```tsx
+// Shown as JSX element children.
 <cf-cell-context $cell={result} label="Calculation Result">
   <div>{result.value}</div>
 </cf-cell-context>

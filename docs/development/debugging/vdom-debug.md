@@ -10,6 +10,7 @@ or broken reactivity.
 Open the browser console on any page with a rendered pattern:
 
 ```javascript
+// Shown inside a pattern body.
 commonfabric.vdom.renders()         // list active renderings
 await commonfabric.vdom.dump()      // pretty-print the VDOM tree
 commonfabric.vdom.stats()           // node/listener counts
@@ -76,6 +77,7 @@ Looks up a DOM node by its internal applicator node ID. Only works for
 worker-path renders (the applicator tracks node IDs).
 
 ```javascript
+// Shown inside a pattern body.
 const node = commonfabric.vdom.nodeForId(1)
 // Returns the DOM element, or undefined
 ```
@@ -85,6 +87,7 @@ const node = commonfabric.vdom.nodeForId(1)
 Raw access to the `Map<HTMLElement, ActiveRender>` for advanced inspection.
 
 ```javascript
+// Shown inside a pattern body.
 commonfabric.vdom.registry
 // Map(1) { div#app => { parent, cell, renderer, path } }
 ```
@@ -112,6 +115,7 @@ data attributes) and aren't needed for structural debugging.
 ### Stale render / content not updating
 
 ```javascript
+// Shown inside a pattern body.
 // Check if the render is active
 commonfabric.vdom.renders()
 
@@ -125,6 +129,7 @@ commonfabric.vdom.nodeForId(1)  // look up specific nodes
 ### Missing children
 
 ```javascript
+// Shown inside a pattern body.
 // Get the raw tree and inspect children arrays
 const tree = await commonfabric.vdom.tree()
 console.log(tree.children)  // are children present in the VDOM?
@@ -133,6 +138,7 @@ console.log(tree.children)  // are children present in the VDOM?
 ### Wrong props
 
 ```javascript
+// Shown inside a pattern body.
 // Get the tree and inspect a node's props
 const tree = await commonfabric.vdom.tree()
 // Props are CellHandles — call .get() on individual ones
@@ -142,6 +148,7 @@ tree.props.className.get()
 ### Multiple renders on the page
 
 ```javascript
+// Shown inside a pattern body.
 // List all renders
 commonfabric.vdom.renders()
 

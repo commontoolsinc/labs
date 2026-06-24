@@ -62,7 +62,7 @@ function schemaifyWish<T>(path: string, def: T) {
   // Can't generate schema - T is not concrete until call site
 }
 
-const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable", []);
+const mentionable = schemaifyWish<MentionablePiece[]>("#mentionable", []);
 ```
 
 **Current behavior:** Graceful degradation - function compiles but loses

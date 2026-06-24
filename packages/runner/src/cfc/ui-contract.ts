@@ -1,5 +1,4 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { isEntityRef } from "@commonfabric/data-model/cell-rep";
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import {
   findAndInlineDataURILinks,
@@ -7,7 +6,7 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getJSONFromDataURI, toURI } from "../uri-utils.ts";
+import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 
@@ -546,9 +545,6 @@ const eventEnvelopePayloads = (
   return payloads;
 };
 
-const aliasCellId = (cell: unknown): string | undefined =>
-  isEntityRef(cell) ? toURI(cell) : undefined;
-
 const contractCandidatesFromEventContext = (
   event: unknown,
   write: NormalizedFullLink,
@@ -567,10 +563,6 @@ const contractCandidatesFromEventContext = (
         !Array.isArray(alias.path) ||
         !pathHasPrefix(write.path, alias.path)
       ) {
-        continue;
-      }
-      const id = aliasCellId(alias.cell);
-      if (id !== undefined && id !== write.id) {
         continue;
       }
       const aliasSpace = typeof alias.space === "string"

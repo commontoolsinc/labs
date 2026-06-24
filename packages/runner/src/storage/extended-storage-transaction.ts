@@ -2,7 +2,7 @@ import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
-  type FabricObject,
+  type FabricPlainObject,
   type FabricValue,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
@@ -761,7 +761,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: FabricObject;
+      let valueObj: FabricPlainObject;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -783,7 +783,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // the shared input.
         valueObj = shallowMutableClone(
           currentValue as FabricValue,
-        ) as FabricObject;
+        ) as FabricPlainObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -792,7 +792,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: FabricObject = valueObj;
+      let nextValue: FabricPlainObject = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.
@@ -802,7 +802,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const isNextKeyArrayIndex = isArrayIndexPropertyName(nextKey);
         nextValue =
           nextValue[key] =
-            (isNextKeyArrayIndex ? [] : {}) as FabricObject;
+            (isNextKeyArrayIndex ? [] : {}) as FabricPlainObject;
       }
       nextValue[lastKey] = value as FabricValue;
       const parentAddress = { ...address, path: lastExistingPath };

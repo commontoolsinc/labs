@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { NAME, Pattern, Runtime } from "@commonfabric/runner";
+import {
+  getPatternIdentityRef,
+  NAME,
+  Pattern,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
 
@@ -105,6 +112,28 @@ function namedPattern(name: string, multiplier: number): Pattern {
   };
 }
 
+function compiledMultiplierProgram(
+  version: string,
+  multiplier: number,
+): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, lift } from 'commonfabric';",
+          `const multiply = lift((input: number) => input * ${multiplier});`,
+          "export default pattern<{ input: number }>(({ input }) => ({",
+          `  version: ${JSON.stringify(version)},`,
+          "  output: multiply(input),",
+          "}));",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs: number = 1_000,
@@ -199,6 +228,70 @@ describe("piece pull materialization", () => {
     );
 
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+  });
+
+  it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("v1", 2),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { input: 5 },
+      "compiled-set-pattern-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const id = entityRefToString(piece.entityId);
+    const controller = new PieceController(manager, piece);
+    const firstRef = getPatternIdentityRef(piece);
+
+    expect(firstRef).toBeDefined();
+    expect(manager.getResult(piece).get()).toEqual({
+      version: "v1",
+      output: 10,
+    });
+
+    await controller.setPattern(compiledMultiplierProgram("v2", 10));
+    await manager.runtime.idle();
+    await manager.synced();
+
+    const secondRef = getPatternIdentityRef(piece);
+    expect(secondRef).toBeDefined();
+    expect(secondRef!.identity).not.toEqual(firstRef!.identity);
+    expect(manager.getResult(piece).get()).toEqual({
+      version: "v2",
+      output: 50,
+    });
+
+    const session = await createSession({
+      identity: signer,
+      spaceName: manager.getSpaceName()!,
+    });
+    const freshRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager,
+    });
+    const freshManager = new PieceManager(session, freshRuntime);
+    const freshPieces = new PiecesController(freshManager);
+
+    try {
+      await freshManager.synced();
+      const freshPiece = await freshPieces.get(id, true);
+      const freshCell = freshPiece.getCell();
+      const freshRef = getPatternIdentityRef(freshCell);
+
+      expect(freshRef).toEqual(secondRef);
+      expect(await freshPiece.result.get()).toEqual({
+        version: "v2",
+        output: 50,
+      });
+      const source = await freshPiece.getPatternSourceProgram();
+      expect(source?.files.some((file) => file.contents.includes("v2"))).toBe(
+        true,
+      );
+    } finally {
+      await freshRuntime.dispose();
+    }
   });
 
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {

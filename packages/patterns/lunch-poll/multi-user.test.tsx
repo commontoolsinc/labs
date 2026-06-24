@@ -21,15 +21,12 @@
 import { action, computed, multiUserTest, pattern } from "commonfabric";
 import LunchPoll, { type CozyPollOutput } from "./main.tsx";
 
-const TEST_WEB_SEARCH_URL =
-  "data:application/json,%7B%22results%22%3A%5B%5D%7D";
-
 interface Setup {
   poll: CozyPollOutput;
 }
 
 export const setup = pattern(() => ({
-  poll: LunchPoll({ webSearchUrl: TEST_WEB_SEARCH_URL }),
+  poll: LunchPoll({}),
 }));
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
@@ -45,9 +42,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     const first = poll.options?.[0];
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
   });
-  const action_refresh_homepages = action(() => {
-    poll.enrichHomePages.send({});
-  });
 
   // First joiner becomes the host.
   const assert_joined_as_host = computed(() =>
@@ -60,10 +54,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
   const assert_option_added = computed(() =>
     (poll.options ?? []).length === 1 &&
-    poll.options?.[0]?.title === "Sushi" &&
-    poll.options?.[0]?.homePageUrl === "" &&
-    poll.options?.[0]?.homePageUrlOverride === "" &&
-    poll.options?.[0]?.imageUrl === ""
+    poll.options?.[0]?.title === "Sushi"
   );
   const assert_own_vote = computed(() =>
     (poll.votes ?? []).length === 1 &&
@@ -78,10 +69,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     poll.votes?.[1]?.voterName === "Bob" &&
     (poll.options ?? []).length === 1 &&
     poll.myName === "Alice"
-  );
-  const assert_host_lookup_active = computed(() =>
-    (poll.homePageLookupUrls ?? []).length === 1 &&
-    poll.homePageLookupUrls?.[0] === TEST_WEB_SEARCH_URL
   );
   // Host takeover observed from the deposed host's runtime.
   const assert_deposed = computed(() =>
@@ -99,9 +86,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "alice-set-up" },
       { await: "bob-voted" },
       { assertion: assert_sees_bob },
-      { action: action_refresh_homepages },
-      { assertion: assert_host_lookup_active },
-      { label: "alice-refreshed-homepages" },
       { await: "bob-claimed-host" },
       { assertion: assert_deposed },
     ],
@@ -156,12 +140,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     poll.votes?.[0]?.voterName === "Alice" &&
     poll.votes?.[1]?.voterName === "Bob"
   );
-  const assert_non_host_lookup_inactive = computed(() =>
-    poll.myName === "Bob" &&
-    poll.isAdmin === false &&
-    (poll.homePageLookupUrls ?? []).length === 1 &&
-    poll.homePageLookupUrls?.[0] === ""
-  );
   const assert_is_host_now = computed(() =>
     poll.adminName === "Bob" && poll.isAdmin === true
   );
@@ -179,8 +157,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { action: action_vote_green },
       { assertion: assert_both_votes },
       { label: "bob-voted" },
-      { await: "alice-refreshed-homepages" },
-      { assertion: assert_non_host_lookup_inactive },
       { action: action_claim_host },
       { assertion: assert_is_host_now },
       { label: "bob-claimed-host" },

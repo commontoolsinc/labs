@@ -13,7 +13,7 @@ import {
 import { default as Note } from "../notes/note.tsx";
 
 // Maximum number of recent pieces to track
-const MAX_RECENT_CHARMS = 10;
+const MAX_RECENT_PIECES = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
@@ -180,7 +180,7 @@ const trackRecent = handler<
   // Remove if already present
   const filtered = current.filter((c) => !equals(c, piece));
   // Add to front and limit to max
-  const updated = [piece, ...filtered].slice(0, MAX_RECENT_CHARMS);
+  const updated = [piece, ...filtered].slice(0, MAX_RECENT_PIECES);
   recentPieces.set(updated);
 });
 

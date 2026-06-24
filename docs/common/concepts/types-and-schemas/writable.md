@@ -27,6 +27,7 @@ When calling a pattern, you have two options for providing input values:
 **Plain values** create independent state for each pattern instance:
 
 ```typescript
+// Shown inside a pattern body.
 const counter1 = Counter({ count: 0 });
 const counter2 = Counter({ count: 0 });
 // counter1 and counter2 have separate state - incrementing one doesn't affect the other
@@ -35,6 +36,7 @@ const counter2 = Counter({ count: 0 });
 **Cell references** share state across pattern instances:
 
 ```typescript
+// Shown inside a pattern body.
 const sharedCount = new Writable(0);
 const counter1 = Counter({ count: sharedCount });
 const counter2 = Counter({ count: sharedCount });
@@ -50,6 +52,7 @@ Note: The `Writable<T>` annotation in a pattern's type signature indicates write
 When storing a "pointer" to a Cell (e.g., tracking which item is selected), **box the reference** in an object:
 
 ```typescript
+// Shown for illustration only.
 // ✅ Correct - Boxed reference
 interface Input {
   selected: Writable<{ item: Item }>;
@@ -87,6 +90,7 @@ elements** (via `equals()` from `commonfabric`; cells also expose an
 equivalent `.equals()` method):
 
 ```typescript
+// Shown at module scope.
 import { equals, handler, Writable } from 'commonfabric';
 
 const removeItem = handler<
@@ -108,6 +112,7 @@ everything else is dropped, even if the underlying data contains it. This is a
 common source of mysterious `undefined`s.
 
 ```typescript
+// Shown at module scope.
 // If Notebook.notes is typed as NotePiece[]...
 interface NotePiece { title?: string; noteId?: string; }
 

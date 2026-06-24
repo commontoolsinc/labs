@@ -7,12 +7,14 @@ This guide explains how to programmatically invoke a handler stream from `Runtim
 ### 1. Get the piece cell
 
 ```typescript
+// Shown inside a pattern body.
 const pieceCell = someCell.resolveAsCell();
 ```
 
 ### 2. Apply schema with `{ asCell: ["stream"] }` on the handler property
 
 ```typescript
+// Shown inside a pattern body.
 const cell = pieceCell.asSchema({
   type: "object",
   properties: {
@@ -27,6 +29,7 @@ const cell = pieceCell.asSchema({
 No transaction needed:
 
 ```typescript
+// Shown for illustration only.
 const handlerStream = cell.key("handlerName");
 handlerStream.send({ eventData });
 ```
@@ -34,6 +37,7 @@ handlerStream.send({ eventData });
 ### 4. Wait for processing
 
 ```typescript
+// Shown inside a pattern body.
 await runtime.idle();
 ```
 

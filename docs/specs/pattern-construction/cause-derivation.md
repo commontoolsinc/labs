@@ -55,6 +55,7 @@ For every helper that returns a cell (including plain `lift`, `handler`,
 Combine these pieces into a structured object and feed it to `createRef`:
 
 ```ts
+// Shown inside a pattern body.
 const cause = createRef({
   parent: frameCause,
   helper: "lift",

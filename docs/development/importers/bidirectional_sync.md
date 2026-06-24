@@ -68,6 +68,7 @@ write redirect link from the edit-allocated cell to the canonical cell. This
 ensures any links created between the edit and the sync remain valid.
 
 ```typescript
+// Shown for illustration only.
 // After getting canonical ID for a newly created item:
 const canonicalCell = Cell.for(canonicalId);
 const editCell = item.asResolvedCell();
@@ -99,6 +100,7 @@ directory and keeps cells in sync with the filesystem.
 ### Daemon Setup
 
 ```typescript
+// Shown for illustration only.
 import { Runtime } from "@commonfabric/runner";
 import { popFrame, pushFrameFromCause } from "@commonfabric/runner/builder";
 
@@ -115,6 +117,7 @@ await Promise.all([
 ### The Sync Loop
 
 ```typescript
+// Shown for illustration only.
 async function runSyncLoop(
   runtime: Runtime,
   space: MemorySpace,
@@ -258,6 +261,7 @@ The `buildStateFromFs` function (or equivalent) **must** use `Cell.for()` for
 every sub-item that has an external canonical ID. For example:
 
 ```typescript
+// Shown for illustration only.
 function buildStateFromFs(fsState: FsState): State {
   return {
     items: fsState.items.map((item) =>
@@ -293,6 +297,7 @@ Only one daemon instance should run per sync target. Use a lockfile with the
 daemon's PID:
 
 ```typescript
+// Shown inside a pattern body.
 const lockPath = path.join(watchPath, ".sync.lock");
 
 function acquireLock(): boolean {
@@ -347,6 +352,7 @@ Not all edit failures are equal. Two categories require different strategies:
   queue and surface to the user for reformulation. The daemon continues running.
 
 ```typescript
+// Shown for illustration only.
 // In the edit application loop:
 try {
   applyEditToFilesystem(edit, watchPath);
@@ -466,6 +472,7 @@ Render directly from the synced state cell. No local state management, no
 optimistic-update tracking in the UI layer.
 
 ```tsx
+// Shown for illustration only.
 const myPattern = pattern<{ state: State; edits: Edit[] }>(
   ({ state, edits }) => {
     return (
@@ -485,6 +492,7 @@ On user interaction, atomically (via `action()` or `handler()`) do two things:
 2. Optimistically apply the change to the local state
 
 ```tsx
+// Shown for illustration only.
 const onRename = handler<{ item: Item; edits: Edit[] }>(
   ({ item, edits }, newName: string) => {
     // Enqueue the edit
@@ -512,6 +520,7 @@ sync overwrites the state. No cleanup logic needed — reactivity handles it.
 "syncing..." badges.
 
 ```tsx
+// Shown for illustration only.
 {
   edits.length > 0 && (
     <span class="sync-badge">Syncing {edits.length} changes...</span>
@@ -560,6 +569,7 @@ An edit carries:
 - **timestamps** — `createdAt`, `sentAt`, `resolvedAt`
 
 ```typescript
+// Shown at module scope.
 interface ApiEdit {
   type: string;
   target: CellReference; // Where this edit should render
@@ -575,6 +585,7 @@ interface ApiEdit {
 A computed index maps targets to their pending edits for efficient lookup:
 
 ```typescript
+// Shown inside a pattern body.
 const editsByTarget = computed(() => {
   const index = new Map<CellReference, ApiEdit[]>();
   for (const edit of editsCell.get()) {
@@ -619,6 +630,7 @@ When the user performs an action:
 4. **On failure** — mark edit as `failed` with error info
 
 ```typescript
+// Shown for illustration only.
 const createIssue = handler<{ edits: ApiEdit[] }>(
   ({ edits }, title: string, body: string) => {
     const edit: ApiEdit = {
@@ -665,6 +677,7 @@ Webhooks deliver events as they happen. Each event is applied as an incremental
 update in a single transaction:
 
 ```typescript
+// Shown for illustration only.
 async function handleWebhookEvent(event: WebhookEvent) {
   // Deduplicate via event ID (idempotency)
   if (processedEvents.has(event.id)) return;
@@ -710,6 +723,7 @@ Webhooks are best-effort. To catch missed events, drift, and eventual consistenc
 gaps, periodically (or on user request) run a full rebuild:
 
 ```typescript
+// Shown for illustration only.
 async function fullRebuild() {
   // Read everything from the API
   const allIssues = await github.listAllIssues();
@@ -754,6 +768,7 @@ The pattern renders canonical state as normal, plus overlays pending and failed
 edits at the appropriate locations:
 
 ```tsx
+// Shown for illustration only.
 const issueList = pattern<{ state: State; edits: ApiEdit[] }>(
   ({ state, edits }) => {
     const pendingEdits = computed(() =>

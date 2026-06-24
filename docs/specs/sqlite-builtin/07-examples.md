@@ -98,6 +98,7 @@ type and which columns are cell-bearing. A `Cell<T>` field marks a decoded link
 column even when the alias drops the `_cf_link` suffix.
 
 ```tsx
+// Shown for illustration only.
 const leaderboard = db.query<{ author: Cell<User>; n: number }>(
   `SELECT author_cf_link AS author, count(*) AS n
    FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
@@ -128,6 +129,7 @@ return lift((
 The free-function form is equivalent if you prefer it:
 
 ```tsx
+// Shown at module scope.
 import { sqliteQuery } from "commonfabric";
 
 const leaderboard = sqliteQuery<{ author: Cell<User>; n: number }>({
@@ -147,6 +149,7 @@ the `INSERT` fails, the whole commit aborts and the counter write rolls back too
 [04](./04-server-execution-and-transactions.md)).
 
 ```tsx
+// Shown inside a pattern body.
 const bump = handler<{ body: string }, { count: Cell<number>; db: SqliteDb }>(
   ({ body }, { count, db }) => {
     count.set(count.get() + 1); // cell write
@@ -172,6 +175,7 @@ agree.
 ## Example 4 — VM-file source (stubbed)
 
 ```tsx
+// Shown inside a pattern body.
 // vmHandle is an opaque capability handle to a VM; path is inside that VM.
 const db = sqliteDatabase({}, { vm: vmHandle, path: "/var/lib/app/data.db" });
 
@@ -186,6 +190,7 @@ and consumes it. It never names a file or picks a source — an operator connect
 one.
 
 ```tsx
+// Shown at module scope.
 export default pattern<{ db: SqliteDb; key: string }>(({ db, key }) => {
   const lookup = db.query<{ value: string }>(
     "SELECT value FROM lookup WHERE key = ?",

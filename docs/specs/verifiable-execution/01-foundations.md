@@ -173,6 +173,7 @@ authority that can be renewed or revoked.
 The fundamental data model uses `{the, of, is, cause}` tuples:
 
 ```typescript
+// Shown at module scope.
 // Media type - adds a dimension for different "views" of an entity
 type MIME = `${string}/${string}`; // e.g., "application/json"
 
@@ -219,6 +220,7 @@ history of changes for each entity:
 1. **Genesis State**: The first assertion for an entity has `cause` pointing to
    the hash of `{the, of}` (the Unclaimed state). This is computed as:
    ```typescript
+   // Shown inside a pattern body.
    const genesisCause = refer({ the, of }); // Hash of unclaimed state
    ```
 

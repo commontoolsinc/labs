@@ -21,6 +21,7 @@ interface Input {
 Use `T | Default<Value>` when the default value is narrower than the runtime type:
 
 ```typescript
+// Shown at module scope.
 interface ProfileInput {
   displayName: string | Default<"">;
   avatarUrl: string | null | Default<null>;
@@ -55,6 +56,7 @@ interface SettingsInput {
 When you need **both** a default value **and** write access (`.push()`, `.set()`, `.get()`), wrap the defaulted type inside `Writable<>`:
 
 ```typescript
+// Shown at module scope.
 import { Default, Writable } from "commonfabric";
 
 interface Board {

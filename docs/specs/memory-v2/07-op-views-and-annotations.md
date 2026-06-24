@@ -125,6 +125,7 @@ queries on them.
 Illustrative shape:
 
 ```typescript
+// Shown at module scope.
 type OpCodecId = string; // e.g. "text-ot@1", "prosemirror-step@1"
 
 interface CollaborativeFieldCapability {
@@ -148,6 +149,7 @@ field path.
 Illustrative extension:
 
 ```typescript
+// Shown at module scope.
 interface ApplyOpOperation {
   op: "apply-op";
   id: EntityId;
@@ -187,6 +189,7 @@ payload with the integrated result.
 Illustrative receipt extension:
 
 ```typescript
+// Shown at module scope.
 interface ApplyOpResolution {
   id: EntityId;
   path: ReadPath;
@@ -257,6 +260,7 @@ integrated ops since version N" are different queries.
 Illustrative request shape:
 
 ```typescript
+// Shown at module scope.
 type ProjectionKind =
   | "materialized"
   | "submitted-ops"
@@ -363,6 +367,7 @@ Properties:
 Illustrative shape:
 
 ```typescript
+// Shown at module scope.
 interface AnchoredAnnotation {
   target: {
     id: EntityId;

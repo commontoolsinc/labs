@@ -89,6 +89,7 @@ Tests are patterns that test patterns: instantiate the subject, alternate
 a `tests` array. From `packages/patterns/counter/counter.test.tsx`:
 
 ```tsx
+// Shown at module scope.
 import { action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 

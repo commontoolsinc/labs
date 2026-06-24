@@ -8,7 +8,7 @@
  * self-model: values, neurotype, and meaning-alignment answers.
  *
  * Usage from other patterns:
- *   const self = wish<SelfOutput>({ query: "#self-model" });
+ *   const self = wish<SelfOutput>({ query: "#selfModel" });
  */
 import {
   computed,
@@ -301,7 +301,7 @@ interface SelfInput {
   selfModel?: Writable<SelfModel | Default<typeof EMPTY_SELF_MODEL>>;
 }
 
-/** Private self-model — the user's values, neurotype, and reflective answers. #self-model */
+/** Private self-model — the user's values, neurotype, and reflective answers. #selfModel */
 export interface SelfOutput {
   [NAME]: string;
   [UI]: VNode;

@@ -48,12 +48,14 @@ Given a recognized helper element:
 Example:
 
 ```tsx
+// Shown for illustration only.
 <UiAction action="SubmitDirectCommand" onClick={submit}>Go</UiAction>
 ```
 
 lowers to:
 
 ```tsx
+// Shown for illustration only.
 <ct-button data-ui-action="SubmitDirectCommand" onClick={submit}>Go</ct-button>
 ```
 
@@ -68,6 +70,7 @@ When the helper's required semantic props are compile-time string literals,
 `CfcJsxTransformer` must attach a node-local schema hint of the form:
 
 ```ts
+// Shown for illustration only.
 {
   cfcUiContract: {
     helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";

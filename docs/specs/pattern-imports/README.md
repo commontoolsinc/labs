@@ -3,6 +3,7 @@
 Letting authored patterns import other patterns published in the fabric:
 
 ```tsx
+// Shown for illustration only.
 import { TodoItem, todoSchema } from "cf:/kitchen/todo-list";  // a slug — names a piece OR a published pattern
 import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";               // a content-addressed source, directly
 ```
@@ -129,6 +130,7 @@ segment-splitting stay unambiguous.)
 Examples:
 
 ```tsx
+// Shown for illustration only.
 import { TodoItem } from "cf:todo-list";                            // slug, current space
 import { todoSchema } from "cf:todo-list/schemas";                  // subpath (phase 2)
 import { TodoItem } from "cf:/kitchen/todo-list";                   // space by name

@@ -20,6 +20,7 @@ async function isValidCache(path: string): Promise<boolean> {
 
 export const webRead: AppRouteHandler<WebReadRoute> = async (c) => {
   const logger = c.get("logger");
+  const verifiedUserDid = c.get("verifiedUserDid");
   const payload = await c.req.json();
   const { url, ...options } = payload;
 
@@ -27,7 +28,7 @@ export const webRead: AppRouteHandler<WebReadRoute> = async (c) => {
   const cachePath = `${CACHE_DIR}/${promptSha}.json`;
 
   logger.info(
-    { url, promptSha, options },
+    { url, promptSha, options, verifiedUserDid },
     "Starting advanced web extraction",
   );
 

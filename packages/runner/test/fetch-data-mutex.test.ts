@@ -16,6 +16,10 @@ import {
   internalSchema,
   tryClaimMutex,
 } from "../src/builtins/fetch-utils.ts";
+import {
+  FIRST_PARTY_HTTP_AUTH_HEADERS,
+  verifyFirstPartyHttpRequest,
+} from "../src/toolshed-http-auth.ts";
 import type { Schema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
@@ -684,5 +688,196 @@ describe("fetch-data mutex mechanism", () => {
         (call.init?.headers as Record<string, string>)?.["Accept"],
       ).toBe("application/vnd.github.v3.star+json");
     }
+  });
+
+  it("adds custom auth headers to protected toolshed fetchData requests", async () => {
+    const fetchData = byRef("fetchData");
+    const testRecipe = pattern<{ query: string }>(
+      ({ query }) =>
+        fetchData({
+          url: "/api/agent-tools/web-search",
+          mode: "json",
+          options: {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: { query },
+          },
+        }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "signed-toolshed-fetch",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { query: "signed request" },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    const call = fetchCalls.find((call) =>
+      call.url === "http://mock-test-server.local/api/agent-tools/web-search"
+    );
+    expect(call).toBeDefined();
+
+    const headers = new Headers(call!.init?.headers);
+    expect(
+      headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.proof),
+    ).toBeTruthy();
+    expect(
+      headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.auth),
+    ).toBeTruthy();
+    expect(
+      headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.bodySha256),
+    ).toBeTruthy();
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.userDid)).toBe(
+      signer.did(),
+    );
+    expect(headers.get("Signature")).toBe(null);
+    expect(headers.get("Signature-Input")).toBe(null);
+    expect(headers.get("Content-Digest")).toBe(null);
+
+    const verified = await verifyFirstPartyHttpRequest({
+      request: new Request(call!.url, {
+        method: call!.init?.method,
+        headers,
+        body: call!.init?.body as BodyInit,
+      }),
+    });
+    expect(verified.userDid).toBe(signer.did());
+  });
+
+  it("replaces caller-supplied auth headers on protected fetchData requests", async () => {
+    const fetchData = byRef("fetchData");
+    const testRecipe = pattern<{ query: string }>(
+      ({ query }) =>
+        fetchData({
+          url: "/api/agent-tools/web-search",
+          mode: "json",
+          options: {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              [FIRST_PARTY_HTTP_AUTH_HEADERS.proof]: "bogus",
+              [FIRST_PARTY_HTTP_AUTH_HEADERS.auth]: "bogus",
+              [FIRST_PARTY_HTTP_AUTH_HEADERS.bodySha256]: "bogus",
+              [FIRST_PARTY_HTTP_AUTH_HEADERS.userDid]: "did:key:bogus",
+              "Signature": "bogus",
+              "Signature-Input": "bogus",
+              "Content-Digest": "bogus",
+            },
+            body: { query },
+          },
+        }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "replace-auth-headers",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { query: "replace request" },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    const call = fetchCalls.find((call) =>
+      call.url === "http://mock-test-server.local/api/agent-tools/web-search"
+    );
+    expect(call).toBeDefined();
+
+    const headers = new Headers(call!.init?.headers);
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.proof)).not.toBe(
+      "bogus",
+    );
+    expect(
+      headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.auth),
+    ).not.toBe("bogus");
+    expect(
+      headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.bodySha256),
+    ).not.toBe("bogus");
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.userDid)).toBe(
+      signer.did(),
+    );
+    expect(headers.get("Signature")).toBe(null);
+    expect(headers.get("Signature-Input")).toBe(null);
+    expect(headers.get("Content-Digest")).toBe(null);
+
+    const verified = await verifyFirstPartyHttpRequest({
+      request: new Request(call!.url, {
+        method: call!.init?.method,
+        headers,
+        body: call!.init?.body as BodyInit,
+      }),
+    });
+    expect(verified.userDid).toBe(signer.did());
+  });
+
+  it("does not add auth headers to protected-looking external requests", async () => {
+    const fetchData = byRef("fetchData");
+    const testRecipe = pattern<{ query: string }>(
+      ({ query }) =>
+        fetchData({
+          url: "http://external.test/api/agent-tools/web-search",
+          mode: "json",
+          options: {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: { query },
+          },
+        }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "external-toolshed-looking-fetch",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { query: "external request" },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    const call = fetchCalls.find((call) =>
+      call.url === "http://external.test/api/agent-tools/web-search"
+    );
+    expect(call).toBeDefined();
+
+    const headers = new Headers(call!.init?.headers);
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.proof)).toBe(
+      null,
+    );
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.auth)).toBe(
+      null,
+    );
+    expect(headers.get(FIRST_PARTY_HTTP_AUTH_HEADERS.userDid)).toBe(null);
   });
 });

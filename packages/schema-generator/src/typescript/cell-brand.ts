@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { traverseTypeHierarchy } from "./type-traversal.ts";
 
 export type CellBrand =
@@ -82,7 +83,18 @@ function findCellBrandSymbol(
   }, seen);
 }
 
-export function getCellBrand(
+// A type's cell brand is invariant: it depends only on the type's own shape,
+// which is fixed within the checker that owns the type. The transformer and
+// schema-generation pipelines query the same types tens of thousands of times,
+// so the hierarchy walk and `getPropertiesOfType` lookups below are memoized per
+// (checker, type).
+const cellBrandCache = new TwoLevelWeakCache<
+  ts.TypeChecker,
+  ts.Type,
+  CellBrand | undefined
+>();
+
+function computeCellBrand(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): CellBrand | undefined {
@@ -99,6 +111,17 @@ export function getCellBrand(
   }
 
   return undefined;
+}
+
+export function getCellBrand(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): CellBrand | undefined {
+  return cellBrandCache.memoize(
+    checker,
+    type,
+    () => computeCellBrand(type, checker),
+  );
 }
 
 export function isCellType(type: ts.Type, checker: ts.TypeChecker): boolean {

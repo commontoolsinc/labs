@@ -352,11 +352,12 @@ export function writeSourceDocs(
       undefined,
       tx,
     );
-    // Preserve any product annotations already on this entry doc — a recompile
-    // of identical source (idempotent, content-addressed) must not clobber them.
-    // Annotations are not part of the content identity, so they ride along
-    // verbatim and never perturb verification.
-    const existingAnnotations = cell.get()?.annotations;
+    // Preserve product annotations on the entry doc only. Annotations are only
+    // written there; reading every dependency doc here turns unrelated stale
+    // cache cells into writeback conflict preconditions.
+    const existingAnnotations = identity === entryIdentity
+      ? cell.get()?.annotations
+      : undefined;
     cell.set({
       kind: "source",
       identity,

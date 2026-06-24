@@ -133,6 +133,7 @@ Decision rule:
 ### Correct `action()` usage
 
 ```tsx
+// Shown inside a pattern body.
 const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
   const menuOpen = new Writable(false);
 
@@ -154,6 +155,7 @@ const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
 ### Correct `handler()` usage
 
 ```tsx
+// Shown for illustration only.
 const deleteItem = handler<void, { index: number; items: Writable<Item[]> }>(
   (_, { index, items }) => {
     const list = items.get();
@@ -204,6 +206,7 @@ The current exported helper names are `safeDateNow()` and
 does not match the current API.
 
 ```tsx
+// Shown inside a pattern body.
 const createItem = action(() => {
   items.push({
     id: `item-${nonPrivateRandom().toString(36).slice(2, 8)}`,
@@ -233,6 +236,7 @@ deferral — see
 `docs/development/debugging/gotchas/eager-ternary-branch-evaluation.md`.
 
 ```tsx
+// Shown inside a pattern body.
 // Wrong
 {computed(() => {
   if (!showAdmin.get()) return null;
@@ -271,6 +275,7 @@ feeds back into the same reactive graph, the runtime will cycle and eventually
 throw.
 
 ```tsx
+// Shown for illustration only.
 // Wrong
 const sorted = computed(() => {
   const items = allItems.get();
@@ -295,6 +300,7 @@ treat that binding as the control's primary value path. Do not add
 into that same cell.
 
 ```tsx
+// Shown for illustration only.
 // Wrong
 <cf-select
   $value={entryType}

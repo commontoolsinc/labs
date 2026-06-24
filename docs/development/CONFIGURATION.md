@@ -11,7 +11,7 @@ of each section.
 |---|---|
 | Toolshed (server) | [`packages/toolshed/env.ts`](../../packages/toolshed/env.ts) |
 | Shell (browser, build-time) | [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts), [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts) |
-| Background charm service | [`packages/background-charm-service/src/env.ts`](../../packages/background-charm-service/src/env.ts) |
+| Background piece service | [`packages/background-piece-service/src/env.ts`](../../packages/background-piece-service/src/env.ts) |
 | CLI | [`packages/cli/launcher.ts`](../../packages/cli/launcher.ts), [`packages/cli/mod.ts`](../../packages/cli/mod.ts) |
 | Integration tests | [`packages/integration/env.ts`](../../packages/integration/env.ts) |
 | Experimental flags | [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) |
@@ -139,7 +139,7 @@ process you're configuring.
 | Process | Path-to-keyfile var | Passphrase var | Default fallback |
 |---|---|---|---|
 | Toolshed | `IDENTITY` | `IDENTITY_PASSPHRASE` _(deprecated)_ | `"implicit trust"` (dev only) |
-| Background charm service | `IDENTITY` | `OPERATOR_PASS` | `"implicit trust"` (dev only) |
+| Background piece service | `IDENTITY` | `OPERATOR_PASS` | `"implicit trust"` (dev only) |
 | CF CLI | `CF_IDENTITY` env or `--identity <path>` | _(none)_ | _(none — error if remote)_ |
 
 For local dev, all three default to the implicit-trust passphrase so they
@@ -209,7 +209,7 @@ longer exist.
 ## Experimental flags
 
 See [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) for
-the full table, propagation paths (server / shell / bg-charm / CLI), and
+the full table, propagation paths (server / shell / bg-piece / CLI), and
 verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
@@ -285,7 +285,7 @@ Passed before the CLI args; rarely needed:
 
 ---
 
-## Background charm service
+## Background piece service
 
 | Var | Default | Notes |
 |---|---|---|
@@ -326,7 +326,7 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `check` | Type-check all packages (`./tasks/check.sh`). |
 | `test` | Run all package tests (`./tasks/test.ts`). |
 | `integration` | Run integration tests (`./tasks/integration.ts`). |
-| `build-binaries` | Build standalone binaries (`cf`, `bg-charm-service`, etc.). |
+| `build-binaries` | Build standalone binaries (`cf`, `bg-piece-service`, etc.). |
 | `cf` | Run the CLI via the launcher. |
 | `initialize-db` | Initialize the local development database. |
 | `install-hooks` | Install git pre-commit hooks. |
@@ -362,14 +362,16 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `test` | Unit tests. |
 | `integration`, `fuse-integration`, `acl-integration` | Integration suites against a local toolshed. |
 
-### Background charm service (`packages/background-charm-service`)
+### Background piece service (`packages/background-piece-service`)
 
 | Task | What it does |
 |---|---|
 | `start` | Run from source. |
-| `add-admin-charm` | One-time setup: cast the admin charm into the system space. |
-| `initialize`, `initialize:gmail`, `initialize:gcal` | Bootstrap integration cells. |
-| `gmail`, `gmail:kv` | Run with Gmail integration enabled. |
+| `add-admin-piece` | One-time setup: cast the admin piece into the system space. |
+| `test` | Run unit tests. |
+| `check` | Type-check source files. |
+| `lint` | Lint source files. |
+| `fmt` | Format package files. |
 | `help` | Service help. |
 
 ---

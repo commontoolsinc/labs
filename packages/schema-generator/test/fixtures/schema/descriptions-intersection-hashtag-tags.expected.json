@@ -1,6 +1,6 @@
 {
   "$comment": "Docs inherited from intersection constituents. Sources: RecipeBase, Schedulable.",
-  "description": "A #recipe with ingredients.\n\nSchedulable on the #meal-plan.",
+  "description": "A #recipe with ingredients.\n\nSchedulable on the #mealPlan.",
   "properties": {
     "ingredients": {
       "items": {
@@ -18,7 +18,7 @@
   ],
   "tags": [
     "recipe",
-    "meal-plan"
+    "mealplan"
   ],
   "type": "object"
 }
