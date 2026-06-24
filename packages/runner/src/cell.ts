@@ -18,6 +18,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -368,8 +369,13 @@ declare module "@commonfabric/api" {
      * storage layer but does not conform to the cell's schema type.
      *
      * Prefer `setRaw()` when the value matches `T`.
+     *
+     * When `onlyIfDifferent` is `true`, the current raw value is read first and
+     * the write is skipped entirely if it deep-equals the value that would be
+     * written. The read is marked `ignoreReadForScheduling`, so it does not
+     * register a dependency that could re-trigger the writing computation.
      */
-    setRawUntyped(value: FabricValue): void;
+    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -1793,12 +1799,26 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue): void {
+  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
+
+    const inlined = findAndInlineDataURILinks(value);
+
+    // When asked to write only on change, read the current raw value and bail
+    // out if it already deep-equals what we'd write. `readValueOrThrow` mirrors
+    // the `writeValueOrThrow` below (same transaction and address, no link
+    // resolution), and `ignoreReadForScheduling` keeps the read from
+    // registering a self-dependency that would re-trigger the writer.
+    if (onlyIfDifferent) {
+      const current = this.tx.readValueOrThrow(this.link, {
+        meta: ignoreReadForScheduling,
+      });
+      if (deepEqual(current, inlined)) return;
+    }
 
     // Raw writes bypass diff-based attempted-target capture. Same-value direct
     // writes through this internal path are therefore outside phase-1 CFC
@@ -1808,7 +1828,7 @@ export class CellImpl<T extends FabricValue>
       this.link,
       this.link.schema ?? this.schema,
     );
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
+    this.tx.writeValueOrThrow(this.link, inlined);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {

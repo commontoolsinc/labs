@@ -325,4 +325,107 @@ describe("Pattern Runner - ifElse", () => {
       ]),
     );
   });
+
+  it("only writes the branch reference once when re-triggered with the " +
+    "same value", async () => {
+    // Record every reactive link-write, grouped by trigger phase, by
+    // instrumenting the transactions the scheduler creates via
+    // `runtime.edit()`. For each write we capture both the doc written and, for
+    // link writes, the doc the link points at.
+    const linkTarget = (value: unknown): string | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const sigil = (value as Record<string, unknown>)["/"];
+      if (!sigil || typeof sigil !== "object") return undefined;
+      const inner = Object.values(sigil as Record<string, unknown>)[0] as
+        | { id?: string }
+        | undefined;
+      return inner?.id;
+    };
+    const writesByPhase: Record<
+      string,
+      Array<{ id: string; target?: string }>
+    > = {};
+    let phase = "init";
+    const origEdit = runtime.edit.bind(runtime);
+    (runtime as unknown as { edit: typeof origEdit }).edit = ((opts?: any) => {
+      const t = origEdit(opts);
+      const origWrite = t.writeValueOrThrow.bind(t);
+      (t as unknown as { writeValueOrThrow: typeof origWrite })
+        .writeValueOrThrow = ((address: any, value: any, options?: any) => {
+          (writesByPhase[phase] ??= []).push({
+            id: String(address.id),
+            target: linkTarget(value),
+          });
+          return origWrite(address, value, options);
+        }) as typeof origWrite;
+      return t;
+    }) as typeof origEdit;
+
+    // `n` is a truthy number rather than a boolean: changing it from 1 to 2
+    // re-triggers ifElse while still selecting the same (`ifTrue`) branch. The
+    // branches are stable input cells (not inline literals, which would be
+    // re-materialized with new ids when `n` changes), so the branch reference
+    // ifElse would write is identical to what is already stored.
+    const ifElsePattern = pattern<{ n: number; a: string; b: string }>(
+      ({ n, a, b }) => ({
+        n,
+        a,
+        b,
+        text: ifElse(n, a, b),
+      }),
+    );
+
+    const pieceCell = runtime.getCell<
+      { n: number; a: string; b: string; text: string }
+    >(
+      space,
+      "ifElse only writes once for same value",
+      ifElsePattern.resultSchema,
+      tx,
+    );
+    const piece = runtime.run(
+      tx,
+      ifElsePattern,
+      { n: 1, a: "A", b: "B" },
+      pieceCell,
+    );
+    tx.commit();
+
+    phase = "first";
+    await piece.pull();
+    expect(piece.key("text").get()).toEqual("A");
+
+    // ifElse writes a redirect into its own result doc that points at the
+    // selected branch input. The other redirect written when wiring the result
+    // (the output binding) points at the result doc itself, so the ifElse
+    // result doc is the link-write whose target is NOT itself a link-write doc.
+    const firstWrites = writesByPhase["first"] ?? [];
+    const writtenIds = new Set(firstWrites.map((w) => w.id));
+    const resultDocs = new Set(
+      firstWrites
+        .filter((w) => w.target !== undefined && !writtenIds.has(w.target))
+        .map((w) => w.id),
+    );
+    expect(resultDocs.size).toEqual(1);
+    const ifElseResultId = [...resultDocs][0];
+    // It was written exactly once on the first trigger.
+    expect(firstWrites.filter((w) => w.id === ifElseResultId).length)
+      .toEqual(1);
+
+    // Re-trigger with a different-but-still-truthy condition. ifElse re-runs and
+    // selects the same branch, so the reference it would write is unchanged.
+    phase = "second";
+    tx = runtime.edit();
+    piece.withTx(tx).key("n").set(2);
+    tx.commit();
+    await piece.pull();
+    expect(piece.key("text").get()).toEqual("A");
+
+    // The selected branch is unchanged, so ifElse must not write its result
+    // again — the redundant write is what `onlyIfDifferent` suppresses.
+    expect(
+      (writesByPhase["second"] ?? []).filter((w) => w.id === ifElseResultId)
+        .length,
+    ).toEqual(0);
+  });
 });
