@@ -449,6 +449,7 @@ const clearHistory = handler<ClearHistoryEvent, {
 });
 
 interface OptionTally {
+  order: number;
   option: Option;
   green: number;
   yellow: number;
@@ -462,9 +463,10 @@ const tallyOptions = (
   users: readonly User[],
 ): OptionTally[] => {
   const colorByName = new Map(users.map((u) => [u.name, u.color]));
-  const tallies = options.map((option): OptionTally => {
+  const tallies = options.map((option, order): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
+      order,
       option,
       green: optionVotes.filter((v) => v.voteType === "green").length,
       yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
@@ -478,7 +480,8 @@ const tallyOptions = (
   });
   return [...tallies].sort((a, b) => {
     if (a.red !== b.red) return a.red - b.red;
-    return b.green - a.green;
+    if (a.green !== b.green) return b.green - a.green;
+    return a.order - b.order;
   });
 };
 
@@ -876,7 +879,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 })}
 
                 {/* All options summary — only when there are options */}
-                {options.length > 0
+                {ranked.length > 0
                   ? (
                     <div
                       style={{
@@ -906,21 +909,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {options.map((option) => {
-                          const oid = option.id;
-                          const summaryRank = computed(() => {
-                            const idx = ranked.findIndex(
-                              (t) => t.option.id === oid,
-                            );
-                            return idx >= 0 ? idx + 1 : 9999;
-                          });
+                        {ranked.map((tally) => {
+                          const oid = tally.option.id;
                           return (
                             <div
                               data-all-options-row="true"
                               data-option-id={oid}
-                              data-option-title={option.title}
+                              data-option-title={tally.option.title}
                               style={{
-                                order: summaryRank,
                                 display: "flex",
                                 alignItems: "center",
                                 gap: "8px",
@@ -938,7 +934,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   color: "#111827",
                                 }}
                               >
-                                {option.title}
+                                {tally.option.title}
                               </div>
                               <div
                                 style={{
@@ -948,11 +944,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {votes.filter((vote) => vote.optionId === oid)
-                                  .map((vote) => (
+                                {tally.voters.map((vote) => (
                                     <span
-                                      title={vote.voterName}
-                                      data-vote-swatch-name={vote.voterName}
+                                      title={vote.name}
+                                      data-vote-swatch-name={vote.name}
                                       style={{
                                         display: "inline-flex",
                                         alignItems: "center",
@@ -966,12 +961,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                         color: "white",
                                         fontSize: "11px",
                                         fontWeight: 700,
-                                        boxShadow: vote.voterName === me
+                                        boxShadow: vote.name === me
                                           ? "0 0 0 2px white, 0 0 0 3px #111827"
                                           : "none",
                                       }}
                                     >
-                                      {getInitials(vote.voterName)}
+                                      {getInitials(vote.name)}
                                     </span>
                                   ))}
                               </div>
