@@ -518,8 +518,10 @@ function effectInputRefs(
 /** Map an `outputs` alias to the internal-cell name it writes (the producing
  * op's output alias), matching `aliasToValueRef`'s `internal` naming so the
  * evaluator's `internalToOp` lookup keys line up. Returns null if the output is
- * not a recognizable internal alias. */
-function outputInternalName(outputs: unknown): string | null {
+ * not a recognizable internal alias. Exported for the runner's faithful
+ * multi-output emission (it builds the synthetic node's per-field output binding
+ * keyed by these names). */
+export function outputInternalName(outputs: unknown): string | null {
   if (!outputs || typeof outputs !== "object") return null;
   const alias = (outputs as { $alias?: Record<string, unknown> }).$alias;
   if (!alias || typeof alias !== "object") return null;

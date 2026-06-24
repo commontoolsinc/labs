@@ -28,7 +28,6 @@ import {
   UI,
 } from "./builder/types.ts";
 import {
-  getTopFrame,
   patternFromFrame,
   popFrame,
   pushFrameFromCause,
@@ -103,6 +102,7 @@ import {
   extractRog,
   hasArgumentWritebackMarker,
   type ImplRefResolver,
+  outputInternalName,
   resolveLeafImpls,
 } from "./reactive-interpreter/extract.ts";
 import {
@@ -694,6 +694,26 @@ export class Runner {
       launched_child: 0,
     },
   };
+
+  /**
+   * PROBE MEMO ACROSS INSTANTIATIONS (D-PROBE-MEMOIZE). The eligibility dry-run
+   * executes user leaf bodies once; the closure-local memo (in
+   * `buildInterpreterPattern`) reuses that for the FIRST real run of THAT
+   * instance. But a pattern can be RE-INSTANTIATED (stop→start, reload, pattern
+   * watcher) — a fresh `buildInterpreterPattern` would re-probe and re-execute the
+   * leaf bodies a second time, doubling user-observable run counts even though the
+   * action is then rehydrated clean and never re-runs (the "uses persisted
+   * observations when a runner restarts a clean piece" failure). We therefore
+   * cache the probe's per-op values keyed on the LIVE pattern object (a WeakMap,
+   * so it never retains a pattern past its session) and reuse them when the
+   * argument snapshot is unchanged — so a side-effecting leaf executes exactly
+   * ONCE across the whole pattern lifetime, mirroring legacy. Cleared on dispose
+   * with the runner. A miss (different pattern object / changed argument) re-probes
+   * fresh, so this never serves stale values. */
+  private readonly interpreterProbeMemo = new WeakMap<
+    Pattern,
+    { argument: unknown; dry: ReturnType<typeof evalRog> }
+  >();
 
   /** Read-only snapshot of the reactive-interpreter dispatch census. */
   getInterpreterCensus(): InterpreterCensus {
@@ -1370,13 +1390,16 @@ export class Runner {
           options.awaitSyncBeforeInitialRun,
         );
       try {
-        // The synthetic interpreter pattern has its own single `$ri-result`
-        // derived cell + single-alias result tree. Setup projected the ORIGINAL
-        // pattern's (multi-alias) result tree, so re-materialize the synthetic
-        // pattern's derived cell and re-project its result onto the result cell
-        // here, inside the same tx, before wiring the interpreter node. This is
-        // the only interpreter write and it happens after the pure probe in
-        // `buildInterpreterPattern` has already succeeded.
+        // The synthetic interpreter pattern PRESERVES the original pattern's
+        // result tree + derivedInternalCells (faithful emission), so this
+        // re-materialize + re-project is identical to what `applySetupState`
+        // already did for the run()/setup path (idempotent). It is still
+        // load-bearing for the pattern-WATCHER path: a pattern change routes
+        // through here WITHOUT re-running setup, so the new pattern's result tree
+        // / internal manifest must be re-materialized + re-projected onto the
+        // result cell, inside the same tx, before wiring the interpreter node.
+        // This is the only interpreter write and it happens after the pure probe
+        // in `buildInterpreterPattern` has already succeeded.
         if (viaInterpreter) {
           const baseCell = resultCell.withTx(actualTx);
           const previousInternal = baseCell.getMetaRaw("internal", {
@@ -2510,12 +2533,39 @@ export class Runner {
     // a legitimately eligible pure-compute pattern whose argument is not yet
     // materialized also reads `undefined`, and rejecting on that would wrongly
     // fall back real coverage (prod-wire / extract-interpret oracle patterns).
-    const argSnapshot = this.readArgumentSnapshot(resultCell);
+    // RE-INSTANTIATION REUSE (D-PROBE-MEMOIZE across instantiations). The probe
+    // reads the argument TX-LESS so a not-yet-committed argument is `undefined`
+    // and the undefined-argument run-gate SKIPS leaf bodies — this is what keeps a
+    // lift lazy until pulled (the "should not run lifts until something pulls"
+    // invariant) on the FIRST instantiation, where the argument lives only in the
+    // in-flight setup tx. But on a RE-INSTANTIATION (stop→start, reload, pattern
+    // watcher) the argument is already COMMITTED, so a tx-less read now returns the
+    // materialized value and the probe would EXECUTE the leaf bodies a second time
+    // — doubling user-observable run counts even though the rehydrated-clean action
+    // never re-runs (the "uses persisted observations when a runner restarts a
+    // clean piece" failure). The eligibility VERDICT is a property of the live
+    // pattern object (structural gates already cover argument-dependent shapes like
+    // conditional Pattern-returning lifts), so once a pattern has been probed we
+    // REUSE that probe rather than re-running its leaf bodies. We carry the
+    // probe's ORIGINAL argument snapshot through, so the closure memo's
+    // `deepEqual` guard below still forces a FRESH evaluation in the first real run
+    // whenever the actual (committed) argument differs from what the probe saw —
+    // serving correct values, never stale ones. Keyed on the live Pattern object
+    // (a WeakMap), so it never retains a pattern past its session.
+    let argSnapshot: unknown;
     let dry: ReturnType<typeof evalRog> | undefined;
-    try {
-      dry = evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
-    } catch {
-      bumpAndThrow("eval_threw");
+    const cachedProbe = this.interpreterProbeMemo.get(pattern);
+    if (cachedProbe) {
+      argSnapshot = cachedProbe.argument;
+      dry = cachedProbe.dry;
+    } else {
+      argSnapshot = this.readArgumentSnapshot(resultCell);
+      try {
+        dry = evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
+      } catch {
+        bumpAndThrow("eval_threw");
+      }
+      this.interpreterProbeMemo.set(pattern, { argument: argSnapshot, dry: dry! });
     }
     // SAFETY NET (context-requiring lifts, run-gate divergences, etc.): the
     // per-op isolation in `evalRog` swallows a leaf's runtime TypeError into
@@ -2558,31 +2608,92 @@ export class Runner {
 
     // --- 4. Build the synthetic single-node interpreter pattern ------------
     const resultSchema = pattern.resultSchema ?? {};
-    const internedResult = internSchema(resultSchema as JSONSchema);
     const argumentSchema = pattern.argumentSchema ?? {};
     const internedArg = internSchema(argumentSchema as JSONSchema);
+
+    // FAITHFUL RESULT-TOPOLOGY EMISSION (D-EMISSION-SCOPE: conservative — only
+    // PURE multi-output computes reach here; arg-cell write-backs / cross-space /
+    // scope-narrowing already fell back via the gates above). The synthetic
+    // pattern PRESERVES the ORIGINAL pattern's result tree and derivedInternal
+    // cells unchanged — so top-level structural keys (e.g. [NAME]), pass-through
+    // argument/internal aliases (which keep their bidirectional write-back), and
+    // the authored internal-cell schema defaults all re-materialize through the
+    // SAME setup projection / materialize path legacy uses. We replace ONLY the
+    // N compute nodes with ONE synthetic raw node that evaluates the whole ROG and
+    // writes each per-field output into its DECLARED internal cell (via the node's
+    // own per-field `outputs` binding), rather than collapsing the whole tree into
+    // a single `$ri-result` alias (which dropped NAME, per-field routing, and the
+    // authored derivedInternalCells, and leaked the full resultSchema onto the
+    // alias link). Because we route through `sendValueToBinding` with the original
+    // per-field output aliases, the per-path CFC content-labels are preserved.
+
+    // Build the synthetic node's `outputs` binding from the ORIGINAL nodes: each
+    // node writes its value into an internal cell named by its output alias
+    // (`outputInternalName`). We union those into one object keyed by internal
+    // name, mapping each to the op that produces it. A node whose output is NOT a
+    // recognizable internal alias has no faithful per-field emission — fall back
+    // (defense-in-depth: argument-writeback / malformed outputs already fell back
+    // via the coverage gates, so this is unreachable on a probe-passing pattern).
+    const syntheticOutputs: Record<string, JSONValue> = {};
+    const outputNameToOpId = new Map<string, OpId>();
+    for (const node of pattern.nodes ?? []) {
+      const outName = outputInternalName(node.outputs);
+      if (outName === null) bumpAndThrow("unrecognized_alias");
+      const opId = internalToOp.get(outName!);
+      if (opId === undefined) bumpAndThrow("unrecognized_alias");
+      // Two nodes targeting the same internal cell would race on one output slot
+      // — not a faithful single-node emission. Fall back. (Builder output is 1:1.)
+      if (Object.hasOwn(syntheticOutputs, outName!)) {
+        bumpAndThrow("unrecognized_alias");
+      }
+      syntheticOutputs[outName!] = node.outputs as JSONValue;
+      outputNameToOpId.set(outName!, opId!);
+    }
+
+    // Assemble the per-field send value from the ROG's per-op values: each
+    // declared output internal cell `name` gets `opValues.get(producingOp)`,
+    // keyed identically to `syntheticOutputs` so `sendValueToBinding` routes each
+    // field to its cell. The result tree's static literals (NAME, pass-through
+    // argument aliases) are NOT in this object — they are projected once and never
+    // overwritten by the node (mirroring legacy, where the node writes only its
+    // own output cell).
+    const buildSendValue = (
+      opValues: Map<OpId, unknown>,
+    ): Record<string, unknown> => {
+      const out: Record<string, unknown> = {};
+      for (const [name, opId] of outputNameToOpId) {
+        out[name] = opValues.get(opId);
+      }
+      return out;
+    };
 
     // PROBE MEMOIZE-AND-REUSE (D-PROBE-MEMOIZE). The eligibility dry-run above
     // already evaluated the whole ROG once on `argSnapshot`, INVOKING every leaf
     // body. Re-running `evalRog` in the first real node action would execute those
     // leaf bodies a SECOND time — doubling user-observable run counts (runCount++)
     // and breaking the lazy-until-pulled invariant. We therefore hand the probe's
-    // result to the FIRST real run, reusing it instead of re-evaluating — but ONLY
-    // when the argument the first run reads THROUGH the tx is unchanged from the
-    // snapshot the probe used (correctness over reuse: a mid-flight argument change
-    // means the probe's values are stale and we must evaluate fresh). The memo is
-    // consumed at most once (`memoConsumed`), so subsequent re-runs (on argument
-    // change) always evaluate fresh, and a side-effecting leaf runs exactly ONCE
-    // total (probe + reused first run = 1 invocation). The memo lives in THIS
-    // closure, so it cannot leak across pattern instances.
+    // per-op values to the FIRST real run, reusing them instead of re-evaluating —
+    // but ONLY when the argument the first run reads THROUGH the tx is unchanged
+    // from the snapshot the probe used (correctness over reuse: a mid-flight
+    // argument change means the probe's values are stale and we must evaluate
+    // fresh). The memo is consumed at most once (`memoConsumed`), so subsequent
+    // re-runs (on argument change) always evaluate fresh, and a side-effecting leaf
+    // runs exactly ONCE total (probe + reused first run = 1 invocation). The memo
+    // lives in THIS closure, so it cannot leak across pattern instances.
     const probeMemo: {
       argument: unknown;
-      result: unknown;
+      opValues: Map<OpId, unknown>;
       errors: Array<{ opId: OpId; error: unknown }>;
     } | undefined = dry
-      ? { argument: argSnapshot, result: dry.result, errors: dry.errors }
+      ? { argument: argSnapshot, opValues: dry.opValues, errors: dry.errors }
       : undefined;
     let memoConsumed = false;
+
+    // Capture the ORIGINAL pattern + result cell for the per-pattern error frame
+    // (the synthetic raw node otherwise runs without an `unsafe_binding` to the
+    // result cell, so a throwing leaf's error carries no pieceId/patternId/space).
+    const sourcePattern = pattern;
+    const sourceResultCell = resultCell;
 
     const interpreterImpl = (
       inputsCell: Cell<unknown>,
@@ -2601,41 +2712,59 @@ export class Runner {
         // argument is unchanged from the probe's snapshot — eliminating the
         // double-execution of leaf bodies. Otherwise (argument changed, or no
         // memo) evaluate fresh.
-        let result: unknown;
+        let opValues: Map<OpId, unknown>;
         let errors: Array<{ opId: OpId; error: unknown }>;
         if (
           !memoConsumed && probeMemo &&
           deepEqual(argument, probeMemo.argument)
         ) {
           memoConsumed = true;
-          result = probeMemo.result;
+          opValues = probeMemo.opValues;
           errors = probeMemo.errors;
         } else {
           memoConsumed = true;
-          ({ result, errors } = evalRog(rog, {
+          ({ opValues, errors } = evalRog(rog, {
             argument,
             leafImpls,
             internalToOp,
           }));
         }
-        sendResult(tx, result);
+        // Route each per-field output value into its declared internal cell. The
+        // node's `outputs` binding is the union of the original nodes' output
+        // aliases; `sendValueToBinding` walks it in parallel with this value.
+        sendResult(tx, buildSendValue(opValues));
+        if (errors.length === 0) return;
         // The result is now written (a throwing leaf's field is `undefined`).
         // Fire scheduler.onError for each throwing leaf WITHOUT failing the node,
         // matching legacy's per-node error reporting (each legacy computed that
-        // throws fires onError; here the ops were collapsed into one node).
-        for (const { error } of errors) {
-          // Attach the current execution frame so handleSchedulerError can
-          // extract pieceId/patternId/space (legacy attaches `error.frame` on
-          // throw at runner.ts:~3889; the interpreter isolates the throw inside
-          // evalRog, so the frame never reaches the error — attach it here).
-          if (
-            error && typeof error === "object" &&
-            !(error as { frame?: unknown }).frame
-          ) {
-            const frame = getTopFrame();
-            if (frame) (error as Error & { frame?: Frame }).frame = frame;
+        // throws fires onError; here the ops were collapsed into one node). Wrap
+        // the reporting in the pattern frame (unsafe_binding → result cell) so
+        // handleSchedulerError can recover pieceId/patternId/space from the error
+        // — the frameless raw node otherwise yields no metadata (R4 attached a
+        // frame, but it lacked the result-cell binding the metadata extraction
+        // dereferences). Mirrors `createPatternFrame` on the legacy javascript
+        // path. The frame is used ONLY to recover error metadata (we pop it
+        // immediately after reporting), so it needs no `cause` for id minting —
+        // matching the `pushFrameFromCause(undefined, …)` builtin-frame pattern.
+        const frame = this.createPatternFrame(
+          undefined,
+          sourcePattern,
+          sourceResultCell,
+          tx,
+          false,
+        );
+        try {
+          for (const { error } of errors) {
+            if (
+              error && typeof error === "object" &&
+              !(error as { frame?: unknown }).frame
+            ) {
+              (error as Error & { frame?: Frame }).frame = frame;
+            }
+            runtime.scheduler.reportError(error as Error);
           }
-          runtime.scheduler.reportError(error as Error);
+        } finally {
+          popFrame(frame);
         }
       };
     };
@@ -2643,24 +2772,26 @@ export class Runner {
     // Probe succeeded: this pattern WILL be instantiated through the interpreter.
     this.interpreterCensus.interpreted_ok++;
 
-    const RESULT_CAUSE = "$ri-result";
     return {
       argumentSchema: argumentSchema as JSONSchema,
       resultSchema: resultSchema as JSONSchema,
-      derivedInternalCells: [{
-        partialCause: RESULT_CAUSE,
-        schema: internedResult,
-      }],
-      result: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+      // PRESERVE the authored internal-cell manifest (schema defaults + per-field
+      // schemas) — NOT a single `$ri-result` cell carrying the full resultSchema.
+      ...(pattern.derivedInternalCells !== undefined
+        ? { derivedInternalCells: pattern.derivedInternalCells }
+        : {}),
+      // PRESERVE the authored result tree (NAME, pass-through argument/internal
+      // aliases). The synthetic node writes only the internal-cell outputs.
+      result: pattern.result,
       nodes: [
         {
           module: {
             type: "raw",
             implementation: interpreterImpl as (...args: any[]) => any,
-            resultSchema: internedResult,
+            resultSchema: internSchema(resultSchema as JSONSchema),
           } as Module,
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+          outputs: syntheticOutputs as JSONValue,
         },
       ],
     } satisfies Pattern;
