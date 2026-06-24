@@ -81,12 +81,24 @@ export function navigate(value: unknown, path: readonly PathStep[]): unknown {
 }
 
 /**
- * Topologically order ops so an op's `opOut` dependencies precede it. The
- * builder already emits nodes in a valid order, but control-flow/data edits can
- * perturb it, so we sort defensively. Cycles (shouldn't occur in a well-formed
- * ROG) fall back to declared order.
+ * Topologically order ops so an op's dependencies precede it. The builder
+ * already emits nodes in a valid order, but control-flow/data edits — and, in
+ * the coalescing partition, the per-segment op REGROUPING — can perturb it, so
+ * we sort defensively. Cycles (shouldn't occur in a well-formed ROG) fall back
+ * to declared order.
+ *
+ * `internalToOp` (optional) lets an `internal` ref's PRODUCER op be ordered
+ * before its consumer. Without it, two leaves both reading the SAME upstream op
+ * via a NAMED internal alias (e.g. `str` interpolating `${branchKind}` and
+ * `${branchVariant}`, where each is a `computed` materialized under an internal
+ * cell) are ordered only by declared appearance — so a consumer that appears
+ * before its producer in `ops` resolves the producer's value as `undefined`.
+ * (The partition can place a `str` construct before a sibling computed it reads.)
  */
-export function topoOrder(ops: Op[]): Op[] {
+export function topoOrder(
+  ops: Op[],
+  internalToOp?: Map<string, OpId>,
+): Op[] {
   const byId = new Map<OpId, Op>(ops.map((o) => [o.id, o]));
   const visited = new Set<OpId>();
   const onStack = new Set<OpId>();
@@ -95,6 +107,10 @@ export function topoOrder(ops: Op[]): Op[] {
     const ids: OpId[] = [];
     const collect = (r: ValueRef) => {
       if (r.kind === "opOut" && byId.has(r.op)) ids.push(r.op);
+      else if (r.kind === "internal" && internalToOp) {
+        const producer = internalToOp.get(r.name);
+        if (producer !== undefined && byId.has(producer)) ids.push(producer);
+      }
     };
     for (const r of op.inputs) collect(r);
     if (op.detail.kind === "collection") collect(op.detail.listInput);
@@ -268,7 +284,7 @@ export function evalRog(
     }
   };
 
-  for (const op of topoOrder(rog.ops)) {
+  for (const op of topoOrder(rog.ops, ctx.internalToOp)) {
     if (op.id < 0) {
       // synthesized result construct (from extraction) — evaluate it too.
     }
