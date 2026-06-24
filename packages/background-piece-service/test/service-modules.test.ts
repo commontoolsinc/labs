@@ -7,6 +7,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
@@ -199,6 +201,17 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
       fn({});
     },
   };
+}
+
+function createUncachedCompileRuntime(url: string, identity: Identity) {
+  return new Runtime({
+    apiUrl: new URL(url),
+    storageManager: StorageManager.open({
+      as: identity,
+      memoryHost: new URL(url),
+    }),
+    cfcEnforcementMode: "disabled",
+  });
 }
 
 class MockWorker extends EventTarget {
@@ -1318,7 +1331,10 @@ describe("cast admin entry point", () => {
 
   it("compiles the actual admin pattern source", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-admin-compile", identity);
+    const runtime = createUncachedCompileRuntime(
+      "memory://cast-admin-compile",
+      identity,
+    );
     try {
       const source = await Deno.readTextFile(
         new URL("../bgAdmin.tsx", import.meta.url),

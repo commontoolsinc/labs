@@ -7,7 +7,7 @@
  *
  * SETUP:
  * 1. Deploy folksonomy-aggregator.tsx first
- * 2. Favorite the aggregator with tag "folksonomyAggregator"
+ * 2. Favorite the aggregator with tag "folksonomy-aggregator"
  * 3. Deploy this demo pattern
  * 4. Add tags in one section, see them appear as suggestions in another
  * 5. Check the aggregator piece to see events flowing in
@@ -48,7 +48,7 @@ export default pattern<Input, Output>(
       suggestions: Record<string, unknown[]>;
       postEvent: unknown;
     }>({
-      query: "#folksonomyAggregator",
+      query: "#folksonomy-aggregator",
       scope: ["~", "."],
     });
     const hasAggregator = aggregatorWish.result != null;
@@ -111,7 +111,7 @@ export default pattern<Input, Output>(
               <span>
                 {hasAggregator
                   ? "Connected to folksonomy-aggregator - community features active!"
-                  : "Aggregator not found. Deploy and favorite folksonomy-aggregator with tag 'folksonomyAggregator' for community features."}
+                  : "Aggregator not found. Deploy and favorite folksonomy-aggregator with tag 'folksonomy-aggregator' for community features."}
               </span>
             </cf-hstack>
           </div>
