@@ -22,6 +22,8 @@ dist/
 .cf-harness-artifacts/
 claude-research.key
 *.key
+# Exported PKCS8/PEM identity keys (e.g. cf.pem) — never commit private keys
+*.pem
 .passphrase
 *passphrase*
 .page-agent-config.json

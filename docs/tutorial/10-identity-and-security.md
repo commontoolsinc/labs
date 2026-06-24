@@ -24,10 +24,18 @@ Two derivation tricks give the system its shape:
 
 A **space DID** is just `someIdentity.derive(spaceName).did()`. No
 registration step, no central registry: knowing the derivation inputs *is*
-knowing the space. (Dev environments lean on this hard — the CLI's
-`id derive "implicit trust"` from Chapter 6 reproduces the standard dev
-identity, and named dev spaces derive from a well-known passphrase, which
-is why two local setups agree on what `did:key:...` a space name means.)
+knowing the space. Dev environments lean on this hard: named dev spaces
+derive from a well-known passphrase, which is why two local setups agree on
+what `did:key:...` a space name means. The same trick defines the **shared
+dev identity** `id derive "implicit trust"` — the DID the local toolshed
+itself runs as in dev mode. Because it comes from a public string, *everyone*
+who derives it gets the identical keypair. That is a convenience on your own
+localhost (CLI, browser, and server can all act as one admin identity) and a
+footgun anywhere shared: derive or browser-import it against a server other
+people use and you all become the *same* principal — seeing and overwriting
+each other's `PerUser` data. Use a unique `id new` key for your own identity;
+reserve `implicit trust` for deliberately acting as a local dev server's
+operator. See `docs/development/SHARED_IDENTITY.md`.
 
 ## Passkeys: the browser login
 

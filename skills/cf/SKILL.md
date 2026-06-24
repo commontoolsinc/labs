@@ -28,14 +28,20 @@ ls -la cf.key                  # Check for existing
 # Never overwrite an existing key file — existing identity-scoped data
 # becomes invisible under a new identity.
 
-# For local dev: derive key matching toolshed's "implicit trust" identity
-deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
-
-# For a fresh random key (e.g., against production):
+# Default: a fresh, UNIQUE key. Use this for normal pattern dev and for ANY
+# shared or remote server (staging, a teammate's box, anything on a tailnet).
 deno run -A packages/cli/mod.ts id new > cf.key
 
 # To match a browser identity registered with a recovery phrase:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > cf.key
+
+# ONLY to act as a LOCAL dev server's operator/admin (localhost, single-tenant):
+# derive the well-known "implicit trust" identity that toolshed itself runs as in
+# dev. This DID is PUBLIC and SHARED — every developer who derives it gets the
+# identical key. Never use it against a shared/remote server, and never import it
+# into a browser pointed at one, or you collide into one principal with everyone
+# else who did (see docs/development/SHARED_IDENTITY.md).
+deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 ```
 
 Both `id derive` and `id from-mnemonic` accept the secret three ways: as a file
@@ -65,8 +71,9 @@ export CF_IDENTITY=./cf.key
 piece should still load and unscoped/`PerSpace` data should remain visible, but
 `PerUser`, `PerSession`, favorites, drafts, and home-space state may look empty
 or default. For identity-sensitive local work, use one key everywhere and import
-the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
-`docs/development/SHARED_IDENTITY.md`.
+the CLI PKCS8/PEM key in the browser via `Import CLI Key` — make it a unique
+`id new` key, never the shared `implicit trust` identity on a server others use.
+See `docs/development/SHARED_IDENTITY.md`.
 
 **Experimental flags** must be set as env vars on both servers AND CLI commands.
 See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.

@@ -143,14 +143,18 @@ process you're configuring.
 | CF CLI | `CF_IDENTITY` env or `--identity <path>` | _(none)_ | _(none — error if remote)_ |
 
 For local dev, all three default to the implicit-trust passphrase so they
-share an identity automatically. To match the CLI to the local server:
+share an identity automatically. To match the CLI to the local server (only
+needed for operator/admin tasks on your own localhost):
 
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
 
-See [`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
+`"implicit trust"` is a shared, publicly-derivable identity — never use it
+against a shared or remote server (everyone who derives it becomes the same
+principal). For a personal or unique identity, use `id new`. See
+[`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
 browser-import flow.
 
 ---
