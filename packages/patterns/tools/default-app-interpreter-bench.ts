@@ -6,11 +6,21 @@
  * model of the Shell default/home app: a top-level `map` over a growing notes
  * array + a "New Note" handler that appends):
  *
- *   - OFF: `experimentalInterpreter` off (legacy per-node materialization;
- *          each map element pays the ~3 docs / ~4 scheduler nodes tax).
+ *   - OFF: `experimentalInterpreter` off (legacy: a child pattern per map
+ *          element — argument doc + lift docs + one CONSOLIDATED VNode result
+ *          doc, + ~4 scheduler nodes).
  *   - ON:  `experimentalInterpreter` on (the eligible pure-render map element
- *          dispatches to `$ri-collection-map` → ~1 doc / ~1 effect per element;
- *          ineligible surfaces fall back with no behavior change).
+ *          dispatches to `$ri-collection-map`; ineligible surfaces fall back
+ *          with no behavior change).
+ *
+ * MEASURED FINDING (see DECISIONS.md D-VNODE-DOC-FRAGMENTATION): on this
+ * VNode-rendering element map the interpreter REDUCES scheduler nodes (~-20%,
+ * dropping the child pattern) but INCREASES docs — it drops the arg doc and
+ * inlines the lifts, yet writes the element-result VNode subtree as one doc PER
+ * NODE (tr/td/vstack/spans) instead of legacy's single consolidated VNode doc,
+ * net +~2 docs/element. The "~1 doc/element" doc win holds only for
+ * scalar/object element results (the W3 test), NOT for rendered (VNode) elements.
+ * This bench surfaces that real, fixable regression; the node win is unaffected.
  *
  * The workload: a single session (the notes app is single-user) drives the real
  * `addNote` handler N times, growing the notes list one note at a time, exactly

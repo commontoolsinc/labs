@@ -134,6 +134,39 @@ differential/reactivity/fallback test) is delegated as workflow `wjvg8vak9`
 full flag-off suite (== baseline) + the flag-on census run + a runner.ts diff
 audit before committing.
 
+## D-VNODE-DOC-FRAGMENTATION — the collection doc-win is element-RESULT-SHAPE-dependent (bench finding, 2026-06-24)
+
+The default-app notes bench measured the interpreter ADDING docs on a `map` whose
+element renders a VNode (+~50%/element), contradicting the W3 controlled test
+(legacy `mapWithPattern` 3 docs/el → interp 1, a win). A skeptical reconciliation
+(clean-room in-process `attachDocRecorder`, the SAME method as W3 — it reproduces
+3→1 for a scalar element AND measures 4→6 for the VNode element, so NOT a
+commit-tap counting artifact) established the cause and the corrected thesis:
+
+- **Per-element doc accounting (N=1):**
+  - Legacy = **4 docs/el**: 1 child-pattern argument doc + 2 lift-output docs +
+    **1 *consolidated* VNode result doc** (the whole `<tr>` subtree in one doc).
+  - Interp = **6 docs/el**: **6 *fragmented* VNode docs** (tr/td/vstack/3×span,
+    each its own linked doc), 0 arg doc, 0 lift docs (inlined).
+- The interpreter genuinely saves the child-pattern arg doc + inlines the lift
+  outputs, **but `$ri-collection-map` writes the element-result VNode tree as one
+  doc per nested VNode node**, whereas legacy's child-pattern render emits the
+  subtree as one consolidated document. The 1→6 fragmentation more than offsets
+  the savings → net **+2 docs/element**.
+- **Corrected thesis:** the "~1+N vs ~3N docs" win holds for **scalar/object**
+  element results (W3) but **INVERTS for VNode/render element results** — which is
+  the common real-UI `.map`. **Scheduler nodes still drop ~20%** (dropping the
+  child pattern), so docs and nodes diverge: a node win paid for with VNode-doc
+  fragmentation.
+- **Fix direction (open):** the interpreter's per-element result write should
+  consolidate a VNode subtree into one doc like legacy (don't split per VNode
+  node). Until then, the collection footprint win is real on value-result maps,
+  not on rendered-element maps. (This also strengthens the case for re-measuring /
+  Option B before any default-on for rendered collections.)
+- Supersedes the notes-bench commit's "inline-value vs cell-link element"
+  explanation, which was wrong (the real variable is element RESULT shape:
+  scalar vs VNode-tree, not element provenance).
+
 ## D-SEAM — scheduler/runtime seam, re-verified against landed code (W0.5, 2026-06-23)
 
 From the `reverify-scheduler-seam` workflow (4 parallel readers + synthesis,
