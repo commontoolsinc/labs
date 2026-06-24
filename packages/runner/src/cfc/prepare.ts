@@ -657,9 +657,7 @@ const storedMetadataFor = (
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isRecord(document)
-    ? document as CfcMetadata
-    : undefined;
+  return isRecord(document) ? document as CfcMetadata : undefined;
 };
 
 /**
