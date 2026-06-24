@@ -509,9 +509,11 @@ describe(
                 }
               }
               await waitFor(
-                async () => {
+                () => {
                   latestVDomSwatches = readVDomSwatches();
-                  return latestVDomSwatches.count === expectedVotes;
+                  return Promise.resolve(
+                    latestVDomSwatches.count === expectedVotes,
+                  );
                 },
                 { timeout: PROPAGATION_TIMEOUT, delay: 250 },
               );
@@ -726,15 +728,6 @@ async function clickButtonByText(page: Page, text: string): Promise<void> {
   }, { args: [text] });
 }
 
-async function clickAllByAriaLabel(
-  page: Page,
-  ariaLabel: string,
-): Promise<void> {
-  await page.evaluate(async (label) => {
-    await globalThis.__lunchPollProbe.clickAllByAriaLabel(label);
-  }, { args: [ariaLabel] });
-}
-
 async function clickVoteByOptionTitle(
   page: Page,
   optionTitle: string,
@@ -779,20 +772,6 @@ async function readRenderedAllOptionsSwatches(
 ): Promise<RenderedOptionSwatchSummary[]> {
   return await page.evaluate(() =>
     globalThis.__lunchPollProbe.snapshot().allOptionsRows
-  );
-}
-
-async function readRenderedPollSummary(page: Page): Promise<string> {
-  return await page.evaluate(() =>
-    globalThis.__lunchPollProbe.snapshot().pollSummary
-  );
-}
-
-async function readRenderedViewerSummary(
-  page: Page,
-): Promise<{ name: string; hostChipVisible: boolean }> {
-  return await page.evaluate(() =>
-    globalThis.__lunchPollProbe.snapshot().viewerSummary
   );
 }
 
@@ -1036,11 +1015,17 @@ async function waitForPollMatrixConvergence(
         }, { timeout: PROPAGATION_TIMEOUT, delay: 250 })
       ),
       waitFor(
-        async () => pollStateMatches(readRuntimePollSummary(), expected),
+        () =>
+          Promise.resolve(
+            pollStateMatches(readRuntimePollSummary(), expected),
+          ),
         { timeout: PROPAGATION_TIMEOUT, delay: 250 },
       ),
       waitFor(
-        async () => pollStateMatches(readMemoryPollSummary(), expected),
+        () =>
+          Promise.resolve(
+            pollStateMatches(readMemoryPollSummary(), expected),
+          ),
         { timeout: PROPAGATION_TIMEOUT, delay: 250 },
       ),
     ]);
