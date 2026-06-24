@@ -911,6 +911,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       >
                         {ranked.map((tally) => {
                           const oid = tally.option.id;
+                          const optionVotes = votes.filter((vote) =>
+                            vote.optionId === oid
+                          );
                           return (
                             <div
                               data-all-options-row="true"
@@ -944,31 +947,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {tally.voters.map((vote) => (
-                                    <span
-                                      title={vote.name}
-                                      data-vote-swatch-name={vote.name}
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        minWidth: "22px",
-                                        height: "22px",
-                                        padding: "0 6px",
-                                        borderRadius: "9999px",
-                                        backgroundColor:
-                                          VOTE_SWATCH[vote.voteType],
-                                        color: "white",
-                                        fontSize: "11px",
-                                        fontWeight: 700,
-                                        boxShadow: vote.name === me
-                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                          : "none",
-                                      }}
-                                    >
-                                      {getInitials(vote.name)}
-                                    </span>
-                                  ))}
+                                {optionVotes.map((vote) => (
+                                  <span
+                                    title={vote.voterName}
+                                    data-vote-swatch-name={vote.voterName}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      minWidth: "22px",
+                                      height: "22px",
+                                      padding: "0 6px",
+                                      borderRadius: "9999px",
+                                      backgroundColor:
+                                        VOTE_SWATCH[vote.voteType],
+                                      color: "white",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      boxShadow: vote.voterName === me
+                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                        : "none",
+                                    }}
+                                  >
+                                    {getInitials(vote.voterName)}
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           );

@@ -76,10 +76,26 @@ type VDomSwatchSummary = {
   samples: string[];
 };
 
+type VoteSwatchRenderSummary = {
+  name: string;
+  text: string;
+  visible: boolean;
+  width: number;
+  height: number;
+  display: string;
+  visibility: string;
+  opacity: string;
+};
+
 type OptionSwatchSummary = {
   optionId: string;
   optionTitle: string;
   swatches: string[];
+};
+
+type RenderedOptionSwatchSummary = OptionSwatchSummary & {
+  visibleSwatches: string[];
+  chips: VoteSwatchRenderSummary[];
 };
 
 type OptionCardSummary = {
@@ -101,10 +117,11 @@ type RenderedPollSnapshot = {
   viewerSummary: { name: string; hostChipVisible: boolean };
   topChoice: { title: string; summary: string };
   optionCards: OptionCardSummary[];
-  allOptionsRows: OptionSwatchSummary[];
+  allOptionsRows: RenderedOptionSwatchSummary[];
 };
 
-type DebugVDomPollSnapshot = RenderedPollSnapshot & {
+type DebugVDomPollSnapshot = Omit<RenderedPollSnapshot, "allOptionsRows"> & {
+  allOptionsRows: OptionSwatchSummary[];
   swatches: string[];
 };
 
@@ -335,7 +352,7 @@ describe(
                     return rows.length === optionTitles.length &&
                       rows.every((row) =>
                         row.swatches.length === PROFILE_COUNT &&
-                        sameStringSet(row.swatches, names)
+                        renderedSwatchesVisibleFor(row, names)
                       );
                   }, { timeout: PROPAGATION_TIMEOUT, delay: 250 })
                 ),
@@ -363,6 +380,31 @@ describe(
                     [...names].sort(),
                     row.optionTitle,
                   );
+                  assertEquals(
+                    row.visibleSwatches.length,
+                    PROFILE_COUNT,
+                    `${row.optionTitle} visible swatches`,
+                  );
+                  assertEquals(
+                    [...row.visibleSwatches].sort(),
+                    [...names].sort(),
+                    `${row.optionTitle} visible swatches`,
+                  );
+                  for (const name of names) {
+                    const chip = row.chips.find((candidate) =>
+                      candidate.name === name && candidate.visible
+                    );
+                    assertEquals(
+                      chip !== undefined,
+                      true,
+                      `${row.optionTitle} visible chip for ${name}`,
+                    );
+                    assertEquals(
+                      chip?.text,
+                      expectedSwatchText(name),
+                      `${row.optionTitle} initials for ${name}`,
+                    );
+                  }
                 }
               }
               await waitFor(
@@ -615,7 +657,7 @@ async function readRenderedVoteSwatches(page: Page): Promise<string[]> {
 
 async function readRenderedAllOptionsSwatches(
   page: Page,
-): Promise<OptionSwatchSummary[]> {
+): Promise<RenderedOptionSwatchSummary[]> {
   return await page.evaluate(() =>
     globalThis.__lunchPollProbe.snapshot().allOptionsRows
   );
@@ -683,6 +725,31 @@ function sameStringSet(actual: readonly string[], expected: readonly string[]) {
     [...actual].sort().every((value, index) =>
       value === [...expected].sort()[index]
     );
+}
+
+function expectedSwatchText(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed.split(/\s+/).map((word) => word[0]).join("").toUpperCase()
+    .slice(0, 2);
+}
+
+function renderedSwatchesVisibleFor(
+  row: RenderedOptionSwatchSummary,
+  expectedVoters: readonly string[],
+): boolean {
+  if (!sameStringSet(row.swatches, expectedVoters)) return false;
+  if (!sameStringSet(row.visibleSwatches, expectedVoters)) return false;
+
+  for (const voterName of expectedVoters) {
+    const chip = row.chips.find((candidate) =>
+      candidate.name === voterName && candidate.visible
+    );
+    if (!chip) return false;
+    if (chip.text !== expectedSwatchText(voterName)) return false;
+  }
+
+  return true;
 }
 
 function emptyVotersByTitle(
@@ -787,7 +854,7 @@ function renderedPollMatches(
       candidate.optionTitle === title
     );
     if (!row) return false;
-    if (!sameStringSet(row.swatches, expected.votersByTitle[title] ?? [])) {
+    if (!renderedSwatchesVisibleFor(row, expected.votersByTitle[title] ?? [])) {
       return false;
     }
   }
@@ -961,6 +1028,30 @@ async function installProbeHelpers(page: Page): Promise<void> {
       return text;
     };
     const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
+    const isVisible = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" &&
+        style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const summarizeVoteSwatch = (
+      element: HTMLElement,
+    ): VoteSwatchRenderSummary => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        name: element.getAttribute("data-vote-swatch-name") ?? "",
+        text: normalizeText(
+          deepText(element) || element.innerText || element.textContent || "",
+        ),
+        visible: isVisible(element),
+        width: rect.width,
+        height: rect.height,
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+      };
+    };
     globalThis.__lunchPollProbe = {
       async clickButtonByText(label: string) {
         const button = findDeep<HTMLElement>(document, (element) => {
@@ -1126,26 +1217,29 @@ async function installProbeHelpers(page: Page): Promise<void> {
             (element) =>
               element instanceof HTMLElement &&
               element.getAttribute("data-vote-swatch-name") !== null,
-          ).map((element) =>
-            element.getAttribute("data-vote-swatch-name") ?? ""
-          ),
+          ).map((element) => summarizeVoteSwatch(element).name),
           allOptionsRows: findAllDeep<HTMLElement>(
             document,
             (element) =>
               element instanceof HTMLElement &&
               element.getAttribute("data-all-options-row") === "true",
-          ).map((row) => ({
-            optionId: row.getAttribute("data-option-id") ?? "",
-            optionTitle: row.getAttribute("data-option-title") ?? "",
-            swatches: findAllDeep<HTMLElement>(
+          ).map((row) => {
+            const chips = findAllDeep<HTMLElement>(
               row,
               (element) =>
                 element instanceof HTMLElement &&
                 element.getAttribute("data-vote-swatch-name") !== null,
-            ).map((element) =>
-              element.getAttribute("data-vote-swatch-name") ?? ""
-            ),
-          })),
+            ).map(summarizeVoteSwatch);
+            return {
+              optionId: row.getAttribute("data-option-id") ?? "",
+              optionTitle: row.getAttribute("data-option-title") ?? "",
+              swatches: chips.map((chip) => chip.name),
+              visibleSwatches: chips.filter((chip) => chip.visible).map((
+                chip,
+              ) => chip.name),
+              chips,
+            };
+          }),
           tags: tags.slice(0, 200),
           labels,
         };
@@ -1270,7 +1364,7 @@ declare global {
       topChoice: { title: string; summary: string };
       optionCards: OptionCardSummary[];
       swatches: string[];
-      allOptionsRows: OptionSwatchSummary[];
+      allOptionsRows: RenderedOptionSwatchSummary[];
       tags: string[];
       labels: string[];
     };
