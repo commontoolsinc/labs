@@ -188,6 +188,9 @@ export interface ChildNodeState {
 
   /** Track current value for deduping updates */
   currentValue?: unknown;
+
+  /** Source cell for reactive child nodes; used to decide same-key reuse. */
+  cell?: Cell<unknown>;
 }
 
 /**
