@@ -79,6 +79,100 @@ describe("plain-data sandbox helper", () => {
     expect(value.nested).not.toBeInstanceOf(FrozenMap);
   });
 
+  it("assertPlainData accepts already verified frozen data", () => {
+    const value = freezeVerifiedPlainData({ nested: { ok: true } });
+
+    assertPlainData(value);
+
+    expect(value.nested).toEqual({ ok: true });
+  });
+
+  it("assertPlainData accepts primitives, arrays, and sets", () => {
+    assertPlainData(undefined);
+    assertPlainData(true);
+    assertPlainData(null);
+    assertPlainData([1, "two"]);
+    assertPlainData(new Set([1, { ok: true }]));
+  });
+
+  it("rejects unsupported primitive values", () => {
+    expect(() => assertPlainData(() => "nope")).toThrow(
+      "Unsupported value type 'function'",
+    );
+    expect(() => freezeVerifiedPlainData(Symbol("nope"))).toThrow(
+      "Unsupported value type 'symbol'",
+    );
+  });
+
+  it("rejects unsupported object prototypes during validation", () => {
+    expect(() => assertPlainData(new Date())).toThrow(
+      "Unsupported object prototype 'Date'",
+    );
+  });
+
+  it("rejects values whose own property descriptors disappear", () => {
+    const source = new Proxy({}, {
+      ownKeys: () => ["ghost"],
+      getOwnPropertyDescriptor: () => undefined,
+    });
+
+    expect(() => assertPlainData(source)).toThrow(
+      "Own property descriptor is missing",
+    );
+    expect(() => freezeVerifiedPlainData(source)).toThrow(
+      "Own property descriptor is missing",
+    );
+  });
+
+  it("rejects Map and Set values when prototype iteration is unavailable", () => {
+    const originalEntriesDescriptor = Object.getOwnPropertyDescriptor(
+      Map.prototype,
+      "entries",
+    );
+    const originalValuesDescriptor = Object.getOwnPropertyDescriptor(
+      Set.prototype,
+      "values",
+    );
+    try {
+      Object.defineProperty(Map.prototype, "entries", {
+        value: undefined,
+        configurable: true,
+      });
+      expect(() => freezeVerifiedPlainData(new Map())).toThrow(
+        "Map-like value has no entries method on its prototype",
+      );
+
+      Object.defineProperty(Set.prototype, "values", {
+        value: undefined,
+        configurable: true,
+      });
+      expect(() => freezeVerifiedPlainData(new Set())).toThrow(
+        "Set-like value has no values method on its prototype",
+      );
+    } finally {
+      if (originalEntriesDescriptor) {
+        Object.defineProperty(
+          Map.prototype,
+          "entries",
+          originalEntriesDescriptor,
+        );
+      }
+      if (originalValuesDescriptor) {
+        Object.defineProperty(
+          Set.prototype,
+          "values",
+          originalValuesDescriptor,
+        );
+      }
+    }
+  });
+
+  it("returns primitive values unchanged when freezing", () => {
+    expect(freezeVerifiedPlainData(undefined)).toBeUndefined();
+    expect(freezeVerifiedPlainData(null)).toBeNull();
+    expect(freezeVerifiedPlainData(true)).toBe(true);
+  });
+
   it("materializes accessor properties once into data properties", () => {
     let reads = 0;
     const value = Object.defineProperty({}, "secret", {
@@ -259,11 +353,37 @@ describe("plain-data sandbox helper", () => {
     expect(Object.isFrozen(result[secret] as object)).toBe(true);
   });
 
+  it("preserves stateless RegExp values and own properties", () => {
+    const value = /hello/i;
+    Object.defineProperty(value, "label", {
+      value: { kind: "greeting" },
+      enumerable: true,
+      configurable: true,
+    });
+
+    const result = freezeVerifiedPlainData(
+      value,
+    ) as RegExp & { readonly label?: { readonly kind: string } };
+
+    expect(result).not.toBe(value);
+    expect(result.source).toBe("hello");
+    expect(result.flags).toBe("i");
+    expect(result.label).toEqual({ kind: "greeting" });
+    expect(Object.isFrozen(result.label as object)).toBe(true);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+
   it("rejects intrinsic stateful RegExp instances", () => {
     const value = /hello/gi;
     value.lastIndex = 2;
 
     expect(() => freezeVerifiedPlainData(value)).toThrow(
+      "Stateful RegExp values are not allowed in verified plain data",
+    );
+  });
+
+  it("assertPlainData rejects intrinsic stateful RegExp instances", () => {
+    expect(() => assertPlainData(/hello/y)).toThrow(
       "Stateful RegExp values are not allowed in verified plain data",
     );
   });

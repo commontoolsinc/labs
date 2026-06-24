@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import {
+  debugTransactionWrites,
   formatTransactionSummary,
   summarizeTransaction,
 } from "../src/storage/transaction-summary.ts";
@@ -16,10 +17,11 @@ class TestJournal implements ITransactionJournal {
   constructor(
     private noveltyData: IAttestation[] = [],
     private historyData: IAttestation[] = [],
+    private activityData: any[] = [],
   ) {}
 
   activity(): Iterable<any> {
-    return [];
+    return this.activityData;
   }
 
   novelty(_space: any): Iterable<IAttestation> {
@@ -47,8 +49,9 @@ function attestation(id: string, path: string[], value?: any): IAttestation {
 function createTestTransaction(
   novelty: IAttestation[],
   history: IAttestation[] = [],
+  activity: any[] = [],
 ): IExtendedStorageTransaction {
-  const journal = new TestJournal(novelty, history);
+  const journal = new TestJournal(novelty, history, activity);
   return {
     journal,
     status: () => ({ status: "done" as const, journal }),
@@ -57,12 +60,24 @@ function createTestTransaction(
 
 function createInspectableTransaction(
   writes: TransactionWriteDetail[],
+  activity: any[] = [],
 ): IExtendedStorageTransaction {
-  const journal = new TestJournal();
+  const journal = new TestJournal([], [], activity);
   return {
     journal,
     getWriteDetails: () => writes,
     status: () => ({ status: "done" as const, journal }),
+  } as any;
+}
+
+function createStatusTransaction(
+  status: "done" | "error",
+  activity: any[] = [],
+): IExtendedStorageTransaction {
+  const journal = new TestJournal([], [], activity);
+  return {
+    journal,
+    status: () => ({ status, journal }),
   } as any;
 }
 
@@ -148,12 +163,25 @@ describe("transaction-summary", () => {
     const tx = createTestTransaction(
       [attestation("of:abc123", ["value", "old"], undefined)],
       [attestation("of:abc123", ["value", "old"], "previous")],
+      [{
+        write: {
+          space: "did:key:test" as any,
+          id: "of:abc123",
+          type: "application/json",
+          path: ["value", "old"],
+        },
+      }],
     );
 
     const summary = summarizeTransaction(tx, "did:key:test" as any);
 
     assertEquals(summary.writes.length, 1);
     assertEquals(summary.writes[0].isDeleted, true);
+    assertEquals(summary.summary, "Deleted value.old");
+    assertEquals(
+      formatTransactionSummary(tx, "did:key:test" as any),
+      "value.old: deleted",
+    );
   });
 
   it("should handle empty transaction", () => {
@@ -164,6 +192,41 @@ describe("transaction-summary", () => {
 
     const formatted = formatTransactionSummary(tx, "did:key:test" as any);
     assertEquals(formatted, "Empty transaction");
+  });
+
+  it("should summarize failed, read-only, and hidden-write transactions", () => {
+    assertEquals(
+      summarizeTransaction(createStatusTransaction("error")).summary,
+      "Transaction failed",
+    );
+
+    const readOnly = createStatusTransaction("done", [
+      { read: { id: "of:read", type: "application/json", path: [] } },
+    ]);
+    assertEquals(
+      summarizeTransaction(readOnly).summary,
+      "Read-only transaction",
+    );
+
+    const hiddenWrite = createStatusTransaction("done", [
+      { write: { id: "of:write", type: "application/json", path: [] } },
+    ]);
+    assertEquals(
+      formatTransactionSummary(hiddenWrite),
+      "(pass space parameter to see what was written)",
+    );
+  });
+
+  it("should include large read counts in formatted output", () => {
+    const activity = Array.from({ length: 11 }, (_, index) => ({
+      read: { id: `of:read-${index}`, type: "application/json", path: [] },
+    }));
+    const tx = createStatusTransaction("done", activity);
+
+    assertEquals(
+      formatTransactionSummary(tx),
+      "Read-only transaction\n(11 reads for context)",
+    );
   });
 
   it("should summarize direct write details without journal novelty/history", () => {
@@ -190,5 +253,199 @@ describe("transaction-summary", () => {
       previousValue: 10,
       isDeleted: false,
     }]);
+  });
+
+  it("should summarize direct reactivity activity", () => {
+    const tx = {
+      journal: new TestJournal(),
+      getReactivityLog: () => ({
+        reads: [
+          { id: "of:read", type: "application/json", path: [] },
+        ],
+        shallowReads: [
+          { id: "of:shallow", type: "application/json", path: [] },
+        ],
+        writes: [
+          { id: "of:write", type: "application/json", path: [] },
+        ],
+      }),
+      getWriteDetails: () => [],
+      status: () => ({
+        status: "done" as const,
+        journal: new TestJournal(),
+      }),
+    } as any;
+
+    const summary = summarizeTransaction(tx);
+
+    assertEquals(summary.activity, { reads: 2, writes: 1 });
+    assertEquals(
+      summary.summary,
+      "1 write(s) (details unavailable without space parameter)",
+    );
+  });
+
+  it("should debug direct reactivity write activity", () => {
+    const journal = new TestJournal([
+      attestation("of:direct123", ["value"], null),
+    ]);
+    const tx = {
+      journal,
+      getReactivityLog: () => ({
+        reads: [],
+        shallowReads: [],
+        writes: [
+          {
+            space: "did:key:test" as any,
+            id: "of:direct123",
+            type: "application/json",
+            path: ["value"],
+          },
+        ],
+      }),
+      status: () => ({
+        status: "done" as const,
+        journal,
+      }),
+    } as any;
+
+    const debug = debugTransactionWrites(tx);
+
+    assertEquals(debug.includes("Total writes in activity: 1"), true);
+    assertEquals(
+      debug.includes("Write to: of:direct123/value (space: did:key:test)"),
+      true,
+    );
+  });
+
+  it("should format null write values", () => {
+    const tx = createInspectableTransaction([{
+      address: {
+        space: "did:key:test" as any,
+        id: "short-id" as any,
+        type: "application/json",
+        path: ["nothing"],
+      },
+      value: null,
+    }], [{
+      write: {
+        space: "did:key:test" as any,
+        id: "short-id",
+        type: "application/json",
+        path: ["nothing"],
+      },
+    }]);
+
+    assertEquals(
+      formatTransactionSummary(tx, "did:key:test" as any),
+      "nothing = null",
+    );
+  });
+
+  it("should truncate verbose write values in summaries", () => {
+    const longText = "x".repeat(120);
+    const tx = createInspectableTransaction(
+      [
+        {
+          address: {
+            space: "did:key:test" as any,
+            id: "a-very-long-object-identifier" as any,
+            type: "application/json",
+            path: ["long"],
+          },
+          value: longText,
+        },
+        {
+          address: {
+            space: "did:key:test" as any,
+            id: "of:array123" as any,
+            type: "application/json",
+            path: ["items"],
+          },
+          value: [1, 2, 3],
+        },
+        {
+          address: {
+            space: "did:key:test" as any,
+            id: "of:object123" as any,
+            type: "application/json",
+            path: ["details"],
+          },
+          value: { nested: { count: 1 } },
+        },
+        {
+          address: {
+            space: "did:key:test" as any,
+            id: "of:boolean123" as any,
+            type: "application/json",
+            path: ["done"],
+          },
+          value: true,
+        },
+      ],
+      Array.from({ length: 4 }, (_, index) => ({
+        write: {
+          space: "did:key:test" as any,
+          id: `of:write-${index}`,
+          type: "application/json",
+          path: [],
+        },
+      })),
+    );
+
+    const summary = summarizeTransaction(tx, "did:key:test" as any);
+
+    assertEquals(summary.writes[0].objectId, "a-very-long-object-i...");
+    assertEquals(summary.writes[0].value, `${"x".repeat(100)}...`);
+    assertEquals(summary.writes[1].value, "[Array: 3 items]");
+    assertEquals(summary.writes[2].value, '{"nested":{"count":1}}');
+    assertEquals(
+      summarizeTransaction(
+        createInspectableTransaction([{
+          address: {
+            space: "did:key:test" as any,
+            id: "of:null123" as any,
+            type: "application/json",
+            path: ["nothing"],
+          },
+          value: null,
+        }]),
+        "did:key:test" as any,
+      ).writes[0].value,
+      null,
+    );
+    assertEquals(summary.summary.includes("... and 1 more"), true);
+    assertEquals(
+      formatTransactionSummary(tx, "did:key:test" as any).includes(
+        "Object a-very-long-object-i...",
+      ),
+      true,
+    );
+  });
+
+  it("should debug journal write activity", () => {
+    const tx = createTestTransaction(
+      [attestation("of:abc123", ["value"], 1)],
+      [],
+      [
+        {
+          write: {
+            space: "did:key:test" as any,
+            id: "of:abc123",
+            type: "application/json",
+            path: ["value"],
+          },
+        },
+      ],
+    );
+
+    const debug = debugTransactionWrites(tx);
+
+    assertEquals(debug.includes("Total writes in activity: 1"), true);
+    assertEquals(
+      debug.includes("Write to: of:abc123/value (space: did:key:test)"),
+      true,
+    );
+    assertEquals(debug.includes("did:key:test: 1 attestation(s)"), true);
   });
 });
