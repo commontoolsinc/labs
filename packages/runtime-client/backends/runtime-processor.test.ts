@@ -144,6 +144,7 @@ describe("page slug redirects", () => {
     schemaCell?: unknown;
     onPull?: () => void;
     patternLink?: unknown;
+    patternIdentity?: unknown;
     onSync?: () => void;
   } = {}) {
     return {
@@ -157,7 +158,11 @@ describe("page slug redirects", () => {
       },
       getRaw: () => options.raw,
       getMetaRaw: (metaField: string) =>
-        metaField === "pattern" ? options.patternLink : undefined,
+        metaField === "patternIdentity"
+          ? options.patternIdentity
+          : metaField === "pattern"
+          ? options.patternLink
+          : undefined,
       getAsLink: () => cellRefToSigilLink(ref),
       getAsNormalizedFullLink: () => ref,
       asSchemaFromLinks: () => options.schemaCell,
@@ -245,14 +250,9 @@ describe("page slug redirects", () => {
         required: ["$NAME", "$UI"],
       },
     };
-    // if we don't have a pattern link, the processor won't pull the cell and
-    // thus won't pull the schema, so we have to include a pattern link
-    const patternRef: CellRef = {
-      id: "of:fid1-pattern-doc" as CellRef["id"],
-      space,
-      scope: "space",
-      path: [],
-    };
+    // If we don't have a pattern identity, the processor won't pull the cell and
+    // thus won't pull the schema, so include the current piece marker.
+    const patternIdentity = { identity: "pattern-identity", symbol: "default" };
     let schemaPulled = false;
     const schemaCell = mockCell(schemaRef, {
       onPull: () => {
@@ -262,7 +262,7 @@ describe("page slug redirects", () => {
     let targetSynced = false;
     const targetCell = mockCell(targetRef, {
       schemaCell,
-      patternLink: redirectRaw(patternRef),
+      patternIdentity,
       onSync: () => {
         targetSynced = true;
       },
@@ -316,14 +316,11 @@ describe("page slug redirects", () => {
       scope: "space",
       path: [],
     };
-    const patternRef: CellRef = {
-      id: "of:fid1-pattern-doc" as CellRef["id"],
-      space,
-      scope: "space",
-      path: [],
-    };
     const pieceCell = mockCell(pieceRef, {
-      patternLink: redirectRaw(patternRef),
+      patternIdentity: {
+        identity: "piece-pattern-identity",
+        symbol: "default",
+      },
     });
     const resultCell = mockCell(resultRef);
     const slugCell = mockCell(slugRef, { raw: redirectRaw(pieceRef) });
