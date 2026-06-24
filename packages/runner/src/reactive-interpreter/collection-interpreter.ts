@@ -215,6 +215,14 @@ export function collectionInterpreter(
       // deno-lint-ignore no-explicit-any
       const slots = new Array<Cell<any>>(len);
       for (let i = 0; i < len; i++) {
+        // Sparse-hole guard (legacy map.ts parity: `if (!(i in list)) continue`).
+        // At a hole index, do NOT mint a per-element doc/effect/slot — running
+        // the element op on `undefined` would write a spurious value (e.g.
+        // double(undefined)=NaN) that fails item validation and drops the whole
+        // field. Keep `len` so trailing positions are preserved; the slot stays a
+        // hole in the container array, so `i in result` is false (sparseness
+        // preserved by storage).
+        if (!(i in (rawList as unknown[]))) continue;
         const index = i;
         // deno-lint-ignore no-explicit-any
         const elemResult = runtime.getCell<any>(

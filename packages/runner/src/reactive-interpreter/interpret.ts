@@ -154,9 +154,22 @@ export function evalRog(
         // has at most one input ref; with none, the leaf is called with
         // undefined. NEVER a positional array (that would feed `add({a,b})` an
         // array and silently yield NaN/`{}`).
-        const input = op.inputs.length === 0
-          ? undefined
-          : resolve(op.inputs[0]);
+        // A leaf with NO input ref legitimately accepts `undefined` (legacy's
+        // `argumentSchema === false` bypass: a no-argument lift runs and may
+        // produce a constant); call it as before.
+        if (op.inputs.length === 0) return impl(undefined);
+        const input = resolve(op.inputs[0]);
+        // UNDEFINED-ARGUMENT RUN-GATE (legacy parity). Legacy gates each node on
+        // `isValidArgument = argument !== undefined` (runner.ts `if
+        // (isValidArgument)`) before invoking, so a node whose resolved input is
+        // strictly `undefined` is gated OUT and stays `undefined` WITHOUT running
+        // its body. This matters for CHAINED lifts: when an upstream leaf throws
+        // (its op value isolated to `undefined`), the downstream leaf reading it
+        // must NOT execute against `undefined` (which would yield e.g.
+        // `healthy: undefined`); it must stay `undefined` too. This does NOT
+        // regress error isolation (R4): a leaf reading a DEFINED input still runs
+        // and a genuine throw is still caught + reported below.
+        if (input === undefined) return undefined;
         return impl(input);
       }
       case "access":
