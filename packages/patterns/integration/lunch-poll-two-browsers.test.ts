@@ -104,6 +104,10 @@ type RenderedPollSnapshot = {
   allOptionsRows: OptionSwatchSummary[];
 };
 
+type DebugVDomPollSnapshot = RenderedPollSnapshot & {
+  swatches: string[];
+};
+
 type BrowserRuntimeDiagnostics = {
   href: string;
   visibilityState: string;
@@ -518,6 +522,7 @@ async function settleAll(pages: readonly Page[]): Promise<void> {
   await Promise.all(pages.map(async (page) => {
     await waitForRuntimeIdle(page, { timeout: PROPAGATION_TIMEOUT });
     await waitForRuntimeSynced(page, { timeout: PROPAGATION_TIMEOUT });
+    await waitForRuntimeIdle(page, { timeout: PROPAGATION_TIMEOUT });
     await waitFor(() => awaitViewSettled(page), {
       timeout: PROPAGATION_TIMEOUT,
       delay: 250,
@@ -836,6 +841,7 @@ async function waitForPollMatrixConvergence(
       ...pages.map((page, index) =>
         waitFor(async () => {
           const state = await readPollCellSummary(page);
+          await drainRuntimeAndView(page);
           const snapshot = await page.evaluate(() =>
             globalThis.__lunchPollProbe.snapshot()
           );
@@ -861,6 +867,9 @@ async function waitForPollMatrixConvergence(
         const snapshot = await page.evaluate(() =>
           globalThis.__lunchPollProbe.snapshot()
         ).catch((error) => ({ error: String(error) }));
+        const debugVDOM = await readPageDebugVDOM(page)
+          .then(summarizeVDomForDiagnostics)
+          .catch((error) => ({ error: String(error) }));
         const runtimeDiagnostics = await collectBrowserRuntimeDiagnostics(page)
           .catch((error) => ({
             href: "",
@@ -872,6 +881,7 @@ async function waitForPollMatrixConvergence(
           expectedViewer: expected.names[index],
           state: summarizeForDiagnostics(state),
           snapshot: summarizeSnapshotForDiagnostics(snapshot),
+          debugVDOM,
           runtimeDiagnostics,
         };
       }),
@@ -891,6 +901,28 @@ async function waitForPollMatrixConvergence(
     );
     throw cause;
   }
+}
+
+async function drainRuntimeAndView(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        rt?: { idle?: () => Promise<void> };
+        viewSettled?: () => Promise<void>;
+      };
+    }).commonfabric;
+    await rt?.rt?.idle?.();
+    await rt?.viewSettled?.();
+  });
+}
+
+async function readPageDebugVDOM(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const cf = (globalThis as typeof globalThis & {
+      commonfabric?: { vdom?: { tree?: () => Promise<unknown> } };
+    }).commonfabric;
+    return await cf?.vdom?.tree?.();
+  });
 }
 
 async function installProbeHelpers(page: Page): Promise<void> {
@@ -1079,6 +1111,9 @@ async function installProbeHelpers(page: Page): Promise<void> {
             optionId: card.getAttribute("data-option-card-id") ?? "",
             optionTitle: card.getAttribute("data-option-card-title") ?? "",
             myVote: card.getAttribute("data-option-card-my-vote") ?? "",
+            me: card.getAttribute("data-option-card-me") ?? "",
+            isJoined: card.getAttribute("data-option-card-is-joined") ?? "",
+            isAdmin: card.getAttribute("data-option-card-is-admin") ?? "",
             voteControls: findAllDeep<HTMLElement>(
               card,
               (element) =>
@@ -1213,6 +1248,7 @@ declare global {
     commonfabric?: {
       readCell?: () => Promise<unknown>;
       viewSettled?: () => Promise<void>;
+      vdom?: { tree?: () => Promise<unknown> };
     };
   }
 
@@ -1367,6 +1403,116 @@ function collectVDomSwatches(root: unknown): VDomSwatchSummary {
 
   visit(root);
   return { count: names.length, names: [...new Set(names)], samples };
+}
+
+function summarizeVDomForDiagnostics(root: unknown): DebugVDomPollSnapshot {
+  const byAttr = (name: string, value?: string) =>
+    findAllVDom(root, (props) => {
+      const actual = readCellLikeValue(props[name]);
+      return value === undefined ? actual !== undefined : actual === value;
+    });
+  const attr = (node: unknown, name: string): string => {
+    const props = propsOf(node);
+    const value = props ? readCellLikeValue(props[name]) : undefined;
+    return typeof value === "string" ? value : "";
+  };
+  const pollSummary = byAttr("data-poll-summary", "true")[0];
+  const hostChip = byAttr("data-viewer-host-chip", "true")[0];
+  const viewerName = byAttr("data-viewer-name")[0];
+  const topChoice = byAttr("data-top-choice", "true")[0];
+  const optionCards = byAttr("data-option-card", "true").map((card) => ({
+    optionId: attr(card, "data-option-card-id"),
+    optionTitle: attr(card, "data-option-card-title"),
+    myVote: attr(card, "data-option-card-my-vote"),
+    me: attr(card, "data-option-card-me"),
+    isJoined: attr(card, "data-option-card-is-joined"),
+    isAdmin: attr(card, "data-option-card-is-admin"),
+    voteControls: findAllVDom(
+      card,
+      (props) => readCellLikeValue(props["data-vote-control"]) !== undefined,
+    ).map((control) => attr(control, "data-vote-control")),
+  }));
+  const allOptionsRows = byAttr("data-all-options-row", "true").map((row) => ({
+    optionId: attr(row, "data-option-id"),
+    optionTitle: attr(row, "data-option-title"),
+    swatches: findAllVDom(
+      row,
+      (props) =>
+        readCellLikeValue(props["data-vote-swatch-name"]) !== undefined,
+    ).map((swatch) => attr(swatch, "data-vote-swatch-name")),
+  }));
+  const swatches = byAttr("data-vote-swatch-name").map((swatch) =>
+    attr(swatch, "data-vote-swatch-name")
+  );
+  return {
+    pollSummary: vdomText(pollSummary),
+    viewerSummary: {
+      name: attr(viewerName, "data-viewer-name"),
+      hostChipVisible: hostChip !== undefined,
+    },
+    topChoice: {
+      title: attr(topChoice, "data-top-choice-title"),
+      summary: attr(topChoice, "data-top-choice-summary"),
+    },
+    optionCards,
+    allOptionsRows,
+    swatches,
+  };
+}
+
+function findAllVDom(
+  root: unknown,
+  predicate: (
+    props: Record<string, unknown>,
+    node: Record<string, unknown>,
+  ) => boolean,
+): unknown[] {
+  const matches: unknown[] = [];
+  const seen = new Set<unknown>();
+  const visit = (node: unknown) => {
+    const value = readCellLikeValue(node);
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (!isRecord(value) || seen.has(value)) return;
+    seen.add(value);
+    const props = propsOf(value);
+    if (props && predicate(props, value)) matches.push(value);
+    const ui = value[UI];
+    if (ui !== undefined && ui !== value) visit(ui);
+    const children = readCellLikeValue(value.children);
+    if (Array.isArray(children)) {
+      for (const child of children) visit(child);
+    } else if (children !== undefined && children !== null) {
+      visit(children);
+    }
+  };
+  visit(root);
+  return matches;
+}
+
+function vdomText(root: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (node: unknown) => {
+    const value = readCellLikeValue(node);
+    if (typeof value === "string" || typeof value === "number") {
+      parts.push(String(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (!isRecord(value) || seen.has(value)) return;
+    seen.add(value);
+    const ui = value[UI];
+    if (ui !== undefined && ui !== value) visit(ui);
+    visit(value.children);
+  };
+  visit(root);
+  return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
 function propsOf(node: unknown): Record<string, unknown> | undefined {

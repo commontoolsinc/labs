@@ -304,7 +304,7 @@ const castVote = handler<CastVoteEvent, {
 }>(({ optionId, voteType }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  const current = votes.get();
+  const current = votes.get() ?? [];
   const existingIdx = current.findIndex(
     (v) => v.voterName === me && v.optionId === optionId,
   );
@@ -723,6 +723,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       : "";
                     return (
                       <div
+                        data-poll-summary="true"
                         style={{
                           marginTop: "4px",
                           fontSize: "13px",
@@ -749,6 +750,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       {amAdmin
                         ? (
                           <span
+                            data-viewer-host-chip="true"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -769,6 +771,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         : null}
                       <span
                         title={viewer}
+                        data-viewer-name={viewer}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -818,6 +821,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   const hasReds = tally.red > 0;
                   return (
                     <div
+                      data-top-choice="true"
+                      data-top-choice-title={tally.option.title}
+                      data-top-choice-summary={summary}
                       style={{
                         padding: "16px",
                         marginBottom: "16px",
@@ -910,6 +916,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           });
                           return (
                             <div
+                              data-all-options-row="true"
+                              data-option-id={oid}
+                              data-option-title={option.title}
                               style={{
                                 order: summaryRank,
                                 display: "flex",
