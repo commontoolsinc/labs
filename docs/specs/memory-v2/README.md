@@ -123,6 +123,7 @@ broader target sections.
 ## Key Type Summary
 
 ```typescript
+// Shown at module scope.
 type EntityId = string;
 type BranchId = string;
 type SessionId = string;

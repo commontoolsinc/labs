@@ -31,6 +31,7 @@ This explains nearly every rule in this chapter before you read it:
 The skeleton (`docs/common/concepts/pattern.md`):
 
 ```tsx
+// Shown for illustration only.
 import { Default, NAME, pattern, Stream, UI, type VNode, Writable } from "commonfabric";
 
 interface CounterInput {
@@ -75,6 +76,7 @@ Name interfaces `<PatternName>Input`/`<PatternName>Output`, not generic
 that re-runs whenever anything it read changes:
 
 ```ts
+// Shown inside a pattern body.
 const itemCount = computed(() => items.get().length);
 const activeItems = computed(() => items.get().filter((i) => !i.done));
 const displayName = computed(() => `Counter: ${value.get()}`);
@@ -90,6 +92,7 @@ computeds, or the return object.
 reactive operator, and it must be declared at **module scope**:
 
 ```ts
+// Shown inside a pattern body.
 const addCells = lift(({ a, b }: { a: number; b: number }) => a + b);
 // inside a pattern:
 return { combined: addCells({ a, b }) };
@@ -115,6 +118,7 @@ from*:
 This is the default choice for single-use behavior:
 
 ```ts
+// Shown inside a pattern body.
 const addItem = action((event: { title: string }) => {
   const trimmed = event.title.trim();
   if (trimmed) items.push({ title: trimmed, done: false });
@@ -126,6 +130,7 @@ const addItem = action((event: { title: string }) => {
 at the call site:
 
 ```ts
+// Shown inside a pattern body.
 const increment = handler<void, { value: Writable<number> }>(
   (_, { value }) => value.set(value.get() + 1),
 );

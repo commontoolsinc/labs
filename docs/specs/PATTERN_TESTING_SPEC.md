@@ -74,6 +74,7 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 The `tests` array uses a discriminated union to avoid TypeScript declaration emit issues:
 
 ```typescript
+// Shown at module scope.
 type TestStep =
   | { assertion: OpaqueRef<boolean> }  // from computed(() => condition)
   | { action: Stream<void> };          // from action(() => handler.send())
@@ -84,6 +85,7 @@ This format keeps `action()` streams and `computed()` cells separate in the type
 ### Example Test Pattern
 
 ```tsx
+// Shown at module scope.
 import { action, computed, pattern, Writable } from "commonfabric";
 import ExpenseTracker from "./expense-tracker.tsx";
 
@@ -222,6 +224,7 @@ expense-tracker.test.tsx
 ### Algorithm
 
 ```typescript
+// Shown for illustration only.
 async function runTestPattern(testPath: string, options: TestOptions): Promise<TestResults> {
   const TIMEOUT = options.timeout ?? 5000;
 
@@ -327,6 +330,7 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
 Use the `action()` helper to create void streams that trigger events on the pattern:
 
 ```tsx
+// Shown inside a pattern body.
 // ✅ Good - use action() to trigger pattern handlers
 const action_add_expense = action(() => {
   subject.addExpense.send({ description: "Coffee", amount: 5, category: "food" });
@@ -338,6 +342,7 @@ const action_add_expense = action(() => {
 Test actions should contain all test data inside them:
 
 ```tsx
+// Shown as alternative snippets.
 // ✅ Good - hardcoded test data inside action
 const action_add_expense = action(() => {
   subject.addExpense.send({ description: "Coffee", amount: 5, category: "food" });
@@ -355,6 +360,7 @@ const action_add_expense = action(() => {
 Use descriptive computed cell names:
 
 ```tsx
+// Shown inside a pattern body.
 // ✅ Good - name describes what's being tested
 const assert_total_equals_45 = computed(() => subject.result.total === 45);
 const assert_items_sorted_by_date = computed(() => isSorted(subject.items));
@@ -368,6 +374,7 @@ const test1 = computed(() => subject.result.total === 45);
 Wrap actions and assertions in their respective object format:
 
 ```tsx
+// Shown inside a pattern body.
 // ✅ Good - discriminated union format
 return {
   tests: [
@@ -389,6 +396,7 @@ return {
 Put actions before the assertions that depend on them:
 
 ```tsx
+// Shown inside a pattern body.
 return {
   tests: [
     { action: action_add_item },     // First, add an item
@@ -525,6 +533,7 @@ export default pattern<Input, Output>(({ value }) => ({
 ### Test Pattern
 
 ```tsx
+// Shown at module scope.
 // counter.test.tsx
 import { Writable, action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";

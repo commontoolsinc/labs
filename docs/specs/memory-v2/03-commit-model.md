@@ -16,6 +16,7 @@ An operation describes a single intended mutation within a transaction. Every
 operation targets an entity by `id`.
 
 ```typescript
+// Shown at module scope.
 interface SetOperation {
   op: "set";
   id: EntityId;
@@ -48,6 +49,7 @@ A transaction groups one or more operations into an atomic unit. All operations
 succeed or all fail.
 
 ```typescript
+// Shown at module scope.
 interface Transaction {
   operations: Operation[];
   codeCID?: Reference;
@@ -117,6 +119,7 @@ A client commit explicitly separates dependencies on confirmed state from
 dependencies on earlier pending commits.
 
 ```typescript
+// Shown at module scope.
 type ReadPath = readonly string[];
 type SessionId = string;
 
@@ -212,6 +215,7 @@ Implementations MAY over-approximate overlap. They MUST NOT miss a real overlap.
 Pending reads are resolved against earlier commits in the same logical session.
 
 ```typescript
+// Shown inside a pattern body.
 function validatePendingReads(
   commit: ClientCommit,
   sessionId: SessionId,
@@ -243,6 +247,7 @@ When validation fails, the server returns a `ConflictError` with enough detail
 for the client to refresh confirmed state and retry.
 
 ```typescript
+// Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
   commit: ClientCommit;
@@ -283,6 +288,7 @@ All write steps happen inside a single database transaction.
 ### 3.7.2 Commit Log Entry
 
 ```typescript
+// Shown at module scope.
 type BranchLifecycleWrite =
   | {
     cmd: "/memory/branch/create";

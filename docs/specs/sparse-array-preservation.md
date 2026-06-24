@@ -59,6 +59,7 @@ sparse arrays — only the style differs.
 ### `forEach` (preferred for iteration)
 
 ```ts
+// Shown inside a pattern body.
 const result = new Array(arr.length);       // pre-allocate with holes
 arr.forEach((v, i) => {
   result[i] = transform(v);                // only called for present indices
@@ -77,6 +78,7 @@ for the production usage shape.
 ### `for` + `i in arr` (when you need to detect absences)
 
 ```ts
+// Shown inside a pattern body.
 for (let i = 0; i < arr.length; i++) {
   if (!(i in arr)) continue;               // skip holes
   result[i] = transform(arr[i]);           // only touch populated indices

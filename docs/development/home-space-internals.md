@@ -10,6 +10,7 @@ from the current space DID). It is not a constructor option — the runtime
 derives it internally from the storage manager's identity:
 
 ```typescript
+// Shown inside a pattern body.
 const runtime = new Runtime({
   apiUrl,
   storageManager,

@@ -16,6 +16,7 @@ exported by the default app pattern. **Never** push to `allPieces` directly.
 The most common case — creating a piece in response to a user interaction:
 
 ```tsx
+// Shown for illustration only.
 import { action, pattern, wish, Stream, UI } from "commonfabric";
 import { MentionablePiece } from "@commonfabric/piece";
 
@@ -40,6 +41,7 @@ return {
 When you need reusable logic that can be bound to different state:
 
 ```tsx
+// Shown for illustration only.
 import { handler, Stream } from "commonfabric";
 import { MentionablePiece } from "@commonfabric/piece";
 
@@ -68,6 +70,7 @@ return {
 ### Direct mutation
 
 ```tsx
+// Shown for illustration only.
 // BAD — direct mutation, no deduplication
 const { allPieces } =
   wish<{ allPieces: Writable<NotePiece[]> }>({ query: "#default" }).result;
@@ -77,6 +80,7 @@ allPieces.push(newNote);
 ### Type hack
 
 ```tsx
+// Shown inside a pattern body.
 // WORSE — hides type errors behind `as any`
 allPieces.push(note as any);
 (allPieces as any).push(note);
@@ -85,6 +89,7 @@ allPieces.push(note as any);
 ### Wishing for `allPieces` as Writable
 
 ```tsx
+// Shown inside a pattern body.
 // BAD — exposes internal implementation of default-app
 wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" });
 ```
@@ -92,6 +97,7 @@ wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" });
 Instead, wish only for the `addPiece` stream:
 
 ```tsx
+// Shown at module scope.
 // GOOD — depends on the handler contract, not internal state
 wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",

@@ -86,6 +86,7 @@ prepared commit persists a **derived** label component at the written path. The
 labelMap entry format grows a provenance tag (wire version 1→2, SC-1):
 
 ```ts
+// Shown at module scope.
 type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;

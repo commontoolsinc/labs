@@ -95,6 +95,7 @@ After the trace, keep the session live and inspect the worker through
 ### Baseline, Replay, Compare
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.getLoggerCounts()       // see what counters exist
 await commonfabric.rt.resetLoggerBaselines()  // just before the interaction
 // ... replay one interaction, let it settle ...
@@ -127,6 +128,7 @@ How to interpret the deltas:
 When logger timing is not enough, capture per-`execute()` settle-loop stats:
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.setSettleStatsEnabled(true)
 // ... replay the interaction ...
 await commonfabric.rt.getSettleStatsHistory()
@@ -143,6 +145,7 @@ Use trigger trace when the question is no longer "is there churn?" and becomes
 "which exact write scheduled this action again?"
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.setTriggerTraceEnabled(false)  // reset the ring buffer
 await commonfabric.rt.setTriggerTraceEnabled(true)
 // ... replay the interaction, let it settle ...
@@ -162,6 +165,7 @@ trace is noisy because one root write schedules many sinks, or when comparing
 run N against run N+1 in the same space.
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.setActionRunTraceEnabled(false)  // reset
 await commonfabric.rt.setActionRunTraceEnabled(true)
 // ... replay the interaction ...
@@ -180,6 +184,7 @@ Once trigger trace has told you which cell is noisy, arm the transaction-level
 write watcher to capture the exact write callsite:
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.watchWrites({
   space: "did:key:z6Mkm...",
   id: "of:baedrei...",
@@ -215,6 +220,7 @@ loggers before raising the whole `scheduler` module:
 - `scheduler` — settle-loop internals (broad — last resort)
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.setLoggerEnabled(true, "runner.trigger-flow")
 await commonfabric.rt.setLoggerLevel("debug", "runner.trigger-flow")
 ```

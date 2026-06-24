@@ -69,6 +69,7 @@ One module-level side table replaces the symbol, same chain semantics, no
 object property:
 
 ```ts
+// Shown at module scope.
 // builder/pattern-metadata.ts
 const derivedFrom = new WeakMap<object, object>(); // copy → original
 

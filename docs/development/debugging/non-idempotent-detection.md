@@ -26,6 +26,7 @@ Common causes:
 The fastest way to check for non-idempotent actions:
 
 ```javascript
+// Shown inside a pattern body.
 // Run diagnosis for 5 seconds (default)
 await commonfabric.detectNonIdempotent()
 
@@ -76,6 +77,7 @@ equal-input nondeterminism (timestamps, random ordering) are still reported.
 ### Basic Usage
 
 ```javascript
+// Shown inside a pattern body.
 // Default: 5-second diagnosis window
 const result = await commonfabric.detectNonIdempotent()
 ```
@@ -132,6 +134,7 @@ A cycle chain reads as `A --[cell X]--> B --[cell Y]--> A`: each entry's
 - **RuntimeClient** (tests or tooling):
 
 ```typescript
+// Shown at module scope.
 import { RuntimeClient } from "@commonfabric/runtime-client";
 
 const result = await runtimeClient.detectNonIdempotent(5000);
@@ -149,6 +152,7 @@ the fan-out workflow in [Debugging Settle Waves](./settle-wave-investigation.md)
 ### Set-to-Array Ordering
 
 ```typescript
+// Shown as alternative snippets.
 // BAD: Set iteration order can vary between identical inputs
 const uniqueTags = computed(() => {
   const set = new Set(items.map(i => i.tag));
@@ -165,6 +169,7 @@ const uniqueTags = computed(() => {
 ### Timestamps or Random Values in computed()
 
 ```typescript
+// Shown inside a pattern body.
 // BAD: Different output every run
 const enriched = computed(() => {
   return items.map(i => ({ ...i, updatedAt: Date.now() }));
@@ -179,6 +184,7 @@ const updateItem = handler<{}, { item: Item }>((_, { item }) => {
 ### Appending Instead of Replacing
 
 ```typescript
+// Shown inside a pattern body.
 // BAD: Grows on every re-run
 const log = computed(() => {
   entries.set([...entries.get(), newEntry]);
@@ -193,6 +199,7 @@ const allEntries = computed(() => {
 ### Writing to a Writable Inside computed()
 
 ```typescript
+// Shown as alternative snippets.
 // BAD: Side-effecting computed — if the write triggers re-reads, it cycles
 const derived = computed(() => {
   const value = expensiveCalculation(input);

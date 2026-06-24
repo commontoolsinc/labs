@@ -8,6 +8,7 @@ after rendering a list.
 rendering, instead of passing a handler to run later.
 
 ```tsx
+// Shown inside a pattern body.
 // WRONG - sends during render
 {items.map((item, index) => (
   <cf-button onClick={selectItem.send(index)}>Select</cf-button>
@@ -25,6 +26,7 @@ argument, wrap the `.send(...)` call in a callback so it runs only when the
 event fires.
 
 ```tsx
+// Shown inside a pattern body.
 // CORRECT - sends only when clicked
 {items.map((item, index) => (
   <cf-button onClick={() => selectItem.send(index)}>Select</cf-button>
@@ -35,6 +37,7 @@ When the same behavior is reused with different state bindings, prefer a
 module-scope `handler()` and bind it inside the map.
 
 ```tsx
+// Shown for illustration only.
 const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
   (_, { items, index }) => items.set(items.get().toSpliced(index, 1)),
 );

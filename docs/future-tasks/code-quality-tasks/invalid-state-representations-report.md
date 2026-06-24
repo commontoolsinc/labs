@@ -9,6 +9,7 @@ refactored:
 **File**: `packages/llm/src/types.ts` **Lines**: 28-38
 
 ```typescript
+// Shown at module scope.
 export interface LLMRequest {
   cache?: boolean;
   messages: LLMMessage[];
@@ -143,6 +144,7 @@ type CallbackResult =
 **File**: `packages/background-piece-service/src/service.ts` **Lines**: 12-19
 
 ```typescript
+// Shown at module scope.
 export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
@@ -160,6 +162,7 @@ interface.
 **Recommendation**: Make defaults explicit in the type:
 
 ```typescript
+// Shown at module scope.
 export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
@@ -181,6 +184,7 @@ export const DEFAULT_BG_OPTIONS = {
 **File**: `packages/builder/src/types.ts` **Lines**: 182-188
 
 ```typescript
+// Shown at module scope.
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
   implementation?: ((...args: any[]) => any) | Pattern | string;
@@ -196,6 +200,7 @@ relationship between `type` and required properties isn't enforced.
 **Recommendation**: Use discriminated unions:
 
 ```typescript
+// Shown at module scope.
 type Module =
   | {
     type: "ref";

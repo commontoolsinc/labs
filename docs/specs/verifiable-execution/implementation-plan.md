@@ -76,6 +76,7 @@ Works with current CAS semantics - no commit model changes required.
 - [ ] Re-run only stale computations
 
 ```typescript
+// Shown at module scope.
 interface TrackedInput {
   address: IMemoryAddress; // {id, type, path} - path-level!
   since: number; // When this input was read
@@ -116,6 +117,7 @@ paths, but this is not persisted in the commit structure.
 - [ ] Extend `CommitData` to include address-level reads/writes:
 
 ```typescript
+// Shown at module scope.
 interface CommitData {
   since: number;
   transaction: Transaction;
@@ -151,6 +153,7 @@ Track which code produced each computation.
 - [ ] Pass code reference through transaction pipeline
 
 ```typescript
+// Shown at module scope.
 interface ComputationContext {
   codeCID: Reference<CodeBundle>; // Hash of code that ran
   handlerId?: string; // Handler name within bundle
@@ -177,6 +180,7 @@ Link outputs to their input sources for provenance chains.
 - [ ] Add input references to commit structure
 
 ```typescript
+// Shown at module scope.
 interface ProvenanceData {
   inputRefs: Reference<Fact>[]; // Source facts
   inputCommitments?: Hash[]; // H(salt || input) for privacy
@@ -199,6 +203,7 @@ Create a unified receipt format that combines current structures.
 - [ ] Add receipt verification functions
 
 ```typescript
+// Shown at module scope.
 interface Receipt {
   // Core fact
   fact: Fact;
@@ -231,6 +236,7 @@ validation.
 - [ ] Define `ClientCommit` structure with confirmed/pending read separation:
 
 ```typescript
+// Shown at module scope.
 interface ClientCommit {
   reads: {
     confirmed: Array<{ address: Address; hash: Hash; since: number }>;
@@ -245,6 +251,7 @@ interface ClientCommit {
 - [ ] Define `CommitLogEntry` structure preserving original + resolution:
 
 ```typescript
+// Shown at module scope.
 interface CommitLogEntry {
   original: SignedClientCommit;
   resolution: {

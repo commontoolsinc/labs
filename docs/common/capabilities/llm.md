@@ -9,6 +9,7 @@ below.
 Free-form text generation.
 
 ```typescript
+// Shown for illustration only.
 const response = generateText({
   prompt: userInput,
   system: "You are a helpful assistant.",  // optional
@@ -29,6 +30,7 @@ const response = generateText({
 Structured data matching a TypeScript type. Schema is inferred automatically.
 
 ```typescript
+// Shown for illustration only.
 interface ProductIdea {
   name: string;
   description: string;
@@ -60,6 +62,7 @@ const idea = generateObject<ProductIdea>({
 Map over items - caching is automatic per-item:
 
 ```typescript
+// Shown inside a pattern body.
 const summaries = articles.map((article) => ({
   article,
   summary: generateText({
@@ -107,6 +110,7 @@ If you get `TypeError: Cannot read properties of undefined (reading 'model')`, c
 For "respin" or "regenerate" features, set `cache: false` in the options:
 
 ```typescript
+// Shown for illustration only.
 const result = generateText({
   prompt,
   cache: false,  // Forces fresh generation

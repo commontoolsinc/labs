@@ -31,6 +31,7 @@ first and the guard is never reached.
 ## Writing tests that use LLM
 
 ```ts
+// Shown at module scope.
 import {
   enableMockMode,
   addMockResponse,

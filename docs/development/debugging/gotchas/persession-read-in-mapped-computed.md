@@ -4,6 +4,7 @@
 picker) gated on per-row open-state, computed *inside* the map:
 
 ```tsx
+// Shown for illustration only.
 {rows.map((row) => {
   const isOpen = computed(() => openTarget.get() === row.id); // openTarget is perSession
   return <>{isOpen ? <Form/> : <button onClick={() => open.send({ id: row.id })}/>}</>;
@@ -47,6 +48,7 @@ at the top (a top-level read resolves) and emit a **plain boolean per row**, so
 no per-row perSession follow is needed:
 
 ```tsx
+// Shown for illustration only.
 const rows = computed(() => {
   const openId = openTarget.get();            // read perSession HERE, at top level
   return myPerSpaceCell.get().map((r) => ({

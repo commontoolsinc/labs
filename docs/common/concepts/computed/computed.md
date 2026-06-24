@@ -5,6 +5,7 @@ other reactive values. Anything referenced inside the body is automatically
 tracked as a dependency, and the result updates when its inputs change.
 
 ```tsx
+// Shown inside a pattern body.
 // ✅ computed() derives data, outside JSX
 const filteredItems = computed(() => {
   const query = searchQuery.get().toLowerCase();
@@ -25,6 +26,7 @@ ternaries — see [Conditional Rendering](../../patterns/conditional.md).
 automatic there:
 
 ```tsx
+// Shown for illustration only.
 // ❌ Unnecessary
 <div>{computed(() => `Hello, ${userName}`)}</div>
 <div>{computed(() => user.name)}</div>
@@ -40,6 +42,7 @@ a `Writable<boolean>` is always truthy. This is the most common source of
 "conditional section always renders" bugs:
 
 ```tsx
+// Shown inside a pattern body.
 // ❌ WRONG - the ternary inside the computed body is plain JS;
 // `showForm` is a Writable object (always truthy), so the form always renders
 {computed(() => {
@@ -60,6 +63,7 @@ transformer lowers and the eager-branch-evaluation caveat.
 value, which breaks reactivity:
 
 ```typescript
+// Shown inside a pattern body.
 // ❌ WRONG - never nest computed()
 const badValue = computed(() => 123 + computed(() => myCell.get() * 2));
 
@@ -74,6 +78,7 @@ Input props are reactive and can't be read at init time. Wrap derived names in
 `computed()` (static strings don't need it):
 
 ```tsx
+// Shown for illustration only.
 // ❌ Error: reactive reference outside context
 [NAME]: `Study: ${deck.name}`,
 
@@ -86,6 +91,7 @@ Input props are reactive and can't be read at init time. Wrap derived names in
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
+// Shown inside a pattern body.
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {
   const current = logArray.get();
@@ -115,6 +121,7 @@ is almost always better — reach for `lift()` only when the same derivation is
 used in multiple patterns or called multiple times in one pattern:
 
 ```typescript
+// Shown for illustration only.
 // Module scope - reusable across patterns
 const getByDate = lift((args: { grouped: Record<string, Item[]>; date: string }) =>
   args.grouped[args.date]
@@ -138,6 +145,7 @@ for why.
   values, breaking intentional reactive loops, or snapshotting. Overuse leads
   to stale data.
   ```typescript
+  // Shown inside a pattern body.
   const result = computed(() => {
     const user = userCell.get(); // dependency - re-runs on change
     const initial = configCell.sample(); // NO dependency
@@ -154,6 +162,7 @@ Properties of object-shaped computeds can be accessed directly, including in
 JSX:
 
 ```tsx
+// Shown for illustration only.
 const data = computed(() => ({ users, posts, config }));
 
 <div>{data.users.length} users</div>
@@ -166,6 +175,7 @@ const data = computed(() => ({ users, posts, config }));
 **Group by:**
 
 ```tsx
+// Shown inside a pattern body.
 const groupedItems = computed(() => {
   const groups: Record<string, Item[]> = {};
   for (const item of items) {
@@ -189,6 +199,7 @@ const categories = computed(() => Object.keys(groupedItems).sort());
 **Filter / search:**
 
 ```tsx
+// Shown inside a pattern body.
 const searchQuery = new Writable("");
 const filteredItems = computed(() =>
   items.filter((item) =>
@@ -204,6 +215,7 @@ const filteredItems = computed(() =>
 site):
 
 ```tsx
+// Shown inside a pattern body.
 const stats = computed(() => ({
   total: items.length,
   completed: items.filter((item) => item.done).length,

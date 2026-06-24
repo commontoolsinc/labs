@@ -20,6 +20,7 @@ returns `undefined` until its first sync settles). The data-model spec also
 [recommends size limits for inlined binary data](../../../specs/data-model/sigil.md).
 
 ```typescript
+// Shown inside a pattern body.
 // WRONG — persists the ~700KB inline base64 `data` in a PerSpace array.
 // Destabilizes the cell's sync; the list renders unreliably.
 const sightings = Writable.perSpace.of<{ image: ImageData; /* … */ }[]>([]);
@@ -29,6 +30,7 @@ sightings.set([...sightings.get(), { image, /* … */ }]); // `image` carries `d
 ```
 
 ```typescript
+// Shown at module scope.
 // CORRECT — persist only the lightweight blob reference (`url`); the bytes
 // live out-of-band in the blob store. `cf-image-input` always uploads them.
 interface StoredImage { url: string; name: string }

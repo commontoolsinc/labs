@@ -27,6 +27,7 @@ The receipt structure extends the current `Fact` model with computation
 metadata:
 
 ```typescript
+// Shown at module scope.
 interface UnsignedReceipt {
   // Core fact identity (existing)
   the: MIME;
@@ -78,6 +79,7 @@ A receipt can be made verifiable beyond “server said so” by attaching one or
 more signatures.
 
 ```typescript
+// Shown at module scope.
 type ReceiptSignature = {
   iss: DID; // signer identity
   sig: Bytes; // signature bytes (algorithm-specific)
@@ -111,6 +113,7 @@ profile.
 The receipt SHOULD include path-level read/write tracking:
 
 ```typescript
+// Shown at module scope.
 interface ReceiptActivity {
   reads: IMemoryAddress[]; // [{id, type, path}]
   writes: IMemoryAddress[]; // [{id, type, path}]

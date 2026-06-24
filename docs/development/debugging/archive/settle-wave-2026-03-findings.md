@@ -316,6 +316,7 @@ signal was the monotonic growth in one note computation source:
 Line `284` in `note.tsx` is the `containingNotebooks` computed:
 
 ```tsx
+// Shown inside a pattern body.
 const containingNotebooks = computed(() => {
   if (!menuOpen.get()) return [];
   // ...
@@ -363,6 +364,7 @@ more reliable than the Astral integration harness for cross-tab persistence.
 The measurement snippet was:
 
 ```js
+// Shown inside a pattern body.
 await commonfabric.rt.idle()
 const { timing } = await commonfabric.rt.getLoggerCounts()
 const graph = await commonfabric.rt.getGraphSnapshot()
@@ -444,6 +446,7 @@ all root writes in the current space while creating a note from an already-open
 note page:
 
 ```js
+// Shown at module scope.
 await commonfabric.watchWrites({
   space: commonfabric.space,
   path: [],

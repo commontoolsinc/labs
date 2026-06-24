@@ -189,6 +189,7 @@ collections on the Scheduler class; that diffusion — membership in many sets
 encoding state implicitly — is the single largest source of v1's complexity.)
 
 ```typescript
+// Shown at module scope.
 interface SchedulerNode {
   id: NodeId;                    // durable identity (§9.1)
   kind: "computation" | "effect";
@@ -304,6 +305,7 @@ were entangled with.
 ### 4.4 Registration and removal
 
 ```typescript
+// Shown as interface or class members.
 register(node: NodeSpec, opts: {
   mode: "fresh" | "resume";       // §9.2
   gate?: { debounce?: ms; noAutoDebounce?: boolean; throttle?: ms };
@@ -962,6 +964,7 @@ facade.
 ## 13. Public API (target)
 
 ```typescript
+// Shown for illustration only.
 class Scheduler {
   // Lifecycle
   register(node: NodeSpec, opts?: RegisterOptions): Cancel;

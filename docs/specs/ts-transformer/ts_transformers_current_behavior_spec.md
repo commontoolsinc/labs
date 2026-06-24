@@ -948,6 +948,7 @@ reference that name. Three builder shapes are registered in
   trailing `.for(...)` member chain stays anchored on the outer call):
 
   ```ts
+  // Shown inside a pattern body.
   // module scope:
   const __cfLift_1 = __cfHelpers.lift(argSchema, resSchema, callback);
   // original site:
@@ -995,6 +996,7 @@ identity-by-text lookups later stages rely on.
 After visiting the whole file, the stage appends **one** trailing call:
 
 ```ts
+// Shown at module scope.
 __cfReg({ __cfLift_1, __cfPattern_1, __cfHandler_1, /* … */ });
 ```
 

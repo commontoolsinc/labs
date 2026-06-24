@@ -1,11 +1,6 @@
 #!/bin/sh
+# Type-checks the code blocks embedded in the Markdown docs. See docs/check.ts
+# for how blocks opt into a context. Pass an optional subfolder to limit the run.
 DOCS_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Optional subfolder argument (e.g., "concepts" or "concepts/computed")
-target="${DOCS_DIR}/${1:-.}"
-
-exit_code=0
-for file in $(find "$target" -name '*.md'); do
-  deno check --doc-only "$file" || exit_code=1
-done
-exit $exit_code
+exec deno run --allow-read --allow-write --allow-run --allow-env \
+  "${DOCS_DIR}/check.ts" "$@"

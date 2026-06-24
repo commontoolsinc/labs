@@ -49,6 +49,9 @@ jobs:
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
+      - name: 📄 Type-check docs code blocks
+        run: deno task check-docs
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types

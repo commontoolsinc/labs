@@ -43,6 +43,7 @@ The Deno process maintains an in-memory tree that is the source of truth for
 all FUSE operations:
 
 ```typescript
+// Shown for illustration only.
 class FsTree {
   inodes: Map<bigint, FsNode>;
   byPath: Map<string, bigint>;

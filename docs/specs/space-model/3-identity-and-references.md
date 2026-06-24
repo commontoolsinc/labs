@@ -27,6 +27,7 @@ object value.
 The preferred format uses a versioned tag:
 
 ```typescript
+// Shown at module scope.
 type SigilLink = {
   "/": {
     "link@1": {
@@ -79,6 +80,7 @@ brand is a type-only marker that distinguishes "this hash is an entity id" from
 an arbitrary content/value/schema hash:
 
 ```typescript
+// Shown at module scope.
 // At runtime an `EntityId` is a `FabricHash`; the brand is type-only.
 type EntityId = FabricHash & { readonly [ENTITY_ID_BRAND]: true };
 ```
@@ -112,6 +114,7 @@ This is the one place that describes the flag bifurcation; the `EntityRef` type
 captures both regimes:
 
 ```typescript
+// Shown at module scope.
 type EntityRef = FabricHash | { "/": string };
 ```
 
@@ -133,6 +136,7 @@ intermix within one regime.
 Internally, links are normalized to `NormalizedFullLink`:
 
 ```typescript
+// Shown at module scope.
 type NormalizedFullLink = {
   id: URI,
   space: MemorySpace,
