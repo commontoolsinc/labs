@@ -398,25 +398,30 @@ describe("Pattern Runner - ifElse", () => {
       await piece.pull();
       expect(piece.key("text").get()).toEqual("A");
 
-      // ifElse writes a redirect into its own result doc that points at the
-      // selected branch input. The other redirect written when wiring the result
-      // (the output binding) points at the result doc itself, so the ifElse
-      // result doc is the link-write whose target is NOT itself a link-write doc.
+      // On each run the ifElse action makes two link-writes:
+      //  - its result doc, holding a redirect to the selected branch input, and
+      //  - the output binding, holding a redirect to that result doc.
+      // The result doc is therefore the link-write whose target is NOT itself a
+      // link-write doc; the binding is the one that targets the result doc.
       const firstWrites = writesByPhase["first"] ?? [];
       const writtenIds = new Set(firstWrites.map((w) => w.id));
-      const resultDocs = new Set(
-        firstWrites
-          .filter((w) => w.target !== undefined && !writtenIds.has(w.target))
-          .map((w) => w.id),
-      );
-      expect(resultDocs.size).toEqual(1);
-      const ifElseResultId = [...resultDocs][0];
-      // It was written exactly once on the first trigger.
+      const resultDocs = firstWrites
+        .filter((w) => w.target !== undefined && !writtenIds.has(w.target))
+        .map((w) => w.id);
+      expect(resultDocs.length).toEqual(1);
+      const ifElseResultId = resultDocs[0];
+      const bindingDocs = firstWrites
+        .filter((w) => w.target === ifElseResultId)
+        .map((w) => w.id);
+      expect(bindingDocs.length).toEqual(1);
+      const bindingId = bindingDocs[0];
+      // Each was written exactly once on the first trigger.
       expect(firstWrites.filter((w) => w.id === ifElseResultId).length)
         .toEqual(1);
+      expect(firstWrites.filter((w) => w.id === bindingId).length).toEqual(1);
 
       // Re-trigger with a different-but-still-truthy condition. ifElse re-runs and
-      // selects the same branch, so the reference it would write is unchanged.
+      // selects the same branch, so neither reference it would write changes.
       phase = "second";
       tx = runtime.edit();
       piece.withTx(tx).key("n").set(2);
@@ -424,12 +429,13 @@ describe("Pattern Runner - ifElse", () => {
       await piece.pull();
       expect(piece.key("text").get()).toEqual("A");
 
-      // The selected branch is unchanged, so ifElse must not write its result
-      // again — the redundant write is what `onlyIfDifferent` suppresses.
-      expect(
-        (writesByPhase["second"] ?? []).filter((w) => w.id === ifElseResultId)
-          .length,
-      ).toEqual(0);
+      // The selection is unchanged, so the re-run must rewrite neither the
+      // result doc (`setRawUntyped` onlyIfDifferent) nor the output binding
+      // (`sendValueToBinding` no-op).
+      const secondWrites = writesByPhase["second"] ?? [];
+      expect(secondWrites.filter((w) => w.id === ifElseResultId).length)
+        .toEqual(0);
+      expect(secondWrites.filter((w) => w.id === bindingId).length).toEqual(0);
     },
   );
 });
