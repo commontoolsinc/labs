@@ -68,7 +68,7 @@ import {
   Writable,
 } from "commonfabric";
 import GmailExtractor from "../gmail-extractor.tsx";
-import type { Auth, GoogleAuthCell } from "../gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../gmail-extractor.tsx";
 import ProcessingStatus from "../processing-status.tsx";
 import {
   BILL_EXTRACTION_SCHEMA,

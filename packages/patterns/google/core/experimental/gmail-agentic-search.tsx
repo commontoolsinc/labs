@@ -57,7 +57,7 @@ import type {
 
 // Re-export Auth types for convenience
 export type { Auth, GoogleAuthCell } from "../gmail-importer.tsx";
-import type { Auth, GoogleAuthCell } from "../gmail-importer.tsx";
+import type { GoogleAuthCell } from "../gmail-importer.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_AGENT = false;
