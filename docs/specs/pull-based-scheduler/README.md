@@ -625,16 +625,17 @@ An action run:
 Reactive action commits are optimistic. The scheduler continues after starting
 the commit, assuming success. If the commit resolves with an error, the action
 is always resubscribed from the captured log so later input changes re-trigger
-it. An ordinary **conflict** (`ConflictError`, a stale read) is then a wait, not
-a retry: the write that caused it has dirtied this action's still-subscribed
-reads, so normal reader-dirty propagation re-runs it with the latest state — it
-is not re-queued and does **not** consume the retry budget. Two structured
-exceptions use bounded retry because reader-dirty propagation cannot recover
-them reliably: conflicts on reads added during commit prepare, and conflicts on
-the action's own write target. These exceptions require a structured
-`conflictingRead` identity from storage and still use `MAX_RETRIES_FOR_REACTIVE`.
+it. An ordinary **conflict** (`ConflictError`, a stale read) is then a
+wait-for-catch-up, not a failure: the scheduler restores consumed trigger reads,
+resubscribes, waits for `readyToRetry` when the storage layer provides it, and
+re-queues the action by marking it dirty, adding it to `pending`, and queuing
+execution. Conflict re-queues do **not** consume the retry budget; otherwise
+sustained multi-writer contention could exhaust the budget and strand a compute
+with a stale committed value. Reader-dirty propagation is a redundant fast path,
+not the sole recovery mechanism, because the write that caused a conflict may
+already have been delivered and therefore produce no future dirty notification.
 Other non-permanent errors are not re-triggered by reader-dirty, so they are
-also retried up to `MAX_RETRIES_FOR_REACTIVE` times by marking the action dirty,
+retried up to `MAX_RETRIES_FOR_REACTIVE` times by marking the action dirty,
 adding it to `pending`, and queuing execution; permanent (precondition)
 rejections are not retried. Retry state is cleared after a successful commit.
 The in-flight source record is removed after the commit promise settles.

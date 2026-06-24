@@ -8,10 +8,7 @@ import {
   type StorageNotificationState,
 } from "../src/scheduler/notifications.ts";
 import { processPullStorageNotification } from "../src/scheduler/pull-notifications.ts";
-import {
-  collectPrepareAddedReads,
-  watchReactiveActionCommit,
-} from "../src/scheduler/action-run.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type {
@@ -215,8 +212,6 @@ describe("trigger reads survive failed runs", () => {
     onMarkDirectDirty?: () => void;
     onClearDirectDirtyAfterCommit?: () => void;
     onQueueExecution?: () => void;
-    prepareAddedReads?: readonly IMemorySpaceAddress[];
-    writes?: readonly IMemorySpaceAddress[];
   }): Promise<void> {
     const action: Action = () => {};
     const tx = { tx: {} } as IExtendedStorageTransaction;
@@ -228,7 +223,7 @@ describe("trigger reads survive failed runs", () => {
     watchReactiveActionCommit({
       action,
       tx,
-      log: { reads: [], shallowReads: [], writes: [...(args.writes ?? [])] },
+      log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
       pending: new Set(),
       commitPromise,
@@ -237,7 +232,6 @@ describe("trigger reads survive failed runs", () => {
       clearDirectDirtyAfterCommit: () => args.onClearDirectDirtyAfterCommit?.(),
       queueExecution: () => args.onQueueExecution?.(),
       restoreCfcTriggerReads: args.onRestore,
-      prepareAddedReads: args.prepareAddedReads ?? [],
     });
     return commitPromise.then(async () => {
       await Promise.resolve();
@@ -281,254 +275,15 @@ describe("trigger reads survive failed runs", () => {
       onClearDirectDirtyAfterCommit: () => calls.push("clear"),
       onQueueExecution: () => calls.push("queue"),
     });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  function conflictError(args: {
-    message?: string;
-    conflictingRead?: {
-      kind: "confirmed" | "pending";
-      space?: string;
-      id: string;
-      scope?: string;
-      branch?: string;
-      path: readonly string[];
-    };
-  }) {
-    const error = Object.assign(
-      new Error(args.message ?? "conflict"),
-      {
-        name: "ConflictError",
-        readyToRetry: () => Promise.resolve(),
-        ...(args.conflictingRead !== undefined
-          ? { conflictingRead: args.conflictingRead }
-          : {}),
-      },
-    );
-    return error;
-  }
-
-  it("bounded-requeues conflicts from prepare-added normal document-root reads", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:normal-doc",
-        path: ["value"],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads: [{
-        space,
-        id: "of:normal-doc",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
-  it("keeps prepare-added reads distinct across ambiguous path joins", async () => {
-    const prepareAddedReads = collectPrepareAddedReads(
-      [{ space, id: "of:normal-doc", path: ["a/b"], scope: "space" }],
-      [
-        { space, id: "of:normal-doc", path: ["a/b"], scope: "space" },
-        { space, id: "of:normal-doc", path: ["a", "b"], scope: "space" },
-      ],
-    );
-    expect(prepareAddedReads).toEqual([
-      { space, id: "of:normal-doc", path: ["a", "b"], scope: "space" },
-    ]);
-
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:normal-doc",
-        path: ["a", "b", "value"],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads,
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
-  });
-
-  it("does not requeue from message-only conflicts even when the id appears", async () => {
-    const error = conflictError({
-      message: "stale pending read of:normal-doc via localSeq 7",
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads: [{
-        space,
-        id: "of:normal-doc",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  it("does not requeue when the same id conflicts at a different path", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:normal-doc",
-        path: ["private"],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads: [{
-        space,
-        id: "of:normal-doc",
-        path: ["public"],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  it("does not requeue when the same id conflicts in a different scope", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "pending",
-        space,
-        id: "of:normal-doc",
-        path: [],
-        scope: "user",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads: [{
-        space,
-        id: "of:normal-doc",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  it("does not requeue when prepare-added reads exist but the actual conflict is ordinary", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:pre-prepare-input",
-        path: [],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      prepareAddedReads: [{
-        space,
-        id: "of:prepare-added-doc",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  it("bounded-requeues conflicts on the action's own write target", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:computed-output",
-        path: [],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      writes: [{
-        space,
-        id: "of:computed-output",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
-  });
-
-  it("does not requeue when writes exist but the conflict is on another cell", async () => {
-    const error = conflictError({
-      conflictingRead: {
-        kind: "confirmed",
-        space,
-        id: "of:ordinary-input",
-        path: [],
-        scope: "space",
-      },
-    });
-    const calls: string[] = [];
-    await watchWith({
-      error,
-      writes: [{
-        space,
-        id: "of:computed-output",
-        path: [],
-        scope: "space",
-      }],
-      onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
-    });
-    expect(calls).toEqual(["restore", "resubscribe"]);
-  });
-
-  it("an ordinary commit conflict does not bypass the retry budget", async () => {
+  it("a commit conflict bypasses the retry budget (re-queues even when exhausted)", async () => {
     // A non-conflict error stops re-arming once the budget is exhausted (see
     // "does not restore when retries are exhausted"). An ordinary conflict is a
-    // wait-for-reader-dirty case, so it re-arms the subscription but does not
-    // force the action back onto the pending queue.
+    // wait-for-catch-up, not a failure, so it always re-arms and re-queues
+    // (restore + resubscribe + dirty + queue) regardless of the budget and never
+    // falls into the exhausted-retries branch.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
     });
@@ -544,12 +299,14 @@ describe("trigger reads survive failed runs", () => {
       onClearDirectDirtyAfterCommit: () => calls.push("clear"),
       onQueueExecution: () => calls.push("queue"),
     });
-    expect(calls).toEqual(["restore", "resubscribe"]);
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
-  it("does not requeue an ordinary conflict when readyToRetry rejects", async () => {
-    // Only structured conflict exceptions wait on readyToRetry. An ordinary
-    // conflict re-arms and waits for the normal reader-dirty path instead.
+  it("re-queues a conflict even when the readyToRetry catch-up rejects", async () => {
+    // The catch-up readiness gate rejects by design when the session is closed,
+    // revoked, or replaced mid-wait. That abort must not strand the action: it is
+    // swallowed and the action is re-queued anyway (restore + resubscribe + dirty
+    // + queue) so it re-runs on the next input change or pull.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
       readyToRetry: () => Promise.reject(new Error("session replaced")),
@@ -563,12 +320,12 @@ describe("trigger reads survive failed runs", () => {
       onQueueExecution: () => calls.push("queue"),
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe"]);
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
-  it("does not requeue an ordinary conflict when readyToRetry throws", async () => {
-    // Ordinary conflicts do not use readyToRetry; only structured conflict
-    // exceptions do.
+  it("re-queues a conflict when readyToRetry throws synchronously", async () => {
+    // A readyToRetry that throws synchronously is handled the same as a rejected
+    // one — swallowed, and the action re-queued.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
       readyToRetry: () => {
@@ -584,7 +341,7 @@ describe("trigger reads survive failed runs", () => {
       onQueueExecution: () => calls.push("queue"),
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe"]);
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
   it("clears direct dirty only after a successful commit", async () => {
