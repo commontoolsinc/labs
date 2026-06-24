@@ -10,6 +10,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
@@ -18,7 +19,6 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -1809,21 +1809,22 @@ export class CellImpl<T extends FabricValue>
     const inlined = findAndInlineDataURILinks(value);
 
     // When asked to write only on change, read the current raw value and bail
-    // out if it already deep-equals what we'd write. `readValueOrThrow` mirrors
-    // the `writeValueOrThrow` below (same transaction and address, no link
-    // resolution). The read is purely an internal write-elision decision, so
-    // it is marked `ignoreReadForScheduling` (it must not register a
-    // self-dependency that would re-trigger the writer) and `internalVerifierRead`
-    // (it must not taint the transaction's CFC labels with this cell's own
-    // value). Note `deepEqual` is not `Fabric`-aware (same-class
-    // `FabricPrimitive`s compare equal regardless of value), matching the
-    // existing no-op write gate in `setValueAtPath`; current callers write
-    // links / plain objects, for which it is exact.
+    // out if it already equals what we'd write. `readValueOrThrow` mirrors the
+    // `writeValueOrThrow` below (same transaction and address, no link
+    // resolution). The read is purely an internal write-elision decision, so it
+    // is marked `ignoreReadForScheduling` (it must not register a
+    // self-dependency that would re-trigger the writer) and
+    // `internalVerifierRead` (it must not taint the transaction's CFC labels
+    // with this cell's own value). Comparison uses `valueEqual`, the
+    // `Fabric`-aware content equality the storage no-op gates rely on:
+    // `deepEqual` walks enumerable own-props and so conflates distinct
+    // same-class `FabricSpecialObject`s (e.g. `FabricBytes`/`FabricHash`),
+    // which would drop a real change.
     if (onlyIfDifferent) {
       const current = this.tx.readValueOrThrow(this.link, {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       });
-      if (deepEqual(current, inlined)) return;
+      if (valueEqual(current, inlined)) return;
     }
 
     // Raw writes bypass diff-based attempted-target capture. Same-value direct
