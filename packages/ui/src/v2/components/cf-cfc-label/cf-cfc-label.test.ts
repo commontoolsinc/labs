@@ -1,10 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  CFCFCLabel,
-  filterCfcLabelView,
-  formatCfcLabelAtom,
-} from "./cf-cfc-label.ts";
+import { CFCFCLabel, filterCfcLabelView, formatCfcLabelAtom } from "./index.ts";
 
 describe("CFCFCLabel", () => {
   it("registers the custom element", () => {

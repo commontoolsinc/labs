@@ -16,6 +16,7 @@ the browser:
 1. Define handler event types in `schemas.tsx`:
 
 ```tsx
+// Shown at module scope.
 // schemas.tsx
 import type { Stream } from "commonfabric";
 
@@ -33,6 +34,7 @@ export interface Output {
 2. Export the bound handler in your pattern:
 
 ```tsx
+// Shown at module scope.
 // main.tsx
 const addItem = handler<AddItemEvent, { items: Writable<Item[]> }>(
   (event, { items }) => {

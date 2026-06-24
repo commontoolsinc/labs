@@ -374,6 +374,4 @@ export class CFMessageBeads extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-message-beads", CFMessageBeads);
-
 export type { CFMessageBeads as CFMessageBeadsElement };

@@ -11,11 +11,13 @@ top-level `PerSpace<T[]>` input) read as a stale snapshot or as `undefined`
 from outside the pattern.
 
 ```typescript
+// Shown inside a pattern body.
 // WRONG - snapshots once, does not track reactively
 const userCount = users.length;
 ```
 
 ```typescript
+// Shown inside a pattern body.
 // CORRECT - wrap in computed
 const userCount = computed(() => users.length);
 ```
@@ -34,6 +36,7 @@ consumers fighting the reactive traversal layer. Wrap arrays/strings in
 `computed(() => cell.get())` so the output type is plain.
 
 ```typescript
+// Shown for illustration only.
 export interface MyOutput {
   users: readonly User[];     // plain type, not PerSpace<User[]>
   myName: string;
@@ -59,6 +62,7 @@ typed as the scope-branded value, not as a `Writable<string>` cell — so
 `joinName.get()` does not compile.
 
 ```typescript
+// Shown inside a pattern body.
 // WRONG
 <cf-button onClick={() => boundJoin.send({ name: joinName.get() })}>
   Join
@@ -70,6 +74,7 @@ event payload optional, have the handler fall back to reading the draft cell
 from its bound closure, and dispatch the bound stream directly.
 
 ```typescript
+// Shown for illustration only.
 // In handler
 const joinAs = handler<{ name?: string }, { joinName: NameCell; ... }>(
   ({ name }, { joinName, ... }) => {
@@ -106,6 +111,7 @@ settles** (the render-path counterpart of pitfall #4). A render-path `computed`
 that chains an array method straight off it then throws:
 
 ```typescript
+// Shown for illustration only.
 // WRONG — throws while pendingVehicles (perSession) / people (perSpace) is
 // still undefined before the first sync; the throw repeats every settle wave.
 const rows = computed(() => pendingVehicles.get().map((v) => …));
@@ -119,6 +125,7 @@ inside a `.map()` (e.g. `activeSpotOpts = computed(() => spots.get().filter(…)
 crashes that row's card, which is why its inline controls never appear.
 
 ```typescript
+// Shown for illustration only.
 // CORRECT — guard every render-path scoped read.
 const rows = computed(() => (pendingVehicles.get() ?? []).map((v) => …));
 const sorted = computed(() => [...(people.get() ?? [])].sort(…));
@@ -156,6 +163,7 @@ shared (`PerSpace`) list hands every other participant a link to *their own*
 empty instance — the data can never propagate.
 
 ```typescript
+// Shown as alternative snippets.
 // WRONG — other users dereference this to their own empty instance.
 const profile = Writable.perUser.of<TrustedProfile>(snapshot);
 registerProfile(sharedProfiles, profile);

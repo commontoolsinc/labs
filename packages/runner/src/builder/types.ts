@@ -20,6 +20,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  FactoryInput,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -40,7 +41,6 @@ import type {
   Module,
   NavigateToFunction,
   NonPrivateRandomFunction,
-  Opaque,
   OpaqueRef,
   Pattern,
   PatternToolFunction,
@@ -114,6 +114,7 @@ export type {
   CellScope,
   CellTypeConstructor,
   FabricValue,
+  FactoryInput,
   FsProjection,
   Handler,
   HandlerFactory,
@@ -139,7 +140,6 @@ export type {
   Module,
   ModuleFactory,
   NodeFactory,
-  Opaque,
   OpaqueCell,
   OpaqueRef,
   Pattern,
@@ -175,7 +175,7 @@ export function isOpaqueRef<T = any>(
 
 export type NodeRef = {
   module: Module | Pattern | OpaqueRef<Module | Pattern>;
-  inputs: Opaque<any>;
+  inputs: FactoryInput<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
 };

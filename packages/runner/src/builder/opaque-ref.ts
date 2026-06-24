@@ -1,8 +1,8 @@
 import {
   type CellKind,
+  type FactoryInput,
   type JSONSchema,
   type JSONValue,
-  type Opaque,
   type OpaqueRef,
   type SchemaWithoutCell,
   type Stream,
@@ -19,7 +19,7 @@ import { ContextualFlowControl } from "../cfc.ts";
  * @returns An OpaqueRef
  */
 function opaqueRefWithCell<T>(
-  value?: Opaque<T> | T | undefined,
+  value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
   kind?: CellKind,
 ): OpaqueRef<T> {
@@ -61,16 +61,16 @@ function opaqueRefWithCell<T>(
 // Legacy opaqueRef for backward compatibility - creates proxies without Cell
 // This is used during pattern construction before we have a runtime
 export function opaqueRef<S extends JSONSchema>(
-  value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S> | undefined,
+  value: FactoryInput<SchemaWithoutCell<S>> | SchemaWithoutCell<S> | undefined,
   schema: S,
 ): OpaqueRef<SchemaWithoutCell<S>>;
 export function opaqueRef<T>(
-  value?: Opaque<T> | T | undefined,
+  value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
 ): OpaqueRef<T>;
 
 export function opaqueRef<T>(
-  value?: Opaque<T> | T | undefined,
+  value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
   return opaqueRefWithCell<T>(value, schema);

@@ -20,6 +20,7 @@ A pattern declares its inputs as an interface. Plain types give you reactive
 mutation methods.
 
 ```tsx
+// Shown at module scope.
 interface ReadOnlyInput {
   count: number;        // reactive — display it, derive from it
   items: Item[];        // reactive — .map() over it
@@ -44,6 +45,7 @@ deep:
 The write-capable surface (`docs/common/concepts/writeable.md`):
 
 ```ts
+// Shown inside a pattern body.
 value.get()              // current value (inside computations: also subscribes)
 value.set(next)          // replace
 value.update({ k: v })   // shallow merge into an object
@@ -68,6 +70,7 @@ So the convention (`docs/common/concepts/types-and-schemas/default.md`) is:
 > computations.
 
 ```ts
+// Shown at module scope.
 interface TodoItem {
   title: string;                       // required
   done: boolean | Default<false>;      // defaults to false
@@ -104,6 +107,7 @@ this an explicit, declarative choice with **scope wrappers**
 (`skills/pattern-dev/SKILL.md`):
 
 ```ts
+// Shown at module scope.
 interface ChatInput {
   conversation?: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
   name?:         PerUser<string | Default<"">>;
@@ -133,6 +137,7 @@ pattern needs private state that isn't part of its interface — say, a
 "currently editing" buffer. You can create a cell directly:
 
 ```ts
+// Shown inside a pattern body.
 const editedName = new Writable("");                    // pattern-scoped
 const selectedItem = new Writable.perSession<string | null>(null);
 const sharedBoard = new Writable.perSpace(DEFAULT_BOARD);
@@ -148,6 +153,7 @@ Two rules, both rooted in how patterns execute (Chapter 3 and 8):
    instead initialize empty and copy inside an event handler:
 
 ```ts
+// Shown inside a pattern body.
 const editedName = new Writable("");
 const startEditing = action(() => {
   editedName.set(deck.name);   // fine: handlers run at event time
@@ -164,6 +170,7 @@ reference identity, not structural equality. When you need to find or remove
 a specific element, use the framework's `equals()`:
 
 ```ts
+// Shown at module scope.
 import { equals } from "commonfabric";
 const idx = items.get().findIndex((el) => equals(item, el));
 ```

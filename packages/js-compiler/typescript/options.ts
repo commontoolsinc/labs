@@ -34,10 +34,20 @@ export const getCompilerOptions = (): CompilerOptions => {
     // types, causing emit to skip entirely. Declaration checking is done
     // explicitly via checker.declarationCheck() instead.
     declaration: false,
-    // Enable source map generation.
+    // Enable source map generation. The mappings are load-bearing: stack-frame
+    // mapping and CFC verified-source / fn.src resolution map compiled
+    // positions back to canonical `cf:module/<id>` coordinates through them.
     sourceMap: true,
-    // We want the source map to include the original TypeScript files
-    inlineSources: true,
+    // Do not embed the authored source in the map. `sourcesContent` has no
+    // reader: the only code that touches it (composeBundleSourceMap) copies it
+    // into the runtime's source-map registry, but the consumers there
+    // (SourceMapParser, via originalPositionFor) read the mappings only, and
+    // no `//# sourceMappingURL` is emitted for a debugger to load these maps.
+    // The authored source is persisted separately as source documents.
+    // Dropping it cuts the per-module source-map bytes the compile cache
+    // stores and syncs by ~65% (e.g. ~110KB to ~38.5KB on the group-chat
+    // bundle).
+    inlineSources: false,
     // Generate separate source map instead of inline
     inlineSourceMap: false,
 

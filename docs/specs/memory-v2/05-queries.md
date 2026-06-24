@@ -30,6 +30,7 @@ Both query types can participate in a session watch set. One-shot queries are
 the direct request/response mode.
 
 ```typescript
+// Shown at module scope.
 // Base query options shared by all query types
 interface QueryOptions {
   branch?: BranchName; // Target branch (default branch if omitted)
@@ -47,6 +48,7 @@ that know exactly which entities they need.
 ### 5.2.1 Query Structure
 
 ```typescript
+// Shown at module scope.
 interface Query extends QueryOptions {
   // Match patterns, keyed by entity id.
   // Use "*" as the id to match all entities.
@@ -104,6 +106,7 @@ this shared-code property.
 ### 5.3.1 Schema Query Structure
 
 ```typescript
+// Shown at module scope.
 interface SchemaQuery extends QueryOptions {
   selectSchema: SchemaSelector;
   limits?: SchemaQueryLimits;
@@ -281,6 +284,7 @@ traversal path, the second visit returns `null` (cycle detected, do not
 descend).
 
 ```typescript
+// Shown for illustration only.
 class CycleTracker<K> {
   private visiting: Set<K>;
 
@@ -298,6 +302,7 @@ triggering a false cycle. This is important because a single entity may be
 reachable via different schema paths that expose different subsets of its data.
 
 ```typescript
+// Shown for illustration only.
 class CompoundCycleTracker<IdentityKey, SchemaKey, Value> {
   // Returns null if this (identityKey, schemaKey) pair has been visited.
   // Uses identity equality for identityKey, deep equality for schemaKey.
@@ -318,6 +323,7 @@ class CompoundCycleTracker<IdentityKey, SchemaKey, Value> {
 In practice, the traverser uses a `CompoundCycleTracker` parameterized as:
 
 ```typescript
+// Shown at module scope.
 type PointerCycleTracker = CompoundCycleTracker<
   JSONValue, // The reference value (identity comparison)
   JSONSchema, // The schema context (deep equality comparison)
@@ -373,6 +379,7 @@ schema context. This information is stored in a `SchemaTracker` (a `MapSet`
 mapping entity keys to `SchemaPathSelector` sets):
 
 ```typescript
+// Shown at module scope.
 type SchemaTracker = MapSet<
   string, // Key: "{space}/{entityId}"
   SchemaPathSelector // The schema+path used when visiting this entity
@@ -503,6 +510,7 @@ server MUST flush the affected watch unions before returning the conflict.
 ### 5.4.6 Session Watch State
 
 ```typescript
+// Shown at module scope.
 interface WatchState {
   id: string;
   query: Query | SchemaQuery;
@@ -596,6 +604,7 @@ entity states organized by entity.
 ### 5.7.1 FactSet Structure
 
 ```typescript
+// Shown for illustration only.
 // The top-level result: space -> entity states
 interface QueryResult {
   [spaceId: string]: FactSet;
@@ -629,6 +638,7 @@ cursor-based pagination.
 ### 5.8.1 Pagination Parameters
 
 ```typescript
+// Shown at module scope.
 interface PaginatedQuery extends Query {
   limit?: number; // Maximum entities to return (default: server-chosen)
   cursor?: string; // Opaque continuation token from a previous response
@@ -638,6 +648,7 @@ interface PaginatedQuery extends Query {
 ### 5.8.2 Pagination Response
 
 ```typescript
+// Shown at module scope.
 interface PaginatedResult {
   facts: FactSet;
   cursor?: string; // Present if more results are available
@@ -665,6 +676,7 @@ branch is used.
 ### 5.9.1 Branch Resolution
 
 ```typescript
+// Shown at module scope.
 interface QueryOptions {
   branch?: BranchName; // Omit for default branch
   atSeq?: number; // Point-in-time read (latest if omitted)
@@ -699,6 +711,7 @@ defines the reference formats used in the query and traversal system.
 Entity graph links use the sigil link format (v1-compatible):
 
 ```typescript
+// Shown at module scope.
 interface EntityLink {
   "/": {
     "link@1": {
@@ -838,6 +851,7 @@ Not all cells carry schemas. In the runner's `StorageManager.syncCell()`, the
 selector is built as:
 
 ```typescript
+// Shown for illustration only.
 const selector = {
   path: cell.path.map((p) => p.toString()),
   schema: schema ?? false,

@@ -11,8 +11,8 @@ import {
   preserveAppViewMode,
   urlToAppView,
 } from "@commonfabric/shell/shared";
-import "../cf-loader/cf-loader.ts";
-import "../cf-cell-link/cf-cell-link.ts";
+import "../cf-loader/index.ts";
+import "../cf-cell-link/index.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -383,6 +383,9 @@ export class CFRender extends BaseElement {
   }
 
   private _handleRenderError(error: unknown) {
+    // A disposal race (runtime swap, logout) cancels an in-flight cell sync;
+    // that is cancellation, not a render failure to surface.
+    if (this.cell?.runtime().signal.aborted) return;
     console.error("[cf-render] Error rendering cell:", error);
 
     const container = this._containerRef.value;
@@ -403,5 +406,3 @@ export class CFRender extends BaseElement {
     this._cleanupRender();
   }
 }
-
-globalThis.customElements.define("cf-render", CFRender);

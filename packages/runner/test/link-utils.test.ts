@@ -22,6 +22,7 @@ import {
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -507,7 +508,7 @@ describe("link-utils", () => {
       };
 
       const result = createSigilLinkFromParsedLink(normalizedLink);
-      expect(result["/"][LINK_V1_TAG].scope).toBe("session");
+      expect(linkRefPayload(result).scope).toBe("session");
 
       expect(parseLink(result, {
         id: "of:base",
@@ -571,7 +572,7 @@ describe("link-utils", () => {
         base: baseCell,
       });
 
-      expect(result["/"][LINK_V1_TAG].space).toBeUndefined();
+      expect(linkRefPayload(result).space).toBeUndefined();
     });
 
     it("should omit id when same as base", () => {
@@ -586,7 +587,7 @@ describe("link-utils", () => {
         base: baseCell,
       });
 
-      expect(result["/"][LINK_V1_TAG].id).toBe(`of:${baseId}`);
+      expect(linkRefPayload(result).id).toBe(`of:${baseId}`);
     });
 
     it("should include overwrite field when present", () => {
@@ -598,7 +599,7 @@ describe("link-utils", () => {
 
       const result = createSigilLinkFromParsedLink(normalizedLink);
 
-      expect(result["/"][LINK_V1_TAG].overwrite).toBe("redirect");
+      expect(linkRefPayload(result).overwrite).toBe("redirect");
     });
 
     it("should preserve stream cell schemas by default when including schema", () => {
@@ -625,7 +626,7 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true });
 
-      expect(result["/"][LINK_V1_TAG].schema).toEqual(schema);
+      expect(linkRefPayload(result).schema).toEqual(schema);
     });
 
     it("should strip stream cell schemas from links when requested", () => {
@@ -652,7 +653,7 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true, keepStreams: false });
 
-      expect(result["/"][LINK_V1_TAG].schema).toEqual({
+      expect(linkRefPayload(result).schema).toEqual({
         type: "object",
         properties: {
           title: { type: "string" },

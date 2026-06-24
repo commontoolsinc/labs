@@ -116,6 +116,24 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload (a `FabricPlainObject`: its addressing fields plus an optional
+ * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
+ * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
+ * link is a small object graph, not a leaf.
+ */
+export interface FabricLink extends FabricInstance {
+  readonly payload: FabricPlainObject;
+}
+
+export interface FabricLinkConstructor {
+  new (payload: FabricPlainObject): FabricLink;
+  prototype: FabricLink;
+}
+
+export declare const FabricLink: FabricLinkConstructor;
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
@@ -126,14 +144,14 @@ export type FabricValue =
   | bigint
   | FabricSpecialObject
   | FabricArray
-  | FabricObject
+  | FabricPlainObject
   | undefined;
 
 /** An array of fabric values. */
 export interface FabricArray extends ArrayLike<FabricValue> {}
 
 /** An object/record of fabric values. */
-export interface FabricObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject extends Record<string, FabricValue> {}
 
 // ============================================================================
 // Runtime Constants
@@ -169,7 +187,7 @@ export type UIVariantKind = "full" | "chip" | "tile";
  * link resolution and click-to-navigate.
  */
 export type UIVariantFunction = (
-  piece: Opaque<unknown>,
+  piece: FactoryInput<unknown>,
   kind?: UIVariantKind,
 ) => VNode;
 
@@ -851,7 +869,7 @@ export interface IDerivable<T> {
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
       array: Reactive<T>,
-    ) => Opaque<S>,
+    ) => FactoryInput<S>,
   ): Reactive<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
@@ -882,7 +900,7 @@ export interface IDerivable<T> {
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
       array: Reactive<T>,
-    ) => Opaque<boolean>,
+    ) => FactoryInput<boolean>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
@@ -895,7 +913,7 @@ export interface IDerivable<T> {
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
       index: Reactive<number>,
       array: Reactive<T>,
-    ) => Opaque<S[]>,
+    ) => FactoryInput<S[]>,
   ): Reactive<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
@@ -1211,34 +1229,33 @@ type OpaqueRefInner<T> = [T] extends
   : T;
 
 // ============================================================================
-// CellLike and Opaque - Utility types for accepting cells
+// CellLike and FactoryInput - Utility types for accepting cells
 // ============================================================================
 
 /**
- * CellLike is a cell (AnyCell) whose nested values are Opaque.
+ * CellLike is a cell (AnyCell) whose nested values are valid factory inputs.
  * The top level must be AnyCell, but nested values can be plain or wrapped.
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> =
-  | AnyBrandedCell<MaybeCellWrapped<T>> & {
-    [CELL_LIKE]?: unknown;
-  }
-  | T;
-type MaybeCellWrapped<T> =
+type CellWrappedValue<T> = AnyBrandedCell<CellWrappedData<T>> & {
+  [CELL_LIKE]?: unknown;
+};
+export type CellLike<T> = CellWrappedValue<T> | T;
+type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
-  | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>>
-    : T extends object ? { [K in keyof T]: MaybeCellWrapped<T[K]> }
+  | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : never);
 export declare const CELL_LIKE: unique symbol;
 
 /**
- * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
+ * Helper type to transform Cell<T> to FactoryInput<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
  * INPUT-POSITION ONLY: stripping is an acceptance tool — used inside
- * `Opaque<StripCell<T>>` so callers can pass the data shape with or without
+ * `FactoryInput<StripCell<T>>` so callers can pass the data shape with or without
  * cell wrappers. It must NOT be applied to factory result types: result-type
  * brands are exported capabilities, and transformer-inferred result schemas
  * derive `asCell`/`asStream` from them (see the boundary principle on
@@ -1267,17 +1284,18 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
   : T;
 
 /**
- * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
- * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in cells (Cell, OpaqueCell, etc).
+ * Input accepted when invoking a Common Fabric factory or helper.
  *
- * Conceptually: T | AnyCell<T> at any nesting level.
+ * FactoryInput accepts T or any cell wrapping T, recursively at any nesting
+ * level. It also accepts cells whose stored data contains reactive values.
+ * Used in APIs that accept inputs from developers: values can be static,
+ * reactive, wrapped in cells, or cells containing reactive values.
  *
  * Special cases for JSX:
- * - Opaque<VNode> also accepts JSXElement
- * - Opaque<UIRenderable> also accepts JSXElement (for .map() callbacks returning JSX)
+ * - FactoryInput<VNode> also accepts JSXElement
+ * - FactoryInput<UIRenderable> also accepts JSXElement (for .map() callbacks returning JSX)
  */
-export type Opaque<T> =
+export type FactoryInput<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
@@ -1289,12 +1307,13 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
+  | CellWrappedValue<T>
   // Special case: When T is VNode or UIRenderable (even with null/undefined),
   // also accept JSXElement. Use NonNullable to handle VNode | undefined.
   // Combined into single check to reduce type instantiation overhead.
   | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
-  | (T extends Array<infer U> ? Array<Opaque<U>>
-    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
+  | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
 /**
@@ -1361,11 +1380,11 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<StripCell<T>>) => Stream<R>;
+  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1373,7 +1392,7 @@ export type NodeFactory<T, R> =
   };
 
 export type PatternFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
   & Pattern
   & toJSON
   & {
@@ -1382,7 +1401,7 @@ export type PatternFactory<T, R> =
   };
 
 export type ModuleFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
   & Module
   & toJSON
   & {
@@ -1390,7 +1409,7 @@ export type ModuleFactory<T, R> =
   };
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
+  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -1956,8 +1975,8 @@ export interface BuiltInCompileAndRunState<T> {
 // Function type definitions
 //
 // Boundary principle for factory types: factories ACCEPT the stripped data
-// shape — `Opaque<StripCell<T>>` means "this data shape, wrapped however you
-// like" (liberal in what we accept). Factories RETURN exactly what the body
+// shape — `FactoryInput<StripCell<T>>` means "this data shape, wrapped however
+// you like" (liberal in what we accept). Factories RETURN exactly what the body
 // returned: `R` unstripped (faithful in what we produce). Cell/Stream brands in
 // a result type are exported capabilities, preserved end-to-end — the brand in
 // the type becomes `asCell`/`asStream` in the generated result schema, which
@@ -1971,7 +1990,7 @@ export interface PatternFunction {
   <T, R>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-    ) => Opaque<R>,
+    ) => FactoryInput<R>,
   ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
@@ -1994,7 +2013,7 @@ export interface PatternFunction {
   <T, R>(
     fn: (
       input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
-    ) => Opaque<R>,
+    ) => FactoryInput<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, R>;
@@ -2020,7 +2039,7 @@ export type PatternToolFunction = <
   // `patternTool(pattern(fn), extraParams?)`.
   pattern: PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
-  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
+  extraParams?: StripCell<E> extends Partial<T> ? FactoryInput<E> : never,
 ) => PatternToolResult<E>;
 
 // Public (schema-light) surface, matching PatternFunction's index.ts shape: the
@@ -2101,36 +2120,36 @@ export type StrFunction = (
 ) => OpaqueRef<string>;
 
 export type IfElseFunction = <T = any, U = any, V = any>(
-  condition: Opaque<T>,
-  ifTrue: Opaque<U>,
-  ifFalse: Opaque<V>,
+  condition: FactoryInput<T>,
+  ifTrue: FactoryInput<U>,
+  ifFalse: FactoryInput<V>,
 ) => OpaqueRef<U | V>;
 
 export type WhenFunction = <T = any, U = any>(
-  condition: Opaque<T>,
-  value: Opaque<U>,
+  condition: FactoryInput<T>,
+  value: FactoryInput<U>,
 ) => OpaqueRef<T | U>;
 
 export type UnlessFunction = <T = any, U = any>(
-  condition: Opaque<T>,
-  fallback: Opaque<U>,
+  condition: FactoryInput<T>,
+  fallback: FactoryInput<U>,
 ) => OpaqueRef<T | U>;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export type LLMFunction = (
-  params: Opaque<BuiltInLLMParams>,
+  params: FactoryInput<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState>;
 
 export type LLMDialogFunction = (
-  params: Opaque<BuiltInLLMParams>,
+  params: FactoryInput<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMDialogState>;
 
 export type GenerateObjectFunction = <T = any>(
-  params: Opaque<BuiltInGenerateObjectParams>,
+  params: FactoryInput<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
 export type GenerateTextFunction = (
-  params: Opaque<BuiltInGenerateTextParams>,
+  params: FactoryInput<BuiltInGenerateTextParams>,
 ) => OpaqueRef<BuiltInGenerateTextState>;
 
 export type FetchOptions = {
@@ -2148,7 +2167,7 @@ export type FetchOptions = {
   redirect?: "follow" | "error" | "manual";
 };
 export type FetchDataFunction = <T>(
-  params: Opaque<{
+  params: FactoryInput<{
     url: string;
     mode?: "json" | "text" | "dataUrl";
     options?: FetchOptions;
@@ -2157,7 +2176,7 @@ export type FetchDataFunction = <T>(
 ) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
 
 export type FetchProgramFunction = (
-  params: Opaque<{ url: string }>,
+  params: FactoryInput<{ url: string }>,
 ) => OpaqueRef<{
   pending: boolean;
   result: {
@@ -2168,7 +2187,7 @@ export type FetchProgramFunction = (
 }>;
 
 export type StreamDataFunction = <T>(
-  params: Opaque<{
+  params: FactoryInput<{
     url: string;
     options?: FetchOptions;
     result?: T;
@@ -2176,14 +2195,14 @@ export type StreamDataFunction = <T>(
 ) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
-  params: Opaque<BuiltInCompileAndRunParams<T>>,
+  params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 declare const __sqliteDb: unique symbol;
 /**
- * Opaque database handle. Empty to pattern code; a cell reference to the runtime
+ * Database handle. Empty to pattern code; a cell reference to the runtime
  * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
  * / sqliteExecute / reactOn), never read it.
  */
@@ -2253,7 +2272,7 @@ export type SqliteDatabaseFunction = {
 };
 
 export type SqliteQueryParams = {
-  db: Opaque<SqliteDatabase | SqliteDb>;
+  db: FactoryInput<SqliteDatabase | SqliteDb>;
   sql: string;
   params?: ReadonlyArray<unknown> | Record<string, unknown>;
   reactOn?: unknown;
@@ -2270,7 +2289,7 @@ export type SqliteQueryParams = {
   onExceed?: "fail" | "skip";
 };
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
-  params: Opaque<SqliteQueryParams>,
+  params: FactoryInput<SqliteQueryParams>,
 ) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
@@ -2368,7 +2387,7 @@ export type WishState<T> = {
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export interface WishFunction {
-  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<WishState<T>>;
+  <T = unknown>(target: FactoryInput<WishParams>): OpaqueRef<WishState<T>>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(

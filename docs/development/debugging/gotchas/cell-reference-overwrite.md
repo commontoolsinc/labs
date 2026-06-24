@@ -5,6 +5,7 @@
 **Cause:** Storing a Cell reference directly in another Cell. When you do `selected.set(item)` where `item` is a Cell, the link chain resolution means subsequent writes to `selected` follow the chain and overwrite the *target* (the item) instead of the *reference* (which item is selected).
 
 ```typescript
+// Shown at module scope.
 // PROBLEMATIC - Direct Cell reference
 interface Input {
   items: Item[];
@@ -23,6 +24,7 @@ selected.set(otherItem);  // This may overwrite `item` instead of changing selec
 Wrap the Cell reference in an object so the link doesn't resolve through:
 
 ```typescript
+// Shown for illustration only.
 // CORRECT - Boxed reference
 interface Input {
   items: Item[];
@@ -43,6 +45,7 @@ const currentItem = selected.get().item;
 You can also use `.key()` to navigate to a nested property:
 
 ```typescript
+// Shown at module scope.
 // ALTERNATIVE - Using .key()
 interface Input {
   items: Item[];
@@ -68,6 +71,7 @@ const currentItem = selected.key("item").get();
 This primarily affects "selection" patterns where you want to track which item from a list is currently active:
 
 ```typescript
+// Shown as alternative snippets.
 // ❌ Anti-pattern
 interface Input {
   items: Item[];

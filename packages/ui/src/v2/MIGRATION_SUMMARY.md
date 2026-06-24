@@ -1,5 +1,8 @@
 # Lit Migration Summary
 
+TODO(ui-migration-doc-cleanup): Remove this migration summary when migration
+notes no longer belong in the component source tree.
+
 ## Components Migrated (12 total)
 
 ### Layout Components (4)
@@ -29,11 +32,12 @@ For each component, the following changes were made:
 
 1. **Imports**
    - Added Lit imports: `html`, `css`, `PropertyValues`
-   - Added decorators: `@customElement`, `@property`, `@query`, `@state`
+   - Added decorators: `@property`, `@query`, `@state`
    - Added directives as needed: `classMap`, `styleMap`, `repeat`
 
 2. **Class Declaration**
-   - Added `@customElement` decorator
+   - Component files export their classes
+   - Component directory `index.ts` files register elements
    - Changed styles to static with `css` template literal
    - Removed `observedAttributes` (handled by `@property`)
 

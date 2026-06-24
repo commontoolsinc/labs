@@ -124,7 +124,3 @@ export class CFHeading extends BaseElement {
     `;
   }
 }
-
-if (!customElements.get("cf-heading")) {
-  customElements.define("cf-heading", CFHeading);
-}

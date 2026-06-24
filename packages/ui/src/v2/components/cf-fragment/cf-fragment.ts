@@ -28,5 +28,3 @@ export class CFFragment extends HTMLElement {
     this.style.display = "contents";
   }
 }
-
-globalThis.customElements.define("cf-fragment", CFFragment);

@@ -202,6 +202,7 @@ Use this shape when a pattern has:
 - subject equality that should work for cells or structured objects
 
 ```ts
+// Shown for illustration only.
 import {
   type AddIntegrity,
   type RequiresIntegrity,
@@ -273,6 +274,7 @@ Atoms are evidence values. Builders should require callers to supply the
 policy-sensitive parameters.
 
 ```ts
+// Shown at module scope.
 import {
   promptInfluenceAtom,
   promptInjectionRiskAtom,
@@ -309,6 +311,7 @@ Schema helpers should make authority requirements visible at the field that
 needs them.
 
 ```ts
+// Shown at module scope.
 import {
   confidentialMessagesSchema,
   sendMailInputSchema,

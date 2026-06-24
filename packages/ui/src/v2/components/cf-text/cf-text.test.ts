@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFText } from "./cf-text.ts";
+import { CFText } from "./index.ts";
 
 function stylesText(): string {
   return (CFText.styles as Array<{ cssText: string }>)

@@ -13,6 +13,7 @@ import {
 import {
   type CellRef,
   type CfcLabelView,
+  ClientNotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -143,6 +144,7 @@ describe("page slug redirects", () => {
     schemaCell?: unknown;
     onPull?: () => void;
     patternLink?: unknown;
+    patternIdentity?: unknown;
     onSync?: () => void;
   } = {}) {
     return {
@@ -156,7 +158,11 @@ describe("page slug redirects", () => {
       },
       getRaw: () => options.raw,
       getMetaRaw: (metaField: string) =>
-        metaField === "pattern" ? options.patternLink : undefined,
+        metaField === "patternIdentity"
+          ? options.patternIdentity
+          : metaField === "pattern"
+          ? options.patternLink
+          : undefined,
       getAsLink: () => cellRefToSigilLink(ref),
       getAsNormalizedFullLink: () => ref,
       asSchemaFromLinks: () => options.schemaCell,
@@ -244,14 +250,9 @@ describe("page slug redirects", () => {
         required: ["$NAME", "$UI"],
       },
     };
-    // if we don't have a pattern link, the processor won't pull the cell and
-    // thus won't pull the schema, so we have to include a pattern link
-    const patternRef: CellRef = {
-      id: "of:fid1-pattern-doc" as CellRef["id"],
-      space,
-      scope: "space",
-      path: [],
-    };
+    // If we don't have a pattern identity, the processor won't pull the cell and
+    // thus won't pull the schema, so include the current piece marker.
+    const patternIdentity = { identity: "pattern-identity", symbol: "default" };
     let schemaPulled = false;
     const schemaCell = mockCell(schemaRef, {
       onPull: () => {
@@ -261,7 +262,7 @@ describe("page slug redirects", () => {
     let targetSynced = false;
     const targetCell = mockCell(targetRef, {
       schemaCell,
-      patternLink: redirectRaw(patternRef),
+      patternIdentity,
       onSync: () => {
         targetSynced = true;
       },
@@ -315,14 +316,11 @@ describe("page slug redirects", () => {
       scope: "space",
       path: [],
     };
-    const patternRef: CellRef = {
-      id: "of:fid1-pattern-doc" as CellRef["id"],
-      space,
-      scope: "space",
-      path: [],
-    };
     const pieceCell = mockCell(pieceRef, {
-      patternLink: redirectRaw(patternRef),
+      patternIdentity: {
+        identity: "piece-pattern-identity",
+        symbol: "default",
+      },
     });
     const resultCell = mockCell(resultRef);
     const slugCell = mockCell(slugRef, { raw: redirectRaw(pieceRef) });
@@ -1867,5 +1865,158 @@ describe("RuntimeProcessor vdom mount render policy", () => {
   it("keeps mounts unbounded when no ceiling is configured", async () => {
     const policy = await mountAndGetRootPolicy(undefined);
     expect(policy.maxConfidentiality).toBeUndefined();
+  });
+});
+
+// handleVDomEvent forwards a main-thread DOM event to the owning mount's
+// reconciler. The reconciler's dispatchEvent returns false when no handler is
+// registered for the handlerId, meaning the event was dropped. The processor
+// surfaces that drop as a console.warn carrying the mountId and handlerId so a
+// silently-dropped click is traceable.
+describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
+  const handleVDomEvent = (RuntimeProcessor.prototype as any).handleVDomEvent;
+
+  function makeState(dispatchResult: boolean, calls: unknown[][]) {
+    return {
+      vdomMounts: new Map<number, { reconciler: unknown }>([
+        [
+          7,
+          {
+            reconciler: {
+              dispatchEvent(handlerId: number, event: unknown): boolean {
+                calls.push([handlerId, event]);
+                return dispatchResult;
+              },
+            },
+          },
+        ],
+      ]),
+    };
+  }
+
+  function captureWarn(run: () => void): string[] {
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      run();
+    } finally {
+      console.warn = original;
+    }
+    return warnings;
+  }
+
+  it("warns with mountId and handlerId when the handler is missing", () => {
+    const calls: unknown[][] = [];
+    const state = makeState(false, calls);
+    const warnings = captureWarn(() =>
+      handleVDomEvent.call(state, {
+        type: ClientNotificationType.VDomEvent,
+        mountId: 7,
+        handlerId: 42,
+        event: { type: "click" },
+        nodeId: 3,
+      })
+    );
+    expect(calls).toEqual([[42, { type: "click" }]]);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("No handler found for mountId: 7");
+    expect(warnings[0]).toContain("handlerId: 42");
+  });
+
+  it("does not warn when the reconciler dispatches the event", () => {
+    const calls: unknown[][] = [];
+    const state = makeState(true, calls);
+    const warnings = captureWarn(() =>
+      handleVDomEvent.call(state, {
+        type: ClientNotificationType.VDomEvent,
+        mountId: 7,
+        handlerId: 99,
+        event: { type: "input" },
+        nodeId: 5,
+      })
+    );
+    expect(calls).toEqual([[99, { type: "input" }]]);
+    expect(warnings.length).toBe(0);
+  });
+
+  it("warns when no mount exists for the event's mountId", () => {
+    const calls: unknown[][] = [];
+    const state = makeState(true, calls);
+    const warnings = captureWarn(() =>
+      handleVDomEvent.call(state, {
+        type: ClientNotificationType.VDomEvent,
+        mountId: 404,
+        handlerId: 1,
+        event: { type: "click" },
+        nodeId: 0,
+      })
+    );
+    expect(calls).toEqual([]);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("No mount found for mountId: 404");
+  });
+});
+
+describe("RuntimeProcessor.handleNotification", () => {
+  // Base the fake on the real prototype so handleNotification's delegation to
+  // handleVDomEvent / handleVDomBatchApplied resolves, while vdomMounts is a
+  // stub that records what the reconciler is asked to do.
+  function fakeProcessor() {
+    const events: Array<{ handlerId: number; event: unknown }> = [];
+    const acks: number[] = [];
+    const processor = Object.create(
+      RuntimeProcessor.prototype,
+    ) as RuntimeProcessor;
+    (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([[
+      1,
+      {
+        reconciler: {
+          dispatchEvent: (handlerId: number, event: unknown) =>
+            events.push({ handlerId, event }),
+          acknowledgeBatchApplied: (batchId: number) => acks.push(batchId),
+        },
+      },
+    ]]);
+    return { processor, events, acks };
+  }
+
+  it("routes a VDomEvent notification to the mount's reconciler", () => {
+    const { processor, events } = fakeProcessor();
+    processor.handleNotification({
+      type: ClientNotificationType.VDomEvent,
+      mountId: 1,
+      handlerId: 7,
+      event: { type: "click" } as never,
+      nodeId: 3,
+    });
+    expect(events).toEqual([{ handlerId: 7, event: { type: "click" } }]);
+  });
+
+  it("routes a VDomBatchApplied notification to the mount's reconciler", () => {
+    const { processor, acks } = fakeProcessor();
+    processor.handleNotification({
+      type: ClientNotificationType.VDomBatchApplied,
+      mountId: 1,
+      batchId: 42,
+    });
+    expect(acks).toEqual([42]);
+  });
+
+  it("warns on an unknown notification type without throwing", () => {
+    const { processor, events, acks } = fakeProcessor();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    try {
+      processor.handleNotification({ type: "vdom:bogus", mountId: 1 } as never);
+    } finally {
+      console.warn = original;
+    }
+    expect(warnings.length).toBe(1);
+    expect(events).toEqual([]);
+    expect(acks).toEqual([]);
   });
 });

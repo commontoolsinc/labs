@@ -178,4 +178,15 @@ export type QueuedEvent = {
   retriesLeft: number;
   onCommit?: (tx: IExtendedStorageTransaction) => void;
   notBefore?: number;
+  /**
+   * Number of transient commit conflicts this intent has hit. Drives the
+   * exponential backoff exponent; carried across backoff retries.
+   */
+  conflictAttempts?: number;
+  /**
+   * Wall-clock deadline (performance.now()) after which a still-conflicting
+   * intent surfaces a terminal error instead of retrying. Set from the first
+   * conflict and carried across backoff retries.
+   */
+  conflictDeadline?: number;
 };

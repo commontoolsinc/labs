@@ -91,6 +91,7 @@ writer, removing a delegate, or transferring ownership produces a new fact that
 commits to the updated ACL.
 
 ```typescript
+// Shown at module scope.
 type Capability = "READ" | "WRITE" | "OWNER";
 
 type ACL = {

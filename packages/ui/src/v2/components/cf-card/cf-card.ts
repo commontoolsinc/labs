@@ -356,5 +356,3 @@ export class CFCard extends BaseElement {
     card?.blur();
   }
 }
-
-globalThis.customElements.define("cf-card", CFCard);

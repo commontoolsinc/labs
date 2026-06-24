@@ -32,6 +32,7 @@
 import ts from "typescript";
 
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
+import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
@@ -51,6 +52,7 @@ import {
   getTypeAtLocationWithFallback,
   getVariableInitializer,
 } from "./utils.ts";
+import { isCollectionType } from "./type-inference.ts";
 
 const BUILDER_SYMBOL_NAMES = COMMONFABRIC_BUILDER_EXPORT_NAMES;
 
@@ -222,42 +224,15 @@ export type WildcardTraversalCallKind =
   | "object-wildcard-traversal"
   | "json-stringify";
 
-type ExpressionCache<T> = WeakMap<ts.TypeChecker, WeakMap<ts.Expression, T>>;
+type ExpressionCache<T> = TwoLevelWeakCache<ts.TypeChecker, ts.Expression, T>;
 
-const callKindCacheByChecker: ExpressionCache<CallKind | null> = new WeakMap();
-const directBuilderKindCacheByChecker: ExpressionCache<
+const callKindCache: ExpressionCache<CallKind | null> = new TwoLevelWeakCache();
+const directBuilderKindCache: ExpressionCache<
   Extract<CallKind, { kind: "builder" }> | null
-> = new WeakMap();
-const reactiveValueCacheByChecker: ExpressionCache<boolean> = new WeakMap();
-const reactiveCollectionProvenanceCacheByChecker: ExpressionCache<boolean> =
-  new WeakMap();
-
-function getCheckerExpressionCache<T>(
-  cacheByChecker: ExpressionCache<T>,
-  checker: ts.TypeChecker,
-): WeakMap<ts.Expression, T> {
-  let cache = cacheByChecker.get(checker);
-  if (!cache) {
-    cache = new WeakMap<ts.Expression, T>();
-    cacheByChecker.set(checker, cache);
-  }
-  return cache;
-}
-
-function getCachedExpressionValue<T>(
-  cacheByChecker: ExpressionCache<T>,
-  checker: ts.TypeChecker,
-  expression: ts.Expression,
-  compute: () => T,
-): T {
-  const cache = getCheckerExpressionCache(cacheByChecker, checker);
-  if (cache.has(expression)) {
-    return cache.get(expression)!;
-  }
-  const value = compute();
-  cache.set(expression, value);
-  return value;
-}
+> = new TwoLevelWeakCache();
+const reactiveValueCache: ExpressionCache<boolean> = new TwoLevelWeakCache();
+const reactiveCollectionProvenanceCache: ExpressionCache<boolean> =
+  new TwoLevelWeakCache();
 
 function usesDefaultReactiveCollectionProvenanceOptions(
   options: ReactiveCollectionProvenanceOptions,
@@ -964,8 +939,7 @@ export function isReactiveValueExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  return getCachedExpressionValue(
-    reactiveValueCacheByChecker,
+  return reactiveValueCache.memoize(
     checker,
     expression,
     () => {
@@ -1019,8 +993,7 @@ export function hasReactiveCollectionProvenance(
   options: ReactiveCollectionProvenanceOptions = {},
 ): boolean {
   if (usesDefaultReactiveCollectionProvenanceOptions(options)) {
-    return getCachedExpressionValue(
-      reactiveCollectionProvenanceCacheByChecker,
+    return reactiveCollectionProvenanceCache.memoize(
       checker,
       expression,
       () =>
@@ -1192,10 +1165,7 @@ function hasReactiveCollectionProvenanceInternal(
         options.typeRegistry,
         options.logger,
       );
-      if (
-        resultType &&
-        (checker.isArrayType(resultType) || checker.isTupleType(resultType))
-      ) {
+      if (isCollectionType(resultType, checker)) {
         return true;
       }
     }
@@ -1298,7 +1268,7 @@ function resolveExpressionKind(
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
-  const cache = getCheckerExpressionCache(callKindCacheByChecker, checker);
+  const cache = callKindCache.groupFor(checker);
   if (cache.has(expression)) {
     return cache.get(expression) ?? undefined;
   }
@@ -1673,7 +1643,7 @@ function resolveBuilderExpressionKind(
 ): Extract<CallKind, { kind: "builder" }> | undefined {
   const cache = options.followFactoryResults
     ? undefined
-    : getCheckerExpressionCache(directBuilderKindCacheByChecker, checker);
+    : directBuilderKindCache.groupFor(checker);
   if (cache?.has(expression)) {
     return cache.get(expression) ?? undefined;
   }

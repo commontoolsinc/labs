@@ -38,6 +38,7 @@ value and execution metadata. The payload is versioned to allow future format
 changes.
 
 ```ts
+// Shown for illustration only.
 interface GraphSnapshotV1 {
   version: 1;
   program?: RuntimeProgram;

@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFRender, hasVariantValue, normalizeVariant } from "./cf-render.ts";
+import { CFRender, hasVariantValue, normalizeVariant } from "./index.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
 // management, render-into-container) require a real DOM with document.body
@@ -97,6 +97,46 @@ describe("hasVariantValue", () => {
     expect(hasVariantValue(null, "$CHIP_UI")).toBe(false);
     expect(hasVariantValue("nope", "$CHIP_UI")).toBe(false);
     expect(hasVariantValue({}, "$CHIP_UI")).toBe(false);
+  });
+});
+
+describe("CFRender render-error handling", () => {
+  function cellWithSignal(aborted: boolean): CellHandle {
+    return {
+      runtime: () => ({ signal: { aborted } }),
+    } as unknown as CellHandle;
+  }
+
+  function captureConsoleError(fn: () => void): unknown[][] {
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    try {
+      fn();
+    } finally {
+      console.error = original;
+    }
+    return calls;
+  }
+
+  it("logs render errors while the runtime is alive", () => {
+    const element = new CFRender();
+    element.cell = cellWithSignal(false);
+    const calls = captureConsoleError(() => {
+      (element as unknown as { _handleRenderError(e: unknown): void })
+        ._handleRenderError(new Error("boom"));
+    });
+    expect(calls.length).toBe(1);
+  });
+
+  it("suppresses render-error logging when the runtime is disposed", () => {
+    const element = new CFRender();
+    element.cell = cellWithSignal(true);
+    const calls = captureConsoleError(() => {
+      (element as unknown as { _handleRenderError(e: unknown): void })
+        ._handleRenderError(new DOMException("aborted", "AbortError"));
+    });
+    expect(calls.length).toBe(0);
   });
 });
 

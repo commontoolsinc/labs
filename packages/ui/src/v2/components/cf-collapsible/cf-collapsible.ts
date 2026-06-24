@@ -255,5 +255,3 @@ export class CFCollapsible extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("cf-collapsible", CFCollapsible);

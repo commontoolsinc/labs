@@ -618,11 +618,13 @@ export class CFCodeEditor extends BaseElement {
     backlinkText: string,
     navigate: boolean,
   ): Promise<void> {
+    // The op runs against the pattern's own runtime, not the ambient
+    // `this.runtime` (which RootView clears to undefined on logout).
+    const rt = this.pattern.runtime();
     try {
       // Simple random ID generator for noteId (matches pattern used in note.tsx)
       const generateId = () =>
         `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-      const rt = this.pattern.runtime();
       const program = this.pattern.get();
       if (!program) return;
       const pattern = JSON.parse(program);
@@ -654,6 +656,9 @@ export class CFCodeEditor extends BaseElement {
         navigate,
       });
     } catch (error) {
+      // A disposal race (logout, runtime swap) cancels the create; that is
+      // cancellation, not a failure to surface.
+      if (rt.signal.aborted) return;
       console.error("Error creating backlink:", error);
     }
   }
@@ -1837,5 +1842,3 @@ export class CFCodeEditor extends BaseElement {
     });
   }
 }
-
-globalThis.customElements.define("cf-code-editor", CFCodeEditor);

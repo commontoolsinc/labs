@@ -153,8 +153,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       return true;
     }
 
-    // Check if this is an Opaque<T> union (T | OpaqueRef<T>)
-    if (this.isOpaqueUnion(type, context.typeChecker)) {
+    // Check if this is FactoryInput<T>.
+    if (this.getFactoryInputBase(type)) {
       return true;
     }
 
@@ -213,7 +213,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return this.formatResolvedCfcAlias(resolvedCfcAlias, context);
     }
 
-    // Handle wrapper unions first (before Opaque<T> union check)
+    // Handle wrapper unions first (before FactoryInput<T> union check)
     // This catches cases like OpaqueRef<T> | undefined and processes them
     // via node inspection to avoid conditional type expansion
     if (
@@ -223,13 +223,12 @@ export class CommonFabricFormatter implements TypeFormatter {
       return this.formatWrapperUnion(type as ts.UnionType, context);
     }
 
-    // Check if this is an Opaque<T> union and handle it first
+    // Check if this is FactoryInput<T> and handle it first
     // This prevents the UnionFormatter from creating an anyOf
-    const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
-    if (opaqueUnionInfo) {
-      // Format the base type T and add asCell: ["opaque"]
+    const factoryInputBase = this.getFactoryInputBase(type);
+    if (factoryInputBase) {
       const innerSchema = this.schemaGenerator.formatChildType(
-        opaqueUnionInfo.baseType,
+        factoryInputBase,
         context,
         undefined, // Don't pass typeNode since we're working with the unwrapped type
       );
@@ -342,7 +341,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // If we detected a wrapper syntactically but the current type is wrapped in
-    // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
+    // additional layers (e.g., FactoryInput<OpaqueRef<...>>), recursively unwrap using
     // brand information until we reach the underlying wrapper.
     const wrapperKinds: WrapperKind[] = [
       "OpaqueCell",
@@ -354,7 +353,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       "ComparableCell",
     ];
     for (const kind of wrapperKinds) {
-      const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+      const unwrappedType = this.recursivelyUnwrapOpaqueCell(
         type,
         kind,
         context.typeChecker,
@@ -758,11 +757,13 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   /**
-   * Recursively unwrap OpaqueRef layers to find a wrapper type (Cell/Stream/OpaqueRef).
-   * This handles cases like Opaque<OpaqueRef<Stream<T>>> where the type is wrapped in
-   * multiple layers of OpaqueRef due to the Opaque type's recursive definition.
+   * Recursively unwrap opaque-branded (OpaqueCell) layers to find a wrapper
+   * type (Cell/Stream/etc.). This handles cases like
+   * FactoryInput<OpaqueCell<Stream<T>>> where the target is wrapped in multiple
+   * opaque-branded layers due to the recursive definition of the FactoryInput
+   * type.
    */
-  private recursivelyUnwrapOpaqueRef(
+  private recursivelyUnwrapOpaqueCell(
     type: ts.Type,
     targetWrapperKind: WrapperKind,
     checker: ts.TypeChecker,
@@ -783,12 +784,12 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    // If this is a union (e.g., from Opaque<T>), check each member
+    // If this is a union (e.g., from FactoryInput<T>), check each member
     if (type.flags & ts.TypeFlags.Union) {
       const unionType = type as ts.UnionType;
       for (const member of unionType.types) {
         // Try to unwrap this member
-        const result = this.recursivelyUnwrapOpaqueRef(
+        const result = this.recursivelyUnwrapOpaqueCell(
           member,
           targetWrapperKind,
           checker,
@@ -798,11 +799,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    // If this is an OpaqueRef type, extract its type argument and recurse
-    if (this.isOpaqueRefType(type, checker)) {
-      const innerType = this.extractOpaqueRefTypeArgument(type, checker);
+    // If this is an opaque-branded cell, extract its type argument and recurse
+    if (this.isOpaqueCellType(type, checker)) {
+      const innerType = this.extractOpaqueCellTypeArgument(type, checker);
       if (innerType) {
-        return this.recursivelyUnwrapOpaqueRef(
+        return this.recursivelyUnwrapOpaqueCell(
           innerType,
           targetWrapperKind,
           checker,
@@ -815,84 +816,27 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   /**
-   * Check if a type is an Opaque<T> union (T | OpaqueRef<T>)
+   * Extract the base type from FactoryInput<T>.
    */
-  private isOpaqueUnion(type: ts.Type, checker: ts.TypeChecker): boolean {
-    return this.getOpaqueUnionInfo(type, checker) !== undefined;
+  private getFactoryInputBase(type: ts.Type): ts.Type | undefined {
+    const aliasType = type as TypeWithInternals;
+    return aliasType.aliasSymbol?.name === "FactoryInput"
+      ? aliasType.aliasTypeArguments?.[0]
+      : undefined;
   }
 
-  /**
-   * Extract information from an Opaque<T> union type.
-   * Opaque<T> is defined as: T | OpaqueRef<T>
-   * This function detects this pattern and returns the base type T.
-   */
-  private getOpaqueUnionInfo(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): { baseType: ts.Type } | undefined {
-    // Must be a union type
-    if (!(type.flags & ts.TypeFlags.Union)) {
-      return undefined;
-    }
-
-    const unionType = type as ts.UnionType;
-    const members = unionType.types;
-
-    // Must have exactly 2 members
-    if (members.length !== 2) {
-      return undefined;
-    }
-
-    // One member should be OpaqueRef<T>, the other should be T
-    let opaqueRefMember: ts.Type | undefined;
-    let baseMember: ts.Type | undefined;
-
-    for (const member of members) {
-      // Check if this member is an OpaqueRef type (it will be an intersection)
-      const isOpaqueRef = this.isOpaqueRefType(member, checker);
-      if (isOpaqueRef) {
-        opaqueRefMember = member;
-      } else {
-        baseMember = member;
-      }
-    }
-
-    // Both members must be present for this to be an Opaque<T> union
-    if (!opaqueRefMember || !baseMember) {
-      return undefined;
-    }
-
-    // Verify that the OpaqueRef's type argument matches the base type
-    // Extract T from OpaqueRef<T>
-    const opaqueRefInnerType = this.extractOpaqueRefTypeArgument(
-      opaqueRefMember,
-      checker,
-    );
-    if (!opaqueRefInnerType) {
-      return undefined;
-    }
-
-    // The inner type of OpaqueRef should match the base member
-    // Use type equality check
-    const innerTypeString = checker.typeToString(opaqueRefInnerType);
-    const baseTypeString = checker.typeToString(baseMember);
-
-    if (innerTypeString !== baseTypeString) {
-      // Not a matching Opaque<T> pattern
-      return undefined;
-    }
-
-    return { baseType: baseMember };
-  }
-
-  private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Detects the "opaque" cell brand, carried by OpaqueCell<T>. Named for the
+  // brand it matches, not the `Reactive`/`OpaqueRef` annotation spelling: those
+  // are an identity alias for T (no runtime wrapper, no brand), so they cannot
+  // be detected structurally here — only OpaqueCell can.
+  private isOpaqueCellType(type: ts.Type, checker: ts.TypeChecker): boolean {
     return isCellBrand(type, checker, "opaque");
   }
 
   /**
-   * Extract the type argument T from OpaqueRef<T> or OpaqueCell<T>
+   * Extract the type argument T from an opaque-branded cell (OpaqueCell<T>).
    */
-  private extractOpaqueRefTypeArgument(
+  private extractOpaqueCellTypeArgument(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
@@ -2167,7 +2111,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
 
       // Skip conditional types - they come from type expansion internals and shouldn't be formatted
-      // Example: T extends (infer U)[] ? Opaque<U>[] : T extends object ? { [K in keyof T]: Opaque<T[K]>; } : T
+      // Example: T extends (infer U)[] ? FactoryInput<U>[] : T extends object ? { [K in keyof T]: FactoryInput<T[K]>; } : T
       if ((memberType.flags & ts.TypeFlags.Conditional) !== 0) {
         continue;
       }

@@ -11,6 +11,7 @@ Explicitly define types for your pattern inputs and outputs.
 The type declares what data it expects and _how_ it is accessed.
 
 ```typescript
+// Shown at module scope.
 interface TodoInput {
   items?: Writable<Todo[] | Default<[]>>;
   title?: Writable<string | Default<"untitled">>;
@@ -42,6 +43,7 @@ Input types describe what the pattern receives when instantiated. Use `Writable<
 Output types describe what the pattern returns. They should exactly mirror the return object without additional wrapping:
 
 ```typescript
+// Shown at module scope.
 interface MyOutput {
   count: number;               // Not Writable<number>
   items: Item[];               // Not Writable<Item[]>
@@ -56,6 +58,7 @@ The output type reflects the *shape* of the returned data, not how it's stored i
 **Always use `pattern<Input, Output>()`** for production patterns:
 
 ```typescript
+// Shown for illustration only.
 // ✅ Correct - explicit Output enables testing and proper typing
 export default pattern<TodoInput, TodoOutput>(({ items }) => {
   const addItem = addItemHandler({ items });

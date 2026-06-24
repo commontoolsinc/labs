@@ -82,6 +82,15 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("telemetry", this._onTelemetry);
   }
 
+  /**
+   * The runtime's lifetime signal. It aborts when the runtime is disposed.
+   * Consumers observe it to stop work and to recognize that a disposal-raced
+   * operation was cancelled rather than failed.
+   */
+  get signal(): AbortSignal {
+    return this.#conn.signal;
+  }
+
   static async initialize(
     transport: RuntimeTransport,
     options: RuntimeClientOptions,

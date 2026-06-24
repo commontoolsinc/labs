@@ -43,6 +43,7 @@ import {
   type CellKind,
   type CellScope,
   type CellTypeConstructor,
+  type FactoryInput,
   type Frame,
   type HKT,
   type ICell,
@@ -56,7 +57,6 @@ import {
   type Module,
   type NodeFactory,
   type NodeRef,
-  type Opaque,
   type OpaqueCell,
   type OpaqueRef,
   type PatternFactory,
@@ -381,7 +381,7 @@ declare module "@commonfabric/api" {
       scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
-      value?: Opaque<T> | T;
+      value?: FactoryInput<T> | T;
       name?: unknown;
       external?: unknown;
     };
@@ -1899,7 +1899,7 @@ export class CellImpl<T extends FabricValue>
     scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
-    value?: Opaque<T> | T;
+    value?: FactoryInput<T> | T;
     name?: unknown;
     external?: unknown;
   } {
@@ -2049,7 +2049,7 @@ export class CellImpl<T extends FabricValue>
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
-    ) => Opaque<S>,
+    ) => FactoryInput<S>,
   ): OpaqueRef<S[]> {
     throw new Error(throwOpFunctionFormMessage("map"));
   }
@@ -2140,7 +2140,7 @@ export class CellImpl<T extends FabricValue>
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
-    ) => Opaque<boolean>,
+    ) => FactoryInput<boolean>,
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
     throw new Error(throwOpFunctionFormMessage("filter"));
   }
@@ -2180,7 +2180,7 @@ export class CellImpl<T extends FabricValue>
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
-    ) => Opaque<S[]>,
+    ) => FactoryInput<S[]>,
   ): OpaqueRef<S[]> {
     throw new Error(throwOpFunctionFormMessage("flatMap"));
   }

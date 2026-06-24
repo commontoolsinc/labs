@@ -3,6 +3,7 @@
  */
 
 import { CFMap } from "./cf-map.ts";
+
 import type {
   Bounds,
   CfBoundsChangeDetail,
@@ -20,6 +21,8 @@ import type {
 if (!customElements.get("cf-map")) {
   customElements.define("cf-map", CFMap);
 }
+
+export type { CFMap as CFMapElement } from "./cf-map.ts";
 
 export { CFMap };
 export type {

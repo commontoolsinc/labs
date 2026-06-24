@@ -28,6 +28,7 @@ Contents:
 **Fix:**
 
 ```typescript
+// Shown inside a pattern body.
 // Given:
 const filteredItems = computed(() => items.filter(item => !item.done));
 
@@ -61,6 +62,7 @@ actual cause is that the value isn't an array (yet):
 **Fix:**
 
 ```typescript
+// Shown at module scope.
 // ✅ Ensure array has a default value
 interface Input {
   items: Item[] | Default<[]>;  // Defaults to empty array
@@ -99,6 +101,7 @@ anywhere a string is expected, an object value stringifies to
 **Fix:**
 
 ```tsx
+// Shown for illustration only.
 const selectedPlace = computed(() =>
   places[selectedIndex] ?? null
 );
@@ -130,6 +133,7 @@ hardcoded data, use inline handlers instead.
 **Fix:**
 
 ```typescript
+// Shown for illustration only.
 const addItem = handler<
   { title: string },               // Event type
   { items: Writable<Item[]> }      // State type
@@ -158,6 +162,7 @@ transformer; `lift()` does not. Use `computed()` by default in patterns.
 **Fix:**
 
 ```typescript
+// Shown as alternative snippets.
 // ❌ Passing cell directly to lift()
 const calcTotal = lift((expenses: Expense[]): number => {
   return expenses.reduce((sum, e) => sum + e.amount, 0);
@@ -188,6 +193,7 @@ reactivity chain may not be properly established. Wrapping in a local
 **Fix:**
 
 ```typescript
+// Shown as alternative snippets.
 // ❌ May hang — cell from composed pattern
 const showDetails = subPattern.isExpanded;
 {ifElse(showDetails, <div>Details</div>, null)}
@@ -208,6 +214,7 @@ buttons at the top level and control visibility with `disabled` or `ifElse`.
 **Fix:**
 
 ```typescript
+// Shown inside a pattern body.
 // ❌ Buttons inside computed() fail when clicked
 {computed(() =>
   showAdd ? <cf-button onClick={addItem({ items })}>Add</cf-button> : null
@@ -233,6 +240,7 @@ handler with state. The bound handler IS the stream that can receive events.
 **Fix:**
 
 ```typescript
+// Shown for illustration only.
 // ❌ Streams are not subscribed to directly
 const addItem: Stream<{ title: string }> = new Stream();
 addItem.subscribe(({ title }) => {
@@ -258,6 +266,7 @@ return { addItem };
 **Fix:**
 
 ```typescript
+// Shown as JSX element children.
 // ❌ Trying to bind entire item
 <cf-checkbox $checked={item} />
 
@@ -271,6 +280,7 @@ Use `Writable<T[]>` by default. Only use `Writable<Array<Writable<T>>>` when
 you need Writable methods (like `.equals()`) on individual elements:
 
 ```typescript
+// Shown inside a pattern body.
 // ✅ Standard — Writable<T[]>
 const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => items.push({ title: "New" })
@@ -293,6 +303,7 @@ See [@writable](../../../common/concepts/types-and-schemas/writable.md).
 For lists with 100+ items that feel slow:
 
 ```typescript
+// Shown for illustration only.
 // ❌ Creates a handler per item per render
 {items.map(item => {
   const remove = handler(() => { ... });
@@ -305,6 +316,7 @@ const removeItem = handler((_, { items, item }) => { ... });
 ```
 
 ```typescript
+// Shown for illustration only.
 // ❌ Expensive computed per item in the loop
 {items.map(item => <div>{computed(() => expensive(item))}</div>)}
 

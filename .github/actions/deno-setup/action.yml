@@ -6,20 +6,60 @@ inputs:
     default: true
   deno-version:
     description: "Deno version to install"
+    # Keep in sync with `./tasks/check.sh` version
     default: "2.8.1"
 runs:
   using: "composite"
   steps:
-    # Keep in sync with `./tasks/check.sh` version
-    - name: 🦕 Setup Deno ${{ inputs.deno-version }}
+    # Cache the Deno toolchain binary. denoland/setup-deno resolves the version
+    # against deno.com/versions.json and downloads the binary at job time, so a
+    # deno.com outage breaks every job. A cache hit installs the binary from disk
+    # instead, with no deno.com contact. setup-deno installs into
+    # <tool_cache>/deno/<version>/<arch>/, so caching that directory and re-adding
+    # it to PATH is enough to run Deno. This is independent of the `cache` input
+    # below (which gates the module/dependency cache) so jobs that pass
+    # `cache: false` are covered too.
+    # Cache version: bump the `deno-bin-v1` token to invalidate all toolchain caches.
+    - name: 💾 Restore Deno toolchain ${{ inputs.deno-version }}
+      id: deno-toolchain-cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
+        key: deno-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}
+
+    - name: 🦕 Download Deno ${{ inputs.deno-version }}
+      # Cache miss: download the toolchain from upstream. setup-deno installs it
+      # into the cached path above, so actions/cache saves it at job end and
+      # later runs hit.
+      if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'
       uses: denoland/setup-deno@v2
       with:
         deno-version: ${{ inputs.deno-version }}
 
+    - name: 🦕 Use cached Deno ${{ inputs.deno-version }}
+      # Cache hit: add the restored binary to PATH and verify, with no deno.com
+      # contact.
+      if: steps.deno-toolchain-cache.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
+      run: |
+        # setup-deno extracts the binary into <tool_cache>/deno/<version>/<arch>/.
+        # The arch subdir name comes from the runner's node arch, so find the
+        # binary instead of assuming the directory name.
+        bin="$(find "$TOOLCHAIN_DIR" -type f -name deno -print -quit 2>/dev/null || true)"
+        if [ -z "$bin" ]; then
+          echo "::error::Cached Deno toolchain not found under $TOOLCHAIN_DIR"
+          exit 1
+        fi
+        chmod +x "$bin"
+        dirname "$bin" >> "$GITHUB_PATH"
+        "$bin" --version
+
     # Cache version: bump to invalidate all caches (e.g., v2 -> v3)
     - name: 📦 Cache Deno dependencies
       if: inputs.cache == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.deno

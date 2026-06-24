@@ -153,6 +153,9 @@ export class XBodyView extends BaseView {
         });
       }
     } catch (error) {
+      // A disposal race (logout, runtime swap) cancels the send; that is not
+      // a pin failure to surface.
+      if (this.rt?.signal.aborted) return;
       console.error("[BodyView] Failed to pin cell:", error);
     }
   };

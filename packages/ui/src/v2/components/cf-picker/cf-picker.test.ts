@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFPicker } from "./cf-picker.ts";
+import { CFPicker } from "./index.ts";
 
 describe("CFPicker", () => {
   it("should be defined", () => {

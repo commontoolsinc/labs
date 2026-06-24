@@ -18,10 +18,10 @@ import type {
   AsCellType,
   Cell,
   ComparableCell,
+  FactoryInput,
   HandlerFactory,
   JSONSchema,
   ModuleFactory,
-  Opaque,
   OpaqueCell,
   OpaqueRef,
   PatternFactory,
@@ -358,7 +358,7 @@ type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
  * Like Schema<T> but without Cell/Stream wrapping.
  *
  * INPUT-POSITION ONLY: used for factory *argument* type parameters, where the
- * stripped shape feeds `Opaque<...>` acceptance. Factory *result* type
+ * stripped shape feeds `FactoryInput<...>` acceptance. Factory *result* type
  * parameters use `Schema<T>` so that `asCell`/`asStream` entries surface as
  * Cell<>/Stream<> brands — matching what consumers actually receive at runtime
  * (see the boundary principle on PatternFunction in index.ts).
@@ -378,7 +378,7 @@ declare module "commonfabric" {
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
         input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<Schema<OS>> },
-      ) => Opaque<Schema<OS>>,
+      ) => FactoryInput<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
     ): PatternFactory<SchemaWithoutCell<IS>, Schema<OS>>;
@@ -428,7 +428,7 @@ declare module "commonfabric" {
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
     <S extends JSONSchema = JSONSchema>(
-      target: Opaque<WishParams>,
+      target: FactoryInput<WishParams>,
       schema: S,
     ): OpaqueRef<WishState<Schema<S>>>;
   }

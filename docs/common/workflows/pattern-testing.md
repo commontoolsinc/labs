@@ -10,6 +10,7 @@ Before writing tests, ensure your pattern:
 2. **Exports actions as `Stream<T>`** - Required for `instance.action.send()` to work
 
 ```typescript
+// Shown at module scope.
 // Pattern must have explicit Output type with Stream<T> for testable actions
 interface MyOutput {
   count: number;
@@ -37,6 +38,7 @@ Test files end in `.test.tsx` and are run with `deno task cf test`.
 ## Quick Example
 
 ```tsx
+// Shown at module scope.
 import { action, computed, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
@@ -84,6 +86,7 @@ deno task cf test packages/patterns/my-pattern/
 Tests use a **discriminated union** format:
 
 ```tsx
+// Shown inside a pattern body.
 return {
   tests: [
     { action: action_do_something },     // Runner calls .send()
@@ -99,6 +102,7 @@ Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
 Use `action()` to create void streams that trigger events on the pattern:
 
 ```tsx
+// Shown inside a pattern body.
 // Trigger a void handler
 const action_reset = action(() => {
   game.reset.send();  // No argument needed for Stream<void>
@@ -121,6 +125,7 @@ const action_setup_game = action(() => {
 Use `computed()` to create reactive boolean assertions:
 
 ```tsx
+// Shown for illustration only.
 // Simple equality
 const assert_count_is_5 = computed(() => counter.value === 5);
 
@@ -147,6 +152,7 @@ exists or changed in the expected place.
 Use descriptive names that explain what the test verifies:
 
 ```tsx
+// Shown for illustration only.
 // Actions: action_<what_it_does>
 const action_add_first_item = action(() => { ... });
 const action_remove_all_items = action(() => { ... });
@@ -161,6 +167,7 @@ const assert_total_is_100 = computed(() => cart.total === 100);
 Put actions before the assertions that depend on them:
 
 ```tsx
+// Shown inside a pattern body.
 return {
   tests: [
     // Initial state
@@ -218,6 +225,7 @@ deno task cf piece get tests/1/assertion --piece <PIECE_ID>
 Add extra fields to your test pattern for debugging:
 
 ```tsx
+// Shown for illustration only.
 return {
   tests: [...],
   // Expose internals for debugging
@@ -235,6 +243,7 @@ return {
 ### Testing Initial State
 
 ```tsx
+// Shown inside a pattern body.
 // Verify pattern initializes correctly
 const assert_initial_count = computed(() => counter.value === 0);
 const assert_initial_empty = computed(() => list.items.length === 0);
@@ -251,6 +260,7 @@ return {
 ### Testing State Transitions
 
 ```tsx
+// Shown inside a pattern body.
 const action_start = action(() => game.start.send());
 const action_pause = action(() => game.pause.send());
 const action_resume = action(() => game.resume.send());
@@ -273,6 +283,7 @@ return {
 ### Testing Computed Values
 
 ```tsx
+// Shown inside a pattern body.
 const action_add_items = action(() => {
   cart.addItem.send({ price: 10, quantity: 2 });
   cart.addItem.send({ price: 5, quantity: 4 });

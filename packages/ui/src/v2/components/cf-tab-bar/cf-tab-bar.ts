@@ -426,5 +426,3 @@ export class CFTabBar extends BaseElement {
     this._cellController.setValue(value);
   }
 }
-
-globalThis.customElements.define("cf-tab-bar", CFTabBar);

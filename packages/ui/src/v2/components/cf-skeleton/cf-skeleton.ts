@@ -175,5 +175,3 @@ export class CFSkeleton extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-skeleton", CFSkeleton);

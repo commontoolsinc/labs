@@ -24,6 +24,7 @@ deno task test
 **Unit test example:**
 
 ```typescript
+// Shown at module scope.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -39,6 +40,7 @@ describe("Feature", () => {
 Integration tests are executable scripts that connect to a real backend and test full workflows. They are located in `packages/runner/integration/` and follow this pattern:
 
 ```typescript
+// Shown for illustration only.
 #!/usr/bin/env -S deno run -A
 
 import { Runtime } from "@commonfabric/runner";

@@ -334,5 +334,3 @@ export class CFListItem extends BaseElement {
     this._hasDetail = slot.assignedElements().length > 0;
   };
 }
-
-globalThis.customElements.define("cf-list-item", CFListItem);

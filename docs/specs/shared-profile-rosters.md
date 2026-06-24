@@ -63,6 +63,7 @@ Store a reference to the contributor's profile cell (the `result` of their
 `#profile` wish) and render it with `<cf-profile-badge $profile={p.profile} />`:
 
 ```ts
+// Shown inside a pattern body.
 participants.push({ profile: myProfile, joinedAt: safeDateNow() });
 // render: <cf-profile-badge $profile={p.profile} />
 ```
@@ -86,6 +87,7 @@ Copy the resolved `name` and `avatar` strings into the roster entry when the use
 joins:
 
 ```ts
+// Shown inside a pattern body.
 participants.push({ name, avatar, joinedAt: safeDateNow() });
 ```
 
@@ -380,6 +382,7 @@ a visitable `<cf-profile-badge>` — is the recommended idiom; see
 for the complete pattern. The shape:
 
 ```tsx
+// Shown inside a pattern body.
 const profileWish = wish({ query: "#profile" }); // result is ProfileHomeOutput-shaped
 // In the join handler, push { profile: profileWish.result, joinedAt }.
 // Render each entry with: <cf-profile-badge $profile={entry.profile} />

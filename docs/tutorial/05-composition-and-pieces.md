@@ -12,6 +12,7 @@ A pattern instantiates another pattern by calling it — as a function or as
 JSX (equivalent; the runtime extracts `[UI]` from the result):
 
 ```tsx
+// Shown inside a pattern body.
 {items.map((item) => ItemCard({ item }))}
 {items.map((item) => <ItemCard item={item} />)}
 ```
@@ -88,6 +89,7 @@ For drill-down flows (list → detail), a handler can return
 `navigateTo(somePiece)`:
 
 ```tsx
+// Shown as JSX element children.
 <cf-button onClick={() => navigateTo(ItemDetail({ item }))}>Edit</cf-button>
 ```
 
@@ -104,6 +106,7 @@ Patterns can call language models declaratively — `generateText` /
 (`docs/common/capabilities/llm.md`):
 
 ```tsx
+// Shown inside a pattern body.
 const response = generateText({
   prompt: userInput,                       // reactive — re-runs when it changes
   system: "You are a helpful assistant.",
@@ -121,6 +124,7 @@ just cells your UI binds to. A real use from
 cached classification per item:
 
 ```tsx
+// Shown inside a pattern body.
 const itemsWithAisles = items.map((item) => {
   const aisleResult = generateObject<AisleResult>({
     system: "You are a grocery store assistant. ...respond with one of the exact locations...",

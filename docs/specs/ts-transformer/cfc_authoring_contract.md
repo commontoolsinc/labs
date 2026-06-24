@@ -125,6 +125,7 @@ ordinary label-transition sugar.
 The canonical form is:
 
 ```ts
+// Shown at module scope.
 type OpaqueInput<
   T,
   Spec extends true | {
@@ -185,6 +186,7 @@ Normative behavior:
 One valid marker shape is:
 
 ```ts
+// Shown for illustration only.
 { __ctWriterIdentityOf: <ts.EntityName> }
 ```
 

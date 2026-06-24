@@ -1,8 +1,267 @@
-import { awaitViewSettled, Page, waitFor } from "@commonfabric/integration";
+import {
+  awaitViewSettled,
+  Page,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
 const CLICK_TARGET_ATTR = "data-cfc-click-target";
+
+// Predicates evaluated in the page by `waitForCondition`. Each is self-contained
+// — it closes over nothing in this module — so it can be serialized and run in
+// the page. `probe` is the shadow-piercing DOM helper set; later parameters are
+// the `args` passed alongside the predicate.
+
+const textPresent = (
+  probe: ProbeApi,
+  selector: string,
+  text: string,
+): boolean =>
+  probe.collect(selector).some((element) =>
+    probe.deepText(element).includes(text)
+  );
+
+const textAbsent = (
+  probe: ProbeApi,
+  selector: string,
+  text: string,
+): boolean =>
+  !probe.collect(selector).some((element) =>
+    probe.deepText(element).includes(text)
+  );
+
+const buttonDisabledIs = (
+  probe: ProbeApi,
+  selector: string,
+  disabled: boolean,
+): boolean => {
+  const element = probe.collect(selector)[0];
+  if (!element) return false;
+  const button = element instanceof HTMLButtonElement
+    ? element
+    : element.shadowRoot?.querySelector("button");
+  return button instanceof HTMLButtonElement
+    ? button.disabled === disabled
+    : false;
+};
+
+const runtimeIdle = async (): Promise<boolean> => {
+  const rt = (globalThis as typeof globalThis & {
+    commonfabric?: { rt?: { idle?: () => Promise<void> } };
+  }).commonfabric?.rt;
+  if (!rt?.idle) return false;
+  await rt.idle();
+  return true;
+};
+
+const runtimeSynced = async (): Promise<boolean> => {
+  const rt = (globalThis as typeof globalThis & {
+    commonfabric?: { rt?: { allSynced?: () => Promise<void> } };
+  }).commonfabric?.rt;
+  if (!rt?.allSynced) return false;
+  await rt.allSynced();
+  return true;
+};
+
+const viewSettledReady = (): boolean =>
+  typeof (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled === "function";
+
+// Fill the input behind `selector`, then report whether the value took. Mirrors
+// the prior poll predicate: a not-yet-ready field (absent, hidden, disabled,
+// read-only) reports false without dispatching anything, so a re-check on the
+// next DOM mutation retries the fill; a ready field is filled once and verified.
+const fillAndVerify = async (
+  probe: ProbeApi,
+  selector: string,
+  nextValue: string,
+): Promise<boolean> => {
+  const element = probe.collect(selector)[0];
+  if (!element) return false;
+  const input = element instanceof HTMLInputElement
+    ? element
+    : element.shadowRoot?.querySelector("input");
+  if (!(input instanceof HTMLInputElement)) return false;
+
+  input.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  if (!probe.isVisible(input) || input.disabled || input.readOnly) {
+    return false;
+  }
+
+  const root = input.getRootNode();
+  const host = root instanceof ShadowRoot ? root.host : element;
+  const hostWithCell = host as Element & {
+    value?: {
+      get?: () => unknown;
+      set?: (value: string) => Promise<void>;
+      sync?: () => Promise<unknown>;
+    };
+    requestUpdate?: () => void | Promise<void>;
+  };
+  const readCellValue = () =>
+    typeof hostWithCell.value?.get === "function"
+      ? hostWithCell.value.get()
+      : undefined;
+
+  input.focus();
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  if (valueSetter) valueSetter.call(input, nextValue);
+  else input.value = nextValue;
+  input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  input.blur();
+
+  if (typeof hostWithCell.value?.set === "function") {
+    await hostWithCell.value.set(nextValue);
+  }
+  const cellValue = typeof hostWithCell.value?.sync === "function"
+    ? await hostWithCell.value.sync()
+    : readCellValue();
+  if (typeof hostWithCell.requestUpdate === "function") {
+    await hostWithCell.requestUpdate.call(hostWithCell);
+  }
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+
+  return hostWithCell.value !== undefined
+    ? cellValue === nextValue
+    : input.value === nextValue;
+};
+
+// Scroll the cf-button behind `selector` into view and tag its inner click
+// target so the test can resolve and click exactly that element.
+const markForClick = async (
+  probe: ProbeApi,
+  selector: string,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const target = probe.collect(selector)[0] as HTMLElement | undefined;
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
+    | HTMLElement
+    | null) ?? target;
+  clickTarget.setAttribute(attr, token);
+  return true;
+};
+
+// Tag the first visible, enabled element carrying `data-ui-action="<action>"`
+// for a single trusted click, and record the next click's provenance so a
+// failure can show whether the dispatch was trusted and where it landed.
+const markTrustedAction = async (
+  probe: ProbeApi,
+  action: string,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const isDisabled = (element: HTMLElement): boolean =>
+    element.hasAttribute("disabled") ||
+    element.getAttribute("aria-disabled") === "true";
+
+  for (const element of probe.collect(`[data-ui-action="${action}"]`)) {
+    const target = element as HTMLElement;
+    target.scrollIntoView({ block: "center", inline: "center" });
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+    const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? target;
+    if (
+      probe.isVisible(target) && probe.isVisible(clickTarget) &&
+      !isDisabled(target) && !isDisabled(clickTarget)
+    ) {
+      clickTarget.setAttribute(attr, token);
+      clickTarget.addEventListener(
+        "click",
+        (event) => {
+          (globalThis as typeof globalThis & {
+            __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
+          }).__lastCfcTrustedActionClick = {
+            trusted: event.isTrusted,
+            path: event.composedPath().flatMap((node) => {
+              if (!(node instanceof HTMLElement)) return [];
+              const dataset: Record<string, string> = {};
+              for (const key in node.dataset) {
+                dataset[key] = node.dataset[key] ?? "";
+              }
+              return [{
+                tagName: node.tagName.toLowerCase(),
+                id: node.id,
+                dataset,
+              }];
+            }),
+          };
+        },
+        { capture: true, once: true },
+      );
+      return true;
+    }
+  }
+  return false;
+};
+
+// Resolve once the shell's reactive view has caught up to runtime state and is
+// interactive, so a click lands on a bound handler. Waits for the shell to
+// expose `viewSettled` (notification-driven), then awaits the settle.
+async function settleView(
+  page: Page,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+): Promise<void> {
+  await waitForCondition(page, viewSettledReady, { timeout });
+  await awaitViewSettled(page);
+}
+
+/**
+ * Wait for `selector` to contain `text` after a stimulus has been dispatched,
+ * driving the shell to settle between checks and resolving the instant the text
+ * appears.
+ *
+ * A freshly dispatched click's effect reaches the DOM only once the worker→main
+ * pipeline runs: the worker settles the reactive graph, pushes a vdom batch,
+ * the main thread applies it, and Lit drains its updates. `awaitViewSettled`
+ * pumps that pipeline. An integration test holds no UI subscription, so nothing
+ * else pumps it — a purely passive wait can sit on a DOM that never changes and
+ * time out even though the effect is ready to apply.
+ *
+ * Each iteration awaits one full view settle, then re-checks. The settle is the
+ * re-evaluation trigger — real asynchronous work (a worker idle round-trip plus
+ * a drained Lit cycle), not a fixed-interval sleep — so the effect is observed
+ * within a settle cycle or two and the wait resolves immediately once it holds.
+ * The settle must be driven from the same call sequence as the check; running
+ * it concurrently with a separate waiter does not help, because the astral CDP
+ * connection serializes evaluations.
+ */
+async function waitForTextWhileSettling(
+  page: Page,
+  selector: string,
+  text: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  if (await textIsPresent(page, selector, text)) return;
+  do {
+    await awaitViewSettled(page);
+    if (await textIsPresent(page, selector, text)) return;
+  } while (Date.now() < deadline);
+  throw new Error(
+    `"${selector}" did not contain "${text}" within ${timeout}ms`,
+  );
+}
 
 export async function clickTrustedAction(
   page: Page,
@@ -12,25 +271,18 @@ export async function clickTrustedAction(
   const token = `trusted-action-${crypto.randomUUID()}`;
   let probe: TrustedActionProbe | undefined;
   try {
-    await waitFor(async () => {
-      try {
-        const marked = await markVisibleTrustedAction(page, action, token);
-        if (!marked) {
-          probe = await readTrustedActionProbe(page, action);
-          return false;
-        }
-        const button = await page.waitForSelector(
-          `[${CLICK_TARGET_ATTR}="${token}"]`,
-          { strategy: "pierce", timeout: 1_000 },
-        );
-        await button.click();
-        return true;
-      } catch {
-        probe = await readTrustedActionProbe(page, action);
-        await clearTrustedActionMark(page, token).catch(() => {});
-        return false;
-      }
-    }, { timeout, delay: 250 });
+    // Wait until a visible, enabled instance of the action can be marked, then
+    // click it exactly once. Marking attaches the provenance listener, so the
+    // single click is the trusted dispatch we record.
+    await waitForCondition(page, markTrustedAction, {
+      timeout,
+      args: [action, token, CLICK_TARGET_ATTR],
+    });
+    const button = await page.waitForSelector(
+      `[${CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce", timeout },
+    );
+    await button.click();
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
     // Indented for readable test-log output
@@ -52,33 +304,52 @@ export async function clickTrustedActionAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
+  // Single timeout budget shared across the fast path, settle, click, and the
+  // wait for the effect.
+  const deadline = Date.now() + timeout;
+  const remaining = () => Math.max(1, deadline - Date.now());
+
   let actionProbe: TrustedActionProbe | undefined;
   let textProbe: TextProbe | undefined;
+
+  // Fast path: the effect may already be present (idempotent re-entry).
+  if (await textIsPresent(page, selector, text)) {
+    return;
+  }
+
+  // Settle the view BEFORE dispatching, then click the trusted action exactly
+  // ONCE. Settling first means the action's handler is bound when the single
+  // trusted click lands; re-dispatching on a later tick is what double-fires
+  // and corrupts the event provenance, so we never re-click.
   try {
-    await waitFor(async () => {
-      if (await textIsPresent(page, selector, text)) {
-        return true;
-      }
-      try {
-        await clickTrustedAction(page, action, { timeout: 2_000 });
-      } catch {
-        actionProbe = await readTrustedActionProbe(page, action).catch(() =>
-          undefined
-        );
-        textProbe = await readTextProbe(page, selector).catch(() => undefined);
-        return false;
-      }
-      const updated = await textIsPresent(page, selector, text);
-      if (!updated) {
-        textProbe = await readTextProbe(page, selector).catch(() => undefined);
-      }
-      return updated;
-    }, { timeout, delay: 1_000 });
+    await settleView(page, { timeout: remaining() });
+    await clickTrustedAction(page, action, { timeout: remaining() });
+  } catch (cause) {
+    actionProbe = await readTrustedActionProbe(page, action).catch(() =>
+      undefined
+    );
+    textProbe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Failed to click trusted action "${action}" while waiting for "${selector}" to contain "${text}". Last probes: ${
+        toIndentedDebugString({ actionProbe, textProbe })
+      }`,
+      { cause },
+    );
+  }
+
+  // The click is delivered; wait for its effect, resolving the instant the
+  // text appears while driving the settle that applies it. No re-clicking — an
+  // optimistic perUser/perSpace write whose chip trails the commit is caught by
+  // the same wait.
+  try {
+    await waitForTextWhileSettling(page, selector, text, {
+      timeout: remaining(),
+    });
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
       undefined
     );
-    textProbe ??= await readTextProbe(page, selector).catch(() => undefined);
+    textProbe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out clicking trusted action "${action}" until "${selector}" contained "${text}". Last probes: ${
         toIndentedDebugString({ actionProbe, textProbe })
@@ -94,18 +365,13 @@ export async function waitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  let probe: TextProbe | undefined;
   try {
-    await waitFor(async () => {
-      try {
-        return await textIsPresent(page, selector, text);
-      } catch {
-        probe = await readTextProbe(page, selector);
-        return false;
-      }
-    }, { timeout, delay: 250 });
+    await waitForCondition(page, textPresent, {
+      timeout,
+      args: [selector, text],
+    });
   } catch (cause) {
-    probe ??= await readTextProbe(page, selector).catch(() => undefined);
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
         toIndentedDebugString(probe)
@@ -121,18 +387,13 @@ export async function waitForTextAbsent(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  let probe: TextProbe | undefined;
   try {
-    await waitFor(async () => {
-      try {
-        return !(await textIsPresent(page, selector, text));
-      } catch {
-        probe = await readTextProbe(page, selector);
-        return false;
-      }
-    }, { timeout, delay: 250 });
+    await waitForCondition(page, textAbsent, {
+      timeout,
+      args: [selector, text],
+    });
   } catch (cause) {
-    probe ??= await readTextProbe(page, selector).catch(() => undefined);
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out waiting for "${selector}" not to contain "${text}". Last probe: ${
         toIndentedDebugString(probe)
@@ -148,130 +409,13 @@ export async function fillCfInput(
   value: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  let probe: CfInputProbe | undefined;
   try {
-    await waitFor(async () => {
-      try {
-        const field = await page.waitForSelector(selector, {
-          strategy: "pierce",
-          timeout: 1_000,
-        });
-        probe = await field.evaluate(
-          async (
-            element: Element,
-            nextValue: string,
-          ): Promise<CfInputProbe> => {
-            const input = element instanceof HTMLInputElement
-              ? element
-              : element.shadowRoot?.querySelector("input");
-            if (!(input instanceof HTMLInputElement)) {
-              return {
-                selector: element.tagName.toLowerCase(),
-                found: false,
-                value: "",
-                cellValue: undefined,
-                hasCell: false,
-                disabled: false,
-                readOnly: false,
-                visible: false,
-                hostTagName: element.tagName.toLowerCase(),
-              };
-            }
-
-            input.scrollIntoView({ block: "center", inline: "center" });
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
-            const rect = input.getBoundingClientRect();
-            const style = globalThis.getComputedStyle(input);
-            const visible = rect.width > 0 && rect.height > 0 &&
-              rect.bottom >= 0 && rect.right >= 0 &&
-              rect.top <= globalThis.innerHeight &&
-              rect.left <= globalThis.innerWidth &&
-              style.visibility !== "hidden" &&
-              style.display !== "none";
-            const root = input.getRootNode();
-            const host = root instanceof ShadowRoot ? root.host : element;
-            const hostWithCell = host as Element & {
-              value?: {
-                get?: () => unknown;
-                set?: (value: string) => Promise<void>;
-                sync?: () => Promise<unknown>;
-              };
-              requestUpdate?: () => void | Promise<void>;
-            };
-            const readCellValue = () =>
-              typeof hostWithCell.value?.get === "function"
-                ? hostWithCell.value.get()
-                : undefined;
-            if (!visible || input.disabled || input.readOnly) {
-              return {
-                selector: input.tagName.toLowerCase(),
-                found: true,
-                value: input.value,
-                cellValue: readCellValue(),
-                hasCell: hostWithCell.value !== undefined,
-                disabled: input.disabled,
-                readOnly: input.readOnly,
-                visible,
-                hostTagName: hostWithCell.tagName.toLowerCase(),
-              };
-            }
-
-            input.focus();
-            const valueSetter = Object.getOwnPropertyDescriptor(
-              HTMLInputElement.prototype,
-              "value",
-            )?.set;
-            if (valueSetter) {
-              valueSetter.call(input, nextValue);
-            } else {
-              input.value = nextValue;
-            }
-            input.dispatchEvent(
-              new Event("input", { bubbles: true, composed: true }),
-            );
-            input.dispatchEvent(
-              new Event("change", { bubbles: true, composed: true }),
-            );
-            input.blur();
-
-            if (typeof hostWithCell.value?.set === "function") {
-              await hostWithCell.value.set(nextValue);
-            }
-            const syncedCellValue =
-              typeof hostWithCell.value?.sync === "function"
-                ? await hostWithCell.value.sync()
-                : readCellValue();
-            if (typeof hostWithCell.requestUpdate === "function") {
-              await hostWithCell.requestUpdate.call(hostWithCell);
-            }
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
-
-            return {
-              selector: input.tagName.toLowerCase(),
-              found: true,
-              value: input.value,
-              cellValue: syncedCellValue,
-              hasCell: hostWithCell.value !== undefined,
-              disabled: input.disabled,
-              readOnly: input.readOnly,
-              visible,
-              hostTagName: hostWithCell.tagName.toLowerCase(),
-            };
-          },
-          { args: [value] },
-        );
-        return probe.found && probe.visible && !probe.disabled &&
-          !probe.readOnly &&
-          (probe.hasCell ? probe.cellValue === value : probe.value === value);
-      } catch {
-        return false;
-      }
-    }, { timeout, delay: 250 });
+    await waitForCondition(page, fillAndVerify, {
+      timeout,
+      args: [selector, value],
+    });
   } catch (cause) {
+    const probe = await readCfInputProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out filling cf input "${selector}" with "${value}". Last probe: ${
         toIndentedDebugString(probe)
@@ -315,16 +459,7 @@ export async function waitForRuntimeIdle(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await waitFor(async () => {
-    return await page.evaluate(async () => {
-      const rt = (globalThis as typeof globalThis & {
-        commonfabric?: { rt?: { idle?: () => Promise<void> } };
-      }).commonfabric?.rt;
-      if (!rt?.idle) return false;
-      await rt.idle();
-      return true;
-    });
-  }, { timeout, delay: 250 });
+  await waitForCondition(page, runtimeIdle, { timeout });
 }
 
 export async function waitForDisabled(
@@ -333,31 +468,15 @@ export async function waitForDisabled(
   disabled: boolean,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  let probe: { disabled?: boolean; selector: string } | undefined;
   try {
-    await waitFor(async () => {
-      try {
-        const node = await page.waitForSelector(selector, {
-          strategy: "pierce",
-          timeout: 1_000,
-        });
-        probe = await node.evaluate((element: Element) => {
-          const button = element instanceof HTMLButtonElement
-            ? element
-            : element.shadowRoot?.querySelector("button");
-          return {
-            selector: element.tagName.toLowerCase(),
-            disabled: button instanceof HTMLButtonElement
-              ? button.disabled
-              : undefined,
-          };
-        });
-        return probe.disabled === disabled;
-      } catch {
-        return false;
-      }
-    }, { timeout, delay: 250 });
+    await waitForCondition(page, buttonDisabledIs, {
+      timeout,
+      args: [selector, disabled],
+    });
   } catch (cause) {
+    const probe = await readDisabledProbe(page, selector).catch(() =>
+      undefined
+    );
     throw new Error(
       `Timed out waiting for ${selector} disabled=${disabled}. Last probe: ${
         toIndentedDebugString(probe)
@@ -373,45 +492,14 @@ export async function clickCfButton(
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `cf-button-${crypto.randomUUID()}`;
-  const mark = async () =>
-    await page.evaluate(async (targetSelector, targetToken, targetAttr) => {
-      function collect(
-        root: Document | ShadowRoot,
-        result: Element[],
-      ): void {
-        for (const element of root.querySelectorAll("*")) {
-          try {
-            if (element.matches(targetSelector)) {
-              result.push(element);
-            }
-          } catch {
-            // Invalid selectors are reported by returning false.
-          }
-          if (element.shadowRoot) {
-            collect(element.shadowRoot, result);
-          }
-        }
-      }
-
-      const matches: Element[] = [];
-      collect(document, matches);
-      const target = matches[0] as HTMLElement | undefined;
-      if (!target) {
-        return false;
-      }
-      target.scrollIntoView({ block: "center", inline: "center" });
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      );
-      const clickTarget =
-        (target.shadowRoot?.querySelector("[data-cf-button]") as
-          | HTMLElement
-          | null) ?? target;
-      clickTarget.setAttribute(targetAttr, targetToken);
-      return true;
-    }, { args: [selector, token, CLICK_TARGET_ATTR] });
   try {
-    await waitFor(mark, { timeout, delay: 250 });
+    // Wait until the button exists, then mark its inner click target exactly
+    // once; the mark is the predicate, so the re-check on each DOM mutation
+    // retries finding the button without re-clicking anything.
+    await waitForCondition(page, markForClick, {
+      timeout,
+      args: [selector, token, CLICK_TARGET_ATTR],
+    });
   } catch (cause) {
     throw new Error(`Unable to mark ${selector} for click`, { cause });
   }
@@ -420,7 +508,7 @@ export async function clickCfButton(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
       {
         strategy: "pierce",
-        timeout: 2_000,
+        timeout,
       },
     );
     await clickTarget.click();
@@ -467,7 +555,7 @@ export async function clickCfButtonAndWaitForText(
     return;
   }
 
-  // Settle the view BEFORE clicking, then click exactly ONCE. awaitViewSettled
+  // Settle the view BEFORE clicking, then click exactly ONCE. settleView
   // resolves only once the worker is idle, the vdom batch has been applied to
   // the main thread, and Lit updates have drained — i.e. the button's handler
   // is actually bound. A single settled click is delivered to a live handler,
@@ -475,10 +563,7 @@ export async function clickCfButtonAndWaitForText(
   // can double-fire, and against a dismissable overlay the repeat clicks
   // dismiss it). See docs/development/UI_TESTING.md.
   try {
-    await waitFor(() => awaitViewSettled(page), {
-      timeout: remaining(),
-      delay: 250,
-    });
+    await settleView(page, { timeout: remaining() });
     await clickCfButton(page, buttonSelector, { timeout: remaining() });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
@@ -490,25 +575,16 @@ export async function clickCfButtonAndWaitForText(
     );
   }
 
-  // The click is delivered; settle the view and wait for its effect. The settle
-  // re-runs each poll, so an effect that renders a few cycles after the click —
-  // including an optimistic perUser/perSpace write whose chip trails the
-  // commit — is captured without ever re-clicking.
+  // The click is delivered; wait for its effect, resolving the instant the text
+  // appears while driving the settle that applies it. An effect that renders a
+  // few cycles after the click — including an optimistic perUser/perSpace write
+  // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitFor(async () => {
-      await awaitViewSettled(page);
-      if (await textIsPresent(page, textSelector, text)) {
-        return true;
-      }
-      textProbe = await readTextProbe(page, textSelector).catch(() =>
-        undefined
-      );
-      return false;
-    }, { timeout: remaining(), delay: 250 });
+    await waitForTextWhileSettling(page, textSelector, text, {
+      timeout: remaining(),
+    });
   } catch (cause) {
-    textProbe ??= await readTextProbe(page, textSelector).catch(() =>
-      undefined
-    );
+    textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
       `Timed out clicking "${buttonSelector}" until "${textSelector}" contained "${text}". Last probe: ${
         toIndentedDebugString(textProbe)
@@ -522,18 +598,9 @@ export async function waitForRuntimeSynced(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await waitFor(async () => {
-    return await page.evaluate(async () => {
-      const rt = (globalThis as typeof globalThis & {
-        commonfabric?: { rt?: { allSynced?: () => Promise<void> } };
-      }).commonfabric?.rt;
-      // Quiescence isn't a per-space question: allSynced awaits every
-      // space the worker has opened.
-      if (!rt?.allSynced) return false;
-      await rt.allSynced();
-      return true;
-    });
-  }, { timeout, delay: 250 });
+  // Quiescence isn't a per-space question: allSynced awaits every space the
+  // worker has opened.
+  await waitForCondition(page, runtimeSynced, { timeout });
 }
 
 export type SchedulerLoadSummary = {
@@ -1100,89 +1167,113 @@ type CfInputProbe = {
   hostTagName: string;
 };
 
-async function markVisibleTrustedAction(
+async function readCfInputProbe(
   page: Page,
-  action: string,
-  token: string,
-): Promise<boolean> {
-  return await page.evaluate(async (targetAction, targetToken, targetAttr) => {
-    function collect(
-      root: Document | ShadowRoot,
-      result: Element[],
-    ): void {
+  selector: string,
+): Promise<CfInputProbe> {
+  return await page.evaluate((targetSelector) => {
+    function collect(root: Document | ShadowRoot, result: Element[]): void {
       for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute("data-ui-action") === targetAction) {
-          result.push(element);
+        try {
+          if (element.matches(targetSelector)) result.push(element);
+        } catch {
+          // Invalid selectors are reported through the empty probe.
         }
-        if (element.shadowRoot) {
-          collect(element.shadowRoot, result);
-        }
+        if (element.shadowRoot) collect(element.shadowRoot, result);
       }
-    }
-
-    function isVisible(element: HTMLElement): boolean {
-      const rect = element.getBoundingClientRect();
-      const style = globalThis.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 &&
-        rect.bottom >= 0 && rect.right >= 0 &&
-        rect.top <= globalThis.innerHeight &&
-        rect.left <= globalThis.innerWidth &&
-        style.visibility !== "hidden" &&
-        style.display !== "none";
-    }
-
-    function isDisabled(element: HTMLElement): boolean {
-      return element.hasAttribute("disabled") ||
-        element.getAttribute("aria-disabled") === "true";
     }
 
     const matches: Element[] = [];
     collect(document, matches);
-    for (const element of matches) {
-      const target = element as HTMLElement;
-      target.scrollIntoView({ block: "center", inline: "center" });
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      );
-      const clickTarget =
-        (target.shadowRoot?.querySelector("[data-cf-button]") as
-          | HTMLElement
-          | null) ?? target;
-      if (
-        isVisible(target) && isVisible(clickTarget) &&
-        !isDisabled(target) && !isDisabled(clickTarget)
-      ) {
-        clickTarget.setAttribute(targetAttr, targetToken);
-        clickTarget.addEventListener(
-          "click",
-          (event) => {
-            (globalThis as typeof globalThis & {
-              __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
-            }).__lastCfcTrustedActionClick = {
-              trusted: event.isTrusted,
-              path: event.composedPath().flatMap((node) => {
-                if (!(node instanceof HTMLElement)) {
-                  return [];
-                }
-                const dataset: Record<string, string> = {};
-                for (const key in node.dataset) {
-                  dataset[key] = node.dataset[key] ?? "";
-                }
-                return [{
-                  tagName: node.tagName.toLowerCase(),
-                  id: node.id,
-                  dataset,
-                }];
-              }),
-            };
-          },
-          { capture: true, once: true },
-        );
-        return true;
+    const element = matches[0];
+    if (!element) {
+      return {
+        selector: targetSelector,
+        found: false,
+        value: "",
+        cellValue: undefined,
+        hasCell: false,
+        disabled: false,
+        readOnly: false,
+        visible: false,
+        hostTagName: "",
+      };
+    }
+    const input = element instanceof HTMLInputElement
+      ? element
+      : element.shadowRoot?.querySelector("input");
+    if (!(input instanceof HTMLInputElement)) {
+      return {
+        selector: element.tagName.toLowerCase(),
+        found: false,
+        value: "",
+        cellValue: undefined,
+        hasCell: false,
+        disabled: false,
+        readOnly: false,
+        visible: false,
+        hostTagName: element.tagName.toLowerCase(),
+      };
+    }
+    const rect = input.getBoundingClientRect();
+    const style = globalThis.getComputedStyle(input);
+    const visible = rect.width > 0 && rect.height > 0 &&
+      rect.bottom >= 0 && rect.right >= 0 &&
+      rect.top <= globalThis.innerHeight &&
+      rect.left <= globalThis.innerWidth &&
+      style.visibility !== "hidden" && style.display !== "none";
+    const root = input.getRootNode();
+    const host = root instanceof ShadowRoot ? root.host : element;
+    const hostWithCell = host as Element & {
+      value?: { get?: () => unknown };
+    };
+    const cellValue = typeof hostWithCell.value?.get === "function"
+      ? hostWithCell.value.get()
+      : undefined;
+    return {
+      selector: input.tagName.toLowerCase(),
+      found: true,
+      value: input.value,
+      cellValue,
+      hasCell: hostWithCell.value !== undefined,
+      disabled: input.disabled,
+      readOnly: input.readOnly,
+      visible,
+      hostTagName: hostWithCell.tagName.toLowerCase(),
+    };
+  }, { args: [selector] });
+}
+
+async function readDisabledProbe(
+  page: Page,
+  selector: string,
+): Promise<{ selector: string; disabled?: boolean }> {
+  return await page.evaluate((targetSelector) => {
+    function collect(root: Document | ShadowRoot, result: Element[]): void {
+      for (const element of root.querySelectorAll("*")) {
+        try {
+          if (element.matches(targetSelector)) result.push(element);
+        } catch {
+          // Invalid selectors are reported through the empty probe.
+        }
+        if (element.shadowRoot) collect(element.shadowRoot, result);
       }
     }
-    return false;
-  }, { args: [action, token, CLICK_TARGET_ATTR] });
+
+    const matches: Element[] = [];
+    collect(document, matches);
+    const element = matches[0];
+    if (!element) return { selector: targetSelector, disabled: undefined };
+    const button = element instanceof HTMLButtonElement
+      ? element
+      : element.shadowRoot?.querySelector("button");
+    return {
+      selector: element.tagName.toLowerCase(),
+      disabled: button instanceof HTMLButtonElement
+        ? button.disabled
+        : undefined,
+    };
+  }, { args: [selector] });
 }
 
 async function clearTrustedActionMark(

@@ -162,6 +162,7 @@ into the existing `transact` commit**.
 ### Reads: `sqlite.query` (new verb)
 
 ```ts
+// Shown at module scope.
 interface SqliteQueryRequest {
   type: "sqlite.query";
   requestId: string;
@@ -230,6 +231,7 @@ The client commit (`ClientCommit` in
 `writeOperation`). The `sqlite` operation kind:
 
 ```ts
+// Shown at module scope.
 interface SqliteOperation {
   op: "sqlite";
   db: SqliteDbRef;       // which attached database

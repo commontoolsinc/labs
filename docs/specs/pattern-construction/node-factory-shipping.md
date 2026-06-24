@@ -30,6 +30,7 @@
 Serialized form:
 
 ```ts
+// Shown for illustration only.
 {
   "/": {
     "nodeFactory@1":

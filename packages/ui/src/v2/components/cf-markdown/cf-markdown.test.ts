@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFMarkdown } from "./cf-markdown.ts";
+import { CFMarkdown } from "./index.ts";
 import {
   createMockCellHandle,
   pushUpdate,

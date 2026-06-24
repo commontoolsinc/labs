@@ -1,6 +1,13 @@
-import { isRecord } from "@commonfabric/utils/types";
-import { FabricSpecialObject, type FabricValue } from "./interface.ts";
+import { isPlainObject } from "@commonfabric/utils/types";
+import { isDeepFrozen } from "./deep-freeze.ts";
+import {
+  type FabricArray,
+  type FabricPlainObject,
+  FabricSpecialObject,
+  type FabricValue,
+} from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
+import { toCompactDebugString } from "./value-debug.ts";
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.
@@ -11,47 +18,133 @@ import { hashStringOf } from "./value-hash.ts";
  * `FabricRegExp` / `FabricEpoch*` / `FabricHash`, and `FabricInstance`
  * wrappers) keeps its state in private `#fields` with zero enumerable
  * own-properties, so `deepEqual()` conflates every distinct same-class instance
- * as equal (the CT-1770 bug). Here such values are compared by canonical
- * content hash instead.
+ * as equal (the CT-1770 bug). Here object equality is decided by canonical
+ * content hash (`hashStringOf()`), which feeds special objects, plain objects,
+ * and arrays alike — including the distinctions a naive walk misses (sparse
+ * array holes vs a stored `undefined`, a present `undefined` vs an absent key)
+ * — so a special object nested arbitrarily deep is still compared by content.
  *
- * Everything else is the ordinary structural recursion over the JSON-shaped
- * `FabricValue` space — plain objects, arrays (including sparse holes vs a
- * stored `undefined`), and primitives via `Object.is` — recursing through every
- * node so a special object nested arbitrarily deep is still hashed. (Unlike
- * `deepEqual()` it does not handle non-`Fabric` class instances or named
- * properties on arrays: those are not representable as `FabricValue`s.)
+ * (Unlike `deepEqual()` it does not handle non-`Fabric` class instances or
+ * named properties on arrays: those are not representable as `FabricValue`s.)
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   if (Object.is(a, b)) return true;
 
-  // Either side a special object: compare by canonical content hash, the
-  // logical identity for every `FabricValue`. (A special object and a plain
-  // value can never share a hash — distinct type tags — so this also correctly
-  // reports them unequal.)
-  if (a instanceof FabricSpecialObject || b instanceof FabricSpecialObject) {
+  switch (typeof a) {
+    case "object": {
+      // `null` is the one `object`-typed value that isn't a container; with
+      // `Object.is()` already ruled out, `a === null` can't equal `b`.
+      if (a === null) return false;
+      break;
+    }
+
+    case "function": {
+      // Not a `FabricValue`; reachable only via an unsound cast.
+      throw new Error("Cannot compare a function value.");
+    }
+
+    default: {
+      // Any other type is a primitive that `Object.is()` already settled as
+      // unequal above.
+      return false;
+    }
+  }
+
+  // `a` is a non-`null` object. Classify `b` the same way, so invalid input
+  // fails identically regardless of argument order: only another non-`null`
+  // object can be equal to `a`.
+  switch (typeof b) {
+    case "object": {
+      // A non-`null` object can't equal `null`; otherwise compare below.
+      if (b === null) return false;
+      break;
+    }
+
+    case "function": {
+      // Not a `FabricValue`; reachable only via an unsound cast.
+      throw new Error("Cannot compare a function value.");
+    }
+
+    default: {
+      // `b` is a primitive, which can't equal the object `a`.
+      return false;
+    }
+  }
+
+  // The canonical content hash is the general object comparator, but it's worth
+  // a few cheap checks first.
+
+  if (isDeepFrozen(a) && isDeepFrozen(b)) {
+    // Both sides are deep-frozen, the hash is cacheable (frozen ~==
+    // non-ephemeral), so hashing can be reasonably assumed to pay for itself.
     return hashStringOf(a) === hashStringOf(b);
   }
 
-  const aIsArray = Array.isArray(a);
-  if (aIsArray || Array.isArray(b)) {
-    if (!aIsArray || !Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      // A hole and a stored `undefined` are different states.
-      if ((i in a) !== (i in b)) return false;
-      if (i in a && !valueEqual(a[i], b[i])) return false;
+  // Otherwise, short-circuit the mismatched subtypes that can never be equal,
+  // without paying for a hash.
+
+  const subtype = objectSubtypeOf(a);
+  const bSubtype = objectSubtypeOf(b);
+
+  if (subtype !== bSubtype) {
+    // Different subtypes can't possibly be equal.
+    return false;
+  }
+
+  switch (subtype) {
+    case "array": {
+      // Alas, casts are required because TS doesn't know the correspondence
+      // between subtype names and type restrictions.
+      const aArray = a as FabricArray;
+      const bArray = b as FabricArray;
+      if (aArray.length !== bArray.length) {
+        // Arrays can't possibly be equal if lengths are different.
+        return false;
+      }
+      break;
     }
-    return true;
+
+    case "plain": {
+      // Alas, casts are required because TS doesn't know the correspondence
+      // between subtype names and type restrictions.
+      const aObject = a as FabricPlainObject;
+      const bObject = b as FabricPlainObject;
+      if (Object.keys(aObject).length !== Object.keys(bObject).length) {
+        // Plain objects can't possibly be equal if they have different numbers
+        // of properties.
+        return false;
+      }
+      break;
+    }
+
+    case "special": {
+      if (a.constructor !== b.constructor) {
+        // `FabricSpecialObject`s (instances in general, really) can't possibly
+        // be equal if they are of different concrete classes.
+        return false;
+      }
+      break;
+    }
   }
 
-  if (!(isRecord(a) && isRecord(b))) return false;
+  // No quick check managed to disqualify full-scale comparison. So it goes.
+  return hashStringOf(a) === hashStringOf(b);
+}
 
-  const keysA = Object.keys(a);
-  if (keysA.length !== Object.keys(b).length) return false;
-  for (const key of keysA) {
-    // A present `undefined` and an absent key are different states, so require
-    // the key on `b` (not just an equal looked-up value).
-    if (!Object.hasOwn(b, key)) return false;
-    if (!valueEqual(a[key], b[key])) return false;
+/**
+ * Helper for {@link #valueEqual}, which classifies object subtypes. This
+ * `throw`s given an object that shouldn't have been passed as a `FabricValue`.
+ */
+function objectSubtypeOf(
+  value: FabricPlainObject | FabricArray | FabricSpecialObject,
+): "array" | "plain" | "special" {
+  if (value instanceof FabricSpecialObject) {
+    return "special";
+  } else if (Array.isArray(value)) {
+    return "array";
+  } else if (isPlainObject(value)) {
+    return "plain";
+  } else {
+    throw new Error(`Cannot compare value ${toCompactDebugString(value)}`);
   }
-  return true;
 }

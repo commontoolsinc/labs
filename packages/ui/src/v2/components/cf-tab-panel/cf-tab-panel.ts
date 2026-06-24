@@ -155,5 +155,3 @@ export class CFTabPanel extends BaseElement {
     this.hidden = !this.hidden;
   }
 }
-
-globalThis.customElements.define("cf-tab-panel", CFTabPanel);

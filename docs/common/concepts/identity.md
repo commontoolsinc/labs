@@ -7,6 +7,7 @@ In traditional web development, you often model data like a database: objects ha
 **Common Fabric works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
 
 ```tsx
+// Shown at module scope.
 // Object graph (no id!)
 interface Todo {
   text: string;
@@ -31,6 +32,7 @@ This shift has several benefits:
 Use `equals()` to compare cells or values. For cells, this checks reference equality (same object in the graph). For plain values, it checks structural equality.
 
 ```typescript
+// Shown for illustration only.
 import { equals, Writable } from 'commonfabric';
 
 const data = new Writable({ name: "Ben" });
@@ -59,6 +61,7 @@ equals(deepData.key("address", "street"), deepData.get().address.street); // => 
 The most common use case is finding items in arrays:
 
 ```typescript
+// Shown at module scope.
 import { equals, handler, Writable } from 'commonfabric';
 
 interface Item {
@@ -79,6 +82,7 @@ const hasItem = lift<{ item: Item, items: Item[] }>(
 When iterating with `.map()`, you have a reference to each item. Use that reference directly:
 
 ```tsx
+// Shown inside a pattern body.
 {items.map((item) => (
   <cf-card>
     <span>{item.name}</span>

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFCellLink } from "./cf-cell-link.ts";
+import { CFCellLink } from "./index.ts";
 import type { CellRef } from "@commonfabric/runtime-client";
 
 function deferred<T>() {
@@ -221,5 +221,116 @@ describe("CFCellLink", () => {
     element._updateSubscription();
 
     expect(subscribeCount).toBe(1);
+  });
+});
+
+describe("CFCellLink disposal handling", () => {
+  // _resolveCell awaits resolveAsCell(); a disposal race rejects it with
+  // AbortError. The guard must read the runtime the resolve ran on (the cell's
+  // own runtime, or the client the linked cell was built from), since the
+  // ambient `this.runtime` is cleared to undefined on logout. Exercised against
+  // a minimal `this` so no Lit reactive lifecycle (and no re-resolve on the
+  // runtime property change) runs.
+  function captureConsoleError(): { calls: unknown[][]; restore(): void } {
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    return { calls, restore: () => (console.error = original) };
+  }
+
+  function resolveCellOn(fakeThis: Record<string, unknown>): Promise<void> {
+    return (CFCellLink.prototype as unknown as {
+      _resolveCell(this: unknown): Promise<void>;
+    })._resolveCell.call(fakeThis);
+  }
+
+  function baseThis(): Record<string, unknown> {
+    return {
+      _resolveCellGeneration: 0,
+      cell: undefined,
+      link: undefined,
+      // The ambient @consume runtime, cleared to undefined on logout.
+      runtime: undefined,
+      space: "did:key:test-space",
+      _cellKey: () => "key",
+      _prepareSubscriptionTarget: () => {},
+      _setResolvedCell: () => {},
+    };
+  }
+
+  function cellThat(aborted: boolean, error: unknown) {
+    return {
+      ref: () => ({
+        id: "of:disposed-cell",
+        space: "did:key:test-space",
+        scope: "space",
+        path: [],
+      }),
+      runtime: () => ({ signal: { aborted } }),
+      resolveAsCell: () => Promise.reject(error),
+    };
+  }
+
+  it("suppresses the resolve-cell log when the cell's runtime is disposed", async () => {
+    const fakeThis = {
+      ...baseThis(),
+      cell: cellThat(true, new DOMException("aborted", "AbortError")),
+    };
+    const spy = captureConsoleError();
+    try {
+      await resolveCellOn(fakeThis);
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(0);
+  });
+
+  it("logs a genuine resolve-cell failure while the runtime is alive", async () => {
+    const fakeThis = {
+      ...baseThis(),
+      cell: cellThat(false, new Error("boom")),
+    };
+    const spy = captureConsoleError();
+    try {
+      await resolveCellOn(fakeThis);
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(1);
+  });
+
+  it("suppresses the resolve-link log when the captured runtime is disposed", async () => {
+    // The link branch reads `this.runtime` once, up front, to build the linked
+    // cell. The guard checks that captured client (the one the resolve ran on),
+    // which is aborted. Clearing the ambient `this.runtime` afterward — as
+    // logout does — must not change the outcome; the old guard read it and
+    // would log anyway.
+    const runtime = {
+      signal: { aborted: true },
+      getCellFromRef: () => ({
+        ref: () => ({
+          id: "of:abc123",
+          space: "did:key:test-space",
+          scope: "space",
+          path: [],
+        }),
+        resolveAsCell: () =>
+          Promise.reject(new DOMException("aborted", "AbortError")),
+      }),
+    };
+    const fakeThis: Record<string, unknown> = {
+      ...baseThis(),
+      link: "/of:abc123",
+      runtime,
+    };
+    const spy = captureConsoleError();
+    try {
+      const resolving = resolveCellOn(fakeThis);
+      fakeThis.runtime = undefined;
+      await resolving;
+    } finally {
+      spy.restore();
+    }
+    expect(spy.calls.length).toBe(0);
   });
 });

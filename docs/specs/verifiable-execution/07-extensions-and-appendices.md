@@ -74,6 +74,7 @@ The **Latest Entity Map** enables efficient, verifiable answers to:
 ### 15.3 Checkpoint
 
 ```typescript
+// Shown at module scope.
 interface UnsignedCheckpoint {
   epoch: number;
   headsRoot?: Hash; // OPTIONAL

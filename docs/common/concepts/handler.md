@@ -11,6 +11,7 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 ## Basic Structure
 
 ```typescript
+// Shown at module scope.
 import { handler, Writable } from "commonfabric";
 
 // Define at module scope (outside pattern body)
@@ -65,6 +66,7 @@ export default pattern(() => {
 The pattern transformer requires `handler()` to be defined **outside** the pattern body. Only the binding (passing state) happens inside:
 
 ```typescript
+// Shown for illustration only.
 // CORRECT - Define at module scope, bind inside pattern
 const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
   ({ title }, { items }) => items.push({ title, done: false })
@@ -110,6 +112,7 @@ Don't try to create streams directly: a bound handler **is** a
 stream, which you export in the return object:
 
 ```tsx
+// Shown for illustration only.
 import { handler, pattern, Stream, Writable, UI } from "commonfabric";
 
 interface Output {
@@ -135,6 +138,7 @@ The first type parameter is the event payload passed to `.send()`; use `void`
 when the handler needs no event data:
 
 ```typescript
+// Shown inside a pattern body.
 // With event data
 addItem({ items }).send({ title: "My Item" });
 

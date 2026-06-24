@@ -200,7 +200,3 @@ export class CFChevronButton extends BaseElement {
     `;
   }
 }
-
-if (!globalThis.customElements.get("cf-chevron-button")) {
-  globalThis.customElements.define("cf-chevron-button", CFChevronButton);
-}

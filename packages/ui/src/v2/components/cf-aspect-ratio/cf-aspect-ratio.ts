@@ -72,5 +72,3 @@ export class CFAspectRatio extends BaseElement {
     return (height / width) * 100;
   }
 }
-
-globalThis.customElements.define("cf-aspect-ratio", CFAspectRatio);

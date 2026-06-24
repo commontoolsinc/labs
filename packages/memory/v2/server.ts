@@ -68,6 +68,7 @@ import {
   trackGraph,
 } from "./query.ts";
 import { respondToHello } from "./handshake.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
   buildFullSync,
@@ -311,6 +312,7 @@ type DirtyOrigin = {
 class Connection {
   #ready = false;
   #closed = false;
+  #syncSchemaTable = false;
   #sessions = new Map<string, SessionHandle>();
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
@@ -319,8 +321,14 @@ class Connection {
   constructor(
     readonly id: string,
     private readonly server: Server,
-    private readonly send: Send,
+    private readonly sendRaw: Send,
   ) {}
+
+  private send(message: ServerMessage): void {
+    this.sendRaw(
+      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
+    );
+  }
 
   hasSession(space: string, sessionId: string): boolean {
     return this.#sessions.has(sessionKey(space, sessionId));
@@ -449,6 +457,10 @@ class Connection {
       if (response.type !== "hello.ok") {
         return;
       }
+      const clientFlags = parseMemoryProtocolFlags(parsed.flags);
+      const serverFlags = parseMemoryProtocolFlags(response.flags);
+      this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
+        serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
       return;
     }

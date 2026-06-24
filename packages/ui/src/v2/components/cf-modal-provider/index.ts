@@ -4,4 +4,6 @@ if (!customElements.get("cf-modal-provider")) {
   customElements.define("cf-modal-provider", CFModalProvider);
 }
 
+export type { CFModalProvider as CFModalProviderElement } from "./cf-modal-provider.ts";
+
 export { CFModalProvider };

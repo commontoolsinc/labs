@@ -68,6 +68,7 @@ The usual shape is:
 4. return the test sequence in order
 
 ```tsx
+// Shown at module scope.
 
 import { action, computed, pattern } from "commonfabric";
 import Pattern from "./pattern.tsx";
@@ -116,6 +117,7 @@ If a test intentionally provokes errors or warnings, opt out explicitly on the
 returned descriptor — each flag covers only its own level:
 
 ```tsx
+// Shown inside a pattern body.
 return {
   tests: [/* ... */],
   allowConsoleErrors: true, // expected console/logger errors don't fail
@@ -137,6 +139,7 @@ participant pattern in its own isolated runtime (own identity, own realm)
 against one shared space on an in-process storage server.
 
 ```tsx
+// Shown for illustration only.
 import { action, computed, multiUserTest, pattern } from "commonfabric";
 import Chat, { type ChatOutput } from "./pattern.tsx";
 

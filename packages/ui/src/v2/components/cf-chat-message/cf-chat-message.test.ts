@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFChatMessage } from "./cf-chat-message.ts";
+import { CFChatMessage } from "./index.ts";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 
 describe("cf-chat-message", () => {

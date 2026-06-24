@@ -2,7 +2,7 @@ import { css, html, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-chip/cf-chip.ts";
+import "../cf-chip/index.ts";
 import {
   type CellHandle,
   CellRef,
@@ -190,6 +190,10 @@ export class CFCellLink extends BaseElement {
         this._setResolvedCell(resolvedCell);
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
+        // A disposal race (logout, runtime swap) cancels the resolve; that is
+        // cancellation, not a failure to surface. Read the cell's own runtime,
+        // not the ambient `this.runtime` (cleared to undefined on logout).
+        if (cell.runtime().signal.aborted) return;
         console.error("Failed to resolve cell:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
@@ -213,6 +217,10 @@ export class CFCellLink extends BaseElement {
         this._setResolvedCell(resolvedCell);
       } catch (e) {
         if (generation !== this._resolveCellGeneration) return;
+        // A disposal race (logout, runtime swap) cancels the resolve; that is
+        // cancellation, not a failure to surface. Read the runtime the linked
+        // cell was built from, not the ambient `this.runtime` (cleared on logout).
+        if (runtime.signal.aborted) return;
         console.error("Failed to resolve link:", e);
         this._prepareSubscriptionTarget(undefined);
         this._setResolvedCell(undefined);
@@ -421,8 +429,6 @@ export class CFCellLink extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-cell-link", CFCellLink);
 
 declare global {
   interface HTMLElementTagNameMap {

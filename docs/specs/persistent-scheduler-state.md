@@ -279,6 +279,7 @@ Each successful dependency collection or action run should produce an
 observation similar to:
 
 ```ts
+// Shown at module scope.
 interface SchedulerActionObservationV1 {
   version: 1;
   ownerSpace: string;
@@ -842,6 +843,7 @@ Memory v2 already validates confirmed reads using path-aware history. The
 scheduler-facing API should expose similar internal primitives:
 
 ```ts
+// Shown for illustration only.
 findOverlappingWritesAfter({
   space,
   branch,

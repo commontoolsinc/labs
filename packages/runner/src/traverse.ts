@@ -62,7 +62,10 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import {
+  excludeReadFromConflict,
+  ignoreReadForScheduling,
+} from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -2538,7 +2541,7 @@ type TraverseResult<T> = { ok: T; error?: never } | {
   error: TraverseFailure;
 };
 
-/** Opaque memo cache shared across SchemaObjectTraverser instances within a query */
+/** Schema memo cache shared across SchemaObjectTraverser instances within a query */
 export type SchemaMemo = Map<string, TraverseResult<Immutable<FabricValue>>>;
 
 /** Create a shared memo cache to pass to multiple SchemaObjectTraverser instances */
@@ -3648,8 +3651,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
         filteredObj[propKey] = val;
       } else {
         const propDoc = { address: propAddress, value: propValue };
-        this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-        const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
+        // When the property is asCell (and reaches here as a sigil link rather
+        // than the inline-value branch above), the descent + pointer resolution
+        // only RESOLVE THE REFERENCE to construct the Cell — they read the link
+        // target's shape, not a value the holder consumes. Those reads must not
+        // become commit-time conflict dependencies (a holder of a reference must
+        // not collide with disjoint writers under the referent's container). They
+        // stay in the journal for reactivity; the holder takes a real dependency
+        // only when it reads THROUGH the Cell in its body. A by-value property
+        // (`hasAsCell` false) is a genuine dependency and is left unmarked.
+        const descend = () => {
+          this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+          return this.traverseWithSchema(propDoc, propSchema);
+        };
+        const { ok: val, error } = SchemaObjectTraverser.hasAsCell(propSchema)
+          ? this.tx.runWithAmbientReadMeta(excludeReadFromConflict, descend)
+          : descend();
         if (error === undefined) {
           filteredObj[propKey] = val;
         }

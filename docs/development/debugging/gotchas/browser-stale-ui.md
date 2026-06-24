@@ -11,6 +11,7 @@ mutation style. Don't.
    `agent-browser eval`):
 
    ```javascript
+   // Shown inside a pattern body.
    await commonfabric.readCell()                       // piece output
    await commonfabric.readArgumentCell({ path: ["items"] })  // piece input
    ```

@@ -22,6 +22,7 @@ the same cell).
    `v2-transaction.ts:1367`):
 
    ```typescript
+   // Shown as interface or class members.
    /**
     * The scheduler action whose run opened this transaction (spec
     * scheduler-v2 P5). Change records derived from this transaction must
@@ -51,6 +52,7 @@ Commit: `feat(runner): stamp the source action on run transactions (scheduler-v2
 1. `src/scheduler/pull-notifications.ts` (~100-102): replace
 
    ```typescript
+   // Shown inside a pattern body.
    const isOwnCommitSource = notification.type === "commit" &&
      notification.source !== undefined &&
      state.inFlightSources.get(action)?.has(notification.source) === true;
@@ -59,6 +61,7 @@ Commit: `feat(runner): stamp the source action on run transactions (scheduler-v2
    with
 
    ```typescript
+   // Shown inside a pattern body.
    const isOwnCommitSource = notification.type === "commit" &&
      notification.source !== undefined &&
      notification.source.sourceAction === action;

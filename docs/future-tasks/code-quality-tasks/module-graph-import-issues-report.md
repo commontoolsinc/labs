@@ -21,6 +21,7 @@ guideline:
 **Example Fix**:
 
 ```typescript
+// Shown for illustration only.
 // Bad
 export default class Clock { ... }
 
@@ -44,6 +45,7 @@ library → external → internal):
 ### `packages/builder/src/utils.ts`
 
 ```typescript
+// Shown for illustration only.
 // Current (internal packages mixed without grouping)
 import { JSONSchema7 } from "json-schema";
 import { isOpaqueRef, OpaqueRef } from "./spell.js";

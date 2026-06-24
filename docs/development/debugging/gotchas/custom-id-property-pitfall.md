@@ -5,6 +5,7 @@
 **Cause:** Adding a custom `id` property to your data types for manual tracking, then trying to use it for lookups or comparisons.
 
 ```typescript
+// Shown at module scope.
 // PROBLEMATIC - Custom id for tracking
 interface Deck {
   id: string;       // Seems reasonable...
@@ -28,6 +29,7 @@ interface Deck {
 ## The Fix: Use `equals()` Instead of ID Lookups
 
 ```typescript
+// Shown at module scope.
 import { equals } from 'commonfabric';
 
 // CORRECT - No id property needed
@@ -61,6 +63,7 @@ interface Deck {
 ## Alternative: Use Indices Directly
 
 ```typescript
+// Shown inside a pattern body.
 // Even simpler - use the index from map
 {decks.map((deck, index) => (
   <cf-button onClick={() => {

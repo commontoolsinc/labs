@@ -6,7 +6,7 @@ import {
 } from "../../core/cell-controller.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { numberSchema } from "@commonfabric/runner/schemas";
-import "../cf-render/cf-render.ts";
+import "../cf-render/index.ts";
 
 /**
  * CFPicker - Simple carousel selection component for cells with UI
@@ -505,8 +505,6 @@ export class CFPicker extends BaseElement {
     this._selectIndex(index);
   }
 }
-
-globalThis.customElements.define("cf-picker", CFPicker);
 
 declare global {
   interface HTMLElementTagNameMap {

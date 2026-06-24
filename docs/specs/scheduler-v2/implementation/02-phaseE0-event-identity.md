@@ -17,6 +17,7 @@ this order: Step 1 → Step 3 → Step 2 → Step 4.
 New file: `src/scheduler/event-identity.ts`
 
 ```typescript
+// Shown at module scope.
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
@@ -65,6 +66,7 @@ Commit: `feat(runner): event-id minting helper (scheduler-v2 E0)`
 1. `src/scheduler/types.ts`: find `QueuedEvent`. Add fields:
 
    ```typescript
+   // Shown as interface or class members.
    /** Durable event id minted at send (spec §7.5). */
    readonly id: string;
    /** The transaction whose handler sent this event, when transactional. */
@@ -77,6 +79,7 @@ Commit: `feat(runner): event-id minting helper (scheduler-v2 E0)`
    parameter:
 
    ```typescript
+   // Shown for illustration only.
    opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
    ```
 
@@ -145,6 +148,7 @@ File: `src/storage/interface.ts`.
    scheduler-facing members, with doc comments):
 
    ```typescript
+   // Shown as interface or class members.
    /**
     * The durable id of the event whose dispatch opened this transaction
     * (spec §7.5). Set by the scheduler's event dispatch; consumed by the

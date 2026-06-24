@@ -3,7 +3,7 @@ import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
-import "../cf-button/cf-button.ts";
+import "../cf-button/index.ts";
 
 /**
  * File System Access API types
@@ -815,5 +815,3 @@ export class CFFileDownload extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-file-download", CFFileDownload);

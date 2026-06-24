@@ -142,7 +142,7 @@ export default pattern(() => {
   // Simulate external holders (selection cells) that read an item once and
   // keep the reference across later mutations (held-reference survival).
   // Typed non-null (placeholder initial value) so the cells can be bound
-  // directly as handler state (`Opaque<T>` accepts `Cell<T>`, not `T | null`).
+  // directly as handler state (`FactoryInput<T>` accepts `Cell<T>`, not `T | null`).
   const heldDept = new Writable<Department>({
     name: "",
     icon: "",

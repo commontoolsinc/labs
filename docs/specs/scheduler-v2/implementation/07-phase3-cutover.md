@@ -57,6 +57,7 @@ Commit: `test(runner): scheduler-v2 cutover fixture pack`
 New file `src/scheduler/node-record.ts`:
 
 ```typescript
+// Shown for illustration only.
 export type NodeKind = "computation" | "effect";
 export type NodeStatus = "never-ran" | "clean" | "invalid";
 
@@ -113,6 +114,7 @@ each):
    maintenance:
 
    ```typescript
+   // Shown for illustration only.
    // live(N) ⇔ N.kind === "effect" (registered)
    //         ∨ N.liveRefs > 0
    //         ∨ N.provisionalDemand

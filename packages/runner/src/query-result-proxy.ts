@@ -9,7 +9,10 @@ import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IReadOptions,
+} from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type CfcLabelView,
@@ -21,6 +24,14 @@ import {
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
+
+// Container/shape reads (proxy creation, ownKeys, getOwnPropertyDescriptor, has,
+// array length) are recorded as nonRecursive so the engine applies shallow
+// (shape-only) conflict granularity to them — matching how the scheduler
+// reader-dirty index already treats nonRecursive reads. Value materialization
+// (leaf scalars via child-proxy creation, array methods that consume elements)
+// stays recursive.
+const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
 // Cache of target objects to their proxies, scoped by ReactivityLog
 type ProxyCache = {
@@ -159,7 +170,15 @@ export function createQueryResultProxy<T>(
       readTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
   ]);
-  const value = readTx.readValueOrThrow(link) as any;
+  const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+
+  // The SHAPE_READ above only tracks the container's shape, but the stream
+  // check depends on a specific field's VALUE. Register an explicit read of
+  // `$stream` when present, so a value flipping into/out of a stream marker
+  // re-triggers consumers. [review: ubik2]
+  if (isRecord(value) && "$stream" in value) {
+    readTx.readValueOrThrow({ ...link, path: [...link.path, "$stream"] });
+  }
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
@@ -175,7 +194,18 @@ export function createQueryResultProxy<T>(
   // directly, exactly as for JS primitives above; wrapping one in a live proxy
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
-  if (!isRecord(value) || value instanceof FabricPrimitive) return value;
+  if (!isRecord(value) || value instanceof FabricPrimitive) {
+    // The SHAPE_READ above tracks only the container's shape, but a
+    // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
+    // back directly, like a JS primitive), not a container whose shape it
+    // inspects. Register a recursive value read so an in-place change to the
+    // primitive (e.g. a FabricBytes updated to different bytes) re-triggers
+    // consumers — a nonRecursive read is compared shape-only and would miss it.
+    if (value instanceof FabricPrimitive) {
+      readTx.readValueOrThrow(link);
+    }
+    return value;
+  }
 
   // TODO(danfuzz): This may have to do something special to handle concrete
   // instances of `FabricInstance` so that they get perceived as such by the
@@ -471,7 +501,7 @@ export function createQueryResultProxy<T>(
     },
     ownKeys: () => {
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link);
+      const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
         return Reflect.ownKeys(current);
       }
@@ -480,6 +510,8 @@ export function createQueryResultProxy<T>(
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {
         const readTx = runtime.readTx(tx);
+        // Read the array fully (not SHAPE_READ) so the length descriptor tracks
+        // element add/remove, matching the `length` get trap above. [review: ubik2]
         const current = readTx.readValueOrThrow(link);
         return {
           configurable: false,
@@ -500,7 +532,7 @@ export function createQueryResultProxy<T>(
         return Object.getOwnPropertyDescriptor(value, prop);
       }
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link) as typeof value;
+      const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
       if ((isRecord(current) || Array.isArray(current)) && prop in current) {
         return {
           configurable: true,
@@ -523,7 +555,7 @@ export function createQueryResultProxy<T>(
         return prop in value;
       }
       const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link);
+      const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
         return prop in current;
       }

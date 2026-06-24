@@ -2,7 +2,7 @@ import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-avatar/cf-avatar.ts";
+import "../cf-avatar/index.ts";
 import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
 import {
   type CellHandle,
@@ -694,6 +694,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }, { includeCfcLabel: true });
     } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
+      // A disposal race (logout, runtime swap) cancels the resolve; that is
+      // cancellation, not a failure to surface. Read the cell's own runtime,
+      // not the ambient `this.runtime` (cleared to undefined on logout).
+      if (cell.runtime().signal.aborted) return;
       console.error("cf-profile-badge: failed to resolve profile cell", e);
       this._resolvedCell = undefined;
       this._navigable = false;
@@ -883,10 +887,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       </span>
     `;
   }
-}
-
-if (!globalThis.customElements.get("cf-profile-badge")) {
-  globalThis.customElements.define("cf-profile-badge", CFProfileBadge);
 }
 
 declare global {

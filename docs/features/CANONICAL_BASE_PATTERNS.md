@@ -127,6 +127,7 @@ This is the contract that enables the ecosystem:
 - Breaking the core schema breaks interoperability
 
 ```typescript
+// Shown at module scope.
 // VALID: extends core
 interface Contractor extends PersonLike {
   name: string;        // ✓ core preserved
@@ -153,6 +154,7 @@ These might be the **same person** in two different contexts. But this is unusua
 **Simple solution:** Add a `sameAs` field when needed:
 
 ```typescript
+// Shown inside a pattern body.
 // When you discover two records are the same person
 contractor.sameAs = friendJohn;  // Simple reference
 ```
@@ -204,6 +206,7 @@ contractor.sameAs = friendJohn;  // Simple reference
 
 **Implementation:**
 ```typescript
+// Shown at module scope.
 interface ContactsContainer {
   items: PersonLike[];           // Directly managed contacts
   subLists: ContactsContainer[]; // Nested containers (imports, groups, etc.)
@@ -300,6 +303,7 @@ When you're viewing a record (e.g., a Contact named "John Smith"), the system ca
 **The `compileAndRun` builtin enables this:**
 
 ```typescript
+// Shown inside a pattern body.
 // packages/runner/src/builtins/compile-and-run.ts
 // Takes: { files: [{name, contents}], main, input }
 // Returns: { result, error, errors, pending }
@@ -327,6 +331,7 @@ Initial: `PersonLike { name: string }`
 
 Emergent (from usage):
 ```typescript
+// Shown at module scope.
 // Most friend patterns have birthday - it becomes expected
 interface FriendLike extends PersonLike {
   name: string;
@@ -481,6 +486,7 @@ System:
 **Using `compileAndRun` for dynamic pattern compilation:**
 
 ```typescript
+// Shown at module scope.
 // The LLM generates the forked pattern source
 const forkedSource = `
   export interface Contractor extends PersonLike {
@@ -592,6 +598,7 @@ export interface UpgradeOption {
 ## Example: Contacts Container (with Lists of Lists)
 
 ```typescript
+// Shown for illustration only.
 import { pattern, NAME, UI, action, computed } from "commonfabric";
 import type {
   ContainerItem,
@@ -681,6 +688,7 @@ This shows how a user might fork the base Contact pattern to create a FamilyMemb
 
 ### Base: contact.tsx (provided)
 ```typescript
+// Shown for illustration only.
 import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
 import type { PersonLike } from "commonfabric";
 
@@ -713,6 +721,7 @@ User says: "I need to track family members with birthdays and dietary restrictio
 LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
+// Shown for illustration only.
 import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
 import type { PersonLike } from "commonfabric";
 
@@ -756,6 +765,7 @@ export default pattern<{ member: Writable<FamilyMember | Default<{ name: "", rel
 ### Example: Contacts with Google Import Sub-List
 
 ```typescript
+// Shown for illustration only.
 import { pattern, NAME, UI, Writable, computed } from "commonfabric";
 import type { PersonLike, ContainerProtocol } from "commonfabric";
 
@@ -835,6 +845,7 @@ These might be the same person. What do you do?
 ### Simple Solution: `sameAs` Field
 
 ```typescript
+// Shown inside a pattern body.
 // When you realize they're the same person, just link them
 contractor.sameAs = friend;
 

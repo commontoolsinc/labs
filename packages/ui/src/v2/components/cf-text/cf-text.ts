@@ -175,5 +175,3 @@ export class CFText extends BaseElement {
     `;
   }
 }
-
-globalThis.customElements.define("cf-text", CFText);

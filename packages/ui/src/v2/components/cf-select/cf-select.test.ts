@@ -3,7 +3,7 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CFSelect, type SelectItem } from "./cf-select.ts";
+import { CFSelect, type SelectItem } from "./index.ts";
 
 describe("CFSelect", () => {
   it("should be defined", () => {

@@ -107,6 +107,7 @@ A label map commitment MUST be domain-separated and deterministic. One simple
 construction is:
 
 ```typescript
+// Shown inside a pattern body.
 // Commitment = merkle-reference hash of a domain-separated wrapper object.
 const labelMapCommitment = refer({ "CT/CFCLabelMap": labelMap });
 ```

@@ -6,8 +6,8 @@ security constraints.
 
 ## 🚀 Features
 
-- **The Full v2 Component Set** - Production-ready implementation of a
-  shadcn/ui-inspired component library (see `src/v2/components/`)
+- **The `cf-*` Component Set** - Production-ready implementation of a
+  shadcn/ui-inspired component library
 - **Security-First Design** - Built for sandboxed environments with strict
   isolation
 - **Zero External Dependencies** - No remote resources, fully self-contained
@@ -19,34 +19,43 @@ security constraints.
 
 ```
 src/
-├── index.ts          # Main entry (exports both v1 and v2, with v2 as default)
-└── v2/              # New shadcn-inspired components (cf- prefix)
-    ├── components/  # 39 modern components
+├── index.ts         # Public package entrypoint
+└── v2/              # cf-* component implementation
+    ├── components/  # Component directories
     ├── core/        # Base element class
     ├── styles/      # Design tokens and shared styles
     └── utils/       # Utilities and helpers
 ```
+
+TODO(ui-path-cleanup): Rename the `src/v2` path now that it is the only UI
+component implementation.
 
 ## 🎯 Quick Start
 
 ### Installation with Deno
 
 ```typescript
-// Import v2 components (default)
+// Importing from the public package entrypoint registers all exported cf-* elements.
 import { CFButton, CFCard, CFInput } from "@commonfabric/ui";
 
-// Or import specific versions
-import { v2 } from "@commonfabric/ui";
+// Use a side-effect import when you only need the elements registered.
+import "@commonfabric/ui";
+```
 
-// Auto-register all v2 components
-import { registerAllComponents } from "@commonfabric/ui/v2";
-registerAllComponents();
+`@commonfabric/ui` is the public package entrypoint. It re-exports the component
+directory indexes, so importing it registers all exported `cf-*` elements.
+
+Repository-local code can import a single component by using that component's
+directory index:
+
+```typescript
+import { CFButton } from "./src/v2/components/cf-button/index.ts";
 ```
 
 ### Use in HTML
 
 ```html
-<!-- V2 Components (cf- prefix) -->
+<!-- cf-* components -->
 <cf-button variant="primary">Click Me</cf-button>
 <cf-input type="email" placeholder="Enter email"></cf-input>
 <cf-card>
@@ -68,32 +77,99 @@ Useful references:
 - `../../docs/common/patterns/style.md`
 - `../../docs/common/components/COMPONENTS.md`
 
-## 📖 V2 Components (39 total)
+## 📖 Components
 
-### Core UI Components (23)
+### Forms And Inputs
 
-- **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
-  `cf-switch`, `cf-toggle`, `cf-slider`
-- **Layout**: `cf-card`, `cf-separator`, `cf-accordion`, `cf-collapsible`,
-  `cf-tabs`, `cf-scroll-area`
-- **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
-- **Data**: `cf-table`, `cf-form`, `cf-input-otp`
-- **Display**: `cf-aspect-ratio`, `cf-resizable-panel-group`
+| Element           | Element     | Element           | Element          |
+| ----------------- | ----------- | ----------------- | ---------------- |
+| `cf-autocomplete` | `cf-button` | `cf-calendar`     | `cf-checkbox`    |
+| `cf-code-editor`  | `cf-field`  | `cf-form`         | `cf-input`       |
+| `cf-input-otp`    | `cf-picker` | `cf-radio`        | `cf-radio-group` |
+| `cf-select`       | `cf-slider` | `cf-switch`       | `cf-tags`        |
+| `cf-textarea`     | `cf-toggle` | `cf-toggle-group` | `cf-voice-input` |
 
-### Layout Components (8)
+### Files And Media
 
-- **Flexbox**: `cf-hstack`, `cf-vstack`, `cf-hgroup`, `cf-vgroup`
-- **Scrolling**: `cf-hscroll`, `cf-vscroll`
-- **Grid**: `cf-grid`, `cf-table`
+| Element              | Element               | Element          | Element            |
+| -------------------- | --------------------- | ---------------- | ------------------ |
+| `cf-attachments-bar` | `cf-audio-visualizer` | `cf-canvas`      | `cf-file-download` |
+| `cf-file-input`      | `cf-iframe`           | `cf-image-input` | `cf-svg`           |
+
+### Layout And Structure
+
+| Element               | Element              | Element                    | Element         |
+| --------------------- | -------------------- | -------------------------- | --------------- |
+| `cf-accordion`        | `cf-accordion-item`  | `cf-aspect-ratio`          | `cf-autolayout` |
+| `cf-card`             | `cf-collapsible`     | `cf-fragment`              | `cf-grid`       |
+| `cf-hgroup`           | `cf-hscroll`         | `cf-hstack`                | `cf-list-item`  |
+| `cf-resizable-handle` | `cf-resizable-panel` | `cf-resizable-panel-group` | `cf-screen`     |
+| `cf-scroll-area`      | `cf-separator`       | `cf-table`                 | `cf-tile`       |
+| `cf-vgroup`           | `cf-vscroll`         | `cf-vstack`                |                 |
+
+### Display And Text
+
+| Element      | Element    | Element    | Element          |
+| ------------ | ---------- | ---------- | ---------------- |
+| `cf-avatar`  | `cf-badge` | `cf-chip`  | `cf-copy-button` |
+| `cf-heading` | `cf-kbd`   | `cf-label` | `cf-markdown`    |
+| `cf-text`    | `cf-theme` |            |                  |
+
+### Feedback And Overlays
+
+| Element    | Element             | Element       | Element       |
+| ---------- | ------------------- | ------------- | ------------- |
+| `cf-alert` | `cf-empty-state`    | `cf-fab`      | `cf-loader`   |
+| `cf-modal` | `cf-modal-provider` | `cf-progress` | `cf-skeleton` |
+| `cf-toast` | `cf-toast-provider` |               |               |
+
+### Charts And Maps
+
+| Element        | Element       | Element    | Element       |
+| -------------- | ------------- | ---------- | ------------- |
+| `cf-area-mark` | `cf-bar-mark` | `cf-chart` | `cf-dot-mark` |
+| `cf-line-mark` | `cf-map`      |            |               |
+
+### Messaging And AI
+
+| Element           | Element           | Element            | Element            |
+| ----------------- | ----------------- | ------------------ | ------------------ |
+| `cf-chat`         | `cf-chat-message` | `cf-message-beads` | `cf-message-input` |
+| `cf-prompt-input` | `cf-question`     | `cf-tool-call`     | `cf-tools-chip`    |
+
+### Identity And Integrations
+
+| Element             | Element            | Element            | Element      |
+| ------------------- | ------------------ | ------------------ | ------------ |
+| `cf-cfc-authorship` | `cf-cfc-label`     | `cf-google-oauth`  | `cf-oauth`   |
+| `cf-plaid-link`     | `cf-profile-badge` | `cf-secret-viewer` | `cf-webhook` |
+
+### Navigation And Routing
+
+| Element             | Element         | Element           | Element       |
+| ------------------- | --------------- | ----------------- | ------------- |
+| `cf-chevron-button` | `cf-link`       | `cf-link-preview` | `cf-location` |
+| `cf-router`         | `cf-space-link` | `cf-tab`          | `cf-tab-bar`  |
+| `cf-tab-bar-item`   | `cf-tab-list`   | `cf-tab-panel`    | `cf-tabs`     |
+
+### Runtime And Interaction
+
+| Element        | Element           | Element        | Element          |
+| -------------- | ----------------- | -------------- | ---------------- |
+| `cf-autostart` | `cf-cell-context` | `cf-cell-link` | `cf-drag-source` |
+| `cf-draggable` | `cf-drop-zone`    | `cf-keybind`   | `cf-piece`       |
+| `cf-render`    | `cf-toolbar`      | `cf-updater`   |                  |
 
 ## 🔒 Security Constraints
 
-Both v1 and v2 components are designed for secure, sandboxed environments:
+Components are designed for secure, sandboxed environments:
 
-- **No External Resources** - No images, SVGs, or remote fetching
+- **No Implicit Remote Fetching** - Media and SVG components render
+  caller-provided data
 - **DOM Isolation** - Components cannot access DOM outside their Shadow DOM
 - **Limited Events** - Only keyboard, mouse, focus, and form events allowed
-- **No Navigation** - No anchor tags or external links
+- **Controlled Navigation** - Navigation components expose explicit routing and
+  link behavior
 - **Visual Containment** - Components render within parent bounds
 
 ## 🤖 LLM Integration
@@ -104,7 +180,7 @@ guide includes:
 
 - Complete component API reference
 - Attribute types and event specifications
-- Usage examples for all 39 v2 components
+- Usage examples for `cf-*` components
 - Security constraints and best practices
 - Component composition patterns
 
@@ -116,20 +192,14 @@ usage.
 ### Commands
 
 ```bash
-# Type checking
-deno task check        # Check all files
-deno task check:v2     # Check v2 only
+# Type checking from the repository root
+deno check packages/ui/src/index.ts
 
-# Linting & Formatting
-deno task lint         # Lint all files
-deno task lint:v2      # Lint v2 only
-deno task fmt          # Format code
+# Formatting from the repository root
+deno fmt packages/ui
 
-# Testing
-deno task test         # Run tests
-
-# Clean
-deno task clean        # Remove build artifacts
+# Testing from packages/ui
+deno task test
 ```
 
 ### Project Structure Details
@@ -141,18 +211,27 @@ packages/ui/
 ├── LLM-COMPONENT-INSTRUCTIONS.md  # AI assistant guide
 ├── src/
 │   ├── index.ts             # Main exports
-│   ├── v1/                  # Legacy components
-│   │   ├── components/      # common-* components
-│   │   └── index.ts
-│   └── v2/                  # Modern components
+│   └── v2/                  # cf-* component implementation
 │       ├── components/      # cf-* components
 │       ├── core/            # BaseElement class
 │       ├── styles/          # Shared styles
 │       ├── utils/           # Utilities
 │       ├── types/           # TypeScript types
-│       ├── register-all.ts  # Auto-registration
 │       └── index.ts
 ```
+
+### Component Registration
+
+Each `cf-*` component directory owns registration in `index.ts`.
+
+The component implementation file exports the class. The directory `index.ts`
+imports the class, checks `customElements.get("<tag>")`, defines the tag when it
+is missing, and exports the class plus an element type alias.
+
+Use value imports from the directory `index.ts` when code relies on
+registration. The package root imports every exported component index and
+registers all exported `cf-*` elements at once. Use type-only imports for type
+references.
 
 ## 📚 Examples
 
@@ -202,7 +281,7 @@ packages/ui/
 ### Event Handling
 
 ```javascript
-// V2 events (cf- prefix)
+// cf-* events
 document.querySelector("cf-button").addEventListener("cf-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
@@ -273,7 +352,7 @@ MIT License - see LICENSE file for details
 
 ## 🙏 Acknowledgments
 
-- v2 design system based on [shadcn/ui](https://ui.shadcn.com/)
+- Design system based on [shadcn/ui](https://ui.shadcn.com/)
 - Built with [Lit](https://lit.dev/) web components
 - Optimized for [Deno](https://deno.land/) runtime
 - Secured for sandboxed environments

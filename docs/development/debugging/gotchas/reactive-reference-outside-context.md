@@ -11,6 +11,7 @@ This commonly happens in these scenarios:
 When a pattern receives input props, accessing their properties in the return statement's `[NAME]` field happens at initialization time.
 
 ```tsx
+// Shown for illustration only.
 // WRONG - accesses reactive value at init time
 export default pattern<Input>(({ deck }) => {
   return {
@@ -35,6 +36,7 @@ export default pattern<Input>(({ deck }) => {
 You cannot pass a reactive value to `new Writable()` because initialization happens outside a reactive context.
 
 ```tsx
+// Shown for illustration only.
 // WRONG - deck.name is reactive
 export default pattern<Input>(({ deck }) => {
   const editedName = new Writable(deck.name);  // ERROR
@@ -57,6 +59,7 @@ export default pattern<Input>(({ deck }) => {
 ## Scenario 3: Using reactive values to index plain objects in `.map()`
 
 ```typescript
+// Shown for illustration only.
 const STYLES = {
   pending: { color: "#92400e" },
   active: { color: "#1e40af" },

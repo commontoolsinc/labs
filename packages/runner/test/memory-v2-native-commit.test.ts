@@ -1,4 +1,10 @@
-import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { Identity } from "@commonfabric/identity";
@@ -10,6 +16,9 @@ import type {
   StorageTransactionRejected,
   Unit,
 } from "../src/storage/interface.ts";
+import type { PatchOp } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { assertNoIndexedArrayStructuralOps } from "../src/storage/v2-transaction.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-native-commit");
 const space = signer.did();
@@ -1103,5 +1112,177 @@ Deno.test("memory v2 transactions keep materialized-parent writes as fine-graine
     }]);
   } finally {
     await storage.close();
+  }
+});
+
+Deno.test("v2 patch generator never emits indexed-array add/remove/move (leaf-only matcher invariant)", async () => {
+  // The commit-conflict matcher (memory/v2/engine.ts patchOverlapsRead) and the
+  // scheduler reader-dirty index (schedulerTouchedLeafPathsForPatch) are both
+  // LEAF-ONLY. That is sound only if array element insert/remove/reorder reaches
+  // the engine as a `splice` on the array path or a whole-array `replace` — never
+  // as an indexed `add`/`remove`/`move`, which shift sibling indices that the
+  // leaf-only matchers cannot track (a reader of a shifted sibling would neither
+  // conflict on commit nor re-trigger via reader-dirty). This test pins that the
+  // diff generator upholds that invariant for every array idiom a pattern can
+  // express through cell writes. The runtime guard
+  // `assertNoIndexedArrayStructuralOps` (v2-transaction.ts) would also throw on a
+  // regression; this test inspects the emitted ops independently so a regression
+  // surfaces as a clear diff, not only via the guard.
+  const { storage, drafts } = captureNativeDrafts();
+  const id = "of:memory-v2-array-shape-invariant";
+
+  const isIndexSegment = (segment: string | undefined): boolean =>
+    segment !== undefined && /^(0|[1-9]\d*)$/.test(segment);
+  const terminalIsIndex = (pointer: string): boolean =>
+    isIndexSegment(pointer.split("/").at(-1));
+  const offendingOps = (patches: readonly PatchOp[]): PatchOp[] =>
+    patches.filter((patch) =>
+      ((patch.op === "add" || patch.op === "remove") &&
+        terminalIsIndex(patch.path)) ||
+      (patch.op === "move" &&
+        (terminalIsIndex(patch.path) || terminalIsIndex(patch.from)))
+    );
+  const patchesInDrafts = (): PatchOp[] =>
+    drafts.flatMap((draft) =>
+      draft.operations.flatMap((operation) =>
+        operation.op === "patch" ? operation.patches : []
+      )
+    );
+
+  const writeItems = async (value: FabricValue): Promise<void> => {
+    const tx = storage.edit();
+    assert(tx.write({ space, id, type, path: ["value", "items"] }, value).ok);
+    assert((await tx.commit()).ok);
+  };
+
+  // Set `base`, then diff to `next` (exactly how cell.set / cell.push /
+  // cell.remove reconstruct and write the whole array). Returns the op kinds the
+  // generator emitted, after asserting none was an indexed-array structural op.
+  const safeDiff = async (
+    label: string,
+    base: FabricValue[],
+    next: FabricValue[],
+  ): Promise<string[]> => {
+    await writeItems(base);
+    drafts.length = 0;
+    await writeItems(next);
+    const patches = patchesInDrafts();
+    assertEquals(
+      offendingOps(patches),
+      [],
+      `idiom "${label}" emitted an indexed-array structural op: ${
+        JSON.stringify(patches)
+      }`,
+    );
+    return patches.map((patch) => patch.op);
+  };
+
+  try {
+    // Seed with a sentinel distinct from every `base` below so each safeDiff's
+    // base-write is a real change (no no-op commit on the first iteration).
+    const seed = storage.edit();
+    assert(
+      seed.write({ space, id, type, path: [] }, {
+        value: { items: ["seed"] },
+      }).ok,
+    );
+    assert((await seed.commit()).ok);
+
+    const seen = new Set<string>();
+    const record = (ops: string[]) => ops.forEach((op) => seen.add(op));
+
+    const scalars = ["a", "b", "c"];
+    record(await safeDiff("tail append (push)", scalars, ["a", "b", "c", "d"]));
+    record(await safeDiff("tail shrink (pop)", scalars, ["a", "b"]));
+    record(await safeDiff("head insert (unshift)", scalars, ["x", ...scalars]));
+    record(await safeDiff("head remove (shift)", scalars, ["b", "c"]));
+    record(await safeDiff("middle insert", scalars, ["a", "x", "b", "c"]));
+    record(await safeDiff("middle remove", scalars, ["a", "c"]));
+    record(await safeDiff("reorder", scalars, ["c", "b", "a"]));
+    record(await safeDiff("in-place element edit", scalars, ["a", "B", "c"]));
+    record(await safeDiff("clear", scalars, []));
+    record(
+      await safeDiff("grow then differ", scalars, ["p", "q", "r", "s", "t"]),
+    );
+
+    // Arrays of objects (the lunch-poll vote-row shape).
+    const objs = [{ k: "a" }, { k: "b" }, { k: "c" }];
+    record(
+      await safeDiff("objects push", [{ k: "a" }], [{ k: "a" }, { k: "b" }]),
+    );
+    record(
+      await safeDiff("objects reorder", objs, [{ k: "c" }, { k: "b" }, {
+        k: "a",
+      }]),
+    );
+    record(
+      await safeDiff("objects middle remove", objs, [{ k: "a" }, { k: "c" }]),
+    );
+
+    // Index-targeted writes (the other producer entry point): in-place edit and
+    // a grow-at-length write. Both must stay `replace` / `splice`.
+    await writeItems(["a", "b"]);
+    drafts.length = 0;
+    const inPlace = storage.edit();
+    assert(
+      inPlace.write({ space, id, type, path: ["value", "items", "0"] }, "Z").ok,
+    );
+    assert((await inPlace.commit()).ok);
+    const inPlacePatches = patchesInDrafts();
+    assertEquals(offendingOps(inPlacePatches), []);
+    record(inPlacePatches.map((patch) => patch.op));
+
+    drafts.length = 0;
+    const growAtIndex = storage.edit();
+    assert(
+      growAtIndex.write({ space, id, type, path: ["value", "items", "2"] }, "c")
+        .ok,
+    );
+    assert((await growAtIndex.commit()).ok);
+    const growPatches = patchesInDrafts();
+    assertEquals(offendingOps(growPatches), []);
+    record(growPatches.map((patch) => patch.op));
+
+    // Sanity: the idioms above actually exercised the array diff path and
+    // produced the safe shapes, so the no-indexed-op assertions aren't vacuous.
+    assert(seen.has("splice"), `expected a splice op; saw ${[...seen]}`);
+    assert(seen.has("replace"), `expected a replace op; saw ${[...seen]}`);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("assertNoIndexedArrayStructuralOps rejects indexed-array structural ops and allows the rest", () => {
+  // The guard's throw and `move` paths are unreachable through the diff generator
+  // (that's the invariant the previous test pins), so they're exercised directly
+  // here with hand-built patches.
+  const rejected: PatchOp[][] = [
+    [{ op: "add", path: "/value/arr/1", value: "x" }],
+    [{ op: "remove", path: "/value/arr/2" }],
+    [{ op: "add", path: "/value/arr/0", value: "x" }],
+    [{ op: "remove", path: "/value/arr/10" }],
+    // move: numeric on `path`, and numeric on `from` (covers both operands).
+    [{ op: "move", from: "/value/arr/0", path: "/value/arr/2" }],
+    [{ op: "move", from: "/value/arr/0", path: "/value/obj/k" }],
+  ];
+  for (const patches of rejected) {
+    assertThrows(
+      () => assertNoIndexedArrayStructuralOps(patches),
+      Error,
+      "indexed-array",
+    );
+  }
+
+  const allowed: PatchOp[][] = [
+    [{ op: "add", path: "/value/obj/key", value: "x" }], // object key, not index
+    [{ op: "remove", path: "/value/obj/key" }],
+    [{ op: "add", path: "/value/arr/-", value: "x" }], // append marker, not index
+    [{ op: "replace", path: "/value/arr/0", value: "x" }], // in-place, no shift
+    [{ op: "splice", path: "/value/arr", index: 0, remove: 1, add: ["z"] }],
+    [{ op: "move", from: "/value/a", path: "/value/b" }], // object-key move
+    [],
+  ];
+  for (const patches of allowed) {
+    assertNoIndexedArrayStructuralOps(patches); // must not throw
   }
 });

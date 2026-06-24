@@ -258,5 +258,3 @@ export class CFTable extends BaseElement {
     });
   }
 }
-
-globalThis.customElements.define("cf-table", CFTable);

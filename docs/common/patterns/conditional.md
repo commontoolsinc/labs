@@ -6,6 +6,7 @@ common value-expression positions, so you usually do not need to author
 `ifElse()` directly.
 
 ```tsx
+// Shown for illustration only.
 // JSX expressions
 {show ? <div>Content</div> : null}
 

@@ -21,6 +21,7 @@ reads are tracked as dependencies (in computed/lift). Derive data with
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```tsx
+// Shown for illustration only.
 import { action, Default, Writable, UI, pattern } from 'commonfabric'
 
 interface Item {}
@@ -95,6 +96,7 @@ included — not a dereferenced copy.
   (it's still reactive, as always).
 
 ```tsx
+// Shown at module scope.
 interface CounterOutput {
   count: Writable<number>;   // consumers may .set() / bind $value
   label: string;             // read-only view (still reactive)
@@ -108,6 +110,7 @@ compilation with "Default export of the module has or is using private name
 'Output'". The result type is your public contract — export it:
 
 ```tsx
+// Shown for illustration only.
 export interface CounterOutput { /* ... */ }
 export default pattern<CounterInput, CounterOutput>(/* ... */);
 ```
@@ -118,6 +121,7 @@ values with `.get()` inside `computed()`/`lift()`/handler bodies, just like a
 `Writable<>` input:
 
 ```tsx
+// Shown inside a pattern body.
 const game = Battleship({});
 const phase = computed(() => game.game.get().phase); // game.game: Writable<GameState>
 ```

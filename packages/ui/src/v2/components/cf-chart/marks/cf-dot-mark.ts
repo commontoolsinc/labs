@@ -25,8 +25,6 @@ export class CFDotMark extends MarkElement {
   }
 }
 
-customElements.define("cf-dot-mark", CFDotMark);
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-dot-mark": CFDotMark;

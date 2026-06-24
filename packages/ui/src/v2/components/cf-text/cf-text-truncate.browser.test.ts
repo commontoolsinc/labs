@@ -1,6 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import "../cf-hstack/cf-hstack.ts";
-import "./cf-text.ts";
+import "../cf-hstack/index.ts";
 
 type UpdatingElement = HTMLElement & {
   updateComplete: Promise<unknown>;

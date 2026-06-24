@@ -12,12 +12,14 @@ instinct says the untaken branch never runs; here it does.
 Verified with `cf check --show-transformed`: the authored ternary
 
 ```tsx
+// Shown inside a pattern body.
 {selectedItem ? selectedItem.label : "Nothing selected"}
 ```
 
 lowers to
 
 ```ts
+// Shown for illustration only.
 __cfHelpers.ifElse(/* schemas */, selectedItem, selectedItem.key("label"), "Nothing selected")
 ```
 
@@ -25,6 +27,7 @@ __cfHelpers.ifElse(/* schemas */, selectedItem, selectedItem.key("label"), "Noth
 `null` — so the property access happens regardless of the condition.
 
 ```tsx
+// Shown inside a pattern body.
 // WRONG - selectedItem.label is dereferenced even when selectedItem is null
 const selectedItem = computed(() =>
   selectedIndex < items.length ? items[selectedIndex] : null

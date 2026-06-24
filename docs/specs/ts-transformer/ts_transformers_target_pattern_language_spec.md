@@ -122,6 +122,7 @@ The top-level pattern body should stay declarative.
 **Good here**
 
 ```ts
+// Shown for illustration only.
 pattern(({ items, show }) => ({
   upper: items[0].name.toUpperCase(),
   title: show ? "Visible" : "Hidden",
@@ -133,6 +134,7 @@ pattern(({ items, show }) => ({
 **Move elsewhere**
 
 ```ts
+// Shown for illustration only.
 pattern(({ user, count }) => ({
   value: count.get(),
 }));
@@ -155,6 +157,7 @@ JSX is the main local reactive expression context.
 **Good here**
 
 ```tsx
+// Shown as JSX element children.
 <div>
   {user.name.toUpperCase()}
   {selectedScopes[key]}
@@ -166,6 +169,7 @@ JSX is the main local reactive expression context.
 **Unsupported here**
 
 ```tsx
+// Shown for illustration only.
 <div>{[0, 1].forEach(() => list.map((item) => item))}</div>
 ```
 
@@ -183,6 +187,7 @@ imperative/value-computation boundaries.
 **Good here**
 
 ```ts
+// Shown inside a pattern body.
 computed(() => input[key])
 computed(() => count.get())
 action(() => state.name.trim())
@@ -191,6 +196,7 @@ action(() => state.name.trim())
 **Still unsupported here**
 
 ```ts
+// Shown inside a pattern body.
 computed(() => derivedValue.get())
 ```
 
@@ -207,6 +213,7 @@ Event handlers are an explicit callback boundary for imperative UI logic.
 **Good here**
 
 ```tsx
+// Shown as JSX element children.
 <button onClick={() => count.set(count.get() + 1)} />
 ```
 
@@ -225,6 +232,7 @@ expression context.
 **Good here**
 
 ```ts
+// Shown inside a pattern body.
 items.map((item) => item.name)
 items.map((item) => item.toUpperCase())
 items.map((item) => identity(item.toUpperCase()))
@@ -251,6 +259,7 @@ into a context that already has a clear language meaning.
 **Avoid**
 
 ```ts
+// Shown for illustration only.
 pattern(({ count }) => ({
   value: count.get(),
 }));
@@ -259,6 +268,7 @@ pattern(({ count }) => ({
 **Prefer**
 
 ```ts
+// Shown for illustration only.
 pattern(({ count, show }) => ({
   value: ifElse(show, count.get(), 0),
 }));
@@ -267,6 +277,7 @@ pattern(({ count, show }) => ({
 or:
 
 ```ts
+// Shown for illustration only.
 pattern(({ count }) => ({
   value: computed(() => count.get()),
 }));
@@ -277,6 +288,7 @@ pattern(({ count }) => ({
 **Avoid**
 
 ```ts
+// Shown for illustration only.
 pattern(({ selectedScopes, key }) => ({
   value: selectedScopes[key],
 }));
@@ -285,6 +297,7 @@ pattern(({ selectedScopes, key }) => ({
 **Prefer**
 
 ```tsx
+// Shown for illustration only.
 pattern(({ selectedScopes, key }) => ({
   [UI]: <div>{selectedScopes[key]}</div>,
 }));
@@ -293,6 +306,7 @@ pattern(({ selectedScopes, key }) => ({
 or:
 
 ```ts
+// Shown for illustration only.
 pattern(({ selectedScopes, key }) =>
   computed(() => selectedScopes[key])
 );
@@ -303,12 +317,14 @@ pattern(({ selectedScopes, key }) =>
 **Avoid**
 
 ```tsx
+// Shown for illustration only.
 <div>{[0, 1].forEach(() => list.map((item) => item))}</div>
 ```
 
 **Prefer**
 
 ```tsx
+// Shown as JSX element children.
 <div>{computed(() => list.map((item) => item))}</div>
 ```
 
@@ -320,6 +336,7 @@ site into a named helper or handler.
 **Avoid**
 
 ```ts
+// Shown for illustration only.
 pattern(({ maybeFn, value }) => ({
   result: maybeFn?.(value),
 }));
@@ -328,6 +345,7 @@ pattern(({ maybeFn, value }) => ({
 **Prefer**
 
 ```ts
+// Shown for illustration only.
 pattern(({ maybeFn, value }) => ({
   result: computed(() => maybeFn == null ? undefined : maybeFn(value)),
 }));

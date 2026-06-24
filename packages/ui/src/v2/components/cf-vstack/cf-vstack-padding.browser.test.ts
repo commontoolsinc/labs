@@ -1,5 +1,4 @@
 import { assertEquals } from "@std/assert";
-import "./cf-vstack.ts";
 
 type UpdatingElement = HTMLElement & {
   updateComplete: Promise<unknown>;

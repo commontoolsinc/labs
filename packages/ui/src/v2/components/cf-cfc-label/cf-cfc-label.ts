@@ -350,10 +350,6 @@ export class CFCFCLabel extends BaseElement {
   }
 }
 
-if (!globalThis.customElements.get("cf-cfc-label")) {
-  globalThis.customElements.define("cf-cfc-label", CFCFCLabel);
-}
-
 declare global {
   interface HTMLElementTagNameMap {
     "cf-cfc-label": CFCFCLabel;

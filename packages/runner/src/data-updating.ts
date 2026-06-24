@@ -1,7 +1,7 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValue,
-  type FabricObject,
+  type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
@@ -462,7 +462,7 @@ export function normalizeAndDiff(
     );
     const { [ID_FIELD]: fieldName, ...rest } = newValue as
       & { [ID_FIELD]: string }
-      & FabricObject;
+      & FabricPlainObject;
     const id = newValue[fieldName as PropertyKey];
     if (link.path.length > 1) {
       const parent = tx.readValueOrThrow({
@@ -833,7 +833,7 @@ export function normalizeAndDiff(
     );
     const { [ID]: id, ...rest } = newValue as
       & { [ID]: string }
-      & FabricObject;
+      & FabricPlainObject;
     let path = link.path;
 
     // If we're setting an array element, make the array the context for the

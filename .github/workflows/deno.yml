@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -49,6 +49,9 @@ jobs:
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
+      - name: 📄 Type-check docs code blocks
+        run: deno task check-docs
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types
@@ -63,7 +66,7 @@ jobs:
         total: [4]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -82,7 +85,7 @@ jobs:
       group: labs
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -116,7 +119,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-workspace
           path: coverage/lcov/workspace.lcov
@@ -133,7 +136,7 @@ jobs:
         total: [4]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -170,7 +173,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-runner-${{ matrix.shard }}
           path: coverage/lcov/runner-${{ matrix.shard }}.lcov
@@ -183,7 +186,7 @@ jobs:
       group: labs
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -198,7 +201,7 @@ jobs:
 
       # Upload binaries as artifacts for the integration tests
       - name: 📤 Upload binaries for integration tests
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: common-binaries
           path: |
@@ -216,7 +219,7 @@ jobs:
         total: [4]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -250,7 +253,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-generated-patterns-${{ matrix.shard }}
           path: coverage/lcov/generated-patterns-${{ matrix.shard }}.lcov
@@ -259,7 +262,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-generated-patterns-${{ matrix.shard }}
           path: test-results/
@@ -295,7 +298,7 @@ jobs:
             headless: true
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -304,7 +307,10 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         env:
@@ -342,7 +348,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-package-${{ matrix.suite_name }}
           path: coverage/lcov/package-${{ matrix.suite_name }}.lcov
@@ -351,7 +357,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-package-integration-${{ matrix.suite_name }}
           path: test-results/${{ matrix.junit_name }}.xml
@@ -393,7 +399,7 @@ jobs:
             timeout_minutes: 15
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -402,7 +408,10 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         env:
@@ -480,7 +489,7 @@ jobs:
 
       - name: 📤 Upload CLI integration timing data
         if: ${{ always() && startsWith(matrix.suite_name, 'core-') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-cli-${{ matrix.suite_name }}
           path: test-results/cli-${{ matrix.suite_name }}-cf-timings.log
@@ -498,7 +507,7 @@ jobs:
         total: [4]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -507,7 +516,10 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🚀 Start Toolshed server for testing
         run: |
@@ -547,7 +559,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-integration-${{ matrix.shard }}
           path: coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
@@ -556,7 +568,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-pattern-integration-${{ matrix.shard }}
           path: test-results/
@@ -568,7 +580,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -596,7 +608,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-reload
           path: coverage/lcov/pattern-reload.lcov
@@ -605,7 +617,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-pattern-reload-integration
           path: test-results/
@@ -622,7 +634,7 @@ jobs:
         total: [5]
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -634,7 +646,10 @@ jobs:
         run: deno task initialize-db
 
       - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🧪 Run pattern unit tests
         run: |
@@ -648,7 +663,7 @@ jobs:
 
       - name: 📤 Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-unit-${{ matrix.chunk }}
           path: coverage/lcov/pattern-unit-${{ matrix.chunk }}.lcov
@@ -657,7 +672,7 @@ jobs:
 
       - name: 📤 Upload test timing data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-timing-pattern-unit-${{ matrix.chunk }}
           path: test-results/
@@ -692,7 +707,7 @@ jobs:
       pull-requests: read
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -709,7 +724,7 @@ jobs:
 
       - name: 📤 Upload coverage regression comment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-comment
           path: coverage-comment.json
@@ -718,7 +733,7 @@ jobs:
 
       - name: 📤 Upload performance metrics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-metrics
           path: perf-metrics.json
@@ -727,7 +742,7 @@ jobs:
 
       - name: 📤 Upload performance metrics backfill
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-metrics-backfill
           path: perf-metrics-backfill.json
@@ -758,10 +773,13 @@ jobs:
       attestations: write
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: common-binaries
+          path: common-binaries
 
       - name: 🔐 Process & sign binaries
         run: |
@@ -851,7 +869,7 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
       - name: 📤 Upload attestations as artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary_attestations
           if-no-files-found: error
@@ -937,7 +955,7 @@ jobs:
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -961,7 +979,7 @@ jobs:
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -994,7 +1012,7 @@ jobs:
     environment: ci
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -1085,7 +1103,7 @@ jobs:
 
       - name: 📤 Upload test logs as artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: patterns-test-logs-${{ github.sha }}
           path: patterns-test-${{ github.sha }}.log

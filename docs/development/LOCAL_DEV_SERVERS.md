@@ -76,6 +76,7 @@ When accessing a space for the first time, you'll need to register:
 
 For Playwright testing, use:
 ```javascript
+// Shown inside a pattern body.
 await page.goto("http://localhost:8000/<SPACE>/<PIECE_ID>");
 ```
 

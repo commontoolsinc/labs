@@ -197,5 +197,3 @@ export class CFAccordion extends BaseElement {
     this.value = this.type === "single" ? "" : [];
   }
 }
-
-globalThis.customElements.define("cf-accordion", CFAccordion);
