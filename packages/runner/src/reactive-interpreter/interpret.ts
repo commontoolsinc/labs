@@ -44,6 +44,22 @@ export interface EvalContext {
    */
   seed?: Map<OpId, unknown>;
   /**
+   * SEED by internal-cell NAME (coalescing partition, step 3). The op-id `seed`
+   * above only covers external producers that ARE ops (an earlier segment's
+   * output, an upstream computed). But a segment can also read an internal cell
+   * that NO op produces — a `cell(…)` declared in the pattern body and written
+   * only by a HANDLER boundary (e.g. an `updates` counter the handler mutates),
+   * or any `derivedInternalCells` default. Those names are absent from
+   * `internalToOp`, so `resolve`'s `internal` branch would otherwise return
+   * `undefined` and the segment would mis-derive (a downstream lift reading
+   * `undefined` is run-gated OUT, yielding `undefined` instead of the lift's
+   * default-handling). The partition dispatch reads each such cell's CURRENT
+   * value (through the tx, schema-defaulted) and feeds it here keyed by name, so
+   * `resolve` returns the live cell value. Empty / absent for the whole-pattern
+   * interpreter and pure hand-built tests.
+   */
+  seedByName?: Map<string, unknown>;
+  /**
    * PROBE MODE (eligibility dry-run only). When true, leaf BODIES are NOT
    * invoked — every leaf op resolves to `undefined`. The eligibility verdict is
    * reached purely structurally (coverage gates + `resolveLeafImpls`'
@@ -170,7 +186,16 @@ export function evalRog(
         return navigate(opValues.get(ref.op), ref.path);
       case "internal": {
         const opId = ctx.internalToOp?.get(ref.name);
-        if (opId === undefined) return undefined; // unwired internal (W1a)
+        if (opId === undefined) {
+          // No op produces this internal cell. In a SEGMENT eval it may still be
+          // a real cell read from outside (a handler-written `cell(…)` / a
+          // `derivedInternalCells` default) — seeded by name. Consult that seed
+          // before giving up; otherwise it is genuinely unwired (W1a).
+          if (ctx.seedByName?.has(ref.name)) {
+            return navigate(ctx.seedByName.get(ref.name), ref.path);
+          }
+          return undefined;
+        }
         return navigate(opValues.get(opId), ref.path);
       }
     }
