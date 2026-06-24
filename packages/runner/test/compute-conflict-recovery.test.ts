@@ -1,15 +1,16 @@
-// Scheduler-side half of the conflict/subscription coherence invariant that
-// #4210 depends on (and #4220 establishes).
+// Scheduler-side characterization of the conflict/subscription coupling: which
+// readers leaf-only reader-dirty propagation re-triggers, and which it does not.
 //
-// #4210 makes a reactive compute STOP re-queueing itself when its commit fails
-// with a granular ConflictError, on the premise that the write which caused the
-// conflict already dirtied the compute's (still-subscribed) reads, so normal
-// reader-dirty propagation re-runs it. That premise holds only if every
-// commit-conflict is also a reader-dirty trigger:
+// A reactive compute whose commit fails with a granular ConflictError is
+// recovered by re-queuing after the conflict's catch-up gate (see
+// scheduler/action-run.ts). Reader-dirty propagation is a redundant fast path:
+// it re-runs the compute sooner when the catch-up write lands as a fresh
+// notification, but only for readers the write actually dirties, and that set is
+// leaf-only:
 //
-//     commitConflicts(write, read)  ==>  readerDirty(write, read)
+//     readerDirty(write, read)  iff  the write's leaf paths overlap the read
 //
-// The two predicates live in different code paths:
+// So the fast path does NOT cover every conflict. Two code paths set the bounds:
 //
 //   - commit-conflict (memory engine `validateConfirmedReads` -> `patchOverlapsRead`)
 //     PARENT-INJECTS before #4220: an `add` of `votes/alice` touches
@@ -19,16 +20,18 @@
 //     `schedulerTouchedLeafPathsForPatch`) is LEAF-ONLY: `votes/alice` does not
 //     overlap `votes/bob`  ==> NOT a reader, NOT dirtied.
 //
-// So before #4220 a compute that reads one key, racing a peer that adds a
-// disjoint sibling key, gets a granular ConflictError but is never re-triggered;
-// with #4210's re-queue removed its derived write is silently dropped. #4220
-// aligns the commit-conflict matcher onto the same leaf-only paths the scheduler
-// uses, so the spurious conflict disappears and the invariant holds.
+// So a compute that reads one key, racing a peer that adds a disjoint sibling
+// key, can get a granular ConflictError that reader-dirty never re-triggers.
+// #4220 aligns the commit-conflict matcher onto the same leaf-only paths the
+// scheduler uses, so that spurious conflict disappears at the source; the
+// scheduler's catch-up re-queue is the backstop that recovers any genuine
+// conflict the fast path misses. Neither layer relies on the other for
+// correctness.
 //
-// Coverage split (both layers needed; neither is reachable from a single-replica
-// runtime test, where the client-side whole-document attestation guard
-// short-circuits with `StorageTransactionInconsistent` before the engine's
-// path-granular matcher runs):
+// Coverage split (both layers exercised independently; neither is reachable from
+// a single-replica runtime test, where the client-side whole-document
+// attestation guard short-circuits with `StorageTransactionInconsistent` before
+// the engine's path-granular matcher runs):
 //   - commit-conflict layer: packages/memory/test/v2-engine-test.ts ->
 //     "memory v2 engine: leaf-only commit conflict — disjoint-key writers merge".
 //     That test PASSES with #4220's leaf-only matcher and FAILS (ConflictError,
@@ -46,16 +49,17 @@ Deno.test(
   "reader-dirty re-triggers container readers but not disjoint-sibling readers",
   () => {
     // A sibling-leaf reader is exactly the reader leaf-only propagation does NOT
-    // re-trigger — so a granular conflict against it cannot be recovered by
-    // subscription, which is why #4210 is unsafe until #4220 stops the engine
-    // from raising that conflict in the first place.
+    // re-trigger — so a granular conflict against it cannot be recovered by the
+    // reader-dirty fast path. #4220 stops the engine from raising that conflict
+    // in the first place; the scheduler's catch-up re-queue recovers any that
+    // remain.
     assert(
       arraysOverlap(["votes", "alice"], ["votes", "bob"]) === false,
       "a write to votes.alice must NOT dirty a reader of the disjoint sibling votes.bob",
     );
 
     // A whole-container reader IS dirtied by the add — this is the
-    // true-dependency case #4210's subscription-recovery relies on.
+    // true-dependency case the reader-dirty fast path covers.
     assert(
       arraysOverlap(["votes", "alice"], ["votes"]) === true,
       "a write to votes.alice MUST dirty a reader of the container votes",

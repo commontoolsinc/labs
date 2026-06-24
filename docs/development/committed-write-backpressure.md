@@ -154,14 +154,17 @@ registered `scheduler.onError` handlers as a `CommitConvergenceError`.
 The reactive path (`scheduler/action-run.ts`) does not need this backpressure
 and shares only the `isConflictRejection` classifier. A reactive action is a
 re-derivation: its output is a function of its inputs. On a conflict it does not
-retry at all — the write that caused the conflict dirtied the action's
-still-subscribed reads, so reader-dirty propagation re-runs it with the latest
-state. A conflict there is a wait, not a retry, and consumes no budget. Only
-non-conflict transient errors fall back to the bounded `MAX_RETRIES_FOR_REACTIVE`
-retry, and every attempt re-subscribes so the action recovers when its inputs
-next change. The backpressure rework targets the event-handler path instead,
-where a one-shot write *is* the user's intent and has no later input change to
-recover it, so a conflict must be actively retried rather than waited out.
+enter the bounded retry budget — instead it re-arms its subscription, waits for
+the conflict's `readyToRetry` catch-up, and re-queues itself to re-run against
+the caught-up state. (Reader-dirty propagation re-runs it too when the catch-up
+write lands as a fresh notification, a redundant fast path that does not cover a
+conflict whose triggering write was already delivered.) A conflict there is a
+wait for catch-up, not a failure, and consumes no budget. Only non-conflict
+transient errors fall back to the bounded `MAX_RETRIES_FOR_REACTIVE` retry, and
+every attempt re-subscribes so the action recovers when its inputs next change.
+The backpressure rework targets the event-handler path instead, where a one-shot
+write *is* the user's intent and cannot be re-derived from inputs, so a conflict
+must be actively retried rather than recovered by re-derivation.
 
 ## Tests
 
