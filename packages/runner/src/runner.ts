@@ -2562,6 +2562,28 @@ export class Runner {
     const argumentSchema = pattern.argumentSchema ?? {};
     const internedArg = internSchema(argumentSchema as JSONSchema);
 
+    // PROBE MEMOIZE-AND-REUSE (D-PROBE-MEMOIZE). The eligibility dry-run above
+    // already evaluated the whole ROG once on `argSnapshot`, INVOKING every leaf
+    // body. Re-running `evalRog` in the first real node action would execute those
+    // leaf bodies a SECOND time — doubling user-observable run counts (runCount++)
+    // and breaking the lazy-until-pulled invariant. We therefore hand the probe's
+    // result to the FIRST real run, reusing it instead of re-evaluating — but ONLY
+    // when the argument the first run reads THROUGH the tx is unchanged from the
+    // snapshot the probe used (correctness over reuse: a mid-flight argument change
+    // means the probe's values are stale and we must evaluate fresh). The memo is
+    // consumed at most once (`memoConsumed`), so subsequent re-runs (on argument
+    // change) always evaluate fresh, and a side-effecting leaf runs exactly ONCE
+    // total (probe + reused first run = 1 invocation). The memo lives in THIS
+    // closure, so it cannot leak across pattern instances.
+    const probeMemo: {
+      argument: unknown;
+      result: unknown;
+      errors: Array<{ opId: OpId; error: unknown }>;
+    } | undefined = dry
+      ? { argument: argSnapshot, result: dry.result, errors: dry.errors }
+      : undefined;
+    let memoConsumed = false;
+
     const interpreterImpl = (
       inputsCell: Cell<unknown>,
       sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
@@ -2575,11 +2597,27 @@ export class Runner {
         // Read the argument THROUGH the tx so the read is tracked: the node then
         // re-runs reactively whenever the argument changes (parity with legacy).
         const argument = inputsCell.asSchema(internedArg).withTx(tx).get();
-        const { result, errors } = evalRog(rog, {
-          argument,
-          leafImpls,
-          internalToOp,
-        });
+        // Reuse the probe's already-computed evaluation on the FIRST run iff the
+        // argument is unchanged from the probe's snapshot — eliminating the
+        // double-execution of leaf bodies. Otherwise (argument changed, or no
+        // memo) evaluate fresh.
+        let result: unknown;
+        let errors: Array<{ opId: OpId; error: unknown }>;
+        if (
+          !memoConsumed && probeMemo &&
+          deepEqual(argument, probeMemo.argument)
+        ) {
+          memoConsumed = true;
+          result = probeMemo.result;
+          errors = probeMemo.errors;
+        } else {
+          memoConsumed = true;
+          ({ result, errors } = evalRog(rog, {
+            argument,
+            leafImpls,
+            internalToOp,
+          }));
+        }
         sendResult(tx, result);
         // The result is now written (a throwing leaf's field is `undefined`).
         // Fire scheduler.onError for each throwing leaf WITHOUT failing the node,
