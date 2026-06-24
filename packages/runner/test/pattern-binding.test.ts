@@ -341,7 +341,6 @@ describe("pattern-binding", () => {
       expect(parseLink(result.profile, resultCell)).toEqual({
         ...argumentCell.getAsNormalizedFullLink(),
         path: ["profile"],
-        scope: "user",
         schema: profileSchema,
         overwrite: "redirect",
       });
