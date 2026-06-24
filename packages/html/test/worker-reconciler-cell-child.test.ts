@@ -1,11 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerVNode } from "../src/worker/types.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, UI } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -154,6 +155,50 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     },
   );
 
+  await t.step(
+    "replaces same-key child Cell when parent supplies a different cell",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const firstChild = new MockCell("first");
+      const secondChild = new MockCell("second");
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [firstChild as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      rootCell.set({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [secondChild as unknown as Cell<WorkerRenderNode>],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").length > 0,
+        true,
+        "old cell child should be removed when the parent supplies a new cell",
+      );
+      assertEquals(
+        collector.getOpsOfType("create-text").some((op) =>
+          "text" in op && op.text === "second"
+        ),
+        true,
+        "new cell child should render its current value",
+      );
+    },
+  );
+
   await t.step("replaces child Cell when tag changes", async () => {
     const collector = createOpsCollector();
     const reconciler = new WorkerReconciler({
@@ -234,6 +279,229 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     assertEquals(updateTextOps.length, 1, "Should emit update-text");
     assertEquals((updateTextOps[0] as any).text, "World");
   });
+
+  await t.step(
+    "updates same-shape slotted header cell VNode children",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const header = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: { slot: "header" },
+          children: [{
+            type: "vnode",
+            name: "span",
+            props: { "data-poll-summary": "true" },
+            children: ["4 joined · 0 options · 0 votes · hosted by Alice"],
+          }],
+        } satisfies WorkerVNode,
+      );
+
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "cf-screen",
+          props: {},
+          children: [header as unknown as WorkerRenderNode],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const screenCreate = collector.getOpsOfType("create-element").find(
+        (op) => "tagName" in op && op.tagName === "cf-screen",
+      );
+      if (!screenCreate || !("nodeId" in screenCreate)) {
+        throw new Error("Expected cf-screen to be created");
+      }
+      const screenNodeId = screenCreate.nodeId;
+      collector.clear();
+
+      header.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { slot: "header" },
+          children: [{
+            type: "vnode",
+            name: "span",
+            props: { "data-poll-summary": "true" },
+            children: ["4 joined · 1 options · 0 votes · hosted by Alice"],
+          }],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const textOps = collector.getOps().filter((op) =>
+        (op.op === "update-text" || op.op === "create-text") &&
+        "text" in op
+      );
+      assertEquals(
+        textOps.some((op) =>
+          "text" in op &&
+          op.text === "4 joined · 1 options · 0 votes · hosted by Alice"
+        ),
+        true,
+        "slotted header summary text should update",
+      );
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === screenNodeId
+        ),
+        false,
+        "slotted header summary update should not remount cf-screen",
+      );
+    },
+  );
+
+  await t.step(
+    "updates same-shape split text children from a Cell VNode",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const summary = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: { "data-poll-summary": "true" },
+          children: [
+            4,
+            " joined · ",
+            4,
+            " options · ",
+            1,
+            " votes · hosted by Dave",
+          ],
+        } satisfies WorkerVNode,
+      );
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [summary as unknown as WorkerRenderNode],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      summary.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { "data-poll-summary": "true" },
+          children: [
+            4,
+            " joined · ",
+            4,
+            " options · ",
+            4,
+            " votes · hosted by Dave",
+          ],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const textOps = collector.getOpsOfType("update-text");
+      assertEquals(
+        textOps.some((op) => "text" in op && op.text === "4"),
+        true,
+        "same-shape split vote-count text should update",
+      );
+      assertEquals(
+        collector.getOps().some((op) =>
+          (op.op === "update-text" || op.op === "create-text") &&
+          "text" in op && op.text === "4"
+        ),
+        true,
+        "same-shape split vote-count text should be represented",
+      );
+    },
+  );
+
+  await t.step(
+    "replaces same-key UI child when rendered root tag changes",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const beforeChild = {
+        [UI]: {
+          type: "vnode",
+          name: "span",
+          props: {},
+          children: ["Before"],
+        } satisfies WorkerVNode,
+      } as unknown as WorkerRenderNode;
+      const afterChild = {
+        [UI]: {
+          type: "vnode",
+          name: "button",
+          props: {},
+          children: ["After"],
+        } satisfies WorkerVNode,
+      } as unknown as WorkerRenderNode;
+
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [beforeChild],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const spanCreate = collector.getOpsOfType("create-element").find(
+        (op) => "tagName" in op && op.tagName === "span",
+      );
+      if (!spanCreate || !("nodeId" in spanCreate)) {
+        throw new Error("Expected span to be created");
+      }
+      const spanNodeId = spanCreate.nodeId;
+      collector.clear();
+
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [afterChild],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === spanNodeId
+        ),
+        true,
+        "same-key UI payload should remove the stale root element",
+      );
+      assertEquals(
+        collector.getOpsOfType("create-element").some((op) =>
+          "tagName" in op && op.tagName === "button"
+        ),
+        true,
+        "same-key UI payload should create the replacement root element",
+      );
+    },
+  );
 
   await t.step(
     "avoids re-emitting set-event when handler is identical (VNode path)",
@@ -613,6 +881,96 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       // With implementation "insert from end", it likely emits inserts.
       // At least 1 insert is expected (to move).
       assertEquals(swapInserts.length > 0, true, "Should insert to re-order");
+    },
+  );
+
+  await t.step(
+    "updates same-key subpattern UI payloads without reinserting",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+      const subpatternOutput = (node: WorkerVNode): WorkerRenderNode => ({
+        [UI]: node,
+        toJSON: () => "stable-subpattern-output",
+      } as unknown as WorkerRenderNode);
+
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [
+            subpatternOutput({
+              type: "vnode",
+              name: "span",
+              props: { "data-row": "same", "data-count": "1" },
+              children: ["one"],
+            }),
+          ],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const spanCreate = collector.getOps().find((op) =>
+        op.op === "create-element" && "tagName" in op &&
+        op.tagName === "span"
+      );
+      if (!spanCreate || !("nodeId" in spanCreate)) {
+        throw new Error("Expected initial span to be created");
+      }
+      const spanNodeId = spanCreate.nodeId;
+      collector.clear();
+
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [
+            subpatternOutput({
+              type: "vnode",
+              name: "span",
+              props: { "data-row": "same", "data-count": "2" },
+              children: ["two"],
+            }),
+          ],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assertEquals(
+        collector.getOpsOfType("create-element").some((op) =>
+          "tagName" in op && op.tagName === "span"
+        ),
+        false,
+        "same-key child update should not recreate the element",
+      );
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === spanNodeId
+        ),
+        false,
+        "same-key child update should not remove the element",
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "key" in op && op.key === "data-count" &&
+          "value" in op && op.value === "2"
+        ),
+        true,
+        "same-key child prop should update",
+      );
+      assertEquals(
+        collector.getOps().some((op) =>
+          (op.op === "update-text" || op.op === "create-text") &&
+          "text" in op && op.text === "two"
+        ),
+        true,
+        "same-key child text should update",
+      );
     },
   );
 });
