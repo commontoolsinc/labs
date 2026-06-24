@@ -521,15 +521,14 @@ describe("trigger reads survive failed runs", () => {
       onMarkDirectDirty: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
-  it("a commit conflict bypasses the retry budget (re-queues even when exhausted)", async () => {
+  it("an ordinary commit conflict does not bypass the retry budget", async () => {
     // A non-conflict error stops re-arming once the budget is exhausted (see
-    // "does not restore when retries are exhausted"). A conflict must NOT: it is
-    // a wait-for-catch-up, not a failure, so it always re-arms and re-queues
-    // (restore + resubscribe + dirty + queue) regardless of the budget and never
-    // falls into the exhausted-retries branch.
+    // "does not restore when retries are exhausted"). An ordinary conflict is a
+    // wait-for-reader-dirty case, so it re-arms the subscription but does not
+    // force the action back onto the pending queue.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
     });
@@ -545,14 +544,12 @@ describe("trigger reads survive failed runs", () => {
       onClearDirectDirtyAfterCommit: () => calls.push("clear"),
       onQueueExecution: () => calls.push("queue"),
     });
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
-  it("re-queues a conflict even when the readyToRetry catch-up rejects", async () => {
-    // The catch-up readiness gate rejects by design when the session is closed,
-    // revoked, or replaced mid-wait. That abort must not strand the action: it is
-    // swallowed and the action is re-queued anyway (restore + resubscribe + dirty
-    // + queue) so it re-runs on the next input change or pull.
+  it("does not requeue an ordinary conflict when readyToRetry rejects", async () => {
+    // Only structured conflict exceptions wait on readyToRetry. An ordinary
+    // conflict re-arms and waits for the normal reader-dirty path instead.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
       readyToRetry: () => Promise.reject(new Error("session replaced")),
@@ -565,15 +562,13 @@ describe("trigger reads survive failed runs", () => {
       onMarkDirectDirty: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    // The rejected readiness gate adds microtask hops before the re-queue; a
-    // macrotask flush drains them so the assertion sees the final state.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
-  it("re-queues a conflict when readyToRetry throws synchronously", async () => {
-    // A readyToRetry that throws synchronously is handled the same as a rejected
-    // one — swallowed, and the action re-queued.
+  it("does not requeue an ordinary conflict when readyToRetry throws", async () => {
+    // Ordinary conflicts do not use readyToRetry; only structured conflict
+    // exceptions do.
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
       readyToRetry: () => {
@@ -589,7 +584,7 @@ describe("trigger reads survive failed runs", () => {
       onQueueExecution: () => calls.push("queue"),
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
   it("clears direct dirty only after a successful commit", async () => {
