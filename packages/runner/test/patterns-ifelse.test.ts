@@ -316,11 +316,21 @@ describe("Pattern Runner - ifElse", () => {
     runtime.run(tx, ifElsePattern, { condition: true }, resultCell);
     await tx.commit();
 
+    // Under the Reactive Interpreter, the per-builtin ifElse node is collapsed
+    // into the single synthetic `interpreterImpl` raw node, so the scheduler
+    // action is named `raw:interpreterImpl:<hash>` rather than `raw:ifElse:`.
+    // Legacy keeps the per-builtin `raw:ifElse:` naming. Assert the
+    // mode-appropriate name without weakening the "named from the raw builtin
+    // ref" invariant in either mode.
+    const expectedActionPrefix = runtime.experimental.experimentalInterpreter
+      ? /^raw:interpreterImpl:/
+      : /^raw:ifElse:/;
+
     expect(subscribedActions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: expect.stringMatching(/^raw:ifElse:/),
-          src: expect.stringMatching(/^raw:ifElse:/),
+          name: expect.stringMatching(expectedActionPrefix),
+          src: expect.stringMatching(expectedActionPrefix),
         }),
       ]),
     );

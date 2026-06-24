@@ -61,7 +61,11 @@ function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {
   });
 }
 
-async function mainTsxSnapshots(runtime: Runtime) {
+// Select the persisted computed-reader snapshots for the active execution mode.
+// Legacy persists one snapshot per source computed (actionId carries the
+// `main.tsx` source). The Reactive Interpreter collapses the three sibling
+// computeds into a single synthetic node persisted as `raw:interpreterImpl:`.
+async function computedReaderSnapshots(runtime: Runtime) {
   const provider = runtime.storageManager.open(space) as {
     listSchedulerActionSnapshots?: (
       q: Record<string, unknown>,
@@ -77,8 +81,11 @@ async function mainTsxSnapshots(runtime: Runtime) {
     ownerSpace: space,
     limit: 1000,
   });
+  const marker = runtime.experimental.experimentalInterpreter
+    ? "raw:interpreterImpl:"
+    : "main.tsx";
   return res.snapshots.filter((s) =>
-    (s.observation.actionId ?? "").includes("main.tsx")
+    (s.observation.actionId ?? "").includes(marker)
   );
 }
 
@@ -113,10 +120,22 @@ Deno.test("reload: sibling-field computeds persist clean and do not re-run", asy
     label: "v=11",
   });
 
-  // All three computeds persisted; NONE should carry a spurious dirty/stale seq.
-  // (Before the fix, dbl + plusOne persisted with directDirtySeq set.)
-  const snaps = await mainTsxSnapshots(runtimeA);
-  expect(snaps.length).toBe(3);
+  // The persisted computed-reader snapshots should carry NO spurious
+  // dirty/stale seq. (Before the CT-1623 fix, dbl + plusOne persisted with
+  // directDirtySeq set.)
+  //
+  // Legacy persists the three sibling computeds as three separate reader
+  // action snapshots. Under the Reactive Interpreter, those three per-source
+  // computeds are collapsed into a SINGLE synthetic node, so the CT-1623
+  // sibling-over-dirtying shape is structurally impossible — there is one
+  // persisted synthetic-node snapshot, not three. In both modes we require an
+  // exact persisted count and that every such snapshot is CLEAN (no
+  // directDirtySeq/staleSeq) — the actual guarantee under test. We do not
+  // relax this to a >=0 no-op.
+  const snaps = await computedReaderSnapshots(runtimeA);
+  expect(snaps.length).toBe(
+    runtimeA.experimental.experimentalInterpreter ? 1 : 3,
+  );
   for (const s of snaps) {
     expect(s.directDirtySeq).toBeUndefined();
     expect(s.staleSeq).toBeUndefined();

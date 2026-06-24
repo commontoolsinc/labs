@@ -16,6 +16,17 @@ import {
 
 const signer = await Identity.fromPassphrase("test experimental");
 
+// `experimentalInterpreter` is defaulted ON by the same env signal the runtime
+// reads (`CF_EXPERIMENTAL_INTERPRETER`), so the exact-shape expectations below
+// must derive it from that signal to stay correct under BOTH flag-on and
+// flag-off without weakening the exhaustive `toEqual` key check. Mirrors
+// `envExperimentalInterpreterDefault()` in runtime.ts: `undefined` when unset,
+// which `toEqual` treats as an absent key (so the off path is unchanged).
+const envExperimentalInterpreter: boolean | undefined = (() => {
+  const value = Deno.env.get("CF_EXPERIMENTAL_INTERPRETER");
+  return value === "1" || value === "true" ? true : undefined;
+})();
+
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
  * `Runtime` construction/disposal correctly propagates flags to all the ambient
@@ -42,6 +53,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: envExperimentalInterpreter,
       });
       await runtime.dispose();
       await sm.close();
@@ -60,6 +72,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: envExperimentalInterpreter,
       });
       await runtime.dispose();
       await sm.close();
@@ -76,6 +89,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: envExperimentalInterpreter,
       });
       await runtime.dispose();
       await sm.close();
