@@ -969,6 +969,47 @@ const PURE_GLOBAL_CALLEES = new Set([
 ]);
 
 /**
+ * True iff a leaf module's declared `resultSchema` pins a CONCRETE JSON VALUE
+ * shape — a `type` keyword, an `enum`/`const`, a `$ref`, or an `anyOf`/`allOf`/
+ * `oneOf` of such schemas. A leaf whose output the builder typed this way
+ * provably produces that VALUE, not a Pattern/Cell/OpaqueRef: a pattern/lift
+ * factory application has no statically-known value shape, so the builder leaves
+ * such a lift's resultSchema EMPTY/absent/`true` (verified empirically: every
+ * pattern-returning `lift(fn)` carries `resultSchema === {}`, while every pure
+ * value-lift in the corpus carries a concrete `type`/`enum`/`$ref`/`anyOf`
+ * schema). We use this as the PRECISE discriminator for the bare-call gate below:
+ * a typed value-producer leaf may freely call a closed-over PURE helper
+ * (`sanitizeAmount(...)`, `summarizeSelection(...)`) without tripping the gate.
+ *
+ * Conservative by construction: an EMPTY/`true`/absent schema returns false (the
+ * bare-call gate stays armed), so the only leaves freed are those the builder
+ * explicitly typed as value producers. A `type` that is itself `"null"` is still
+ * a concrete value (never a Pattern), so it counts.
+ */
+function resultSchemaDeclaresValueType(schema: unknown): boolean {
+  if (schema === true) return false; // `true` = "any" — not a pinned value type.
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return false;
+  }
+  const s = schema as Record<string, unknown>;
+  if (typeof s.type === "string") return true;
+  if (Array.isArray(s.type) && s.type.length > 0) return true; // type union
+  if (Array.isArray(s.enum) && s.enum.length > 0) return true;
+  if (Object.prototype.hasOwnProperty.call(s, "const")) return true;
+  if (typeof s.$ref === "string") return true;
+  for (const key of ["anyOf", "allOf", "oneOf"] as const) {
+    const branch = s[key];
+    if (
+      Array.isArray(branch) && branch.length > 0 &&
+      branch.every((b) => resultSchemaDeclaresValueType(b))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * STRUCTURAL signal that a LIVE leaf body CAN return a Pattern / sub-computation /
  * Promise the interpreter cannot store — a `pattern(...)`/`lift(...)` factory
  * application, a cross-space/scope `.inSpace(...)`/`.asScope(...)` child
@@ -993,11 +1034,27 @@ const PURE_GLOBAL_CALLEES = new Set([
  *    how an ordinary value-lift legitimately produces a value, so they do NOT trip
  *    the bare-call gate; only a bare call to a closed-over factory/lift identifier
  *    does.
+ *
+ * PRECISION (the bare-call branch only): a bare call to a closed-over PURE HELPER
+ * (`(input) => summarizeSelection(input.a, input.b)`) is SYNTACTICALLY identical to
+ * a bare call to a closed-over PATTERN factory (`({value}) => childPattern({value})`)
+ * — no source signal distinguishes them. The DISCRIMINATOR is the leaf module's
+ * declared `resultSchema`: a pattern-returning lift has no statically-known value
+ * shape, so the builder leaves its schema EMPTY/absent/`true`, whereas a pure
+ * value-lift carries a concrete `type`/`enum`/`$ref`/`anyOf` schema. So when the
+ * caller passes a resultSchema that `resultSchemaDeclaresValueType` recognizes, the
+ * bare-call branch is SUPPRESSED (the leaf provably produces a value, not a Pattern)
+ * — freeing pure-helper lifts to interpret. The `.inSpace`/`.asScope`/`async`
+ * detectors stay UNCONDITIONAL: an async lift can declare a value resultSchema (the
+ * awaited type) yet still return a Promise, and a cross-space child is always a
+ * permanent fallback regardless of schema.
+ *
  * Conservative by construction: a false positive only causes an extra
  * (always-sound) legacy fallback, never a mis-eval.
  */
 function liveLeafCanInstantiatePattern(
   impl: (input: unknown) => unknown,
+  resultSchema?: unknown,
 ): boolean {
   let src: string;
   try {
@@ -1024,6 +1081,13 @@ function liveLeafCanInstantiatePattern(
   // (arrow `async (`/`async x =>` or `async function`), not as an identifier
   // substring. Sound: a false positive only adds a (correct) legacy fallback.
   if (/^async[\s(]/.test(src.trimStart())) return true;
+  // BARE-CALL branch (the over-broad one). A bare call to a closed-over factory
+  // is indistinguishable in source from a bare call to a closed-over pure helper,
+  // so we suppress this branch ONLY when the leaf's declared `resultSchema` pins a
+  // concrete VALUE type — proof the builder typed this leaf as a value producer,
+  // not a Pattern factory (a pattern-returning lift carries an EMPTY schema). An
+  // empty/absent/`true` schema keeps the branch armed (the conservative default).
+  if (resultSchemaDeclaresValueType(resultSchema)) return false;
   // Match a BARE-identifier call: an identifier not preceded by `.` or another
   // identifier char (so `a.b(` and `xb(` inside `foox(` do not match the `x`),
   // immediately followed by `(`. The `(?<![.\w$])` lookbehind excludes member
@@ -1146,7 +1210,10 @@ export function resolveLeafImpls(
     // false positive only adds a (correct) legacy fallback, never a mis-eval.
     if (
       liveLeafTrustCheck && typeof impl === "function" &&
-      (liveLeafCanInstantiatePattern(impl as (input: unknown) => unknown) ||
+      (liveLeafCanInstantiatePattern(
+        impl as (input: unknown) => unknown,
+        module?.resultSchema,
+      ) ||
         liveLeafNeedsBuilderContext(impl as (input: unknown) => unknown))
     ) {
       unresolvedLeafOps.push(op.id);
