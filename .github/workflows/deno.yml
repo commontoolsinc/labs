@@ -177,6 +177,41 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  # ---------------------------------------------------------------------------
+  # Reactive Interpreter completion dashboard (experimental, NON-BLOCKING)
+  #
+  # Runs the runner unit suite with CF_EXPERIMENTAL_INTERPRETER=1 so every
+  # Runtime the suite constructs routes eligible patterns through the Reactive
+  # Interpreter. This is a TRACKER, not a gate: it MAY be red (red == the
+  # "drive to green" backlog). It is intentionally absent from every `needs:`
+  # list and from the perf-check/attest gates, so it can never block the
+  # existing jobs or deployments. Mirrors `runner-test`'s setup (Deno version,
+  # caching, ENV=test, permissions) so the only difference is the flag.
+  # ---------------------------------------------------------------------------
+  reactive-interpreter-experimental:
+    name: "Reactive Interpreter (experimental ON)"
+    runs-on: ubuntu-latest
+    # Tracker only — never block the PR/merge on this job's result.
+    continue-on-error: true
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🧪 Run runner tests (interpreter ON)
+        working-directory: packages/runner
+        env:
+          CF_EXPERIMENTAL_INTERPRETER: "1"
+        run: deno task test
+
   build-binaries:
     name: "Build Binaries"
     runs-on:
