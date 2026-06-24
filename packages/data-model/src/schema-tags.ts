@@ -9,11 +9,18 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 
-const HASHTAG_PATTERN = /#([a-z0-9-]+)/gi;
+// A hashtag is `#` followed by a run of Unicode letters, combining marks,
+// numbers, and underscores. This matches the convention shared across social
+// platforms: letters from any script are accepted (Latin with diacritics, CJK,
+// Cyrillic, Arabic, and so on), not just unaccented a-z. Any other character,
+// including a hyphen, whitespace, or the end of the text, terminates the tag.
+const HASHTAG_PATTERN = /#([\p{L}\p{M}\p{N}_]+)/gu;
 
 /**
- * Extract hashtag tokens from free text. Returns the tokens lowercased,
- * without the leading `#`, deduplicated, in order of first appearance.
+ * Extract hashtag tokens from free text. A token starts at `#` and runs through
+ * Unicode letters, combining marks, numbers, and underscores; a hyphen, space,
+ * or other punctuation ends it. Returns the tokens lowercased, without the
+ * leading `#`, deduplicated, in order of first appearance.
  */
 export function extractHashtags(text: string): string[] {
   const tags: string[] = [];

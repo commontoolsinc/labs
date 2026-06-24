@@ -20,7 +20,7 @@
  * ```
  *
  * AGGREGATOR DISCOVERY:
- * This pattern auto-discovers the aggregator using wish("#folksonomy-aggregator").
+ * This pattern auto-discovers the aggregator using wish("#folksonomyAggregator").
  * Deploy and favorite the folksonomy-aggregator charm for community features.
  * Without the aggregator, falls back to local-only mode.
  *
@@ -285,7 +285,7 @@ export const FolksonomyTags = pattern<
     // Use injected aggregator if provided, otherwise discover via wish()
     // Search both favorites (~) and current space mentionables (.)
     const aggregatorWish = wish<AggregatorCharm>({
-      query: "#folksonomy-aggregator",
+      query: "#folksonomyAggregator",
       scope: ["~", "."],
     });
 

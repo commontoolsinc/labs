@@ -2811,7 +2811,7 @@ describe("wish built-in", () => {
         avatar: "",
         elements: [{
           cell: profileCard,
-          tag: "#profile-card",
+          tag: "#profileCard",
           userTags: ["person"],
           title: "Profile Card",
         }],
@@ -2837,7 +2837,7 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => ({
         byUserTag: wish({ query: "#person", scope: ["profile"] }),
-        byTag: wish({ query: "#profile-card", scope: ["profile"] }),
+        byTag: wish({ query: "#profileCard", scope: ["profile"] }),
       }));
 
       const resultCell = runtime.getCell<Record<string, any>>(
@@ -3445,10 +3445,19 @@ describe("tagMatchesHashtag", () => {
     expect(tagMatchesHashtag("#pattern for dinner", "pattern")).toBe(true);
   });
 
-  it("matches hashtag portion before special characters", () => {
-    // The hashtag #todo_list is parsed as #todo (underscore ends the hashtag)
-    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(true);
-    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(false);
+  it("includes underscores in the hashtag", () => {
+    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(true);
+    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(false);
+  });
+
+  it("ends the hashtag at a hyphen", () => {
+    expect(tagMatchesHashtag("#todo-list", "todo")).toBe(true);
+    expect(tagMatchesHashtag("#todo-list", "todo-list")).toBe(false);
+  });
+
+  it("matches hashtags written in non-Latin scripts", () => {
+    expect(tagMatchesHashtag("一篇 #日本語 笔记", "日本語")).toBe(true);
+    expect(tagMatchesHashtag("café au #café", "café")).toBe(true);
   });
 });
 

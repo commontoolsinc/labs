@@ -1,4 +1,4 @@
-/** A #note the user took, discoverable via #quick-capture. */
+/** A #note the user took, discoverable via #quickCapture. */
 interface SchemaRoot {
   /** The note body. */
   content: string;

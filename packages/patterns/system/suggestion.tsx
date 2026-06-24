@@ -121,7 +121,7 @@ export default pattern<
   const suggestionHistory = SuggestionHistory({});
 
   const patternIndexUrl = wish<{ url: Writable<string> }>({
-    query: "#pattern-index",
+    query: "#patternIndex",
   });
   const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
   computed(() => {

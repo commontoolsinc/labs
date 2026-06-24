@@ -293,7 +293,7 @@ const mutateElements = handler<
         ),
         source: "catalog",
         title: "Profile card",
-        tag: "profile-card",
+        tag: "#profileCard",
         userTags,
       }, state.elements);
       return;

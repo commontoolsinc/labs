@@ -4,8 +4,8 @@
  * This charm collects tag usage events from folksonomy-tags instances and
  * computes community suggestions ranked by usage count (preferential attachment).
  *
- * SETUP: After deploying, FAVORITE this charm with tag "folksonomy-aggregator"
- * so that folksonomy-tags instances can discover it via wish("#folksonomy-aggregator").
+ * SETUP: After deploying, FAVORITE this charm with tag "folksonomyAggregator"
+ * so that folksonomy-tags instances can discover it via wish("#folksonomyAggregator").
  *
  * HOW IT WORKS:
  * 1. folksonomy-tags instances post events via the postEvent stream
@@ -57,9 +57,9 @@ interface Input {
 }
 
 /**
- * A #folksonomy-aggregator that collects tag usage events and serves community suggestions.
+ * A #folksonomyAggregator that collects tag usage events and serves community suggestions.
  *
- * The #folksonomy-aggregator tag is how folksonomy-tags instances discover this charm via wish().
+ * The #folksonomyAggregator tag is how folksonomy-tags instances discover this charm via wish().
  */
 export interface Output {
   events: TagEvent[];
@@ -172,7 +172,7 @@ export default pattern<Input, Output>(({ events }) => {
           <h2 style={{ margin: 0 }}>🏷️ Folksonomy Aggregator</h2>
           <p style={{ color: "#666", margin: 0, fontSize: "14px" }}>
             Community tag telemetry collector. Favorite this charm with tag
-            "folksonomy-aggregator" for discovery.
+            "folksonomyAggregator" for discovery.
           </p>
         </cf-vstack>
 
