@@ -66,7 +66,7 @@ Commit: `feat(runner): event-id minting helper (scheduler-v2 E0)`
 1. `src/scheduler/types.ts`: find `QueuedEvent`. Add fields:
 
    ```typescript
-   // Shown as JSX element children.
+   // Shown as interface or class members.
    /** Durable event id minted at send (spec §7.5). */
    readonly id: string;
    /** The transaction whose handler sent this event, when transactional. */
@@ -148,7 +148,7 @@ File: `src/storage/interface.ts`.
    scheduler-facing members, with doc comments):
 
    ```typescript
-   // Shown as JSX element children.
+   // Shown as interface or class members.
    /**
     * The durable id of the event whose dispatch opened this transaction
     * (spec §7.5). Set by the scheduler's event dispatch; consumed by the

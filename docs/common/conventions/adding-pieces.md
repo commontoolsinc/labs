@@ -97,7 +97,7 @@ wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" });
 Instead, wish only for the `addPiece` stream:
 
 ```tsx
-// Shown inside a pattern body.
+// Shown at module scope.
 // GOOD — depends on the handler contract, not internal state
 wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",

@@ -77,7 +77,7 @@ declared writes. This keeps the dependency graph precise while still
 handling no-op runs and declared outputs:
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 // Sometimes writes A, sometimes B
 if (condition) cellA.set(x);
 else cellB.set(x);
@@ -154,7 +154,7 @@ actions is O(1) per changed cell before path-overlap filtering.
 Before an action runs for the first time, the scheduler discovers its dependencies:
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 // Scheduler calls the action's populateDependencies callback
 const tx = runtime.edit();
 populateDependencies(tx);  // Action reads cells it will access
@@ -202,7 +202,7 @@ pending.
 Actions are sorted so dependencies run before dependents:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 function topologicalSort(
   actions,
   dependencies,
@@ -253,7 +253,7 @@ for (const action of sortedOrder) {
 Dependencies can change at runtime. The classic example is `ifElse`:
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 const result = ifElse(condition, branchA, branchB);
 ```
 
@@ -844,7 +844,7 @@ violations.
 Delays execution until triggers stop arriving:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.setDebounce(action, 100);  // Wait 100ms after last trigger
 ```
 
@@ -861,7 +861,7 @@ out with `{ noDebounce: true }` in subscription options.
 Limits execution frequency:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.setThrottle(action, 1000);  // Max once per second
 ```
 
@@ -947,7 +947,7 @@ modules under `packages/runner/src/scheduler/`, including:
 ## Constants
 
 ```typescript
-// Shown as JSX element children.
+// Shown as interface or class members.
 MAX_ITERATIONS_PER_RUN = 100       // Max runs per action per execute cycle
 MAX_SETTLE_STATS_HISTORY = 20      // Max settle stats entries retained
 MAX_TRIGGER_TRACE_HISTORY = 400    // Max trigger trace entries retained
@@ -1101,7 +1101,7 @@ scheduler.addEventHandler(
 ### Console and Error Hooks
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.onConsole(fn: ConsoleHandler): void
 scheduler.onError(fn: ErrorHandler): void
 ```
@@ -1109,7 +1109,7 @@ scheduler.onError(fn: ErrorHandler): void
 ### Timing Controls
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.setDebounce(action, ms)
 scheduler.getDebounce(action)
 scheduler.clearDebounce(action)
@@ -1123,7 +1123,7 @@ scheduler.clearThrottle(action)
 ### Breakpoints and Basic Queries
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.setBreakpoints(actionIds)
 scheduler.getBreakpoints()
 scheduler.hasBreakpoint(actionId)
@@ -1142,7 +1142,7 @@ scheduler.resetFilterStats()
 ### Graph and Trace Diagnostics
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.getGraphSnapshot()
 
 scheduler.enableSettleStats()
@@ -1163,7 +1163,7 @@ scheduler.isEventPreflightTelemetryEnabled()
 ### Non-Settling and Idempotency Diagnosis
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.isNonSettling()
 scheduler.setAutoTriggerDiagnosis(enabled)
 scheduler.runDiagnosis(durationMs)
@@ -1177,7 +1177,7 @@ scheduler.runIdempotencyCheck()
 ### Lifecycle
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.dispose()
 ```
 
@@ -1187,7 +1187,7 @@ These are public on the class for runtime integration, but are not general
 pattern APIs:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 scheduler.runningPromise
 scheduler.withExecutingAction(action, fn)
 ```
@@ -1197,7 +1197,7 @@ scheduler.withExecutingAction(action, fn)
 The scheduler module also re-exports:
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 txToReactivityLog
 allowMutableTransactionRead
 ignoreReadForScheduling

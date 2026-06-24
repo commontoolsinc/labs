@@ -996,7 +996,7 @@ identity-by-text lookups later stages rely on.
 After visiting the whole file, the stage appends **one** trailing call:
 
 ```ts
-// Shown inside a pattern body.
+// Shown at module scope.
 __cfReg({ __cfLift_1, __cfPattern_1, __cfHandler_1, /* … */ });
 ```
 

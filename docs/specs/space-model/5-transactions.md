@@ -29,7 +29,7 @@ to cells require a transaction context.
 Within a transaction, reads reflect pending writes:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 const tx = runtime.edit();
 cell.withTx(tx).set(5);
 cell.withTx(tx).get();  // returns 5, even before commit

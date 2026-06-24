@@ -19,7 +19,7 @@ Verified with `cf check --show-transformed`: the authored ternary
 lowers to
 
 ```ts
-// Shown as JSX element children.
+// Shown for illustration only.
 __cfHelpers.ifElse(/* schemas */, selectedItem, selectedItem.key("label"), "Nothing selected")
 ```
 

@@ -140,7 +140,7 @@ handlers that launch nothing.
      create-only:
 
      ```typescript
-     // Shown as JSX element children.
+     // Shown inside a pattern body.
      // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
      // launched, but the result cell is still created — its create is the
      // exactly-once witness for this event id.

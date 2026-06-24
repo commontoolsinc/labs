@@ -154,7 +154,7 @@ These might be the **same person** in two different contexts. But this is unusua
 **Simple solution:** Add a `sameAs` field when needed:
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 // When you discover two records are the same person
 contractor.sameAs = friendJohn;  // Simple reference
 ```
@@ -845,7 +845,7 @@ These might be the same person. What do you do?
 ### Simple Solution: `sameAs` Field
 
 ```typescript
-// Shown as JSX element children.
+// Shown inside a pattern body.
 // When you realize they're the same person, just link them
 contractor.sameAs = friend;
 

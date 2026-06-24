@@ -366,6 +366,13 @@ export function render(ctx: Context, rawBody: string, docDir: string): string {
       return `${pre}\nexport async function __snippet(): Promise<any> {\n${body}\n}\n`;
     }
     case "jsx":
+      // A `<>...</>` fragment treats any non-JSX content as plain text, so
+      // imperative code spliced here would "pass" without being checked. Require
+      // the block to actually contain JSX; otherwise fail so the wrong marker is
+      // caught and a real context (pattern/module/member) is used instead.
+      if (!hasJsx(src)) {
+        return `${pre}\nconst __this_block_has_no_jsx_use_another_marker: never = 0;\n`;
+      }
       return `${pre}\nexport const __snippet: any = (<>\n${src}\n</>);\n`;
     case "member":
       return looksLikeClassBody(src)

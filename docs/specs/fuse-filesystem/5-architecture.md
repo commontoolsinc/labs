@@ -109,7 +109,7 @@ complex and only worth pursuing if single-threaded mode proves too slow.
 The FFI layer needs to bind a relatively small subset of libfuse:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // Core session lifecycle
 fuse_session_new(args, ops, ops_size, userdata): FuseSession
 fuse_session_mount(session, mountpoint): number

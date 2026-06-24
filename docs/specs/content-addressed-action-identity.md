@@ -198,7 +198,7 @@ product); what dies is the *symbol-on-object identity-carry*. The replacement
 is one explicit call at each copy site:
 
 ```ts
-// Shown as JSX element children.
+// Shown as interface or class members.
 // pattern-manager (or a small trust module):
 noteDerivedCopy(copy: object, original: object): void
 //  - if isTrustedBuilderArtifact(original): brand `copy` as derived-trusted

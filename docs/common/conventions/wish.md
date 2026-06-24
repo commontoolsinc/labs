@@ -109,7 +109,7 @@ recency-ordered `mru`. The well-known wishes enumerate that list and resolve,
 ordered **default first, then by MRU**:
 
 ```tsx
-// Shown inside a pattern body.
+// Shown at module scope.
 wish({ query: "#profile" }) // the default profile (headless); see [UI] below
 wish({ query: "#profileName" }) // default profile's initialNameApplied
 wish({ query: "#profileAvatar" }) // default profile's avatar

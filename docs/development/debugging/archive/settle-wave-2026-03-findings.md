@@ -446,7 +446,7 @@ all root writes in the current space while creating a note from an already-open
 note page:
 
 ```js
-// Shown inside a pattern body.
+// Shown at module scope.
 await commonfabric.watchWrites({
   space: commonfabric.space,
   path: [],

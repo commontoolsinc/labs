@@ -20,7 +20,7 @@ the checker splices the block into the matching scaffold before running
 ```text
 // Shown at module scope.                 top level of a module
 // Shown inside a pattern body.           inside a function body
-// Shown as JSX element children.         inside a JSX fragment
+// Shown as JSX element children.         inside a JSX fragment (must contain JSX)
 // Shown as interface or class members.   inside an interface / class body
 // Shown as alternative snippets.         "wrong then right" variants, each in
 //                                        its own scope so a name can recur

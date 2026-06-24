@@ -754,7 +754,7 @@ The verified runtime path evaluates that bundle inside the pattern's
 Compartment:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 preflightCompiledBundle(compiledBundle);
 const entrypoint = patternCompartment.evaluate(compiledBundle);
 const result = entrypoint(runtimeDeps);
@@ -2073,7 +2073,7 @@ callback Compartment. Any missing lexical capture must therefore fail closed at
 runtime rather than silently preserving host state.
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // Before
 fn = this.runtime.harness.getInvocation(module.implementation);
 

@@ -117,7 +117,7 @@ The callback fires for each event.
 #### `pull()` — Read with Dependency Tracking
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 const value = await cell.pull();
 ```
 

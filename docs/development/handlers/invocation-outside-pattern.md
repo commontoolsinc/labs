@@ -29,7 +29,7 @@ const cell = pieceCell.asSchema({
 No transaction needed:
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 const handlerStream = cell.key("handlerName");
 handlerStream.send({ eventData });
 ```

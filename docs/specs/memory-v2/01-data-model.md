@@ -220,7 +220,7 @@ and leave any future metadata rules to explicit higher-layer writes.
 ### 2.3 Fact (union)
 
 ```typescript
-// Shown as JSX element children.
+// Shown at module scope.
 type Fact = Write | Delete;
 ```
 

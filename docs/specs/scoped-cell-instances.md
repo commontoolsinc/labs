@@ -614,7 +614,7 @@ link, following that stable output link resolves to data in the runtime scope.
 ### `navigateTo` Is Session State
 
 ```ts
-// Shown inside a pattern body.
+// Shown at module scope.
 navigateTo(piece);
 ```
 

@@ -21,7 +21,7 @@ options object. If you already have a full trigger-trace entity id such as
 `of:baedrei...`, pass it as `id`.
 
 ```javascript
-// Shown inside a pattern body.
+// Shown at module scope.
 // Read the full output of the current piece
 await commonfabric.readCell()
 
@@ -563,7 +563,7 @@ trace.slice(-5)
 To watch one specific changed cell from trigger trace:
 
 ```javascript
-// Shown inside a pattern body.
+// Shown at module scope.
 await commonfabric.watchWrites({
   space: "did:key:z6Mkm...",
   id: "of:baedrei...",

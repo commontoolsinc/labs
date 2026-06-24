@@ -776,7 +776,7 @@ union. It extends `FabricSpecialObject`.
   `FabricBytes`, `FabricRegExp`).
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // file: packages/data-model/interface.ts
 
 /**
@@ -2390,7 +2390,7 @@ The module also provides a shallow conversion function
 `fabric-value.ts`, which also defines the comparison function `valueEqual()`.
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**
@@ -2825,7 +2825,7 @@ There are two directions:
 ### 8.2 `shallowFabricFromNativeValue()` and `fabricFromNativeValue()`
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**
@@ -2991,7 +2991,7 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
 ### 8.3 `isFabricCompatible()`
 
 ```typescript
-// Shown as JSX element children.
+// Shown for illustration only.
 // file: packages/data-model/native-conversion.ts
 
 /**

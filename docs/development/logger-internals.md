@@ -84,7 +84,7 @@ By default, a debug-level summary is emitted every 100 calls:
 Configure or disable with `logCountEvery`:
 
 ```typescript
-// Shown inside a pattern body.
+// Shown at module scope.
 getLogger("chatty", { logCountEvery: 50 });  // every 50 calls
 getLogger("quiet", { logCountEvery: 0 });    // disable summaries
 ```
@@ -133,7 +133,7 @@ Flags track named boolean state per ID, with optional metadata. They're used
 to surface runtime conditions like "this action has invalid input":
 
 ```typescript
-// Shown inside a pattern body.
+// Shown at module scope.
 // Set a flag with metadata
 logger.flag("action invalid input", "action:myModule", true, {
   schema: { type: "object" },
