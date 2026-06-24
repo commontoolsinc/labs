@@ -167,8 +167,28 @@ calls) directly as ROG **operator ops** the meta-node evaluates natively; explic
   (fail-closed, growable).
 - **Composition:** 07 (coalescing) un-traps the pure regions; 08 (this) lets those
   regions run without SES. Together = the interpreter genuinely covering real
-  loaded patterns. Status: design landed; coverage prototype + adversarial review
-  next (OQ-E1..E5 in 08-*.md).
+  loaded patterns.
+- **Scope WIDENED (user-decided 2026-06-24, post-prototype):** interpret any
+  **single-expression compute body (auto OR explicit `computed(()=>expr)`)** — the
+  auto-vs-explicit split is a coding-style artifact; the real line is
+  "single-expression-in-subset vs has-statements." Coverage: §08-as-first-scoped
+  (auto only) = **31.6%** off-SES; widening to single-expression computes ≈
+  **70%** (45/80 explicit computes are single-expression). Multi-statement compute
+  bodies stay opaque leaves.
+- **Sequencing (corrected):** **v1 = the FULL expression-operator subset**
+  (bounded, JS-spec-specifiable: binary/unary/logical/ternary + access/construct
+  reuse) — NOT access+ternary-first. The win requires the operators. access (43%)
+  + ternary (32%) reuse existing `access`/`control` ops (free, no fidelity risk);
+  the `expr` operator ops (~15%) are part of v1, oracle-gated. The only deferred
+  tail is the **unbounded** part — method calls (`.slice`/`.join`/…, 38 in corpus).
+- Review = **GO-WITH-FIXES** (08-*.md §9.3): E-1 `&&`/`||` must return the resolved
+  operand (single `pred` ref), not a boolean; E-2 the emitter dispatch is NOT
+  fail-closed by construction → an explicit `SUPPORTED_EXPR_OPERATORS` allow-list
+  ⊆ oracle-verified, red-tested before any emitter; E-3 unary baseline corrected
+  (only `!` has an emitter; exclude `typeof` v1); E-4 keep the CFC label-join over
+  the static operand set under short-circuit; E-5 `expr` ops need `outSchema` from
+  the type checker. Highest-risk pre-build = E-1 + E-2 as invariants. Status:
+  design + prototype + review done; ready for the implementation track.
 
 ## D-COALESCE — interpreter = pure-region coalescing pass; all-or-nothing eligibility superseded (2026-06-24)
 

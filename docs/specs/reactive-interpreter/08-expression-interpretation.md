@@ -51,8 +51,21 @@ the runtime, where it's erased.
 **Replace the pattern-owned expression-site lowering with one that emits the
 expression subset directly as ROG operator ops the meta-node evaluates natively,
 falling back to a lift-applied leaf only for forms it does not (yet) support.**
-Leave **explicit** `computed()`/`lift()`/`derive()` alone (their bodies can be
-arbitrary JS — statements, loops — and stay opaque leaves).
+
+**Scope (decided 2026-06-24, revised by the §9.1 coverage data):** the
+interpret-vs-black-box line is **"is the compute body a *single expression in the
+supported subset*?"**, **not** "was it auto-generated?". A single-expression
+**explicit** `computed(() => a + b)` is the identical shape to an auto-wrapped
+`a + b` and is interpreted the same way; only compute bodies with **statements**
+(loops, `let`, multiple statements) stay opaque leaves. (The auto-vs-explicit
+distinction is a coding-style artifact and is erased post-transform anyway — §1.)
+
+**v1 = the full expression-OPERATOR subset** (a fixed, fully JS-spec-specifiable
+set: binary / unary / logical / ternary, plus the existing `access` + `construct`
+reuse), each implemented and **oracle-verified**, behind the fail-closed
+allow-list (§9.3 E-2). The only genuinely *incremental* tail is the **unbounded**
+part — method/function calls (`.slice`/`.toFixed`/…), infinitely many — which stay
+leaf-fallback and grow over time (§9.2).
 
 Concretely, in `rewriteExpression` (`expression-rewrite/rewrite-expression.ts:214`)
 and its emitters, for a pattern-owned site whose expression is in the **expression
@@ -90,15 +103,15 @@ that fallback.
   `pattern-context-validation.ts:453` — a pattern body is "a single terminal
   return, no loops/let/var/reassignment"). So lowering them to operator ops is
   safe — there is no statement-level JS to miss.
-- **Explicit `computed(fn)`/`lift(fn)` bodies** can contain arbitrary JS, so they
-  stay **opaque leaves**. (Note: inside an explicit compute, `&&`/`||` already
-  stay native JS — `shouldLowerLogicalExpression` only lowers them in
-  `contextKind === "pattern"`, `rewrite-policy.ts:35`. So "emit `&&`/`||` as
-  expression ops" is *already* the behavior inside computes; this change extends
-  the **graph** treatment to pattern-owned sites.)
+- **Single-expression `computed(() => expr)`/`lift(() => expr)` bodies** are
+  *also* provably in the expression subset (one expression, no statements), so
+  they are **interpreted too** (the §9.1 decision) — they are
+  morally-auto-sites.
+- **Multi-statement compute bodies** (`computed(() => { … })` with `let`, loops,
+  multiple statements) can contain arbitrary JS, so they stay **opaque leaves**.
 
 This is the clean line: **interpret what is provably an expression (the pattern
-body); black-box what may be arbitrary JS (explicit compute bodies).**
+body, and any single-expression compute body); black-box what has statements.**
 
 ### 2.2 What it does to the control ops
 
@@ -227,18 +240,23 @@ bodies. (Scope decision for the coordinator.)
 ### 9.2 Priority — access + ternary dominate, and both reuse EXISTING ops
 
 By share of A: **access 43% · ternary 32% (cumulative 76%)** · call 14% · binary
-**5%** · logical 5% · unary 0%. Two consequences:
+**5%** · logical 5% · unary 0%. This is a *coverage* observation, not a sequencing
+plan:
 
-- The arithmetic operators (`+ - * /`) are a **thin 5% tail** in real patterns; the
-  bulk is **member access + ternary**.
-- Both high-coverage forms map to **existing interpreter ops** (`access`,
-  `control`) — *no new semantics, no semantic-fidelity risk*. So the
-  **high-coverage, low-risk v1 is "stop wrapping access/ternary expression sites
-  in lift leaves; emit them as the `access`/`control` ops they already are."** The
-  new `expr` operator ops (arithmetic/logical/unary — where the §4 fidelity risk
-  lives) are a small, incremental, oracle-gated tail.
-- Next growth target after v1: **method calls** (`.slice`/`.join`/`.toFixed` — 38
-  occurrences, the dominant out-of-subset fallback leaf).
+- **v1 is the full expression-OPERATOR subset** — the operators are a fixed,
+  fully JS-spec-specifiable set, so implement and oracle-verify all of them
+  (binary/unary/logical/ternary + `access`/`construct` reuse). The serialized-
+  boundary win *requires* the operators (access+ternary alone don't get arithmetic
+  computeds off SES), so there is no reason to defer them.
+- **access (43%) + ternary (32%) reuse EXISTING ops** (`access`, `control`) — no
+  new semantics, no fidelity risk — so they are the free, zero-risk *majority* of
+  the win; the new `expr` operator ops (arithmetic/logical/unary, ~15%) carry the
+  §4 fidelity work but are still part of v1, each gated by the oracle + the E-2
+  allow-list (so a half-done operator degrades to a leaf, never a wrong op).
+- **The only genuinely incremental/deferred tail is the UNBOUNDED part — method
+  calls** (`.slice`/`.join`/`.toFixed` — 38 occurrences, the dominant
+  out-of-subset fallback leaf). Infinitely many methods → leaf-fallback for the
+  unsupported, support common ones over time.
 
 ### 9.3 Design punch-list (GO-WITH-FIXES; resolve before building)
 
