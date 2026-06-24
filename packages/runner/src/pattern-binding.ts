@@ -1,6 +1,9 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
@@ -19,6 +22,7 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   Cell,
@@ -267,10 +271,22 @@ export function sendValueToBinding<T>(
         valueLink !== undefined &&
         !areNormalizedLinksSame(valueLink, bindingLink)
       ) {
-        tx.writeValueOrThrow(
-          bindingLink,
-          createSigilLinkFromParsedLink(valueLink) as FabricValue,
-        );
+        const newValue = createSigilLinkFromParsedLink(
+          valueLink,
+        ) as FabricValue;
+        // Skip the write when the redirect already holds this exact link. Raw
+        // builtins (ifElse/when/unless/map/...) re-run and re-send their result
+        // whenever their inputs change, but the output binding points at a
+        // cause-stable result cell, so the link is usually unchanged. The read
+        // is an internal write-elision decision: kept out of scheduling
+        // (`ignoreReadForScheduling`) and CFC taint (`internalVerifierRead`),
+        // and compared with the `Fabric`-aware `valueEqual`.
+        const current = tx.readValueOrThrow(bindingLink, {
+          meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        });
+        if (!valueEqual(current, newValue)) {
+          tx.writeValueOrThrow(bindingLink, newValue);
+        }
         return;
       }
     }

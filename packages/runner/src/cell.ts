@@ -10,6 +10,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
@@ -368,8 +369,13 @@ declare module "@commonfabric/api" {
      * storage layer but does not conform to the cell's schema type.
      *
      * Prefer `setRaw()` when the value matches `T`.
+     *
+     * When `onlyIfDifferent` is `true`, the current raw value is read first and
+     * the write is skipped entirely if it deep-equals the value that would be
+     * written. The read is marked `ignoreReadForScheduling`, so it does not
+     * register a dependency that could re-trigger the writing computation.
      */
-    setRawUntyped(value: FabricValue): void;
+    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -1793,12 +1799,33 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue): void {
+  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
+
+    const inlined = findAndInlineDataURILinks(value);
+
+    // When asked to write only on change, read the current raw value and bail
+    // out if it already equals what we'd write. `readValueOrThrow` mirrors the
+    // `writeValueOrThrow` below (same transaction and address, no link
+    // resolution). The read is purely an internal write-elision decision, so it
+    // is marked `ignoreReadForScheduling` (it must not register a
+    // self-dependency that would re-trigger the writer) and
+    // `internalVerifierRead` (it must not taint the transaction's CFC labels
+    // with this cell's own value). Comparison uses `valueEqual`, the
+    // `Fabric`-aware content equality the storage no-op gates rely on:
+    // `deepEqual` walks enumerable own-props and so conflates distinct
+    // same-class `FabricSpecialObject`s (e.g. `FabricBytes`/`FabricHash`),
+    // which would drop a real change.
+    if (onlyIfDifferent) {
+      const current = this.tx.readValueOrThrow(this.link, {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      });
+      if (valueEqual(current, inlined)) return;
+    }
 
     // Raw writes bypass diff-based attempted-target capture. Same-value direct
     // writes through this internal path are therefore outside phase-1 CFC
@@ -1808,7 +1835,7 @@ export class CellImpl<T extends FabricValue>
       this.link,
       this.link.schema ?? this.schema,
     );
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
+    this.tx.writeValueOrThrow(this.link, inlined);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {

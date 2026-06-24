@@ -325,4 +325,117 @@ describe("Pattern Runner - ifElse", () => {
       ]),
     );
   });
+
+  it(
+    "only writes the branch reference once when re-triggered with the " +
+      "same value",
+    async () => {
+      // Record every reactive link-write, grouped by trigger phase, by
+      // instrumenting the transactions the scheduler creates via
+      // `runtime.edit()`. For each write we capture both the doc written and, for
+      // link writes, the doc the link points at.
+      const linkTarget = (value: unknown): string | undefined => {
+        if (!value || typeof value !== "object") return undefined;
+        const sigil = (value as Record<string, unknown>)["/"];
+        if (!sigil || typeof sigil !== "object") return undefined;
+        const inner = Object.values(sigil as Record<string, unknown>)[0] as
+          | { id?: string }
+          | undefined;
+        return inner?.id;
+      };
+      const writesByPhase: Record<
+        string,
+        Array<{ id: string; target?: string }>
+      > = {};
+      let phase = "init";
+      const origEdit = runtime.edit.bind(runtime);
+      (runtime as unknown as { edit: typeof origEdit }).edit =
+        ((opts?: any) => {
+          const t = origEdit(opts);
+          const origWrite = t.writeValueOrThrow.bind(t);
+          (t as unknown as { writeValueOrThrow: typeof origWrite })
+            .writeValueOrThrow = ((address: any, value: any, options?: any) => {
+              (writesByPhase[phase] ??= []).push({
+                id: String(address.id),
+                target: linkTarget(value),
+              });
+              return origWrite(address, value, options);
+            }) as typeof origWrite;
+          return t;
+        }) as typeof origEdit;
+
+      // `n` is a truthy number rather than a boolean: changing it from 1 to 2
+      // re-triggers ifElse while still selecting the same (`ifTrue`) branch. The
+      // branches are stable input cells (not inline literals, which would be
+      // re-materialized with new ids when `n` changes), so the branch reference
+      // ifElse would write is identical to what is already stored.
+      const ifElsePattern = pattern<{ n: number; a: string; b: string }>(
+        ({ n, a, b }) => ({
+          n,
+          a,
+          b,
+          text: ifElse(n, a, b),
+        }),
+      );
+
+      const pieceCell = runtime.getCell<
+        { n: number; a: string; b: string; text: string }
+      >(
+        space,
+        "ifElse only writes once for same value",
+        ifElsePattern.resultSchema,
+        tx,
+      );
+      const piece = runtime.run(
+        tx,
+        ifElsePattern,
+        { n: 1, a: "A", b: "B" },
+        pieceCell,
+      );
+      tx.commit();
+
+      phase = "first";
+      await piece.pull();
+      expect(piece.key("text").get()).toEqual("A");
+
+      // On each run the ifElse action makes two link-writes:
+      //  - its result doc, holding a redirect to the selected branch input, and
+      //  - the output binding, holding a redirect to that result doc.
+      // The result doc is therefore the link-write whose target is NOT itself a
+      // link-write doc; the binding is the one that targets the result doc.
+      const firstWrites = writesByPhase["first"] ?? [];
+      const writtenIds = new Set(firstWrites.map((w) => w.id));
+      const resultDocs = firstWrites
+        .filter((w) => w.target !== undefined && !writtenIds.has(w.target))
+        .map((w) => w.id);
+      expect(resultDocs.length).toEqual(1);
+      const ifElseResultId = resultDocs[0];
+      const bindingDocs = firstWrites
+        .filter((w) => w.target === ifElseResultId)
+        .map((w) => w.id);
+      expect(bindingDocs.length).toEqual(1);
+      const bindingId = bindingDocs[0];
+      // Each was written exactly once on the first trigger.
+      expect(firstWrites.filter((w) => w.id === ifElseResultId).length)
+        .toEqual(1);
+      expect(firstWrites.filter((w) => w.id === bindingId).length).toEqual(1);
+
+      // Re-trigger with a different-but-still-truthy condition. ifElse re-runs and
+      // selects the same branch, so neither reference it would write changes.
+      phase = "second";
+      tx = runtime.edit();
+      piece.withTx(tx).key("n").set(2);
+      tx.commit();
+      await piece.pull();
+      expect(piece.key("text").get()).toEqual("A");
+
+      // The selection is unchanged, so the re-run must rewrite neither the
+      // result doc (`setRawUntyped` onlyIfDifferent) nor the output binding
+      // (`sendValueToBinding` no-op).
+      const secondWrites = writesByPhase["second"] ?? [];
+      expect(secondWrites.filter((w) => w.id === ifElseResultId).length)
+        .toEqual(0);
+      expect(secondWrites.filter((w) => w.id === bindingId).length).toEqual(0);
+    },
+  );
 });
