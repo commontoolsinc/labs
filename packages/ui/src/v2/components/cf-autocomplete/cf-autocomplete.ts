@@ -53,12 +53,12 @@ export interface AutocompleteItem {
    * Use `Cell.equals()` for comparisons - it handles both Cells and links.
    *
    * @example
-   * // In pattern - pass charm reference
-   * items={charms.map(c => ({ value: c[NAME], data: c }))}
+   * // In pattern - pass piece reference
+   * items={pieces.map(c => ({ value: c[NAME], data: c }))}
    *
    * // In handler - compare with Cell.equals()
-   * const { data: charm } = event.detail;
-   * const isDuplicate = members.some(m => Cell.equals(m.charm, charm));
+   * const { data: piece } = event.detail;
+   * const isDuplicate = members.some(m => Cell.equals(m.piece, piece));
    */
   data?: unknown;
 }

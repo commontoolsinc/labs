@@ -28,7 +28,7 @@ const envSchema = z.object({
   //MAX_CONSECUTIVE_FAILURES: z.coerce.number().positive().default(5),
 
   // Timeouts (in milliseconds)
-  //CHARM_EXECUTION_TIMEOUT_MS: z.coerce.number().positive().default(30_000),
+  //PIECE_EXECUTION_TIMEOUT_MS: z.coerce.number().positive().default(30_000),
 
   // Identity
   OPERATOR_PASS: z.string().default("implicit trust"),
@@ -45,7 +45,7 @@ const envSchema = z.object({
   // other boolean env vars in this file have the same latent bug.
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
-  // Background Charm Service: default is public space "toolshed-system"
+  // Background Piece Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
   //),
@@ -53,11 +53,13 @@ const envSchema = z.object({
 
 export type EnvVars = z.infer<typeof envSchema>;
 
-function loadEnv(): EnvVars {
+export function loadEnv(
+  source: (key: string) => string | undefined = (key) => Deno.env.get(key),
+): EnvVars {
   const rawEnv: Record<string, string | undefined> = {};
 
   for (const key of Object.keys(envSchema.shape)) {
-    rawEnv[key] = Deno.env.get(key);
+    rawEnv[key] = source(key);
   }
 
   return envSchema.parse(rawEnv);

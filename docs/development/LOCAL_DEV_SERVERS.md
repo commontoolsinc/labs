@@ -13,7 +13,7 @@
 ./scripts/restart-local-dev.sh --force       # Force kill first
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
-./scripts/restart-local-dev.sh --bg-updater  # Also start background-charm-service
+./scripts/restart-local-dev.sh --bg-updater  # Also start background-piece-service
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
@@ -215,11 +215,7 @@ When editing `cf-*` components in `packages/ui/`, restart the local dev server t
 
 ## Background Piece Service (Optional)
 
-> **Note:** This package is still named `background-charm-service` in the
-> codebase. "Charm" is the legacy name for "piece"; they refer to the same
-> concept.
-
-The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
+The background-piece-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
 
 ### Quick Setup (Recommended)
 
@@ -231,7 +227,7 @@ Use the `--bg-updater` flag with the local dev scripts:
 ./scripts/restart-local-dev.sh --bg-updater
 ```
 
-This waits for toolshed to be healthy, then starts the background service. The service log is at `packages/background-charm-service/local-dev-bg.log`. The stop script will also clean up the background service process. The system space cell is auto-created when a piece is first registered (e.g., during Google OAuth).
+This waits for toolshed to be healthy, then starts the background service. The service log is at `packages/background-piece-service/local-dev-bg.log`. The stop script will also clean up the background service process. The system space cell is auto-created when a piece is first registered (e.g., during Google OAuth).
 
 ### Manual Setup
 
@@ -242,19 +238,19 @@ If you prefer manual control:
 ./scripts/restart-local-dev.sh
 
 # 2. Start the background service from source
-cd packages/background-charm-service
+cd packages/background-piece-service
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 ```
 
-> **Optional:** The `add-admin-charm` task deploys an admin dashboard piece
+> **Optional:** The `add-admin-piece` task deploys an admin dashboard piece
 > into the system space. It is **not** required for normal background-service
 > operation -- the system space cell is bootstrapped automatically by
-> `setBGCharm()` during the OAuth callback when a piece is first registered.
+> `setBGPiece()` during the OAuth callback when a piece is first registered.
 > Run it only if you want the admin dashboard:
 >
 > ```bash
-> cd packages/background-charm-service
-> OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
+> cd packages/background-piece-service
+> OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-piece
 > ```
 
 ### Registering a Piece for Background Updates
@@ -282,7 +278,7 @@ Or use the `<cf-updater>` component in your piece's UI.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `CompilerError: no exported member 'pattern'` | Binary version mismatch | Run `deno task build-binaries` |
-| `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-charm` |
+| `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-piece` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
-See `packages/background-charm-service/CLAUDE.md` for more details.
+See `packages/background-piece-service/CLAUDE.md` for more details.

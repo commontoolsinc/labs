@@ -17,10 +17,10 @@ const { result } = wish<T>(...);                     // (2) single-level destruc
 const { result: { allPieces } } = wish<T>(...);      // (3) nested destructure
 
 const x = wish<T>(...).result;                       // (4) one-line direct
-const x = wish<T>(...).result.allCharms;             // (5) one-line chained
-const { allCharms } = wish<T>(...).result;           // (6) one-line + destructure
-const { allCharms } = wish<T>(...).result!;          // (7) with non-null assertion
-const { allCharms } = (wish<T>(...) as U).result;    // (8) with cast
+const x = wish<T>(...).result.allPieces;             // (5) one-line chained
+const { allPieces } = wish<T>(...).result;           // (6) one-line + destructure
+const { allPieces } = wish<T>(...).result!;          // (7) with non-null assertion
+const { allPieces } = (wish<T>(...) as U).result;    // (8) with cast
 ```
 
 Shapes (4)–(8) are handled by a pre-pass (`rewriteInlineReactiveOriginChains`)

@@ -1,4 +1,4 @@
-import { BGCharmEntry } from "./schema.ts";
+import { BGPieceEntry } from "./schema.ts";
 import { Cell } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
@@ -105,8 +105,8 @@ export class WorkerController extends EventTarget {
     }
   }
 
-  async runCharm(
-    bg: Cell<BGCharmEntry>,
+  async runPiece(
+    bg: Cell<BGPieceEntry>,
   ): Promise<void> {
     if (this.state !== WorkerState.Ready) {
       throw new Error("Worker not ready.");
@@ -200,7 +200,10 @@ export class WorkerController extends EventTarget {
     }
 
     if (response.type === "ready") {
-      this.startInitialize().then(() => this.initializeDeferred.resolve());
+      this.startInitialize().then(
+        () => this.initializeDeferred.resolve(),
+        (error) => this.initializeDeferred.reject(error),
+      );
       return;
     }
     const pending = this.pending.get(response.msgId);

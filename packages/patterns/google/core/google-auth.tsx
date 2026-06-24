@@ -283,7 +283,7 @@ export interface Output {
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */
   refreshToken: Stream<Record<string, never>>;
-  /** Background updater for proactive token refresh via background-charm-service */
+  /** Background updater for proactive token refresh via background-piece-service */
   bgUpdater: Stream<Record<string, never>>;
 }
 

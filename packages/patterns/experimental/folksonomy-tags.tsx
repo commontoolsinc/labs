@@ -8,7 +8,7 @@
  * - Local-first autocomplete: Shows tags from user's space matching the same scope
  * - Community fallback: When no local matches, show dimmed suggestions from community
  * - Preferential attachment: Popular community tags sort first (most used -> least used)
- * - Telemetry: Posts add/use/remove events to community aggregator charm
+ * - Telemetry: Posts add/use/remove events to community aggregator piece
  *
  * USAGE:
  * ```tsx
@@ -21,7 +21,7 @@
  *
  * AGGREGATOR DISCOVERY:
  * This pattern auto-discovers the aggregator using wish("#folksonomyAggregator").
- * Deploy and favorite the folksonomy-aggregator charm for community features.
+ * Deploy and favorite the folksonomy-aggregator piece for community features.
  * Without the aggregator, falls back to local-only mode.
  *
  * NOTE: Due to a runtime bug where CustomEvent details aren't passed through
@@ -64,7 +64,7 @@ interface CommunityTagSuggestion {
  * Aggregator interface for type-safe wish().
  * Must match the Output interface of folksonomy-aggregator.tsx.
  */
-interface AggregatorCharm {
+interface AggregatorPiece {
   events: TagEvent[];
   postEvent: Stream<TagEvent>;
   suggestions: Record<string, CommunityTagSuggestion[]>;
@@ -76,7 +76,7 @@ interface FolksonomyTagsInput {
   /** User's tags for this scope - bidirectional binding */
   tags: Writable<string[] | Default<[]>>;
   /** Optional: Direct reference to aggregator (bypasses wish() discovery) */
-  aggregator?: AggregatorCharm;
+  aggregator?: AggregatorPiece;
 }
 
 export interface FolksonomyTagsOutput {
@@ -284,7 +284,7 @@ export const FolksonomyTags = pattern<
   ({ scope, tags, aggregator: injectedAggregator }) => {
     // Use injected aggregator if provided, otherwise discover via wish()
     // Search both favorites (~) and current space mentionables (.)
-    const aggregatorWish = wish<AggregatorCharm>({
+    const aggregatorWish = wish<AggregatorPiece>({
       query: "#folksonomyAggregator",
       scope: ["~", "."],
     });
@@ -308,7 +308,7 @@ export const FolksonomyTags = pattern<
     });
 
     // Build autocomplete items combining local and community.
-    // Local tags are just the current tags (same scope within same charm).
+    // Local tags are just the current tags (same scope within same piece).
     const autocompleteItems = buildAutocompleteItems({
       localTags: tags,
       communitySuggestions,

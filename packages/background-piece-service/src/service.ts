@@ -7,118 +7,129 @@ import {
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
-  type BGCharmEntry,
+  type BGPieceEntry,
 } from "./schema.ts";
-import { getBGCharms } from "./utils.ts";
+import { getBGPieces } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commonfabric/runner";
 
-export interface BackgroundCharmServiceOptions {
+type SpaceManagerLike = Pick<SpaceManager, "start" | "stop" | "watch">;
+
+export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
   runtime: Runtime;
   bgSpace?: MemorySpace;
   bgCause?: string;
   workerTimeoutMs?: number;
+  createSpaceManager?: (
+    options: ConstructorParameters<typeof SpaceManager>[0],
+  ) => SpaceManagerLike;
 }
 
-export class BackgroundCharmService {
-  private charmsCell: Cell<Cell<BGCharmEntry>[]> | null = null;
+export class BackgroundPieceService {
+  private piecesCell: Cell<Cell<BGPieceEntry>[]> | null = null;
   private isRunning = false;
-  private charmSchedulers: Map<string, SpaceManager> = new Map();
+  private pieceSchedulers: Map<string, SpaceManagerLike> = new Map();
   private identity: Identity;
   private toolshedUrl: string;
   private runtime: Runtime;
   private bgSpace: MemorySpace;
   private bgCause: string;
   private workerTimeoutMs?: number;
+  private createSpaceManager: (
+    options: ConstructorParameters<typeof SpaceManager>[0],
+  ) => SpaceManagerLike;
 
-  constructor(options: BackgroundCharmServiceOptions) {
+  constructor(options: BackgroundPieceServiceOptions) {
     this.identity = options.identity;
     this.toolshedUrl = options.toolshedUrl;
     this.runtime = options.runtime;
     this.bgSpace = options.bgSpace ?? BG_SYSTEM_SPACE_ID;
     this.bgCause = options.bgCause ?? BG_CELL_CAUSE;
     this.workerTimeoutMs = options.workerTimeoutMs;
+    this.createSpaceManager = options.createSpaceManager ??
+      ((managerOptions) => new SpaceManager(managerOptions));
   }
 
   async initialize() {
-    // Storage URL and signer are already configured in the Runtime
-    this.charmsCell = await getBGCharms({
-      bgSpace: this.bgSpace,
-      bgCause: this.bgCause,
-      runtime: this.runtime,
-    });
-    await this.charmsCell.sync();
-    await this.runtime.storageManager.synced();
-
     if (this.isRunning) {
       console.log("Service is already running");
       return;
     }
 
+    // Storage URL and signer are already configured in the Runtime
+    this.piecesCell = await getBGPieces({
+      bgSpace: this.bgSpace,
+      bgCause: this.bgCause,
+      runtime: this.runtime,
+    });
+    await this.piecesCell.sync();
+    await this.runtime.storageManager.synced();
+
     this.isRunning = true;
-    this.charmsCell.sink((cs) => this.ensureCharms(cs));
+    this.piecesCell.sink((cs) => this.ensurePieces(cs));
   }
 
   stop(): Promise<PromiseSettledResult<void>[]> {
-    // FIXME(ja): stop listening to the charms cell ?
+    // FIXME(ja): stop listening to the pieces cell ?
     if (!this.isRunning) {
       console.log("Service is not running");
       return Promise.resolve([]);
     }
 
-    const promises = Array.from(this.charmSchedulers.values()).map(
+    this.isRunning = false;
+    const promises = Array.from(this.pieceSchedulers.values()).map(
       (scheduler) => scheduler.stop(),
     );
     return Promise.allSettled(promises);
   }
 
-  // FIXME(ja): space managers should watch their own charms!
+  // FIXME(ja): space managers should watch their own pieces!
   // Note(ja): this assumes that sync won't return an empty
   // array / partial results!
-  private ensureCharms(charms: readonly Cell<BGCharmEntry>[]) {
+  private ensurePieces(pieces: readonly Cell<BGPieceEntry>[]) {
     if (!this.isRunning) {
-      console.log("ignoring charms update because service asked to stop");
+      console.log("ignoring pieces update because service asked to stop");
       return;
     }
 
-    // Charms that hit an e.g. Authorization Error are empty, and space
-    // is undefined -- filter out any of these charms before creating
+    // Pieces that hit an e.g. Authorization Error are empty, and space
+    // is undefined -- filter out any of these pieces before creating
     // a worker
-    const charmContents = charms.map((c) => c.get()).filter(Boolean);
-    const enabledCharms = charmContents.filter((c) => !c.disabledAt);
-    const dids = new Set(enabledCharms.map((c) => c.space));
+    const pieceContents = pieces.map((c) => c.get()).filter(Boolean);
+    const enabledPieces = pieceContents.filter((c) => !c.disabledAt);
+    const dids = new Set(enabledPieces.map((c) => c.space));
     console.log(`monitoring ${dids.size} spaces`);
 
     const [cancel, addCancel] = useCancelGroup();
 
     for (const did of dids) {
-      let scheduler = this.charmSchedulers.get(did);
+      let scheduler = this.pieceSchedulers.get(did);
       if (!scheduler) {
         // Should send a derived/non-top-level key
         // to each space once delegation is working.
-        scheduler = new SpaceManager({
+        scheduler = this.createSpaceManager({
           did,
           toolshedUrl: this.toolshedUrl,
           identity: this.identity,
           timeoutMs: this.workerTimeoutMs,
           experimental: this.runtime.experimental,
         });
-        this.charmSchedulers.set(did, scheduler);
+        this.pieceSchedulers.set(did, scheduler);
         scheduler.start();
       }
 
-      // we are only filtering charms because until the FIXME above is fixed
-      const didCharms = charms.filter((c) => c.get().space === did);
-      addCancel(scheduler.watch(didCharms));
+      // we are only filtering pieces because until the FIXME above is fixed
+      const didPieces = pieces.filter((c) => c.get()?.space === did);
+      addCancel(scheduler.watch(didPieces));
     }
 
-    const removedSpaces = new Set(this.charmSchedulers.keys()).difference(dids);
+    const removedSpaces = new Set(this.pieceSchedulers.keys()).difference(dids);
     for (const did of removedSpaces.values()) {
       // we are no longer monitoring this space
-      const scheduler = this.charmSchedulers.get(did);
-      this.charmSchedulers.delete(did);
+      const scheduler = this.pieceSchedulers.get(did);
+      this.pieceSchedulers.delete(did);
       // we can't await this in our callback, but we can at least catch and log errors
       scheduler?.stop().catch((e) =>
         console.error(`Error stopping scheduler: ${e}`)

@@ -71,7 +71,7 @@ const storePieceAndNavigate = lift(
 
 // Handler that creates a new piece instance and stores its reference.
 // 1. Creates a local isInitialized cell to track one-time execution
-// 2. Instantiates SimplePiece piece
+// 2. Instantiates the SimplePiece pattern
 // 3. Uses storePieceAndNavigate lift to save reference and navigate
 const createSimplePiece = handler<
   unknown,

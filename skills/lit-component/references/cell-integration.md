@@ -214,7 +214,7 @@ import { UI } from "@commonfabric/api";
 
 // In render()
 return html`
-  <cf-render .cell="${myCharmCell}"></cf-render>
+  <cf-render .cell="${myPieceCell}"></cf-render>
 `;
 ```
 

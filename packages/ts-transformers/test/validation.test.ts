@@ -3451,12 +3451,12 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
       const source = `
         import { pattern, wish } from "commonfabric";
 
-        type ResultShape = { allCharms: { id: string }[] };
+        type ResultShape = { allPieces: { id: string }[] };
 
         export default pattern<Record<string, never>>(() => {
-          const { allCharms } =
+          const { allPieces } =
             (wish({ query: "/" }) as { result: ResultShape }).result;
-          return { count: allCharms.length };
+          return { count: allPieces.length };
         });
       `;
       const { diagnostics, output } = await validateSource(source, {

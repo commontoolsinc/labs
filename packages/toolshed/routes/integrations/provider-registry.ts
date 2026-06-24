@@ -128,7 +128,7 @@ async function resolveProviderConfig(
  * Returns `null` if credentials are missing (logs a warning).
  *
  * @param includeBgRoute  Whether to include the shared /api/integrations/bg route.
- *   The bg handler is provider-agnostic (only calls setBGCharm) but must live
+ *   The bg handler is provider-agnostic (only calls setBGPiece) but must live
  *   on exactly one router to avoid duplicate-route conflicts.
  */
 async function createProviderRouter(
