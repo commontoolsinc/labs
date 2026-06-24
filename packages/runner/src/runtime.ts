@@ -102,6 +102,25 @@ import {
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
 
+/**
+ * Suite-wide default for `experimentalInterpreter` driven by an env var. When
+ * `CF_EXPERIMENTAL_INTERPRETER` is set to `1`/`true`, every Runtime the suite
+ * constructs defaults the flag ON — the "interpreter ON in CI" feedback loop.
+ * Unset (the production path) returns `undefined`, leaving the existing default
+ * (off) untouched so the env-unset byte image is unchanged. An explicit
+ * `experimental.experimentalInterpreter` option still wins over this default.
+ * Guarded so non-Deno hosts (no `Deno.env`) silently fall through to `undefined`.
+ */
+function envExperimentalInterpreterDefault(): boolean | undefined {
+  try {
+    const value = Deno.env.get("CF_EXPERIMENTAL_INTERPRETER");
+    if (value === "1" || value === "true") return true;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -168,6 +187,15 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Route eligible (non-collection, fully-resolvable) patterns through the
+   * Reactive Interpreter instead of the legacy per-node materialization.
+   * Default OFF. When off the interpreter dispatch branch is never entered, so
+   * there is ZERO behavior change. Unlike the other flags this one is read only
+   * in the runner (`this.runtime.experimental.experimentalInterpreter`), so it
+   * has no ambient config setter — it is stored directly on `this.experimental`.
+   */
+  experimentalInterpreter?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -342,6 +370,11 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      // Env-var default for the "interpreter ON in CI" feedback loop. Sits
+      // BEFORE the `options.experimental` spread so an explicit caller option
+      // always wins, and resolves to `undefined` when the env var is unset, so
+      // the production (env-unset) path is byte-unchanged.
+      experimentalInterpreter: envExperimentalInterpreterDefault(),
       ...options.experimental,
     };
 

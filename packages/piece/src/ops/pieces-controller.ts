@@ -1,6 +1,7 @@
 import {
   type Cell,
   entityIdFrom,
+  type ExperimentalOptions,
   type JSONSchema,
   Runtime,
   RuntimeProgram,
@@ -145,10 +146,17 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName }: {
+  static async initialize({ apiUrl, identity, spaceName, experimental }: {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
+    /**
+     * Optional experimental runtime feature flags (e.g.
+     * `experimentalInterpreter`). Off by default, so the production default is
+     * byte-for-byte unchanged; benches/tests opt in to flip a flag for a
+     * controlled A/B without touching this call site.
+     */
+    experimental?: ExperimentalOptions;
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
@@ -159,6 +167,7 @@ export class PiecesController<T = unknown> {
         spaceIdentity: session.spaceIdentity,
       }),
       cfcEnforcementMode: "enforce-explicit",
+      ...(experimental ? { experimental } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),

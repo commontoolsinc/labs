@@ -27,6 +27,7 @@ import {
   UI,
 } from "./builder/types.ts";
 import {
+  getTopFrame,
   patternFromFrame,
   popFrame,
   pushFrameFromCause,
@@ -67,7 +68,11 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import {
+  isRawBuiltinResult,
+  raw,
+  type RawBuiltinReturnType,
+} from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
@@ -92,6 +97,20 @@ import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  type ExtractResult,
+  extractRog,
+  type ImplRefResolver,
+  resolveLeafImpls,
+} from "./reactive-interpreter/extract.ts";
+import {
+  evalRog,
+  NotInterpretedHere,
+} from "./reactive-interpreter/interpret.ts";
+import { collectionInterpreter } from "./reactive-interpreter/collection-interpreter.ts";
+import { buildElementEvaluator } from "./reactive-interpreter/element-evaluator.ts";
+import type { OpId, Rog, ValueRef } from "./reactive-interpreter/rog.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -552,6 +571,57 @@ function dedupeNormalizedLinks(
   return deduped;
 }
 
+/** Reason a pattern fell back from the interpreter to the legacy path. */
+export type InterpreterFallbackReason =
+  | "ineligible_opkind"
+  | "unrecognized_alias"
+  | "unresolved_leaf"
+  | "eval_threw"
+  // A collection op (map) carried a `scope` alias in its list input or element
+  // graph. The first-cut collection interpreter is unscoped-only, so any scope
+  // falls back. Distinct from `ineligible_opkind` so the oracle's negative axis
+  // can assert scoped collections fall back for THIS reason.
+  | "scoped";
+
+/** Census of reactive-interpreter dispatch outcomes (see Runner field). */
+export interface InterpreterCensus {
+  interpreted_ok: number;
+  fallback_by_reason: Record<InterpreterFallbackReason, number>;
+}
+
+/** True iff `m` is an inline Pattern (carries a `nodes` array) — the in-memory
+ * element-pattern shape the collection interpreter consumes (vs a serialized
+ * `$patternRef`). */
+function isPatternLike(m: unknown): m is { nodes: unknown[] } {
+  return !!m && typeof m === "object" &&
+    Array.isArray((m as { nodes?: unknown }).nodes);
+}
+
+/** Recursively scan a serialized value tree for ANY `scope` key carrying a
+ * NON-DEFAULT value (anything other than `"space"` / `"inherit"`), whether it
+ * sits on an alias payload (`$alias.scope`) or on an embedded schema
+ * (`$alias.schema.scope`, where a PerUser/PerSession argument records its
+ * narrowing). The fresh builder attaches the DEFAULT `scope: "space"` (the
+ * ambient frame) to ordinary aliases, which the interpreter resolves correctly;
+ * a `scope: "user" | "session"` narrowing ANYWHERE in the list-input / element
+ * graph is the unmodeled indirection the unscoped-only first cut rejects. (An
+ * earlier, alias-only check let a user-scoped list — whose narrowing lives on
+ * `$alias.schema.scope`, not `$alias.scope` — SLIP THROUGH and interpret to an
+ * empty result, a real mis-eval; this scans schemas too.) */
+function hasNonDefaultScope(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((v) => hasNonDefaultScope(v));
+  const obj = value as Record<string, unknown>;
+  const scope = obj.scope;
+  if (typeof scope === "string" && scope !== "space" && scope !== "inherit") {
+    return true;
+  }
+  for (const v of Object.values(obj)) {
+    if (hasNonDefaultScope(v)) return true;
+  }
+  return false;
+}
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -578,8 +648,45 @@ export class Runner {
     MemorySpace[]
   >();
 
+  /**
+   * Reactive-interpreter dispatch census (only mutated when the
+   * `experimentalInterpreter` flag is on). Tallies how the corpus actually maps:
+   * `interpreted_ok` counts patterns instantiated through the interpreter, and
+   * each `fallback_by_reason` bucket counts the precise reason a pattern fell
+   * back to the legacy path. A flag-on suite run reveals real coverage. Cheap
+   * and off-path when the flag is off (the dispatch branch is never entered).
+   */
+  private readonly interpreterCensus: InterpreterCensus = {
+    interpreted_ok: 0,
+    fallback_by_reason: {
+      ineligible_opkind: 0,
+      unrecognized_alias: 0,
+      unresolved_leaf: 0,
+      eval_threw: 0,
+      scoped: 0,
+    },
+  };
+
+  /** Read-only snapshot of the reactive-interpreter dispatch census. */
+  getInterpreterCensus(): InterpreterCensus {
+    return {
+      interpreted_ok: this.interpreterCensus.interpreted_ok,
+      fallback_by_reason: { ...this.interpreterCensus.fallback_by_reason },
+    };
+  }
+
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
+    // Reactive-interpreter collection dispatch: register the `map` collection
+    // interpreter builtin ONLY when the experimental flag is on. Flag-off ⇒ the
+    // ref is never registered, so the collection branch can never resolve it and
+    // behavior is byte-unchanged.
+    if (this.runtime.experimental.experimentalInterpreter) {
+      this.runtime.moduleRegistry.addModuleByRef(
+        "$ri-collection-map",
+        raw(collectionInterpreter("map")) as unknown as Module,
+      );
+    }
   }
 
   /**
@@ -1185,6 +1292,26 @@ export class Runner {
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
     ) => {
+      // Reactive-interpreter dispatch (default OFF). When the flag is off this
+      // branch is never entered, so there is ZERO behavior change. When on, an
+      // *eligible* pattern is rewritten to a single interpreter node and then
+      // instantiated through the SAME legacy node loop below (so it inherits all
+      // binding / scheduling / reactivity machinery). The rewrite (probe) is
+      // PURE: it never writes to a tx, so on `NotInterpretedHere` we simply use
+      // the original pattern and fall through with no side effect — the hard
+      // no-partial-materialize invariant.
+      let effectivePattern = pattern;
+      let viaInterpreter = false;
+      if (this.runtime.experimental.experimentalInterpreter) {
+        try {
+          effectivePattern = this.buildInterpreterPattern(pattern, resultCell);
+          viaInterpreter = true;
+        } catch (e) {
+          if (!(e instanceof NotInterpretedHere)) throw e;
+          effectivePattern = pattern; // legacy fallback, nothing materialized
+        }
+      }
+
       // Create new cancel group for nodes
       const [nodeCancel, addNodeCancel] = useCancelGroup();
       cancelNodes = nodeCancel;
@@ -1201,7 +1328,30 @@ export class Runner {
           options.awaitSyncBeforeInitialRun,
         );
       try {
-        for (const node of pattern.nodes) {
+        // The synthetic interpreter pattern has its own single `$ri-result`
+        // derived cell + single-alias result tree. Setup projected the ORIGINAL
+        // pattern's (multi-alias) result tree, so re-materialize the synthetic
+        // pattern's derived cell and re-project its result onto the result cell
+        // here, inside the same tx, before wiring the interpreter node. This is
+        // the only interpreter write and it happens after the pure probe in
+        // `buildInterpreterPattern` has already succeeded.
+        if (viaInterpreter) {
+          const baseCell = resultCell.withTx(actualTx);
+          const previousInternal = baseCell.getMetaRaw("internal", {
+            meta: ignoreReadForScheduling,
+          });
+          const internalManifest = this.materializeDerivedInternalCells(
+            actualTx,
+            effectivePattern,
+            baseCell,
+            previousInternal,
+          );
+          baseCell.setMetaRaw("internal", internalManifest);
+          this.updateResultProjection(actualTx, effectivePattern, baseCell, {
+            preserveName: true,
+          });
+        }
+        for (const node of effectivePattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
           this.instantiateNode(
             actualTx,
@@ -1210,7 +1360,7 @@ export class Runner {
             node.outputs,
             baseCell,
             addNodeCancel,
-            pattern,
+            effectivePattern,
             schedulerRehydration,
           );
         }
@@ -1905,6 +2055,497 @@ export class Runner {
     this.resultPatternCache.clear();
     this.locallyPreparedResults.clear();
     this.locallyStoppedResults.clear();
+  }
+
+  /**
+   * Resolve a serialized leaf's `$implRef` to a live callable, backed by the
+   * runtime's verified-implementation index. Used by `resolveLeafImpls` when a
+   * leaf's `module.implementation` is no longer a live function (a graph read
+   * back from a cell keeps only its content-addressed ref). Mirrors
+   * `resolveByImplRef`'s harness fallback, normalized to a plain function.
+   */
+  private readonly interpreterImplRefResolver: ImplRefResolver = (
+    identity,
+    symbol,
+  ) => {
+    const artifact = this.runtime.patternManager.artifactFromIdentitySync(
+      identity,
+      symbol,
+    );
+    const fromArtifact = artifact &&
+        typeof (artifact as { implementation?: unknown }).implementation ===
+          "function"
+      ? (artifact as { implementation: (input: unknown) => unknown })
+        .implementation
+      : typeof artifact === "function"
+      ? (artifact as (input: unknown) => unknown)
+      : undefined;
+    if (fromArtifact) return fromArtifact;
+    const verified = this.runtime.harness.getVerifiedImplementation?.(
+      identity,
+      symbol,
+    );
+    return typeof verified === "function"
+      ? (verified as (input: unknown) => unknown)
+      : undefined;
+  };
+
+  /**
+   * Reactive-interpreter eligibility probe + rewrite (PURE — no tx writes).
+   *
+   * Extracts the pattern to a ROG, checks it is fully covered and uses only the
+   * non-collection vocabulary this step interprets ({leaf, access, construct,
+   * control}), resolves every leaf impl, and DRY-RUNS `evalRog` on a snapshot of
+   * the current argument. If any check fails it bumps the census and throws
+   * `NotInterpretedHere` so the caller falls back to the legacy path with NO
+   * side effect (the hard no-partial-materialize invariant: nothing here writes
+   * to a tx — the only interpreter write happens in the caller, after this
+   * returns successfully).
+   *
+   * On success it returns a synthetic single-node Pattern: one `raw` interpreter
+   * node (argument → ROG eval → result) writing into one `$ri-result` derived
+   * cell, with the result aliased to it. Instantiated through the same legacy
+   * node loop, so it inherits reactivity (the argument read is tracked, so the
+   * node re-runs on input change) and result materialization for free.
+   */
+  private buildInterpreterPattern(
+    pattern: Pattern,
+    resultCell: Cell<any>,
+  ): Pattern {
+    const bumpAndThrow = (reason: InterpreterFallbackReason): never => {
+      this.interpreterCensus.fallback_by_reason[reason]++;
+      throw new NotInterpretedHere(reason);
+    };
+
+    // --- 1. Extract + coverage (pure structural classification) ------------
+    const extracted: ExtractResult = extractRog(
+      pattern as unknown as Parameters<typeof extractRog>[0],
+    );
+    // --- 1b. COLLECTION branch (single top-level `map`) --------------------
+    // Placed BEFORE the unrecognizedAliases check because `extractRog` recurses
+    // into the inline element pattern sharing ONE `unrecognized` set, and the
+    // element's serialized aliases legitimately carry `defer:1` (nested-pattern
+    // serialization) — which pollutes the OUTER report. For a collection, the
+    // element internals are NOT the outer interpreter's concern: they are
+    // validated independently by `buildElementEvaluator` (which re-extracts the
+    // element pattern fresh, at depth 0, where its aliases are clean). So the
+    // collection probe validates only the OUTER surfaces (list-input alias +
+    // result shape) and must run before the element-internal `defer` aliases
+    // would (spuriously) trip the scalar `unrecognized_alias` gate.
+    //
+    // The probe is PURE — no tx writes — and on a matching, fully-resolvable
+    // single `map` it returns a synthetic node dispatching to the registered
+    // `$ri-collection-map` builtin. On ANY miss it either returns null (when
+    // there is no collection op at all → fall through to the scalar gates
+    // unchanged) or fails closed via `bumpAndThrow` (when there IS a collection
+    // op but it is not the eligible single-map shape).
+    const collectionPattern = this.tryBuildCollectionInterpreterPattern(
+      pattern,
+      extracted,
+      bumpAndThrow,
+    );
+    if (collectionPattern) {
+      this.interpreterCensus.interpreted_ok++;
+      return collectionPattern;
+    }
+
+    // Scalar path: the element-internal defer pollution does not apply (there is
+    // no collection op), so a non-empty unrecognized report is a real outer
+    // alias problem → fall back.
+    if (extracted.coverage.unrecognizedAliases.length > 0) {
+      bumpAndThrow("unrecognized_alias");
+    }
+
+    // --- PATTERN gate (mirror the collection gate; MUTUALLY LOAD-BEARING with
+    // the extraction recursion, R1). A top-level INLINED nested pattern (the
+    // `pattern` op) is now eligible — BUT only when it is a PURE computation
+    // (its sub-ROG is leaf/access/construct/control only), in-memory, top-level,
+    // and unscoped. The coverage counters (`byKind`/`nested`) account for the
+    // recursed-into sub-graph that `rog.ops` is BLIND to (each `build` returns a
+    // fresh ops[] the recursion discards from the parent ops list). A gate on
+    // `rog.ops` alone would silently MIS-EVALUATE a nested pattern whose sub-ROG
+    // contains a collection/effect/deeper-nest — so we gate on the COVERAGE.
+    if ((extracted.coverage.byKind.pattern ?? 0) > 0) {
+      const byKind = extracted.coverage.byKind;
+      // Sub-ROG must be PURE: no collection / effect anywhere in the closure.
+      if ((byKind.collection ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+      if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+      // Exactly the single OUTER pattern op — >1 means a DEEPER nest (a nested
+      // pattern inside the nested pattern) which this first cut does not model.
+      if ((byKind.pattern ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+      // The extractor recurses into the inline sub-pattern exactly once; >1 is a
+      // deeper / multiple nested graph beyond the single top-level inline.
+      if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+      // A serialized $patternRef element (no in-memory `.nodes`) is recorded as
+      // an unrecognized alias / leaves `inlined` undefined; either way it falls
+      // back. Unrecognized aliases anywhere → fall back.
+      if (extracted.coverage.unrecognizedAliases.length > 0) {
+        bumpAndThrow("unrecognized_alias");
+      }
+      // Any non-default (PerUser/PerSession) scope in the pattern node's bound
+      // argument or the sub-pattern graph → out of scope for this cut.
+      const patternNode = (pattern.nodes ?? []).find((n) =>
+        (n.module as { type?: string } | undefined)?.type === "pattern"
+      );
+      if (patternNode && hasNonDefaultScope(patternNode.inputs)) {
+        bumpAndThrow("scoped");
+      }
+      if (
+        patternNode &&
+        hasNonDefaultScope(
+          (patternNode.module as { implementation?: unknown } | undefined)
+            ?.implementation,
+        )
+      ) {
+        bumpAndThrow("scoped");
+      }
+    }
+
+    // This step interprets the non-collection vocabulary plus a TOP-LEVEL,
+    // in-memory, PURE-computation INLINED nested pattern. `leaf` (opaque
+    // sandboxed JS) plus the interpreted kinds access/construct/control are
+    // eligible; an inlined `pattern` op is eligible AFTER passing the coverage
+    // gate above (which guarantees its sub-ROG is pure and unscoped).
+    // collection/effect remain out of scope → fall back. The result construct
+    // synthesized by extraction (id < 0) is a `construct`, so it is eligible.
+    const ELIGIBLE_KINDS = new Set([
+      "leaf",
+      "access",
+      "construct",
+      "control",
+      "pattern",
+    ]);
+    for (const op of extracted.rog.ops) {
+      if (!ELIGIBLE_KINDS.has(op.kind)) bumpAndThrow("ineligible_opkind");
+      // A `pattern` op that did NOT inline (serialized $patternRef, no `.nodes`)
+      // fails closed: the evaluator would throw NotInterpretedHere at eval time,
+      // but we reject it up front for a precise reason so it never reaches the
+      // dry-run probe. (Defense-in-depth; `inlined === undefined` ⇒ legacy.)
+      if (
+        op.kind === "pattern" && op.detail.kind === "pattern" &&
+        !op.detail.inlined
+      ) {
+        bumpAndThrow("ineligible_opkind");
+      }
+    }
+
+    // --- 2. Resolve every leaf impl (live fn or $implRef index) ------------
+    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+      pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
+      extracted.rog,
+      this.interpreterImplRefResolver,
+    );
+    if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
+
+    const { rog, internalToOp } = extracted;
+
+    // --- 3. Dry-run probe on a snapshot of the current argument ------------
+    // Pure: reads the argument value WITHOUT a scheduling tx (untracked) and
+    // never writes. If the evaluator throws (NotInterpretedHere for an
+    // unexpected op, or any runtime error from a leaf body), fall back.
+    const argSnapshot = this.readArgumentSnapshot(resultCell);
+    let dry: ReturnType<typeof evalRog> | undefined;
+    try {
+      dry = evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
+    } catch {
+      bumpAndThrow("eval_threw");
+    }
+    // R6: an async leaf returns a Promise the interpreter cannot store (legacy
+    // awaits async leaves) — fall back. R5: a `derive`/`lift` returning a Pattern
+    // needs a real reactive child instantiation the interpreter does not do —
+    // fall back. Both surface in this dry-run: an async lift returns a Promise on
+    // every call, and a pattern-returning derive returns a Pattern. Conservative:
+    // any Promise/Pattern anywhere in the evaluated values → fall back to legacy.
+    const dryValues = [dry!.result, ...dry!.opValues.values()];
+    const isThenable = (v: unknown): boolean =>
+      typeof (v as { then?: unknown } | null | undefined)?.then === "function";
+    if (dryValues.some(isThenable)) bumpAndThrow("eval_threw");
+    if (dryValues.some(isPattern)) bumpAndThrow("ineligible_opkind");
+
+    // --- 4. Build the synthetic single-node interpreter pattern ------------
+    const resultSchema = pattern.resultSchema ?? {};
+    const internedResult = internSchema(resultSchema as JSONSchema);
+    const argumentSchema = pattern.argumentSchema ?? {};
+    const internedArg = internSchema(argumentSchema as JSONSchema);
+
+    const interpreterImpl = (
+      inputsCell: Cell<unknown>,
+      sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+      _addCancel: AddCancel,
+      _cause: unknown,
+      _parentCell: Cell<unknown>,
+      runtime: Runtime,
+      _outputBinding?: NormalizedFullLink,
+    ): Action => {
+      return (tx: IExtendedStorageTransaction) => {
+        // Read the argument THROUGH the tx so the read is tracked: the node then
+        // re-runs reactively whenever the argument changes (parity with legacy).
+        const argument = inputsCell.asSchema(internedArg).withTx(tx).get();
+        const { result, errors } = evalRog(rog, {
+          argument,
+          leafImpls,
+          internalToOp,
+        });
+        sendResult(tx, result);
+        // The result is now written (a throwing leaf's field is `undefined`).
+        // Fire scheduler.onError for each throwing leaf WITHOUT failing the node,
+        // matching legacy's per-node error reporting (each legacy computed that
+        // throws fires onError; here the ops were collapsed into one node).
+        for (const { error } of errors) {
+          // Attach the current execution frame so handleSchedulerError can
+          // extract pieceId/patternId/space (legacy attaches `error.frame` on
+          // throw at runner.ts:~3889; the interpreter isolates the throw inside
+          // evalRog, so the frame never reaches the error — attach it here).
+          if (
+            error && typeof error === "object" &&
+            !(error as { frame?: unknown }).frame
+          ) {
+            const frame = getTopFrame();
+            if (frame) (error as Error & { frame?: Frame }).frame = frame;
+          }
+          runtime.scheduler.reportError(error as Error);
+        }
+      };
+    };
+
+    // Probe succeeded: this pattern WILL be instantiated through the interpreter.
+    this.interpreterCensus.interpreted_ok++;
+
+    const RESULT_CAUSE = "$ri-result";
+    return {
+      argumentSchema: argumentSchema as JSONSchema,
+      resultSchema: resultSchema as JSONSchema,
+      derivedInternalCells: [{
+        partialCause: RESULT_CAUSE,
+        schema: internedResult,
+      }],
+      result: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+      nodes: [
+        {
+          module: {
+            type: "raw",
+            implementation: interpreterImpl as (...args: any[]) => any,
+            resultSchema: internedResult,
+          } as Module,
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: RESULT_CAUSE, path: [] } },
+        },
+      ],
+    } satisfies Pattern;
+  }
+
+  /**
+   * COLLECTION eligibility probe (PURE — no tx writes) for exactly ONE top-level
+   * `map`. Returns a synthetic single-node Pattern dispatching to the registered
+   * `$ri-collection-map` builtin when the pattern is the eligible single-map
+   * shape, or `null` when there is NO collection op at all (so the caller falls
+   * through to the scalar interpreter path). When there IS a collection op but it
+   * is not the eligible shape, it `bumpAndThrow`s a fail-closed reason (never
+   * returns null in that case) so the pattern falls back to legacy.
+   *
+   * Highest-risk soundness point: this consults `coverage.byKind` / `coverage`
+   * `.nested`, NOT just `rog.ops`. `extractRog` recurses into the element pattern
+   * with a FRESH per-recursion ops array THAT IS DISCARDED, so element-internal
+   * pattern/effect/nested-collection ops NEVER appear in `rog.ops`. A naive
+   * "loop rog.ops" gate would ADMIT a map whose element contains a nested
+   * pattern/effect and SILENTLY MIS-EVALUATE. We therefore reject any element
+   * graph carrying a `pattern`/`effect` op, any collection beyond the outer map,
+   * or more than one nested recursion (`coverage.nested > 1`).
+   */
+  private tryBuildCollectionInterpreterPattern(
+    pattern: Pattern,
+    extracted: ExtractResult,
+    bumpAndThrow: (reason: InterpreterFallbackReason) => never,
+  ): Pattern | null {
+    // --- Shape: exactly one non-structural op, and it is a `map` -----------
+    // Structural ops are the extraction-synthesized result/input constructs
+    // (`construct`) and `access`; the meaningful op must be the single map.
+    const nonStructural = extracted.rog.ops.filter(
+      (op) => op.kind !== "construct" && op.kind !== "access",
+    );
+    const collectionOps = extracted.rog.ops.filter(
+      (op) => op.kind === "collection",
+    );
+    if (collectionOps.length === 0) return null; // no collection → scalar path
+    // From here on there IS a collection op: every miss fails closed.
+    if (collectionOps.length !== 1) bumpAndThrow("ineligible_opkind");
+    const mapOp = collectionOps[0];
+    if (mapOp.detail.kind !== "collection" || mapOp.detail.op !== "map") {
+      // filter / flatMap and any multi-collection shape → fall back.
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // The OUTER list input must resolve to a recognized argument/internal link.
+    // If extraction could not represent it, it is a `const` placeholder (the
+    // outer alias was recorded as unrecognized) → fail closed. (Element-internal
+    // aliases are NOT consulted here; they are validated by the evaluator.)
+    if (mapOp.detail.listInput.kind === "const") {
+      bumpAndThrow("unrecognized_alias");
+    }
+    // The map op must be the ONLY non-structural op (no sibling leaves/controls
+    // running alongside the map in this first cut).
+    if (nonStructural.length !== 1 || nonStructural[0] !== mapOp) {
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- Result must be the bare map op, or a trivial one-field construct ---
+    // wrapping it (e.g. `{ mapped: <map> }`). Anything else (the result reads
+    // more than the single map output) → fall back.
+    if (
+      !this.resultIsBareOrTrivialWrap(
+        extracted.rog,
+        mapOp.id,
+        extracted.internalToOp,
+      )
+    ) {
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- CRITICAL element-internal gate: coverage.byKind / coverage.nested --
+    // (see method doc). `coverage` accounts for the element graph that
+    // `rog.ops` discards.
+    const byKind = extracted.coverage.byKind;
+    if ((byKind.pattern ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+    if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+    // Any collection op beyond the single outer map (a nested collection inside
+    // the element) → fall back.
+    if ((byKind.collection ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+    // The extractor recurses into the element pattern exactly once for a single
+    // inline map; >1 means a nested collection element graph we do not model.
+    if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+
+    // --- Locate the raw map node (to reuse its `{list, op}` inputs verbatim) -
+    const mapNode = this.findRawMapNode(pattern);
+    if (!mapNode) bumpAndThrow("ineligible_opkind");
+    const mapNodeInputs = mapNode.inputs as Record<string, unknown>;
+    const elementPattern = mapNodeInputs.op;
+    if (!isPatternLike(elementPattern)) {
+      // A serialized `$patternRef` element (not an inline pattern) is out of
+      // scope for the in-memory-element first cut → fall back.
+      bumpAndThrow("ineligible_opkind");
+    }
+
+    // --- Unscoped-only: reject any non-default scope in list/element graph --
+    // The fresh builder attaches the DEFAULT `scope: "space"` (the ambient
+    // frame) to ordinary aliases; that is fine. A PerUser/PerSession narrowing
+    // (`scope: "user" | "session"`) is the unmodeled indirection this first cut
+    // rejects → a distinct `scoped` reason for the oracle's negative axis.
+    if (
+      hasNonDefaultScope(mapNodeInputs.list) ||
+      hasNonDefaultScope(elementPattern)
+    ) {
+      bumpAndThrow("scoped");
+    }
+
+    // --- Element evaluator must fully resolve (no unresolved leaf ops) ------
+    const evaluator = buildElementEvaluator(
+      elementPattern as Record<string, unknown>,
+      this.interpreterImplRefResolver,
+    );
+    if (evaluator.unresolvedLeafOps.length > 0) {
+      bumpAndThrow("unresolved_leaf");
+    }
+
+    // --- Build the synthetic single-node collection pattern ----------------
+    // Reuse the ORIGINAL map node's `{list, op, params}` inputs and its output
+    // binding (which carries the author-declared scope + item schema downstream
+    // `.key(i)` consumers need) verbatim, swapping only the module ref to the
+    // registered `$ri-collection-map` builtin. Keeping the original result tree
+    // and output binding inherits the exact projection + reactivity for free.
+    return {
+      argumentSchema: pattern.argumentSchema as JSONSchema,
+      resultSchema: pattern.resultSchema as JSONSchema,
+      ...(pattern.derivedInternalCells !== undefined
+        ? { derivedInternalCells: pattern.derivedInternalCells }
+        : {}),
+      result: pattern.result,
+      nodes: [
+        {
+          module: {
+            type: "ref",
+            implementation: "$ri-collection-map",
+          } as Module,
+          inputs: mapNode.inputs,
+          outputs: mapNode.outputs,
+        },
+      ],
+    } satisfies Pattern;
+  }
+
+  /**
+   * True iff the ROG result is the bare map op's output, or a single-field
+   * object/array construct wrapping ONLY that map op's output (peeling a trivial
+   * one-field wrapper). Any result that references more than the single map op
+   * output is rejected by the caller.
+   */
+  private resultIsBareOrTrivialWrap(
+    rog: Rog,
+    mapOpId: OpId,
+    internalToOp: Map<string, OpId>,
+  ): boolean {
+    // A ValueRef "is the bare map output" if it is either an `opOut` of the map
+    // op, or an `internal` ref whose name maps (via `internalToOp`) to the map
+    // op id (the builder names the map node's output internal cell and the
+    // result references it by name, NOT as a positional opOut), with no path.
+    const isBareMapOut = (ref: ValueRef): boolean => {
+      if (ref.kind === "opOut") {
+        return ref.op === mapOpId && ref.path.length === 0;
+      }
+      if (ref.kind === "internal") {
+        return internalToOp.get(ref.name) === mapOpId && ref.path.length === 0;
+      }
+      return false;
+    };
+
+    const result = rog.result;
+    // Bare: result is the map op output directly.
+    if (isBareMapOut(result)) return true;
+    // Trivial wrap: result is a synthesized construct (id < 0) with exactly one
+    // field, whose value is the bare map op output.
+    if (result.kind === "opOut" && result.op < 0) {
+      const wrap = rog.ops.find((op) => op.id === result.op);
+      if (!wrap || wrap.detail.kind !== "construct") return false;
+      const tmpl = wrap.detail.template;
+      const refs = tmpl.shape === "object"
+        ? Object.values(tmpl.fields)
+        : tmpl.items;
+      if (refs.length !== 1) return false;
+      return isBareMapOut(refs[0]);
+    }
+    return false;
+  }
+
+  /** Find the single raw `map` ref node in a pattern (the node the collection
+   * branch rewrites). Returns undefined if not present (e.g. already lowered or
+   * not a top-level map). */
+  private findRawMapNode(
+    pattern: Pattern,
+  ): Pattern["nodes"][number] | undefined {
+    for (const node of pattern.nodes) {
+      const module = node.module as { type?: string; implementation?: unknown };
+      if (module?.type === "ref" && module.implementation === "map") {
+        return node;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Read a snapshot of the result cell's argument value for the interpreter's
+   * pure dry-run probe. Untracked (no scheduling tx) and read-only — it must
+   * never write, since the probe runs before the fallback decision. Returns
+   * `undefined` if the argument cell is not resolvable yet (the probe then runs
+   * evalRog against `undefined`, which is a valid input for the eligible
+   * vocabulary).
+   */
+  private readArgumentSnapshot(resultCell: Cell<any>): unknown {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (!argumentLink) return undefined;
+    try {
+      return this.runtime.getCellFromLink(argumentLink).get();
+    } catch {
+      return undefined;
+    }
   }
 
   private instantiateNode(

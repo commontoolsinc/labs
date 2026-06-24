@@ -45,6 +45,18 @@ export class StandaloneMemoryServer {
         mode: MemoryServer.MemoryAclMode;
         serviceDids?: readonly string[];
       };
+      /**
+       * Optional per-commit tap. Invoked with the parsed operations of each
+       * inbound commit (and the connection tag), BEFORE they are applied.
+       * Read-only — purely for in-process measurement (e.g. counting distinct
+       * documents a workload writes). Undefined ⇒ no overhead and no behavior
+       * change. Exceptions thrown here are swallowed so a faulty tap can never
+       * break the server.
+       */
+      onCommitOperations?: (
+        operations: readonly Record<string, unknown>[],
+        connectionTag: number,
+      ) => void;
     } = {},
   ): StandaloneMemoryServer {
     const memory = new MemoryServer.Server({
@@ -67,6 +79,7 @@ export class StandaloneMemoryServer {
         }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+      const { onCommitOperations } = options;
       socket.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
           socket.close(1003, "memory websocket expects text frames");
@@ -75,6 +88,9 @@ export class StandaloneMemoryServer {
         }
         if (debugWrites) {
           logCommitOperations(connectionTag, event.data);
+        }
+        if (onCommitOperations) {
+          tapCommitOperations(event.data, connectionTag, onCommitOperations);
         }
         connection.receive(event.data).catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
@@ -93,6 +109,29 @@ export class StandaloneMemoryServer {
   async close(): Promise<void> {
     await this.#http.shutdown();
     await this.#memory.close();
+  }
+}
+
+// Best-effort per-commit tap for in-process measurement. Parses the inbound
+// commit and hands the raw operations array to the caller's callback. Any
+// parse/callback error is swallowed — the tap must never break the server.
+function tapCommitOperations(
+  payload: string,
+  connectionTag: number,
+  onCommitOperations: (
+    operations: readonly Record<string, unknown>[],
+    connectionTag: number,
+  ) => void,
+): void {
+  try {
+    const parsed = MemoryServer.parseClientMessage(payload) as unknown as {
+      commit?: { operations?: Array<Record<string, unknown>> };
+    };
+    const operations = parsed?.commit?.operations;
+    if (!Array.isArray(operations)) return;
+    onCommitOperations(operations, connectionTag);
+  } catch {
+    // Measurement only; never surface tap failures to the server.
   }
 }
 
