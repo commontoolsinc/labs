@@ -30,6 +30,7 @@ declare global {
       rootOnly?: boolean;
       includeCurrentValue?: boolean;
     }) => Promise<unknown>;
+    forwardWorkerConsole?: (enabled?: boolean) => void;
     [key: string]: unknown;
   };
 }

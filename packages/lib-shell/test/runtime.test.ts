@@ -343,6 +343,94 @@ describe("RuntimeInternals", () => {
     expect(withoutTrust.trustSnapshot).toBeUndefined();
   });
 
+  it("carries the worker-console flag onto the client options", async () => {
+    const { createRuntimeClientOptions } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const { createSession, Identity } = await import("@commonfabric/identity");
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-forward-worker-console",
+    });
+
+    expect(
+      createRuntimeClientOptions({
+        session,
+        apiUrl: new URL("http://shell.test/"),
+        forwardWorkerConsole: true,
+      }).forwardWorkerConsole,
+    ).toBe(true);
+    expect(
+      createRuntimeClientOptions({
+        session,
+        apiUrl: new URL("http://shell.test/"),
+      }).forwardWorkerConsole,
+    ).toBeUndefined();
+  });
+
+  // create() builds the client options and sends the Initialize request; this
+  // covers that path end to end and asserts the worker-console flag reaches the
+  // worker. A stub worker completes the READY handshake, then fails Initialize
+  // so create() aborts without a real runtime.
+  describe("create() forwards the worker-console flag to the worker", () => {
+    it("includes forwardWorkerConsole in the Initialize request", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const { Identity } = await import("@commonfabric/identity");
+      const identity = await Identity.generate({ implementation: "noble" });
+
+      const initRequests: Array<{ data: { forwardWorkerConsole?: boolean } }> =
+        [];
+      class StubWorker extends EventTarget {
+        constructor(_url: URL | string) {
+          super();
+          queueMicrotask(() =>
+            this.dispatchEvent(new MessageEvent("message", { data: "READY" }))
+          );
+        }
+        postMessage(message: unknown): void {
+          const msg = message as {
+            msgId?: number;
+            data?: { type?: string; data?: { forwardWorkerConsole?: boolean } };
+          };
+          if (typeof msg?.msgId !== "number") return;
+          if (msg.data?.type === "initialize") {
+            initRequests.push(
+              msg.data as { data: { forwardWorkerConsole?: boolean } },
+            );
+          }
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: { msgId: msg.msgId, error: "stub init failure" },
+              }),
+            )
+          );
+        }
+        terminate(): void {}
+      }
+
+      const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
+      (globalThis as { Worker: unknown }).Worker = StubWorker;
+      try {
+        await expect(
+          RuntimeInternals.create({
+            identity,
+            apiUrl: new URL("http://shell.test/"),
+            workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
+            getBuildHash: () => Promise.resolve(undefined),
+            forwardWorkerConsole: true,
+          }),
+        ).rejects.toThrow("stub init failure");
+      } finally {
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+      }
+
+      expect(initRequests).toHaveLength(1);
+      expect(initRequests[0].data.forwardWorkerConsole).toBe(true);
+    });
+  });
+
   // A deploy must always load the fresh worker bundle: the worker URL is
   // cache-busted with `?v=<buildHash>` whenever the build manifest provides
   // a hash (no feature gate).

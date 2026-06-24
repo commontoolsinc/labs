@@ -58,6 +58,7 @@ export enum RequestType {
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
+  SetForwardWorkerConsole = "runtime:setForwardWorkerConsole",
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
   GetSettleStats = "runtime:getSettleStats",
   GetSettleStatsHistory = "runtime:getSettleStatsHistory",
@@ -177,6 +178,12 @@ export interface InitializationData {
     actingPrincipal?: string;
     revision?: string;
   };
+  // When true, the worker mirrors its own console output (log/warn/error)
+  // to the main thread, which re-emits it on the page console prefixed
+  // with `[worker]`, so runtime-internal logs reach devtools and
+  // integration-test console capture. Off by default: each forwarded call
+  // costs one postMessage, so it is enabled only for diagnostic runs.
+  forwardWorkerConsole?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -320,6 +327,11 @@ export interface SetLoggerEnabledRequest extends BaseRequest {
 
 export interface SetTelemetryEnabledRequest extends BaseRequest {
   type: RequestType.SetTelemetryEnabled;
+  enabled: boolean;
+}
+
+export interface SetForwardWorkerConsoleRequest extends BaseRequest {
+  type: RequestType.SetForwardWorkerConsole;
   enabled: boolean;
 }
 
@@ -686,6 +698,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | SetForwardWorkerConsoleRequest
   | ResetLoggerBaselinesRequest
   | GetSettleStatsRequest
   | GetSettleStatsHistoryRequest
@@ -918,6 +931,10 @@ export type Commands = {
   };
   [RequestType.SetTelemetryEnabled]: {
     request: SetTelemetryEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetForwardWorkerConsole]: {
+    request: SetForwardWorkerConsoleRequest;
     response: EmptyResponse;
   };
   [RequestType.ResetLoggerBaselines]: {

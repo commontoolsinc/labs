@@ -18,6 +18,78 @@ import { RuntimeProcessor } from "../mod.ts";
 let worker: RuntimeProcessor | undefined;
 let workerInitialization: Promise<RuntimeProcessor> | undefined;
 
+const CONSOLE_LEVELS = ["log", "warn", "error"] as const;
+type ConsoleLevel = (typeof CONSOLE_LEVELS)[number];
+type ConsoleMethod = (...args: unknown[]) => void;
+
+// The worker's original console methods, saved while the bridge is installed.
+// `undefined` means the bridge is off and `console` is untouched, so disabled
+// forwarding adds no per-log cost.
+let savedConsole: Record<ConsoleLevel, ConsoleMethod> | undefined;
+
+function formatConsoleArg(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  // Errors serialize to `{}` under JSON.stringify (message/stack are
+  // non-enumerable), which would drop exactly the detail this bridge exists
+  // to surface, so forward the stack (or name/message) instead.
+  if (arg instanceof Error) return arg.stack ?? `${arg.name}: ${arg.message}`;
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
+/**
+ * Patch the worker's `console.log`/`warn`/`error` so each call also posts a
+ * structured `{ __workerConsole: { level, text } }` message that the web-worker
+ * transport re-emits on the page console. The original method is called first,
+ * so nothing is lost in the worker's own console. No-op if already installed.
+ */
+function installWorkerConsoleBridge(): void {
+  if (savedConsole) return;
+  const saved: Record<ConsoleLevel, ConsoleMethod> = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+  };
+  savedConsole = saved;
+
+  for (const level of CONSOLE_LEVELS) {
+    console[level] = (...args: unknown[]) => {
+      saved[level].apply(console, args);
+      try {
+        self.postMessage({
+          __workerConsole: {
+            level,
+            text: args.map(formatConsoleArg).join(" "),
+          },
+        });
+      } catch {
+        // A non-cloneable payload or a closed channel must not break the
+        // logging call itself.
+      }
+    };
+  }
+}
+
+/**
+ * Restore the worker's native console methods, returning `console` to a state
+ * with no forwarding overhead. No-op if the bridge is not installed.
+ */
+function uninstallWorkerConsoleBridge(): void {
+  if (!savedConsole) return;
+  for (const level of CONSOLE_LEVELS) {
+    console[level] = savedConsole[level];
+  }
+  savedConsole = undefined;
+}
+
+function setWorkerConsoleBridge(enabled: boolean): void {
+  if (enabled) installWorkerConsoleBridge();
+  else uninstallWorkerConsoleBridge();
+}
+
 self.addEventListener("message", async (event: MessageEvent) => {
   const message = event.data;
 
@@ -45,11 +117,21 @@ self.addEventListener("message", async (event: MessageEvent) => {
       if (workerInitialization) {
         throw new Error("Initialization of WorkerRuntime already attempted.");
       }
+      setWorkerConsoleBridge(request.data.forwardWorkerConsole === true);
       workerInitialization = RuntimeProcessor.initialize(
         request.data,
       );
       worker = await workerInitialization;
       self.postMessage({ msgId: message.msgId });
+      return;
+    }
+
+    // Toggling console forwarding is handled here, not in the RuntimeProcessor,
+    // because the console patch lives in this worker entry. It is independent
+    // of runtime initialization, so it is answered before the init check.
+    if (request.type === RequestType.SetForwardWorkerConsole) {
+      setWorkerConsoleBridge(request.enabled);
+      self.postMessage({ msgId });
       return;
     }
 
