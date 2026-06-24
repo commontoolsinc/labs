@@ -2821,6 +2821,10 @@ export class Runner {
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
+    const directResultOutputScope = narrowestScope([
+      schemaCellScope(resultSchema),
+      narrowestReadScope,
+    ]);
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
       frame.opaqueRefs.size === 0
@@ -2839,7 +2843,7 @@ export class Runner {
         outputs,
         result,
         {
-          narrowestReadScope,
+          narrowestReadScope: directResultOutputScope,
         },
       );
       return result;

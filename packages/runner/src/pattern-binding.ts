@@ -233,6 +233,8 @@ export function sendValueToBinding<T>(
       scopeRank(outputScope) > scopeRank(ref.scope)
     ) {
       const scopedRef = { ...ref, scope: outputScope };
+      const baseBindingLink: NormalizedFullLink = { ...bindingLink };
+      delete baseBindingLink.schema;
       const valueLink = isCellLink(value) ? parseLink(value, ref) : undefined;
       if (
         valueLink === undefined ||
@@ -248,9 +250,9 @@ export function sendValueToBinding<T>(
         );
       }
       tx.writeValueOrThrow(
-        bindingLink,
+        baseBindingLink,
         createSigilLinkFromParsedLink(scopedRef, {
-          base: bindingLink,
+          base: baseBindingLink,
         }) as FabricValue,
       );
       return;
