@@ -90,10 +90,14 @@ echo "Public:  $PUBLIC_URL  (toolshed :$TOOLSHED_PORT, shell :$SHELL_PORT, inspe
 : > "$PIDFILE"
 
 # ---------- toolshed (with --inspect) ----------
+# SHELL_URL tells the toolshed where to proxy the shell from. It has no default,
+# and our shell is on an OFFSET port — without this the toolshed serves
+# "Shell app not available" and the shared URL is broken.
 cd "$REPO_ROOT/packages/toolshed"
 [ -f .env ] || printf 'ENV=development\nLOG_LEVEL=info\nCFTS_AI_GATEWAY_URL=\n' > .env
 echo "Starting toolshed..."
-nohup deno run --unstable-otel -A --inspect=127.0.0.1:"$INSPECT_PORT" \
+nohup env SHELL_URL="http://localhost:$SHELL_PORT" \
+  deno run --unstable-otel -A --inspect=127.0.0.1:"$INSPECT_PORT" \
   --env-file=.env index.ts --port="$TOOLSHED_PORT" > /tmp/cf-share-toolshed.log 2>&1 &
 echo $! >> "$PIDFILE"
 
