@@ -969,26 +969,32 @@ const PURE_GLOBAL_CALLEES = new Set([
 ]);
 
 /**
- * STRUCTURAL signal that a LIVE leaf body CAN return a Pattern / sub-computation
- * instantiation (a `pattern(...)` factory call or a `lift(...)`-application). The
- * eligibility dry-run's value guard (runner.ts: `isPattern`/`isCell`/`isOpaqueRef`
- * on the evaluated values) MISSES these when the pattern is returned only on SOME
- * arguments: the probe reads the argument TX-LESS (undefined for a not-yet-committed
- * setup argument), and the evaluator's undefined-argument run-gate (interpret.ts)
- * then SKIPS the leaf body entirely — so the conditional/recursive pattern branch
- * never runs and the guard sees `undefined`, not the returned Cell. Calling such a
- * factory at the synthetic node's RUNTIME (no builder frame) throws "no runtime
- * context available" → the result materializes empty. These need the real reactive
- * child instantiation legacy performs (D-EMISSION-SCOPE: permanent fallback).
+ * STRUCTURAL signal that a LIVE leaf body CAN return a Pattern / sub-computation /
+ * Promise the interpreter cannot store — a `pattern(...)`/`lift(...)` factory
+ * application, a cross-space/scope `.inSpace(...)`/`.asScope(...)` child
+ * instantiation, or an `async` body (Promise return). The eligibility dry-run runs
+ * in PROBE MODE (interpret.ts `probe:true`) and NEVER invokes a leaf body, so the
+ * dry-run value guard (runner.ts: `isPattern`/`isCell`/`isOpaqueRef`/thenable on
+ * the evaluated values) can no longer see the returned Pattern/Cell/Promise — this
+ * structural source scan is the catcher. (It also covered the pre-probe-mode case
+ * where the value guard missed a pattern returned only on SOME committed arguments,
+ * the run-gate having skipped the body.) Calling such a factory at the synthetic
+ * node's RUNTIME (no builder frame) throws / materializes empty; an async leaf
+ * returns a Promise legacy AWAITS. These need the real reactive child
+ * instantiation / await legacy performs (D-EMISSION-SCOPE: permanent fallback).
  *
  * We detect it from the leaf's live function SOURCE (`fn.toString()`, real source
- * for a trusted in-memory function): a BARE-identifier call expression `name(`
- * (a `pattern`/`lift` factory closed over by the body) that is NOT a member call
- * (`x.foo(`) and NOT a known pure host global (`Array(`, `parseInt(`, …). Member
- * calls and pure-global calls are how an ordinary value-lift legitimately produces
- * a value, so they do NOT trip this gate; only a bare call to a closed-over
- * (factory/lift) identifier does. Conservative by construction: a false positive
- * only causes an extra (always-sound) legacy fallback, never a mis-eval.
+ * for a trusted in-memory function):
+ *  - a `.inSpace(`/`.asScope(` member call (cross-space/scope routing);
+ *  - a leading `async` keyword (Promise-returning body);
+ *  - a BARE-identifier call expression `name(` (a `pattern`/`lift` factory closed
+ *    over by the body) that is NOT a member call (`x.foo(`) and NOT a known pure
+ *    host global (`Array(`, `parseInt(`, …). Member calls and pure-global calls are
+ *    how an ordinary value-lift legitimately produces a value, so they do NOT trip
+ *    the bare-call gate; only a bare call to a closed-over factory/lift identifier
+ *    does.
+ * Conservative by construction: a false positive only causes an extra
+ * (always-sound) legacy fallback, never a mis-eval.
  */
 function liveLeafCanInstantiatePattern(
   impl: (input: unknown) => unknown,
@@ -1001,6 +1007,23 @@ function liveLeafCanInstantiatePattern(
     // inspected — do NOT gate on it here (other gates / the value guard cover it).
     return false;
   }
+  // CROSS-SPACE / SCOPE-ROUTING factory member calls (`.inSpace(` / `.asScope(`):
+  // `Child.inSpace(name)({...})` / `Child.asScope("user")({...})` instantiate a
+  // child pattern routed to another space / non-default scope. These are MEMBER
+  // calls (so the bare-identifier scan below misses them) and the outer
+  // application is on a parenthesized member-call result (no leading identifier),
+  // so neither sub-call trips the bare-call regex. Per D-EMISSION-SCOPE
+  // cross-space/.inSpace/.asScope is permanent legacy fallback — detect it
+  // structurally here (the probe no longer executes leaf bodies, so the dry-run
+  // value guard can no longer see the returned cross-space Pattern).
+  if (/\.(inSpace|asScope)\s*\(/.test(src)) return true;
+  // ASYNC lift: an `async` body returns a Promise the interpreter cannot store
+  // (legacy AWAITS async leaves). The probe no longer runs the body, so the
+  // dry-run thenable guard can no longer see the Promise — detect the `async`
+  // keyword on the function source. Match `async` only as a leading keyword
+  // (arrow `async (`/`async x =>` or `async function`), not as an identifier
+  // substring. Sound: a false positive only adds a (correct) legacy fallback.
+  if (/^async[\s(]/.test(src.trimStart())) return true;
   // Match a BARE-identifier call: an identifier not preceded by `.` or another
   // identifier char (so `a.b(` and `xb(` inside `foox(` do not match the `x`),
   // immediately followed by `(`. The `(?<![.\w$])` lookbehind excludes member

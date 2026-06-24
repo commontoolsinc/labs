@@ -2561,7 +2561,22 @@ export class Runner {
     } else {
       argSnapshot = this.readArgumentSnapshot(resultCell);
       try {
-        dry = evalRog(rog, { argument: argSnapshot, leafImpls, internalToOp });
+        // PROBE MODE (probe:true): the eligibility dry-run reaches its verdict
+        // STRUCTURALLY and never invokes a leaf body. This keeps the probe LAZY
+        // even on a RE-INSTANTIATION whose argument is already committed (a
+        // pattern-watcher re-instantiating a child pattern): a body-executing
+        // probe would spuriously re-run a side-effecting lift (doubling
+        // `runCount`), diverging from legacy which never runs a lift body during
+        // instantiation. The body runs exactly once in the FIRST real node action
+        // below. Structural gates (resolveLeafImpls' pattern/context detectors,
+        // the launched-child / cross-space / scope gates) carry the verdict; the
+        // first-real-run error/Promise/Cell nets backstop the value-shape cases.
+        dry = evalRog(rog, {
+          argument: argSnapshot,
+          leafImpls,
+          internalToOp,
+          probe: true,
+        });
       } catch {
         bumpAndThrow("eval_threw");
       }
@@ -2670,27 +2685,19 @@ export class Runner {
       return out;
     };
 
-    // PROBE MEMOIZE-AND-REUSE (D-PROBE-MEMOIZE). The eligibility dry-run above
-    // already evaluated the whole ROG once on `argSnapshot`, INVOKING every leaf
-    // body. Re-running `evalRog` in the first real node action would execute those
-    // leaf bodies a SECOND time — doubling user-observable run counts (runCount++)
-    // and breaking the lazy-until-pulled invariant. We therefore hand the probe's
-    // per-op values to the FIRST real run, reusing them instead of re-evaluating —
-    // but ONLY when the argument the first run reads THROUGH the tx is unchanged
-    // from the snapshot the probe used (correctness over reuse: a mid-flight
-    // argument change means the probe's values are stale and we must evaluate
-    // fresh). The memo is consumed at most once (`memoConsumed`), so subsequent
-    // re-runs (on argument change) always evaluate fresh, and a side-effecting leaf
-    // runs exactly ONCE total (probe + reused first run = 1 invocation). The memo
-    // lives in THIS closure, so it cannot leak across pattern instances.
-    const probeMemo: {
-      argument: unknown;
-      opValues: Map<OpId, unknown>;
-      errors: Array<{ opId: OpId; error: unknown }>;
-    } | undefined = dry
-      ? { argument: argSnapshot, opValues: dry.opValues, errors: dry.errors }
-      : undefined;
-    let memoConsumed = false;
+    // PROBE LAZINESS (D-PROBE-MEMOIZE, simplified). The eligibility dry-run above
+    // runs in PROBE MODE (`probe:true`) and never invokes a leaf body — its
+    // verdict is purely STRUCTURAL. So there is NO probe-side body execution to
+    // dedup: the first real node action below simply evaluates the ROG fresh,
+    // running each leaf body exactly ONCE. This is what keeps a side-effecting
+    // lift lazy on a RE-INSTANTIATION (the pattern-watcher re-instantiating a
+    // child pattern whose argument is already committed) — the earlier
+    // body-executing probe spuriously re-ran such a lift (doubling `runCount`),
+    // diverging from legacy which never runs a lift body during instantiation.
+    // (Historically a closure-memo handed the probe's already-computed per-op
+    // values to the first run to avoid a SECOND execution; with a lazy probe that
+    // reuse is both unnecessary and unsound — the probe's leaf op values are all
+    // `undefined` — so it is removed.)
 
     // Capture the ORIGINAL pattern + result cell for the per-pattern error frame
     // (the synthetic raw node otherwise runs without an `unsafe_binding` to the
@@ -2711,27 +2718,14 @@ export class Runner {
         // Read the argument THROUGH the tx so the read is tracked: the node then
         // re-runs reactively whenever the argument changes (parity with legacy).
         const argument = inputsCell.asSchema(internedArg).withTx(tx).get();
-        // Reuse the probe's already-computed evaluation on the FIRST run iff the
-        // argument is unchanged from the probe's snapshot — eliminating the
-        // double-execution of leaf bodies. Otherwise (argument changed, or no
-        // memo) evaluate fresh.
-        let opValues: Map<OpId, unknown>;
-        let errors: Array<{ opId: OpId; error: unknown }>;
-        if (
-          !memoConsumed && probeMemo &&
-          deepEqual(argument, probeMemo.argument)
-        ) {
-          memoConsumed = true;
-          opValues = probeMemo.opValues;
-          errors = probeMemo.errors;
-        } else {
-          memoConsumed = true;
-          ({ opValues, errors } = evalRog(rog, {
-            argument,
-            leafImpls,
-            internalToOp,
-          }));
-        }
+        // Evaluate the ROG fresh (bodies run exactly once per node action). The
+        // eligibility probe ran in PROBE MODE and skipped every leaf body, so
+        // there is no prior execution to reuse and no double-execution risk.
+        const { opValues, errors } = evalRog(rog, {
+          argument,
+          leafImpls,
+          internalToOp,
+        });
         // Route each per-field output value into its declared internal cell. The
         // node's `outputs` binding is the union of the original nodes' output
         // aliases; `sendValueToBinding` walks it in parallel with this value.

@@ -31,6 +31,22 @@ export interface EvalContext {
    * `internal` refs resolve to that op's output (populated by extraction
    * wiring; absent in pure hand-built tests that use `opOut` directly). */
   internalToOp?: Map<string, OpId>;
+  /**
+   * PROBE MODE (eligibility dry-run only). When true, leaf BODIES are NOT
+   * invoked — every leaf op resolves to `undefined`. The eligibility verdict is
+   * reached purely structurally (coverage gates + `resolveLeafImpls`'
+   * structural pattern/context gates); the leaf bodies then run exactly ONCE in
+   * the first real node action. This preserves legacy laziness on a RE-
+   * INSTANTIATION (the pattern-watcher re-instantiating a child pattern with an
+   * already-COMMITTED argument): legacy never runs a lift body during
+   * instantiation, so a body-executing probe would spuriously re-run a
+   * side-effecting lift (doubling `runCount`). The non-probe call (first real
+   * run) executes bodies normally and feeds the result through. The
+   * already-present structural gates (`liveLeafCanInstantiatePattern`,
+   * schema/Cell-context, async/Promise/Cell return-value nets on the first real
+   * run) catch the cases the dry-run's value guard used to.
+   */
+  probe?: boolean;
 }
 
 export class NotInterpretedHere extends Error {
@@ -148,6 +164,15 @@ export function evalRog(
             `no leaf impl for op ${op.id} (unresolved)`,
           );
         }
+        // PROBE MODE: never invoke a leaf body. The eligibility verdict is
+        // structural; the body runs exactly once in the first real run. Skipping
+        // execution here preserves legacy laziness on a re-instantiation (a
+        // pattern-watcher re-instantiating a child pattern whose argument is
+        // already committed) — a body-executing probe would spuriously re-run a
+        // side-effecting lift. A still-missing-or-throwing impl is caught above /
+        // by the first-real-run nets; structural pattern/context/async gates
+        // (resolveLeafImpls + dry-value backstops) cover the rest.
+        if (ctx.probe) return undefined;
         // A leaf takes its SINGLE structured input — the exact resolved value
         // legacy passes (a keyed object/array assembled by a preceding
         // synthesized construct, or a direct ref). Extraction guarantees a leaf
@@ -222,6 +247,7 @@ export function evalRog(
           argument: resolve(argument),
           leafImpls: inlined.leafImpls ?? new Map(),
           internalToOp: inlined.internalToOp,
+          probe: ctx.probe,
         });
         return result;
       }
