@@ -991,7 +991,10 @@ export function resolveLeafImpls(
       // runtime element-eval path that already ran behind the runner's gate),
       // the live function is trusted — preserving the established resolution
       // contract for those callers without weakening the runner's gate.
-      if (!liveLeafTrustCheck || liveLeafTrustCheck(impl as (input: unknown) => unknown)) {
+      if (
+        !liveLeafTrustCheck ||
+        liveLeafTrustCheck(impl as (input: unknown) => unknown)
+      ) {
         leafImpls.set(op.id, impl as LeafImpl);
       } else {
         unresolvedLeafOps.push(op.id);

@@ -2883,7 +2883,9 @@ export class Runner {
       // setup tx when provided so a not-yet-committed argument write is visible.
       let cell = this.runtime.getCellFromLink(argumentLink);
       if (tx) cell = cell.withTx(tx);
-      return cell.getRaw({ lastNode: "value" } as Parameters<typeof cell.getRaw>[0]);
+      return cell.getRaw(
+        { lastNode: "value" } as Parameters<typeof cell.getRaw>[0],
+      );
     } catch {
       return undefined;
     }
