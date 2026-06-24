@@ -28,6 +28,7 @@
 import {
   extractRog,
   type ImplRefResolver,
+  type LiveLeafTrustCheck,
   resolveLeafImpls,
 } from "./extract.ts";
 import { evalRog } from "./interpret.ts";
@@ -63,12 +64,17 @@ export function buildElementEvaluator(
    * `getRaw()`), whose leaf bodies are no longer live callables but whose
    * `$implRef`s resolve through the harness's verified-implementation index. */
   implRefResolver?: ImplRefResolver,
+  /** SECURITY trust gate for LIVE element-leaf impls — an untrusted in-memory
+   * callback is reported as unresolved (→ legacy fallback) so it never runs as a
+   * raw host closure inside the interpreter. Mirrors the scalar leaf path. */
+  liveLeafTrustCheck?: LiveLeafTrustCheck,
 ): ElementEvaluator {
   const ex = extractRog(elementPattern as Parameters<typeof extractRog>[0]);
   const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
     elementPattern as Parameters<typeof resolveLeafImpls>[0],
     ex.rog,
     implRefResolver,
+    liveLeafTrustCheck,
   );
 
   const evaluate = ((elementValue: unknown): unknown => {

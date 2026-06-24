@@ -232,6 +232,26 @@ function aliasToValueRef(
  * structured input. Recorded → the pattern is ineligible → legacy fallback. */
 const MALFORMED_ALIAS_MARKER = '["$alias:malformed"]';
 
+/** Marker recorded into `unrecognized` for a node whose OUTPUT aliases an
+ * ARGUMENT cell (`{$alias:{cell:"argument",path:[...]}}`) — i.e. the node writes
+ * its computed value BACK into the argument cell (which the pattern result then
+ * aliases). This is a reactive side effect, not pure compute: the synthetic
+ * interpreter node has no per-output write-back machinery (it only `sendResult`s
+ * the single `$ri-result`), so the write-back would be silently dropped and the
+ * result (aliasing the arg cell) would read `{}`. Recorded → the runner maps it
+ * to the `argument_writeback` fallback reason → legacy path. Kept distinct from
+ * `MALFORMED_ALIAS_MARKER` so the census attributes it precisely. */
+const ARGUMENT_WRITEBACK_MARKER = '["$output:argument-writeback"]';
+
+/** True iff the `unrecognized` report carries the argument-writeback marker, so
+ * the runner can map it to the dedicated `argument_writeback` fallback reason
+ * (vs the generic `unrecognized_alias`). Exported for the runner's gate. */
+export function hasArgumentWritebackMarker(
+  unrecognizedAliases: readonly string[],
+): boolean {
+  return unrecognizedAliases.includes(ARGUMENT_WRITEBACK_MARKER);
+}
+
 /** True iff `obj` has a `$alias` own-key AND at least one OTHER own-key. Such an
  * object is not a representable structured input: resolving the alias would
  * silently discard the siblings. */
@@ -515,6 +535,17 @@ function outputInternalName(outputs: unknown): string | null {
   return null;
 }
 
+/** True iff a node's `outputs` is a canonical alias that targets the ARGUMENT
+ * cell (`{$alias:{cell:"argument",path:[...]}}`) — a write-BACK into the
+ * argument the result aliases. (A normal output aliases a `partialCause`
+ * internal cell, recognized by `outputInternalName`.) */
+function isArgumentWritebackOutput(outputs: unknown): boolean {
+  if (!outputs || typeof outputs !== "object") return false;
+  if (!isLegacyAlias(outputs)) return false;
+  const alias = (outputs as { $alias?: Record<string, unknown> }).$alias;
+  return !!alias && typeof alias === "object" && alias.cell === "argument";
+}
+
 export interface ExtractResult {
   rog: Rog;
   coverage: CoverageReport;
@@ -577,6 +608,13 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         const outName = outputInternalName(node.outputs);
         if (outName !== null) {
           internalToOp.set(outName, i);
+        } else if (isArgumentWritebackOutput(node.outputs)) {
+          // FAIL CLOSED: the node's OUTPUT aliases an ARGUMENT cell — it writes
+          // its value BACK into the argument cell (which the result then aliases).
+          // The synthetic interpreter node has no per-output write-back machinery,
+          // so this would be silently dropped → result reads `{}`. Record the
+          // dedicated marker so the runner falls back via `argument_writeback`.
+          unrecognized.add(ARGUMENT_WRITEBACK_MARKER);
         } else if (
           node.outputs && typeof node.outputs === "object" &&
           Object.hasOwn(node.outputs as object, "$alias") &&
@@ -674,7 +712,19 @@ export function extractRog(pattern: RawPattern): ExtractResult {
               bump,
               expectedDefer,
             );
-        const pred = branchRef(inObj.condition ?? inObj.if);
+        // Pick a branch source by the FIRST key PRESENT (own-key), not by `??`
+        // coalescing: a legitimate literal `null` branch value (`ifFalse: null`)
+        // must survive — `null ?? undefined === undefined` would collapse it to
+        // `const undefined`, so `ifElse(false, x, null)` would wrongly yield
+        // `undefined` instead of `null` (CT-1158). `branchRef` already routes a
+        // literal `null` to `{kind:"const",value:null}`.
+        const pickBranch = (...keys: string[]): unknown => {
+          for (const k of keys) {
+            if (Object.hasOwn(inObj, k)) return inObj[k];
+          }
+          return undefined;
+        };
+        const pred = branchRef(pickBranch("condition", "if"));
         // Branches must be exactly [then, else] in that order — NOT the flat
         // `inputs` list (which also carries the condition). The builder names
         // the inputs per builtin (verified empirically against the real
@@ -688,10 +738,8 @@ export function extractRog(pattern: RawPattern): ExtractResult {
         // fallback/ifFalse branch. The interpreter uses `pred` for the
         // condition-returning branch of when/unless. (then/else are legacy
         // ifElse fallbacks.)
-        const thenRef = branchRef(inObj.ifTrue ?? inObj.then ?? inObj.value);
-        const elseRef = branchRef(
-          inObj.ifFalse ?? inObj.else ?? inObj.fallback,
-        );
+        const thenRef = branchRef(pickBranch("ifTrue", "then", "value"));
+        const elseRef = branchRef(pickBranch("ifFalse", "else", "fallback"));
         op.detail = {
           kind: "control",
           op: c.ctrlOp!,
@@ -818,6 +866,53 @@ export type ImplRefResolver = (
   symbol: string,
 ) => ((input: unknown) => unknown) | undefined;
 
+/**
+ * Trust gate for a LIVE leaf implementation (a `module.implementation` that is
+ * still a callable, not a serialized source string). SECURITY-RELEVANT: the
+ * interpreter runs a resolved leaf impl as a RAW host closure against the real
+ * host globals — it does NOT route it through the SES sandbox. So an UNTRUSTED
+ * in-memory callback (a test-built / never-verified `cf.lift((..)=>..)` whose
+ * function carries no verified provenance and no resolvable entry ref) must NOT
+ * be resolved here: legacy routes such callbacks through the SES fallback
+ * (`getFallbackJavaScriptImplementation`, recompiled from `fn.toString()` so
+ * captured closures are stripped and `Proxy` is absent). Resolving it as a leaf
+ * would defeat that sandboxing invariant (`typeof Proxy === "function"`, a
+ * captured `secret.factor` resolves) — so an untrusted live leaf is treated as
+ * UNRESOLVED, which trips the caller's `unresolved_leaf` gate and falls the
+ * whole pattern back to the legacy (SES) path. Mirrors `resolveJavaScript
+ * Function`'s `liveTrusted` test in runner.ts. Returns true iff the live
+ * function is trusted (verified provenance OR a harness-resolvable entry ref).
+ */
+export type LiveLeafTrustCheck = (
+  impl: (input: unknown) => unknown,
+) => boolean;
+
+/**
+ * True iff a leaf's argument schema anywhere requires a LIVE Cell/Stream handle
+ * — i.e. it carries an `asCell` or `asStream` annotation (the builder writes
+ * `{asCell: [...]}` / `{asStream: [...]}` onto the schema property the lift
+ * receives as a Cell). The interpreter deep-resolves the argument to a PLAIN
+ * value before calling the leaf, so any such leaf would call a Cell method on a
+ * plain value and throw. Scans recursively (the annotation may sit on a nested
+ * property/items schema), but does NOT descend into the literal `default` value
+ * (a default is data, not schema, and could spuriously contain those keys).
+ */
+function schemaNeedsCellContext(schema: unknown): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  if (Array.isArray(schema)) {
+    return schema.some((s) => schemaNeedsCellContext(s));
+  }
+  const obj = schema as Record<string, unknown>;
+  if (obj.asCell !== undefined || obj.asStream !== undefined) return true;
+  for (const [k, v] of Object.entries(obj)) {
+    // `default` holds an authored VALUE, not a sub-schema — skip it so a literal
+    // payload that happens to carry an `asCell` key cannot trip the gate.
+    if (k === "default") continue;
+    if (schemaNeedsCellContext(v)) return true;
+  }
+  return false;
+}
+
 export function resolveLeafImpls(
   pattern: RawPattern,
   rog: Rog,
@@ -825,6 +920,15 @@ export function resolveLeafImpls(
    * longer a live callable but whose `$implRef` is resolvable (W1b-bridge over a
    * graph read back via `getRaw()`). */
   implRefResolver?: ImplRefResolver,
+  /** SECURITY trust gate for a LIVE leaf impl. When provided, a live function
+   * that does NOT pass this check is treated as UNRESOLVED (→ `unresolved_leaf`
+   * fallback → legacy SES path), so an untrusted in-memory callback never runs
+   * as a raw host closure inside the interpreter. The RUNNER'S eligibility probe
+   * ALWAYS passes it, so production patterns are gated. When omitted (direct
+   * unit-test calls / the runtime element-eval path that already cleared the
+   * runner's gate), live functions resolve as before — the trust decision is the
+   * runner probe's responsibility, made before any interpretation runs. */
+  liveLeafTrustCheck?: LiveLeafTrustCheck,
 ): { leafImpls: Map<OpId, LeafImpl>; unresolvedLeafOps: OpId[] } {
   const leafImpls = new Map<OpId, LeafImpl>();
   const unresolvedLeafOps: OpId[] = [];
@@ -846,6 +950,7 @@ export function resolveLeafImpls(
         (childPattern ?? {}) as RawPattern,
         op.detail.inlined.rog,
         implRefResolver,
+        liveLeafTrustCheck,
       );
       // Attach the child's resolved leaf impls onto its inlined detail (the
       // evaluator reads them from there, NOT from the parent map).
@@ -862,9 +967,35 @@ export function resolveLeafImpls(
     // Synthesized ops (id < 0) are never leaves; real leaf ops map 1:1 to nodes.
     const node = op.id >= 0 ? nodes[op.id] : undefined;
     const module = node?.module as RawModule | undefined;
+    // STRUCTURAL CONTEXT GATE (only when a trust check is supplied = the runner's
+    // eligibility probe; NOT the partition probe / unit-test callers that omit
+    // it and count unresolved leaves as boundaries). A leaf whose argument schema
+    // carries an `asCell`/`asStream` annotation expects a LIVE Cell/Stream handle
+    // (it calls `.get()`/`.key()`/`.sample()`/`.set()` on its input). The
+    // interpreter feeds the leaf a deep-resolved PLAIN value, so those Cell
+    // methods are undefined and the leaf throws. Treat such a leaf as UNRESOLVED
+    // → `unresolved_leaf` fallback → legacy (schema-aware Cell materialization).
+    // Recurses into nested-pattern leaves via the inlined-pattern branch above.
+    if (liveLeafTrustCheck && schemaNeedsCellContext(module?.argumentSchema)) {
+      unresolvedLeafOps.push(op.id);
+      continue;
+    }
     const impl = module?.implementation;
     if (typeof impl === "function") {
-      leafImpls.set(op.id, impl as LeafImpl);
+      // SECURITY: only a TRUSTED live function may run as a raw leaf inside the
+      // interpreter (see `LiveLeafTrustCheck`). An untrusted in-memory callback
+      // is treated as UNRESOLVED → `unresolved_leaf` fallback → legacy SES path,
+      // so it never bypasses the sandbox. The RUNNER'S eligibility probe ALWAYS
+      // passes the strict check, so a production pattern with an untrusted leaf
+      // falls back. When NO check is supplied (direct unit-test calls / the
+      // runtime element-eval path that already ran behind the runner's gate),
+      // the live function is trusted — preserving the established resolution
+      // contract for those callers without weakening the runner's gate.
+      if (!liveLeafTrustCheck || liveLeafTrustCheck(impl as (input: unknown) => unknown)) {
+        leafImpls.set(op.id, impl as LeafImpl);
+      } else {
+        unresolvedLeafOps.push(op.id);
+      }
       continue;
     }
     // Serialized leaf: try the `$implRef` index (the verified-implementation

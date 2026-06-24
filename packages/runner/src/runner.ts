@@ -16,6 +16,7 @@ import {
   type CellScope,
   type Frame,
   isModule,
+  isOpaqueRef,
   isPattern,
   isStreamValue,
   type JSONSchema,
@@ -100,6 +101,7 @@ import { SigilLink } from "./sigil-types.ts";
 import {
   type ExtractResult,
   extractRog,
+  hasArgumentWritebackMarker,
   type ImplRefResolver,
   resolveLeafImpls,
 } from "./reactive-interpreter/extract.ts";
@@ -109,7 +111,7 @@ import {
 } from "./reactive-interpreter/interpret.ts";
 import { collectionInterpreter } from "./reactive-interpreter/collection-interpreter.ts";
 import { buildElementEvaluator } from "./reactive-interpreter/element-evaluator.ts";
-import type { OpId, Rog, ValueRef } from "./reactive-interpreter/rog.ts";
+import type { Op, OpId, Rog, ValueRef } from "./reactive-interpreter/rog.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 export {
   extractDefaultValues,
@@ -539,6 +541,12 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  // The pattern is a LAUNCHED CHILD (handler `this.run` receipt / navigateTo
+  // target / build-time `instantiatePatternNode`): the reactive interpreter must
+  // fall back to legacy for it (its result cell is consumed by a launcher
+  // contract the collapsed `$ri-result` alias does not preserve). Only consulted
+  // when the experimental interpreter flag is on; otherwise inert.
+  launchedChild?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -564,7 +572,20 @@ export type InterpreterFallbackReason =
   // graph. The first-cut collection interpreter is unscoped-only, so any scope
   // falls back. Distinct from `ineligible_opkind` so the oracle's negative axis
   // can assert scoped collections fall back for THIS reason.
-  | "scoped";
+  | "scoped"
+  // Cross-space / scope routing: the pattern node carries `module.targetSpace`
+  // (`.inSpace(...)`) or a non-default `module.defaultScope` (`.asScope(...)`).
+  // Cross-space child materialization / scoped child result cells are real
+  // reactive child instantiation outside the pure-compute subset → legacy.
+  | "cross_space"
+  // A node's OUTPUT aliases the ARGUMENT cell — a write-BACK side effect the
+  // synthetic node cannot emit (see extract.ts ARGUMENT_WRITEBACK_MARKER).
+  | "argument_writeback"
+  // The pattern is a LAUNCHED CHILD (handler `this.run` receipt / navigateTo
+  // target / build-time `instantiatePatternNode`) whose result cell is consumed
+  // by a launcher contract (firstResolvedOutputRedirect / receipt / navigable
+  // link) the single `$ri-result` alias does not preserve → legacy.
+  | "launched_child";
 
 /** Census of reactive-interpreter dispatch outcomes (see Runner field). */
 export interface InterpreterCensus {
@@ -601,6 +622,27 @@ function hasNonDefaultScope(value: unknown): boolean {
   }
   for (const v of Object.values(obj)) {
     if (hasNonDefaultScope(v)) return true;
+  }
+  return false;
+}
+
+/** True iff ANY node in the pattern carries cross-space / non-default-scope
+ * routing on its module: `module.targetSpace` (`.inSpace(...)` DID / named / cell
+ * / anonymous routing) or `module.defaultScope` not in {undefined, "space"}
+ * (`.asScope("user"|"session")`). Such a node mints its child result cell in
+ * another space or at a narrower scope — real reactive child materialization the
+ * inlining interpreter does not perform — so the whole pattern falls back to
+ * legacy. The extractor drops `targetSpace`/`defaultScope` entirely, so this is
+ * read directly off the raw module objects, not the ROG. */
+function patternHasCrossSpaceOrScopeRouting(pattern: Pattern): boolean {
+  for (const node of pattern.nodes ?? []) {
+    const module = node.module as
+      | { targetSpace?: unknown; defaultScope?: unknown }
+      | undefined;
+    if (!module) continue;
+    if (module.targetSpace !== undefined) return true;
+    const ds = module.defaultScope;
+    if (ds !== undefined && ds !== "space" && ds !== "inherit") return true;
   }
   return false;
 }
@@ -647,6 +689,9 @@ export class Runner {
       unresolved_leaf: 0,
       eval_threw: 0,
       scoped: 0,
+      cross_space: 0,
+      argument_writeback: 0,
+      launched_child: 0,
     },
   };
 
@@ -1250,6 +1295,9 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      // Launched-child signal (see RunnerRunOptions.launchedChild): forces the
+      // reactive interpreter to fall back to legacy for this pattern.
+      launchedChild?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1293,7 +1341,12 @@ export class Runner {
       let viaInterpreter = false;
       if (this.runtime.experimental.experimentalInterpreter) {
         try {
-          effectivePattern = this.buildInterpreterPattern(pattern, resultCell);
+          effectivePattern = this.buildInterpreterPattern(
+            pattern,
+            resultCell,
+            options.launchedChild === true,
+            useTx,
+          );
           viaInterpreter = true;
         } catch (e) {
           if (!(e instanceof NotInterpretedHere)) throw e;
@@ -1626,6 +1679,7 @@ export class Runner {
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      launchedChild: options.launchedChild,
     });
   }
 
@@ -1699,7 +1753,12 @@ export class Runner {
         startTx,
       );
       try {
-        this.run(startTx, pattern, inputs, committedResultCell);
+        // Launched child (navigateTo / handler-result deferred pattern): its
+        // result cell is consumed by a launcher contract the interpreter's
+        // collapsed result alias does not preserve → force legacy.
+        this.run(startTx, pattern, inputs, committedResultCell, {
+          launchedChild: true,
+        });
         if (markCreateOnlyResult) {
           startTx.markCreateOnly?.(
             committedResultCell.getAsNormalizedFullLink(),
@@ -2077,6 +2136,29 @@ export class Runner {
   };
 
   /**
+   * SECURITY trust gate for a LIVE leaf impl, passed to `resolveLeafImpls`. An
+   * untrusted in-memory callback must NOT run as a raw host closure inside the
+   * interpreter — it would bypass the SES sandbox legacy routes it through
+   * (`getFallbackJavaScriptImplementation`, recompiled from `fn.toString()` so
+   * captured closures are stripped and `Proxy` is absent). Mirrors the
+   * `liveTrusted` test in `resolveJavaScriptFunction`: a live function is trusted
+   * iff it carries verified module-eval provenance, OR it has an entry ref THIS
+   * runtime's harness resolves back to the same function. An untrusted leaf is
+   * reported as unresolved → `unresolved_leaf` fallback → legacy SES path.
+   */
+  private readonly interpreterLiveLeafTrustCheck = (
+    impl: (input: unknown) => unknown,
+  ): boolean => {
+    if (getVerifiedProvenance(impl) !== undefined) return true;
+    const entryRef = getArtifactEntryRef(impl);
+    return entryRef !== undefined &&
+      this.runtime.harness.getVerifiedImplementation?.(
+          entryRef.identity,
+          entryRef.symbol,
+        ) === impl;
+  };
+
+  /**
    * Reactive-interpreter eligibility probe + rewrite (PURE — no tx writes).
    *
    * Extracts the pattern to a ROG, checks it is fully covered and uses only the
@@ -2097,11 +2179,42 @@ export class Runner {
   private buildInterpreterPattern(
     pattern: Pattern,
     resultCell: Cell<any>,
+    /** True when this pattern is being instantiated as a LAUNCHED CHILD (handler
+     * `this.run` receipt / navigateTo target / build-time `instantiatePatternNode`).
+     * Its result cell is consumed by a launcher contract (firstResolvedOutput
+     * Redirect / receipt / navigable link) the single `$ri-result` alias does not
+     * preserve, so always fall back to legacy. */
+    launchedChild = false,
+    /** The in-flight setup transaction, if the caller has one. The argument is
+     * written into this tx during setup and is NOT yet visible to a tx-less read,
+     * so the collection scope probe reads the RAW argument THROUGH this tx to see
+     * per-element link scopes. Read-only — the probe never writes. */
+    setupTx?: IExtendedStorageTransaction,
   ): Pattern {
     const bumpAndThrow = (reason: InterpreterFallbackReason): never => {
       this.interpreterCensus.fallback_by_reason[reason]++;
       throw new NotInterpretedHere(reason);
     };
+
+    // --- 0. LAUNCHED-CHILD gate (cluster: launched child result-cell contract).
+    // A handler-launched / navigateTo-target / build-time child pattern's result
+    // cell is consumed by a launcher contract (receipt resolution, navigateTo
+    // dereference, firstResolvedOutputRedirect) that the collapsed single
+    // `$ri-result` alias does not honor. Always fall back. Sound (legacy green).
+    if (launchedChild) bumpAndThrow("launched_child");
+
+    // --- 0b. CROSS-SPACE / SCOPE ROUTING gate (cluster: .inSpace / .asScope /
+    // module.targetSpace / module.defaultScope). A child pattern node routed to
+    // another space (`module.targetSpace`) or carrying a non-default
+    // `module.defaultScope` (`.asScope("user"|"session")`) is real reactive
+    // cross-space / scoped child materialization the inlining synthetic node
+    // cannot reproduce — it would inline the child into a `$ri-result` cell in
+    // the PARENT space at the default scope. Scan every node (build-time pattern
+    // nodes AND handler-result inSpace patterns route through this method). Always
+    // sound (legacy routes through instantiatePatternNode / replicatePatternToSpace).
+    if (patternHasCrossSpaceOrScopeRouting(pattern)) {
+      bumpAndThrow("cross_space");
+    }
 
     // --- 1. Extract + coverage (pure structural classification) ------------
     const extracted: ExtractResult = extractRog(
@@ -2129,6 +2242,8 @@ export class Runner {
       pattern,
       extracted,
       bumpAndThrow,
+      resultCell,
+      setupTx,
     );
     if (collectionPattern) {
       this.interpreterCensus.interpreted_ok++;
@@ -2137,9 +2252,15 @@ export class Runner {
 
     // Scalar path: the element-internal defer pollution does not apply (there is
     // no collection op), so a non-empty unrecognized report is a real outer
-    // alias problem → fall back.
+    // alias problem → fall back. The dedicated argument-writeback marker maps to
+    // its own `argument_writeback` reason (a node whose output aliases the
+    // argument cell — a write-back side effect the synthetic node cannot emit).
     if (extracted.coverage.unrecognizedAliases.length > 0) {
-      bumpAndThrow("unrecognized_alias");
+      bumpAndThrow(
+        hasArgumentWritebackMarker(extracted.coverage.unrecognizedAliases)
+          ? "argument_writeback"
+          : "unrecognized_alias",
+      );
     }
 
     // --- PATTERN gate (mirror the collection gate; MUTUALLY LOAD-BEARING with
@@ -2215,11 +2336,157 @@ export class Runner {
       }
     }
 
+    // --- STRUCTURAL eligibility gates over the extracted ROG ----------------
+    // These are read off the ROG topology (no body execution) and each ONLY
+    // causes fallback (legacy is green), so they are always sound.
+    {
+      // Enumerate every ValueRef an op reads (flat inputs + structural detail
+      // refs + construct-template leaves), and the result ref.
+      const refsOfOp = (op: Op): ValueRef[] => {
+        const refs: ValueRef[] = [...op.inputs];
+        const d = op.detail;
+        if (d.kind === "collection") refs.push(d.listInput);
+        if (d.kind === "pattern") refs.push(d.argument);
+        if (d.kind === "control") refs.push(d.pred, ...d.branches);
+        if (d.kind === "construct") {
+          refs.push(
+            ...(d.template.shape === "object"
+              ? Object.values(d.template.fields)
+              : d.template.items),
+          );
+        }
+        return refs;
+      };
+      const allRefs: ValueRef[] = [extracted.rog.result];
+      for (const op of extracted.rog.ops) allRefs.push(...refsOfOp(op));
+
+      // GATE (dangling internal — cluster: raw Pattern with derivedInternalCells
+      // defaults). An `internal` ref whose name is absent from `internalToOp` is
+      // produced by NO node (a derivedInternalCells-only / dangling cell the
+      // evaluator resolves to `undefined`, never consulting the declared default
+      // — and legacy's raw-runner toJSON normalization never runs). Fall back.
+      for (const ref of allRefs) {
+        if (
+          ref.kind === "internal" &&
+          !extracted.internalToOp.has(ref.name)
+        ) {
+          bumpAndThrow("unrecognized_alias");
+        }
+      }
+
+      // NOTE: we deliberately do NOT broadly fall back on any non-empty
+      // `pattern.derivedInternalCells`. The AUTHORED result internal cell (e.g.
+      // `{partialCause:"doubled"}` wired to a node output) is the NORMAL eligible
+      // shape — falling it back would erase real interpreter coverage. The
+      // toJSON-normalize cluster (a derivedInternalCells-only DANGLING cell
+      // produced by no node) is already caught by the dangling-internal gate
+      // above (its name is absent from `internalToOp`).
+
+      // GATE (output-less / side-effect-only leaf — cluster: side-effect-only
+      // leaves admitted). A leaf op whose output never flows into the result
+      // closure (e.g. `() => { startCount++ }`) has no faithful single-eval
+      // interpreter semantics: the probe would double-execute its side effect and
+      // the emission carries nothing. Reject BEFORE any leaf body runs. Compute
+      // the op ids reachable from the result via the ref graph; a leaf not in the
+      // reachable set is output-less.
+      const byId = new Map<OpId, Op>();
+      for (const op of extracted.rog.ops) byId.set(op.id, op);
+      const reachable = new Set<OpId>();
+      const stack: ValueRef[] = [extracted.rog.result];
+      while (stack.length > 0) {
+        const ref = stack.pop()!;
+        // Resolve a ref to a producing op id: `opOut` directly, or an `internal`
+        // ref via `internalToOp` (the builder names a node's output internal cell
+        // and the result references it by NAME, not as a positional `opOut`).
+        let opId: OpId | undefined;
+        if (ref.kind === "opOut") opId = ref.op;
+        else if (ref.kind === "internal") {
+          opId = extracted.internalToOp.get(ref.name);
+        }
+        if (opId === undefined || reachable.has(opId)) continue;
+        reachable.add(opId);
+        const producer = byId.get(opId);
+        if (producer) stack.push(...refsOfOp(producer));
+      }
+      for (const op of extracted.rog.ops) {
+        if (op.kind === "leaf" && !reachable.has(op.id)) {
+          bumpAndThrow("ineligible_opkind");
+        }
+      }
+
+      // GATE (static-construct-over-argument result — cluster: static-construct
+      // read synchronously / as schema-lineage). A pattern with NO compute op
+      // (no leaf/control/collection/pattern — only the extraction-synthesized
+      // access/construct ops) re-shapes the argument into a static link tree.
+      // Legacy materializes that tree SYNCHRONOUSLY at setup (a non-async read
+      // resolves immediately and `.asSchema({asCell})` surfaces the argument's
+      // schema lineage as a Cell); the interpreter's `$ri-result` value is only
+      // produced when the synthetic node runs under the scheduler (async) and
+      // navigates the argument to a plain value, dropping the alias→Cell lineage.
+      // Fall back so legacy's synchronous static materialization is preserved.
+      const hasComputeOp = extracted.rog.ops.some((op) =>
+        op.kind === "leaf" || op.kind === "control" ||
+        op.kind === "collection" || op.kind === "pattern"
+      );
+      if (!hasComputeOp) bumpAndThrow("ineligible_opkind");
+    }
+
+    // GATE (per-node input / result / element schema scope narrowing — cluster:
+    // per-node input/schema scope narrowing dropped). For a pure-compute pattern
+    // whose narrowing scope arrives via a user/session-scoped INPUT LINK
+    // (per-node `inputs` binding) or a non-default `scope` in the argument /
+    // result schema, legacy mints a space-scoped internal cell linking to a
+    // narrower-scoped output cell (scope-policy narrowestCellScope/scopedCell).
+    // The single-`$ri-result` emission produces an inlined value with no scoped
+    // output-cell chain, so a downstream `.getRaw()` is not the expected scoped
+    // link chain (parseLink/getCellFromLink throws or `.scope` is undefined).
+    // Fall back whenever a non-default scope appears on any per-node input
+    // binding or in the argument / result schema. Reuses the scoped-fallback
+    // machinery; always sound (legacy is green).
+    if (
+      hasNonDefaultScope(pattern.argumentSchema) ||
+      hasNonDefaultScope(pattern.resultSchema) ||
+      (pattern.nodes ?? []).some((n) =>
+        hasNonDefaultScope(n.inputs) ||
+        // The narrowing can live on a NODE's own module schema — an opaque JS
+        // action whose `resultSchema` (or `argumentSchema`) carries `scope`
+        // participates in the effective output scope. Scan those too.
+        hasNonDefaultScope(
+          (n.module as { argumentSchema?: unknown } | undefined)
+            ?.argumentSchema,
+        ) ||
+        hasNonDefaultScope(
+          (n.module as { resultSchema?: unknown } | undefined)?.resultSchema,
+        )
+      )
+    ) {
+      bumpAndThrow("scoped");
+    }
+    // RUNTIME input-link scope (same cluster): the narrowing often arrives via the
+    // bound argument DATA (a user/session-scoped input cell), not statically on a
+    // schema or node binding. Inspect the RAW argument tree (links preserved,
+    // through the in-flight setup tx so a not-yet-committed write is visible) for
+    // any non-default scope and fall back. Targeted — fires ONLY when a scope is
+    // actually present, so it does not over-reject unscoped patterns. Sound
+    // (legacy mints the narrower-scoped output-cell chain the interpreter cannot).
+    if (hasNonDefaultScope(this.readRawArgumentSnapshot(resultCell, setupTx))) {
+      bumpAndThrow("scoped");
+    }
+
+    // NOTE: the context-requiring-lift gate (a leaf whose argument schema carries
+    // `asCell`/`asStream` — it expects a live Cell/Stream handle and calls Cell
+    // methods on its input, which the interpreter cannot supply) is applied inside
+    // `resolveLeafImpls` below (it recurses into nested-pattern leaves too) and is
+    // GATED on the trust check being supplied, so the partition probe's
+    // trust-checkless `resolveLeafImpls` — which counts unresolved leaves as
+    // boundaries — is unaffected. Complemented by the dry-run `dry.errors` net.
+
     // --- 2. Resolve every leaf impl (live fn or $implRef index) ------------
     const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
       pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
       extracted.rog,
       this.interpreterImplRefResolver,
+      this.interpreterLiveLeafTrustCheck,
     );
     if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
 
@@ -2227,8 +2494,22 @@ export class Runner {
 
     // --- 3. Dry-run probe on a snapshot of the current argument ------------
     // Pure: reads the argument value WITHOUT a scheduling tx (untracked) and
-    // never writes. If the evaluator throws (NotInterpretedHere for an
-    // unexpected op, or any runtime error from a leaf body), fall back.
+    // never writes. Crucially we read TX-LESS (not through `setupTx`): reading
+    // through the in-flight tx would make the dry-run exercise leaf bodies against
+    // the REAL argument, which (a) double-executes side-effecting leaves and
+    // breaks pull-laziness, and (b) makes a throwing leaf throw at probe time
+    // (falling back patterns that should interpret with per-node error isolation).
+    // The tx-less read yields `undefined` for a not-yet-committed argument, a
+    // valid eligible-vocabulary probe input. If the evaluator throws, fall back.
+    //
+    // NOTE on the demand-gated / lazy handler-written result pattern cluster
+    // (patterns-handlers): that pattern carries a handler node (classified
+    // `effect` → `ineligible_opkind`) and its lazily-written result is a launched
+    // child (handler `this.run` → `launched_child`), so it ALREADY falls back via
+    // those gates. We deliberately do NOT gate on `argSnapshot === undefined`:
+    // a legitimately eligible pure-compute pattern whose argument is not yet
+    // materialized also reads `undefined`, and rejecting on that would wrongly
+    // fall back real coverage (prod-wire / extract-interpret oracle patterns).
     const argSnapshot = this.readArgumentSnapshot(resultCell);
     let dry: ReturnType<typeof evalRog> | undefined;
     try {
@@ -2236,6 +2517,14 @@ export class Runner {
     } catch {
       bumpAndThrow("eval_threw");
     }
+    // SAFETY NET (context-requiring lifts, run-gate divergences, etc.): the
+    // per-op isolation in `evalRog` swallows a leaf's runtime TypeError into
+    // `errors[]` and returns successfully, so a thrown probe alone does not catch
+    // a leaf that called a Cell method (`.get()`/`.sample()`) on a plain value,
+    // or any other leaf-body failure. Treat ANY recorded dry-run error as a
+    // fallback signal — legacy faithfully models these (schema-aware Cell
+    // materialization, per-node error reporting). Always sound: legacy is green.
+    if (dry!.errors.length > 0) bumpAndThrow("eval_threw");
     // R6: an async leaf returns a Promise the interpreter cannot store (legacy
     // awaits async leaves) — fall back. R5: a `derive`/`lift` returning a Pattern
     // needs a real reactive child instantiation the interpreter does not do —
@@ -2247,6 +2536,25 @@ export class Runner {
       typeof (v as { then?: unknown } | null | undefined)?.then === "function";
     if (dryValues.some(isThenable)) bumpAndThrow("eval_threw");
     if (dryValues.some(isPattern)) bumpAndThrow("ineligible_opkind");
+    // GATE (pattern-returning / OpaqueRef-returning / Cell-valued lifts): a lift
+    // whose body returns a pattern instantiation (a `CellImpl`) or another
+    // lift/derive application (an `OpaqueRef` proxy) needs the real reactive
+    // child instantiation legacy performs — the synthetic node would yield the
+    // raw Cell/OpaqueRef into `$ri-result` and materialize `undefined`. The
+    // `isPattern` guard above misses these (a `CellImpl`/`OpaqueRef` lacks the
+    // argumentSchema+resultSchema+nodes shape). Broaden to any Cell or OpaqueRef
+    // value anywhere in the evaluated set. Always sound (legacy is green).
+    if (dryValues.some((v) => isCell(v) || isOpaqueRef(v))) {
+      bumpAndThrow("ineligible_opkind");
+    }
+    // GATE (mid-handler lift whose result is a write-REDIRECT link consumed
+    // cross-node, patterns-misc): a leaf output that is itself a write-redirect
+    // link (legacy `$alias` or a sigil link with `overwrite:"redirect"`) is a
+    // cross-node binding the synthetic node does not honor — fall back. Detect
+    // the redirect-link result shape structurally on the evaluated values.
+    if (dryValues.some((v) => isWriteRedirectLink(v))) {
+      bumpAndThrow("ineligible_opkind");
+    }
 
     // --- 4. Build the synthetic single-node interpreter pattern ------------
     const resultSchema = pattern.resultSchema ?? {};
@@ -2342,6 +2650,8 @@ export class Runner {
     pattern: Pattern,
     extracted: ExtractResult,
     bumpAndThrow: (reason: InterpreterFallbackReason) => never,
+    resultCell: Cell<any>,
+    setupTx?: IExtendedStorageTransaction,
   ): Pattern | null {
     // --- Shape: exactly one non-structural op, and it is a `map` -----------
     // Structural ops are the extraction-synthesized result/input constructs
@@ -2422,11 +2732,24 @@ export class Runner {
     ) {
       bumpAndThrow("scoped");
     }
+    // RUNTIME element-link scope (cluster: collection per-element result cells
+    // not scope-narrowed). The narrowing may not sit STATICALLY on the list-input
+    // alias schema — it can arrive via the bound argument DATA (an element link
+    // carrying `scope:"user"|"session"`). The per-element evaluator mints each
+    // result cell at the parent space (unscoped), so a narrowed element link
+    // would not be reproduced. Inspect the RAW argument tree (links preserved)
+    // for any non-default scope and fall back. Sound (legacy narrows per element).
+    if (
+      hasNonDefaultScope(this.readRawArgumentSnapshot(resultCell, setupTx))
+    ) {
+      bumpAndThrow("scoped");
+    }
 
     // --- Element evaluator must fully resolve (no unresolved leaf ops) ------
     const evaluator = buildElementEvaluator(
       elementPattern as Record<string, unknown>,
       this.interpreterImplRefResolver,
+      this.interpreterLiveLeafTrustCheck,
     );
     if (evaluator.unresolvedLeafOps.length > 0) {
       bumpAndThrow("unresolved_leaf");
@@ -2524,11 +2847,43 @@ export class Runner {
    * evalRog against `undefined`, which is a valid input for the eligible
    * vocabulary).
    */
-  private readArgumentSnapshot(resultCell: Cell<any>): unknown {
+  private readArgumentSnapshot(
+    resultCell: Cell<any>,
+    tx?: IExtendedStorageTransaction,
+  ): unknown {
     const argumentLink = getMetaLink(resultCell, "argument");
     if (!argumentLink) return undefined;
     try {
-      return this.runtime.getCellFromLink(argumentLink).get();
+      let cell = this.runtime.getCellFromLink(argumentLink);
+      if (tx) cell = cell.withTx(tx);
+      return cell.get();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Read the RAW argument tree (links preserved, NOT deep-resolved), so the
+   * collection probe can inspect the SCOPE carried on per-element input links.
+   * `.get()` (used by `readArgumentSnapshot`) navigates links to plain values and
+   * loses scope; `getRaw()` keeps the sigil links whose `scope` records a
+   * user/session narrowing. Untracked, read-only, fail-soft (returns undefined on
+   * any error). Used only to detect a non-default element-link scope the unscoped
+   * collection interpreter cannot reproduce.
+   */
+  private readRawArgumentSnapshot(
+    resultCell: Cell<any>,
+    tx?: IExtendedStorageTransaction,
+  ): unknown {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (!argumentLink) return undefined;
+    try {
+      // Resolve the argument link to its VALUE node (following the redirect) and
+      // read raw so per-element link scopes survive. Read through the in-flight
+      // setup tx when provided so a not-yet-committed argument write is visible.
+      let cell = this.runtime.getCellFromLink(argumentLink);
+      if (tx) cell = cell.withTx(tx);
+      return cell.getRaw({ lastNode: "value" } as Parameters<typeof cell.getRaw>[0]);
     } catch {
       return undefined;
     }
@@ -3299,7 +3654,12 @@ export class Runner {
         cause,
         true,
       )
-      : this.run(tx, resultPattern, undefined, receiptCell);
+      // Handler-launched child pattern (receipt-anchored): its result cell is
+      // consumed by the receipt / launch contract the interpreter's collapsed
+      // result alias does not preserve → force legacy.
+      : this.run(tx, resultPattern, undefined, receiptCell, {
+        launchedChild: true,
+      });
 
     if (!deferForNavigate) {
       tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
@@ -3393,7 +3753,8 @@ export class Runner {
         tx,
         resultCell,
         resultSetup.pattern,
-        {},
+        // Launched child (deferred navigateTo / handler result pattern) → legacy.
+        { launchedChild: true },
         this.patternNeedsOneShotPull(resultSetup.pattern),
       );
     }
@@ -3517,11 +3878,15 @@ export class Runner {
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
       });
+      // Action/computed-result child pattern: its result cell is consumed by
+      // the launcher contract the interpreter's collapsed result alias does not
+      // preserve → force legacy.
       this.run(
         childSetupTx,
         resultPattern,
         undefined,
         resultCell,
+        { launchedChild: true },
       );
       addCancel(() => this.stop(resultCell));
 
@@ -4745,6 +5110,13 @@ export class Runner {
     this.run(tx, patternImpl, inputs, childResultCell, {
       awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
         ?.awaitSync,
+      // NOTE: a build-time nested pattern node is NOT one of the launched-child
+      // contracts (handler `this.run` receipt / navigateTo target). It is a
+      // regular child the interpreter may still cover (collection / inlined
+      // nested-pattern coverage), so we do NOT set `launchedChild` here. The
+      // cross-space variant is independently gated by
+      // `patternHasCrossSpaceOrScopeRouting` (which reads the child's own
+      // `module.targetSpace` / `module.defaultScope`).
     });
 
     if (sendToBindings) {
