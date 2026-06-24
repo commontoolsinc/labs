@@ -512,7 +512,24 @@ type SchedulerRehydrationSubscriptionOptions = {
     processGeneration: number;
     awaitSync?: boolean;
   };
+  // Defer initial action runs until the space finishes syncing, without
+  // restoring persisted scheduler state. Set for resumed patterns when
+  // persistent scheduler state is disabled, so re-running actions read
+  // confirmed-loaded inputs.
+  awaitSyncBeforeInitialRun?: {
+    space: MemorySpace;
+  };
 };
+
+// Whether resumed nodes should hold their initial run until the space syncs,
+// from either the rehydration path or the flag-off await-sync path. Used to
+// propagate the intent to cross-space child runs and container-minting builtins.
+function defersInitialRunUntilSynced(
+  options: SchedulerRehydrationSubscriptionOptions,
+): boolean {
+  return !!(options.rehydrateFromStorage?.awaitSync ||
+    options.awaitSyncBeforeInitialRun);
+}
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
@@ -889,20 +906,14 @@ export class Runner {
         ? descriptor.schema.default as JSONValue | undefined
         : undefined;
       if (currentValue === undefined && schemaDefault !== undefined) {
-        if (manifestMatch !== -1) {
-          // The manifest already references this cell (a previous run
-          // materialized it), yet it reads undefined here — on a cold cache
-          // this usually means the doc just isn't loaded, and writing the
-          // default would clobber persisted state (CT-1666 class of bug).
-          logger.warn("internal-default-over-manifest", () => [
-            `materializeDerivedInternalCells: applying schema default over`,
-            `undefined for existing manifest entry`,
-            `partialCause=${JSON.stringify(descriptor.partialCause)}`,
-            `cell=${derivedCell.getAsNormalizedFullLink().id}`,
-            `result=${resultCell.getAsNormalizedFullLink().id}`,
-          ]);
+        // A manifest entry means this cell's doc is durable: the manifest entry
+        // and the build-time default are written together in one transaction.
+        // So for a manifest-referenced cell an undefined read means the doc is
+        // not loaded yet on a cold-cache resume, not that it is absent; seed the
+        // default only when there is no manifest entry yet.
+        if (manifestMatch === -1) {
+          derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
         }
-        derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
       }
     }
 
@@ -1777,10 +1788,13 @@ export class Runner {
     resultCell: Cell<any>,
     awaitSync?: boolean,
   ): SchedulerRehydrationSubscriptionOptions {
-    if (!getPersistentSchedulerStateConfig()) {
-      return {};
-    }
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    if (!getPersistentSchedulerStateConfig()) {
+      // Persistent scheduler state is off: actions always re-run on resume.
+      // When resuming from a synced state, hold the initial run until the space
+      // is synced so re-derivations read confirmed-loaded inputs.
+      return awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {};
+    }
     return {
       rehydrateFromStorage: {
         space,
@@ -3777,7 +3791,7 @@ export class Runner {
           // Propagate the resumed-from-synced-state flag so container-minting
           // builtins (map/filter/flatmap) defer their per-element sub-pattern
           // runs until sync completes too.
-          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
+          ...(defersInitialRunUntilSynced(schedulerRehydration)
             ? { awaitSync: true }
             : {}),
         },
@@ -4102,8 +4116,9 @@ export class Runner {
       );
     }
     this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
-        ?.awaitSync,
+      awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
+        schedulerRehydration,
+      ),
     });
 
     if (sendToBindings) {
