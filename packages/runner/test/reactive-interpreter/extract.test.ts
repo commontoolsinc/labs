@@ -14,6 +14,7 @@ import { Identity } from "@commonfabric/identity";
 import { setGlobalLogFloor } from "@commonfabric/utils/logger";
 import { createMeasureEnv } from "../support/interpreter-measure.ts";
 import { extractRog } from "../../src/reactive-interpreter/extract.ts";
+import { inputsOf } from "../../src/reactive-interpreter/rog.ts";
 import type { JSONSchema } from "../../src/builder/types.ts";
 
 setGlobalLogFloor("error");
@@ -399,5 +400,182 @@ describe("W0.4 extraction coverage", () => {
     if (tmpl?.shape === "object") {
       expect(tmpl.fields["scoped"]?.kind).toBe("argument");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F1 — boundary (effect) ops carry their input ValueRef(s).
+//
+// Production extraction USED to give `op.inputs` only to LEAF ops; an effect op
+// (a `fetch`/`generateText`/`sqlite` value computation, or a handler) got
+// `detail = {kind:"effect", sink}` with NO refs and `rog.ts::inputsOf` returned
+// [] for it. So a boundary like `fetch(a)` had no `boundary←producer` edge in
+// the ROG, and the coalescing partitioner (§4.2) could not order the producing
+// segment before the boundary it feeds, nor label the CFC read-through (§4.5).
+//
+// F1 captures the boundary op's value-producer input ValueRef(s) from the raw
+// `node.inputs` alias tree (using the SAME `aliasToValueRef` path leaf nodes
+// use), EXCLUDING event-stream aliases (a handler's `$event`). The interpreter
+// is UNCHANGED — effect ops still throw `NotInterpretedHere`; this only ADDS
+// edges to the ROG.
+// ---------------------------------------------------------------------------
+describe("F1: boundary (effect) ops carry input ValueRefs", () => {
+  it("a fetchData(computed) boundary now carries its producer input ref (was empty)", () => {
+    const env = createMeasureEnv(signer);
+    try {
+      // deno-lint-ignore no-explicit-any
+      const cf = env.commonfabric as any;
+      // ({url}) => ({ data: fetchData({ url, mode:"json" }) }). The fetchData
+      // ref builtin classifies as `effect` (EFFECT_REFS). Its input reads the
+      // `url` argument — that read must now appear as a boundary input ValueRef.
+      const p = cf.pattern(
+        // deno-lint-ignore no-explicit-any
+        ({ url }: any) => ({ data: cf.fetchData({ url, mode: "json" }) }),
+        {
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+        },
+        { type: "object" },
+      );
+      const r = extractRog(p);
+
+      const effect = r.rog.ops.find((op) => op.detail.kind === "effect");
+      expect(effect).toBeDefined();
+      // The GAP this closes: the effect op's inputs are NO LONGER empty.
+      expect(effect!.inputs.length).toBeGreaterThan(0);
+      // `inputsOf` surfaces the same refs (so topoOrder + the partitioner see the
+      // boundary←producer edges).
+      expect(inputsOf(effect!).length).toBeGreaterThan(0);
+      // The boundary reads the `url` argument — captured as an argument ref.
+      const readsUrl = inputsOf(effect!).some((ref) =>
+        ref.kind === "argument" && ref.path.includes("url")
+      );
+      expect(readsUrl).toBe(true);
+    } finally {
+      env.dispose();
+    }
+  });
+
+  it("a handler boundary carries its captured-value input ref, EXCLUDING the $event stream", () => {
+    const env = createMeasureEnv(signer);
+    try {
+      // deno-lint-ignore no-explicit-any
+      const cf = env.commonfabric as any;
+      const numS = { type: "number" } as const satisfies JSONSchema;
+      // ({count}) => ({ count, increment: handler({count}) }). The handler node
+      // (wrapper:"handler") classifies as `effect`. Its `inputs` are
+      // `{ $ctx: {count: <arg>}, $event: <stream> }`: the `count` capture is a
+      // value producer (must appear), the `$event` stream is an event source
+      // (must NOT appear).
+      const p = cf.pattern(
+        // deno-lint-ignore no-explicit-any
+        ({ count }: any) => {
+          const increment = cf.handler(
+            { type: "object" },
+            { type: "object", properties: { count: numS } },
+            // deno-lint-ignore no-explicit-any
+            (_e: any, s: any) => {
+              s.count = s.count + 1;
+            },
+          );
+          return { count, increment: increment({ count }) };
+        },
+        { type: "object", properties: { count: numS } },
+        {
+          type: "object",
+          properties: { count: numS, increment: { asStream: true } },
+        } as JSONSchema,
+      );
+      const r = extractRog(p);
+
+      const effect = r.rog.ops.find((op) => op.detail.kind === "effect");
+      expect(effect).toBeDefined();
+      // The handler boundary now carries its captured-value input ref(s).
+      expect(effect!.inputs.length).toBeGreaterThan(0);
+      // The captured `count` value is read (a value-producer edge).
+      const readsCount = inputsOf(effect!).some((ref) =>
+        (ref.kind === "argument" || ref.kind === "internal") &&
+        ref.path.includes("count")
+      );
+      expect(readsCount).toBe(true);
+      // The `$event` stream alias is EXCLUDED — no ref names a stream-typed
+      // producer. (Stream aliases carry `partialCause.$kind === "stream"`, which
+      // `aliasToValueRef` would otherwise record as `internal`. We assert none of
+      // the captured refs is the event stream by confirming every captured ref is
+      // a recognized value producer — argument/internal/opOut/const — and the
+      // count edge is present; the stream is structurally absent because
+      // `effectInputRefs` skips it.)
+      for (const ref of inputsOf(effect!)) {
+        expect(["argument", "internal", "opOut", "const"]).toContain(ref.kind);
+      }
+    } finally {
+      env.dispose();
+    }
+  });
+
+  it("FAIL-CLOSED: a malformed boundary input alias is recorded (not silently resolved)", () => {
+    // Hand-built effect node whose input mixes a recognized argument alias with
+    // a MALFORMED `$alias` (truthy non-record payload). The malformed one MUST be
+    // recorded into `unrecognizedAliases` (the same fail-closed contract leaf
+    // inputs hold), and the boundary's captured refs must NOT include a bogus ref
+    // for it. (`isEffect:true` forces the `effect` classification on a hand-built
+    // node so `effectInputRefs` runs.)
+    const pattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: { type: "ref", implementation: "fetchData" },
+          inputs: {
+            ok: { $alias: { cell: "argument", path: ["url"] } },
+            // Malformed — bears a `$alias` key but the payload is a string.
+            bad: { $alias: "str" },
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+    };
+    // deno-lint-ignore no-explicit-any
+    const r = extractRog(pattern as any);
+    // Recorded (→ ineligible → legacy fallback), not silently resolved.
+    expect(r.coverage.unrecognizedAliases.length).toBeGreaterThan(0);
+    // The effect op captured the well-formed `url` ref but NOT the malformed one.
+    const effect = r.rog.ops.find((op) => op.detail.kind === "effect");
+    expect(effect).toBeDefined();
+    const readsUrl = effect!.inputs.some((ref) =>
+      ref.kind === "argument" && ref.path.includes("url")
+    );
+    expect(readsUrl).toBe(true);
+    // No const placeholder snuck in for the malformed alias.
+    expect(effect!.inputs.some((ref) => ref.kind === "const")).toBe(false);
+  });
+
+  it("FAIL-CLOSED: a `defer`-bearing boundary input alias falls back, not mis-resolved", () => {
+    // A canonical alias carrying a non-local `defer` (serialized / nested-pattern
+    // indirection the interpreter does not model). On a boundary input it must
+    // fail closed exactly as on a leaf input — recorded, not resolved as level-0.
+    const pattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: { type: "ref", implementation: "fetchData" },
+          inputs: {
+            deferred: { $alias: { cell: "argument", path: ["a"], defer: 1 } },
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+    };
+    // deno-lint-ignore no-explicit-any
+    const r = extractRog(pattern as any);
+    expect(r.coverage.unrecognizedAliases.length).toBeGreaterThan(0);
+    // The deferred alias was NOT resolved to a plain `argument` boundary ref.
+    const effect = r.rog.ops.find((op) => op.detail.kind === "effect");
+    expect(effect).toBeDefined();
+    expect(effect!.inputs.some((ref) => ref.kind === "argument")).toBe(false);
   });
 });

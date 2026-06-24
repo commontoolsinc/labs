@@ -417,6 +417,84 @@ function inputRefs(
   return [ref];
 }
 
+/** True iff a canonical `$alias`'s payload is an EVENT-STREAM source, not a
+ * value producer. A handler's `$event` input (and any stream-typed internal
+ * cell) carries `partialCause = { $kind: "stream", … }` (builder/pattern.ts:312)
+ * or the legacy `{ stream: [...] }` shape. The boundary fires on events from
+ * such a source; it does NOT wait for a segment to PRODUCE the stream value, so
+ * it is not a `boundary←producer` edge. Mirrors the standalone probe's
+ * `aliasProducerName` exclusion (coalescing-partition-probe.ts). */
+function isEventStreamAlias(alias: Record<string, unknown>): boolean {
+  const pc = alias.partialCause;
+  if (!pc || typeof pc !== "object") return false;
+  const o = pc as Record<string, unknown>;
+  return o.$kind === "stream" || Array.isArray(o.stream);
+}
+
+/**
+ * Capture a BOUNDARY (effect) op's input ValueRef(s) from the RAW `node.inputs`
+ * alias tree — the `boundary←producer` edges the partitioner (§4.2) needs to
+ * order a producing segment before the boundary it feeds, and the labeled
+ * read-through CFC (§4.5) needs to attribute the boundary's reads.
+ *
+ * An effect op's `detail` carries no refs (`{kind:"effect", sink}`) and the
+ * interpreter never EVALUATES it (it throws `NotInterpretedHere`), so unlike a
+ * leaf we do NOT reconstruct the structured argument into ONE construct-backed
+ * ValueRef. We instead collect the FLAT list of value-producer alias leaves —
+ * one ValueRef per canonical `$alias` the boundary reads — using the SAME
+ * lossless `aliasToValueRef` path leaf nodes use (so the recognized argument /
+ * internal / generated forms resolve identically, and the same `defer`
+ * fail-closed contract holds). EVENT-STREAM aliases (a handler's `$event`,
+ * `{$kind:"stream"}` / `{stream:[…]}` payloads) are EXCLUDED — they are event
+ * sources, not value producers (mirrors the probe).
+ *
+ * Order of traversal is deterministic (object key / array order), so the
+ * resulting `op.inputs` is stable. A malformed `$alias` leaf (non-canonical
+ * payload, or `$alias` mixed with siblings) is recorded into `unrecognized`
+ * exactly as the leaf path records it — fail-closed, so a boundary whose input
+ * tree is unrepresentable still makes the pattern ineligible (it already was,
+ * since it carries an effect op, so eligibility is unchanged either way).
+ */
+function effectInputRefs(
+  inputs: unknown,
+  unrecognized: Set<string>,
+  expectedDefer: number,
+): ValueRef[] {
+  const refs: ValueRef[] = [];
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    const obj = v as Record<string, unknown>;
+    if (isLegacyAlias(v)) {
+      // A canonical alias mixed with sibling keys is not a representable input
+      // — record it (fail closed) and do not descend, matching `valueToRef`.
+      if (hasAliasMixedWithSiblings(obj)) {
+        unrecognized.add(MALFORMED_ALIAS_MARKER);
+        return;
+      }
+      const alias = obj.$alias as Record<string, unknown>;
+      // Event-stream source (handler `$event`, stream cell): not a producer.
+      if (isEventStreamAlias(alias)) return;
+      const ref = aliasToValueRef(alias, unrecognized, expectedDefer);
+      if (ref) refs.push(ref);
+      // Never descend into an alias payload (path/schema are not inputs).
+      return;
+    }
+    // Bears a `$alias` key but is NOT canonical (malformed payload): record,
+    // do not descend — same fail-closed contract as `valueToRef`.
+    if (Object.hasOwn(obj, "$alias")) {
+      unrecognized.add(MALFORMED_ALIAS_MARKER);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const el of v) visit(el);
+      return;
+    }
+    for (const el of Object.values(obj)) visit(el);
+  };
+  visit(inputs);
+  return refs;
+}
+
 /** Map an `outputs` alias to the internal-cell name it writes (the producing
  * op's output alias), matching `aliasToValueRef`'s `internal` naming so the
  * evaluator's `internalToOp` lookup keys line up. Returns null if the output is
@@ -519,10 +597,16 @@ export function extractRog(pattern: RawPattern): ExtractResult {
       // Leaf nodes (and the conservative-default leaf) receive a SINGLE
       // structured input — reconstruct it losslessly (synthesizing construct
       // ops for object/array shapes) so the evaluator passes the leaf the exact
-      // value legacy passes. Collection/control/pattern/effect carry their
-      // meaningful refs in `detail`, so their flat `inputs` stays empty (the
-      // `detail` refs alone drive ordering + read-set derivation).
-      const inputs = (c.kind === "leaf")
+      // value legacy passes. Collection/control/pattern carry their meaningful
+      // refs in `detail`, so their flat `inputs` stays empty (the `detail` refs
+      // alone drive ordering + read-set derivation). EFFECT (boundary) ops carry
+      // no `detail` refs, so we populate their flat `inputs` with the FLAT list
+      // of value-producer alias leaves from the raw input tree (event streams
+      // excluded) — the `boundary←producer` edges the partitioner (§4.2) and the
+      // CFC read-through (§4.5) need. The interpreter never evaluates an effect
+      // op (it throws `NotInterpretedHere`), so these refs only ADD edges to the
+      // ROG; they change no eligible-pattern evaluation.
+      const inputs = c.kind === "leaf"
         ? inputRefs(
           node.inputs,
           unrecognized,
@@ -531,6 +615,8 @@ export function extractRog(pattern: RawPattern): ExtractResult {
           bump,
           expectedDefer,
         )
+        : c.kind === "effect"
+        ? effectInputRefs(node.inputs, unrecognized, expectedDefer)
         : [];
       const op: Op = {
         id: i,

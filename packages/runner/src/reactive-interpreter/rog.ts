@@ -147,7 +147,17 @@ export const INTERPRETED_KINDS: ReadonlySet<OpKind> = new Set([
   "effect",
 ]);
 
-/** ValueRefs an op reads, for ordering / read-set derivation. */
+/** ValueRefs an op reads, for ordering / read-set derivation.
+ *
+ * `op.inputs` is the flat input list: leaf ops carry their single structured
+ * input there, and EFFECT (boundary) ops carry the flat list of value-producer
+ * alias leaves the boundary reads (extraction's `effectInputRefs`, event streams
+ * excluded) — the `boundary←producer` edges the partitioner (§4.2) and the CFC
+ * read-through (§4.5) consume. The structural op kinds carry their meaningful
+ * refs in `detail` instead, so we union those in: collection.listInput,
+ * pattern.argument, control.pred + branches. (construct refs live in the
+ * template; topoOrder reads them directly, so they are intentionally not
+ * surfaced here — `inputsOf` is the producer-edge view, not a full ref walk.) */
 export function inputsOf(op: Op): ValueRef[] {
   const extra: ValueRef[] = [];
   if (op.detail.kind === "collection") extra.push(op.detail.listInput);
