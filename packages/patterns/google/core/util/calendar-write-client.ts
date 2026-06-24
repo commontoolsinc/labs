@@ -31,11 +31,30 @@
  * });
  * ```
  */
-import { getPatternEnvironment, Writable } from "commonfabric";
+import {
+  type Default,
+  getPatternEnvironment,
+  type Writable,
+} from "commonfabric";
 
-// Re-export the Auth type for convenience
-export type { Auth } from "./google-auth-manager.tsx";
-import type { Auth } from "./google-auth-manager.tsx";
+type Secret<T> = T;
+
+// Re-export the auth shape for convenience.
+export type Auth = {
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user:
+    | {
+      email: string;
+      name: string;
+      picture: string;
+    }
+    | Default<{ email: ""; name: ""; picture: "" }>;
+};
 
 // ============================================================================
 // TYPES
