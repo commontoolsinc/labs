@@ -2980,7 +2980,7 @@ export class Runner {
         }
         return;
       }
-      if (Array.isArray(v)) for (const el of v) collectAliases(el);
+      if (Array.isArray(v)) { for (const el of v) collectAliases(el); }
       else for (const el of Object.values(v)) collectAliases(el);
     };
     for (const b of part.boundaries) {
