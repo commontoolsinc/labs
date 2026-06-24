@@ -2299,6 +2299,10 @@ export class Scheduler {
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),
+      clearDirectDirtyAfterCommit: (target) => {
+        if (!this.nodes.computations.has(target)) return;
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
+      },
       recordChangedComputationWrites: (target, tx, log) => {
         return recordChangedComputationWrites(
           this.writePropagationState,
@@ -2309,7 +2313,6 @@ export class Scheduler {
       },
       markReadersDirtyForChangedWrites: (target, changedWrites) => {
         if (!this.nodes.computations.has(target)) return;
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
         markReadersDirtyForChangedWrites(
           this.writePropagationState,
           target,

@@ -2,11 +2,13 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
+import type { CellScope } from "../builder/types.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IReadActivity,
 } from "../storage/interface.ts";
 import {
   isConflictRejection,
@@ -26,6 +28,7 @@ import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
+import { getTransactionReadActivities } from "../storage/transaction-inspection.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import type {
@@ -110,13 +113,16 @@ export function watchReactiveActionCommit(state: {
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
+  readonly clearDirectDirtyAfterCommit: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreCfcTriggerReads: () => void;
+  readonly prepareAddedReads: readonly IMemorySpaceAddress[];
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      state.clearDirectDirtyAfterCommit(state.action);
       return;
     }
 
@@ -126,51 +132,32 @@ export function watchReactiveActionCommit(state: {
       error,
     );
 
-    // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
-    // means one of its inputs moved: the authoritative version is ahead of this
-    // replica, and the action's read set is stale until the replica catches up
-    // (the conflict's `readyToRetry` gates exactly that catch-up). Re-arm the
-    // subscription, wait for the catch-up, then re-run the action against the
-    // fresh state. A conflict is a WAIT, not a failure, so it does NOT consume
-    // the retry budget — otherwise sustained contention would exhaust the budget
-    // and strand the compute as a zombie against rolled-back data.
-    //
-    // Reader-dirty propagation also re-triggers the action when the catch-up
-    // write lands as a fresh notification, but that does not cover every
-    // conflict: when the write that caused the conflict has already been
-    // delivered (it is what triggered this run), no further dirty arrives, and
-    // relying on reader-dirty alone would leave the action stranded with its
-    // stale committed value. So the re-queue here is the recovery mechanism;
-    // reader-dirty is a redundant fast path (the re-dirty/pending/queue calls
-    // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
-    // transaction still carries their flow labels.
+    // #4210: a reactive compute is not a transactional retrier. An ordinary
+    // CONFLICT (stale read) is recovered by reader-dirty propagation, not by
+    // forcing this action back onto the pending queue. Re-arm the action's
+    // subscriptions and restore consumed trigger reads (§8.9.2) so the normal
+    // dirty path can rerun it with the right flow labels. The only exceptions
+    // below are bounded, structured cases where the conflict is known to be on
+    // a prepare-added verifier read or this action's own output write.
     if (isConflictRejection(error)) {
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
       // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreCfcTriggerReads();
       state.resubscribe(state.action, state.log);
-      const readyToRetry =
-        (error as { readyToRetry?: () => unknown }).readyToRetry;
-      if (typeof readyToRetry === "function") {
-        // The readiness gate rejects by design when the session is closed,
-        // revoked, or replaced while we wait — an expected control-flow signal,
-        // not an error. Swallow it and re-queue anyway: the action stays live
-        // and re-runs on the next input change or pull. A `readyToRetry` that
-        // throws synchronously is handled the same way.
-        try {
-          await readyToRetry();
-        } catch (readyError) {
-          logger.debug(
-            "conflict-retry-readiness-aborted",
-            "conflict catch-up readiness aborted; re-queuing action anyway",
-            readyError,
-          );
+      if (
+        conflictMatchesPrepareAddedRead(error, state.prepareAddedReads) ||
+        conflictMatchesActionWrite(error, state.log.writes)
+      ) {
+        const retries = (state.retries.get(state.action) ?? 0) + 1;
+        state.retries.set(state.action, retries);
+        if (retries < MAX_RETRIES_FOR_REACTIVE) {
+          await waitUntilReadyToRetry(error);
+          state.markDirectDirty(state.action);
+          state.pending.add(state.action);
+          state.queueExecution();
         }
       }
-      state.markDirectDirty(state.action);
-      state.pending.add(state.action);
-      state.queueExecution();
       return;
     }
 
@@ -202,6 +189,127 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+function conflictMatchesActionWrite(
+  error: unknown,
+  writes: readonly IMemorySpaceAddress[],
+): boolean {
+  if (writes.length === 0) return false;
+  const conflictingRead = getStructuredConflictingRead(error);
+  if (conflictingRead === undefined) return false;
+  return writes.some((write) => writeOverlapsConflict(write, conflictingRead));
+}
+
+function conflictMatchesPrepareAddedRead(
+  error: unknown,
+  prepareAddedReads: readonly IMemorySpaceAddress[],
+): boolean {
+  if (prepareAddedReads.length === 0) return false;
+  const conflictingRead = getStructuredConflictingRead(error);
+  if (conflictingRead === undefined) return false;
+  return prepareAddedReads.some((read) =>
+    readCoversConflict(read, conflictingRead)
+  );
+}
+
+type StructuredConflictingRead = {
+  readonly kind: "confirmed" | "pending";
+  readonly space?: string;
+  readonly id: string;
+  readonly scope?: CellScope;
+  readonly branch?: string;
+  readonly path: readonly string[];
+  readonly nonRecursive?: boolean;
+};
+
+function getStructuredConflictingRead(
+  error: unknown,
+): StructuredConflictingRead | undefined {
+  if (error === null || typeof error !== "object") return undefined;
+  const conflictingRead = (error as { conflictingRead?: unknown })
+    .conflictingRead;
+  if (conflictingRead === null || typeof conflictingRead !== "object") {
+    return undefined;
+  }
+  const read = conflictingRead as Record<string, unknown>;
+  if (read.kind !== "confirmed" && read.kind !== "pending") return undefined;
+  if (typeof read.id !== "string") return undefined;
+  if (!Array.isArray(read.path) || !read.path.every(isString)) return undefined;
+  if (read.space !== undefined && typeof read.space !== "string") {
+    return undefined;
+  }
+  if (read.scope !== undefined && !isCellScope(read.scope)) return undefined;
+  if (read.branch !== undefined && typeof read.branch !== "string") {
+    return undefined;
+  }
+  if (
+    read.nonRecursive !== undefined && typeof read.nonRecursive !== "boolean"
+  ) {
+    return undefined;
+  }
+  return {
+    kind: read.kind,
+    id: read.id,
+    path: read.path,
+    ...(read.space !== undefined ? { space: read.space } : {}),
+    ...(read.scope !== undefined ? { scope: read.scope } : {}),
+    ...(read.branch !== undefined ? { branch: read.branch } : {}),
+    ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+  };
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function readCoversConflict(
+  prepareAddedRead: IMemorySpaceAddress,
+  conflictingRead: StructuredConflictingRead,
+): boolean {
+  if (prepareAddedRead.id !== conflictingRead.id) return false;
+  if (prepareAddedRead.space !== conflictingRead.space) return false;
+  if (
+    normalizeCellScope(prepareAddedRead.scope) !==
+      normalizeCellScope(conflictingRead.scope)
+  ) {
+    return false;
+  }
+  const branch = (prepareAddedRead as { branch?: unknown }).branch;
+  if (branch !== undefined && branch !== conflictingRead.branch) return false;
+  return isPathPrefix(prepareAddedRead.path, conflictingRead.path);
+}
+
+function writeOverlapsConflict(
+  write: IMemorySpaceAddress,
+  conflictingRead: StructuredConflictingRead,
+): boolean {
+  if (write.id !== conflictingRead.id) return false;
+  if (write.space !== conflictingRead.space) return false;
+  if (
+    normalizeCellScope(write.scope) !==
+      normalizeCellScope(conflictingRead.scope)
+  ) {
+    return false;
+  }
+  return isPathPrefix(write.path, conflictingRead.path) ||
+    isPathPrefix(conflictingRead.path, write.path);
+}
+
+function isPathPrefix(
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean {
+  if (prefix.length > path.length) return false;
+  return prefix.every((part, index) => path[index] === part);
+}
+
+async function waitUntilReadyToRetry(error: unknown): Promise<void> {
+  if (error === null || typeof error !== "object") return;
+  const readyToRetry = (error as { readyToRetry?: unknown }).readyToRetry;
+  if (typeof readyToRetry === "function") {
+    await readyToRetry.call(error);
+  }
 }
 
 export function appendActionRunTrace(state: {
@@ -295,6 +403,7 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
+  readonly clearDirectDirtyAfterCommit: (action: Action) => void;
   readonly recordChangedComputationWrites: (
     action: Action,
     tx: IExtendedStorageTransaction,
@@ -491,6 +600,7 @@ function finalizeReactiveActionCommit(
   // retry logic below will have re-scheduled this action, so
   // topological sorting should move it before the dependencies.
   let log: ReactivityLog | undefined;
+  const prePrepareReads = collectTransactionReads(args.tx);
   // Captured at commit kickoff (after prepareTxForCommit populates the CFC
   // outbox, before the async flush clears it): does this commit have
   // asynchronous post-commit work that `settled()` must wait on?
@@ -520,6 +630,10 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(commitPromise);
   }
   const committedLog = log;
+  const prepareAddedReads = collectPrepareAddedReads(
+    prePrepareReads,
+    collectTransactionReads(args.tx),
+  );
   const changedComputationWrites = state.recordChangedComputationWrites(
     args.action,
     args.tx,
@@ -534,7 +648,9 @@ function finalizeReactiveActionCommit(
     commitPromise,
     resubscribe: state.resubscribe,
     markDirectDirty: state.markDirectDirty,
+    clearDirectDirtyAfterCommit: state.clearDirectDirtyAfterCommit,
     queueExecution: state.queueExecution,
+    prepareAddedReads,
     restoreCfcTriggerReads: () => {
       if (
         args.cfcTriggerReads !== undefined && args.cfcTriggerReads.length > 0
@@ -564,6 +680,45 @@ function finalizeReactiveActionCommit(
     changedComputationWrites,
   );
   args.resolve(args.result);
+}
+
+export function collectPrepareAddedReads(
+  beforePrepare: readonly IMemorySpaceAddress[],
+  afterPrepare: readonly IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  const before = new Set(beforePrepare.map(readKey));
+  const added: IMemorySpaceAddress[] = [];
+  for (const read of afterPrepare) {
+    if (before.has(readKey(read))) {
+      continue;
+    }
+    added.push(read);
+  }
+  return added;
+}
+
+function collectTransactionReads(
+  tx: IExtendedStorageTransaction,
+): IMemorySpaceAddress[] {
+  return [...getTransactionReadActivities(tx)].map(readActivityToAddress);
+}
+
+function readActivityToAddress(read: IReadActivity): IMemorySpaceAddress {
+  return {
+    space: read.space,
+    scope: normalizeCellScope(read.scope),
+    id: read.id,
+    path: [...read.path],
+  };
+}
+
+function readKey(read: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    read.space ?? null,
+    normalizeCellScope(read.scope) ?? null,
+    read.id,
+    read.path,
+  ]);
 }
 
 function warnOnWriteSurfaceViolations(

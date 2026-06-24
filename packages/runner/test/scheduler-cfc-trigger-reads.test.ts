@@ -8,7 +8,10 @@ import {
   type StorageNotificationState,
 } from "../src/scheduler/notifications.ts";
 import { processPullStorageNotification } from "../src/scheduler/pull-notifications.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
+import {
+  collectPrepareAddedReads,
+  watchReactiveActionCommit,
+} from "../src/scheduler/action-run.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type {
@@ -210,7 +213,10 @@ describe("trigger reads survive failed runs", () => {
     onRestore: () => void;
     onResubscribe?: () => void;
     onMarkDirectDirty?: () => void;
+    onClearDirectDirtyAfterCommit?: () => void;
     onQueueExecution?: () => void;
+    prepareAddedReads?: readonly IMemorySpaceAddress[];
+    writes?: readonly IMemorySpaceAddress[];
   }): Promise<void> {
     const action: Action = () => {};
     const tx = { tx: {} } as IExtendedStorageTransaction;
@@ -222,14 +228,16 @@ describe("trigger reads survive failed runs", () => {
     watchReactiveActionCommit({
       action,
       tx,
-      log: { reads: [], shallowReads: [], writes: [] },
+      log: { reads: [], shallowReads: [], writes: [...(args.writes ?? [])] },
       retries: args.retries ?? new WeakMap(),
       pending: new Set(),
       commitPromise,
       resubscribe: () => args.onResubscribe?.(),
       markDirectDirty: () => args.onMarkDirectDirty?.(),
+      clearDirectDirtyAfterCommit: () => args.onClearDirectDirtyAfterCommit?.(),
       queueExecution: () => args.onQueueExecution?.(),
       restoreCfcTriggerReads: args.onRestore,
+      prepareAddedReads: args.prepareAddedReads ?? [],
     });
     return commitPromise.then(async () => {
       await Promise.resolve();
@@ -270,6 +278,247 @@ describe("trigger reads survive failed runs", () => {
       onRestore: () => calls.push("restore"),
       onResubscribe: () => calls.push("resubscribe"),
       onMarkDirectDirty: () => calls.push("dirty"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  function conflictError(args: {
+    message?: string;
+    conflictingRead?: {
+      kind: "confirmed" | "pending";
+      space?: string;
+      id: string;
+      scope?: string;
+      branch?: string;
+      path: readonly string[];
+    };
+  }) {
+    const error = Object.assign(
+      new Error(args.message ?? "conflict"),
+      {
+        name: "ConflictError",
+        readyToRetry: () => Promise.resolve(),
+        ...(args.conflictingRead !== undefined
+          ? { conflictingRead: args.conflictingRead }
+          : {}),
+      },
+    );
+    return error;
+  }
+
+  it("bounded-requeues conflicts from prepare-added normal document-root reads", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:normal-doc",
+        path: ["value"],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space,
+        id: "of:normal-doc",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("keeps prepare-added reads distinct across ambiguous path joins", async () => {
+    const prepareAddedReads = collectPrepareAddedReads(
+      [{ space, id: "of:normal-doc", path: ["a/b"], scope: "space" }],
+      [
+        { space, id: "of:normal-doc", path: ["a/b"], scope: "space" },
+        { space, id: "of:normal-doc", path: ["a", "b"], scope: "space" },
+      ],
+    );
+    expect(prepareAddedReads).toEqual([
+      { space, id: "of:normal-doc", path: ["a", "b"], scope: "space" },
+    ]);
+
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:normal-doc",
+        path: ["a", "b", "value"],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads,
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("does not requeue from message-only conflicts even when the id appears", async () => {
+    const error = conflictError({
+      message: "stale pending read of:normal-doc via localSeq 7",
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space,
+        id: "of:normal-doc",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  it("does not requeue when the same id conflicts at a different path", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:normal-doc",
+        path: ["private"],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space,
+        id: "of:normal-doc",
+        path: ["public"],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  it("does not requeue when the same id conflicts in a different scope", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "pending",
+        space,
+        id: "of:normal-doc",
+        path: [],
+        scope: "user",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space,
+        id: "of:normal-doc",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  it("does not requeue when prepare-added reads exist but the actual conflict is ordinary", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:pre-prepare-input",
+        path: [],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space,
+        id: "of:prepare-added-doc",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  it("bounded-requeues conflicts on the action's own write target", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:computed-output",
+        path: [],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      writes: [{
+        space,
+        id: "of:computed-output",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("does not requeue when writes exist but the conflict is on another cell", async () => {
+    const error = conflictError({
+      conflictingRead: {
+        kind: "confirmed",
+        space,
+        id: "of:ordinary-input",
+        path: [],
+        scope: "space",
+      },
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      writes: [{
+        space,
+        id: "of:computed-output",
+        path: [],
+        scope: "space",
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
@@ -293,6 +542,7 @@ describe("trigger reads survive failed runs", () => {
       onRestore: () => calls.push("restore"),
       onResubscribe: () => calls.push("resubscribe"),
       onMarkDirectDirty: () => calls.push("dirty"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
       onQueueExecution: () => calls.push("queue"),
     });
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
@@ -340,6 +590,16 @@ describe("trigger reads survive failed runs", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("clears direct dirty only after a successful commit", async () => {
+    const calls: string[] = [];
+    await watchWith({
+      error: undefined,
+      onRestore: () => calls.push("restore"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
+    });
+    expect(calls).toEqual(["clear"]);
   });
 
   it("requeues primitive retryable errors without retry readiness", async () => {
