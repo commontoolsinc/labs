@@ -319,3 +319,31 @@ report: workflow `wmbkm0782`.
   **stacked onto #4298**, merged once as a unit (not a merge-the-spec-then-
   separate-PRs split). Each stacked branch still updates `PROGRESS.md`. The PR
   grows large; that is accepted in exchange for one coherent landing.
+
+## Resolved (CI-ON drive, 2026-06-24)
+
+Context: with the interpreter defaulted ON in CI (`CF_EXPERIMENTAL_INTERPRETER=1`),
+the flag-ON suite was 42 failed. A 24-way re-triage workflow classified every
+failure (saved: `retriage-2026-06-24.json`). Two coordinator design forks were
+decided (user-confirmed):
+
+- **D-EMISSION-SCOPE — Conservative fallback boundary (decided, @berni).** The
+  faithful result-emission build (Wave 3) interprets PURE multi-output computes
+  only (faithful result topology + derived-internal cells + `[NAME]`). Arg-cell
+  write-backs, cross-space `.inSpace`/`.asScope` routing, per-node scope-narrowing,
+  and synchronous-static results are **permanent legacy fallback** — not unfinished,
+  deliberately out of the interpreter's intended subset (cross-space is real child
+  materialization, antithetical to the inlining premise). Coverage expansion past
+  this boundary is a separate, deliberate future decision, not a default.
+- **D-PROBE-MEMOIZE — Memoize-and-reuse the dry-run (decided, @berni).** The
+  eligibility dry-run probe re-executed user leaf bodies (double-run: broke
+  run-count + lazy-until-pulled invariants, 13 failures). Fix = cache the dry-run
+  evaluation and reuse it for the first real node run, eliminating the double
+  execution while KEEPING the runtime async/Pattern detection the probe provides
+  (the basis for the R5/R6/Wave-1 eligibility fallbacks). NOT structural-only
+  eligibility (which would lose that runtime detection).
+
+Wave landing (all on #4298): R5/R6 `d8fb41cdd`, R4 `1c6325fa8`, Wave 0
+`46335bd98`, Wave 2a `91c2c720b`, Wave 1 `7fe8ec724`+`702cf2aff` — flag-ON
+42 -> 8 failed, flag-off 658/0 throughout. Remaining: Wave 2b (probe memoize)
++ residual fallback gaps + Wave 3 (conservative emission).

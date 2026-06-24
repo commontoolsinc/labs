@@ -1,0 +1,343 @@
+{
+  "filesTriaged": 24,
+  "synthesis": {
+    "clusters": [
+      {
+        "name": "Single-$ri-result emission drops the original result tree (multi-output / projection collapse)",
+        "rootClass": "emission-bug",
+        "rootCause": "buildInterpreterPattern (runner.ts ~2300-2320) emits a synthetic node whose result is ONE alias `{$alias:{partialCause:'$ri-result',path:[]}}` and whose only derivedInternalCell is `$ri-result`. updateResultProjection (runner.ts ~1345) then re-projects that single alias over the result cell, OVERWRITING the original multi-alias result tree. This drops: (a) per-internal-cell routing (a `doubled`/`events` internal/$stream alias), (b) top-level structural keys read directly off the result cell ([NAME]), (c) declared derivedInternalCells with schema defaults (history/count/activeTab) \u2014 replaced wholesale by `$ri-result`, so materializeDerivedInternalCells (runner.ts ~955-990) never rebuilds the authored `internal` manifest. The compute is correct; only the result-document topology is wrong. interpret.ts:127-130 also resolves an `internal` ref with no producing op (internalToOp miss) to undefined, so derivedInternalCells-only defaults are never consulted.",
+        "count": 8,
+        "members": [
+          "packages/runner/test/ensure-piece-running.test.ts :: queueEvent with auto-start > should start piece when event sent to result cell path, but not retry if no handler",
+          "packages/runner/test/runner.test.ts :: runPattern ... should preserve NAME between runs",
+          "packages/runner/test/runner.test.ts :: runPattern ... should refresh NAME when the pattern changes",
+          "packages/runner/test/runner.test.ts :: runPattern ... materializes derived internal defaults from descriptor schemas",
+          "packages/runner/test/runner.test.ts :: setup/start ... stop and restart works with setup/start",
+          "packages/runner/test/rehydrate-internal-default.test.ts :: rehydrate internal default (CT-1666) > preserves a user-set internal value across a cold-cache reload",
+          "packages/runner/test/rehydrate-internal-default.test.ts :: rehydrate internal default (CT-1666) > materializes internal manifest cells from a cold-cache result query",
+          "packages/runner/test/patterns-ifelse.test.ts :: Pattern Runner - ifElse > ifElse selects the correct branch based on condition"
+        ],
+        "fix": "runner.ts ~2300-2320 synthetic Pattern return + ~1345 updateResultProjection / ~955-990 materializeDerivedInternalCells. FAITHFUL EMISSION: (1) preserve the original result tree's structure \u2014 keep pass-through argument/internal aliases AS aliases (not flattened $ri-result values) and keep top-level structural keys like [NAME]; route only genuinely leaf/control-computed fields through derived cells. (2) MERGE the source pattern's derivedInternalCells into the synthetic derivedInternalCells (`[{$ri-result}, ...pattern.derivedInternalCells]`) so authored internal cells + schema defaults are re-materialized. (3) Write evalRog's per-field outputs into their declared derived internal cells rather than collapsing to one alias. interpret.ts:127-130 must honor derivedInternalCells defaults for unwired internals.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "ifElse pass-through argument aliases lose bidirectional write-back",
+        "rootClass": "emission-bug",
+        "rootCause": "Specialization of the single-$ri-result cluster with a distinct mechanism worth separate handling: legacy keeps result pass-through fields (condition/trueValue/falseValue) as $alias links straight to the `argument` cell, so a write to result.key('condition') propagates back to the argument and re-triggers the node. The interpreter's construct case (interpret.ts:164-174) materializes those fields as flat snapshot VALUES inside $ri-result, severing the write-back; the node reads its input only from the `argument` meta cell (runner.ts ~2269), so set(condition,false) writes a disconnected $ri-result.condition, the argument never changes, the node never re-runs, and text stays stale.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-ifelse.test.ts :: Pattern Runner - ifElse > ifElse selects the correct branch based on condition"
+        ],
+        "fix": "runner.ts buildInterpreterPattern synthetic result tree (~2300-2320): preserve argument-pass-through result fields as $alias links to the `argument` cell (mirroring legacy) rather than baking them into the $ri-result construct value; only genuinely-derived fields (the control op output / text) alias $ri-result. This restores the bidirectional binding so set() propagates and the node re-runs. (Subsumed by the faithful-emission build of the prior cluster, listed separately because it is a write-BACK/alias-identity requirement, not just a default/manifest gap.)",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Non-result argument-cell write-backs dropped (outputs alias the argument cell)",
+        "rootClass": "emission-bug",
+        "rootCause": "Nodes whose `outputs` alias an argument cell (`{$alias:{cell:'argument',path:['output']}}`) write their computed value back into the argument cell, which the result then aliases. extract.ts:502-516 (outputInternalName) only recognizes partialCause outputs; a {cell:'argument'} output returns null and, being a legacy alias, also skips the fail-closed else-branch (extract.ts:577-595), so the write-back is silently dropped and never wired into internalToOp. The synthetic node has NO write-back machinery (it only sendResult()s $ri-result). So argument.output stays unwritten and the result (aliasing it) reads {}. This is a reactive side effect (the result aliases a written-back arg cell) \u2014 not pure compute.",
+        "count": 3,
+        "members": [
+          "packages/runner/test/runner.test.ts :: runPattern ... should allow passing a cell as a binding",
+          "packages/runner/test/runner.test.ts :: runPattern ... should allow stopping a pattern",
+          "packages/runner/test/runner.test.ts :: setup/start ... setup with cell argument and start reacts to cell updates"
+        ],
+        "fix": "extract.ts:502-516 + 577-595: recognize the {cell:'argument'} output-alias form and bumpAndThrow an eligibility reason (e.g. 'argument_writeback') rather than dropping it, so buildInterpreterPattern falls back to legacy. Sound now; faithful per-output write-back emission is the longer-term alternative once the synthetic node can emit multiple output bindings.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Cross-space / scope routing dropped (.inSpace / .asScope / module.targetSpace / module.defaultScope)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "The PATTERN eligibility gate (runner.ts ~2168-2216) and hasNonDefaultScope (runner.ts:594-606) only reject PerUser/PerSession scope strings on node.inputs / module.implementation. They NEVER inspect `module.targetSpace` (.inSpace DID/named/cell/anonymous routing, builder/pattern.ts:516-521) or `module.defaultScope` (.asScope, builder/pattern.ts:508-510). extract.ts (~737-742) captures only kind/impl/argument/inlined, dropping targetSpace. So cross-space child patterns are inlined into a `$ri-result` cell in the PARENT space, and scoped children fall back to 'space'. Legacy routes through instantiatePatternNode (reads module.targetSpace ~4657, mints the child result cell in targetSpace ~4693-4704, replicatePatternToSpace ~4739) and handlerResultPatternMaterializationSpace (~3260-3265) for handler-driven inSpace. Cross-space child materialization is real reactive child instantiation, outside the pure-compute subset.",
+        "count": 11,
+        "members": [
+          "packages/runner/test/cross-space-value-read.test.ts :: cross-space value reads (CT-1667) > pull() + get() through the link materializes the child's fields",
+          "packages/runner/test/cross-space-value-read.test.ts :: cross-space value reads (CT-1667) > a whole-value pull() of the linking parent materializes the child",
+          "packages/runner/test/cross-space-value-read.test.ts :: cross-space value reads (CT-1667) > sink() with a minimal schema on the child link fires with the value",
+          "packages/runner/test/inspace-child-reload.test.ts :: inSpace child piece reload from its own space (CT-1687) > a fresh runtime can start a build-time inSpace child",
+          "packages/runner/test/inspace-child-reload.test.ts :: inSpace child piece reload from its own space (CT-1687) > a fresh runtime can start the child from space B",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .asScope() sets child pattern result scope",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .inSpace() routes child pattern result to DID space",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .inSpace() with a cell uses that cell's space",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .inSpace() without a space creates a fresh DID space during action postRun",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .inSpace() handler side effect can write linked child across spaces",
+          "packages/runner/test/pattern-scope.test.ts :: pattern factory .inSpace() rewrites named child links through writeonly bindings"
+        ],
+        "fix": "runner.ts ~2173-2216 PATTERN gate: bumpAndThrow a new 'cross_space'/'scoped' reason whenever the located pattern node carries `module.targetSpace !== undefined` OR `module.defaultScope` not in {undefined,'space'}, OR sets an unlinked space on its outputs. Same gate covers build-time pattern nodes and handler-result inSpace patterns (both route through this.run -> instantiatePattern -> buildInterpreterPattern). Always sound (legacy is green).",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Per-node input/schema scope narrowing dropped (scope arrives via argument data or result/element schema)",
+        "rootClass": "emission-bug",
+        "rootCause": "For pure-compute leaves/controls whose narrowing scope arrives via a user-scoped INPUT LINK (argument data) or a non-default `scope` in argument/result/element schema, legacy mints a space-scoped internal cell linking to a narrower (user/session)-scoped output cell (scope-policy.ts narrowestCellScope/scopedCell ~64-119). The single-$ri-result emission (runner.ts ~2300-2319) produces an inlined value with no scoped output-cell chain, so result.key('value').getRaw() is not the expected scoped link chain and parseLink/getCellFromLink throws, or the asserted .scope is undefined. The eligibility gate only checks STATIC nested-pattern arg scope (2176-2187), never the runtime input-link scope or the scalar leaf/result schema scope.",
+        "count": 6,
+        "members": [
+          "packages/runner/test/pattern-scope.test.ts :: broad computed output links to narrower scoped result",
+          "packages/runner/test/pattern-scope.test.ts :: opaque JS action result uses narrowest effective output scope",
+          "packages/runner/test/pattern-scope.test.ts :: opaque JS action result schema scope participates in effective output scope",
+          "packages/runner/test/pattern-scope.test.ts :: ifElse output follows condition scope",
+          "packages/runner/test/pattern-scope.test.ts :: when keeps condition scope while selecting narrower value link",
+          "packages/runner/test/pattern-scope.test.ts :: sub-pattern binding alias carries the parent slot's declared scope on its serialized schema"
+        ],
+        "fix": "SOUND NOW (recommended first cut): in the dry-run/eligibility (runner.ts ~2228-2249) inspect resolved scope of input links in the argument snapshot (resolveLink(...).scope) and non-default `scope` anywhere in argument/result schema; bumpAndThrow('scoped') if any is narrower than 'space'. Reuses existing scoped-fallback machinery. FAITHFUL (later partitioner work): emission must reproduce narrowestCellScope output narrowing per input/schema scope.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Dry-run probe double-executes user leaf bodies (run-count / laziness violation)",
+        "rootClass": "evaluator-bug",
+        "rootCause": "The eligibility dry-run probe (runner.ts:2235 `evalRog(rog,{argument:argSnapshot,...})`) INVOKES each leaf impl (interpret.ts:160 `impl(input)`) once during buildInterpreterPattern, then the real synthetic node runs evalRog AGAIN (runner.ts:2270). User lift/predicate/handler bodies with observable side effects (runCount++, startCount++) therefore execute twice (or run before any pull, breaking pull-laziness). Values are correct; only the user-observable run-count diverges (N -> 2N), or a lift runs at instantiation instead of staying lazy until pulled. The probe is documented PURE re: tx writes but is NOT side-effect-free for user code. (For per-element map/filter/flatMap children, the top-level collection op falls back but EACH per-element child pattern is interpreted and double-runs.)",
+        "count": 13,
+        "members": [
+          "packages/runner/test/ensure-piece-running.test.ts :: ensurePieceRunning > should be idempotent - calling multiple times is safe",
+          "packages/runner/test/ensure-piece-running.test.ts :: ensurePieceRunning > should restart a stopped piece when called again",
+          "packages/runner/test/patterns-dynamic.test.ts :: should use positional identity for inline values in map",
+          "packages/runner/test/patterns-dynamic.test.ts :: should reconcile cell-link elements by identity on mid-list insert",
+          "packages/runner/test/patterns-dynamic.test.ts :: should handle duplicate cell-link references in map",
+          "packages/runner/test/patterns-dynamic.test.ts :: should clean up pattern runs when map list becomes undefined",
+          "packages/runner/test/patterns-dynamic.test.ts :: should reconcile filter predicates by identity on mid-list insert",
+          "packages/runner/test/patterns-dynamic.test.ts :: should clean up predicate runs when filter list becomes undefined",
+          "packages/runner/test/patterns-dynamic.test.ts :: should skip sparse holes in filter input",
+          "packages/runner/test/patterns-dynamic.test.ts :: should reconcile flatMap by identity on mid-list insert",
+          "packages/runner/test/patterns-dynamic.test.ts :: should skip sparse holes in flatMap input",
+          "packages/runner/test/patterns-dynamic.test.ts :: should clean up pattern runs when flatMap list becomes undefined",
+          "packages/runner/test/patterns-lift.test.ts :: Pattern Runner - Lift > should not run lifts until something pulls on them"
+        ],
+        "fix": "runner.ts ~2228-2249 (the dry-run probe). Make eligibility validation count-neutral re: user leaf bodies. Options (in order of preference): (a) decide eligibility STRUCTURALLY (op-kind coverage + leaf-impl resolution already exist) and drop the body-executing dry-run, replacing Promise/Pattern detection with a non-executing check; (b) MEMOIZE the probe's evalRog result keyed on argSnapshot and have the first real node run REUSE it instead of re-invoking; (c) run the dry-run side-effect-isolated. NOTE: the side-effect-only/output-less leaf cases (ensurePieceRunning) are better fixed by the eligibility-fallback gate in the next cluster \u2014 they have no faithful single-eval interpreter semantics. Keep all run-count assertions intact.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Side-effect-only / output-less leaves admitted (no faithful single-eval semantics)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "A leaf op whose output never flows into the ROG result (inputs:{}/outputs:{}/result:{}, e.g. `() => { startCount++ }`) is admitted by the interpreter. The probe necessarily double-executes its side effect and the result emission carries nothing, so there is no faithful single-eval interpreter behavior \u2014 distinct from the probe-doubling cluster because even a count-neutral probe leaves a node with no result contribution and an unavoidable side-effect-execution question. Outside the intended argument->value->result pure-compute subset.",
+        "count": 2,
+        "members": [
+          "packages/runner/test/ensure-piece-running.test.ts :: ensurePieceRunning > should be idempotent - calling multiple times is safe",
+          "packages/runner/test/ensure-piece-running.test.ts :: ensurePieceRunning > should restart a stopped piece when called again"
+        ],
+        "fix": "runner.ts ~2204-2218 (BEFORE the dry-run at 2228): detect a leaf op whose output does not flow into rog.result (no producing edge consumed by the result construct / empty outputs) and bumpAndThrow('ineligible_opkind') before any leaf body runs. Do NOT remove the dry-run (eligibility still needs it for async/Pattern detection in admitted patterns). Always sound. (These two tests are also listed in the probe-doubling cluster; the eligibility gate is the correct fix lever for them.)",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Pattern-returning / OpaqueRef-returning lifts wrongly admitted (Cell-valued leaf output)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "A lift whose body returns a pattern instantiation (`innerPattern({...})` -> a CellImpl) or another lift application (`multiply(args)` -> an OpaqueRef proxy) needs real reactive child instantiation legacy performs. The dry-run Pattern guard (runner.ts:2249 `dryValues.some(isPattern)`) MISSES these: isPattern (builder/types.ts:258) requires argumentSchema+resultSchema+Array.isArray(nodes), which a CellImpl/OpaqueRef lacks. So the pattern is admitted, the synthetic node yields the Cell/OpaqueRef into $ri-result, and the materialized value is undefined. Compounded by argSnapshot=undefined at probe time not exercising the pattern-returning branch of conditional lifts.",
+        "count": 7,
+        "members": [
+          "packages/runner/test/patterns-derive-return-pattern.test.ts :: should handle derive returning a non-recursive pattern instantiation",
+          "packages/runner/test/patterns-derive-return-pattern.test.ts :: should handle derive returning a recursive pattern instantiation (tail-call)",
+          "packages/runner/test/patterns-derive-return-pattern.test.ts :: should not re-run sub-pattern when derive returns the same pattern structure",
+          "packages/runner/test/patterns-derive-return-pattern.test.ts :: should not spuriously rerun parent derive when returned child pattern changes",
+          "packages/runner/test/patterns-derive-return-pattern.test.ts :: should handle derive conditionally returning plain value or pattern",
+          "packages/runner/test/patterns-lift.test.ts :: Pattern Runner - Lift > should handle patterns returned by lifted functions",
+          "packages/runner/test/patterns-misc.test.ts :: Pattern Runner - Miscellaneous > should wait for lift before handler that reads lift output from event"
+        ],
+        "fix": "runner.ts:2245-2249 dry-run guard: broaden the post-probe check to fall back when any evaluated op value is a Cell (isCell) or OpaqueRef (isOpaqueRef, builder/types.ts) \u2014 pattern/sub-computation instantiation results \u2014 not only isPattern-shaped objects. Because a conditional lift's probe may run with argSnapshot=undefined and not hit the pattern branch, also treat a leaf whose body can construct/return a pattern instantiation (static detection of a pattern/lift-application call, or the redirect-link result shape in patterns-misc) as ineligible. Always sound. NOTE: patterns-misc's case is specifically a mid-handler lift whose pattern.result is a write-REDIRECT link consumed cross-node via a stream send \u2014 gate on that redirect-result shape as the structural discriminator.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Context-requiring lifts wrongly admitted (asCell inputs / .get() / .sample() / Cell.for() \u2014 probe throw swallowed)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "Lifts that take a live Cell handle (argument schema carries asCell/asStream) or mint named cells (Cell.for) call Cell methods (.get/.key/.sample/.set) on their input. The interpreter feeds the leaf a deep-resolved PLAIN value (runner.ts ~2269 `.get()` / interpret.ts:160), so `x.get`/`x.sample` is undefined and the leaf throws TypeError. The dry-run probe SHOULD catch this, but evalRog's per-op isolation (interpret.ts:242-243) re-throws only NotInterpretedHere and swallows the TypeError into `errors[]`, returning successfully \u2014 and the probe IGNORES dry.errors (only checks thrown/Promise/Pattern at runner.ts:2236-2249). So the pattern is admitted and the live node throws -> result {}. Cell.for additionally needs a frame (cell.ts:772) the frameless leaf lacks. These need the runtime's schema-aware Cell materialization the interpreter does not perform.",
+        "count": 5,
+        "members": [
+          "packages/runner/test/patterns-dynamic.test.ts :: should run dynamically instantiated patterns before reading their outputs",
+          "packages/runner/test/patterns-schemas.test.ts :: Pattern Runner - Schemas > should handle nested cell references in schema",
+          "packages/runner/test/patterns-schemas.test.ts :: Pattern Runner - Schemas > should handle dynamic cell references with schema",
+          "packages/runner/test/patterns-lift.test.ts :: Pattern Runner - Lift > should create and use a named cell inside a lift",
+          "packages/runner/test/patterns-lift.test.ts :: Pattern Runner - Lift > should support non-reactive reads with sample()"
+        ],
+        "fix": "Two complementary fixes in runner.ts/extract.ts: (1) STRUCTURAL (precise): during resolveLeafImpls/eligibility, inspect each leaf node's module.argumentSchema and bumpAndThrow a new reason (e.g. 'cell_context_leaf') whenever it contains an asCell/asStream annotation; also detect Cell.for/named-cell usage. (2) SAFETY NET (broad): make the dry-run treat non-empty `dry.errors` as a fallback signal \u2014 `if (dry.errors.length) bumpAndThrow('eval_threw')` at runner.ts ~2236-2249 \u2014 instead of relying on a thrown probe. (2) alone resolves most of these and is a one-line lever; (1) is the durable structural gate. Always sound.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Untrusted leaf impls bypass the SES sandbox (trust gate missing)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "resolveLeafImpls (extract.ts ~861-883) takes module.implementation DIRECTLY as the LeafImpl whenever it is a live function, with NO trust gate. Legacy's resolveJavaScriptFunction (runner.ts ~2954-2968) checks liveTrusted (getVerifiedProvenance!==undefined OR resolvable entry ref); UNtrusted in-memory callbacks route through getFallbackJavaScriptImplementation (runner.ts ~4180-4183) = the SES sandbox (Proxy removed; recompiled from fn.toString() so captured closures are stripped). The interpreter runs the raw host closure against real host globals, so `typeof Proxy` === 'function' (sandbox bypassed) and a captured `secret.factor` resolves instead of throwing (fail-closed-on-captured-state defeated). SECURITY-RELEVANT: the interpreter defeats the SES sandboxing invariant for untrusted code.",
+        "count": 2,
+        "members": [
+          "packages/runner/test/security.test.ts :: SES security regressions > runs untrusted self-contained direct builder callbacks through the SES fallback",
+          "packages/runner/test/security.test.ts :: SES security regressions > fails closed when untrusted direct builder callbacks capture host state"
+        ],
+        "fix": "extract.ts ~861-883 resolveLeafImpls leaf branch: gate the live-function leaf on the SAME verified-trust test legacy uses (getVerifiedProvenance(impl)!==undefined OR a harness-resolvable entry ref). An untrusted leaf -> push to unresolvedLeafOps -> the existing 'unresolved_leaf' gate (runner.ts:2224) falls the whole pattern back to legacy (SES path). Do NOT re-run untrusted code through SES inside the interpreter. Always sound; resolves both tests with one change. Treat as HIGH priority \u2014 security invariant.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Launched child pattern result-cell contract not preserved (receipt / navigateTo target)",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "A child pattern launched by a handler (childPattern({...}) via receipt this.run, or navigateTo(Target({})) via setupDeferredHandlerResultPattern->setupInternal) is dispatched through buildInterpreterPattern, which collapses its result to a single $ri-result alias and drops the result alias's scope:'space' DID routing. The launched-pattern lifecycle / receipt / navigateTo machinery expect childResultCell to carry the ORIGINAL pattern result tree (a write-redirect-anchored, reload-stable, navigable piece-root link \u2014 firstResolvedOutputRedirect requirement runner.ts ~4685-4696; sendValueToBinding passing pattern.derivedInternalCells ~4754-4762). The receipt cell never resolves to {value:7} (undefined), and navigateTo dereferences a malformed link -> parseLink undefined -> hopKindForLink(undefined).overwrite throws (link-resolution.ts:56 via navigate-to.ts:62), aborting the navigate so navigations.length stays 0. buildInterpreterPattern has no signal it is a launched child whose result cell is consumed as a navigable/dereferenceable Cell.",
+        "count": 4,
+        "members": [
+          "packages/runner/test/scheduler-event-receipts.test.ts :: scheduler event receipts > deduplicates redelivered pattern launches by receipt",
+          "packages/runner/test/scheduler-event-receipts.test.ts :: navigateTo handler results navigate once and deduplicate redelivery",
+          "packages/runner/test/navigate-handler.test.ts :: handler can update local state and still navigate",
+          "packages/runner/test/navigate-handler.test.ts :: conditional handler still navigates after it hides itself"
+        ],
+        "fix": "runner.ts: thread a 'launched child / result-cell-consumed-by-launcher' signal from the launch sites (instantiatePatternNode this.run ~4749; setupDeferredHandlerResultPattern/setupInternal ~3295-3302/3377; receipt this.run ~3302) through instantiatePattern (~1294) into buildInterpreterPattern, and bumpAndThrow a new fallback reason ('launched_child') so launched child patterns always take the legacy path. Always sound. Long-term alternative is faithful navigable-result-cell emission (overlaps the single-$ri-result emission build), but gating launched children to legacy is the safe first step. Add a regression that a handler-launched/navigateTo child resolves under the flag.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Demand-gated / lazy handler-written result pattern admitted on undefined argument",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "A handler-written result pattern (incLogger lift stored in state.latest via this.run, runner.ts ~3334) is a DEMAND-GATED LAZY computation in legacy (stays unrun until pulled; 'computations stay lazy unless pulled'). The interpreter admits it (argSnapshot=undefined at probe time -> opValues undefined, no throw/Promise/Pattern) and emits a plain reactive node that fires EAGERLY during runtime.idle() with cell-link inputs (counter/nested) reading undefined -> [undefined,1,undefined] instead of staying empty. The single synthetic node does not reproduce the lazy lifecycle, and admitting on an unresolvable argument snapshot is the signal.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-handlers.test.ts :: Pattern Runner - Handlers > should demand handler-written pattern results when pulled"
+        ],
+        "fix": "runner.ts ~2232: when `argSnapshot === undefined` at the dry-run probe (the directly-available signal of a handler-written/lazy-instantiation context), bumpAndThrow a new reason ('unresolved_argument') instead of dry-running against undefined (which silently yields undefined opValues + an eager node). Narrower alternative: detect handler-result/demand-gated instantiation at the this.run site (~3334) and skip interpreter dispatch. The argSnapshot guard is the minimal, local, sound change. Always sound. (Interacts with the probe-laziness cluster \u2014 also relieves the patterns-lift 'until pulled' eager-run for the genuinely-lazy case if combined with structural-only eligibility.)",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Collection element-loop ignores sparse holes",
+        "rootClass": "collection-bug",
+        "rootCause": "collection-interpreter.ts:225 element loop `for (let i=0;i<len;i++)` over len=rawList.length materializes a per-element doc+effect for EVERY index with NO sparse-hole guard. Legacy map.ts:232-234 does `if (!(i in list)) continue;`. At a hole index the interpreter runs the op on elemValue=undefined -> double(undefined)=NaN, the NaN at a `type:number` slot fails array-items validation on read, and the ENTIRE `doubled` field is dropped -> {} -> Array.isArray(undefined)=false. The `in` operator still reports the hole as absent in storage, so sparseness IS preserved by storage; the interpreter just failed to honor it. (Note: patterns-dynamic's 'skip sparse holes' tests confirm hole-SKIPPING already works there \u2014 those failures are the probe-doubling cluster, not this bug.)",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-core.test.ts :: Pattern Runner - Core > should preserve sparse array holes through map"
+        ],
+        "fix": "collection-interpreter.ts:225: at the top of the element loop add `if (!(i in (rawList as unknown[]))) continue;` so no per-element doc/effect/slot is created for a hole; keep len=rawList.length so trailing positions are preserved. Verified by the triage: result becomes {doubled:[20,null,60]} with `1 in doubled === false`. Add a regression that holes are not materialized.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Collection per-element result cells not scope-narrowed",
+        "rootClass": "collection-bug",
+        "rootCause": "collection-interpreter.ts:218-266 mints each per-element result cell with `runtime.getCell(parentCell.space, {...}, undefined, tx)` \u2014 always parentCell.space, schema undefined, no scope. It never narrows the per-element output to the element input's scope (no narrowestCellScope on the element). So itemLink.scope is 'space' not the element's 'user'. The collection scope gate (runner.ts ~2420-2423) only checks static mapNodeInputs.list/elementPattern, not the runtime element-link scope.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/pattern-scope.test.ts :: map keeps outer list scope and narrows per-element result cells"
+        ],
+        "fix": "Two options: (a) SOUND FIRST CUT \u2014 tighten tryBuildCollectionInterpreterPattern (runner.ts ~2420-2423) to fall back when the list's resolved element links carry non-default scope (read runtime scope, mirroring the static gate). (b) FAITHFUL \u2014 make the per-element effect mint elemResult at the narrowest scope of its element input (apply scopedCell/narrowestCellScope to the resolved slot link before getCell), collection-interpreter.ts:218-266. (a) is the safer first cut. ASIDE: remove the leftover `console.error('CIDIAG ...')` at collection-interpreter.ts:203.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Control-branch extraction swallows literal null via `??`",
+        "rootClass": "evaluator-bug",
+        "rootCause": "extract.ts:691-694 builds control branches via `branchRef(inObj.ifFalse ?? inObj.else ?? inObj.fallback)` (and analogous thenRef ~691, condition ~677). A raw node carrying a legitimate literal `ifFalse: null` collapses: `null ?? undefined ?? undefined === undefined`, so branchRef(undefined) yields {kind:'const',value:undefined}. ifElse(cond=false) then returns undefined instead of null. Flag-off result=null, flag-on=undefined. evalRog's control case (interpret.ts:186-187) is correct given the corrupted ref.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-regressions.test.ts :: should preserve cell references when map truncates with ifElse null values (CT-1158)"
+        ],
+        "fix": "extract.ts ~677-694: stop using `??` to pick the branch source (null is a meaningful distinct branch). Use presence checks: `const pickBranch = (...keys)=>{ for (const k of keys) if (Object.hasOwn(inObj,k)) return inObj[k]; return undefined; }` and call branchRef(pickBranch('ifFalse','else','fallback')) / branchRef(pickBranch('ifTrue','then','value')) / pickBranch('condition','if'). branchRef already routes literal null to {kind:'const',value:null}. Add a red-green interpret/extract unit case: ifElse(false,x,null) extracts elseRef as const null and evals to null.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Chained-lift downstream missing undefined-input run-gate",
+        "rootClass": "evaluator-bug",
+        "rootCause": "Two chained lifts: poisoned = lift(throw-if>1)(input); healthy = lift(p=>`healthy: ${p}`)(poisoned). At input=2 the poisoned leaf throws; per-op isolation (interpret.ts:240-251) sets opValues[poisoned]=undefined and CONTINUES, then the downstream healthy leaf is evaluated UNCONDITIONALLY (interpret.ts:157-160 impl(undefined)) -> 'healthy: undefined'. Legacy gates each node on isValidArgument = argument !== undefined (runner.ts:3112-3113) and guards `if (isValidArgument)` before invoking (runner.ts:3969), so when poisoned is undefined the healthy node is gated OUT and stays undefined. The interpreter has NO argument-defined run-gate. The interpret.ts:224-233 comment claimed legacy-parity but only against an INDEPENDENT sibling leaf, not a downstream-dependent leaf reading the poisoned value.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/computed-error.test.ts :: computed throws error"
+        ],
+        "fix": "interpret.ts leaf case (137-161), specifically the unconditional impl(input) at 157-160: replicate legacy's undefined-argument run-gate \u2014 when a leaf has an input ref and the resolved input is strictly undefined (mirroring isValidArgument = argument!==undefined for module.argumentSchema!==false), SKIP impl and yield undefined for that op. Validate against legacy's argumentSchema===false bypass so leaves whose schema legitimately accepts undefined are not over-suppressed. Add a focused interpret.ts unit test for upstream-throw -> downstream-undefined chaining.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Result-link embeds full resultSchema (schema leak on $ri-result alias)",
+        "rootClass": "emission-bug",
+        "rootCause": "The synthetic node emits the result as a single redirect alias to the $ri-result derived-internal cell, and getDerivedInternalCellLink (link-utils.ts:723) writes the interned resultSchema INTO that emitted link (runner.ts:2253 interns; 2304-2307 declares). Legacy's inline result-doc {doubled:<link>} carries no embedded schema. Downstream asSchemaFromLinks().getAsNormalizedFullLink() follows through to the $ri-result link whose embedded full resultSchema OVERRIDES a narrowed .asSchema({name}) view (or a cleared asSchema(undefined)), so getCellSchema returns the resultSchema instead of the narrowed/absent schema. (resultSchema meta via updateResultSchemaMeta still runs, so the meta-recovery tests 1 & 2 pass.)",
+        "count": 2,
+        "members": [
+          "packages/runner/test/llm-dialog-cell-schema.test.ts :: getCellSchema > returns the link-embedded schema for a reference written under one",
+          "packages/runner/test/llm-dialog-cell-schema.test.ts :: getCellSchema > recovers resultSchema from meta of a resolved reference target"
+        ],
+        "fix": "runner.ts ~2300-2320 synthetic result emission: stop carrying the full resultSchema embedded on the $ri-result result alias. Either (a) emit the result as an inline value document (parity with legacy's inline {doubled:<link>}), or (b) drop descriptor.schema from the result alias link (keep resultSchema only in the result-doc meta via updateResultSchemaMeta, which already runs). Contrast link-utils.ts:723. (Overlaps the faithful single-$ri-result emission build \u2014 the result-doc topology fix subsumes this.)",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Throwing leaf error context lacks pattern frame metadata",
+        "rootClass": "emission-bug",
+        "rootCause": "A throwing pure-compute lift IS interpreted and reports via scheduler.reportError with getTopFrame() (runner.ts:2289-2292), but the synthetic node is a `raw` module: instantiateRawNode runs its action without a per-pattern frame (createPatternFrame is only on the legacy javascript path runner.ts:3903; the raw builtinFrame wraps only the factory call ~4383-4436, not the action). So at error time getTopFrame() has no unsafe_binding to the result cell, getPieceMetadataFromFrame (scheduler/diagnostics.ts:165-169) hits !isCellResultForDereferencing and returns {}, so lastError.patternId/space/pieceId are all undefined.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-lift.test.ts :: Pattern Runner - Lift > failed lifted functions should output undefined instead of retaining stale values"
+        ],
+        "fix": "runner.ts ~2266-2295 (interpreterImpl action): establish the pattern frame (unsafe_binding -> result cell, like createPatternFrame) around the action body before evalRog, OR populate the error context directly (set patternId from resultCell.getMetaRaw('patternIdentity'), space from resultCell.space, pieceId from sourceURI) so handleSchedulerError can extract them. Currently it attaches a frame yielding no metadata.",
+        "disposition": "should-interpret"
+      },
+      {
+        "name": "Static-construct result read synchronously / as schema-lineage Cell",
+        "rootClass": "emission-bug",
+        "rootCause": "A pure access+construct pattern (no leaf) that re-shapes the argument into a {[UI]:{...props:{value:input.details}}} tree. Two divergences: (1) legacy materializes the result as a STATIC reactive-link tree synchronously at setup, so a non-async test reading resultCell.key(UI).get() resolves immediately; the interpreter's $ri-result value is produced only when the synthetic node action runs under the scheduler (async), so the synchronous read sees undefined. (2) evalRog access/construct (interpret.ts:162-174) materialize input.details as a PLAIN value (navigate), dropping the argument alias/link that carries the input details schema, so .asSchema({asCell}) cannot surface it as a schema-bearing Cell. The interpreter's value-materialization model cannot preserve synchronous static materialization + alias->Cell schema lineage.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/schema-lineage.test.ts :: Schema propagation end-to-end example > should propagate schema through a pattern"
+        ],
+        "fix": "SOUND NOW: runner.ts dry-run/eligibility \u2014 detect 'result is a pure static construct/access over the argument with no leaf compute' (the construct fields are argument/internal aliases, no leaf op) and bumpAndThrow -> legacy, which materializes the static link tree synchronously and preserves alias->Cell schema lineage. FAITHFUL (larger): emit the static portion of the result as a real link/alias tree like legacy and route only leaf-computed sub-values through the node (the 'don't collapse the static result tree' emission redesign \u2014 same build as the single-$ri-result cluster).",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Raw Pattern with derivedInternalCells defaults + toJSON-needing result",
+        "rootClass": "eligibility-fallback",
+        "rootCause": "A raw Pattern with nodes:[] and result {internalRecipe:{$alias:{partialCause:'recipe'}}, resultRecipe:<function-with-toJSON>}, plus derivedInternalCells:[{partialCause:'recipe',schema:{default:{name:'initial recipe'}}}]. The interpreter admits it (scalar eligibility has no check for derivedInternalCells-backed internal refs or function/object results needing toJSON normalization; the probe only rejects throw/Promise/Pattern). internalToOp is EMPTY (the 'recipe' cell is a derivedInternalCells entry, produced by no node), so interpret.ts:127-131 resolves the internal to undefined (the declared default is never consulted), and legacy's raw-runner toJSON normalization never runs. Both result fields drop -> {}.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/patterns-regressions.test.ts :: normalizes nested toJSON values before raw runner writes in v2"
+        ],
+        "fix": "runner.ts ~2147-2255 scalar eligibility: after extraction, walk rog.result + every op's refs for any {kind:'internal'} whose name is absent from extracted.internalToOp (a derivedInternalCells-only / dangling internal the evaluator cannot materialize) and bumpAndThrow a fail-closed reason ('unwired_internal'/'unrecognized_alias'). Optionally also fall back when pattern.derivedInternalCells is non-empty on the scalar path (the scalar synthetic node does not carry them). Always sound. Note: a faithful emission of derivedInternalCells defaults (the rehydrate-internal cluster) would NOT fix this one, because it additionally needs legacy raw-runner toJSON normalization \u2014 so keep this as fallback.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Node input-validation run-gate not modeled (invalid arg alias still runs)",
+        "rootClass": "emission-bug",
+        "rootCause": "A node whose inputs alias a non-existent arg path ({cell:'argument',path:['other']}) with a side-effecting leaf (ran=true). Legacy does NOT run the action when the input alias fails schema validation, so ran stays false. The interpreter has no input-validation-gates-execution model: the dry-run (runner.ts:2249) and the synthetic node (runner.ts:2284) both call impl(navigate(argument,['other'])) unconditionally regardless of validation, so ran becomes true. The pure dry-run probe ALSO executes the side-effecting leaf, compounding the divergence.",
+        "count": 1,
+        "members": [
+          "packages/runner/test/runner.test.ts :: runPattern ... should handle incorrect inputs gracefully"
+        ],
+        "fix": "runner.ts ~2218-2230 eligibility: fall back when a node's input binding cannot validate against the argument schema, OR teach the synthetic node to honor legacy's 'skip action on invalid/missing required input' gate before invoking evalRog. Fallback is the sound choice (the input-validation-gates-execution semantic is not modeled and the probe executes side effects). Also relieved by the probe-side-effect fix (probe-doubling cluster) for the dry-run half, but the run-gate itself is the primary defect.",
+        "disposition": "should-fallback"
+      },
+      {
+        "name": "Tests asserting env-flag construction shape (experimental-options)",
+        "rootClass": "test-artifact",
+        "rootCause": "Under CF_EXPERIMENTAL_INTERPRETER=1, envExperimentalInterpreterDefault() returns true (runtime.ts:110-118) and the constructor seeds experimentalInterpreter:true into this.experimental (runtime.ts:357-367). The exact-shape toEqual expected literals omit experimentalInterpreter, so deep equality fails on the extra key. No pattern is interpreted in these steps \u2014 pure construction-time flag-object assertion.",
+        "count": 3,
+        "members": [
+          "packages/runner/test/experimental-options.test.ts :: ExperimentalOptions > Runtime construction > respects explicitly-set flags (all false)",
+          "packages/runner/test/experimental-options.test.ts :: ExperimentalOptions > Runtime construction > respects explicitly-set flags (all true)",
+          "packages/runner/test/experimental-options.test.ts :: ExperimentalOptions > Runtime construction > merges provided flags with defaults"
+        ],
+        "fix": "test/experimental-options.test.ts:41-45/59-63/75-79: add `experimentalInterpreter: <env-derived expected>` to each expected object, computed from the same env logic (CF_EXPERIMENTAL_INTERPRETER === '1' || 'true' ? true : undefined). KEEP toEqual (do NOT switch to toMatchObject) to preserve exhaustive key checking.",
+        "disposition": "test-artifact"
+      },
+      {
+        "name": "Tests asserting legacy internals invalidated by node-collapse (action naming / per-source snapshots)",
+        "rootClass": "test-artifact",
+        "rootCause": "These assert a LEGACY MATERIALIZATION INTERNAL that the interpreter legitimately changes by collapsing per-builtin/per-computed nodes into ONE synthetic interpreterImpl raw node: (1) the per-builtin ifElse scheduler action name raw:ifElse:<hash> (schedulerRawActionName, runner.ts:148-159) becomes raw:interpreterImpl:<hash>; (2) the three sibling computeds no longer persist three separate per-source 'main.tsx' scheduler action snapshots (snaps.length 0 vs 3) \u2014 the CT-1623 sibling-over-dirtying guard is structurally impossible under the interpreter because the siblings are no longer separate reader action nodes. Values are correct.",
+        "count": 2,
+        "members": [
+          "packages/runner/test/patterns-ifelse.test.ts :: Pattern Runner - ifElse > names raw ifElse actions from the builtin ref",
+          "packages/runner/test/reload-sibling-overdirty.test.ts :: reload: sibling-field computeds persist clean and do not re-run"
+        ],
+        "fix": "Make the tests interpreter-aware WITHOUT weakening the legacy guarantee, branching on the flag (runtime.experimental.experimentalInterpreter / getInterpreterCensus().interpreted_ok>0 / CF_EXPERIMENTAL_INTERPRETER): ifElse \u2014 under the flag assert the synthetic action naming raw:interpreterImpl: instead of raw:ifElse: ; keep /^raw:ifElse:/ on the legacy branch. reload-sibling \u2014 under the flag assert the interpreter-shaped invariant (the single synthetic node persists clean: any persisted snapshot has directDirtySeq/staleSeq undefined) and keep value-equality + reload-no-miss assertions in BOTH modes; do NOT relax the count to a >=0 no-op.",
+        "disposition": "test-artifact"
+      }
+    ],
+    "fixSequence": [
+      "WAVE 0 \u2014 Test-artifacts (no product code; unblock the harness immediately, ~5 failures across 3 tests). (a) experimental-options.test.ts: add env-derived experimentalInterpreter to the 3 expected literals (keep toEqual). (b) patterns-ifelse 'names raw ifElse' + reload-sibling-overdirty: branch on the flag, assert the interpreter-shaped invariant under-flag and keep the legacy assertion off-flag. These are independent and touch only test files.",
+      "WAVE 1 \u2014 Safe eligibility fallbacks (tighten gates; always sound because flag-off is green; no emission build). Do these next for the largest green gain at lowest risk: (1) SECURITY trust gate in extract.ts resolveLeafImpls (untrusted live leaf -> unresolved_leaf fallback) \u2014 2 tests, HIGHEST priority (security invariant). (2) Surface dry.errors as a fallback signal in the probe (runner.ts ~2236-2249) + structural asCell/asStream gate in resolveLeafImpls \u2014 5 context-requiring-lift tests, and it is a one-line safety net that also hardens many others. (3) targetSpace/defaultScope gate in the PATTERN gate (runner.ts ~2173-2216) \u2014 11 cross-space/scope tests. (4) Cell/OpaqueRef-valued + redirect-result-shape guard in the dry-run (runner.ts:2245-2249) \u2014 7 pattern-returning-derive/lift/misc tests. (5) input-link/schema scope probe -> 'scoped' fallback \u2014 6 per-node-scope tests. (6) launched-child signal -> fallback \u2014 4 receipt/navigateTo tests. (7) argSnapshot===undefined -> 'unresolved_argument' fallback \u2014 1 demand-gated handler test. (8) side-effect-only/output-less leaf gate BEFORE the dry-run \u2014 2 ensurePieceRunning tests. (9) dangling-internal (internalToOp miss) + derivedInternalCells-on-scalar fallback \u2014 1 toJSON-normalize test. (10) invalid-input-alias validation fallback \u2014 1 runner 'incorrect inputs' test. (11) static-construct-over-argument result fallback \u2014 1 schema-lineage test. (12) collection element-link non-default-scope fallback in tryBuildCollectionInterpreterPattern \u2014 1 map-narrow test. These 12 fallback gates are mutually independent and each is individually shippable red->green.",
+      "WAVE 2 \u2014 Pure evaluator bugs (small, localized, should-interpret; no large emission redesign). (1) extract.ts ~677-694: replace `??` branch-picking with presence checks so literal null survives \u2014 1 CT-1158 test. (2) collection-interpreter.ts:225: add the `if (!(i in rawList)) continue;` sparse-hole guard \u2014 1 patterns-core test; also remove the leftover CIDIAG console.error at :203. (3) interpret.ts leaf case 157-160: add the undefined-argument run-gate for chained lifts \u2014 1 computed-error test. (4) Probe side-effect elimination (runner.ts ~2228-2249): make eligibility count-neutral (structural-only eligibility, or memoize the probe evalRog and reuse for the first real node run) \u2014 13 probe-doubling/laziness tests. (4) is the single highest-yield should-interpret fix and is independent of all emission work; sequence it as the capstone of Wave 2.",
+      "WAVE 3 \u2014 The foundational EMISSION build (faithful single-$ri-result -> faithful result-document topology). This is the dominant should-interpret cluster and the largest. Build it as: (a) preserve the original result alias tree (pass-through argument/internal aliases stay aliases, not flattened values; top-level structural keys like [NAME] preserved); (b) write per-field evalRog outputs into their declared derived internal cells; (c) MERGE source derivedInternalCells into the synthetic ones (defaults/manifest re-materialized); (d) stop embedding resultSchema on the result alias link (keep it in meta); (e) establish a pattern frame in the interpreterImpl action for error metadata. This single build resolves the single-$ri-result cluster (8), the ifElse pass-through write-back (1), the result-link schema-leak (2), the throwing-leaf-frame (1), and RELIEVES the should-fallback static-construct (schema-lineage) and the argument-cell write-back clusters (they could then be interpreted rather than fall back). Do this LAST and only after Waves 0-2 have driven the suite green via fallback, so it is a pure coverage-expansion build with a green safety net underneath. DEPENDENCY NOTE: once Wave 3 lands, revisit the Wave 1 fallback gates for clusters that emission now covers (argument-cell write-back, static-construct result, result-link schema leak) and decide per the design judgments whether to flip them from fallback to interpret."
+    ],
+    "designJudgments": [
+      "SCOPE/SPACE clusters (cross-space .inSpace/.asScope = 11 tests; per-node input/schema scope narrowing = 6 tests; collection per-element scope = 1 test): the triage recommends FALLBACK for all of them, and that is correct as the immediate move (always sound). But it is a genuine SCOPE CHOICE whether the interpreter should EVER interpret scoped/cross-space pure patterns. Faithful emission of (a) targetSpace child minting + replicatePatternToSpace and (b) narrowestCellScope output-cell chains is the partitioner's job (partition.ts exists but is unwired). TRADEOFF: cross-space child instantiation is real reactive child materialization \u2014 re-implementing it inside the synthetic node defeats the inlining premise, so cross-space should almost certainly stay legacy permanently. But pure-compute scope NARROWING (user/session-scoped inputs/schemas producing a scoped output cell) is plausibly in-scope for the partitioner later. Coordinator decision: confirm cross-space = permanent fallback, and decide whether scope-narrowing is a future emission target or permanent fallback.",
+      "NON-RESULT ARGUMENT-CELL WRITE-BACKS (3 tests): triage recommends FALLBACK. This is the clearest 'is this pure compute at all?' boundary \u2014 a node that writes back into a shared argument cell is a reactive side effect the result aliases. Decision: is write-back emission (per-output bindings on the synthetic node) ever in-scope, or is any non-result output a permanent legacy boundary? This overlaps the Wave 3 emission build (multi-output emission), so the coordinator should decide whether Wave 3 includes write-backs or explicitly excludes them.",
+      "STATIC-CONSTRUCT-OVER-ARGUMENT result read synchronously / as schema-lineage (schema-lineage, 1 test): triage recommends FALLBACK now but flags that faithful static-result-tree emission would let it be interpreted. The crux is whether the interpreter must preserve SYNCHRONOUS static result materialization (legacy materializes the static link tree at setup with no scheduler pass) \u2014 the single async $ri-result node fundamentally cannot, so even with Wave 3 emission, a synchronous-read contract may force this to fall back. Coordinator decision: is synchronous static-result materialization a requirement the interpreter must meet (big), or is async-only result production acceptable (then this stays fallback)?",
+      "PROBE SIDE-EFFECT MODEL (13 probe-doubling tests + the laziness violation): the latent design assumption is that user leaf bodies are pure/idempotent so a dry-run is free. They are not (run-count assertions + pull-laziness invariants observe it). Decision: drop the value-executing dry-run in favor of STRUCTURAL eligibility (cleanest, but loses the async/Pattern runtime detection the dry-run currently provides \u2014 those would need a structural/static substitute), OR memoize-and-reuse the probe result for the first real run (keeps runtime detection, adds a reuse path). This is a core interpreter-architecture decision touching eligibility soundness, not a local patch.",
+      "LAUNCHED-CHILD patterns (receipt / navigateTo, 4 tests): triage recommends FALLBACK (gate launched children to legacy). The alternative \u2014 faithful navigable/reload-stable result-cell emission \u2014 overlaps Wave 3 but adds the firstResolvedOutputRedirect + receipt contract. Decision: are launched child patterns a permanent legacy boundary (likely yes \u2014 their result cell is consumed by a launcher contract the synthetic node doesn't honor), or a future emission target once Wave 3 lands?",
+      "POST-WAVE-3 FLIP-BACK: several Wave 1 fallback gates (argument-cell write-back, static-construct result, result-link schema leak, possibly scope-narrowing) are interim FALLBACKS that the faithful emission build could convert to INTERPRET. Coordinator should decide, per cluster, whether to flip them to interpret after Wave 3 (more coverage, more risk) or leave them as permanent sound fallbacks (less coverage, zero risk). This is the central interpreter-coverage-vs-build-cost tradeoff and should be made deliberately rather than by default."
+    ],
+    "unknowns": [
+      "No classifications were left as 'unknown' rootClass; all failures were attributed with high or medium confidence. The medium-confidence items below warrant a quick re-verification before committing the fix, but none are unattributed.",
+      "pattern-scope.test.ts 'resolves named spaces during action postRun' (medium): the lift returns an OpaqueRef/PatternFactory result that isPattern may not match; confirm whether the broadened Cell/OpaqueRef dry-run guard (Wave 1 step 4) actually catches it, or whether it needs the targetSpace gate as well. Investigate by dumping the dry-run value ctor for that specific lift.",
+      "pattern-scope.test.ts 'handler side effect can write linked child across spaces' and 'resolves named handler children to DIDs' (medium): classified as targetSpace-gate fallbacks, but they ride through a handler/effect path that should already fall back. Verify the SECOND (child) pattern is the one being interpreted (RI_TRACE census) and that the targetSpace gate is the operative fix, not the effect-op gate.",
+      "patterns-ifelse 'should allow Cell<Array>.push of newly created pieces' (medium): the inner child piece interprets with origResult:{} (empty/degenerate). Confirm whether the durable fix is faithful child-result emission (Wave 3) or the launched-child fallback gate (Wave 1 step 6) \u2014 i.e. whether a handler-pushed innerPattern is a 'launched child' for gating purposes. Re-run with the launched-child signal threaded to see if it falls back cleanly.",
+      "runner.test.ts 'should handle incorrect inputs gracefully' (medium): confirm the input-schema validation gate exists in legacy at the instantiateNode boundary as assumed, and that a clean eligibility check can detect 'input alias does not validate against argument schema' statically (vs needing a runtime validate). If only detectable at runtime, prefer the synthetic-node run-gate over the eligibility fallback."
+    ],
+    "totals": {
+      "totalFailures": 57,
+      "shouldFallback": 23,
+      "shouldInterpret": 27,
+      "testArtifact": 5,
+      "byRootClass": "emission-bug: 22 (single-$ri-result emission 8 [ifElse-select counted here], ifElse pass-through write-back 1 same test, argument-cell write-back 3, per-node input/schema scope 6, result-link schema leak 2, throwing-leaf frame 1, node input-validation run-gate 1, static-construct result 1 \u2014 note ifElse-select is shared between two emission clusters so unique emission tests = 21); eligibility-fallback: 21 (cross-space/scope 11 [incl 1 shared with ensurePieceRunning? no], context-requiring lift 5, pattern-returning derive/lift/misc 7, launched-child 4, side-effect-only leaf 2 [shared with probe-doubling], demand-gated 1, untrusted SES 2, toJSON-normalize raw 1 \u2014 overlaps make the unique-test count lower); evaluator-bug: 16 (probe-doubling/laziness 13, control-branch null 1, chained-lift undefined-gate 1, plus sparse-hole is collection-bug); collection-bug: 3 (sparse-hole map 1, per-element scope 1, [filter/flatMap sparse-hole counted under probe-doubling evaluator-bug]); test-artifact: 5. CAVEAT: clusters overlap (a few tests appear in two clusters because they have two distinct fixable defects \u2014 e.g. ensurePieceRunning idempotent/restart in both probe-doubling and side-effect-only; ifElse-select in single-$ri-result and pass-through write-back), so summing cluster counts double-counts ~4 tests. The 57 total is the unique failing-test count across all 24 files; the should-fallback/should-interpret/test-artifact split (23/27/5=55) reflects unique-test disposition where a test with both a fallback and an interpret cluster is assigned to its PRIMARY recommended fix \u2014 net unique failing tests = 55 after collapsing the ~2 double-counts that resolve to one disposition."
+    }
+  }
+}
