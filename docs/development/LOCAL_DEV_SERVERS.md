@@ -56,11 +56,16 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 - `packages/toolshed/local-dev-toolshed.log`
 
 **CLI identity for local dev:** The local toolshed uses an identity derived from
-the passphrase `"implicit trust"`. To create a matching key for CLI operations:
+the passphrase `"implicit trust"`. To create a key matching the local server (so
+the CLI can act as its operator/admin):
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
+This is a shared, publicly-derivable key — every developer who derives it gets
+the same DID. Use it only against your own localhost. For a personal identity, or
+any shared/remote server, use `id new` instead (see
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md)).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
