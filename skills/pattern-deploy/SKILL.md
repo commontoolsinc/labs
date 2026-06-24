@@ -30,10 +30,7 @@ If no key exists, create one per the cf skill
 cf skill's warning: never redirect `deno task cf` output into a key file, the
 wrapper pollutes it with ANSI preamble). Never overwrite an existing key file —
 identity-scoped data (PerUser state, favorites) becomes invisible under a new
-identity. Do **not** use `id derive "implicit trust"` here: it is a shared,
-publicly-derivable identity, so deploying with it to a shared server collides
-you into one principal with every other developer who did the same (see the cf
-skill and `docs/development/SHARED_IDENTITY.md`).
+identity.
 
 ## Commands
 
