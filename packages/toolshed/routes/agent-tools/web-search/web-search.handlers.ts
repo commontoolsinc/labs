@@ -279,6 +279,7 @@ async function isValidCache(path: string): Promise<boolean> {
 
 export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
   const logger = c.get("logger");
+  const verifiedUserDid = c.get("verifiedUserDid");
   const payload = await c.req.json();
   const { query, max_results = 5, include_content = false } = payload;
 
@@ -287,7 +288,7 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
   const cachePath = `${CACHE_DIR}/${promptSha}.json`;
 
   logger.info(
-    { query, max_results, include_content, promptSha },
+    { query, max_results, include_content, promptSha, verifiedUserDid },
     "Starting web search",
   );
 
