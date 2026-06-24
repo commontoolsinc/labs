@@ -157,6 +157,14 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   // Small delay to allow any pending debounce timers to either fire or be cancelled
   await sleep(100);
 
+  if (Deno.env.get("RI_CENSUS_DUMP")) {
+    console.error(
+      "RI_CENSUS",
+      name,
+      JSON.stringify(runtime.runner.getInterpreterCensus()),
+    );
+  }
+
   await runtime.dispose();
   await storageManager.close();
 
