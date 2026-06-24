@@ -166,9 +166,18 @@ design: [../07-coalescing-architecture.md](../07-coalescing-architecture.md).
   segment; pure `map`/nested = pure ops within a segment. Migration replaces the
   all-or-nothing gate with the partitioner + multi-node emission; keeps `evalRog`
   + the collection mechanism + the legacy `instantiateNode` path for boundaries.
-- Status: design landed; partition prototype (static, over real ROGs) to validate
-  the coverage/footprint jump before implementation. Open questions OQ-C1..C6 in
-  07-*.md.
+- Status: design landed + independently adversarially reviewed → **GO-WITH-FIXES**
+  (07-*.md §8). Reframe sound; corrections folded in. **F1 (blocker): the ROG
+  drops boundary input edges** (`extract.ts` gives inputs only to leaf ops), so
+  the partition has nothing to cut on for I/O boundaries AND the first prototype
+  over-counted coalescing — numbers being re-baselined with boundary edges. **F2:
+  "no scheduler change" corrected** — a segment feeding >1 boundary needs
+  R-SEAM-1 fan-out (or a container-of-links). **F3: CFC** — legacy is per-node
+  (segments ≈ legacy, not finer); + a real boundary→boundary under-label hazard
+  → labeled read-through invariant. **F4 (open):** handler write-back can form
+  `S→handler→S`; the partition must cut on boundary write-back edges too. F5 (§5
+  honest re multi-segment machinery), F6 (cause-naming), F7 (R-SEAM-3 dep). The
+  highest-risk pre-implementation item is F1.
 
 ## D-VNODE-DOC-FRAGMENTATION — the collection doc-win is element-RESULT-SHAPE-dependent (bench finding, 2026-06-24)
 

@@ -32,13 +32,17 @@ handful of co-located `fetchData`/`generateText`/handler ops. The pure nodes are
 not ineligible — they are **trapped** beside a few effects.
 
 **Measured (static partition prototype, `packages/patterns/tools/coalescing-partition-probe.ts`,
-over 7 real fall-back-today patterns):** boundaries are only **6.7%** of ops
-(100/1496); **93.3%** are pure and would coalesce into **33 segments**; projected
-**node** footprint **133 vs 246 legacy = 45.9% reduction**. The marquee trapped
-case — lunch-poll's `PollOptionCard` — is **166/180 ops pure → 15 vs 50 nodes
-(70% collapse)**, versus **0%** interpreted under today's all-or-nothing gate.
-(Node reduction is the validated claim; see §4.3 / §4.8 on the separate, gated
-doc-win.)
+over 7 real fall-back-today patterns).** ⚠️ The first-pass numbers (corpus **93.3%**
+pure, **45.9%** projected node reduction; `PollOptionCard` 166/180 pure, 70%
+collapse) were computed on an **edge-less graph** (review F1 — boundaries had no
+input edges, so the partition under-counted segments and over-counted
+coalescing). They establish the *direction* (boundaries are a small minority;
+most ops are pure and trapped today) but **not the trustworthy magnitude** — the
+node-reduction figure is being **re-baselined with boundary-input edges modeled**
+(see §8/F1). The robust, edge-independent claim stands: every one of the 7
+patterns falls back **0%** today, and the boundary set is a small fraction of ops.
+(Node reduction is the headline once re-baselined; see §4.3 / §4.8 on the
+separate, gated doc-win.)
 
 ## 2. The reframe
 
@@ -119,7 +123,19 @@ coalesced.
 
 ### 4.2 The partition
 
-Given the pattern's ROG with the boundary set marked:
+> **PRECONDITION (review F1, blocker).** The partition needs **boundary input
+> edges** the ROG does not currently carry: extraction gives `inputs` only to
+> `leaf` ops (`extract.ts`), so effect/handler boundary ops have *no* input refs
+> and `inputsOf` returns `[]` for them. Step 2/3 below have nothing to cut on for
+> I/O boundaries unless extraction is first extended to record every boundary
+> op's input ValueRef(s) (the same `inputRefs`/`buildStructuredRef` leaf nodes
+> use). This is both a partition-ordering precondition AND a CFC-soundness one
+> (§4.5 read-through). **The first prototype was measured WITHOUT these edges and
+> over-counted coalescing; the numbers in §1 are re-baselined with boundary edges
+> modeled.**
+
+Given the pattern's ROG with the boundary set marked (and boundary input edges
+present, per the precondition above):
 
 1. Build the data-flow DAG over all ops (a well-formed pattern is acyclic).
 2. **Cut** at every boundary node: a boundary node's inputs come *from* an
@@ -189,21 +205,48 @@ a change to a pattern arg re-runs only the segment(s) that read it; a boundary
 re-runs only when *its* input value actually changes — so a `fetch` does not
 re-fire because an unrelated pure value changed. This is strictly finer than the
 landed single-node interpreter (which re-runs the whole pure computation on any
-input change). **No new scheduler primitive is required** — this is the decisive
-advantage over Option 1.
+input change).
 
-### 4.5 CFC — finer, not coarser
+**Correction (review F2): the scheduler *algorithm/invalidation* is unchanged,
+but node *emission* needs a net-new primitive.** A segment feeding **>1 downstream
+boundary** must write **>1 boundary-input doc** — the multi-value fan-out the seam
+analysis flagged as net-new ([DECISIONS R-SEAM-1](./implementation/DECISIONS.md):
+one node emits one output; a container-of-links is fine, N separate output docs is
+not). Honest claim: invalidation/ordering needs no change, but multi-segment
+emission requires either (a) the R-SEAM-1 multi-output fan-out, or (b) a
+**container-of-links** convention (a segment writes one container; each downstream
+boundary reads its input from a field/link). (b) is the preferred first cut, but
+it is a real materialization+wiring design, not "no change." The re-baselined
+prototype must report how many segments feed >1 boundary (the fan-out exposure).
+
+### 4.5 CFC — segment ≈ legacy (finer than the single-node interpreter)
 
 Each segment is one transaction, so it carries **one flow-join over its own
 reads** (`deriveFlowJoin`: confidentiality ∪, integrity meet), stamped on its
 writes. Because segments are cut at boundaries, a public-args segment stays
 public; only the segment that reads `builtinₖ`'s output inherits that builtin's
-label (e.g. `fetch`/`llm` results are `LlmDerived`/untrusted, `sqlite` carries its
-own). This is **finer-grained than the landed whole-pattern label** (which would
-union every input across all boundaries into one smear) — a precision *gain*. The
-boundary docs carry the builtin's intrinsic label; downstream segments join it.
-Per-element collection labels (the pointwise mechanism from
-[03-cfc.md](./03-cfc.md)) compose unchanged within a segment.
+label.
+
+**Correction (review F3): the honest baseline.** Legacy is **already
+per-node/per-tx**, not a "whole-pattern smear" — so per-segment CFC is **≈ legacy
+granularity**, and *finer only than the landed single-node interpreter* (which
+does smear one label over the whole pattern). The win here is recovering legacy's
+per-node precision while collapsing nodes, not beating legacy.
+
+**Hazard (review F3 — the dangerous direction): boundary→boundary under-label.**
+`deriveFlowJoin` taints only what a transaction actually **reads** (journaled
+reads + trigger reads, `forEachFlowObservation`). In an effect→effect chain
+(`generateText(fetchData(x))`) the `fetch` output flows directly into the `llm`
+input with **no interpreter segment reading it** — so unless that wiring is an
+explicit **read-through** (a segment, or the boundary node itself, journals the
+read of `fetch`'s output before writing `llm`'s input), the `llm` input doc can be
+written **without** the `LlmDerived`/untrusted label legacy gives it. **Invariant:
+every boundary-input doc must be produced by a read that journals its source
+boundary's label** — the boundary-input wiring is a labeled read-through, never an
+unread hop. (This is why F1's boundary-input edges are also a CFC-soundness
+precondition, not just a partition-ordering one.) The boundary docs carry the
+builtin's intrinsic label; downstream segments join it. Per-element collection
+labels ([03-cfc.md](./03-cfc.md)) compose within a segment.
 
 ### 4.6 Handlers and effects — preserved, never executed
 
@@ -262,10 +305,16 @@ This generalizes, rather than discards, what is built:
 - The **new** capability is patterns with boundaries: today they fall back; under
   coalescing they become *multi-segment*.
 
-So the migration is additive: keep the segment evaluator (`evalRog`) and the
-collection mechanism; replace the all-or-nothing `buildInterpreterPattern` gate
-with the **partition** + multi-node emission; keep the legacy `instantiateNode`
-path for boundary nodes.
+The `evalRog` segment evaluator and the boundary classifier are reused, but the
+migration is **not** merely "swap the gate" (review F5). The landed single-node
+path emits **one** synthetic `$ri-result` internal cell + a single-alias result,
+and the collection path is gated on the `map` being the **only** non-structural op
+with a bare/trivial-wrap result (`resultIsBareOrTrivialWrap`). A multi-segment
+pattern violates both: it must re-introduce the **multi-`derivedInternalCells` +
+multi-alias result tree** (`materializeDerivedInternalCells` / `updateResultProjection`)
+the single-node path deliberately dropped, plus the boundary-input fan-out (F2).
+So multi-segment emission is **net-new emission machinery on top of** the reused
+`evalRog` — honestly scoped, not "additive."
 
 ## 6. Open questions / risks
 
@@ -311,8 +360,9 @@ path for boundary nodes.
 2. **Differential oracle** as the gate (unchanged discipline): for each corpus
    pattern, the coalesced graph must produce outputs == legacy, with the boundary
    nodes behaving identically. **Gate the two wins separately:** (a) **node
-   reduction** + coverage — validated by the static prototype (45.9% corpus,
-   70% on `PollOptionCard`), safe to gate on now; (b) **doc reduction** — gate
+   reduction** + coverage — projected by the static prototype (numbers being
+   re-baselined with boundary-input edges per F1), safe to gate on once the
+   re-baselined magnitude holds; (b) **doc reduction** — gate
    *separately and only after* the §4.8 VNode-consolidation fix, and do not claim
    it for rendered collections until the oracle shows coalesced docs ≤ legacy on a
    rendered-element pattern. Also add the OQ-C4 invalidation gate (segment re-runs
@@ -327,3 +377,33 @@ The win to measure: on a pattern with `B` boundaries and `N` pure ops, legacy
 materializes `~N + B` nodes; coalescing emits `~(B+1) segments + B boundary
 nodes`, collapsing the `N` pure ops into a handful of segments while preserving
 exactly the I/O nodes that must exist anyway.
+
+## 8. Adversarial review findings (2026-06-24)
+
+An independent adversarial design review returned **GO-WITH-FIXES**: the reframe
+is sound (split-segments over one-resumable-node; handlers-as-boundaries), but
+several load-bearing claims needed correction. F1 must be resolved before
+implementation; the prototype numbers are being re-baselined on a complete graph.
+
+| # | Finding | Severity | Status |
+| --- | --- | --- | --- |
+| **F1** | The ROG drops **boundary input edges** (`extract.ts` gives `inputs` only to leaf ops); the partition had nothing to cut on for I/O boundaries, and the prototype over-counted coalescing. | **Blocker** | Precondition noted in §4.2; extraction fix is implementation work; prototype re-baselined with boundary edges. |
+| **F2** | "No scheduler change" over-claimed: a segment feeding >1 boundary needs **multi-value fan-out (R-SEAM-1)**. | **Blocker** | §4.4 corrected — invalidation unchanged, but emission needs R-SEAM-1 or a container-of-links convention. |
+| **F3** | CFC: (a) legacy is **per-node**, not a whole-pattern smear (so segments ≈ legacy, finer only than the single-node interpreter); (b) **boundary→boundary under-label** — an unread effect→effect hop journals no taint. | **Major** | §4.5 corrected + the labeled read-through invariant added (F1 edges are a CFC precondition). |
+| **F4** | **Handler write-back cycle**: a handler reading+writing the same state coalesced into one segment forms `S → handler → S`, invisible to a data-flow-only partition. | **Major** | **Open — add invariant (below).** |
+| **F5** | §5 "additive migration" over-claimed: multi-segment needs the legacy multi-`derivedInternalCells` + multi-alias result machinery the single-node path dropped. | **Major** | §5 corrected. |
+| **F6** | Materialization identity: internal-cell id = `f(resultCell, partialCause)`; splitting survives only with a **stable, collision-free cause-naming scheme** incl. distinct causes for a boundary's input vs output docs. | Minor→Major | **Open — specify in OQ-C6.** |
+| **F7** | Per-segment labeling may depend on the unbuilt **R-SEAM-3** per-path label channel; verify the per-tx join suffices and where R-SEAM-3 is actually required. | Minor | **Open — verify.** |
+
+**New invariant (F4):** the partition must treat a boundary node's **write-back
+targets** (a handler's `writes`, an effect's output cells) as **cut edges**, not
+just its data-flow inputs. A segment that *produces* state a downstream boundary
+writes back must not be coalesced with the segment that *consumes* that
+write-back — otherwise the coarsened graph contains a cycle legacy avoided by
+keeping each pure node separate. So the partition graph must include
+`boundary → (segments reading its write-back targets)` edges, derived from the
+boundary node's `outputs`/write-redirect set, in addition to the F1 input edges.
+
+**Highest-risk item to resolve before implementation: F1** — extend extraction so
+every boundary op carries its input ValueRef(s), then re-confirm the partition,
+the fan-out exposure (F2), and the CFC read-through (F3) on the complete graph.
