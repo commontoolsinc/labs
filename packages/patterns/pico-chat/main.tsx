@@ -279,7 +279,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
               }
 
               .pico-message-row:hover .pico-reaction-option,
-              .pico-message-row:focus-within .pico-reaction-option {
+              .pico-message-row:has(.pico-reaction-option:focus-visible) .pico-reaction-option {
                 opacity: 1;
                 pointer-events: auto;
               }
