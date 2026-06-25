@@ -372,6 +372,15 @@ declare module "@commonfabric/api" {
     setRawUntyped(value: FabricValue): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
+    /**
+     * Return a read-only SIBLING of this cell (same identity / link / tx /
+     * schema), with the write barrier set. Unlike `freeze()`, the ORIGINAL cell
+     * is NOT mutated — callers that legitimately write the same underlying value
+     * (e.g. a handler holding the writable handle) keep their writable view. The
+     * read-only barrier propagates through `.key()`/`.asSchema()`/`.withTx()`, so
+     * the entire handle subtree reachable from the returned cell is read-only.
+     */
+    readOnly(reason: string): Cell<T>;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -460,6 +469,7 @@ const cellMethods = new Set<
   "getArgumentCell",
   "freeze",
   "isFrozen",
+  "readOnly",
   "setSchema",
   "connect",
   "export",
@@ -1169,6 +1179,7 @@ export class CellImpl<T extends FabricValue>
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
+    this.throwIfReadOnly("set");
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
@@ -1270,6 +1281,7 @@ export class CellImpl<T extends FabricValue>
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     values: V extends object ? AnyCellWrapping<V> : never,
   ): Cell<T> {
+    this.throwIfReadOnly("update");
     if (!this.tx) {
       throw new Error(
         "Cell.update() requires transaction and object value\n" +
@@ -1336,6 +1348,7 @@ export class CellImpl<T extends FabricValue>
   push(
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void {
+    this.throwIfReadOnly("push");
     if (!this.tx) {
       throw new Error(
         "Cell.push() requires transaction and array value\n" +
@@ -1527,7 +1540,7 @@ export class CellImpl<T extends FabricValue>
       }
     }
 
-    return new CellImpl(
+    const child = new CellImpl(
       this.runtime,
       this.tx,
       currentLink,
@@ -1535,7 +1548,14 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer,
       kind,
       rebaseCfcLabelView(this._cfcLabelView, childPath),
-    ) as unknown as Cell<any>;
+    );
+    // Propagate the read-only barrier to derived cells: a frozen handle must
+    // stay read-only through `.key(...)` so a leaf cannot escape the backstop
+    // via `frozenCell.key("x").set(...)`. `readOnlyReason` is a per-instance
+    // field (not shared via `_causeContainer`), so it must be carried forward
+    // explicitly. Inert when unset (the normal case).
+    child.readOnlyReason = this.readOnlyReason;
+    return child as unknown as Cell<any>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -1553,7 +1573,7 @@ export class CellImpl<T extends FabricValue>
       schema: internCellLinkSchema(schema),
     };
 
-    return new CellImpl(
+    const sibling = new CellImpl(
       this.runtime,
       this.tx,
       siblingLink,
@@ -1561,7 +1581,9 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
       this._cfcLabelView,
-    ) as unknown as Cell<any>;
+    );
+    sibling.readOnlyReason = this.readOnlyReason; // propagate read-only barrier
+    return sibling as unknown as Cell<any>;
   }
 
   /**
@@ -1584,7 +1606,7 @@ export class CellImpl<T extends FabricValue>
       this.link,
     );
 
-    return new CellImpl(
+    const sibling = new CellImpl(
       this.runtime,
       this.tx,
       {
@@ -1595,13 +1617,15 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
       this._cfcLabelView,
-    ) as unknown as Cell<T>;
+    );
+    sibling.readOnlyReason = this.readOnlyReason; // propagate read-only barrier
+    return sibling as unknown as Cell<T>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
     // withTx creates a sibling with same identity but different transaction
     // Share the causeContainer so .for() calls propagate
-    return new CellImpl(
+    const sibling = new CellImpl(
       this.runtime,
       newTx,
       this._link, // Use the same link
@@ -1609,7 +1633,9 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
       this._cfcLabelView,
-    ) as unknown as Cell<T>;
+    );
+    sibling.readOnlyReason = this.readOnlyReason; // propagate read-only barrier
+    return sibling as unknown as Cell<T>;
   }
 
   sink(
@@ -1794,6 +1820,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   setRawUntyped(value: FabricValue): void {
+    this.throwIfReadOnly("setRaw");
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -1830,6 +1857,42 @@ export class CellImpl<T extends FabricValue>
     return !!this.readOnlyReason;
   }
 
+  readOnly(reason: string): Cell<T> {
+    // Non-mutating read-only view: a sibling sharing identity/link/tx/schema with
+    // the write barrier set. `withTx(this.tx)` already constructs a sibling and
+    // propagates `readOnlyReason`; set the reason on the sibling without touching
+    // `this` (the caller's writable handle stays writable).
+    const sibling = this.withTx(this.tx) as unknown as CellImpl<T>;
+    sibling.readOnlyReason = reason;
+    return sibling as unknown as Cell<T>;
+  }
+
+  /**
+   * ENFORCED read-only backstop. When a cell has been `freeze()`d, every
+   * mutation entry point consults this guard and throws — turning the
+   * previously-advisory `readOnlyReason` flag into a hard write barrier.
+   *
+   * Used by the reactive interpreter, which hands a read-only asCell input
+   * VIEW to a context-requiring leaf (a pure lift/computed that calls `.get()`/
+   * `.sample()` on its Cell input). The eligibility-time source scan
+   * (`liveLeafWritesCellInput`) already keeps WRITE-capable leaves as legacy
+   * fallback boundaries, so this guard is the defense-in-depth backstop: a write
+   * the scan misses throws here, the interpreter's per-op isolation catches it,
+   * isolates that op's value to `undefined`, and reports to `scheduler.onError`
+   * — exactly what legacy does when a node throws. Never a silent wrong write.
+   *
+   * Off the interpreter's frozen-view path NO caller ever sets `readOnlyReason`,
+   * so this guard is inert and every existing write path is byte-unchanged.
+   */
+  private throwIfReadOnly(method: string): void {
+    if (this.readOnlyReason !== undefined) {
+      throw new Error(
+        `Cell is read-only (${this.readOnlyReason}): .${method}() is not ` +
+          `permitted on this handle`,
+      );
+    }
+  }
+
   getMetaRaw(
     metaField: MetaField,
     options?: IReadOptions,
@@ -1845,6 +1908,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   setMetaRaw(metaField: MetaField, value: FabricValue): void {
+    this.throwIfReadOnly("setMetaRaw");
     if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.

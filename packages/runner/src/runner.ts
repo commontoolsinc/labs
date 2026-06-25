@@ -677,6 +677,163 @@ function hasNonDefaultScope(value: unknown): boolean {
  * `pred`/`branches`, construct template leaves). Used to find a segment's
  * argument reads in ANY op position (predicate, branch, list input, template
  * field), not just the flat `inputs`. PURE. */
+/**
+ * Make every live Cell handle reachable in a leaf's structured INPUT read-only
+ * (the `allowReadOnlyCellLeaves` increment). A context-requiring read-only leaf
+ * (a pure lift/computed whose `asCell`/`asStream` input it `.get()`/`.sample()`s)
+ * is handed the live handle the deep-resolved argument tree surfaces. Before the
+ * leaf body runs, replace each handle with a read-only SIBLING (`cell.readOnly`)
+ * so a write the eligibility scan missed (`liveLeafWritesCellInput`) throws —
+ * the interpreter's per-op isolation then degrades it to a correct error-isolated
+ * node, never a silent wrong write. The ORIGINAL handle in the argument tree is
+ * untouched, so a `construct`/`access` op re-emitting the SAME handle to a HANDLER
+ * boundary keeps its writable view (the handler legitimately writes it).
+ *
+ * Shallow-to-deep structural walk over plain objects/arrays only (the resolved
+ * argument tree is plain data with Cell handles at asCell/asStream paths); a
+ * Cell handle is a leaf of the walk (not descended into — its sub-cells are
+ * reached via `.key()`, which propagates the barrier on demand).
+ */
+function makeLeafInputReadOnly(input: unknown): unknown {
+  if (isCell(input)) return input.readOnly("ri-readonly-leaf-input");
+  if (Array.isArray(input)) {
+    let changed = false;
+    const out = input.map((v) => {
+      const w = makeLeafInputReadOnly(v);
+      if (w !== v) changed = true;
+      return w;
+    });
+    return changed ? out : input;
+  }
+  if (isRecord(input)) {
+    let changed = false;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input)) {
+      const w = makeLeafInputReadOnly(v);
+      if (w !== v) changed = true;
+      out[k] = w;
+    }
+    return changed ? out : input;
+  }
+  return input;
+}
+
+/** Wrap a leaf impl so its structured input's Cell handles are made read-only
+ * before the body runs (see {@link makeLeafInputReadOnly}). Used for a resolved
+ * read-only context leaf (asCell/asStream input). */
+function withReadOnlyCellInput(
+  impl: (input: unknown) => unknown,
+): (input: unknown) => unknown {
+  return (input: unknown) => impl(makeLeafInputReadOnly(input));
+}
+
+/** Read-only VALUE unwrap for the interpreter's control predicate: a live Cell
+ * handle resolved at an asCell argument path is unwrapped via a tracked `.get()`
+ * (journals through the tx → CFC + reactivity parity); a plain value passes
+ * through unchanged. See `EvalContext.unwrapCellForValue`. */
+function unwrapReadOnlyCellValue(value: unknown): unknown {
+  return isCell(value) ? value.get() : value;
+}
+
+/**
+ * Compute the TOP-LEVEL leaf op ids eligible to engage as READ-ONLY context
+ * leaves (the in-scope 2(a) case): a `leaf` whose node `argumentSchema` needs
+ * cell context AND whose every asCell/asStream input field is fed by a PATTERN-
+ * ARGUMENT ref (`{kind:"argument"}`). Only at an `argument` ref does the deep-
+ * resolved arg tree surface a LIVE Cell/Stream handle the leaf can `.get()`; an
+ * `internal`/`opOut`/`const`-fed asCell input resolves to a PLAIN value (2(b),
+ * deferred) and would throw on `.get()`, so such a leaf is EXCLUDED here (stays a
+ * legacy boundary, exactly as before this increment).
+ *
+ * The leaf input is `op.inputs[0]`. The transformer assembles a multi-field lift
+ * input as a synthesized `construct` op (referenced by `opOut`); a single-field
+ * input may be a direct ref. We walk:
+ *   - direct `argument` ref input → the whole handle is argument-fed; eligible if
+ *     the schema's sole cell-context field is the navigated one (covered by the
+ *     per-field construct check when wrapped in a construct; for a bare ref we
+ *     require the argument path to need cell context).
+ *   - `opOut` → synthesized `construct` (object): each schema property that needs
+ *     cell context MUST map to a field ref of `kind:"argument"`.
+ * Anything else (an asCell field fed by internal/opOut/const) → NOT eligible.
+ *
+ * PURE structural read — no tx, no leaf-body execution.
+ */
+function computeArgumentFedContextLeaves(
+  rog: Rog,
+  nodes: readonly unknown[],
+): Set<OpId> {
+  const eligible = new Set<OpId>();
+  const opById = new Map<OpId, Op>();
+  for (const op of rog.ops) opById.set(op.id, op);
+  // The PATTERN argument schema decides whether the interpreter's deep-resolved
+  // `$arg` read actually SURFACES a live handle at a given argument path. A lift
+  // may declare its INPUT `asCell`/`Writable` (so the lift body `.get()`s it),
+  // but if the PATTERN argument at that path is a PLAIN value (e.g.
+  // `min: Default<number>` whose lift typed it `Writable<number>`), the
+  // schema-driven `$arg` read surfaces a plain NUMBER, not a handle — `.get()`
+  // would throw. So the fed argument path must ALSO need cell context in the
+  // PATTERN arg schema for a handle to exist. (Legacy materializes such a lift
+  // through its binding layer, which establishes the cell linkage even for a
+  // plain-typed pattern arg; the interpreter has no such linkage — it reads the
+  // value tree — so it must keep these leaves as legacy boundaries.)
+  const patternArgSchema = rog.argumentSchema;
+
+  for (const op of rog.ops) {
+    if (op.kind !== "leaf" || op.id < 0) continue;
+    const argSchema = (nodes[op.id] as { module?: { argumentSchema?: unknown } })
+      ?.module?.argumentSchema;
+    if (!schemaNeedsCellContext(argSchema)) continue;
+
+    const inputRef = op.inputs[0];
+    if (inputRef === undefined) continue;
+
+    // The set of construct field refs feeding this leaf, by property name.
+    let fields: Record<string, ValueRef> | undefined;
+    if (inputRef.kind === "opOut") {
+      const producer = opById.get(inputRef.op);
+      const tmpl = producer?.detail.kind === "construct"
+        ? producer.detail.template
+        : undefined;
+      if (tmpl?.shape === "object") fields = tmpl.fields;
+    } else if (inputRef.kind === "argument") {
+      // A bare `argument` ref IS the handle: the leaf takes the whole asCell arg
+      // directly. Eligible iff the PATTERN arg at that path surfaces a handle.
+      if (argumentPathNeedsCellContext(patternArgSchema, inputRef.path)) {
+        eligible.add(op.id);
+      }
+      continue;
+    }
+    if (!fields) continue;
+
+    // Every property the leaf's schema marks as needing cell context MUST be fed
+    // by an `argument` ref WHOSE PATTERN-ARG PATH actually surfaces a live handle
+    // (`argumentPathNeedsCellContext` on the pattern arg schema). If any cell-
+    // context field is fed by a non-argument ref (internal/opOut/const) OR by an
+    // argument path that the pattern arg schema does NOT mark asCell (no handle
+    // surfaced), the leaf is NOT eligible — it stays a legacy boundary, as before.
+    const props = isRecord(argSchema)
+      ? (argSchema.properties as Record<string, unknown> | undefined)
+      : undefined;
+    if (!props) continue;
+    let allArgumentFed = true;
+    let sawCellContextField = false;
+    for (const [name, propSchema] of Object.entries(props)) {
+      if (!schemaNeedsCellContext(propSchema)) continue;
+      sawCellContextField = true;
+      const fieldRef = fields[name];
+      if (
+        !fieldRef || fieldRef.kind !== "argument" ||
+        !argumentPathNeedsCellContext(patternArgSchema, fieldRef.path)
+      ) {
+        allArgumentFed = false;
+        break;
+      }
+    }
+    if (sawCellContextField && allArgumentFed) eligible.add(op.id);
+  }
+  return eligible;
+}
+
 function argRefsOfOpFull(op: Op): ValueRef[] {
   const refs: ValueRef[] = [...op.inputs];
   const d = op.detail;
@@ -2565,13 +2722,40 @@ export class Runner {
     // we reuse the resolved set on the single-node fall-through below (no
     // double-resolution). A non-empty unresolved set means a serialized/untrusted
     // leaf boundary → `unresolved_leaf` fallback, exactly as the single-node path.
+    // ENGAGE read-only context-requiring leaves (asCell/asStream INPUT to a pure
+    // lift/computed) — but ONLY those whose asCell input is fed by a PATTERN-
+    // ARGUMENT ref (the sole place a live handle is surfaced in the deep-resolved
+    // arg tree). An internal/opOut-fed asCell input resolves to a plain value and
+    // would throw on `.get()` (the 2(b) case — deferred). The runner wraps each
+    // resolved such leaf's impl read-only below; a write-capable leaf stays a
+    // legacy boundary (`liveLeafWritesCellInput` inside `resolveLeafImpls`). Only
+    // on the experimental-interpreter path.
+    const patternNodes = (pattern as { nodes?: unknown[] }).nodes ?? [];
+    const readOnlyCellLeafOps = computeArgumentFedContextLeaves(
+      extracted.rog,
+      patternNodes,
+    );
     const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
       pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
       extracted.rog,
       this.interpreterImplRefResolver,
       this.interpreterLiveLeafTrustCheck,
+      readOnlyCellLeafOps,
     );
     const unresolvedLeafSet = new Set<OpId>(unresolvedLeafOps);
+
+    // READ-ONLY VIEW for the engaged argument-fed context leaves. Each was
+    // resolved (rather than falling back) only because `readOnlyCellLeafOps`
+    // proved it argument-fed + write-free — it takes a live Cell/Stream input.
+    // Wrap its impl so the surfaced handle is made read-only before the body
+    // runs: a pure `.get()`/`.sample()` reads through (journaled for CFC +
+    // reactivity), and a write the source scan missed throws (error-isolated by
+    // the interpreter, never a silent mis-write). Only these vetted ops are
+    // wrapped; nested-pattern leaves (their own id space) are never in the set.
+    for (const opId of readOnlyCellLeafOps) {
+      const leafImpl = leafImpls.get(opId);
+      if (leafImpl) leafImpls.set(opId, withReadOnlyCellInput(leafImpl));
+    }
 
     // A pattern has a partitionable BOUNDARY when it carries an `effect`
     // (handler / I/O builtin), a `collection` op (a `map`/`filter`/`flatMap`),
@@ -2617,6 +2801,7 @@ export class Runner {
         internedArgForPartition,
         unresolvedLeafSet,
         setupTx,
+        readOnlyCellLeafOps,
       );
       if (partitioned) {
         this.interpreterCensus.interpreted_ok++;
@@ -3040,6 +3225,11 @@ export class Runner {
           argument,
           leafImpls,
           internalToOp,
+          // Unwrap a live Cell handle to its VALUE for a `control` predicate
+          // (`ifElse(enabledCell, …)`): a raw handle is always truthy, so the
+          // predicate must read through it. Tracked read → CFC + reactivity
+          // parity. Pure leaves keep the handle (they `.get()` it themselves).
+          unwrapCellForValue: unwrapReadOnlyCellValue,
         });
         // Route each per-field output value into its declared internal cell. The
         // node's `outputs` binding is the union of the original nodes' output
@@ -3155,6 +3345,10 @@ export class Runner {
      * collection guard can read the RAW bound argument THROUGH it to see per-
      * element link scopes that are not yet committed. Read-only. */
     setupTx?: IExtendedStorageTransaction,
+    /** Top-level leaf op ids engaged as READ-ONLY argument-fed context leaves
+     * (see `computeArgumentFedContextLeaves`). Such a leaf WANTS the live handle,
+     * so a segment reading the handle arg path for it is NOT a partition hazard. */
+    readOnlyCellLeafOps: ReadonlySet<OpId> = new Set<OpId>(),
   ): Pattern | null {
     // (a) Partition the extracted ROG structurally. No `resolveInner` (the spike
     // does not recurse into collection/pattern boundaries — those are gated out
@@ -3278,19 +3472,25 @@ export class Runner {
       const segByIdLocal = new Map<OpId, Op>();
       for (const op of extracted.rog.ops) segByIdLocal.set(op.id, op);
       // A handle arg read is only HAZARDOUS when the consuming segment op
-      // INTERPRETS the value: a `leaf` body calls `.get()`/`.key()` on what it
-      // expects to be a plain value (it gets a handle → wrong), and a `control`
-      // op's predicate/branch coerces a handle as truthy (always-true → wrong).
-      // A `construct` / `access` op merely RE-PROJECTS the handle structurally
-      // into its output (a VNode prop, a handler-input object) — exactly as
-      // legacy's binding layer wires the live cell into that downstream
-      // structure. `asSchema(internedArg).get()` already surfaces the handle for
-      // an `asCell`/`asStream` field (the annotation rides `internedArg`), so the
-      // construct re-emits the SAME live handle legacy would, and a downstream
-      // handler reads it through. So gate ONLY on a `leaf`/`control` op reading a
-      // handle arg path; a `construct`/`access` handle pass-through is sound and
-      // is exactly the lunch-poll PollOptionCard case the coarse gate trapped
-      // (its handle reads are all VNode/handler-input CONSTRUCTS — 07 §4.7/§4.8).
+      // INTERPRETS the value WRONG: a `leaf` body that expects a PLAIN value gets
+      // a handle (→ wrong), and a `control` op's predicate/branch coerces a handle
+      // as truthy (always-true → wrong). A `construct` / `access` op merely RE-
+      // PROJECTS the handle structurally into its output (a VNode prop, a handler-
+      // input object) — exactly as legacy's binding layer wires the live cell into
+      // that downstream structure. `asSchema(internedArg).get()` already surfaces
+      // the handle for an `asCell`/`asStream` field (the annotation rides
+      // `internedArg`), so the construct re-emits the SAME live handle legacy
+      // would, and a downstream handler reads it through.
+      //
+      // READ-ONLY CONTEXT-LEAF EXCEPTION (`allowReadOnlyCellLeaves`): a `leaf`
+      // whose OWN `module.argumentSchema` needs cell context is a resolved read-
+      // only context leaf — it WANTS the handle (it `.get()`/`.sample()`s its
+      // input itself; the runner wraps it read-only). Such a leaf reading a handle
+      // arg path is NOT hazardous. `control` STAYS hazardous (conservative — a
+      // segment `ifElse(handle, …)` falls back; the whole-pattern path's
+      // `unwrapCellForValue` hook handles the standalone counter-conditional
+      // case). A leaf whose schema is NOT asCell but reads a handle path expects a
+      // plain value and stays hazardous.
       const HANDLE_HAZARD_KINDS = new Set(["leaf", "control"]);
       const handleArgPaths: string[] = [];
       let segmentReadsHandleArg = false;
@@ -3299,6 +3499,10 @@ export class Runner {
           const op = segByIdLocal.get(id);
           if (!op) continue;
           if (!HANDLE_HAZARD_KINDS.has(op.kind)) continue;
+          // An ENGAGED argument-fed read-only context leaf consumes the handle
+          // deliberately (it `.get()`/`.sample()`s its frozen input) — not a
+          // hazard. Everything else reading a handle arg path stays hazardous.
+          if (op.kind === "leaf" && readOnlyCellLeafOps.has(op.id)) continue;
           for (const ref of argRefsOfOpFull(op)) {
             if (
               ref.kind === "argument" &&
@@ -3938,6 +4142,9 @@ export class Runner {
           internalToOp,
           seed,
           seedByName,
+          // See the whole-pattern impl: unwrap a Cell handle for a `control`
+          // predicate (tracked read). Pure leaves keep the handle.
+          unwrapCellForValue: unwrapReadOnlyCellValue,
         });
 
         // Write each of THIS segment's output names from its producing op value.

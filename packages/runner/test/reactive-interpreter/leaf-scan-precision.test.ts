@@ -27,8 +27,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { setGlobalLogFloor } from "@commonfabric/utils/logger";
-import { resolveLeafImpls } from "../../src/reactive-interpreter/extract.ts";
-import type { Op, Rog } from "../../src/reactive-interpreter/rog.ts";
+import {
+  liveLeafWritesCellInput,
+  resolveLeafImpls,
+} from "../../src/reactive-interpreter/extract.ts";
+import type { Op, OpId, Rog } from "../../src/reactive-interpreter/rog.ts";
 import type { JSONSchema } from "../../src/builder/types.ts";
 
 setGlobalLogFloor("error");
@@ -189,5 +192,119 @@ describe("leaf-scan precision: resultSchema discriminates pure-helper vs pattern
       trustAll,
     );
     expect(unresolvedLeafOps).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read-only context-leaf split (`readOnlyCellLeafOps`): a leaf whose argument
+// schema needs cell context (asCell/asStream INPUT) resolves as a read-only
+// context leaf ONLY when the runner proved it eligible (its op id is in the set)
+// AND its source does not write the input. Otherwise it stays UNRESOLVED.
+// ---------------------------------------------------------------------------
+
+/** A RawPattern whose node 0 is a `javascript` leaf with an asCell argument
+ * schema (so `schemaNeedsCellContext` is true) and the given live impl. */
+function asCellLeafPattern(
+  impl: (input: unknown) => unknown,
+): { nodes: Array<{ module: Record<string, unknown> }> } {
+  return {
+    nodes: [{
+      module: {
+        type: "javascript",
+        implementation: impl,
+        resultSchema: { type: "boolean" } satisfies JSONSchema,
+        argumentSchema: {
+          type: "object",
+          properties: {
+            input: { type: "boolean", asCell: ["readonly"] },
+          },
+          required: ["input"],
+        } satisfies JSONSchema,
+      },
+    }],
+  };
+}
+
+describe("read-only context-leaf split (readOnlyCellLeafOps)", () => {
+  const eligible: ReadonlySet<OpId> = new Set<OpId>([0]);
+
+  it("RESOLVES a read-only asCell leaf when its op id is in the eligible set", () => {
+    // `({input}) => input.get() === true` — reads the handle, never writes it.
+    const impl = (i: unknown) =>
+      (i as { input: { get(): unknown } }).input.get() === true;
+    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+      // deno-lint-ignore no-explicit-any
+      asCellLeafPattern(impl) as any,
+      singleLeafRog(),
+      undefined,
+      trustAll,
+      eligible,
+    );
+    expect(unresolvedLeafOps).toEqual([]);
+    expect(leafImpls.has(0)).toBe(true);
+  });
+
+  it("FALLS BACK a WRITE-capable asCell leaf even when in the eligible set", () => {
+    // `({input}) => { input.set(true); return true; }` — mutates the handle. A
+    // write-capable context leaf is EFFECTFUL and must stay a legacy boundary.
+    const impl = (i: unknown) => {
+      (i as { input: { set(v: unknown): void } }).input.set(true);
+      return true;
+    };
+    const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+      // deno-lint-ignore no-explicit-any
+      asCellLeafPattern(impl) as any,
+      singleLeafRog(),
+      undefined,
+      trustAll,
+      eligible,
+    );
+    expect(unresolvedLeafOps).toEqual([0]);
+    expect(leafImpls.has(0)).toBe(false);
+  });
+
+  it("FALLS BACK any asCell leaf when the eligible set is EMPTY (every existing caller)", () => {
+    // No set supplied / empty set ⇒ byte-for-byte the prior behavior: ALL
+    // context-requiring leaves stay UNRESOLVED.
+    const impl = (i: unknown) =>
+      (i as { input: { get(): unknown } }).input.get() === true;
+    for (const set of [undefined, new Set<OpId>()]) {
+      const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
+        // deno-lint-ignore no-explicit-any
+        asCellLeafPattern(impl) as any,
+        singleLeafRog(),
+        undefined,
+        trustAll,
+        set,
+      );
+      expect(unresolvedLeafOps).toEqual([0]);
+      expect(leafImpls.has(0)).toBe(false);
+    }
+  });
+
+  it("liveLeafWritesCellInput detects each write method on the handle", () => {
+    const writes = [
+      (i: { c: { set(v: unknown): void } }) => i.c.set(1),
+      (i: { c: { send(v: unknown): void } }) => i.c.send(1),
+      (i: { c: { update(v: unknown): void } }) => i.c.update({}),
+      (i: { c: { push(v: unknown): void } }) => i.c.push(1),
+      (i: { c: { setRaw(v: unknown): void } }) => i.c.setRaw(1),
+      (i: { c: { setRawUntyped(v: unknown): void } }) => i.c.setRawUntyped(1),
+      (i: { c: { setMetaRaw(k: string, v: unknown): void } }) =>
+        i.c.setMetaRaw("argument", 1),
+      (i: { c: { exec(s: string): void } }) => i.c.exec("INSERT"),
+    ];
+    for (const fn of writes) {
+      expect(liveLeafWritesCellInput(fn as (i: unknown) => unknown)).toBe(true);
+    }
+    // Pure reads do NOT match.
+    const reads = [
+      (i: { c: { get(): unknown } }) => i.c.get(),
+      (i: { c: { sample(): unknown } }) => i.c.sample(),
+      (i: { c: { key(k: string): { get(): unknown } } }) => i.c.key("x").get(),
+    ];
+    for (const fn of reads) {
+      expect(liveLeafWritesCellInput(fn as (i: unknown) => unknown)).toBe(false);
+    }
   });
 });

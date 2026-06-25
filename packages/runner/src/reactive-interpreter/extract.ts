@@ -1405,6 +1405,40 @@ function liveLeafNeedsBuilderContext(
   return /\.for\s*\(/.test(src);
 }
 
+/**
+ * SECURITY/SOUNDNESS gate for a LIVE leaf whose argument schema needs cell
+ * context (`schemaNeedsCellContext`): does the body call any WRITE method on its
+ * Cell/Stream input handle? The interpreter may hand a context-requiring leaf a
+ * read-only Cell VIEW so a PURE lift/computed (one that only `.get()`/`.sample()`s
+ * its input) interprets instead of falling back to legacy. A leaf that MUTATES
+ * its input (`.set`/`.send`/`.update`/`.push`/`.setRaw`/`.setRawUntyped`/
+ * `.setMetaRaw`/`.exec`) is EFFECTFUL — it must STAY a legacy fallback boundary
+ * (the interpreter only ever claims to evaluate read-only leaves). Detected from
+ * the leaf source by a `.method(` member-call scan (mirrors
+ * `liveLeafNeedsBuilderContext`'s `.for(` scan).
+ *
+ * Conservative on the UNSAFE side: any match → write-capable → fall back (a false
+ * positive only adds a correct legacy fallback). This is the PRIMARY write gate;
+ * the cell-view freeze guard (cell.ts `throwIfReadOnly`) is the defense-in-depth
+ * backstop if the scan ever misses a write (it then throws and the per-op
+ * isolation degrades it to a correct error-isolated node, never a wrong write).
+ */
+export function liveLeafWritesCellInput(
+  impl: (input: unknown) => unknown,
+): boolean {
+  let src: string;
+  try {
+    src = Function.prototype.toString.call(impl);
+  } catch {
+    // Source unreadable: be conservative and treat as write-capable (fall back).
+    return true;
+  }
+  // Member-call writes on the handle (the leading `.` excludes bare identifiers
+  // and confines the match to method invocations on the input Cell/Stream).
+  return /\.\s*(set|send|update|push|setRaw|setRawUntyped|setMetaRaw|exec)\s*\(/
+    .test(src);
+}
+
 export function resolveLeafImpls(
   pattern: RawPattern,
   rog: Rog,
@@ -1421,6 +1455,22 @@ export function resolveLeafImpls(
    * runner's gate), live functions resolve as before — the trust decision is the
    * runner probe's responsibility, made before any interpretation runs. */
   liveLeafTrustCheck?: LiveLeafTrustCheck,
+  /** OPT-IN: the TOP-LEVEL leaf op ids the runner has PROVEN eligible to engage
+   * as READ-ONLY context-requiring leaves (asCell/asStream INPUT to a pure lift/
+   * computed). A leaf whose argument schema needs cell context
+   * (`schemaNeedsCellContext`) is resolved as a NORMAL leaf — invoked with the
+   * live Cell/Stream VIEW the interpreter surfaces — only if its op id is in this
+   * set. The runner populates it ONLY for leaves whose asCell inputs are fed by
+   * PATTERN-ARGUMENT refs (the only place a live handle is available in the
+   * deep-resolved arg tree) AND whose source does not write the input
+   * (`liveLeafWritesCellInput`). When omitted/empty (every existing caller —
+   * flag-off runner, unit tests, the element evaluator), ALL context-requiring
+   * leaves stay UNRESOLVED — byte-for-byte the prior behavior. Sound: the runner
+   * freezes the surfaced view, so a missed write throws and is error-isolated,
+   * never a silent mis-write. The set is the PARENT op-id space only; inlined
+   * nested-pattern leaves (their own id space) are never matched, so a nested
+   * context leaf stays a legacy boundary (out of scope for this increment). */
+  readOnlyCellLeafOps?: ReadonlySet<OpId>,
 ): { leafImpls: Map<OpId, LeafImpl>; unresolvedLeafOps: OpId[] } {
   const leafImpls = new Map<OpId, LeafImpl>();
   const unresolvedLeafOps: OpId[] = [];
@@ -1443,6 +1493,9 @@ export function resolveLeafImpls(
         op.detail.inlined.rog,
         implRefResolver,
         liveLeafTrustCheck,
+        // The eligible set is the PARENT op-id space; a child has its own ids.
+        // Nested context leaves stay legacy boundaries (out of scope).
+        undefined,
       );
       // Attach the child's resolved leaf impls onto its inlined detail (the
       // evaluator reads them from there, NOT from the parent map).
@@ -1459,20 +1512,39 @@ export function resolveLeafImpls(
     // Synthesized ops (id < 0) are never leaves; real leaf ops map 1:1 to nodes.
     const node = op.id >= 0 ? nodes[op.id] : undefined;
     const module = node?.module as RawModule | undefined;
+    const impl = module?.implementation;
     // STRUCTURAL CONTEXT GATE (only when a trust check is supplied = the runner's
     // eligibility probe; NOT the partition probe / unit-test callers that omit
     // it and count unresolved leaves as boundaries). A leaf whose argument schema
     // carries an `asCell`/`asStream` annotation expects a LIVE Cell/Stream handle
     // (it calls `.get()`/`.key()`/`.sample()`/`.set()` on its input). The
     // interpreter feeds the leaf a deep-resolved PLAIN value, so those Cell
-    // methods are undefined and the leaf throws. Treat such a leaf as UNRESOLVED
-    // → `unresolved_leaf` fallback → legacy (schema-aware Cell materialization).
-    // Recurses into nested-pattern leaves via the inlined-pattern branch above.
+    // methods are undefined and the leaf throws — UNLESS the interpreter hands it
+    // the live VIEW (the `allowReadOnlyCellLeaves` increment).
+    //
+    // SPLIT: a READ-ONLY context leaf the runner PROVED argument-fed (its op id is
+    // in `readOnlyCellLeafOps`) and whose source does not WRITE its input
+    // (`liveLeafWritesCellInput` is false) FALLS THROUGH to normal resolution: the
+    // runner surfaces the asCell/asStream handle in the deep-resolved argument
+    // tree (a live Cell bound to the segment tx), freezes it read-only, and the
+    // leaf interprets by calling `.get()`/`.sample()` on it (reads journal through
+    // the tx → CFC + reactivity parity). A WRITE-capable context leaf (effectful),
+    // a leaf whose asCell input is internal/opOut-fed (no handle available — 2(b),
+    // deferred), or any leaf the runner did not vet stays UNRESOLVED → legacy. When
+    // the set is empty (every existing caller), EVERY context leaf stays
+    // UNRESOLVED — byte-for-byte the prior behavior. Recurses into nested-pattern
+    // leaves via the inlined-pattern branch above.
     if (liveLeafTrustCheck && schemaNeedsCellContext(module?.argumentSchema)) {
-      unresolvedLeafOps.push(op.id);
-      continue;
+      const readOnlyEligible = readOnlyCellLeafOps?.has(op.id) === true &&
+        typeof impl === "function" &&
+        !liveLeafWritesCellInput(impl as (input: unknown) => unknown);
+      if (!readOnlyEligible) {
+        unresolvedLeafOps.push(op.id);
+        continue;
+      }
+      // read-only context leaf: fall through to the shared resolution path below
+      // (the pattern-instantiation / builder-frame / trust gates still apply).
     }
-    const impl = module?.implementation;
     // STRUCTURAL PATTERN-INSTANTIATION / CONTEXT GATES (runner probe only, gated on
     // `liveLeafTrustCheck`). Read off the leaf's live source, BEFORE resolving it as
     // a callable leaf, so a body that CAN return a pattern/lift instantiation

@@ -75,6 +75,27 @@ export interface EvalContext {
    * run) catch the cases the dry-run's value guard used to.
    */
   probe?: boolean;
+  /**
+   * READ-ONLY cell-VALUE unwrap hook (the `allowReadOnlyCellLeaves` increment).
+   * When an `asCell`/`asStream` ARGUMENT is resolved at a path the deep-resolved
+   * `argument` tree surfaces as a live Cell/Stream HANDLE, a consumer that needs
+   * the unwrapped VALUE rather than the handle must read THROUGH it. Today the
+   * only such consumer is a `control` predicate (`ifElse(enabledCell, …)`): a raw
+   * handle is always truthy, so it would always take the THEN branch. This hook,
+   * given a resolved value, returns `handle.get()` (a tracked, read-only read —
+   * journals through the segment tx for CFC + reactivity parity) when the value
+   * is a live Cell, and the value unchanged otherwise.
+   *
+   * PURE leaves are NOT unwrapped here: a read-only asCell leaf WANTS the handle
+   * (it calls `.get()`/`.sample()` itself). `construct`/`access` ops re-emit the
+   * handle structurally (legacy's binding layer wires the same live cell into the
+   * downstream VNode/handler input). Only the control predicate is unwrapped.
+   *
+   * Absent for the pure hand-built tests and the whole-pattern path that has no
+   * asCell argument (identity); the runner supplies it (backed by `isCell` +
+   * `.get()`) when interpreting a pattern with a context-requiring leaf.
+   */
+  unwrapCellForValue?: (value: unknown) => unknown;
 }
 
 export class NotInterpretedHere extends Error {
@@ -264,7 +285,17 @@ export function evalRog(
         return t.items.map(resolve);
       }
       case "control": {
-        const cond = resolve(op.detail.pred);
+        // Unwrap a live Cell HANDLE to its VALUE for the predicate: an
+        // `ifElse(enabledCell, …)` reads an asCell argument that the deep-
+        // resolved arg tree surfaces as a handle (always truthy). The read-only
+        // unwrap hook reads through it (`handle.get()`, journaled through the tx)
+        // so the predicate sees the actual boolean — parity with legacy, which
+        // reads the cell for the branch decision. Identity when no hook is
+        // supplied or the value is already plain. The when/unless off-branch also
+        // returns this UNWRAPPED `cond` (legacy returns the condition VALUE, not a
+        // handle).
+        const unwrap = ctx.unwrapCellForValue ?? ((v: unknown) => v);
+        const cond = unwrap(resolve(op.detail.pred));
         const [thenRef, elseRef] = op.detail.branches;
         // Real builtin semantics (built-in.ts):
         //   ifElse(condition, ifTrue, ifFalse) = cond ? ifTrue : ifFalse
@@ -301,6 +332,7 @@ export function evalRog(
           leafImpls: inlined.leafImpls ?? new Map(),
           internalToOp: inlined.internalToOp,
           probe: ctx.probe,
+          unwrapCellForValue: ctx.unwrapCellForValue,
         });
         return result;
       }
