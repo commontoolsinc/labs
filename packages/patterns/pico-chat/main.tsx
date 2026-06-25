@@ -168,8 +168,13 @@ const textStyle = {
 const messagePaneStyle = {
   height: "320px",
   overflowY: "auto",
+};
+
+const messageListStyle = {
+  minHeight: "100%",
   display: "flex",
-  flexDirection: "column-reverse",
+  flexDirection: "column",
+  justifyContent: "flex-end",
 };
 
 const groupStyle = {
@@ -194,7 +199,6 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const send = sendMessage({ messages, name });
     const react = toggleReaction({ messages, name });
     const groups = computed(() => groupMessages([...messages]));
-    const displayGroups = computed(() => [...groups].reverse());
 
     return {
       [NAME]: "Pico chat",
@@ -219,19 +223,14 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 id="chat-messages"
                 style={messagePaneStyle}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column-reverse",
-                  }}
-                >
-                  {displayGroups.length === 0
+                <div style={messageListStyle}>
+                  {groups.length === 0
                     ? (
                       <div style={{ color: "var(--cf-colors-muted, #64748b)" }}>
                         No messages yet
                       </div>
                     )
-                    : displayGroups.map((group) => (
+                    : groups.map((group) => (
                       <div style={groupStyle}>
                         <strong dir="ltr" style={textStyle}>
                           {group.from}
