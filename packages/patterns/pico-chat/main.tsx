@@ -49,10 +49,16 @@ interface DisplayMessage {
   index: number;
   from: string;
   body: string;
-  message: ChatMessage;
   showAuthor: boolean;
   className: string;
   canReact: boolean;
+  thumbsActive: boolean;
+  thumbsLabel: string;
+  heartActive: boolean;
+  heartLabel: string;
+  laughActive: boolean;
+  laughLabel: string;
+  hasAnyReaction: boolean;
 }
 
 export interface PicoChatInput {
@@ -147,9 +153,15 @@ function displayMessages(
       index,
       from: message.from,
       body: message.body,
-      message,
       showAuthor,
       canReact: viewerName !== "" && message.from !== viewerName,
+      thumbsActive: hasReaction(message, "👍"),
+      thumbsLabel: reactionLabel(message, "👍"),
+      heartActive: hasReaction(message, "❤️"),
+      heartLabel: reactionLabel(message, "❤️"),
+      laughActive: hasReaction(message, "😂"),
+      laughLabel: reactionLabel(message, "😂"),
+      hasAnyReaction: hasAnyReaction(message),
       className: [
         "pico-message-row",
         showAuthor ? "pico-message-row-start" : "",
@@ -180,8 +192,8 @@ function hasAnyReaction(message: ChatMessage) {
     hasReaction(message, "😂");
 }
 
-function reactionOptionClass(message: ChatMessage, emoji: string) {
-  return hasReaction(message, emoji)
+function reactionOptionClass(active: boolean) {
+  return active
     ? "pico-reaction-option pico-reaction-option-active"
     : "pico-reaction-option";
 }
@@ -310,8 +322,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                             >
                               <cf-button
                                 className={reactionOptionClass(
-                                  row.message,
-                                  "👍",
+                                  row.thumbsActive,
                                 )}
                                 size="sm"
                                 variant="ghost"
@@ -321,13 +332,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "👍",
                                   })}
                               >
-                                {reactionLabel(row.message, "👍")}
+                                {row.thumbsLabel}
                               </cf-button>
                               <cf-button
-                                className={reactionOptionClass(
-                                  row.message,
-                                  "❤️",
-                                )}
+                                className={reactionOptionClass(row.heartActive)}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -336,13 +344,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "❤️",
                                   })}
                               >
-                                {reactionLabel(row.message, "❤️")}
+                                {row.heartLabel}
                               </cf-button>
                               <cf-button
-                                className={reactionOptionClass(
-                                  row.message,
-                                  "😂",
-                                )}
+                                className={reactionOptionClass(row.laughActive)}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -351,31 +356,31 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "😂",
                                   })}
                               >
-                                {reactionLabel(row.message, "😂")}
+                                {row.laughLabel}
                               </cf-button>
                             </div>
                           )
-                          : hasAnyReaction(row.message)
+                          : row.hasAnyReaction
                           ? (
                             <div style={reactionRowStyle}>
-                              {hasReaction(row.message, "👍")
+                              {row.thumbsActive
                                 ? (
                                   <span style={reactionBadgeStyle}>
-                                    {reactionLabel(row.message, "👍")}
+                                    {row.thumbsLabel}
                                   </span>
                                 )
                                 : null}
-                              {hasReaction(row.message, "❤️")
+                              {row.heartActive
                                 ? (
                                   <span style={reactionBadgeStyle}>
-                                    {reactionLabel(row.message, "❤️")}
+                                    {row.heartLabel}
                                   </span>
                                 )
                                 : null}
-                              {hasReaction(row.message, "😂")
+                              {row.laughActive
                                 ? (
                                   <span style={reactionBadgeStyle}>
-                                    {reactionLabel(row.message, "😂")}
+                                    {row.laughLabel}
                                   </span>
                                 )
                                 : null}
