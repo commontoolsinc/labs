@@ -416,8 +416,8 @@ set of module docs.
   sigil links (`asCell`) + a link-following schema. `runtimeVersion` is the
   `COMPILE_CACHE_RUNTIME_VERSION` constant, set automatically: a binary build
   bakes in `cf/esm-compile/<fingerprint>`, a hash of the compiler inputs
-  (ts-transformers, js-compiler, schema-generator, root `deno.json`, `deno.lock`)
-  computed by `compiler-fingerprint.deno.ts` and written into
+  (ts-transformers, js-compiler, schema-generator, `api`, root `deno.json`,
+  `deno.lock`) computed by `compiler-fingerprint.deno.ts` and written into
   `compile-cache-version.ts`; runs from source use a stable
   `cf/esm-compile/source` sentinel.
 - **4.3.2 Source-set store.** ✅ Done. `writeSourceDocs` / `loadSourceClosure`

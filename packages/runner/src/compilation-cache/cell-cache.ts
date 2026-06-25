@@ -82,9 +82,10 @@ export interface CompiledDoc extends ModuleDocBase {
  *
  * The value is set automatically rather than bumped by hand. A binary build
  * bakes in `cf/esm-compile/<fingerprint>`, where `<fingerprint>` is a hash of
- * the compiler inputs (ts-transformers, js-compiler, schema-generator, the root
- * `deno.json` compiler options, and `deno.lock`), so editing any of those moves
- * the tag and invalidates stale compiled docs without a human bump. Runs from
+ * the compiler inputs (ts-transformers, js-compiler, schema-generator, the
+ * `api` types lowered into baked schemas, the root `deno.json` compiler options,
+ * and `deno.lock`), so editing any of those moves the tag and invalidates stale
+ * compiled docs without a human bump. Runs from
  * source (dev / tests) use a stable `cf/esm-compile/source` sentinel in its own
  * namespace, so they never collide with a baked fingerprint. See
  * `compile-cache-version.ts` and `compiler-fingerprint.deno.ts`.

@@ -117,6 +117,23 @@ describe("compile-cache version axis", () => {
     expect(onDisk).toBe(renderVersionModule(SENTINEL_VERSION));
   });
 
+  it("fingerprints the compiler-input packages that shape emitted bytes", () => {
+    // `api` carries the pattern-facing types the schema-generator lowers into
+    // baked schemas, so it must be fingerprinted alongside the pipeline.
+    for (
+      const input of [
+        "packages/ts-transformers",
+        "packages/js-compiler",
+        "packages/schema-generator",
+        "packages/api",
+        "deno.json",
+        "deno.lock",
+      ]
+    ) {
+      expect(COMPILE_FINGERPRINT_INPUTS).toContain(input);
+    }
+  });
+
   it("a baked version over the real inputs differs from the sentinel", async () => {
     const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
     const version = await computeCompilerVersion(

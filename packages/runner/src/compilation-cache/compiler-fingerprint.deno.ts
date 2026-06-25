@@ -21,17 +21,20 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
  */
 
 /**
- * Repo-relative inputs hashed into the fingerprint, kept consistent with the
- * CI compile-cache cache key (the same paths). Directory inputs are hashed
- * whole, so the version also moves when a test, fixture, or doc under them
- * changes, and the whole-file `deno.lock` moves it on any dependency bump. The
- * result over-invalidates rather than under-invalidates: a redundant recompile,
- * never a stale read.
+ * Repo-relative inputs hashed into the fingerprint: the source that determines
+ * the compiler's emitted bytes, plus the lockfile and root compiler options.
+ * Directory inputs are hashed whole, so the version also moves when a test,
+ * fixture, or doc under them changes, and the whole-file `deno.lock` moves it on
+ * any dependency bump. The result over-invalidates rather than under-
+ * invalidates: a redundant recompile, never a stale read.
  *
  *  - `packages/ts-transformers` — the CF transformer pipeline, including the
  *    `SchemaGeneratorTransformer` that bakes schemas into the emitted bytes;
  *  - `packages/js-compiler` — the TypeScript-to-JS compiler driver;
  *  - `packages/schema-generator` — schema emission consumed by the pipeline;
+ *  - `packages/api` — the pattern-facing types (`Default`, `Cell`, ...) the
+ *    schema-generator lowers into the baked schemas, so a type change there
+ *    changes emitted bytes;
  *  - `deno.json` — the root compiler options (jsx / jsxImportSource);
  *  - `deno.lock` — pins the TypeScript version the compiler runs.
  */
@@ -39,6 +42,7 @@ export const COMPILE_FINGERPRINT_INPUTS: readonly string[] = [
   "packages/ts-transformers",
   "packages/js-compiler",
   "packages/schema-generator",
+  "packages/api",
   "deno.json",
   "deno.lock",
 ];
