@@ -2434,6 +2434,7 @@ export class Runner {
         resultCell,
         internedArgForPartition,
         unresolvedLeafSet,
+        setupTx,
       );
       if (partitioned) {
         this.interpreterCensus.interpreted_ok++;
@@ -2941,10 +2942,10 @@ export class Runner {
     leafImpls: Map<OpId, (input: unknown) => unknown>,
     internalToOp: Map<string, OpId>,
     // The spike falls back by RETURNING NULL (not throwing), so the caller's
-    // `bumpAndThrow` / result cell are part of the spec signature but unused
-    // here; kept for parity with the single-node path's parameter shape.
+    // `bumpAndThrow` is part of the spec signature but unused here; kept for
+    // parity with the single-node path's parameter shape.
     _bumpAndThrow: (reason: InterpreterFallbackReason) => never,
-    _resultCell: Cell<any>,
+    resultCell: Cell<any>,
     internedArg: JSONSchema,
     /** Leaf op ids that did NOT resolve (`resolveLeafImpls`): a context-requiring
      * lift (`asCell`/`asStream` input, `Cell.for`), a pattern-returning factory
@@ -2953,6 +2954,10 @@ export class Runner {
      * pure region still interprets. Empty set ⇒ effect-only partition (the
      * original spike behavior). */
     unresolvedLeafOps: ReadonlySet<OpId> = new Set<OpId>(),
+    /** The in-flight setup transaction, if the caller has one — so the scoped-
+     * collection guard can read the RAW bound argument THROUGH it to see per-
+     * element link scopes that are not yet committed. Read-only. */
+    setupTx?: IExtendedStorageTransaction,
   ): Pattern | null {
     // (a) Partition the extracted ROG structurally. No `resolveInner` (the spike
     // does not recurse into collection/pattern boundaries — those are gated out
@@ -2990,6 +2995,34 @@ export class Runner {
         b.kind !== "effect" && b.kind !== "unresolved-leaf" &&
         b.kind !== "collection"
       )
+    ) {
+      return null;
+    }
+
+    // SCOPED COLLECTION (D-EMISSION-SCOPE — conservative fallback boundary).
+    // A `collection` boundary whose list / per-element result is narrowed to a
+    // non-default (session/user) scope is PERMANENT legacy fallback: legacy
+    // mints a narrower-scoped per-element result cell (R-SCOPE /
+    // narrowestCellScope), and a downstream `.getRaw()` expects that scoped
+    // output-cell chain. The interpreter's segment emission materializes the
+    // surrounding pure region (the list lift, the `ifElse`/VNode constructs)
+    // into derived-internal cells at the DEFAULT (space) scope, so the map's
+    // list — and the per-element/branch result links the partition projects —
+    // carry the wrong scope label (`space` instead of `session`, or `undefined`
+    // instead of `space`). The narrowing may not sit STATICALLY on a list-input
+    // alias schema (the `tryLowerCollectionBoundaryNode` static gate) — it
+    // arrives via the bound argument DATA (a session/user-scoped input cell
+    // feeding the list lift). When the partition carries any `collection`
+    // boundary AND the raw bound argument tree carries a non-default scope, fall
+    // back the WHOLE partition to legacy (whose per-node materialization emits
+    // the correct scope labels). Reuses the same `hasNonDefaultScope` helper +
+    // raw-argument snapshot the single-node collection path uses; gated to the
+    // collection-boundary case so non-collection scoped partitions are
+    // unaffected and engagement only drops the few session-scoped collection
+    // patterns to full legacy (monotonic for everything else).
+    if (
+      part.boundaries.some((b) => b.kind === "collection") &&
+      hasNonDefaultScope(this.readRawArgumentSnapshot(resultCell, setupTx))
     ) {
       return null;
     }
