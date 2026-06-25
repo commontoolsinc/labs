@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -234,6 +235,29 @@ describe("Engine.compileToRecordGraph", () => {
         precompiledModules: tagged,
       });
       expect((main as { total(): number }).total()).toBe(42);
+    });
+
+    it("ignores precompiled bodies when pattern coverage is enabled", async () => {
+      const first = await engine.compileToRecordGraph(MULTI);
+      const tagged = taggedFrom(first.modules);
+      const coverage = new PatternCoverageCollector();
+
+      const compiled = await engine.compileToRecordGraph(MULTI, {
+        patternCoverage: coverage,
+        precompiledModules: tagged,
+      });
+      for (const m of compiled.modules) {
+        expect(m.js).not.toContain("//cached");
+      }
+
+      const { main } = engine.evaluateRecordGraph(
+        compiled.id,
+        compiled.graph,
+        compiled.mainSpecifier,
+        MULTI.files,
+      );
+      expect((main as { total(): number }).total()).toBe(42);
+      expect(coverage.report().totals.coveredRuntimeLines).toBeGreaterThan(0);
     });
 
     it("security-verifies UNtrusted direct precompiled injection (no blind trust)", async () => {

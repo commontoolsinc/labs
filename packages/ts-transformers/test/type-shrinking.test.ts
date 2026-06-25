@@ -3,8 +3,15 @@ import ts from "typescript";
 
 import type { CapabilityParamSummary } from "../src/core/mod.ts";
 import {
+  applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
+  containsAnyOrUnknownTypeNode,
+  isCellLikeTypeNode,
+  isSqliteTypeNode,
+  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
+  wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
 
 function createProgram(source: string): {
@@ -793,4 +800,90 @@ Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven
   assertStringIncludes(printed, "id: string;");
   assertEquals(printed.includes("title"), false);
   assertEquals(printed.includes("value"), false);
+});
+
+Deno.test("applyCapabilityDefaultsToTypeNode applies defaults through tuples and unions", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input =
+      | [{ name?: string; unused?: string }]
+      | { fallback?: string; unused?: string };
+    type NameDefault = "Anonymous";
+    type FallbackDefault = "Fallback";
+  `);
+  const input = findTypeAlias(sourceFile, "Input");
+  const nameDefault = findTypeAlias(sourceFile, "NameDefault");
+  const fallbackDefault = findTypeAlias(sourceFile, "FallbackDefault");
+  const baseType = checker.getTypeAtLocation(input.type);
+
+  const result = applyCapabilityDefaultsToTypeNode(
+    input.type,
+    [
+      { path: ["0", "name"], defaultType: nameDefault.type },
+      { path: ["fallback"], defaultType: fallbackDefault.type },
+    ],
+    baseType,
+    [["0", "name"], ["fallback"]],
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(
+    printed,
+    'name?: __cfHelpers.Default<string, "Anonymous">;',
+  );
+  assertStringIncludes(
+    printed,
+    'fallback?: __cfHelpers.Default<string, "Fallback">;',
+  );
+});
+
+Deno.test("type shrinking helper predicates detect wrapper type nodes", () => {
+  const { sourceFile, checker } = createProgram(`
+    type CellValue = Cell<string>;
+    type StreamValue = Stream<string>;
+    type SqliteValue = SqliteDb<{ id: string }>;
+    type PlainValue = string;
+    type AnyUnion = { value: any } | { fallback: unknown };
+  `);
+  const cellNode = findTypeAlias(sourceFile, "CellValue").type;
+  const streamNode = findTypeAlias(sourceFile, "StreamValue").type;
+  const sqliteNode = findTypeAlias(sourceFile, "SqliteValue").type;
+  const plainNode = findTypeAlias(sourceFile, "PlainValue").type;
+  const anyUnionNode = findTypeAlias(sourceFile, "AnyUnion").type;
+
+  assertEquals(containsAnyOrUnknownTypeNode(anyUnionNode), true);
+  assertEquals(containsAnyOrUnknownTypeNode(plainNode), false);
+  assertEquals(isCellLikeTypeNode(cellNode), true);
+  assertEquals(isCellLikeTypeNode(sqliteNode), false);
+  assertEquals(isStreamTypeNode(streamNode), true);
+  assertEquals(isStreamTypeNode(cellNode), false);
+  assertEquals(isSqliteTypeNode(sqliteNode), true);
+  assertEquals(isSqliteTypeNode(cellNode), false);
+  assertEquals(preservedWrapperFor(streamNode, undefined, checker), "Stream");
+  assertEquals(preservedWrapperFor(sqliteNode, undefined, checker), "SqliteDb");
+  assertEquals(preservedWrapperFor(plainNode, undefined, checker), undefined);
+});
+
+Deno.test("wrapTypeNodeWithCapability emits the expected cell wrappers", () => {
+  const { sourceFile } = createProgram(`type Value = string;`);
+  const valueNode = findTypeAlias(sourceFile, "Value").type;
+
+  const wrappers = [
+    ["readonly", "ReadonlyCell"],
+    ["comparable", "ComparableCell"],
+    ["writeonly", "WriteonlyCell"],
+    ["writable", "Writable"],
+    ["opaque", "OpaqueCell"],
+  ] as const;
+
+  for (const [capability, wrapperName] of wrappers) {
+    const printed = printTypeNode(
+      wrapTypeNodeWithCapability(valueNode, capability, ts.factory),
+      sourceFile,
+    );
+    assertStringIncludes(printed, `__cfHelpers.${wrapperName}<string>`);
+  }
 });
