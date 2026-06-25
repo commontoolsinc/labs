@@ -106,8 +106,17 @@ export interface CoverageReport {
   classified: number;
   /** Per-kind counts. */
   byKind: Record<OpKind | "unknown", number>;
-  /** Distinct `$alias` shapes that were NOT recognized (for follow-up). */
+  /** Distinct `$alias` shapes that were NOT recognized (for follow-up). Shared
+   * across the whole recursion (top frame + every nested sub-pattern frame). */
   unrecognizedAliases: string[];
+  /** The subset of `unrecognizedAliases` recorded while extracting the TOP frame
+   * (`depth === 0`). A nested sub-pattern frame's serialized aliases legitimately
+   * carry cross-frame `defer`s the outer frame cannot resolve locally — those
+   * pollute `unrecognizedAliases` but are validated independently when the child
+   * re-dispatches (§4.7). The runner gates the OUTER pattern only on THIS set so a
+   * nested-frame cross-frame indirection does not spuriously fall the outer
+   * pattern back; a genuine top-frame alias problem still fails closed. */
+  topFrameUnrecognizedAliases: string[];
   /** Nested element graphs recursed into. */
   nested: number;
 }
@@ -685,7 +694,26 @@ export function extractRog(
    * the base). Inferred by `extractRogBaseDefer` for the element-evaluator. */
   baseDefer = 0,
 ): ExtractResult {
-  const unrecognized = new Set<string>();
+  // §4.7: the unrecognized-alias report is shared across the whole recursion (the
+  // top frame + every nested sub-pattern frame), because a nested sub-pattern's
+  // serialized aliases legitimately carry cross-frame `defer`s the OUTER frame
+  // cannot resolve locally — those pollute the outer report. We additionally
+  // track which failures came from the TOP frame (`depth === 0`) so the runner
+  // can tell a genuine outer-frame alias problem (always fall back) from a
+  // nested-frame cross-frame indirection (validated independently when the child
+  // re-dispatches — see the recursion comment in `buildInterpreterPattern`). A
+  // Set subclass records the CURRENT recursion depth at add-time into the top-
+  // frame set, capturing additions from BOTH `build` and every helper that takes
+  // the `unrecognized` set, without threading depth through each call.
+  let currentExtractDepth = 0;
+  const topFrameUnrecognized = new Set<string>();
+  class DepthAwareUnrecognized extends Set<string> {
+    override add(value: string): this {
+      if (currentExtractDepth === 0) topFrameUnrecognized.add(value);
+      return super.add(value);
+    }
+  }
+  const unrecognized: Set<string> = new DepthAwareUnrecognized();
   const byKind = {} as Record<OpKind | "unknown", number>;
   let nodeCount = 0;
   let classified = 0;
@@ -709,6 +737,24 @@ export function extractRog(
   // node space. The top-level call's map becomes `ExtractResult.internalToOp`
   // (public surface unchanged); each sub-Rog's map rides on its inlined detail.
   function build(
+    p: RawPattern,
+    depth: number,
+  ): { rog: Rog; internalToOp: Map<string, OpId> } {
+    // Track the recursion depth for the depth-aware unrecognized recorder. A
+    // nested `build(..., depth+1)` sets it deeper and restores it on return, so
+    // every `unrecognized.add(...)` (here or in a helper) is attributed to the
+    // frame that is currently processing — `topFrameUnrecognized` collects only
+    // the `depth === 0` ones.
+    const savedExtractDepth = currentExtractDepth;
+    currentExtractDepth = depth;
+    try {
+      return buildInner(p, depth);
+    } finally {
+      currentExtractDepth = savedExtractDepth;
+    }
+  }
+
+  function buildInner(
     p: RawPattern,
     depth: number,
   ): { rog: Rog; internalToOp: Map<string, OpId> } {
@@ -965,6 +1011,7 @@ export function extractRog(
       classified,
       byKind,
       unrecognizedAliases: [...unrecognized],
+      topFrameUnrecognizedAliases: [...topFrameUnrecognized],
       nested,
     },
     internalToOp,

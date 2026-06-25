@@ -2434,14 +2434,31 @@ export class Runner {
       return collectionPattern;
     }
 
+    // §4.7: a nested sub-pattern whose CLOSURE carries a boundary (collection /
+    // effect / deeper nest) is kept as a VERBATIM `pattern` boundary by the
+    // partition and the child re-dispatches independently (see the PATTERN gate
+    // below). When that is the shape, a NESTED-frame unrecognized alias is NOT the
+    // outer pattern's concern — it is validated when the child re-dispatches. A
+    // PURE nested closure, by contrast, is INLINED into a segment, so a nested-
+    // frame unrecognized alias there WOULD be silently mis-evaluated and MUST
+    // still fall back. So relax to the TOP-FRAME report ONLY for the partitioned
+    // (boundary-closure) shape; otherwise use the full whole-recursion report.
+    const byKindForUa = extracted.coverage.byKind;
+    const nestedClosureHasBoundaryForUa = (byKindForUa.pattern ?? 0) > 0 &&
+      ((byKindForUa.collection ?? 0) > 0 || (byKindForUa.effect ?? 0) > 0 ||
+        (byKindForUa.pattern ?? 0) > 1 || extracted.coverage.nested > 1);
     // Scalar path: the element-internal defer pollution does not apply (there is
     // no collection op), so a non-empty unrecognized report is a real outer
     // alias problem → fall back. The dedicated argument-writeback marker maps to
     // its own `argument_writeback` reason (a node whose output aliases the
     // argument cell — a write-back side effect the synthetic node cannot emit).
-    if (extracted.coverage.unrecognizedAliases.length > 0) {
+    const uaForGate = this.runtime.experimental.experimentalInterpreter &&
+        nestedClosureHasBoundaryForUa
+      ? extracted.coverage.topFrameUnrecognizedAliases
+      : extracted.coverage.unrecognizedAliases;
+    if (uaForGate.length > 0) {
       bumpAndThrow(
-        hasArgumentWritebackMarker(extracted.coverage.unrecognizedAliases)
+        hasArgumentWritebackMarker(uaForGate)
           ? "argument_writeback"
           : "unrecognized_alias",
       );

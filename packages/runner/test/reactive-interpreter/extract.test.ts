@@ -401,6 +401,76 @@ describe("W0.4 extraction coverage", () => {
       expect(tmpl.fields["scoped"]?.kind).toBe("argument");
     }
   });
+
+  it("§4.7: a NESTED-frame unrecognized alias is excluded from topFrameUnrecognizedAliases", () => {
+    // A child sub-pattern node whose own frame carries an unrecognized alias (a
+    // `defer`-bearing arg ref that the child frame, extracted at depth 1, sees as
+    // non-local). It MUST appear in the whole-recursion `unrecognizedAliases` but
+    // NOT in `topFrameUnrecognizedAliases` — the outer pattern is not blocked by a
+    // nested frame's cross-frame indirection (it is validated when the child
+    // re-dispatches, §4.7).
+    const childPattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "cout", path: [] } },
+      nodes: [
+        {
+          module: { type: "javascript", implementation: (i: unknown) => i },
+          // A `defer:1` arg ref inside the child frame: at depth 1 the local
+          // defer is 1, so this resolves LOCALLY (recognized). To force a NESTED-
+          // frame unrecognized, use a defer that is NOT the child's expected
+          // level (defer:5 — neither local nor the outer level).
+          inputs: {
+            bad: { $alias: { cell: "argument", path: ["z"], defer: 5 } },
+          },
+          outputs: { $alias: { partialCause: "cout", path: [] } },
+        },
+      ],
+    };
+    const r = extractRog({
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: { type: "pattern", implementation: childPattern },
+          inputs: { v: { $alias: { cell: "argument", path: ["x"] } } },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+      // deno-lint-ignore no-explicit-any
+    } as any);
+    // The nested-frame unrecognized alias is in the whole-recursion report …
+    expect(r.coverage.unrecognizedAliases.length).toBeGreaterThan(0);
+    // … but NOT attributed to the TOP frame.
+    expect(r.coverage.topFrameUnrecognizedAliases).toEqual([]);
+  });
+
+  it("§4.7: a TOP-frame unrecognized alias IS in topFrameUnrecognizedAliases", () => {
+    // The outer pattern's OWN frame carries a non-local `defer` arg ref. It must
+    // appear in BOTH reports — a genuine top-frame alias problem still fails
+    // closed for the outer pattern.
+    const r = extractRog({
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: { type: "javascript", implementation: (i: unknown) => i },
+          inputs: {
+            bad: { $alias: { cell: "argument", path: ["a"], defer: 3 } },
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+      // deno-lint-ignore no-explicit-any
+    } as any);
+    expect(r.coverage.unrecognizedAliases.length).toBeGreaterThan(0);
+    expect(r.coverage.topFrameUnrecognizedAliases.length).toBeGreaterThan(0);
+    expect(r.coverage.topFrameUnrecognizedAliases).toEqual(
+      r.coverage.unrecognizedAliases,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
