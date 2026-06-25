@@ -475,8 +475,16 @@ describe("schema-hash", () => {
 
     it("leaves the schema hash unchanged (it was already key-order-insensitive)", () => {
       const tag = "canon-hash-test";
-      const unsorted: JSONSchema = { type: "number", title: tag, description: "d" };
-      const sorted: JSONSchema = { description: "d", title: tag, type: "number" };
+      const unsorted: JSONSchema = {
+        type: "number",
+        title: tag,
+        description: "d",
+      };
+      const sorted: JSONSchema = {
+        description: "d",
+        title: tag,
+        type: "number",
+      };
       expect(hashSchema(unsorted)).toBe(hashSchema(sorted));
       expect(hashSchema(internSchema(unsorted))).toBe(hashSchema(unsorted));
     });

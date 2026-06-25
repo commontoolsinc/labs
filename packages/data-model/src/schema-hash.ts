@@ -136,7 +136,8 @@ function canonicalizeSchemaKeyOrder(value: unknown): unknown {
   // Never silently drop owned non-string (symbol) keys, even though schemas are
   // normally string-keyed and symbol keys do not affect JSON serialization.
   for (const sym of Object.getOwnPropertySymbols(obj)) {
-    (out as Record<symbol, unknown>)[sym] = (obj as Record<symbol, unknown>)[sym];
+    (out as Record<symbol, unknown>)[sym] =
+      (obj as Record<symbol, unknown>)[sym];
   }
   return out;
 }
@@ -216,9 +217,10 @@ function internSchemaReturningSchemaAndHash(
   // is key-order-insensitive, so it is unchanged and stays consistent with the
   // stored object. (See `canonicalizeSchemaKeyOrder`.)
   const canonicalized = canonicalizeSchemaKeyOrder(frozen);
-  const canonical = (canonicalized === frozen
-    ? frozen
-    : deepFreeze(canonicalized)) as JSONSchemaObj;
+  const canonical =
+    (canonicalized === frozen
+      ? frozen
+      : deepFreeze(canonicalized)) as JSONSchemaObj;
 
   const sah = new SchemaAndHash(canonical, hash);
   schemaToSah.set(frozen, sah);
