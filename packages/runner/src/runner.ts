@@ -602,6 +602,48 @@ function isPatternLike(m: unknown): m is { nodes: unknown[] } {
     Array.isArray((m as { nodes?: unknown }).nodes);
 }
 
+/** Deep scan an evaluated value tree (the dry-run result / per-op values) for a
+ * LIVE REACTIVE HANDLE the synthetic interpreter node cannot faithfully emit: a
+ * Pattern instantiation, a Cell/OpaqueRef, or a Promise (async leaf). A lift that
+ * returns ONE such value is caught by the scalar gates; one that returns an
+ * ARRAY or OBJECT *of* such values (e.g. `entries.map(() => childPattern(...))`,
+ * the launched-child-via-lift shape) is NOT — the handle hides one level down.
+ * Recurse through arrays and plain objects so the gate defers those too (legacy
+ * does the real reactive child instantiation; the interpreter would inline the
+ * raw handle and materialize `undefined`). Stops descending at a recognized
+ * handle (it is the reject signal — no need to look inside it) and never recurses
+ * into a non-plain value, so it cannot loop on a Cell's internal graph. */
+function containsReactiveHandle(value: unknown, depth = 0): boolean {
+  if (value === null || typeof value !== "object") {
+    // A thenable can be a function or an object; check both at the leaf.
+    return typeof (value as { then?: unknown } | null | undefined)?.then ===
+      "function";
+  }
+  const obj = value as Record<string, unknown>;
+  if (
+    isPattern(value) || isCell(value) || isOpaqueRef(value) ||
+    typeof obj.then === "function"
+  ) {
+    return true;
+  }
+  // Bound the recursion: evaluated value trees are shallow (result shapes), and a
+  // deep guard keeps a pathological structure from blowing the stack.
+  if (depth > 8) return false;
+  if (Array.isArray(value)) {
+    return (value as unknown[]).some((el) =>
+      containsReactiveHandle(el, depth + 1)
+    );
+  }
+  // Only recurse into PLAIN objects (own enumerable values). A class instance
+  // that slipped the handle checks above is treated as opaque (not descended).
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  for (const el of Object.values(obj)) {
+    if (containsReactiveHandle(el, depth + 1)) return true;
+  }
+  return false;
+}
+
 /** Recursively scan a serialized value tree for ANY `scope` key carrying a
  * NON-DEFAULT value (anything other than `"space"` / `"inherit"`), whether it
  * sits on an alias payload (`$alias.scope`) or on an embedded schema
@@ -2657,6 +2699,15 @@ export class Runner {
     if (dryValues.some((v) => isCell(v) || isOpaqueRef(v))) {
       bumpAndThrow("ineligible_opkind");
     }
+    // GATE (lift returning a CONTAINER of reactive handles, e.g.
+    // `entries.map(() => childPattern(...))` — the launched-child-via-lift shape):
+    // the scalar `isPattern`/`isCell`/`isOpaqueRef` guards above miss a handle
+    // nested one level down inside an array/object. Deep-scan the evaluated values
+    // so an array/object of Patterns/Cells/OpaqueRefs/Promises also falls back.
+    // Always sound (legacy does the real reactive child instantiation).
+    if (dryValues.some((v) => containsReactiveHandle(v))) {
+      bumpAndThrow("ineligible_opkind");
+    }
     // GATE (mid-handler lift whose result is a write-REDIRECT link consumed
     // cross-node, patterns-misc): a leaf output that is itself a write-redirect
     // link (legacy `$alias` or a sigil link with `overwrite:"redirect"`) is a
@@ -2918,6 +2969,17 @@ export class Runner {
       const outName = outputInternalName(bNode.outputs);
       if (outName !== null && segmentReadNames.has(outName)) return null;
     }
+
+    // NOTE on launched-child-via-lift (`entries.map(() => childPattern(...))`):
+    // a segment leaf whose body instantiates a pattern factory cannot be
+    // interpreted (it needs a reactive runtime frame the synthetic node lacks).
+    // That is caught STRUCTURALLY and BODY-FREE upstream by
+    // `liveLeafCanInstantiatePattern` (extract.ts) — such a leaf is reported as an
+    // UNRESOLVED leaf, so the caller's `unresolved_leaf` gate already fell the
+    // pattern back to legacy BEFORE this partition is attempted. (We must NOT run
+    // leaf bodies here to detect it: a non-probe eval would re-execute pure lifts
+    // and double their observable run counts — the laziness invariant the
+    // single-node `probe:true` path preserves.)
 
     // (c) Build one raw interpreter node per segment. `byId` indexes the
     // extracted ROG's ops by id so a segment's sub-op-set is a real op list.

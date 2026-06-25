@@ -166,6 +166,57 @@ function classifyModule(
   return { kind: "effect" };
 }
 
+/** Map a `partialCause` (the opaque derived-internal-cell identity, an arbitrary
+ * `JSONValue`) to the STABLE STRING NAME the interpreter keys internal cells by.
+ *
+ * The legacy binding layer matches a `partialCause` alias to its
+ * `derivedInternalCells` descriptor via `deepEqual` (pattern-binding.ts), so the
+ * cause can be ANY JSON value. The interpreter only needs a deterministic,
+ * collision-free string KEY for its `internalToOp` / `internalCellAliasByName`
+ * maps — the ORIGINAL `partialCause` payload is carried separately wherever the
+ * binding layer is invoked (so deepEqual still matches the real descriptor).
+ *
+ * Two legacy forms keep their HISTORICAL names verbatim so already-engaged
+ * patterns are unchanged:
+ *   - a `string` cause `"foo"` → `"foo"`
+ *   - a `{$generated:N}` cause → `"$generated:N"`
+ * Every OTHER JSON cause (the common builder `[label, counterId]` tuple, e.g.
+ * `["normalizedValue", 4]`, or any object cause) is namespaced under `$cause:`
+ * with a canonical JSON encoding. The `$cause:` prefix cannot collide with a bare
+ * string name, and the canonical JSON cannot collide with `$generated:N` (which
+ * is emitted only for the `{$generated:N}` form). Returns null only for an absent
+ * cause (the caller then tries `cell:"argument"` / fails closed). */
+export function partialCauseToInternalName(
+  partialCause: unknown,
+): string | null {
+  if (partialCause === undefined) return null;
+  if (typeof partialCause === "string") return partialCause;
+  if (
+    partialCause && typeof partialCause === "object" &&
+    "$generated" in (partialCause as object)
+  ) {
+    return `$generated:${(partialCause as { $generated: number }).$generated}`;
+  }
+  // The `["__patternResult", <field>]` cause is the transformer's RESULT-CELL
+  // PROJECTION marker (ts-transformers PATTERN_RESULT_CAUSE), NOT a derived
+  // internal cell with a producing compute op. The interpreter handles the
+  // pattern result via the preserved result tree, not as a named internal cell;
+  // naming it would (a) wrongly wire a `map` node's result-projection output into
+  // `internalToOp` — flipping the deferred COLLECTION probe's bare-map-output
+  // detection and bypassing the legacy `$patternRef` sentinel path — and (b) name
+  // a cell no compute op produces. Leave it UNRECOGNIZED (null) so both paths
+  // behave exactly as before this normalization. (No engaged scalar/partition
+  // pattern in the corpus carries a `__patternResult` cause; collections are
+  // INC3.)
+  if (
+    Array.isArray(partialCause) && partialCause[0] === "__patternResult"
+  ) {
+    return null;
+  }
+  // General JSON cause (array tuple / object). Canonical, namespaced key.
+  return `$cause:${JSON.stringify(partialCause)}`;
+}
+
 /** Map a single `$alias` payload to a ValueRef, or null if unrecognized.
  *
  * `expectedDefer` is the recursion depth of the (sub-)Rog this alias lives in
@@ -212,15 +263,13 @@ function aliasToValueRef(
   }
   const path = ((alias.path as string[]) ?? []).map(String);
   if (alias.cell === "argument") return { kind: "argument", path };
-  if (typeof alias.partialCause === "string") {
-    return { kind: "internal", name: alias.partialCause, path };
-  }
-  if (
-    alias.partialCause && typeof alias.partialCause === "object" &&
-    "$generated" in (alias.partialCause as object)
-  ) {
-    const g = (alias.partialCause as { $generated: number }).$generated;
-    return { kind: "internal", name: `$generated:${g}`, path };
+  // Any `partialCause` (string, `{$generated:N}`, or a general JSON cause such as
+  // the builder's `[label, counterId]` tuple) names a derived internal cell. We
+  // key it by the SAME stable name `outputInternalName` uses, so a result/input
+  // `internal` ref lines up with its producing node's output cell.
+  if ("partialCause" in alias) {
+    const name = partialCauseToInternalName(alias.partialCause);
+    if (name !== null) return { kind: "internal", name, path };
   }
   unrecognized.add(JSON.stringify(Object.keys(alias).sort()));
   return null;
@@ -525,16 +574,8 @@ export function outputInternalName(outputs: unknown): string | null {
   if (!outputs || typeof outputs !== "object") return null;
   const alias = (outputs as { $alias?: Record<string, unknown> }).$alias;
   if (!alias || typeof alias !== "object") return null;
-  if (typeof alias.partialCause === "string") return alias.partialCause;
-  if (
-    alias.partialCause && typeof alias.partialCause === "object" &&
-    "$generated" in (alias.partialCause as object)
-  ) {
-    return `$generated:${
-      (alias.partialCause as { $generated: number }).$generated
-    }`;
-  }
-  return null;
+  if (!("partialCause" in alias)) return null;
+  return partialCauseToInternalName(alias.partialCause);
 }
 
 /** True iff a node's `outputs` is a canonical alias that targets the ARGUMENT
@@ -992,6 +1033,28 @@ function resultSchemaDeclaresValueType(schema: unknown): boolean {
     return false;
   }
   const s = schema as Record<string, unknown>;
+  // An ARRAY type only pins a concrete VALUE producer when its ELEMENT schema is
+  // itself a pinned value type. The builder emits `items: true` (or omits `items`)
+  // when the element type is statically unknown — the signature of a lift that
+  // returns a collection of PATTERNS / OpaqueRefs (e.g.
+  // `entries.map(() => childPattern(...))`, whose result schema is
+  // `{type:"array", items:true}`). Treating that as a value producer would SUPPRESS
+  // the bare-call pattern-instantiation gate and wrongly interpret a launched-child
+  // lift. Require the element schema to declare a value type so an untyped-array
+  // lift stays gated (→ legacy). A `prefixItems` tuple counts when every entry is a
+  // value type. (Conservative: a genuine `unknown[]` value lift also stays gated —
+  // an always-sound extra legacy fallback, never a mis-eval.)
+  if (s.type === "array") {
+    if (resultSchemaDeclaresValueType(s.items)) return true;
+    const prefix = s.prefixItems;
+    if (
+      Array.isArray(prefix) && prefix.length > 0 &&
+      prefix.every((p) => resultSchemaDeclaresValueType(p))
+    ) {
+      return true;
+    }
+    return false;
+  }
   if (typeof s.type === "string") return true;
   if (Array.isArray(s.type) && s.type.length > 0) return true; // type union
   if (Array.isArray(s.enum) && s.enum.length > 0) return true;
@@ -1088,6 +1151,20 @@ function liveLeafCanInstantiatePattern(
   // not a Pattern factory (a pattern-returning lift carries an EMPTY schema). An
   // empty/absent/`true` schema keeps the branch armed (the conservative default).
   if (resultSchemaDeclaresValueType(resultSchema)) return false;
+  // TRANSPILED INDIRECT-CALL form. A pattern/lift factory IMPORTED from another
+  // module compiles to the CommonJS interop call `(0, exports.childPattern)(...)`
+  // or `(0, mod.childPattern)(...)` (the `(0, <expr>)` sequence strips the method
+  // receiver so the member is called as a plain function). The bare-identifier
+  // regex below MISSES this — the factory name sits behind a `.` (member access)
+  // and the application `(` follows a `)`, not an identifier. Match the interop
+  // call head `(0, …)(` explicitly so a closed-over factory invoked through the
+  // transpiler's indirect call is caught. Conservative & schema-gated exactly like
+  // the bare-call branch
+  // (already suppressed above when the result schema pins a value type), so a
+  // value-producing helper called this way still interprets; only an
+  // untyped/`items:true`-result indirect call (the launched-child-collection lift
+  // `entries.map(() => (0, exports.childPattern)(...))`) trips it.
+  if (/\(\s*0\s*,[^)]*\)\s*\(/.test(src)) return true;
   // Match a BARE-identifier call: an identifier not preceded by `.` or another
   // identifier char (so `a.b(` and `xb(` inside `foox(` do not match the `x`),
   // immediately followed by `(`. The `(?<![.\w$])` lookbehind excludes member
