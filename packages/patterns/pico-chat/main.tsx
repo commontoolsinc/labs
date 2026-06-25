@@ -29,15 +29,15 @@ export interface SendEvent {
 }
 
 export interface PicoChatInput {
-  messages?: PerSpace<ChatMessage[] | Default<typeof DEFAULT_MESSAGES>>;
-  name?: PerUser<string | Default<"">>;
+  messages?: PerSpace<Default<ChatMessage[], typeof DEFAULT_MESSAGES>>;
+  name?: PerUser<Default<string, "">>;
 }
 
 export interface PicoChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  messages: PerSpace<ChatMessage[] | Default<typeof DEFAULT_MESSAGES>>;
-  name: PerUser<string | Default<"">>;
+  messages: PerSpace<Default<ChatMessage[], typeof DEFAULT_MESSAGES>>;
+  name: PerUser<Default<string, "">>;
   send: Stream<SendEvent>;
 }
 

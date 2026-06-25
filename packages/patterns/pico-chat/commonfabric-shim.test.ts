@@ -3,7 +3,7 @@ export const UI = "$UI";
 export const Stream = Symbol("Stream");
 export const Default = Symbol("Default");
 
-export type Default<T> = T;
+export type Default<T, _Value extends T = T> = T;
 export type PerSpace<T> = T;
 export type PerUser<T> = T;
 export type Stream<T> = { send(event: T): void };
