@@ -172,7 +172,6 @@ export function map(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, listScope);
-      result.send([]);
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
       setPatternCell(result, parentCell.key("pattern"));
