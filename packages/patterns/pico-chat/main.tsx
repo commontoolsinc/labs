@@ -292,6 +292,7 @@ const textStyle = {
 
 const messagePaneStyle = {
   height: "320px",
+  overflowX: "hidden",
   overflowY: "auto",
 };
 
@@ -441,6 +442,15 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 pointer-events: auto;
               }
 
+              .pico-message-pane {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+              }
+
+              .pico-message-pane::-webkit-scrollbar {
+                display: none;
+              }
+
               .pico-scroll-anchor {
                 appearance: none;
                 align-self: flex-end;
@@ -474,6 +484,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
               <div
                 slot="content"
                 id="chat-messages"
+                className="pico-message-pane"
                 style={messagePaneStyle}
               >
                 <div style={messageListStyle}>
