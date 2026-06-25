@@ -85,7 +85,7 @@ Deno.test("pico chat groups legacy same-name messages without cell links", () =>
   ]);
 });
 
-Deno.test("pico chat toggles emoji reactions by user reference", () => {
+Deno.test("pico chat toggles emoji reactions by display name", () => {
   const alex = PicoChat({
     messages: [],
     name: "Alex",
@@ -146,7 +146,7 @@ Deno.test("pico chat ignores invalid reaction attempts", () => {
   assertEquals(message.reactions, []);
 });
 
-Deno.test("pico chat allows same display names to react independently", () => {
+Deno.test("pico chat treats the same display name as the same reactor", () => {
   const firstAlex = PicoChat({
     messages: [],
     name: "Alex",
@@ -162,11 +162,7 @@ Deno.test("pico chat allows same display names to react independently", () => {
   firstAlex.react.send({ message, emoji: "❤️" });
   secondAlex.react.send({ message, emoji: "❤️" });
 
-  assertEquals(message.reactions?.length, 2);
-  assertEquals(message.reactions?.map((reaction) => reaction.byName), [
-    "Alex",
-    "Alex",
-  ]);
+  assertEquals(message.reactions, []);
 });
 
 Deno.test("pico chat ignores blank names and messages", () => {

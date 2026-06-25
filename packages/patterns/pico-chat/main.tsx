@@ -17,13 +17,11 @@ export type NameCell = Writable<string>;
 
 export interface Reaction {
   emoji: string;
-  by: NameCell;
   byName: string;
 }
 
 export interface ChatMessage {
   from: string;
-  fromName?: NameCell;
   body: string;
   reactions?: Reaction[] | Default<[]>;
 }
@@ -46,7 +44,6 @@ export interface ReactEvent {
 
 export interface MessageGroup {
   from: string;
-  fromName?: NameCell;
   messages: ChatMessage[];
 }
 
@@ -74,7 +71,7 @@ const sendMessage = handler<SendEvent, {
 
   if (!from || !body) return;
 
-  messages.push({ from, fromName: name, body, reactions: [] });
+  messages.push({ from, body, reactions: [] });
 });
 
 const toggleReaction = handler<ReactEvent, {
@@ -94,13 +91,13 @@ const toggleReaction = handler<ReactEvent, {
   const reactionsCell = messages.key(index).key("reactions");
   const reactions = asReactions(reactionsCell.get());
   const existingIndex = reactions.findIndex((reaction) =>
-    reaction.emoji === mark && reaction.by && equals(reaction.by, name)
+    reaction.emoji === mark && reaction.byName === byName
   );
 
   reactionsCell.set(
     existingIndex >= 0
-      ? reactions.toSpliced(existingIndex, 1)
-      : [...reactions, { emoji: mark, by: name, byName }],
+      ? reactions.filter((_, index) => index !== existingIndex)
+      : [...reactions, { emoji: mark, byName }],
   );
 });
 
@@ -110,13 +107,6 @@ function asReactions(
   return Array.isArray(reactions) ? [...reactions] : [];
 }
 
-function sameAuthor(left: ChatMessage, right: ChatMessage) {
-  if (left.fromName && right.fromName) {
-    return equals(left.fromName, right.fromName);
-  }
-  return left.from === right.from;
-}
-
 export function groupMessages(
   messages: readonly ChatMessage[],
 ): MessageGroup[] {
@@ -124,14 +114,12 @@ export function groupMessages(
 
   for (const message of messages) {
     const last = groups[groups.length - 1];
-    if (last && sameAuthor(last.messages[last.messages.length - 1], message)) {
+    if (last && last.messages[last.messages.length - 1].from === message.from) {
       last.from = message.from;
-      last.fromName = message.fromName;
       last.messages.push(message);
     } else {
       groups.push({
         from: message.from,
-        fromName: message.fromName,
         messages: [message],
       });
     }
