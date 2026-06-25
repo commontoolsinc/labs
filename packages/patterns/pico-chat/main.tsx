@@ -27,7 +27,6 @@ export interface ChatMessage {
 }
 
 const DEFAULT_MESSAGES: ChatMessage[] = [];
-const REACTION_EMOJIS = ["👍", "❤️", "😂"] as const;
 
 export type MessagesCell = Writable<ChatMessage[]>;
 
@@ -45,6 +44,13 @@ export interface ReactEvent {
 export interface MessageGroup {
   from: string;
   messages: ChatMessage[];
+}
+
+interface DisplayMessage {
+  from: string;
+  body: string;
+  message: ChatMessage;
+  showAuthor: boolean;
 }
 
 export interface PicoChatInput {
@@ -128,6 +134,15 @@ export function groupMessages(
   return groups;
 }
 
+function displayMessages(messages: readonly ChatMessage[]): DisplayMessage[] {
+  return messages.map((message, index) => ({
+    from: message.from,
+    body: message.body,
+    message,
+    showAuthor: index === 0 || messages[index - 1].from !== message.from,
+  }));
+}
+
 function reactionCount(message: ChatMessage, emoji: string) {
   return asReactions(message.reactions).filter((reaction) =>
     reaction.emoji === emoji
@@ -162,10 +177,9 @@ const groupStyle = {
   borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
 };
 
-const messageStackStyle = {
-  display: "grid",
-  gap: "0.5rem",
-  marginTop: "0.25rem",
+const continuationStyle = {
+  padding: "4px 0 10px",
+  borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
 };
 
 const reactionRowStyle = {
@@ -179,6 +193,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const send = sendMessage({ messages, name });
     const react = toggleReaction({ messages, name });
     const groups = computed(() => groupMessages([...messages]));
+    const rows = computed(() => displayMessages([...messages]));
 
     return {
       [NAME]: "Pico chat",
@@ -204,37 +219,60 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 style={messagePaneStyle}
               >
                 <div style={messageListStyle}>
-                  {groups.length === 0
+                  {rows.length === 0
                     ? (
                       <div style={{ color: "var(--cf-colors-muted, #64748b)" }}>
                         No messages yet
                       </div>
                     )
-                    : groups.map((group) => (
-                      <div style={groupStyle}>
-                        <strong dir="ltr" style={textStyle}>
-                          {group.from}
-                        </strong>
-                        <div style={messageStackStyle}>
-                          {group.messages.map((message) => (
-                            <div>
-                              <div dir="ltr" style={textStyle}>
-                                {message.body}
-                              </div>
-                              <div style={reactionRowStyle}>
-                                {REACTION_EMOJIS.map((emoji) => (
-                                  <cf-button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      react.send({ message, emoji })}
-                                  >
-                                    {reactionLabel(message, emoji)}
-                                  </cf-button>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
+                    : rows.map((row) => (
+                      <div
+                        style={row.showAuthor ? groupStyle : continuationStyle}
+                      >
+                        {row.showAuthor
+                          ? (
+                            <strong dir="ltr" style={textStyle}>
+                              {row.from}
+                            </strong>
+                          )
+                          : null}
+                        <div dir="ltr" style={textStyle}>
+                          {row.body}
+                        </div>
+                        <div style={reactionRowStyle}>
+                          <cf-button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              react.send({
+                                message: row.message,
+                                emoji: "👍",
+                              })}
+                          >
+                            {reactionLabel(row.message, "👍")}
+                          </cf-button>
+                          <cf-button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              react.send({
+                                message: row.message,
+                                emoji: "❤️",
+                              })}
+                          >
+                            {reactionLabel(row.message, "❤️")}
+                          </cf-button>
+                          <cf-button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              react.send({
+                                message: row.message,
+                                emoji: "😂",
+                              })}
+                          >
+                            {reactionLabel(row.message, "😂")}
+                          </cf-button>
                         </div>
                       </div>
                     ))}
