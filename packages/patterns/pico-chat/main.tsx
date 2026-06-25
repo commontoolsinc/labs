@@ -51,7 +51,7 @@ interface DisplayMessage {
   body: string;
   message: ChatMessage;
   showAuthor: boolean;
-  endGroup: boolean;
+  className: string;
 }
 
 export interface PicoChatInput {
@@ -136,14 +136,23 @@ export function groupMessages(
 }
 
 function displayMessages(messages: readonly ChatMessage[]): DisplayMessage[] {
-  return messages.map((message, index) => ({
-    from: message.from,
-    body: message.body,
-    message,
-    showAuthor: index === 0 || messages[index - 1].from !== message.from,
-    endGroup: index === messages.length - 1 ||
-      messages[index + 1].from !== message.from,
-  }));
+  return messages.map((message, index) => {
+    const showAuthor = index === 0 || messages[index - 1].from !== message.from;
+    const endGroup = index === messages.length - 1 ||
+      messages[index + 1].from !== message.from;
+
+    return {
+      from: message.from,
+      body: message.body,
+      message,
+      showAuthor,
+      className: [
+        "pico-message-row",
+        showAuthor ? "pico-message-row-start" : "",
+        endGroup ? "pico-message-row-end" : "",
+      ].filter(Boolean).join(" "),
+    };
+  });
 }
 
 function reactionCount(message: ChatMessage, emoji: string) {
@@ -175,32 +184,12 @@ const messageListStyle = {
   justifyContent: "flex-end",
 };
 
-const groupStartStyle = {
-  padding: "10px 0 4px",
-};
-
-const groupEndStyle = {
-  padding: "4px 0 10px",
-  borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
-};
-
-const continuationStyle = {
-  padding: "4px 0",
-};
-
 const reactionRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: "0.25rem",
   minHeight: "1.75rem",
 };
-
-function rowStyle(row: DisplayMessage) {
-  if (row.showAuthor && row.endGroup) return groupEndStyle;
-  if (row.showAuthor) return groupStartStyle;
-  if (row.endGroup) return groupEndStyle;
-  return continuationStyle;
-}
 
 export default pattern<PicoChatInput, PicoChatOutput>(
   ({ messages, name }) => {
@@ -219,6 +208,19 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 opacity: 0;
                 pointer-events: none;
                 transition: opacity 120ms ease;
+              }
+
+              .pico-message-row {
+                padding: 4px 0;
+              }
+
+              .pico-message-row-start {
+                padding-top: 10px;
+              }
+
+              .pico-message-row-end {
+                padding-bottom: 10px;
+                border-bottom: 1px solid var(--cf-colors-border, #e2e8f0);
               }
 
               .pico-message-row:hover .pico-reactions,
@@ -255,10 +257,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                       </div>
                     )
                     : rows.map((row) => (
-                      <div
-                        className="pico-message-row"
-                        style={rowStyle(row)}
-                      >
+                      <div className={row.className}>
                         {row.showAuthor
                           ? (
                             <strong dir="ltr" style={textStyle}>
