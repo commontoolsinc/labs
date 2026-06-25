@@ -216,13 +216,14 @@ const textStyle = {
 const messagePaneStyle = {
   height: "320px",
   overflowY: "auto",
+  display: "flex",
+  flexDirection: "column-reverse",
 };
 
 const messageListStyle = {
   minHeight: "100%",
   display: "flex",
-  flexDirection: "column",
-  justifyContent: "flex-end",
+  flexDirection: "column-reverse",
 };
 
 const reactionRowStyle = {
@@ -247,6 +248,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const rows = computed(() =>
       displayMessages([...messages], String(name).trim())
     );
+    const visibleRows = computed(() => [...rows].reverse());
 
     return {
       [NAME]: "Pico chat",
@@ -305,13 +307,13 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 style={messagePaneStyle}
               >
                 <div style={messageListStyle}>
-                  {rows.length === 0
+                  {visibleRows.length === 0
                     ? (
                       <div style={{ color: "var(--cf-colors-muted, #64748b)" }}>
                         No messages yet
                       </div>
                     )
-                    : rows.map((row) => (
+                    : visibleRows.map((row) => (
                       <div className={row.className}>
                         {row.showAuthor
                           ? (
