@@ -3018,9 +3018,23 @@ export class Runner {
     // (Cross-segment `opOut` externals are MATERIALIZED via synthetic `$ri-op-<id>`
     // cells in step (c) below — not gated out.)
 
-    // No fan-out: a segment feeding >1 boundary needs a multi-output / container-
-    // of-links emission (§4.4). Defer.
-    if (part.fanoutSegmentIds.length > 0) return null;
+    // FAN-OUT (R-SEAM-1, §4.4) is ENGAGED, not deferred. A segment op consumed by
+    // >1 boundary is the ONE-value/N-readers shape, NOT true distinct-output fan-
+    // out: the producer is marked consumed ONCE (`partition.ts` `consumedOpIdx`,
+    // regardless of reader count) and materialized into its single declared output
+    // cell; each boundary then reads THAT SAME cell through its UNCHANGED verbatim
+    // input alias (kept in step (d), `boundaryNodes.push(bNode)`). No multi-output
+    // / container-of-links emission (§4.4(a)/(b)) is required — that would only be
+    // needed if a single segment had to emit DISTINCT docs to distinct boundaries,
+    // which cannot arise here (a consumed pure op is one scalar/list value behind
+    // one declared/synthetic cell; N boundaries alias that one cell). Witnessed by
+    // counter-render-tree `safeStep` (one lift → increment + decrement handlers),
+    // menu-planner `daysView`/`recipesView`, and form-wizard `stepsView`.
+    if (
+      Deno.env.get("RI_PART_DEBUG") === "1" && part.fanoutSegmentIds.length > 0
+    ) {
+      console.error("RI_PART fanout engaged:", part.fanoutSegmentIds);
+    }
 
     // No boundary→boundary edge: an effect→effect hop is the §4.5 CFC read-
     // through hazard (an unread labeled hop). Defer.
