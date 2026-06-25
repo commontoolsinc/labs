@@ -28,6 +28,7 @@ import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { createTrustedBuilder } from "../support/trusted-builder.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { JSONSchema } from "../../src/builder/types.ts";
 
 setGlobalLogFloor("error");
 const signer = await Identity.fromPassphrase("ri-coalescing-spike");
@@ -128,5 +129,183 @@ describe("coalescing spike — partitioned dispatch engages", () => {
     // And it is the EXPECTED value: doubled = 2 * counter.value, with the handler
     // having driven counter.value to 4 by the time the result settles.
     expect(interpreted.afterDoubled).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COLLECTION-BOUNDARY engagement (INC3 LEVEL-1).
+// ---------------------------------------------------------------------------
+
+interface CollectionOutcome {
+  interpretedOk: number;
+  initialHeadline: unknown;
+  initialLabels: unknown;
+  afterHeadline: unknown;
+  afterLabels: unknown;
+}
+
+/** Run a pattern that combines a reactive `.map` (a `collection` BOUNDARY) with
+ * surrounding PURE compute (a `str` headline segment) and a HANDLER boundary that
+ * mutates the list. At LEVEL-1 the map node is kept verbatim (its per-element
+ * render runs as legacy) while the headline segment interprets; firing the
+ * handler grows the list, and both the mapped `labels` and the `headline` must
+ * re-derive reactively THROUGH the boundaries. */
+async function runCollection(
+  experimentalInterpreter: boolean,
+): Promise<CollectionOutcome> {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+    experimental: { experimentalInterpreter },
+  });
+  const { commonfabric } = createTrustedBuilder(runtime);
+  // deno-lint-ignore no-explicit-any
+  const cf = commonfabric as any;
+  const space = signer.did() as MemorySpace;
+
+  const num = { type: "number" } as const;
+  try {
+    // The map ELEMENT pattern: a PURE render of one entry → kept in the legacy
+    // map node verbatim at LEVEL-1. `mapWithPattern` is the builder-direct form
+    // of an authored `.map(...)` (which the TS transformer lowers — here we call
+    // the builder API directly, so we supply the element pattern explicitly).
+    const elementPattern = cf.pattern(
+      ({ element }: { element: number }) => ({
+        label: cf.str`item ${element}`,
+      }),
+      { type: "object", properties: { element: num }, required: ["element"] },
+      {
+        type: "object",
+        properties: { label: { type: "string" } },
+      },
+    );
+    // A pure `str` headline over the list LENGTH → an interpreted SEGMENT that is
+    // SEPARATE from the map boundary (no fan-out: it reads `count`, not the map).
+    const lengthOf = cf.lift(
+      (raw: number[] | undefined) => (Array.isArray(raw) ? raw.length : 0),
+      { type: "array", items: num } as JSONSchema,
+      num,
+    );
+    // The handler grows the shared list → a legacy BOUNDARY node.
+    const pushHandler = cf.handler(
+      (
+        { n }: { n: number },
+        { history }: { history: number[] },
+      ) => {
+        history.push(n);
+      },
+      { proxy: true },
+    );
+
+    const collectionPattern = cf.pattern(
+      ({ history }: { history: number[] }) => {
+        // A reactive map over the list → a `collection` BOUNDARY. Its per-element
+        // render stays in the legacy map node verbatim.
+        const labels = (history as unknown as {
+          mapWithPattern(p: unknown, params: unknown): unknown;
+        }).mapWithPattern(elementPattern, {});
+        const count = lengthOf(history);
+        const headline = cf.str`history has ${count} entries`;
+        return {
+          history,
+          labels,
+          headline,
+          push: pushHandler({ history }),
+        };
+      },
+      {
+        type: "object",
+        properties: { history: { type: "array", items: num } },
+        required: ["history"],
+      } as JSONSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "coalescing-spike-collection",
+      undefined,
+    );
+    const tx = runtime.edit();
+    const r = runtime.run(
+      tx,
+      collectionPattern,
+      { history: [1, 2] },
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.idle();
+    // deno-lint-ignore no-explicit-any
+    const headlineCell = r.key("headline") as any;
+    // deno-lint-ignore no-explicit-any
+    const labelsCell = r.key("labels") as any;
+    const cancelH = headlineCell.sink(() => {});
+    const cancelL = labelsCell.sink(() => {});
+    await runtime.idle();
+    await headlineCell.pull();
+    await labelsCell.pull();
+    await runtime.idle();
+
+    // Read settled values via the typed cell `.get()` (NOT `r.pull()`, which
+    // returns query-result-proxies that defeat structural `toEqual`). Round-trip
+    // through JSON so the comparison is over plain JSON.
+    const norm = (v: unknown): unknown => JSON.parse(JSON.stringify(v));
+    const initialHeadline = norm(headlineCell.get());
+    const initialLabels = norm(labelsCell.get());
+
+    // Fire the handler boundary: history [1,2] -> [1,2,3]. The map boundary must
+    // emit a 3rd label and the headline segment must re-derive "3 entries"
+    // (reactivity THROUGH both boundaries).
+    r.key("push").send({ n: 3 });
+    await runtime.idle();
+    await headlineCell.pull();
+    await labelsCell.pull();
+    await runtime.idle();
+    const afterHeadline = norm(headlineCell.get());
+    const afterLabels = norm(labelsCell.get());
+    cancelH();
+    cancelL();
+
+    return {
+      interpretedOk: runtime.runner.getInterpreterCensus().interpreted_ok,
+      initialHeadline,
+      initialLabels,
+      afterHeadline,
+      afterLabels,
+    };
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+}
+
+describe("coalescing spike — collection boundary engages (INC3 LEVEL-1)", () => {
+  it("interprets the surrounding pure region while the map stays a boundary node", async () => {
+    const legacy = await runCollection(false);
+    const interpreted = await runCollection(true);
+
+    // ENGAGEMENT: a collection-bearing pattern (a reactive `.map` ALONGSIDE pure
+    // compute + a handler) now PARTITIONS — the headline segment interprets while
+    // the map + handler stay legacy boundaries. Before INC3 this fell back
+    // wholesale on the `ineligible_opkind` collection gate (`interpreted_ok == 0`).
+    expect(legacy.interpretedOk).toBe(0);
+    expect(interpreted.interpretedOk).toBeGreaterThanOrEqual(1);
+
+    // CORRECTNESS (differential oracle): the interpreted headline + mapped labels
+    // are IDENTICAL to legacy, both initially and after the handler grows the list
+    // (the map boundary and headline segment re-derive reactively).
+    expect(interpreted.initialHeadline).toEqual(legacy.initialHeadline);
+    expect(interpreted.initialLabels).toEqual(legacy.initialLabels);
+    expect(interpreted.afterHeadline).toEqual(legacy.afterHeadline);
+    expect(interpreted.afterLabels).toEqual(legacy.afterLabels);
+
+    // And the EXPECTED settled values: 3 entries after the push, with the map
+    // having emitted a per-element render (`{ label }`) per entry.
+    expect(interpreted.afterHeadline).toBe("history has 3 entries");
+    expect(interpreted.afterLabels).toEqual([
+      { label: "item 1" },
+      { label: "item 2" },
+      { label: "item 3" },
+    ]);
   });
 });

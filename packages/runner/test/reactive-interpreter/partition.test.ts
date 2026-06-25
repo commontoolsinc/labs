@@ -96,6 +96,21 @@ const constructObj = (
   detail: { kind: "construct", template: { shape: "object", fields } },
 });
 
+/** A `map` collection boundary reading `listInput` (its element ROG is opaque to
+ * the top-level partition at LEVEL-1 — no `resolveInner`). */
+const collectionMap = (id: OpId, listInput: ValueRef): Op => ({
+  id,
+  kind: "collection",
+  inputs: [],
+  outSchema: T,
+  detail: {
+    kind: "collection",
+    op: "map",
+    elementRog: { identity: "<inline>", symbol: "op" },
+    listInput,
+  },
+});
+
 const arg = (...path: string[]): ValueRef => ({ kind: "argument", path });
 const opOut = (op: OpId, ...path: string[]): ValueRef => ({
   kind: "opOut",
@@ -323,6 +338,53 @@ describe("partition (hand-built): segments, cuts, ordering", () => {
     );
     expect(p.boundaries.map((b) => b.opId)).toEqual([1]);
     expect(p.boundaries[0].kind).toBe("unresolved-leaf");
+    expect(segWith(p, 2).layer).toBeGreaterThan(segWith(p, 0).layer);
+  });
+
+  it("a `collection` (map) boundary cuts seg->bnd and bnd->seg around itself (INC3 LEVEL-1)", () => {
+    // ({items}) => { const list = sanitize(items);     // seg0 feeds the map
+    //                const mapped = list.map(...);      // collection BOUNDARY
+    //                const label  = summarize(mapped);  // seg1 reads the map out
+    //                return { mapped, label } }
+    // A pure region BEFORE the map (the list sanitizer) and a pure region AFTER
+    // the map (a summary over the mapped container) must each interpret as their
+    // own segment, with the map kept as a verbatim `collection` boundary between
+    // them — the exact LEVEL-1 shape this increment engages. The map output is a
+    // NORMAL dataflow output, so the downstream read is a sound `bnd->seg` edge.
+    const ops = [
+      leaf(0, arg("items")), // sanitize(items) -> the list the map consumes
+      collectionMap(1, opOut(0)), // map over the sanitized list (boundary)
+      leaf(2, opOut(1)), // summarize(mapped) -> reads the map output
+      constructObj(3, { mapped: opOut(1), label: opOut(2) }),
+    ];
+    const p = ok(partition(inputOf(ops, opOut(3))));
+
+    // Exactly one collection boundary, kept verbatim (no inner — LEVEL-1).
+    expect(p.boundaries.map((b) => b.kind)).toEqual(["collection"]);
+    expect(p.boundaries[0].opId).toBe(1);
+    expect(p.boundaries[0].inner).toBeUndefined();
+
+    // The boundary reads op 0's output as its list input.
+    expect(opOutsOf(p.boundaries[0].inputs)).toEqual([0]);
+
+    // seg->bnd: the sanitizer segment (op 0) feeds the map boundary.
+    expect(
+      p.edges.some((e) =>
+        e.kind === "seg->bnd" && e.from === segWith(p, 0).id && e.to === "bnd1"
+      ),
+    ).toBe(true);
+    // bnd->seg: the summary/result segment (ops 2,3) reads the map output.
+    expect(
+      p.edges.some((e) =>
+        e.kind === "bnd->seg" && e.from === "bnd1" &&
+        e.to === segWith(p, 2).id
+      ),
+    ).toBe(true);
+    // No bnd->bnd (the §4.5 read-through hazard) and no fan-out.
+    expect(p.edges.some((e) => e.kind === "bnd->bnd")).toBe(false);
+    expect(p.fanoutSegmentIds).toEqual([]);
+
+    // The consumer segment is placed strictly after the producer segment.
     expect(segWith(p, 2).layer).toBeGreaterThan(segWith(p, 0).layer);
   });
 

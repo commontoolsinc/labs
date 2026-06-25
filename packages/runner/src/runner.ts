@@ -2399,19 +2399,28 @@ export class Runner {
     const unresolvedLeafSet = new Set<OpId>(unresolvedLeafOps);
 
     // A pattern has a partitionable BOUNDARY when it carries an `effect`
-    // (handler / I/O builtin) OR an UNRESOLVED leaf (a context-requiring lift —
-    // `asCell`/`asStream` input, `Cell.for`, or a pattern-returning factory). In
-    // BOTH cases the original legacy node is kept verbatim as a boundary while
-    // the pattern's PURE regions interpret as segments. This is the lever that
-    // engages the launched-child-via-lift / context-leaf clusters' PURE regions:
-    // the context-requiring or child-launching lift stays a LEGACY node (it runs
-    // in the SES sandbox / launches its children exactly as today — sound), and
-    // only the surrounding pure compute (str / scalar lifts / computed) is
-    // interpreted. A fully-pure pattern has no boundary, so the simpler
-    // single-node path below handles it.
+    // (handler / I/O builtin), a `collection` op (a `map`/`filter`/`flatMap`),
+    // OR an UNRESOLVED leaf (a context-requiring lift — `asCell`/`asStream`
+    // input, `Cell.for`, or a pattern-returning factory). In ALL three cases the
+    // original legacy node is kept verbatim as a boundary while the pattern's
+    // PURE regions interpret as segments. This is the lever that engages the
+    // launched-child-via-lift / context-leaf clusters' PURE regions AND the
+    // collection cluster: the array op / context-requiring / child-launching lift
+    // stays a LEGACY node (it runs in the SES sandbox / iterates its element
+    // render / launches its children exactly as today — sound), and only the
+    // surrounding pure compute (str / scalar lifts / computed) is interpreted.
+    // The single TOP-LEVEL pure `map` is already handled earlier by
+    // `tryBuildCollectionInterpreterPattern` (which returns FIRST), so the
+    // `hasCollectionOp` entry here only fires for a `map`/`filter`/`flatMap`
+    // sitting ALONGSIDE other compute (or feeding a non-trivial result) — the
+    // `ineligible_opkind` collection cluster. A fully-pure scalar pattern has no
+    // boundary, so the simpler single-node path below handles it.
     const hasEffectOp = extracted.rog.ops.some((op) => op.kind === "effect");
+    const hasCollectionOp = extracted.rog.ops.some((op) =>
+      op.kind === "collection"
+    );
     const hasUnresolvedLeafBoundary = unresolvedLeafSet.size > 0;
-    if (hasEffectOp || hasUnresolvedLeafBoundary) {
+    if (hasEffectOp || hasUnresolvedLeafBoundary || hasCollectionOp) {
       const internedArgForPartition = internSchema(
         (pattern.argumentSchema ?? {}) as JSONSchema,
       );
@@ -2960,14 +2969,23 @@ export class Runner {
     // null → caller falls through to the single-node path.
 
     // Boundaries this partition can KEEP VERBATIM as legacy nodes: `effect`
-    // (handlers / I/O builtins) and `unresolved-leaf` (a context-requiring or
-    // child-launching lift). Both pass through `(d)` as the original node, so the
-    // legacy node runs / launches exactly as today while the pure segments around
-    // it interpret. A `collection` / `pattern` boundary still needs the recursion
-    // machinery this spike does not build → fall through.
+    // (handlers / I/O builtins), `unresolved-leaf` (a context-requiring or
+    // child-launching lift), and `collection` (a `map`/`filter`/`flatMap`). All
+    // three pass through `(d)` as the original node, so the legacy node runs /
+    // launches / iterates its element render exactly as today while the pure
+    // segments around it interpret. For a `collection` boundary the original
+    // `map` node's `inputs.list` alias already references whatever internal cell /
+    // argument a segment now writes, and its `outputs` alias names the map's
+    // result internal cell a downstream segment seeds from (registered in
+    // `internalToOp` like any node). The element render stays inside the legacy
+    // node verbatim (LEVEL-1: no `resolveInner` recursion below, so the per-
+    // element CFC labelling and consolidated VNode doc are unchanged). A
+    // `pattern` boundary still needs the recursion machinery this spike does not
+    // build → fall through.
     if (
       part.boundaries.some((b) =>
-        b.kind !== "effect" && b.kind !== "unresolved-leaf"
+        b.kind !== "effect" && b.kind !== "unresolved-leaf" &&
+        b.kind !== "collection"
       )
     ) {
       return null;
@@ -3021,8 +3039,12 @@ export class Runner {
     // genuine cycle. An `unresolved-leaf` boundary's output is a NORMAL dataflow
     // output (the lift's value), so a downstream segment reading it is a sound
     // `bnd→seg` edge — exactly the case we now engage (e.g. a `detail` segment
-    // reading a context-requiring `summary` lift's `.trend`). Excluding
-    // unresolved-leaf boundaries here is what lets their pure region interpret.
+    // reading a context-requiring `summary` lift's `.trend`). A `collection`
+    // boundary's output is likewise a NORMAL dataflow output (the mapped
+    // container of links), never a `$ctx` side-effect, so a downstream segment
+    // reading it back is a sound `bnd→seg` edge too — NOT a cycle. Excluding both
+    // `unresolved-leaf` and `collection` boundaries here is what lets their pure
+    // region interpret.
     const segmentReadNames = new Set<string>();
     for (const seg of part.segments) {
       for (const ref of seg.inputs) {
@@ -3477,19 +3499,30 @@ export class Runner {
    * COLLECTION eligibility probe (PURE — no tx writes) for exactly ONE top-level
    * `map`. Returns a synthetic single-node Pattern dispatching to the registered
    * `$ri-collection-map` builtin when the pattern is the eligible single-map
-   * shape, or `null` when there is NO collection op at all (so the caller falls
-   * through to the scalar interpreter path). When there IS a collection op but it
-   * is not the eligible shape, it `bumpAndThrow`s a fail-closed reason (never
-   * returns null in that case) so the pattern falls back to legacy.
+   * shape (the WHOLE pattern is the map — per-element interpreted). Returns
+   * `null` when there is NO collection op at all (scalar path) OR there IS a
+   * collection op but it is NOT the eligible single-map shape (a `map` alongside
+   * other compute, a `filter`/`flatMap`, a multi-collection pattern, a non-
+   * trivial result projection, a scoped/context element). In the NOT-eligible
+   * case the caller falls through to the PARTITION path
+   * (`tryBuildPartitionedInterpreterPattern`), where the collection op is kept
+   * VERBATIM as a legacy boundary node (its per-element render, scope, and leaves
+   * run exactly as legacy — green) while the SURROUNDING pure regions interpret
+   * as segments. If the partition also cannot engage, the downstream
+   * `ELIGIBLE_KINDS` / `unresolved_leaf` gates throw the final fail-closed reason
+   * (`ineligible_opkind` / `unresolved_leaf`) — so the fail-closed verdict is
+   * never lost, only DEFERRED to give the partition a chance first.
    *
    * Highest-risk soundness point: this consults `coverage.byKind` / `coverage`
    * `.nested`, NOT just `rog.ops`. `extractRog` recurses into the element pattern
    * with a FRESH per-recursion ops array THAT IS DISCARDED, so element-internal
    * pattern/effect/nested-collection ops NEVER appear in `rog.ops`. A naive
    * "loop rog.ops" gate would ADMIT a map whose element contains a nested
-   * pattern/effect and SILENTLY MIS-EVALUATE. We therefore reject any element
-   * graph carrying a `pattern`/`effect` op, any collection beyond the outer map,
-   * or more than one nested recursion (`coverage.nested > 1`).
+   * pattern/effect and SILENTLY MIS-EVALUATE via the single-node `$ri-collection-
+   * map` path. We therefore decline the single-node path for any element graph
+   * carrying a `pattern`/`effect` op, any collection beyond the outer map, or
+   * more than one nested recursion (`coverage.nested > 1`) — those fall through
+   * to the partition (legacy map node) instead, which is sound.
    */
   private tryBuildCollectionInterpreterPattern(
     pattern: Pattern,
@@ -3508,30 +3541,38 @@ export class Runner {
       (op) => op.kind === "collection",
     );
     if (collectionOps.length === 0) return null; // no collection → scalar path
-    // From here on there IS a collection op: every miss fails closed.
-    if (collectionOps.length !== 1) bumpAndThrow("ineligible_opkind");
+    // From here on there IS a collection op. The single-node `$ri-collection-map`
+    // path requires the eligible single-bare-map shape; any miss `return null` so
+    // the caller continues to the PARTITION path (where the map is a verbatim
+    // legacy boundary and the surrounding pure region interprets). The downstream
+    // `ELIGIBLE_KINDS` / `unresolved_leaf` gates supply the final fail-closed
+    // reason if the partition also declines — so the verdict is deferred, never
+    // lost.
+    if (collectionOps.length !== 1) return null;
     const mapOp = collectionOps[0];
     if (mapOp.detail.kind !== "collection" || mapOp.detail.op !== "map") {
-      // filter / flatMap and any multi-collection shape → fall back.
-      bumpAndThrow("ineligible_opkind");
+      // filter / flatMap and any multi-collection shape → partition path.
+      return null;
     }
 
     // The OUTER list input must resolve to a recognized argument/internal link.
-    // If extraction could not represent it, it is a `const` placeholder (the
-    // outer alias was recorded as unrecognized) → fail closed. (Element-internal
-    // aliases are NOT consulted here; they are validated by the evaluator.)
+    // If extraction could not represent it, it is a `const` placeholder → the
+    // single-node path cannot wire it, but the partition keeps the map's ORIGINAL
+    // `inputs.list` alias verbatim → defer to the partition.
     if (mapOp.detail.listInput.kind === "const") {
-      bumpAndThrow("unrecognized_alias");
+      return null;
     }
-    // The map op must be the ONLY non-structural op (no sibling leaves/controls
-    // running alongside the map in this first cut).
+    // The map op must be the ONLY non-structural op for the single-node path (no
+    // sibling leaves/controls). A map ALONGSIDE other compute is exactly the
+    // partition case → defer.
     if (nonStructural.length !== 1 || nonStructural[0] !== mapOp) {
-      bumpAndThrow("ineligible_opkind");
+      return null;
     }
 
     // --- Result must be the bare map op, or a trivial one-field construct ---
-    // wrapping it (e.g. `{ mapped: <map> }`). Anything else (the result reads
-    // more than the single map output) → fall back.
+    // wrapping it (e.g. `{ mapped: <map> }`) for the single-node path. A result
+    // that reads more than the single map output is a downstream-segment shape →
+    // defer to the partition.
     if (
       !this.resultIsBareOrTrivialWrap(
         extracted.rog,
@@ -3539,21 +3580,25 @@ export class Runner {
         extracted.internalToOp,
       )
     ) {
-      bumpAndThrow("ineligible_opkind");
+      return null;
     }
 
     // --- CRITICAL element-internal gate: coverage.byKind / coverage.nested --
     // (see method doc). `coverage` accounts for the element graph that
-    // `rog.ops` discards.
+    // `rog.ops` discards. The single-node `$ri-collection-map` path INTERPRETS
+    // the element per-element, so a pattern/effect/nested-collection element graph
+    // would mis-evaluate — decline the single-node path and defer to the partition
+    // (legacy map node renders the element verbatim — sound).
     const byKind = extracted.coverage.byKind;
-    if ((byKind.pattern ?? 0) > 0) bumpAndThrow("ineligible_opkind");
-    if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+    if ((byKind.pattern ?? 0) > 0) return null;
+    if ((byKind.effect ?? 0) > 0) return null;
     // Any collection op beyond the single outer map (a nested collection inside
-    // the element) → fall back.
-    if ((byKind.collection ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+    // the element) → defer to the partition.
+    if ((byKind.collection ?? 0) > 1) return null;
     // The extractor recurses into the element pattern exactly once for a single
-    // inline map; >1 means a nested collection element graph we do not model.
-    if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+    // inline map; >1 means a nested collection element graph the single-node path
+    // does not model → defer.
+    if (extracted.coverage.nested > 1) return null;
 
     // --- Locate the raw map node (to reuse its `{list, op}` inputs verbatim) -
     const mapNode = this.findRawMapNode(pattern);
