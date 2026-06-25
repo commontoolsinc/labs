@@ -25,6 +25,17 @@ function opt(name: string, def: string): string {
   const i = args.indexOf(`--${name}`);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : def;
 }
+// Parse a numeric option, falling back to the default for missing or invalid
+// input and clamping to a minimum (so e.g. --concurrency 0 can't stall the pool).
+function numOpt(
+  name: string,
+  def: number,
+  { min = 0, integer = false }: { min?: number; integer?: boolean } = {},
+): number {
+  const v = Number(opt(name, String(def)));
+  const n = Number.isFinite(v) && v >= min ? v : def;
+  return integer ? Math.floor(n) : n;
+}
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
     "Usage: scripts/ci-gantt.ts [--repo OWNER/REPO] [--workflow FILE] [--limit N]\n" +
@@ -35,12 +46,12 @@ if (args.includes("--help") || args.includes("-h")) {
 
 const REPO = opt("repo", "commontoolsinc/labs");
 const WORKFLOW = opt("workflow", "deno.yml");
-const LIMIT = Number(opt("limit", "100"));
+const LIMIT = numOpt("limit", 100, { min: 1, integer: true });
 const OUT = opt("out", "ci-gantt.png");
-const SCALE = Number(opt("scale", "2"));
-const CONCURRENCY = Number(opt("concurrency", "8"));
+const SCALE = numOpt("scale", 2, { min: 0.1 });
+const CONCURRENCY = numOpt("concurrency", 8, { min: 1, integer: true });
 const MIN_RUNS_OVERRIDE = args.includes("--min-runs")
-  ? Number(opt("min-runs", "0"))
+  ? numOpt("min-runs", 1, { min: 1, integer: true })
   : null;
 // By default only successful job executions feed the timings, so failed or
 // cancelled runs don't skew the min/max. Pass --all-conclusions to include them.
@@ -285,8 +296,12 @@ const prJobs = aggregates.filter((j) => !j.mainOnly);
 const mainJobs = aggregates.filter((j) => j.mainOnly);
 const prTiers = orderSection(prJobs);
 
-// The pull-request run finishes when its latest-finishing job ends.
-const prFinish = Math.max(...prJobs.map((j) => j.end.med));
+// The run finishes when its latest-finishing job ends. Fall back to the full
+// job set when no pull-request jobs are present (e.g. a push-only workflow), so
+// the subtitle never shows an -Infinity/NaN time. (aggregates is non-empty here.)
+const prFinish = Math.max(
+  ...(prJobs.length ? prJobs : aggregates).map((j) => j.end.med),
+);
 
 // ---------------------------------------------------------------------------
 // SVG layout
