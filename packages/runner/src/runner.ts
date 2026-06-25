@@ -3036,9 +3036,34 @@ export class Runner {
       console.error("RI_PART fanout engaged:", part.fanoutSegmentIds);
     }
 
-    // No boundary→boundary edge: an effect→effect hop is the §4.5 CFC read-
-    // through hazard (an unread labeled hop). Defer.
-    if (part.edges.some((e) => e.kind === "bnd->bnd")) {
+    // Boundary→boundary edge: the §4.5 CFC read-through hazard is specifically an
+    // **effect→effect** hop (`generateText(fetchData(x))`) — an `effect`'s LABELED
+    // builtin output (a `$ctx` side-effect write carrying e.g. `LlmDerived`) flows
+    // into another `effect`'s input with no interpreter segment journaling the read,
+    // so the consumer-input doc can be written WITHOUT the producer's intrinsic
+    // label. That hazard requires the PRODUCER boundary to be an `effect` (a labeled
+    // builtin). When the producer is an `unresolved-leaf` (a context-requiring lift)
+    // or a `collection` (a mapped container of links), its output is a NORMAL
+    // dataflow value, NOT a `$ctx` side-effect write — there is no intrinsic builtin
+    // label to drop, and BOTH boundaries are kept VERBATIM as legacy nodes (step
+    // (d) below), so the consumer reads the producer's output cell through its
+    // ORIGINAL input alias exactly as legacy does (the interpreter never sits in
+    // this hop — it only replaces the surrounding PURE nodes with segments; this
+    // edge stays entirely within the preserved legacy subgraph, which labels and
+    // wires it itself). This is the SAME producer-kind discrimination the F4 write-
+    // back gate already makes below (it fires only for `effect` producers, treating
+    // unresolved-leaf/collection outputs as sound dataflow). So defer ONLY when an
+    // `effect` produces the hop; engage the non-effect producer cases — e.g.
+    // budget-planner / support-ticket-triage, where a context-requiring lift
+    // (`unresolved-leaf`) feeds a handler (`effect`).
+    const effectBoundaryIds = new Set(
+      part.boundaries.filter((b) => b.kind === "effect").map((b) => b.id),
+    );
+    if (
+      part.edges.some((e) =>
+        e.kind === "bnd->bnd" && effectBoundaryIds.has(e.from)
+      )
+    ) {
       return null;
     }
 

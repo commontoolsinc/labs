@@ -327,6 +327,41 @@ describe("partition (hand-built): segments, cuts, ordering", () => {
     expect(bb[0].to).toBe("bnd1");
   });
 
+  it("unresolved-leaf -> effect hop is a bnd->bnd edge FROM the leaf (non-effect producer ⇒ runner engages)", () => {
+    // A context-requiring lift (`unresolved-leaf` boundary) feeds a handler
+    // (`effect` boundary), with NO pure op between them — the budget-planner /
+    // support-ticket-triage shape. The partition records the hop as `bnd->bnd`
+    // (same kind as effect->effect), but its `from` is the UNRESOLVED-LEAF
+    // boundary, not an effect. The §4.5 read-through hazard is specific to an
+    // EFFECT producer (a labeled `$ctx` builtin write); an unresolved-leaf output
+    // is NORMAL dataflow (the lift's value), and both nodes are kept VERBATIM, so
+    // the runner's gate (`effectBoundaryIds.has(e.from)`) must see a NON-effect
+    // producer here and ENGAGE rather than defer. This pins the structural fact
+    // the runner gate keys on. We add ONE pure op (op 0) so there is a real
+    // segment to interpret (otherwise the runner's no-segment gate fires anyway).
+    const ops = [
+      leaf(0, arg("x")), // pure -> segment (gives the runner something to interpret)
+      leaf(1, opOut(0)), // UNRESOLVED context leaf -> boundary
+      effect(2, opOut(1)), // handler reads the leaf's output -> bnd->bnd
+    ];
+    const p = ok(
+      partition(inputOf(ops, opOut(2), { unresolvedLeafOps: new Set([1]) })),
+    );
+    const bnd1 = p.boundaries.find((b) => b.opId === 1)!;
+    const bnd2 = p.boundaries.find((b) => b.opId === 2)!;
+    expect(bnd1.kind).toBe("unresolved-leaf");
+    expect(bnd2.kind).toBe("effect");
+    const bb = p.edges.filter((e) => e.kind === "bnd->bnd");
+    expect(bb.length).toBe(1);
+    // The edge flows FROM the unresolved-leaf boundary (the non-effect producer)
+    // INTO the effect boundary — so the runner's effect-producer gate does NOT
+    // fire and the surrounding pure segment engages.
+    expect(bb[0].from).toBe(bnd1.id);
+    expect(bb[0].to).toBe(bnd2.id);
+    // There IS a pure segment (op 0) for the interpreter to engage.
+    expect(p.segments.some((s) => s.opIds.includes(0))).toBe(true);
+  });
+
   it("an unresolved leaf is a fail-closed boundary", () => {
     const ops = [
       leaf(0, arg("x")), // resolvable
