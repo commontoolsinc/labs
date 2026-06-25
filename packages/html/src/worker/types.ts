@@ -168,6 +168,12 @@ export interface NodeState {
 
   /** Original authored props, used to recompute child render policy. */
   sourceProps?: WorkerVNode["props"];
+
+  /** Text-integrity boundary that blocked this whole rendered node. */
+  textIntegrityBlockedFor?: number;
+
+  /** Text-integrity boundary that blocked each visible prop on this node. */
+  textIntegrityBlockedProps?: Map<string, number>;
 }
 
 /**

@@ -1065,31 +1065,60 @@ export class WorkerReconciler {
     }]);
   }
 
-  private resetTextIntegrityBoundary(
+  private refreshTextIntegrityBoundaryState(
     state: NodeState,
     policy: RenderPolicy,
   ): void {
     if (state.tagName !== CFC_AUTHORSHIP_TAG) {
       return;
     }
-    if (
-      policy.textIntegrity !== undefined &&
-      policy.textIntegrity.boundaryNodeId !== state.nodeId
-    ) {
+    if (policy.textIntegrity?.boundaryNodeId !== state.nodeId) {
       return;
     }
+    const value = this.hasTextIntegrityBlockForBoundary(state, state.nodeId)
+      ? "blocked"
+      : "ok";
     this.queueOps([{
       op: "set-prop",
       nodeId: state.nodeId,
       key: "textIntegrityState",
-      value: "ok",
+      value,
     }]);
   }
 
-  private markTextIntegrityBlocked(policy: RenderPolicy): void {
+  private hasTextIntegrityBlockForBoundary(
+    state: NodeState,
+    boundaryNodeId: number,
+  ): boolean {
+    if (state.textIntegrityBlockedFor === boundaryNodeId) {
+      return true;
+    }
+    if (
+      state.textIntegrityBlockedProps !== undefined &&
+      [...state.textIntegrityBlockedProps.values()].some((id) =>
+        id === boundaryNodeId
+      )
+    ) {
+      return true;
+    }
+    for (const child of state.children.values()) {
+      if (
+        child.elementState &&
+        this.hasTextIntegrityBlockForBoundary(
+          child.elementState,
+          boundaryNodeId,
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private markTextIntegrityBlocked(policy: RenderPolicy): number | undefined {
     const boundaryNodeId = policy.textIntegrity?.boundaryNodeId;
     if (boundaryNodeId === undefined) {
-      return;
+      return undefined;
     }
     this.queueOps([{
       op: "set-prop",
@@ -1097,6 +1126,7 @@ export class WorkerReconciler {
       key: "textIntegrityState",
       value: "blocked",
     }]);
+    return boundaryNodeId;
   }
 
   private canRenderCellTextUnderPolicy(
@@ -1234,13 +1264,21 @@ export class WorkerReconciler {
     sourceCell?: Cell<unknown>,
     // deno-lint-ignore no-explicit-any
   ): any {
-    if (
-      this.isTextIntegrityProp(state, key) &&
-      (sourceCell
+    if (this.isTextIntegrityProp(state, key)) {
+      const shouldBlock = sourceCell
         ? this.shouldBlockTextFromCell(value, sourceCell, state.renderPolicy)
-        : this.shouldBlockLiteralText(value, state.renderPolicy))
-    ) {
-      this.markTextIntegrityBlocked(state.renderPolicy);
+        : this.shouldBlockLiteralText(value, state.renderPolicy);
+      if (!shouldBlock) {
+        state.textIntegrityBlockedProps?.delete(key);
+        return this.transformPropValue(key, value);
+      }
+      const boundaryNodeId = this.markTextIntegrityBlocked(state.renderPolicy);
+      if (boundaryNodeId !== undefined) {
+        if (state.textIntegrityBlockedProps === undefined) {
+          state.textIntegrityBlockedProps = new Map();
+        }
+        state.textIntegrityBlockedProps.set(key, boundaryNodeId);
+      }
       this.queueOps([{
         op: "set-prop",
         nodeId: state.nodeId,
@@ -1362,9 +1400,6 @@ export class WorkerReconciler {
             oldState,
             policyChildren.children,
           );
-          if (!childrenSame || policyChanged) {
-            this.resetTextIntegrityBoundary(oldState, childPolicy);
-          }
           this.updateChildrenInPlace(
             ctx,
             oldState,
@@ -1373,6 +1408,9 @@ export class WorkerReconciler {
             childPolicy,
             policyChanged,
           );
+          if (!childrenSame || policyChanged) {
+            this.refreshTextIntegrityBoundaryState(oldState, childPolicy);
+          }
         }
         return;
       }
@@ -1541,6 +1579,7 @@ export class WorkerReconciler {
       this.removeSingleProp(state, key);
     }
     state.propSubscriptions.clear();
+    state.textIntegrityBlockedProps?.clear();
   }
 
   /**
@@ -1997,7 +2036,6 @@ export class WorkerReconciler {
 
     const childrenSame = this.areChildrenSame(state, policyChildren.children);
     if (!childrenSame || policyChanged) {
-      this.resetTextIntegrityBoundary(state, childPolicy);
       this.updateChildrenInPlace(
         ctx,
         state,
@@ -2006,6 +2044,7 @@ export class WorkerReconciler {
         childPolicy,
         policyChanged,
       );
+      this.refreshTextIntegrityBoundaryState(state, childPolicy);
     }
   }
 
@@ -2115,6 +2154,7 @@ export class WorkerReconciler {
    * Remove a single prop from a node (DOM side + handler cleanup).
    */
   private removeSingleProp(state: NodeState, key: string): void {
+    state.textIntegrityBlockedProps?.delete(key);
     if (isEventProp(key)) {
       const eventType = getEventType(key);
       this.retireEventHandler(state, eventType);
@@ -2450,6 +2490,9 @@ export class WorkerReconciler {
       renderPolicy: policy,
       childRenderPolicy: policy,
       childrenBlockedByPolicy: false,
+      textIntegrityBlockedFor: integrityBlocked
+        ? policy.textIntegrity?.boundaryNodeId
+        : undefined,
     };
   }
 
@@ -3069,9 +3112,6 @@ export class WorkerReconciler {
         childState.elementState,
         policyChildren.children,
       );
-      if (!childrenSame || policyChanged) {
-        this.resetTextIntegrityBoundary(childState.elementState, childPolicy);
-      }
       this.updateChildrenInPlace(
         ctx,
         childState.elementState,
@@ -3080,6 +3120,12 @@ export class WorkerReconciler {
         childPolicy,
         policyChanged,
       );
+      if (!childrenSame || policyChanged) {
+        this.refreshTextIntegrityBoundaryState(
+          childState.elementState,
+          childPolicy,
+        );
+      }
     }
     return true;
   }
@@ -3293,12 +3339,6 @@ export class WorkerReconciler {
                     childState.elementState,
                     policyChildren.children,
                   );
-                  if (!childrenSame || policyChanged) {
-                    this.resetTextIntegrityBoundary(
-                      childState.elementState,
-                      childPolicy,
-                    );
-                  }
                   this.updateChildrenInPlace(
                     ctx,
                     childState.elementState,
@@ -3307,6 +3347,12 @@ export class WorkerReconciler {
                     childPolicy,
                     policyChanged,
                   );
+                  if (!childrenSame || policyChanged) {
+                    this.refreshTextIntegrityBoundaryState(
+                      childState.elementState,
+                      childPolicy,
+                    );
+                  }
                 }
                 return;
               }
