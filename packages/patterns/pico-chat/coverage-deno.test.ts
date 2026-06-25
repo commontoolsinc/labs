@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { NAME, UI } from "commonfabric";
-import PicoChat, { groupMessages, reactionClick } from "./main.tsx";
+import PicoChat, { groupMessages } from "./main.tsx";
 
 Deno.test("pico chat sends trimmed messages from a named user", () => {
   const subject = PicoChat({
@@ -104,25 +104,6 @@ Deno.test("pico chat toggles emoji reactions by display name", () => {
 
   alex.react.send({ message, emoji: "👍" });
   assertEquals(message.reactions, []);
-});
-
-Deno.test("pico chat reaction helper sends the selected message and emoji", () => {
-  const subject = PicoChat({
-    messages: [],
-    name: "Alex",
-  });
-  subject.send.send({ detail: { message: "Click helper" } });
-  const [message] = subject.messages.get();
-
-  reactionClick(subject.react, message, "😂")();
-
-  assertEquals(
-    message.reactions?.map(({ emoji, byName }) => ({
-      emoji,
-      byName,
-    })),
-    [{ emoji: "😂", byName: "Alex" }],
-  );
 });
 
 Deno.test("pico chat ignores invalid reaction attempts", () => {

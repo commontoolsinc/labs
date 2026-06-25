@@ -139,14 +139,6 @@ function reactionLabel(message: ChatMessage, emoji: string) {
   return count > 0 ? `${emoji} ${count}` : emoji;
 }
 
-export function reactionClick(
-  react: Stream<ReactEvent>,
-  message: ChatMessage,
-  emoji: string,
-) {
-  return () => react.send({ message, emoji });
-}
-
 const textStyle = {
   unicodeBidi: "plaintext",
   whiteSpace: "pre-wrap",
@@ -234,11 +226,8 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   <cf-button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={reactionClick(
-                                      react,
-                                      message,
-                                      emoji,
-                                    )}
+                                    onClick={() =>
+                                      react.send({ message, emoji })}
                                   >
                                     {reactionLabel(message, emoji)}
                                   </cf-button>
