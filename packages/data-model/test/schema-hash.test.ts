@@ -497,5 +497,51 @@ describe("schema-hash", () => {
       });
       assert(isDeepFrozen(interned));
     });
+
+    it("shares already-interned sub-schemas by reference (no needless rebuild)", () => {
+      // Pre-intern a child, then intern a parent that holds it. Canonicalizing
+      // the parent keeps the already-interned (already-canonical) child by
+      // reference instead of cloning it, preserving structural sharing.
+      const child = internSchema({
+        title: `canon-child-${Date.now()}-${Math.random()}`,
+        type: "string",
+      }) as JSONSchemaObj;
+      const parent = internSchema({
+        type: "object",
+        title: `canon-parent-${Date.now()}-${Math.random()}`,
+        properties: { x: child },
+      }) as JSONSchemaObj;
+      expect((parent.properties as Record<string, unknown>).x).toBe(child);
+    });
+
+    it("rebuilds non-canonical array elements while preserving array order", () => {
+      // An array element that is itself a non-canonical object gets its keys
+      // sorted, but the array's element order is preserved (arrays are ordered).
+      const interned = internSchema({
+        title: `canon-arr-${Date.now()}-${Math.random()}`,
+        anyOf: [
+          { type: "object", $defs: { X: { type: "null" } } }, // non-canonical
+          { type: "string" },
+        ],
+      }) as JSONSchemaObj;
+      const anyOf = interned.anyOf as JSONSchemaObj[];
+      expect(Object.keys(anyOf[0])).toEqual(["$defs", "type"]); // element sorted
+      expect((anyOf[1] as JSONSchemaObj).type).toBe("string"); // order preserved
+      expect(anyOf.length).toBe(2);
+    });
+
+    it("preserves owned symbol-keyed properties when it rebuilds for sorting", () => {
+      // Schemas are normally string-keyed, but canonicalization must never
+      // silently drop an owned (symbol) property when it rebuilds to sort keys.
+      const marker = Symbol("schemaMarker");
+      const schema = {
+        type: "object",
+        title: `canon-sym-${Date.now()}-${Math.random()}`,
+        [marker]: "kept",
+      } as unknown as JSONSchemaObj;
+      const interned = internSchema(schema) as JSONSchemaObj;
+      expect(Object.keys(interned)).toEqual(["title", "type"]); // string keys sorted
+      expect((interned as Record<symbol, unknown>)[marker]).toBe("kept");
+    });
   });
 });
