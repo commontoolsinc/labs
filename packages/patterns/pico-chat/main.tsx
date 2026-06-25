@@ -293,14 +293,13 @@ const textStyle = {
 const messagePaneStyle = {
   height: "320px",
   overflowY: "auto",
-  display: "flex",
-  flexDirection: "column-reverse",
 };
 
 const messageListStyle = {
   minHeight: "100%",
   display: "flex",
-  flexDirection: "column-reverse",
+  flexDirection: "column",
+  justifyContent: "flex-end",
 };
 
 const reactionSummaryStyle = {
@@ -324,7 +323,6 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const rows = computed(() =>
       displayMessages([...messages], currentViewerName(name))
     );
-    const visibleRows = computed(() => [...rows].reverse());
 
     return {
       [NAME]: "Emo chat",
@@ -405,6 +403,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
               .pico-message-row {
                 border-radius: 6px;
                 margin: 0 -0.5rem;
+                overflow-anchor: none;
                 padding: 0.375rem 2.5rem 0.375rem 0.5rem;
                 position: relative;
                 transition: background-color 120ms ease;
@@ -441,6 +440,21 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 opacity: 1;
                 pointer-events: auto;
               }
+
+              .pico-scroll-anchor {
+                appearance: none;
+                align-self: flex-end;
+                background: transparent;
+                border: 0;
+                height: 1px;
+                opacity: 0;
+                outline: 0;
+                overflow-anchor: auto;
+                overflow: hidden;
+                padding: 0;
+                pointer-events: none;
+                width: 1px;
+              }
             `}
           </style>
           <cf-vstack gap="4" padding="6" style="max-width: 720px;">
@@ -463,13 +477,13 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 style={messagePaneStyle}
               >
                 <div style={messageListStyle}>
-                  {visibleRows.length === 0
+                  {rows.length === 0
                     ? (
                       <div style={{ color: "var(--cf-colors-muted, #64748b)" }}>
                         No messages yet
                       </div>
                     )
-                    : visibleRows.map((row) => (
+                    : rows.map((row) => (
                       <div className={row.className}>
                         {row.showAuthor
                           ? (
@@ -615,6 +629,14 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                           : null}
                       </div>
                     ))}
+                  <button
+                    id="chat-latest"
+                    type="button"
+                    className="pico-scroll-anchor"
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    autoFocus
+                  />
                 </div>
               </div>
             </cf-card>
