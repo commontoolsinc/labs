@@ -1072,10 +1072,15 @@ export class WorkerReconciler {
     if (state.tagName !== CFC_AUTHORSHIP_TAG) {
       return;
     }
-    if (policy.textIntegrity?.boundaryNodeId !== state.nodeId) {
+    if (
+      policy.textIntegrity !== undefined &&
+      policy.textIntegrity.boundaryNodeId !== state.nodeId
+    ) {
       return;
     }
-    const value = this.hasTextIntegrityBlockForBoundary(state, state.nodeId)
+    const value = policy.textIntegrity === undefined
+      ? "ok"
+      : this.hasTextIntegrityBlockForBoundary(state, state.nodeId)
       ? "blocked"
       : "ok";
     this.queueOps([{
