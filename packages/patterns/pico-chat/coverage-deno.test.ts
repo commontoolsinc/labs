@@ -85,25 +85,29 @@ Deno.test("pico chat groups legacy same-name messages without cell links", () =>
   ]);
 });
 
-Deno.test("pico chat toggles emoji reactions by display name", () => {
-  const alex = PicoChat({
+Deno.test("pico chat lets another named user toggle emoji reactions", () => {
+  const author = PicoChat({
     messages: [],
+    name: "Tony",
+  });
+  author.send.send({ detail: { message: "Reactable" } });
+
+  const reactor = PicoChat({
+    messages: author.messages,
     name: "Alex",
   });
-  alex.send.send({ detail: { message: "Reactable" } });
-  const [message] = alex.messages.get();
 
-  alex.react.send({ message, emoji: "👍" });
+  reactor.react.send({ messageIndex: 0, emoji: "👍" });
   assertEquals(
-    message.reactions?.map(({ emoji, byName }) => ({
+    author.messages.get()[0].reactions?.map(({ emoji, byName }) => ({
       emoji,
       byName,
     })),
     [{ emoji: "👍", byName: "Alex" }],
   );
 
-  alex.react.send({ message, emoji: "👍" });
-  assertEquals(message.reactions, []);
+  reactor.react.send({ messageIndex: 0, emoji: "👍" });
+  assertEquals(author.messages.get()[0].reactions, []);
 });
 
 Deno.test("pico chat ignores invalid reaction attempts", () => {
@@ -112,22 +116,22 @@ Deno.test("pico chat ignores invalid reaction attempts", () => {
     name: "Alex",
   });
   subject.send.send({ detail: { message: "Valid" } });
-  const [message] = subject.messages.get();
-  const detached = { from: "Alex", body: "Detached" };
 
-  subject.react.send({ message, emoji: "   " });
-  subject.react.send({ message: detached, emoji: "👍" });
+  subject.react.send({ messageIndex: 0, emoji: "   " });
+  subject.react.send({ messageIndex: -1, emoji: "👍" });
+  subject.react.send({ messageIndex: 99, emoji: "👍" });
+  subject.react.send({ messageIndex: 0.5, emoji: "👍" });
 
   const emptyNameSubject = PicoChat({
     messages: subject.messages,
     name: " ",
   });
-  emptyNameSubject.react.send({ message, emoji: "👍" });
+  emptyNameSubject.react.send({ messageIndex: 0, emoji: "👍" });
 
-  assertEquals(message.reactions, []);
+  assertEquals(subject.messages.get()[0].reactions, []);
 });
 
-Deno.test("pico chat treats the same display name as the same reactor", () => {
+Deno.test("pico chat prevents reactions to own display-name messages", () => {
   const firstAlex = PicoChat({
     messages: [],
     name: "Alex",
@@ -140,8 +144,8 @@ Deno.test("pico chat treats the same display name as the same reactor", () => {
     name: "Alex",
   });
 
-  firstAlex.react.send({ message, emoji: "❤️" });
-  secondAlex.react.send({ message, emoji: "❤️" });
+  firstAlex.react.send({ messageIndex: 0, emoji: "❤️" });
+  secondAlex.react.send({ messageIndex: 0, emoji: "❤️" });
 
   assertEquals(message.reactions, []);
 });

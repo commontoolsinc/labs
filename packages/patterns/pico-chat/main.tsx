@@ -1,7 +1,6 @@
 import {
   computed,
   Default,
-  equals,
   handler,
   NAME,
   pattern,
@@ -37,7 +36,7 @@ export interface SendEvent {
 }
 
 export interface ReactEvent {
-  message: ChatMessage;
+  messageIndex: number;
   emoji: string;
 }
 
@@ -47,11 +46,13 @@ export interface MessageGroup {
 }
 
 interface DisplayMessage {
+  index: number;
   from: string;
   body: string;
   message: ChatMessage;
   showAuthor: boolean;
   className: string;
+  canReact: boolean;
 }
 
 export interface PicoChatInput {
@@ -84,18 +85,16 @@ const sendMessage = handler<SendEvent, {
 const toggleReaction = handler<ReactEvent, {
   messages: MessagesCell;
   name: NameCell;
-}>(({ message, emoji }, { messages, name }) => {
+}>(({ messageIndex, emoji }, { messages, name }) => {
   const mark = emoji.trim();
   const byName = name.get().trim();
-  if (!message || !mark || !byName) return;
+  if (!mark || !byName || !Number.isInteger(messageIndex)) return;
 
   const currentMessages = messages.get();
-  const index = currentMessages.findIndex((candidate) =>
-    equals(candidate, message)
-  );
-  if (index < 0) return;
+  const message = currentMessages[messageIndex];
+  if (!message || message.from === byName) return;
 
-  const reactionsCell = messages.key(index).key("reactions");
+  const reactionsCell = messages.key(messageIndex).key("reactions");
   const reactions = asReactions(reactionsCell.get());
   const existingIndex = reactions.findIndex((reaction) =>
     reaction.emoji === mark && reaction.byName === byName
@@ -135,17 +134,22 @@ export function groupMessages(
   return groups;
 }
 
-function displayMessages(messages: readonly ChatMessage[]): DisplayMessage[] {
+function displayMessages(
+  messages: readonly ChatMessage[],
+  viewerName: string,
+): DisplayMessage[] {
   return messages.map((message, index) => {
     const showAuthor = index === 0 || messages[index - 1].from !== message.from;
     const endGroup = index === messages.length - 1 ||
       messages[index + 1].from !== message.from;
 
     return {
+      index,
       from: message.from,
       body: message.body,
       message,
       showAuthor,
+      canReact: viewerName !== "" && message.from !== viewerName,
       className: [
         "pico-message-row",
         showAuthor ? "pico-message-row-start" : "",
@@ -164,6 +168,16 @@ function reactionCount(message: ChatMessage, emoji: string) {
 function reactionLabel(message: ChatMessage, emoji: string) {
   const count = reactionCount(message, emoji);
   return count > 0 ? `${emoji} ${count}` : emoji;
+}
+
+function hasReaction(message: ChatMessage, emoji: string) {
+  return reactionCount(message, emoji) > 0;
+}
+
+function hasAnyReaction(message: ChatMessage) {
+  return hasReaction(message, "👍") ||
+    hasReaction(message, "❤️") ||
+    hasReaction(message, "😂");
 }
 
 const textStyle = {
@@ -191,12 +205,21 @@ const reactionRowStyle = {
   minHeight: "1.75rem",
 };
 
+const reactionBadgeStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: "1.75rem",
+  padding: "0 0.35rem",
+};
+
 export default pattern<PicoChatInput, PicoChatOutput>(
   ({ messages, name }) => {
     const send = sendMessage({ messages, name });
     const react = toggleReaction({ messages, name });
     const groups = computed(() => groupMessages([...messages]));
-    const rows = computed(() => displayMessages([...messages]));
+    const rows = computed(() =>
+      displayMessages([...messages], String(name).trim())
+    );
 
     return {
       [NAME]: "Pico chat",
@@ -268,44 +291,74 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                         <div dir="ltr" style={textStyle}>
                           {row.body}
                         </div>
-                        <div
-                          className="pico-reactions"
-                          style={reactionRowStyle}
-                        >
-                          <cf-button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              react.send({
-                                message: row.message,
-                                emoji: "👍",
-                              })}
-                          >
-                            {reactionLabel(row.message, "👍")}
-                          </cf-button>
-                          <cf-button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              react.send({
-                                message: row.message,
-                                emoji: "❤️",
-                              })}
-                          >
-                            {reactionLabel(row.message, "❤️")}
-                          </cf-button>
-                          <cf-button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              react.send({
-                                message: row.message,
-                                emoji: "😂",
-                              })}
-                          >
-                            {reactionLabel(row.message, "😂")}
-                          </cf-button>
-                        </div>
+                        {row.canReact
+                          ? (
+                            <div
+                              className="pico-reactions"
+                              style={reactionRowStyle}
+                            >
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  react.send({
+                                    messageIndex: row.index,
+                                    emoji: "👍",
+                                  })}
+                              >
+                                {reactionLabel(row.message, "👍")}
+                              </cf-button>
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  react.send({
+                                    messageIndex: row.index,
+                                    emoji: "❤️",
+                                  })}
+                              >
+                                {reactionLabel(row.message, "❤️")}
+                              </cf-button>
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  react.send({
+                                    messageIndex: row.index,
+                                    emoji: "😂",
+                                  })}
+                              >
+                                {reactionLabel(row.message, "😂")}
+                              </cf-button>
+                            </div>
+                          )
+                          : hasAnyReaction(row.message)
+                          ? (
+                            <div style={reactionRowStyle}>
+                              {hasReaction(row.message, "👍")
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {reactionLabel(row.message, "👍")}
+                                  </span>
+                                )
+                                : null}
+                              {hasReaction(row.message, "❤️")
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {reactionLabel(row.message, "❤️")}
+                                  </span>
+                                )
+                                : null}
+                              {hasReaction(row.message, "😂")
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {reactionLabel(row.message, "😂")}
+                                  </span>
+                                )
+                                : null}
+                            </div>
+                          )
+                          : null}
                       </div>
                     ))}
                 </div>
