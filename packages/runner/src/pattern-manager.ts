@@ -513,19 +513,47 @@ export class PatternManager {
     // accumulate open transactions.
     const readTx = this.runtime.edit();
 
+    const byteCache = this.runtime.moduleByteCache;
+    // The per-space storage closure served the full module set (already durable
+    // in this space, so no write-back needed).
     let warmHit = false;
+    // The process-level byte cache served the full module set, skipping the
+    // transform-and-emit step (the TypeScript program build, type-check, the
+    // type-driven CF transformer, and the emit — `compileToModules`). The bytes
+    // are durable in the byte cache but NOT necessarily in this space's persisted
+    // cache, so this still triggers a write-back.
+    let processServed = false;
     let compiled;
     try {
       compiled = await harness.compileToRecordGraph(program, {
         fabricImports: { space },
-        // The bodies returned below come from `loadCompiledClosure`, an
-        // integrity-gated (`requiredIntegrity`, fail-closed) read of the
-        // compiled set. On a full hit the CFC integrity label is the security
-        // boundary, so skip the redundant per-module SES re-verification (threat
-        // model: docs/specs/module-loading.md). A partial/miss returns undefined
-        // below → fresh compile → bodies are SES-verified as usual.
+        // The bodies returned below come either from the process byte cache or
+        // from `loadCompiledClosure`, an integrity-gated (`requiredIntegrity`,
+        // fail-closed) read of the compiled set. On a full hit the byte cache's
+        // provenance (see the channel below) / the CFC integrity label is the
+        // security boundary, so skip the redundant per-module SES re-verification
+        // (threat model: docs/specs/module-loading.md). A partial/miss returns
+        // undefined below → fresh compile → bodies are SES-verified as usual.
         trustedBodies: true,
         precompiledModulesFor: async ({ entryIdentity, identities }) => {
+          // Process byte cache first (cross-runtime, cross-space): a full hit
+          // skips BOTH the transform-and-emit step (`compileToModules`: TS
+          // program build, type-check, CF transform, emit) and the per-space
+          // storage read. Trust by provenance: bytes this process compiled were
+          // SES-verified then; bytes a test seeded from a CI disk file were not —
+          // those are trusted via the workflow's cache key, which fingerprints
+          // every compile input. Either path is test/CI-only: nothing in
+          // production installs a byte cache.
+          if (byteCache) {
+            const bodies = byteCache.getCompleteSet(
+              cacheOpts.runtimeVersion,
+              identities,
+            );
+            if (bodies) {
+              processServed = true;
+              return bodies;
+            }
+          }
           // Concurrency-safe timing: explicit start (no shared timer key, which
           // parallel compiles would clobber). Same for the others below.
           const readStart = performance.now();
@@ -564,6 +592,12 @@ export class PatternManager {
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
     cacheCtx.onEntryIdentity?.(entryIdentity);
 
+    // Populate the process byte cache with this program's module bytes (freshly
+    // compiled, or reused from storage). Idempotent and content-addressed, so a
+    // redundant put is harmless. A later runtime or space then reuses these
+    // modules instead of re-transforming them.
+    byteCache?.putAll(cacheOpts.runtimeVersion, modules);
+
     const evalStart = performance.now();
     const result = harness.evaluateRecordGraph(
       id,
@@ -574,32 +608,28 @@ export class PatternManager {
     logger.time(evalStart, "compile-cache", "evaluate");
 
     if (warmHit) {
+      // The per-space storage closure was just READ from this space, i.e. it is
+      // already durable here — no write-back.
       this.esmCacheStats.hits++;
     } else {
-      this.esmCacheStats.misses++;
-      // Cold/partial: persist the freshly compiled module set. AWAITED
-      // (identity E4): refs-only pattern JSON makes artifact persistence part
-      // of the compilation contract — a cell can only carry a `$patternRef`
-      // after compilePattern returned, so completing the write here
-      // guarantees every persisted ref has a durable closure behind it (no
-      // race against session end). Cold compiles only; a warm hit means the
-      // closure was just READ from storage, i.e. it is already durable. A
-      // failed cache write fails the compile: persisted refs-only pattern JSON
-      // would otherwise point at a closure that is not durable in `space`.
-      const writeBack = this.writeBackCompileCache(
+      this.esmCacheStats[processServed ? "hits" : "misses"]++;
+      // Persist the module set into this space. AWAITED (identity E4): refs-only
+      // pattern JSON makes artifact persistence part of the compilation
+      // contract — a cell can only carry a `$patternRef` after compilePattern
+      // returned, so completing the write here guarantees every persisted ref
+      // has a durable closure behind it (no race against session end). This
+      // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
+      // the transform-and-emit step was skipped, but this space's persisted
+      // cache may be empty (e.g. a fresh space), and the by-identity reload path
+      // needs the closure here. A failed write fails the compile: persisted
+      // refs-only pattern JSON would otherwise point at a closure that is not
+      // durable in `space`.
+      await this.persistCompileCacheTracked(
         space,
         modules,
         entryIdentity,
         cacheOpts,
       );
-      this.compileCacheWrites.add(writeBack);
-      this.pendingCacheWriteBacks.add(writeBack);
-      try {
-        await writeBack;
-      } finally {
-        this.compileCacheWrites.delete(writeBack);
-        this.pendingCacheWriteBacks.delete(writeBack);
-      }
     }
 
     return this.patternFromEvaluation(result, program, entryIdentity);
@@ -1070,6 +1100,35 @@ export class PatternManager {
     this.modulesByIdentity.set(entryIdentity, cached);
     setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
     return pattern;
+  }
+
+  /**
+   * Write the module set into `space` and AWAIT it, tracking the in-flight
+   * promise in `compileCacheWrites` + `pendingCacheWriteBacks` (so graceful
+   * shutdown and closure replication can observe it). A failure PROPAGATES and
+   * fails the compile: refs-only pattern JSON makes a durable closure in `space`
+   * part of the compilation contract.
+   */
+  private async persistCompileCacheTracked(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
+    const writeBack = this.writeBackCompileCache(
+      space,
+      modules,
+      entryIdentity,
+      opts,
+    );
+    this.compileCacheWrites.add(writeBack);
+    this.pendingCacheWriteBacks.add(writeBack);
+    try {
+      await writeBack;
+    } finally {
+      this.compileCacheWrites.delete(writeBack);
+      this.pendingCacheWriteBacks.delete(writeBack);
+    }
   }
 
   /**
