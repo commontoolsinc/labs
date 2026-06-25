@@ -60,15 +60,15 @@ interface DisplayMessage {
   showAuthor: boolean;
   className: string;
   canReact: boolean;
-  thumbsActive: boolean;
-  thumbsLabel: string;
-  thumbsClassName: string;
-  heartActive: boolean;
-  heartLabel: string;
-  heartClassName: string;
-  laughActive: boolean;
-  laughLabel: string;
-  laughClassName: string;
+  thumbsCount: number;
+  thumbsPicked: boolean;
+  thumbsSummaryLabel: string;
+  heartCount: number;
+  heartPicked: boolean;
+  heartSummaryLabel: string;
+  laughCount: number;
+  laughPicked: boolean;
+  laughSummaryLabel: string;
   hasAnyReaction: boolean;
 }
 
@@ -159,9 +159,9 @@ function displayMessages(
     const showAuthor = index === 0 || messages[index - 1].from !== message.from;
     const endGroup = index === messages.length - 1 ||
       messages[index + 1].from !== message.from;
-    const thumbsActive = hasReaction(message, "👍");
-    const heartActive = hasReaction(message, "❤️");
-    const laughActive = hasReaction(message, "😂");
+    const thumbsCount = reactionCount(message, "👍");
+    const heartCount = reactionCount(message, "❤️");
+    const laughCount = reactionCount(message, "😂");
 
     return {
       index,
@@ -169,16 +169,16 @@ function displayMessages(
       body: message.body,
       showAuthor,
       canReact: viewerName !== "" && message.from !== viewerName,
-      thumbsActive,
-      thumbsLabel: reactionLabel(message, "👍"),
-      thumbsClassName: reactionOptionClass(thumbsActive),
-      heartActive,
-      heartLabel: reactionLabel(message, "❤️"),
-      heartClassName: reactionOptionClass(heartActive),
-      laughActive,
-      laughLabel: reactionLabel(message, "😂"),
-      laughClassName: reactionOptionClass(laughActive),
-      hasAnyReaction: hasAnyReaction(message),
+      thumbsCount,
+      thumbsPicked: hasViewerReaction(message, "👍", viewerName),
+      thumbsSummaryLabel: reactionSummaryLabel("👍", thumbsCount),
+      heartCount,
+      heartPicked: hasViewerReaction(message, "❤️", viewerName),
+      heartSummaryLabel: reactionSummaryLabel("❤️", heartCount),
+      laughCount,
+      laughPicked: hasViewerReaction(message, "😂", viewerName),
+      laughSummaryLabel: reactionSummaryLabel("😂", laughCount),
+      hasAnyReaction: thumbsCount > 0 || heartCount > 0 || laughCount > 0,
       className: [
         "pico-message-row",
         showAuthor ? "pico-message-row-start" : "",
@@ -194,25 +194,25 @@ function reactionCount(message: ChatMessage, emoji: string) {
   ).length;
 }
 
-function reactionLabel(message: ChatMessage, emoji: string) {
-  const count = reactionCount(message, emoji);
+function reactionSummaryLabel(emoji: string, count: number) {
   return count > 0 ? `${emoji} ${count}` : emoji;
 }
 
-function hasReaction(message: ChatMessage, emoji: string) {
-  return reactionCount(message, emoji) > 0;
+function hasViewerReaction(
+  message: ChatMessage,
+  emoji: string,
+  viewerName: string,
+) {
+  return viewerName !== "" &&
+    asReactions(message.reactions).some((reaction) =>
+      reaction.emoji === emoji && reaction.byName === viewerName
+    );
 }
 
-function hasAnyReaction(message: ChatMessage) {
-  return hasReaction(message, "👍") ||
-    hasReaction(message, "❤️") ||
-    hasReaction(message, "😂");
-}
-
-function reactionOptionClass(active: boolean) {
-  return active
-    ? "pico-reaction-option pico-reaction-option-active"
-    : "pico-reaction-option";
+function reactionChoiceClass(picked: boolean) {
+  return picked
+    ? "pico-reaction-choice pico-reaction-choice-picked"
+    : "pico-reaction-choice";
 }
 
 const textStyle = {
@@ -234,8 +234,14 @@ const messageListStyle = {
   flexDirection: "column-reverse",
 };
 
-const reactionRowStyle = {
+const reactionSummaryStyle = {
   display: "flex",
+  flexWrap: "wrap",
+  gap: "0.25rem",
+  minHeight: "1.5rem",
+};
+
+const reactionPickerStyle = {
   flexWrap: "wrap",
   gap: "0.25rem",
   minHeight: "1.75rem",
@@ -264,15 +270,15 @@ export default pattern<PicoChatInput, PicoChatOutput>(
         <cf-screen>
           <style>
             {`
-              .pico-reaction-option {
+              .pico-reaction-picker {
+                display: none;
                 opacity: 0;
                 pointer-events: none;
                 transition: opacity 120ms ease;
               }
 
-              .pico-reaction-option-active {
-                opacity: 1;
-                pointer-events: auto;
+              .pico-reaction-choice-picked {
+                background: var(--cf-colors-muted, #e2e8f0);
               }
 
               .pico-message-row {
@@ -288,8 +294,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 border-bottom: 1px solid var(--cf-colors-border, #e2e8f0);
               }
 
-              .pico-message-row:hover .pico-reaction-option,
-              .pico-message-row:has(.pico-reaction-option:focus-visible) .pico-reaction-option {
+              .pico-message-row:hover .pico-reaction-picker,
+              .pico-message-row:has(.pico-reaction-choice:focus-visible) .pico-reaction-picker {
+                display: flex;
                 opacity: 1;
                 pointer-events: auto;
               }
@@ -333,14 +340,43 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                         <div dir="ltr" style={textStyle}>
                           {row.body}
                         </div>
+                        {row.hasAnyReaction
+                          ? (
+                            <div style={reactionSummaryStyle}>
+                              {row.thumbsCount > 0
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {row.thumbsSummaryLabel}
+                                  </span>
+                                )
+                                : null}
+                              {row.heartCount > 0
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {row.heartSummaryLabel}
+                                  </span>
+                                )
+                                : null}
+                              {row.laughCount > 0
+                                ? (
+                                  <span style={reactionBadgeStyle}>
+                                    {row.laughSummaryLabel}
+                                  </span>
+                                )
+                                : null}
+                            </div>
+                          )
+                          : null}
                         {row.canReact
                           ? (
                             <div
-                              className="pico-reactions"
-                              style={reactionRowStyle}
+                              className="pico-reaction-picker"
+                              style={reactionPickerStyle}
                             >
                               <cf-button
-                                className={row.thumbsClassName}
+                                className={reactionChoiceClass(
+                                  row.thumbsPicked,
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -349,10 +385,12 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "👍",
                                   })}
                               >
-                                {row.thumbsLabel}
+                                👍
                               </cf-button>
                               <cf-button
-                                className={row.heartClassName}
+                                className={reactionChoiceClass(
+                                  row.heartPicked,
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -361,10 +399,12 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "❤️",
                                   })}
                               >
-                                {row.heartLabel}
+                                ❤️
                               </cf-button>
                               <cf-button
-                                className={row.laughClassName}
+                                className={reactionChoiceClass(
+                                  row.laughPicked,
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -373,34 +413,8 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                     emoji: "😂",
                                   })}
                               >
-                                {row.laughLabel}
+                                😂
                               </cf-button>
-                            </div>
-                          )
-                          : row.hasAnyReaction
-                          ? (
-                            <div style={reactionRowStyle}>
-                              {row.thumbsActive
-                                ? (
-                                  <span style={reactionBadgeStyle}>
-                                    {row.thumbsLabel}
-                                  </span>
-                                )
-                                : null}
-                              {row.heartActive
-                                ? (
-                                  <span style={reactionBadgeStyle}>
-                                    {row.heartLabel}
-                                  </span>
-                                )
-                                : null}
-                              {row.laughActive
-                                ? (
-                                  <span style={reactionBadgeStyle}>
-                                    {row.laughLabel}
-                                  </span>
-                                )
-                                : null}
                             </div>
                           )
                           : null}
