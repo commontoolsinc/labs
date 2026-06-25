@@ -4,7 +4,6 @@ import type {
   Source,
 } from "@commonfabric/js-compiler";
 import type { MemorySpace } from "../runtime.ts";
-import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import type {
   CachedCompiledModule,
   CompiledModuleGraph,
@@ -33,10 +32,6 @@ export interface TypeScriptHarnessProcessOptions {
   getTransformedProgram?: (program: Program) => void;
   // Show verbose TypeScript error messages instead of simplified hints.
   verboseErrors?: boolean;
-  // Collect statement-reach coverage for pattern source. It records authored
-  // statement ranges that ran; synthetic statements without source positions are
-  // not counted.
-  patternCoverage?: PatternCoverageCollector;
   // Cached per-module compiled bodies keyed by content-addressed module
   // identity (the prefix-free `cf:module/<hash>` minus the scheme). Used only on
   // the ESM record-graph path: when every emitted module is present,

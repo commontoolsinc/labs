@@ -534,6 +534,113 @@ Deno.test("pattern coverage keeps raw mount report keys before LCOV emission", (
   );
 });
 
+Deno.test("pattern coverage normalizes file URLs and relative paths", () => {
+  const fileUrlCoverage = new PatternCoverageCollector();
+  fileUrlCoverage.registerSpan({
+    fileName: "file:///tmp/pattern.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+
+  assertEquals(fileUrlCoverage.report().files[0].path, "/tmp/pattern.tsx");
+
+  const absoluteCoverage = new PatternCoverageCollector();
+  absoluteCoverage.registerSpan({
+    fileName: "/absolute.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+
+  assertEquals(
+    absoluteCoverage.report({ root: "/repo" }).files[0].path,
+    "/repo/absolute.tsx",
+  );
+
+  const relativeCoverage = new PatternCoverageCollector();
+  relativeCoverage.registerSpan({
+    fileName: "relative.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+
+  assertEquals(
+    relativeCoverage.report({ root: "/repo" }).files[0].path,
+    "/repo/relative.tsx",
+  );
+  assertEquals(relativeCoverage.report().files[0].path, "relative.tsx");
+});
+
+Deno.test("pattern coverage ignores non-runtime spans", () => {
+  const coverage = new PatternCoverageCollector();
+  coverage.registerSpan({
+    fileName: "/subject.tsx",
+    id: 1,
+    kind: "non-runtime" as "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+
+  assertObjectMatch(coverage.report().files[0], {
+    totals: {
+      runtimeLines: 0,
+      coveredRuntimeLines: 0,
+      uncoveredRuntimeLines: 0,
+    },
+  });
+});
+
+Deno.test("pattern coverage uses the highest hit count for equal-width spans", () => {
+  const coverage = new PatternCoverageCollector();
+  coverage.registerSpan({
+    fileName: "/subject.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+  coverage.registerSpan({
+    fileName: "/subject.tsx",
+    id: 2,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+  coverage.hit("/subject.tsx", 1);
+  coverage.hit("/subject.tsx", 2);
+  coverage.hit("/subject.tsx", 2);
+
+  assertEquals(
+    patternCoverageReportToLcov(coverage.report()),
+    [
+      "TN:pattern-runtime",
+      "SF:/subject.tsx",
+      "DA:1,2",
+      "LF:1",
+      "LH:1",
+      "end_of_record",
+      "",
+    ].join("\n"),
+  );
+});
+
 Deno.test("pattern coverage excludes test files by default", () => {
   const coverage = new PatternCoverageCollector();
   coverage.registerSpan({

@@ -1,5 +1,13 @@
-import { assertEquals, assertMatch, assertNotMatch } from "@std/assert";
-import { transformInjectHelperModule } from "../src/harness/pretransform.ts";
+import {
+  assertEquals,
+  assertMatch,
+  assertNotMatch,
+  assertThrows,
+} from "@std/assert";
+import {
+  preserveLineCount,
+  transformInjectHelperModule,
+} from "../src/harness/pretransform.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 Deno.test("transformInjectHelperModule transforms by default and respects cf-disable-transform", () => {
@@ -75,11 +83,13 @@ Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js source
 // Coverage remapping assumes this pretransform only adds the one-line helper
 // prelude. Mixed import splitting must preserve the original line count.
 Deno.test("mixed import rewrite must not drift coverage line numbers", () => {
-  const markerOutputLine = (contents: string): number =>
+  const transformedContents = (contents: string): string =>
     transformInjectHelperModule({
       main: "/m.tsx",
       files: [{ name: "/m.tsx", contents }],
-    }).files[0]!.contents.split("\n").findIndex((line) =>
+    }).files[0]!.contents;
+  const markerOutputLine = (contents: string): number =>
+    transformedContents(contents).split("\n").findIndex((line) =>
       line.includes("MARKER")
     ) + 1;
 
@@ -100,4 +110,37 @@ Deno.test("mixed import rewrite must not drift coverage line numbers", () => {
   const multiLineNamedBindings =
     `import D, {\n  a,\n  b,\n} from "x";\nconst MARKER = 1;\n`;
   assertEquals(markerOutputLine(multiLineNamedBindings), 6);
+
+  const defaultInNamedBindings =
+    `import { default as D, a } from "x";\nconst MARKER = 1;\n`;
+  assertEquals(markerOutputLine(defaultInNamedBindings), 3);
+  assertMatch(
+    transformedContents(defaultInNamedBindings),
+    /import D from "x"; import \{ a \} from "x";/,
+  );
+
+  const onlyDefaultInNamedBindings =
+    `import { default as D } from "x";\nconst MARKER = 1;\n`;
+  assertEquals(markerOutputLine(onlyDefaultInNamedBindings), 3);
+  assertMatch(
+    transformedContents(onlyDefaultInNamedBindings),
+    /import D from "x";\nconst MARKER/,
+  );
+
+  const nonStringImportAttribute =
+    `import { default as D, a } from "x" with { type: json };\nconst MARKER = 1;\n`;
+  assertEquals(markerOutputLine(nonStringImportAttribute), 3);
+  assertMatch(
+    transformedContents(nonStringImportAttribute),
+    /with \{ type: json \}; import \{ a \} from "x" with \{ type: json \};/,
+  );
+});
+
+Deno.test("preserveLineCount rejects expanding rewrites", () => {
+  assertEquals(preserveLineCount("one\ntwo", "one"), "one\n");
+  assertThrows(
+    () => preserveLineCount("one", "one\ntwo"),
+    Error,
+    "Import rewrite expanded from 1 to 2 lines",
+  );
 });

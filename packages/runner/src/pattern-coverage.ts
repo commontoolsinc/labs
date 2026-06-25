@@ -101,6 +101,12 @@ export class PatternCoverageCollector {
   }
 }
 
+declare module "./harness/types.ts" {
+  interface TypeScriptHarnessProcessOptions {
+    patternCoverage?: PatternCoverageCollector;
+  }
+}
+
 export async function writePatternCoverageLcov(
   collector: PatternCoverageCollector,
   outputPath: string,

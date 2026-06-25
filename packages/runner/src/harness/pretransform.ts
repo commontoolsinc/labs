@@ -107,10 +107,7 @@ function normalizeMixedModuleImports(source: string): string {
     }
 
     const { importClause } = statement;
-    const namedBindings = importClause.namedBindings;
-    if (!namedBindings || !ts.isNamedImports(namedBindings)) {
-      continue;
-    }
+    const namedBindings = importClause.namedBindings as ts.NamedImports;
 
     let rewrittenStatements: ts.ImportDeclaration[] | undefined;
     if (importClause.name) {
@@ -265,7 +262,10 @@ function cloneImportAttributeValue(value: ts.Expression): ts.Expression {
   return value;
 }
 
-function preserveLineCount(original: string, replacement: string): string {
+export function preserveLineCount(
+  original: string,
+  replacement: string,
+): string {
   const originalLineCount = original.split(/\r\n|\r|\n/).length;
   const replacementLineCount = replacement.split(/\r\n|\r|\n/).length;
   if (replacementLineCount > originalLineCount) {

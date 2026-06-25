@@ -1463,13 +1463,16 @@ function patternCoverageOptionsForCompile(
       },
     ]),
   );
+  const unknownSourceInfo = {
+    lineOffset: 0,
+    lineCount: Number.POSITIVE_INFINITY,
+  };
 
   return {
     fileName: (sourceFileName) =>
       coverageFilenameFor(sourceFileName, params.id, params.mounts),
     mapSpan: (span) => {
-      const info = sourceInfo.get(span.fileName);
-      if (info === undefined) return span;
+      const info = sourceInfo.get(span.fileName) ?? unknownSourceInfo;
 
       const startLine = span.startLine + info.lineOffset;
       if (startLine < 1 || startLine > info.lineCount) return undefined;
