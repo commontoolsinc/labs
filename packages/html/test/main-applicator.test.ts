@@ -297,6 +297,98 @@ Deno.test("DomApplicator - child operations", async (t) => {
     assertEquals(parent.childNodes[1].tagName, "SPAN");
   });
 
+  await t.step(
+    "replays insert when child is created later in the batch",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+          { op: "create-element", nodeId: 1, tagName: "div" },
+          { op: "create-element", nodeId: 2, tagName: "span" },
+        ],
+      });
+
+      const parent = applicator.getNode(1) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      assertEquals(parent.childNodes.length, 1);
+      assertEquals(parent.childNodes[0].tagName, "SPAN");
+    },
+  );
+
+  await t.step(
+    "does not replay stale placement after child moves elsewhere",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "section" },
+          { op: "insert-child", parentId: 2, childId: 3, beforeId: null },
+          { op: "create-element", nodeId: 3, tagName: "span" },
+          { op: "insert-child", parentId: 1, childId: 3, beforeId: null },
+          { op: "create-element", nodeId: 2, tagName: "div" },
+        ],
+      });
+
+      const laterParent = applicator.getNode(1) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      const staleParent = applicator.getNode(2) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      assertEquals(laterParent.childNodes.map((child) => child.tagName), [
+        "SPAN",
+      ]);
+      assertEquals(staleParent.childNodes, []);
+    },
+  );
+
+  await t.step(
+    "does not replay insert after child is removed before creation",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "div" },
+          { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+          { op: "remove-node", nodeId: 2 },
+          { op: "create-element", nodeId: 2, tagName: "span" },
+        ],
+      });
+
+      const parent = applicator.getNode(1) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      assertEquals(parent.childNodes, []);
+      assertEquals(
+        (applicator.getNode(2) as unknown as { tagName: string }).tagName,
+        "SPAN",
+      );
+    },
+  );
+
   await t.step("moves child to new position", () => {
     const doc = createMockDocument();
     const applicator = createDomApplicator({
