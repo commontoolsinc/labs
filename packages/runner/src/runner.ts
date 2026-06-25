@@ -4143,19 +4143,81 @@ export class Runner {
         if (!this.elementLeavesSurviveSerialization(impl)) return false;
         continue;
       }
-      // A function-bearing leaf must carry a `$implRef` the resolver can bind, or
-      // the serialized runtime form is unresolvable.
+      // A function-bearing leaf must be recoverable from the SERIALIZED form the
+      // runtime `$ri-collection-map` builtin reads (`getRaw()`), where the live
+      // function is gone. Recovery is by the content-addressed `{identity,symbol}`
+      // ref `moduleToJSON` will emit as `$implRef`. The live in-builder module does
+      // NOT yet carry a `$implRef` FIELD (that field is added only at serialize
+      // time), so checking `module.$implRef` alone wrongly rejects EVERY inline
+      // `computed()`/`lift()` element leaf (`__cfLift_N` — e.g. a rendered row's
+      // `{computed(content.slice)}` / `{computed(tags.join)}`). Recover the
+      // content-addressed `{identity, symbol}` ref `moduleToJSON` will MINT as
+      // `$implRef` — the explicit field, else the live function's verified
+      // provenance — and require the SAME resolver the runtime builtin uses to
+      // bind it. If it resolves, the serialized element WILL carry a resolvable
+      // `$implRef`, so lowering to `$ri-collection-map` is sound. (See
+      // `elementLeafImplRefResolvable` for why the host entry-ref is excluded.)
       if (typeof impl === "function" || typeof impl === "string") {
-        const ref = module.$implRef as
-          | { identity: string; symbol: string }
-          | undefined;
-        const resolved = ref
-          ? this.interpreterImplRefResolver(ref.identity, ref.symbol)
-          : undefined;
-        if (typeof resolved !== "function") return false;
+        if (!this.elementLeafImplRefResolvable(module, impl)) return false;
       }
     }
     return true;
+  }
+
+  /**
+   * True iff a function-bearing element leaf module is recoverable from its
+   * SERIALIZED form (the `getRaw()` round-trip the runtime `$ri-collection-map`
+   * builtin reads) via a CONTENT-ADDRESSED `{identity, symbol}` ref that the
+   * `interpreterImplRefResolver` (the same resolver the runtime builtin uses)
+   * binds to a function.
+   *
+   * The candidate ref is the explicit `module.$implRef` field if present (an
+   * already-serialized element), else the live function's verified provenance
+   * (`getVerifiedProvenance` — the `__cfLift_N`/`__cfPattern_N` content-derived
+   * `{identity, symbol}` recorded during verified evaluation). Both are
+   * content-addressed: keyed into the pattern-manager artifact index, which
+   * SURVIVES the cell round-trip, so a ref that resolves here resolves again
+   * after `getRaw()` (verified: a transformer-compiled rendered map's inline
+   * `computed()` leaves — `__cfLift_4`/`__cfLift_5` — lower and interpret).
+   *
+   * DELIBERATELY EXCLUDED: the host artifact ENTRY-ref (`getArtifactEntryRef` →
+   * `host:N/fnN`). `moduleToJSON` may emit it as `$implRef`, but it is
+   * REGISTRY-/session-scoped (E5 host pseudo-module trust grant), not content-
+   * addressed, and does NOT survive into the form the collection builtin reads
+   * back: a builder-direct `cf.str` element leaf resolves to `host:1/fn0` HERE
+   * yet the runtime builtin throws `unresolved element leaf ops` on it. Admitting
+   * it produced a real gate↔runtime skew (the LEVEL-1 coalescing-spike oracle).
+   * Per D-EMISSION-SCOPE we admit only what is PROVABLY recoverable post-
+   * serialization (content-addressed) and keep the entry-ref case a verbatim
+   * LEVEL-1 legacy boundary. Pure: never runs a leaf body.
+   */
+  private elementLeafImplRefResolvable(
+    module: Record<string, unknown>,
+    impl: unknown,
+  ): boolean {
+    const field = module.$implRef as
+      | { identity: string; symbol: string }
+      | undefined;
+    const prov = typeof impl === "function"
+      ? getVerifiedProvenance(impl as (...a: unknown[]) => unknown)
+      : undefined;
+    const candidates: Array<{ identity: string; symbol: string } | undefined> =
+      [
+        field,
+        prov?.symbol !== undefined
+          ? { identity: prov.identity, symbol: prov.symbol }
+          : undefined,
+      ];
+    for (const ref of candidates) {
+      if (!ref) continue;
+      if (
+        typeof this.interpreterImplRefResolver(ref.identity, ref.symbol) ===
+          "function"
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

@@ -259,11 +259,51 @@ commit-tap counting artifact) established the cause and the corrected thesis:
   the common real-UI `.map`. **Scheduler nodes still drop ~20%** (dropping the
   child pattern), so docs and nodes diverge: a node win paid for with VNode-doc
   fragmentation.
-- **Fix direction (open):** the interpreter's per-element result write should
-  consolidate a VNode subtree into one doc like legacy (don't split per VNode
-  node). Until then, the collection footprint win is real on value-result maps,
-  not on rendered-element maps. (This also strengthens the case for re-measuring /
-  Option B before any default-on for rendered collections.)
+- **Fix direction (DOC HALF RESOLVED §4.8, 2026-06-25):** two changes, both in
+  `packages/runner/src`, land the rendered-map doc win — and the bench measured
+  far MORE than the predicted −2/el because the real default-app blocker was one
+  step earlier than this entry assumed:
+  1. **Consolidated element-result write** (`collection-interpreter.ts`): the
+     per-element write was `elemResult.set(out)`, whose `recursivelyAddIDIfNeeded`
+     stamps `[ID]` on every object-inside-an-array (the VNode `children`), which
+     `normalizeAndDiff` `[BRANCH_ID_OBJECT]` then hoists into one doc per nested
+     VNode node — the 1→6 fragmentation. Replaced with a RAW consolidated write
+     `elemResult.setRawUntyped(fabricFromNativeValue(convertCellsToLinks(out)))`,
+     exactly legacy `updateResultProjection`'s primitive (`runner.ts`), so the
+     whole VNode subtree stores INLINE in one element doc. Scalar/object results
+     (W3 oracle `{doubled:N}`) are unaffected — already inline; the docs/el slope
+     only tightens.
+  2. **THE ACTUAL DEFAULT-APP BLOCKER — the lowering gate was too conservative**
+     (`tryLowerCollectionBoundaryNode` → `elementLeavesSurviveSerialization`): a
+     transformer-compiled rendered row's inline `computed()` leaves serialize as
+     module-level `__cfLift_N` lifts with NO `$implRef` *field* on the live
+     in-builder module (that field is minted only at `moduleToJSON` time). The old
+     gate checked the field directly → declined EVERY such element (`RI_LOWER
+     decline: element-leaf-no-implref`), so the notes map NEVER lowered to
+     `$ri-collection-map` — each element ran as a full legacy CHILD PATTERN
+     (`__cfPattern_1` result doc + arg doc + 2 lift docs). The doc tax this entry
+     attributed to "VNode fragmentation inside `$ri-collection-map`" was in fact
+     the per-element child-pattern instantiation; `$ri-collection-map` was never
+     reached. New helper `elementLeafImplRefResolvable` consults the SAME thing
+     `moduleToJSON` uses to mint `$implRef` — the explicit field, else the live
+     function's `getVerifiedProvenance` (content-addressed `{identity, __cfLift_N}`,
+     keyed into the artifact index that SURVIVES the `getRaw()` round-trip). It
+     DELIBERATELY EXCLUDES the host artifact entry-ref (`getArtifactEntryRef` →
+     `host:N/fnN`): that is registry-/session-scoped, NOT content-addressed, and a
+     builder-direct `cf.str` element resolves to it HERE yet the runtime builtin
+     throws `unresolved element leaf ops` on it (a real gate↔runtime skew that the
+     LEVEL-1 `coalescing-spike` oracle caught). Per D-EMISSION-SCOPE we admit only
+     what is provably recoverable post-serialization.
+  - **Measured (default-app notes bench, OFF vs ON):** docs/note **5.00 → 2.00
+    (−60%)**; absolute @N=100 **515 → 220 (−57%)**; nodes/note 5.00 → 3.00 (−40%);
+    wall-clock −19%; conflicts 0; output-equivalence PASS; census `interpreted_ok
+    1/1` (the whole pattern, map lowered). The W3 controlled oracle slope holds at
+    1/el. flag-off runner 698/0 unaffected (`$ri-collection-map` never registered
+    flag-off).
+- **Read-isolation / I/O-coalesce half: STILL OPEN** (see §4.8 secondary). The
+  `RI_F4_IO_COALESCE` per-element-read-isolation ratchet (conflicts/wall-clock on
+  the hot shared poll doc) is a SEPARATE, cross-document contention problem; the
+  doc-consolidation half above does not touch it and it stays gated default-off.
 - Supersedes the notes-bench commit's "inline-value vs cell-link element"
   explanation, which was wrong (the real variable is element RESULT shape:
   scalar vs VNode-tree, not element provenance).

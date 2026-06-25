@@ -36,8 +36,10 @@
  */
 
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { listResultSchema } from "../builtins/list-result-schema.ts";
 import { buildElementEvaluator } from "./element-evaluator.ts";
+import { convertCellsToLinks } from "../cell.ts";
 import { setResultCell } from "../result-utils.ts";
 import { outputSpotFromBinding } from "../builtins/scope-policy.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
@@ -288,7 +290,32 @@ export function collectionInterpreter(
           // Pass the positional `index` too (the `mapWithPattern` element pattern
           // exposes `{element, index}`); an element ignoring `index` never reads it.
           const out = evaluateElement(elemValue, index);
-          elemResult.withTx(childTx).set(out);
+          // §4.8 CONSOLIDATED element-result write (legacy `updateResultProjection`
+          // parity — runner.ts `writableResultCell.setRawUntyped(...)`). A plain
+          // `.set()` runs `recursivelyAddIDIfNeeded`, which stamps `[ID]` on every
+          // object sitting inside an array; for a rendered-VNode element result the
+          // VNode `children` are arrays-of-objects, so each child VNode (`td`,
+          // `cf-vstack`, every `span`) is then hoisted by `normalizeAndDiff`
+          // `[BRANCH_ID_OBJECT]` into its OWN entity document → the per-element
+          // result fragments into ~6 docs (the D-VNODE-DOC-FRAGMENTATION tax). A
+          // RAW write stores the whole VNode subtree INLINE in this one element doc
+          // (exactly what legacy's child-pattern render gets for free), so a
+          // rendered map costs ONE consolidated doc/element. Scalar/object element
+          // results (the W3 oracle's `{doubled:N}`) are unaffected: that object is
+          // the doc root, never an object-inside-an-array, so it already lived
+          // inline — a raw write of the same fabricized value is output-identical
+          // and the docs/element slope only tightens. `convertCellsToLinks` first
+          // turns any live Cell handles the element field reads produced into links
+          // (mirrors what `.set()` would do via `recursivelyAddIDIfNeeded`'s
+          // cell-link passthrough); `fabricFromNativeValue` deep-fabricizes the rest
+          // (same call legacy uses). `setRawUntyped` records the schema-write policy
+          // input for CFC; the element doc's schema is `undefined`, so the legacy
+          // `recordSetupProjectionPolicyInputs` is a no-op here and the per-element
+          // read-isolated tx already carries element i's flow-join label onto this
+          // single doc — pointwise CFC parity is preserved.
+          elemResult.withTx(childTx).setRawUntyped(
+            fabricFromNativeValue(convertCellsToLinks(out)),
+          );
         };
         setResultCell(elemResult, parentCell);
         const cancel = runtime.scheduler.subscribe(
