@@ -12,6 +12,7 @@ import {
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
   type EntityRef,
@@ -628,6 +629,11 @@ export class CellImpl<T extends FabricValue>
 
   // Self-reference for pattern SELF symbol support
   private _selfRef?: OpaqueRef<any>;
+  private viewRefHashCache?: {
+    link: NormalizedFullLink;
+    cfcLabelView: CfcLabelView | undefined;
+    hash: string;
+  };
 
   constructor(
     public readonly runtime: Runtime,
@@ -693,6 +699,18 @@ export class CellImpl<T extends FabricValue>
       link: this.link,
       cfcLabelView: this._cfcLabelView,
     };
+  }
+
+  private viewRefHash(): string {
+    const link = this.link;
+    const cfcLabelView = this._cfcLabelView;
+    const cached = this.viewRefHashCache;
+    if (cached?.link === link && cached.cfcLabelView === cfcLabelView) {
+      return cached.hash;
+    }
+    const hash = hashStringOf({ link, cfcLabelView } satisfies CellViewRef);
+    this.viewRefHashCache = { link, cfcLabelView, hash };
+    return hash;
   }
 
   /**
@@ -882,8 +900,10 @@ export class CellImpl<T extends FabricValue>
     // tx, and the same CFC state. Reuse the prior result when the tx supports
     // caching (the non-reactive sample() wrapper does not) and is still open.
     // The tx clears this cache on any write, so a hit only happens when nothing
-    // has changed since the last read. Keyed on the cell's link identity, which
-    // is stable per cell; `variant` separates reads that differ in options.
+    // has changed since the last read. Key by the stable value of the view ref
+    // (link + CFC label view), not link object identity, so equivalent CellImpl
+    // wrappers in the same tx can share the cached traversal result. `variant`
+    // separates reads that differ in options or synced state.
     const tx = this.tx;
     const cacheable = tx !== undefined &&
       tx.getCachedReadResult !== undefined &&
@@ -893,8 +913,9 @@ export class CellImpl<T extends FabricValue>
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
     const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    const cacheKey = cacheable ? this.viewRefHash() : undefined;
     if (cacheable) {
-      const cached = tx.getCachedReadResult!(this._link, variant);
+      const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
         return cached.value as Readonly<StripDefaultBrand<T>>;
       }
@@ -919,8 +940,8 @@ export class CellImpl<T extends FabricValue>
     if (cacheable) {
       // Re-read this._link: validateAndTransform (via viewRef -> link) may have
       // run ensureLink() and replaced it with the completed link object, which
-      // is the identity subsequent get()s will key on.
-      tx.setCachedReadResult!(this._link, variant, value);
+      // is the identity subsequent get()s will hash.
+      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
     }
     return value;
   }
