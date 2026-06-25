@@ -15,7 +15,17 @@
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
 ./scripts/restart-local-dev.sh --bg-updater  # Also start background-piece-service
 ./scripts/check-local-dev.sh          # Health check both servers
+./scripts/share-pattern-via-tailscale.sh packages/patterns/lunch-poll/main.tsx  # Host a pattern + share on your tailnet
+./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
+
+To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
+`<pattern>` locally with `--inspect` and export it over Tailscale"), use
+`share-pattern-via-tailscale.sh`. It starts an isolated toolshed (with
+`--inspect`) + shell on offset ports, deploys the pattern, and `tailscale serve`s
+it (tailnet-only). It launches the shell with `API_URL` set to your MagicDNS name
+— the standard `dev-local` task bakes in `localhost`, which breaks remote
+browsers.
 
 `start-local-dev.sh` validates required commands before launching anything and
 waits for both servers to bind their ports and return HTTP 200 before reporting
