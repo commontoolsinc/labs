@@ -446,3 +446,115 @@ ratchet. The READ-ISOLATION / I/O-coalesce half (`RI_F4_IO_COALESCE`) stays OPEN
 gated default-off — a SEPARATE cross-document contention problem the doc-
 consolidation half does not touch; engaging PollOptionCard's I/O edge is still
 measured net-negative under concurrent load until that ratchet is removed.
+
+### §4.8 FINAL MEASURE + GATE — standalone re-verification (2026-06-25, HEAD `f434f884d`)
+
+Re-ran ALL gates + ALL benches FRESH (the campaign's "measure real footprint
+honestly, never trust a written number" contract — [[proxy-metric-decoupling]]).
+The §4.8 code was already committed (`d6b11688c`); nothing changed in this pass —
+this is the verification the FINAL-GATE phase requires before push. Every number
+below was measured on this branch HEAD now.
+
+**GATES — ALL GREEN (re-measured fresh):**
+- STATIC: `deno check` clean (`runner.ts` + `collection-interpreter.ts`); `deno
+  lint` clean (7 files); `deno fmt --check` no diff.
+- RI unit (`test/reactive-interpreter/*.test.ts`): **40 passed / 0 failed**.
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed**
+  — green WITH the interpreter engaged (engagement census below).
+- flag-OFF `packages/runner` `deno task test`: **698 passed / 0 failed** (HARD
+  invariant held — `$ri-collection-map` never registers flag-off + the §4.8
+  lowering-gate broadening is on the interpreter dispatch path only).
+- flag-ON `packages/runner` `deno task test`: **698 passed / 0 failed** — NO new
+  reds (the three §4.7 canary tests stay green; the §4.8 lowering broadening did
+  NOT reintroduce the per-element scope-label divergence — D-EMISSION-SCOPE guard
+  holds).
+
+**ENGAGEMENT (`RI_FOOTPRINT_DUMP` per-line census, 147 lines / 146 distinct
+scenarios, `counterAggregator` twice):** **143 engaged / 146 distinct** (the §4.8
+FINAL-GATE section above reports 142/144 on a per-census-LINE basis; this is the
+same corpus aggregated per DISTINCT scenario = 143/146, matching the §4.7 number —
+NO regression, the difference is purely the aggregation unit). fallback_by_reason
+summed: `launched_child` 14, `unresolved_leaf` 4, `ineligible_opkind` 2;
+`unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/`argument_writeback` all
+**0** (the §4.8 broadening admitted NO scoped/cross-space element). NOT-ENGAGED 3,
+all DOCUMENTED genuine non-core exceptions: `counterWithConditionalBranch`
+(asCell-arg control predicate), `counterWithHandlerSpawn` (launched_child launcher
+contract), `Cell<unknown> capture …` (cell-capture-diagnostic feeder — no output
+to materialize).
+
+**PRIMARY METRIC — notes-list doc win (`tools/default-app-interpreter-bench.ts
+--notes=10,30,100`), the §4.8 headline, output-EQUIVALENT (note count + titles
+identical OFF vs ON, census `interpreted_ok=1/1 fallback{none}` at every N):**
+
+| metric | BEFORE §4.8 | OFF | ON (AFTER §4.8) | Δ |
+| --- | --- | --- | --- | --- |
+| **docs/note (slope)** | **5.00 / 5.00 FLAT** | **5.00** | **2.00** | **−60%** |
+| nodes/note (slope) | −20% (5→4) | 5.00 | 3.00 | −40% |
+| docs @N=100 (abs) | (flat) | 515 | 220 | −57.3% |
+| nodes @N=100 (abs) | — | 510 | 315 | −38.2% |
+| wall @N=100 | — | 10760ms | 8829ms | −17.9% |
+| conflicts | — | 0 | 0 | flat |
+
+- **DID docs/note DROP? YES — the §4.8 DOC WIN.** BEFORE §4.8 the rendered-map
+  docs/note was FLAT (OFF 5.0 / ON 5.0, the D-VNODE-DOC-FRAGMENTATION tax — the
+  per-element VNode subtree fragmented into ~6 docs, and the lowering gate was so
+  conservative the notes map ran each element as a full legacy child pattern and
+  never reached `$ri-collection-map`). AFTER §4.8 docs/note ON **2.00 < OFF 5.00**
+  — the doc half of the `docs≈5+3N` tax is now reduced on the exact shape
+  (rendered `.map`) coalescing most wants to help. Output equivalence PASSES.
+
+**lunch-poll (`tools/lunch-poll-interpreter-bench.ts --cases=3x3,5x5 --rounds=2`),
+output-EQUIVALENT, NO conflict ratchet:**
+
+| case | engaged | docs OFF→ON | nodes OFF→ON | conflicts OFF→ON (rejected) | wall OFF→ON |
+| --- | --- | --- | --- | --- | --- |
+| 3x3 | 35.3% (18/51) | 420→429 (+2.1%) | 1236→1246 (+0.8%) | 238→162 (rej 0/0) | 3876→3920ms (+1.1%) |
+| 5x5 | 37.0% (50/135) | 615→623 (+1.3%) | 3107→3160 (+1.7%) | 785→816 (rej 0/0) | 10639→11878ms (+11.6%) |
+
+- OUTPUT EQUIVALENCE: PASS (vote tallies byte-identical). `rejected=0` both arms
+  OFF + ON; `conflicts == reverts` throughout (the retry-that-succeeds signature,
+  NOT a newer-seq stomp). 3x3 ON conflicts (162) are BELOW OFF (238); 5x5 ON (816)
+  vs OFF (785) is within run noise. The 5x5 wall +11.6% is one noisy run (this is
+  a single-run measure; §4.7 saw 5x5 wall flat-to-negative across runs).
+- **DID the per-element I/O coalesce become NET-POSITIVE? NO — honestly, not in
+  this increment.** §4.8 delivered the DOC half (the consolidated `setRawUntyped`
+  element-result write + the read-isolated `$ri-collection-map` per-element tx),
+  which is exactly what the notes-list rendered map needs (−60% docs/note). But
+  lunch-poll's footprint stays FLAT (±2%) because the §4.8 doc-consolidation lands
+  on `$ri-collection-map`-lowered rendered maps (notes-list), and lunch-poll's
+  dominant per-element footprint driver — **PollOptionCard's interactive I/O rows
+  (`fetchData`/`generateText` + `castVote`/… handler sinks)** — does NOT go through
+  that path: it is a handler-bearing per-element row kept a BOUNDARY by the F4
+  write-back-cycle gate (`runner.ts:3457`). Engaging its I/O edge requires
+  `RI_F4_IO_COALESCE=1`, which **stays gated default-off** because it is still
+  MEASURED NET-NEGATIVE under concurrent multi-user load (the 4–10× conflict /
+  2–6× wall ratchet on the hot shared poll doc). The read-isolation primitive the
+  ratchet-removal needs now EXISTS on the `$ri-collection-map` path (the per-element
+  read-isolated tx + consolidated doc), but it is NOT yet wired into the
+  handler-bearing I/O-coalesce path, so that path stays default-off and the
+  lunch-poll footprint win remains DEFERRED. The §4.8 increment makes the DOC half
+  work where it can (notes-list) without regressing lunch-poll (output-equivalent,
+  no ratchet) — it does NOT yet flip the I/O coalesce net-positive.
+
+**INTEGRATION aggregate footprint (`RI_FOOTPRINT_DUMP`, OFF vs ON, summed over 147
+census lines):**
+- scheduler nodes **2398 → 1764 = −634 (−26.4%)**.
+- documents (written) **2931 → 2939 = +8 (+0.3%) FLAT**.
+- UNCHANGED in character from §4.7 (nodes −26.4% / docs flat). §4.8 did NOT improve
+  the integration-aggregate docs: the realistic integration corpus carries no
+  rendered-VNode element map that lowers to `$ri-collection-map` (its rendered-map
+  scenarios already engaged via the legacy-boundary per-element child re-dispatch,
+  not the §4.8 lowering), so the −60% doc win is specific to the default-app
+  notes-list shape and does not move the integration sum. Honest: §4.8's doc win
+  is real but narrow (the notes-list rendered-map shape), not corpus-wide.
+
+**§4.8 FINAL VERDICT.** §4.8 DELIVERED THE DOC WIN on the rendered-map shape
+(notes-list docs/note 5.00→2.00, −60%, oracle-verified output-equivalent — the
+doc half of the tax the node-half work left FLAT). All gates GREEN (147/0 engaged
+143/146, RI unit 40/0, flag-off 698/0, flag-ON 698/0), lunch-poll output-equivalent
+with no conflict ratchet, integration nodes −26.4% / docs flat. The per-element I/O
+coalesce did NOT become net-positive — `RI_F4_IO_COALESCE` stays default-off
+(still net-negative under concurrent load); the read-isolation primitive now exists
+on the `$ri-collection-map` path but is not yet wired into the handler-bearing I/O
+path, so the lunch-poll complex-app footprint win stays explicitly DEFERRED.
