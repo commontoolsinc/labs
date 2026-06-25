@@ -151,3 +151,78 @@ DOC half (`docs≈5+3N`) is FLAT, not reduced. Remaining to make the win uniform
 lift complex-app engagement (lunch-poll); (d) a cost-gate so trivial single-leaf
 patterns don't partition (avoid the +1). Instrumentation: RI_FOOTPRINT_DUMP (env-gated)
 in pattern-harness.ts.
+
+## §4.7 NESTED-PATTERN BOUNDARY RECURSION (this phase) — engagement DOUBLED on lunch-poll
+
+GOAL (Berni, AFK autonomous): recurse into a collection/pattern boundary so the
+nested pure regions interpret per-element — lift complex-app engagement
+(item (c) above). The BIG win the user explicitly wanted even though complex.
+
+**Mechanism (the sound one).** A top-level inlined `pattern` op whose CLOSURE
+carries a boundary (collection / effect / a deeper nested pattern) used to bump
+`ineligible_opkind` at the single-node inline gate (the inline path can only
+model a PURE closure). It now routes to the PARTITION path, where the `pattern`
+op is kept as a **VERBATIM legacy boundary node** and the inlined CHILD pattern
+re-dispatches through `buildInterpreterPattern` at runtime
+(`instantiatePatternNode` → `this.run` → `instantiatePattern` →
+`buildInterpreterPattern`). So the recursion is the **runtime per-element CHILD
+re-dispatch** (07 §4.7), NOT a bespoke per-element `b.inner` emit —
+`partition.resolveInner` stays UNWIRED (emitting `b.inner` is the storming path;
+the runtime child re-dispatch is sound and already exists). The OUTER pattern's
+surrounding pure region (the per-option wrapper, the result projection)
+interprets as segments; each nested child (PollOptionCard, OptionSummaryRow's
+`voters.map`) interprets its OWN pure regions / collections RECURSIVELY when it
+re-dispatches.
+
+**Landed (flag-ON only; flag-OFF byte-unchanged), all gated GREEN:**
+- pattern-coverage gate DEFERS a collection/effect/deeper-nest closure to the
+  partition (was: bump `ineligible_opkind`).
+- partition entry adds `hasPatternOp`; boundary-kind gate admits `pattern`
+  boundaries (kept verbatim in step (d)).
+- a clean `ineligible_opkind` gate fires BEFORE the single-node inline dry-run
+  for a non-pure inlined closure the partition could not engage (the bare
+  relaxation otherwise produced `eval_threw` — the inline dry-run throws on a
+  collection/effect inlined into one segment). Same clean reason the
+  pre-recursion gate used.
+- TOP-FRAME unrecognized-alias attribution (`extract.ts`
+  `DepthAwareUnrecognized` + `topFrameUnrecognizedAliases`): a NESTED-frame
+  cross-frame alias no longer falls the OUTER pattern back. Used ONLY for the
+  partitioned (boundary-closure) shape — a PURE inlined nested closure still
+  falls back on the full report (a nested-frame alias there WOULD be
+  mis-evaluated). Dormant on the integration corpus, sound generalization.
+
+**Measured:**
+- integration **147/0** GREEN; engaged **141/143** (`ineligible_opkind` 4→1).
+- RI unit **40/0** (incl. 2 new top-frame attribution tests).
+- flag-OFF runner **698/0** (HARD invariant); flag-ON `pattern-scope` +
+  `patterns-lift` green; nested-prod-wire soundness teeth still pass (minimal
+  nested-with-boundary outers still fall back clean — they have no pure region;
+  the recursion win is on outers WITH a pure region around the nested op).
+- **lunch-poll 5x5 (mean of 3 runs): engagement 21.4% → 42.3% (DOUBLED),
+  `ineligible_opkind` 50→0, output-EQUIVALENT every run, conflicts NOT
+  ratcheting (ON 605–857 vs OFF 598–893 — within noise), docs +2.5% / nodes
+  +0.2% (FLAT).**
+
+**Honest footprint result + DEFERRED items (precise tracker note):**
+- The DOC/NODE footprint on lunch-poll is **FLAT** despite engagement doubling,
+  because the dominant per-element footprint driver — **PollOptionCard's
+  interactive rows (fetchData/generateText I/O + castVote/… handler sinks)** —
+  is STILL kept a boundary. Coalescing its I/O edge (`RI_F4_IO_COALESCE=1`)
+  engages it to ~41% / −15% nodes BUT is MEASURED NET-NEGATIVE under concurrent
+  multi-user load (5x5 conflicts ~1.8k→2.6k, wall-clock 33s→49s — the
+  cross-session conflict ratchet). That is the **§4.8 doc-consolidation +
+  element-scoped-segment-write** increment (DEFERRED, unchanged from the prior
+  §4.7 phase — its fix removes the ratchet, then the doc win lands).
+- The **MAIN poll pattern (65 nodes)** falls back `unrecognized_alias` because
+  its result tree aliases its OWN result fields via `["__patternResult", <field>]`
+  causes — a **result-cell self-reference** the interpreter does not model
+  (`partialCauseToInternalName` returns null for it by design). Its nested
+  patterns STILL engage via the legacy map nodes' per-element child re-dispatch,
+  so the main falling back does NOT lose the per-element engagement. Engaging the
+  main's own pure region (header/stats computeds) needs `__patternResult`
+  result-self-reference handling in the partition — **DEFERRED (out of scope this
+  increment, high-risk: a mis-handled result self-ref mis-evaluates the whole
+  render); kept as a sound boundary.**
+- `resolveInner`/`b.inner` per-element partition EMISSION stays UNWIRED by
+  design — the runtime child re-dispatch is the sound recursion; emitting
+  `b.inner` is the storming path and is unnecessary for the win.
