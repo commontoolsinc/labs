@@ -21,7 +21,10 @@ import {
   ConsoleMethod,
   type Engine,
   type Pattern,
+  PatternCoverageCollector,
+  patternCoverageOutputPath,
   Runtime,
+  writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { buildActionEvent } from "./trusted-test-event.ts";
@@ -72,6 +75,9 @@ let storageManager:
   | undefined;
 let engine: Engine | undefined;
 let stepCells: Cell<unknown>[] = [];
+let patternCoverage: PatternCoverageCollector | undefined;
+let patternCoveragePath: string | undefined;
+let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
 /** Channel 1: console.error/warn captured via the harness console event. */
 const consoleErrors: string[] = [];
@@ -198,6 +204,17 @@ const handlers: Record<
     // splits verified-load/source-map state and breaks CFC verified-binding
     // identities under enforcement.
     engine = runtime.harness;
+    patternCoverage = typeof args.patternCoverageDir === "string"
+      ? new PatternCoverageCollector()
+      : undefined;
+    patternCoveragePath = typeof args.patternCoverageDir === "string"
+      ? patternCoverageOutputPath(
+        args.patternCoverageDir,
+        args.testPath as string,
+        args.participant as string,
+      )
+      : undefined;
+    patternCoverageRoot = typeof args.root === "string" ? args.root : undefined;
 
     const program = await engine.resolve(
       new FileSystemProgramResolver(
@@ -205,7 +222,9 @@ const handlers: Record<
         args.root as string | undefined,
       ),
     );
-    const { main } = await engine.compileAndEvaluateModules(program);
+    const { main } = await engine.compileAndEvaluateModules(program, {
+      patternCoverage,
+    });
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.
     loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     consoleCaptureActive = true;
@@ -370,6 +389,17 @@ const handlers: Record<
     });
   },
 
+  async writeCoverage() {
+    if (patternCoverage && patternCoveragePath) {
+      await writePatternCoverageLcov(
+        patternCoverage,
+        patternCoveragePath,
+        { root: patternCoverageRoot },
+      );
+    }
+    return {};
+  },
+
   async dispose() {
     stepCells = [];
     // `engine` is the runtime's own harness; runtime.dispose() disposes it.
@@ -378,6 +408,9 @@ const handlers: Record<
     runtime = undefined;
     storageManager = undefined;
     engine = undefined;
+    patternCoverage = undefined;
+    patternCoveragePath = undefined;
+    patternCoverageRoot = undefined;
     return {};
   },
 };
@@ -393,12 +426,12 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   handler(args).then(
     (ok) => respond({ id, ok }),
-    (error: unknown) =>
-      respond({
-        id,
-        error: error instanceof Error
-          ? `${error.message}\n${error.stack ?? ""}`
-          : String(error),
-      }),
+    (error: unknown) => respond({ id, error: formatError(error) }),
   );
 };
+
+function formatError(error: unknown): string {
+  return error instanceof Error
+    ? error.stack || error.message || String(error)
+    : String(error);
+}
