@@ -2079,6 +2079,72 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "strict text integrity resets same-key child when content becomes clean",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [{
+            type: "vnode",
+            name: "cf-cfc-authorship",
+            props: {
+              key: "stable-authorship",
+              verifyTextIntegrity: true,
+              requiredTextIntegrity: signedReleaseAtom,
+            },
+            children: [unsignedReleaseText as never],
+          }],
+        });
+
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+          collector.clear();
+
+          rootCell.set({
+            type: "vnode",
+            name: "div",
+            props: {},
+            children: [{
+              type: "vnode",
+              name: "cf-cfc-authorship",
+              props: {
+                key: "stable-authorship",
+                verifyTextIntegrity: true,
+                requiredTextIntegrity: signedReleaseAtom,
+              },
+              children: [verifiedText as never],
+            }],
+          });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "ok"
+            ),
+            true,
+          );
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Verified release note"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity blocks mismatched visible name props",
       async () => {
         const collector = createOpsCollector();

@@ -3064,7 +3064,11 @@ export class WorkerReconciler {
     this.updatePropsInPlace(ctx, childState.elementState, sanitized.props);
 
     if (policyChildren.children !== undefined) {
-      if (policyChanged) {
+      const childrenSame = this.areChildrenSame(
+        childState.elementState,
+        policyChildren.children,
+      );
+      if (!childrenSame || policyChanged) {
         this.resetTextIntegrityBoundary(childState.elementState, childPolicy);
       }
       this.updateChildrenInPlace(
@@ -3284,7 +3288,11 @@ export class WorkerReconciler {
                 );
 
                 if (policyChildren.children !== undefined) {
-                  if (policyChanged) {
+                  const childrenSame = this.areChildrenSame(
+                    childState.elementState,
+                    policyChildren.children,
+                  );
+                  if (!childrenSame || policyChanged) {
                     this.resetTextIntegrityBoundary(
                       childState.elementState,
                       childPolicy,
