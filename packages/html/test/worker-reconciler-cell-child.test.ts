@@ -1117,4 +1117,66 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
     },
   );
+
+  await t.step("replaces same-key child when tag changes", async () => {
+    const collector = createOpsCollector();
+    const reconciler = new WorkerReconciler({
+      onOps: collector.onOps,
+    });
+
+    const rootCell = new MockCell(
+      {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [{
+          type: "vnode",
+          name: "span",
+          props: { key: "stable" },
+          children: ["old"],
+        }],
+      } satisfies WorkerVNode,
+    );
+
+    reconciler.mount(rootCell as unknown as Cell<unknown>);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const spanCreate = collector.getOpsOfType("create-element").find((op) =>
+      "tagName" in op && op.tagName === "span"
+    );
+    if (!spanCreate || !("nodeId" in spanCreate)) {
+      throw new Error("Expected initial keyed span");
+    }
+    const spanNodeId = spanCreate.nodeId;
+    collector.clear();
+
+    rootCell.set(
+      {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [{
+          type: "vnode",
+          name: "button",
+          props: { key: "stable" },
+          children: ["new"],
+        }],
+      } satisfies WorkerVNode,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assertEquals(
+      collector.getOpsOfType("remove-node").some((op) =>
+        "nodeId" in op && op.nodeId === spanNodeId
+      ),
+      true,
+      "same-key tag change should remove the old child",
+    );
+    assertEquals(
+      collector.getOpsOfType("create-element").some((op) =>
+        "tagName" in op && op.tagName === "button"
+      ),
+      true,
+      "same-key tag change should create the replacement child",
+    );
+  });
 });

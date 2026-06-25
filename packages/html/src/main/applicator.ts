@@ -456,6 +456,13 @@ export class DomApplicator {
     const child = this.nodes.get(childId);
     if (!parent || !child) return false;
 
+    const beforeNode = beforeId === null ? null : this.nodes.get(beforeId);
+    if (
+      beforeId !== null && (!beforeNode || beforeNode.parentNode !== parent)
+    ) {
+      return false;
+    }
+
     this.discardPendingForChild(childId);
 
     // Update parent/children tracking
@@ -473,15 +480,9 @@ export class DomApplicator {
     }
     children.add(childId);
 
-    const beforeNode = beforeId !== null
-      ? this.nodes.get(beforeId) ?? null
-      : null;
-
-    if (beforeNode && beforeNode.parentNode === parent) {
-      // Only use insertBefore if the beforeNode is actually a child of parent
+    if (beforeNode) {
       parent.insertBefore(child, beforeNode);
     } else {
-      // Either no beforeNode, or it's not a child of this parent - just append
       parent.appendChild(child);
     }
     return true;

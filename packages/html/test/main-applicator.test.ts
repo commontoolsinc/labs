@@ -359,6 +359,63 @@ Deno.test("DomApplicator - child operations", async (t) => {
   );
 
   await t.step(
+    "waits for beforeId to attach before replaying placement",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "div" },
+          { op: "create-element", nodeId: 4, tagName: "c" },
+          { op: "insert-child", parentId: 1, childId: 4, beforeId: null },
+          { op: "create-element", nodeId: 2, tagName: "a" },
+          { op: "insert-child", parentId: 1, childId: 2, beforeId: 3 },
+          { op: "create-element", nodeId: 3, tagName: "b" },
+          { op: "insert-child", parentId: 1, childId: 3, beforeId: 4 },
+        ],
+      });
+
+      const parent = applicator.getNode(1) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      assertEquals(parent.childNodes.map((child) => child.tagName), [
+        "A",
+        "B",
+        "C",
+      ]);
+    },
+  );
+
+  await t.step("replays deferred move-child when nodes appear", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "move-child", parentId: 1, childId: 2, beforeId: null },
+        { op: "create-element", nodeId: 1, tagName: "div" },
+        { op: "create-element", nodeId: 2, tagName: "span" },
+      ],
+    });
+
+    const parent = applicator.getNode(1) as unknown as {
+      childNodes: Array<{ tagName: string }>;
+    };
+    assertEquals(parent.childNodes.map((child) => child.tagName), ["SPAN"]);
+  });
+
+  await t.step(
     "does not replay insert after child is removed before creation",
     () => {
       const doc = createMockDocument();
@@ -388,6 +445,40 @@ Deno.test("DomApplicator - child operations", async (t) => {
       );
     },
   );
+
+  await t.step("drops pending inserts that target removed descendants", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "section" },
+        { op: "create-element", nodeId: 2, tagName: "div" },
+        { op: "create-element", nodeId: 3, tagName: "b" },
+        { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+        { op: "insert-child", parentId: 2, childId: 3, beforeId: null },
+        { op: "create-element", nodeId: 4, tagName: "a" },
+        { op: "insert-child", parentId: 1, childId: 4, beforeId: 3 },
+        { op: "remove-node", nodeId: 1 },
+        { op: "create-element", nodeId: 5, tagName: "footer" },
+      ],
+    });
+
+    assertEquals(applicator.getNode(1), undefined);
+    assertEquals(applicator.getNode(2), undefined);
+    assertEquals(applicator.getNode(3), undefined);
+    const pendingChild = applicator.getNode(4) as unknown as {
+      parentNode: unknown;
+      tagName: string;
+    };
+    assertEquals(pendingChild.tagName, "A");
+    assertEquals(pendingChild.parentNode, null);
+  });
 
   await t.step("moves child to new position", () => {
     const doc = createMockDocument();
@@ -447,6 +538,62 @@ Deno.test("DomApplicator - child operations", async (t) => {
 
     const parent = applicator.getNode(1) as any;
     assertEquals(parent.childNodes.length, 0);
+    assertEquals(applicator.getNode(2), undefined);
+  });
+
+  await t.step("removes listeners from removed descendants", () => {
+    const doc = createMockDocument();
+    const events: DomEventMessage[] = [];
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: (msg) => events.push(msg),
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "section" },
+        { op: "create-element", nodeId: 2, tagName: "button" },
+        { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+        { op: "set-event", nodeId: 1, eventType: "click", handlerId: 11 },
+        { op: "set-event", nodeId: 2, eventType: "click", handlerId: 22 },
+      ],
+    });
+
+    const parentNode = applicator.getNode(1) as unknown as {
+      dispatchEvent(event: {
+        type: string;
+        target: unknown;
+        isTrusted: boolean;
+      }): void;
+    };
+    const childNode = applicator.getNode(2) as unknown as {
+      dispatchEvent(event: {
+        type: string;
+        target: unknown;
+        isTrusted: boolean;
+      }): void;
+    };
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{ op: "remove-node", nodeId: 1 }],
+    });
+
+    parentNode.dispatchEvent({
+      type: "click",
+      target: parentNode,
+      isTrusted: true,
+    });
+    childNode.dispatchEvent({
+      type: "click",
+      target: childNode,
+      isTrusted: true,
+    });
+
+    assertEquals(events, []);
+    assertEquals(applicator.getNode(1), undefined);
     assertEquals(applicator.getNode(2), undefined);
   });
 });
