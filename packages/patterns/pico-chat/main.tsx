@@ -54,10 +54,13 @@ interface DisplayMessage {
   canReact: boolean;
   thumbsActive: boolean;
   thumbsLabel: string;
+  thumbsClassName: string;
   heartActive: boolean;
   heartLabel: string;
+  heartClassName: string;
   laughActive: boolean;
   laughLabel: string;
+  laughClassName: string;
   hasAnyReaction: boolean;
 }
 
@@ -148,6 +151,9 @@ function displayMessages(
     const showAuthor = index === 0 || messages[index - 1].from !== message.from;
     const endGroup = index === messages.length - 1 ||
       messages[index + 1].from !== message.from;
+    const thumbsActive = hasReaction(message, "👍");
+    const heartActive = hasReaction(message, "❤️");
+    const laughActive = hasReaction(message, "😂");
 
     return {
       index,
@@ -155,12 +161,15 @@ function displayMessages(
       body: message.body,
       showAuthor,
       canReact: viewerName !== "" && message.from !== viewerName,
-      thumbsActive: hasReaction(message, "👍"),
+      thumbsActive,
       thumbsLabel: reactionLabel(message, "👍"),
-      heartActive: hasReaction(message, "❤️"),
+      thumbsClassName: reactionOptionClass(thumbsActive),
+      heartActive,
       heartLabel: reactionLabel(message, "❤️"),
-      laughActive: hasReaction(message, "😂"),
+      heartClassName: reactionOptionClass(heartActive),
+      laughActive,
       laughLabel: reactionLabel(message, "😂"),
+      laughClassName: reactionOptionClass(laughActive),
       hasAnyReaction: hasAnyReaction(message),
       className: [
         "pico-message-row",
@@ -321,9 +330,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                               style={reactionRowStyle}
                             >
                               <cf-button
-                                className={reactionOptionClass(
-                                  row.thumbsActive,
-                                )}
+                                className={row.thumbsClassName}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -335,7 +342,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                 {row.thumbsLabel}
                               </cf-button>
                               <cf-button
-                                className={reactionOptionClass(row.heartActive)}
+                                className={row.heartClassName}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -347,7 +354,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                 {row.heartLabel}
                               </cf-button>
                               <cf-button
-                                className={reactionOptionClass(row.laughActive)}
+                                className={row.laughClassName}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
