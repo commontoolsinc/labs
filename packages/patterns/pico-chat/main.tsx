@@ -63,12 +63,15 @@ interface DisplayMessage {
   thumbsCount: number;
   thumbsPicked: boolean;
   thumbsSummaryLabel: string;
+  thumbsTitle: string;
   heartCount: number;
   heartPicked: boolean;
   heartSummaryLabel: string;
+  heartTitle: string;
   laughCount: number;
   laughPicked: boolean;
   laughSummaryLabel: string;
+  laughTitle: string;
   hasAnyReaction: boolean;
 }
 
@@ -180,12 +183,15 @@ function displayMessages(
       thumbsCount,
       thumbsPicked: hasViewerReaction(message, "👍", viewerName),
       thumbsSummaryLabel: reactionSummaryLabel("👍", thumbsCount),
+      thumbsTitle: reactionTitle(message, "👍"),
       heartCount,
       heartPicked: hasViewerReaction(message, "❤️", viewerName),
       heartSummaryLabel: reactionSummaryLabel("❤️", heartCount),
+      heartTitle: reactionTitle(message, "❤️"),
       laughCount,
       laughPicked: hasViewerReaction(message, "😂", viewerName),
       laughSummaryLabel: reactionSummaryLabel("😂", laughCount),
+      laughTitle: reactionTitle(message, "😂"),
       hasAnyReaction: thumbsCount > 0 || heartCount > 0 || laughCount > 0,
       className: [
         "pico-message-row",
@@ -204,6 +210,16 @@ function reactionCount(message: ChatMessage, emoji: string) {
 
 function reactionSummaryLabel(emoji: string, count: number) {
   return count > 0 ? `${emoji} ${count}` : emoji;
+}
+
+function reactionTitle(message: ChatMessage, emoji: string) {
+  const names = asReactions(message.reactions)
+    .filter((reaction) => reaction.emoji === emoji)
+    .map((reaction) => reaction.byName.trim())
+    .filter(Boolean);
+  return names.length > 0
+    ? `${emoji} by ${Array.from(new Set(names)).join(", ")}`
+    : "";
 }
 
 function hasViewerReaction(
@@ -282,6 +298,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 display: none;
                 opacity: 0;
                 pointer-events: none;
+                position: absolute;
+                right: 0.5rem;
+                top: 0.5rem;
                 transition: opacity 120ms ease;
               }
 
@@ -318,16 +337,25 @@ export default pattern<PicoChatInput, PicoChatOutput>(
               }
 
               .pico-message-row {
-                padding: 4px 0;
+                border-radius: 6px;
+                margin: 0 -0.5rem;
+                padding: 0.375rem 2.5rem 0.375rem 0.5rem;
+                position: relative;
+                transition: background-color 120ms ease;
               }
 
               .pico-message-row-start {
-                padding-top: 10px;
+                padding-top: 0.625rem;
               }
 
               .pico-message-row-end {
-                padding-bottom: 10px;
+                padding-bottom: 0.625rem;
                 border-bottom: 1px solid var(--cf-colors-border, #e2e8f0);
+              }
+
+              .pico-message-row:hover,
+              .pico-message-row:focus-within {
+                background: rgba(148, 163, 184, 0.14);
               }
 
               .pico-message-row:hover .pico-reaction-picker,
@@ -381,21 +409,30 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                             <div style={reactionSummaryStyle}>
                               {row.thumbsCount > 0
                                 ? (
-                                  <span style={reactionBadgeStyle}>
+                                  <span
+                                    style={reactionBadgeStyle}
+                                    title={row.thumbsTitle}
+                                  >
                                     {row.thumbsSummaryLabel}
                                   </span>
                                 )
                                 : null}
                               {row.heartCount > 0
                                 ? (
-                                  <span style={reactionBadgeStyle}>
+                                  <span
+                                    style={reactionBadgeStyle}
+                                    title={row.heartTitle}
+                                  >
                                     {row.heartSummaryLabel}
                                   </span>
                                 )
                                 : null}
                               {row.laughCount > 0
                                 ? (
-                                  <span style={reactionBadgeStyle}>
+                                  <span
+                                    style={reactionBadgeStyle}
+                                    title={row.laughTitle}
+                                  >
                                     {row.laughSummaryLabel}
                                   </span>
                                 )
@@ -415,6 +452,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   row.thumbsPicked,
                                 )}
                                 aria-label="React with thumbs up"
+                                title={row.thumbsPicked
+                                  ? "Remove your thumbs up"
+                                  : "React with thumbs up"}
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
@@ -429,6 +469,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   row.heartPicked,
                                 )}
                                 aria-label="React with heart"
+                                title={row.heartPicked
+                                  ? "Remove your heart"
+                                  : "React with heart"}
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
@@ -443,6 +486,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   row.laughPicked,
                                 )}
                                 aria-label="React with laughing face"
+                                title={row.laughPicked
+                                  ? "Remove your laughing face"
+                                  : "React with laughing face"}
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
