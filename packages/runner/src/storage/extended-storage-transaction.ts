@@ -143,13 +143,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
   // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
   #privilegedSystemWriteDepth = 0;
-  // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
+  // Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
-  private readResultCache = new WeakMap<
-    object,
-    Map<string, { value: unknown }>
-  >();
+  // This is a Map rather than a WeakMap, but the transaction owns it and writes
+  // drop it wholesale, bounding retention to reads-without-writes in one tx.
+  private readResultCache = new Map<string, Map<string, { value: unknown }>>();
+  private readResultCacheHits = 0;
+  private readResultCacheMisses = 0;
+  private readResultCacheSets = 0;
 
   constructor(
     public tx: IStorageTransaction,
@@ -380,31 +382,56 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   getCachedReadResult(
-    keyObject: object,
+    key: string,
     variant: string,
   ): { value: unknown } | undefined {
-    return this.readResultCache.get(keyObject)?.get(variant);
+    const cached = this.readResultCache.get(key)?.get(variant);
+    if (cached === undefined) {
+      this.readResultCacheMisses++;
+    } else {
+      this.readResultCacheHits++;
+    }
+    return cached;
   }
 
   setCachedReadResult(
-    keyObject: object,
+    key: string,
     variant: string,
     value: unknown,
   ): void {
-    let byVariant = this.readResultCache.get(keyObject);
+    let byVariant = this.readResultCache.get(key);
     if (byVariant === undefined) {
       byVariant = new Map();
-      this.readResultCache.set(keyObject, byVariant);
+      this.readResultCache.set(key, byVariant);
     }
     byVariant.set(variant, { value });
+    this.readResultCacheSets++;
+  }
+
+  getReadResultCacheStats(): {
+    hits: number;
+    misses: number;
+    sets: number;
+    entries: number;
+  } {
+    let entries = 0;
+    for (const byVariant of this.readResultCache.values()) {
+      entries += byVariant.size;
+    }
+    return {
+      hits: this.readResultCacheHits,
+      misses: this.readResultCacheMisses,
+      sets: this.readResultCacheSets,
+      entries,
+    };
   }
 
   private invalidateReadResultCache(): void {
     // A write may have changed any value a cached read depends on. Drop the
-    // whole cache by replacing the map (WeakMap has no clear()); this enforces
+    // whole cache by replacing the map; this enforces
     // the "no writes between the last read and this one" invariant the cache
     // relies on.
-    this.readResultCache = new WeakMap();
+    this.readResultCache = new Map();
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {

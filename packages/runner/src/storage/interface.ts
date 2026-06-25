@@ -1026,26 +1026,41 @@ export interface IExtendedStorageTransaction
    * When no write has occurred since the last read, that work is redundant: the
    * value, the reactive reads it registers, and the CFC state it produces are all
    * identical. These two methods let `Cell.get()` cache its result keyed by the
-   * cell's link identity; the implementation clears the entire cache on any
-   * write, so a cached entry is only ever returned when no write has intervened.
+   * stable value of the cell view; the implementation clears the entire cache
+   * on any write, so a cached entry is only ever returned when no write has
+   * intervened.
    *
    * Optional: transactions that must not cache (e.g. the non-reactive `sample()`
    * wrapper) leave these undefined and callers fall back to recomputing.
-   * `keyObject` must be a stable per-cell object identity (the cell's normalized
-   * link); `variant` distinguishes reads that differ in options. A returned
-   * `{ value }` wrapper signals a hit, so a cached `undefined` value is
-   * distinguishable from a miss.
+   * `key` must be a stable value key for the cell view (normalized link,
+   * including schema, plus any CFC label view); `variant` distinguishes reads
+   * that differ in options. A returned `{ value }` wrapper signals a hit, so a
+   * cached `undefined` value is distinguishable from a miss.
    */
   getCachedReadResult?(
-    keyObject: object,
+    key: string,
     variant: string,
   ): { value: unknown } | undefined;
 
   setCachedReadResult?(
-    keyObject: object,
+    key: string,
     variant: string,
     value: unknown,
   ): void;
+
+  /**
+   * Optional diagnostics for the transaction-local `Cell.get()` cache.
+   *
+   * `entries` reports the currently retained cache entries, which drops to zero
+   * after any write because writes replace the transaction-local cache map.
+   * Hit/miss/set counts are cumulative for the transaction.
+   */
+  getReadResultCacheStats?(): {
+    hits: number;
+    misses: number;
+    sets: number;
+    entries: number;
+  };
 }
 
 export interface ITransactionReader {
