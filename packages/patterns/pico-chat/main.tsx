@@ -18,9 +18,18 @@ export interface ChatMessage {
 }
 
 const DEFAULT_MESSAGES: ChatMessage[] = [];
+const DEFAULT_NAME = "";
 
-export type MessagesCell = Writable<ChatMessage[]>;
-export type NameCell = Writable<string>;
+type MessagesValue =
+  | ChatMessage[]
+  | Default<
+    ChatMessage[],
+    typeof DEFAULT_MESSAGES
+  >;
+type NameValue = string | Default<typeof DEFAULT_NAME>;
+
+export type MessagesCell = Writable<MessagesValue>;
+export type NameCell = Writable<NameValue>;
 
 export interface SendEvent {
   detail?: {
@@ -29,15 +38,15 @@ export interface SendEvent {
 }
 
 export interface PicoChatInput {
-  messages?: PerSpace<Default<ChatMessage[], typeof DEFAULT_MESSAGES>>;
-  name?: PerUser<Default<string, "">>;
+  messages?: PerSpace<MessagesValue>;
+  name?: PerUser<NameValue>;
 }
 
 export interface PicoChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  messages: PerSpace<Default<ChatMessage[], typeof DEFAULT_MESSAGES>>;
-  name: PerUser<Default<string, "">>;
+  messages: PerSpace<MessagesValue>;
+  name: PerUser<NameValue>;
   send: Stream<SendEvent>;
 }
 
