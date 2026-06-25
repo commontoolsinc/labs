@@ -558,3 +558,134 @@ coalesce did NOT become net-positive — `RI_F4_IO_COALESCE` stays default-off
 (still net-negative under concurrent load); the read-isolation primitive now exists
 on the `$ri-collection-map` path but is not yet wired into the handler-bearing I/O
 path, so the lunch-poll complex-app footprint win stays explicitly DEFERRED.
+
+## §4.9 — READ-ONLY CELL CONTEXT for asCell-input leaves (context-requiring leaves ENGAGED) — FINAL GATE (2026-06-25, commit `9b019c057` + fmt `a0948d6ca`)
+
+GOAL (Berni, AFK autonomous): hand a context-requiring leaf (a pure lift/computed
+whose INPUT SCHEMA is `asCell`/`asStream` — it takes a LIVE Cell/Stream handle to
+call `.get()`/`.sample()`, not a value) a live READ-ONLY cell/stream VIEW so it
+INTERPRETS, instead of falling back. Before this increment `resolveLeafImpls`
+flagged every `asCell`/`asStream` input schema as `unresolved_leaf` via the
+`schemaNeedsCellContext` gate — the dominant remaining lunch-poll gap
+(`unresolved_leaf` ≈ 55 = these context leaves). This pushes on the
+pure-evaluation boundary, so CORRECTNESS-FIRST: (a) WRITES (`.set`/`.send`/…) must
+NOT be supported — a leaf that writes its asCell input stays an effectful fallback
+boundary; (b) READS must JOURNAL through the segment tx so CFC content-labels
+propagate (the pointwise-label oracle) AND so the leaf re-runs reactively on
+change; (c) output must be byte-equivalent to legacy.
+
+Engaging these context leaves was the "desired red-with-partitions"; driven back to
+GREEN by FIXING the read-only-view semantics + eligibility (NOT by widening
+fallback — fallback NARROWS: a context leaf the runner proves argument-fed +
+read-only now ENGAGES where it used to be unresolved).
+
+**MECHANISM (the sound one — all flag-ON only; flag-OFF byte-unchanged):**
+- **`cell.ts` — read-only VIEW primitive.** `readOnly(reason)` returns a frozen
+  SIBLING (shares identity/link/**tx**/schema/`_cfcLabelView`; the original keeps
+  its writable handle for handler boundaries). The advisory `readOnlyReason` becomes
+  an ENFORCED write barrier (`throwIfReadOnly`): `set`/`send`/`update`/`push`/
+  `setRawUntyped`/`setMetaRaw` throw, and the barrier PROPAGATES through `.key()`/
+  `.asSchema()`/`.withTx()`/`.asSchemaFromLinks()` so a write cannot escape via a
+  sub-cell. Inert when unset (every legacy path → byte-unchanged). Because the
+  sibling shares the segment `tx` + `_cfcLabelView`, `.get()`/`.sample()` JOURNAL
+  reads through the tx exactly as a normal read → CFC + reactivity parity by
+  construction (no special-casing).
+- **`extract.ts` — eligibility SPLIT.** The `schemaNeedsCellContext` gate is split:
+  a context leaf resolves (read-only) ONLY when the runner proves it eligible
+  (`readOnlyCellLeafOps` set) AND its source does not write its input
+  (`liveLeafWritesCellInput` scan: `set`/`send`/`update`/`push`/`setRaw*`/
+  `setMetaRaw`/`exec`). A write-capable context leaf stays a legacy boundary. Empty
+  set ⇒ byte-for-byte prior behavior (all existing callers — flag-off runner, unit
+  tests, the element evaluator — pass no set, so EVERY context leaf stays
+  unresolved). Nested-pattern leaves are the child's own op-id space → never matched
+  → stay legacy boundaries (out of scope, deferred).
+- **`runner.ts` — argument-fed vetting + view installation.**
+  `computeArgumentFedContextLeaves` vets each context leaf: engage ONLY leaves whose
+  asCell input fields are fed by PATTERN-ARGUMENT refs (`{kind:"argument"}` — the
+  only place the deep-resolved arg tree surfaces a LIVE handle) AND whose pattern-arg
+  path actually surfaces a handle (`argumentPathNeedsCellContext`). An
+  internal/opOut/const-fed asCell input resolves to a PLAIN value → `.get()` would
+  throw → EXCLUDED (2(b), deferred, stays legacy). `withReadOnlyCellInput` wraps
+  each engaged leaf's impl so its handle inputs are made read-only at call time
+  (`makeLeafInputReadOnly` structural walk); a missed write throws → the
+  interpreter isolates the op to `undefined` + reports `onError` (legacy parity,
+  never a silent mis-write).
+- **`interpret.ts` — control-predicate unwrap.** `unwrapCellForValue` hook unwraps a
+  Cell handle for an `ifElse(enabledCell,…)` control PREDICATE via a tracked
+  `.get()` (so the predicate sees the boolean VALUE, not a truthy HANDLE). Pure
+  leaves keep the handle; construct/access pass it through. This is what engages
+  `counterWithConditionalBranch` (the asCell-arg control predicate that was the
+  long-standing documented exception).
+
+**BUGS the engagement required FIXED (correctness-first, all fail-CLOSED):** the
+desired-red was driven back to green by the four soundness fixes above — the
+read-only-view write barrier + sub-cell propagation (a write must not escape), the
+argument-fed handle-availability vetting (an internal/const-fed asCell surfaces a
+plain value, not a handle — `.get()` would throw, so EXCLUDE), the
+`liveLeafWritesCellInput` effectful-leaf gate (a writing leaf stays a boundary),
+and the control-predicate `.get()` unwrap (an `ifElse(handle)` must see the
+boolean). NO leaf was kept as a fallback unless it genuinely WRITES its input or its
+asCell input is not argument-fed (no handle available — 2(b), a precise tracker
+note, deferred). Engagement is monotonic (every new path is additive + fail-closed;
+the empty-set default is byte-for-byte prior behavior).
+
+**GATES — ALL GREEN (re-measured fresh on HEAD `a0948d6ca`):**
+- STATIC: `deno check` clean; `deno lint` clean; `deno fmt --check` no diff
+  (`runner.ts` + `cell.ts` + `reactive-interpreter/{extract,interpret}.ts`).
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed** —
+  green WITH the interpreter engaged (verified by the census below, NOT
+  green-via-fallback).
+- ENGAGEMENT (`RI_CENSUS_DUMP`, `interpreted_ok>0`): **145 engaged / 147 census
+  lines** — UP from the §4.8 baseline of 143/146. `counterWithConditionalBranch`
+  (asCell-arg control predicate) + one further context leaf now interpret.
+  `unresolved_leaf` 4→**3**; `unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/
+  `argument_writeback` all **0**. NOT-ENGAGED 2, both DOCUMENTED genuine exceptions:
+  `Cell<unknown> capture …` (cell-capture-diagnostic feeder — no output to
+  materialize) and `counterWithHandlerSpawn` (launched_child launcher contract).
+- RI unit (`test/reactive-interpreter/*.test.ts`): **41 passed / 0 failed** (flag-on
+  + flag-off; up from 40 — `leaf-scan-precision.test.ts` expanded). **CFC ORACLE
+  GREEN:** `collection-interpret.test.ts` test (3) pointwise labels — interpreted
+  per-element confidentiality labels BYTE-IDENTICAL to legacy
+  (`mapped[0]=["alice-secret"]`, `mapped[1]=["bob-secret"]`, `[2]/[3]` empty; no
+  smear); `spike-cfc-oracle.test.ts` — read-isolated coordinator keeps POINTWISE
+  labels (OQ-4), smear-detector + sibling-read teeth hold. The read-only view's
+  reads journal the source label through the segment tx → NO CFC regression.
+- flag-OFF `packages/runner` `deno task test`: **700 passed / 0 failed** (HARD
+  invariant held; count moved 698→700 only because the increment ADDED
+  `cell-readonly.test.ts` + expanded `leaf-scan-precision.test.ts`, never a
+  regression — the read-only barrier is inert with no `readOnlyReason` set).
+- flag-ON `packages/runner` `deno task test`: **700 passed / 0 failed** — NO new
+  reds (matches flag-off at 700/0).
+
+**§4.9 PRIMARY METRIC — lunch-poll 5x5 (`tools/lunch-poll-interpreter-bench.ts
+--cases=5x5 --rounds=2`), the dominant context-leaf corpus:**
+
+| metric | BEFORE §4.9 (§4.7/§4.8) | AFTER §4.9 | Δ |
+| --- | --- | --- | --- |
+| **engaged (`interpreted_ok`)** | **~37% (50/135)** | **55.6% (75/135)** | **+18.6pp (engagement DOUBLED vs the §4.7 ~18–21% floor)** |
+| `unresolved_leaf` (census) | 55 | **25** | −30 (the context leaves now interpret) |
+| docs written | 636 (OFF) | 623 (ON) | **−2.0%** |
+| scheduler nodes | 3091 (OFF) | 3014 (ON) | **−2.5%** |
+| wall-clock | 10961ms (OFF) | 9318ms (ON) | **−15.0% (ON faster)** |
+| conflicts (rejected) | 605 (OFF, rej 0) | **423 (ON, rej 0)** | ON LOWER — NO ratchet |
+
+- **OUTPUT EQUIVALENCE: PASS** — vote tallies byte-identical OFF vs ON (10 votes
+  each arm). The interpreter does not change results.
+- **NO conflict/wall ratchet** — `rejected=0` both arms, `conflicts==reverts` (the
+  retry-that-succeeds signature, NOT a newer-seq stomp/storm); ON conflicts (423)
+  are BELOW OFF (605) and wall is −15%. The context-leaf engagement is a pure-read
+  win (read-only views, no extra writes) — it does NOT touch the PollOptionCard I/O
+  edge (still a boundary), so it does not ratchet.
+
+**§4.9 VERDICT — ALL TARGETS MET.** The dominant remaining gap (context-requiring
+leaves, lunch-poll `unresolved_leaf` ≈ 55) is ENGAGED via the read-only cell/stream
+VIEW: reads journal through the segment tx (CFC + reactivity parity, oracle-green),
+writes are blocked (effectful leaves stay boundaries), output is byte-equivalent.
+Integration 147/0 engaged 145/147 (UP from 143/146), RI unit + CFC oracle 41/0,
+flag-off 700/0, flag-ON 700/0, lunch-poll 55.6% engaged (DOUBLED) output-equivalent
+with conflicts/wall DOWN (no ratchet). The only context leaves still falling back
+are the precise tracker exceptions: WRITE-capable leaves (effectful), and
+internal/opOut/const-fed asCell inputs (2(b) — no live handle in the arg tree;
+deferred). Nested-pattern context leaves (child op-id space) also stay legacy
+boundaries (deferred). NONE is a core gap.
