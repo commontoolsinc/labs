@@ -938,7 +938,9 @@ interface LobbyOutput {
 
 Minimal shared chat demo. Each user keeps their own display name, while the
 message log is shared across the space. The composer sends on Return and keeps
-the latest messages visible at the bottom of the message pane.
+the latest messages visible at the bottom of the message pane. Consecutive
+messages from the same user are grouped, and messages support simple emoji
+reactions.
 
 **Keywords:** chat, multiplayer, per-user, per-space, message-input
 
@@ -947,7 +949,15 @@ the latest messages visible at the bottom of the message pane.
 ```ts
 interface ChatMessage {
   from: string;
+  fromName?: Writable<string>;
   body: string;
+  reactions?: Reaction[] | Default<[]>;
+}
+
+interface Reaction {
+  emoji: string;
+  by: Writable<string>;
+  byName: string;
 }
 
 interface PicoChatInput {
@@ -962,7 +972,9 @@ interface PicoChatInput {
 interface PicoChatOutput {
   messages: PerSpace<ChatMessage[] | Default<[]>>;
   name: PerUser<string | Default<"">>;
+  groups: MessageGroup[];
   send: Stream<{ detail?: { message?: string } }>;
+  react: Stream<{ message: ChatMessage; emoji: string }>;
 }
 ```
 

@@ -1,6 +1,7 @@
 import {
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -12,20 +13,41 @@ import {
   Writable,
 } from "commonfabric";
 
+export type NameCell = Writable<string>;
+
+export interface Reaction {
+  emoji: string;
+  by: NameCell;
+  byName: string;
+}
+
 export interface ChatMessage {
   from: string;
+  fromName?: NameCell;
   body: string;
+  reactions?: Reaction[] | Default<[]>;
 }
 
 const DEFAULT_MESSAGES: ChatMessage[] = [];
+const REACTION_EMOJIS = ["👍", "❤️", "😂"] as const;
 
 export type MessagesCell = Writable<ChatMessage[]>;
-export type NameCell = Writable<string>;
 
 export interface SendEvent {
   detail?: {
     message?: string;
   };
+}
+
+export interface ReactEvent {
+  message: ChatMessage;
+  emoji: string;
+}
+
+export interface MessageGroup {
+  from: string;
+  fromName?: NameCell;
+  messages: ChatMessage[];
 }
 
 export interface PicoChatInput {
@@ -38,7 +60,9 @@ export interface PicoChatOutput {
   [UI]: VNode;
   messages: PerSpace<Default<ChatMessage[], typeof DEFAULT_MESSAGES>>;
   name: PerUser<Default<string, "">>;
+  groups: MessageGroup[];
   send: Stream<SendEvent>;
+  react: Stream<ReactEvent>;
 }
 
 const sendMessage = handler<SendEvent, {
@@ -50,16 +74,127 @@ const sendMessage = handler<SendEvent, {
 
   if (!from || !body) return;
 
-  messages.push({ from, body });
+  messages.push({ from, fromName: name, body, reactions: [] });
 });
 
-const textStyle =
-  "unicode-bidi: plaintext; white-space: pre-wrap; overflow-wrap: anywhere;";
+const toggleReaction = handler<ReactEvent, {
+  messages: MessagesCell;
+  name: NameCell;
+}>(({ message, emoji }, { messages, name }) => {
+  const mark = emoji.trim();
+  const byName = name.get().trim();
+  if (!message || !mark || !byName) return;
+
+  const currentMessages = messages.get();
+  const index = currentMessages.findIndex((candidate) =>
+    equals(candidate, message)
+  );
+  if (index < 0) return;
+
+  const reactionsCell = messages.key(index).key("reactions");
+  const reactions = asReactions(reactionsCell.get());
+  const existingIndex = reactions.findIndex((reaction) =>
+    reaction.emoji === mark && reaction.by && equals(reaction.by, name)
+  );
+
+  reactionsCell.set(
+    existingIndex >= 0
+      ? reactions.toSpliced(existingIndex, 1)
+      : [...reactions, { emoji: mark, by: name, byName }],
+  );
+});
+
+function asReactions(
+  reactions: readonly Reaction[] | Default<[]> | undefined,
+): Reaction[] {
+  return Array.isArray(reactions) ? [...reactions] : [];
+}
+
+function sameAuthor(left: ChatMessage, right: ChatMessage) {
+  if (left.fromName && right.fromName) {
+    return equals(left.fromName, right.fromName);
+  }
+  return left.from === right.from;
+}
+
+export function groupMessages(
+  messages: readonly ChatMessage[],
+): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+
+  for (const message of messages) {
+    const last = groups[groups.length - 1];
+    if (last && sameAuthor(last.messages[last.messages.length - 1], message)) {
+      last.from = message.from;
+      last.fromName = message.fromName;
+      last.messages.push(message);
+    } else {
+      groups.push({
+        from: message.from,
+        fromName: message.fromName,
+        messages: [message],
+      });
+    }
+  }
+
+  return groups;
+}
+
+function reactionCount(message: ChatMessage, emoji: string) {
+  return asReactions(message.reactions).filter((reaction) =>
+    reaction.emoji === emoji
+  ).length;
+}
+
+function reactionLabel(message: ChatMessage, emoji: string) {
+  const count = reactionCount(message, emoji);
+  return count > 0 ? `${emoji} ${count}` : emoji;
+}
+
+export function reactionClick(
+  react: Stream<ReactEvent>,
+  message: ChatMessage,
+  emoji: string,
+) {
+  return () => react.send({ message, emoji });
+}
+
+const textStyle = {
+  unicodeBidi: "plaintext",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+};
+
+const messagePaneStyle = {
+  height: "320px",
+  overflowY: "auto",
+  display: "flex",
+  flexDirection: "column-reverse",
+};
+
+const groupStyle = {
+  padding: "10px 0",
+  borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
+};
+
+const messageStackStyle = {
+  display: "grid",
+  gap: "0.5rem",
+  marginTop: "0.25rem",
+};
+
+const reactionRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.25rem",
+};
 
 export default pattern<PicoChatInput, PicoChatOutput>(
   ({ messages, name }) => {
     const send = sendMessage({ messages, name });
-    const displayMessages = computed(() => [...messages].reverse());
+    const react = toggleReaction({ messages, name });
+    const groups = computed(() => groupMessages([...messages]));
+    const displayGroups = computed(() => [...groups].reverse());
 
     return {
       [NAME]: "Pico chat",
@@ -82,17 +217,49 @@ export default pattern<PicoChatInput, PicoChatOutput>(
               <div
                 slot="content"
                 id="chat-messages"
-                style="height: 320px; overflow-y: auto; display: flex; flex-direction: column-reverse;"
+                style={messagePaneStyle}
               >
-                <div style="display: flex; flex-direction: column-reverse;">
-                  {displayMessages.length === 0
-                    ? <div style="color: #64748b;">No messages yet</div>
-                    : displayMessages.map((message) => (
-                      <div style="padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column-reverse",
+                  }}
+                >
+                  {displayGroups.length === 0
+                    ? (
+                      <div style={{ color: "var(--cf-colors-muted, #64748b)" }}>
+                        No messages yet
+                      </div>
+                    )
+                    : displayGroups.map((group) => (
+                      <div style={groupStyle}>
                         <strong dir="ltr" style={textStyle}>
-                          {message.from}
+                          {group.from}
                         </strong>
-                        <div dir="ltr" style={textStyle}>{message.body}</div>
+                        <div style={messageStackStyle}>
+                          {group.messages.map((message) => (
+                            <div>
+                              <div dir="ltr" style={textStyle}>
+                                {message.body}
+                              </div>
+                              <div style={reactionRowStyle}>
+                                {REACTION_EMOJIS.map((emoji) => (
+                                  <cf-button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={reactionClick(
+                                      react,
+                                      message,
+                                      emoji,
+                                    )}
+                                  >
+                                    {reactionLabel(message, emoji)}
+                                  </cf-button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                 </div>
@@ -110,7 +277,9 @@ export default pattern<PicoChatInput, PicoChatOutput>(
       ),
       messages,
       name,
+      groups,
       send,
+      react,
     };
   },
 );
