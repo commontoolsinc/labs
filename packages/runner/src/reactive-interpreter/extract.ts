@@ -940,7 +940,7 @@ export type LiveLeafTrustCheck = (
  * property/items schema), but does NOT descend into the literal `default` value
  * (a default is data, not schema, and could spuriously contain those keys).
  */
-function schemaNeedsCellContext(schema: unknown): boolean {
+export function schemaNeedsCellContext(schema: unknown): boolean {
   if (!schema || typeof schema !== "object") return false;
   if (Array.isArray(schema)) {
     return schema.some((s) => schemaNeedsCellContext(s));

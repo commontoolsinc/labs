@@ -104,6 +104,7 @@ import {
   type ImplRefResolver,
   outputInternalName,
   resolveLeafImpls,
+  schemaNeedsCellContext,
 } from "./reactive-interpreter/extract.ts";
 import {
   evalRog,
@@ -2395,14 +2396,22 @@ export class Runner {
       this.interpreterImplRefResolver,
       this.interpreterLiveLeafTrustCheck,
     );
-    if (unresolvedLeafOps.length > 0) bumpAndThrow("unresolved_leaf");
+    const unresolvedLeafSet = new Set<OpId>(unresolvedLeafOps);
 
-    // Only attempt the partition when the pattern actually HAS a boundary
-    // (effect) op — a fully-pure pattern has no boundaries to keep, so the
-    // single-node path is strictly simpler and equivalent. This keeps the spike
-    // additive: pure patterns are unaffected, handler-bearing patterns engage.
+    // A pattern has a partitionable BOUNDARY when it carries an `effect`
+    // (handler / I/O builtin) OR an UNRESOLVED leaf (a context-requiring lift —
+    // `asCell`/`asStream` input, `Cell.for`, or a pattern-returning factory). In
+    // BOTH cases the original legacy node is kept verbatim as a boundary while
+    // the pattern's PURE regions interpret as segments. This is the lever that
+    // engages the launched-child-via-lift / context-leaf clusters' PURE regions:
+    // the context-requiring or child-launching lift stays a LEGACY node (it runs
+    // in the SES sandbox / launches its children exactly as today — sound), and
+    // only the surrounding pure compute (str / scalar lifts / computed) is
+    // interpreted. A fully-pure pattern has no boundary, so the simpler
+    // single-node path below handles it.
     const hasEffectOp = extracted.rog.ops.some((op) => op.kind === "effect");
-    if (hasEffectOp) {
+    const hasUnresolvedLeafBoundary = unresolvedLeafSet.size > 0;
+    if (hasEffectOp || hasUnresolvedLeafBoundary) {
       const internedArgForPartition = internSchema(
         (pattern.argumentSchema ?? {}) as JSONSchema,
       );
@@ -2414,12 +2423,20 @@ export class Runner {
         bumpAndThrow,
         resultCell,
         internedArgForPartition,
+        unresolvedLeafSet,
       );
       if (partitioned) {
         this.interpreterCensus.interpreted_ok++;
         return partitioned;
       }
     }
+
+    // The partition could not interpret a pure region around the unresolved
+    // leaf (no usable segment, fan-out, a boundary→boundary read-through, etc.),
+    // so the WHOLE pattern falls back to legacy exactly as before. A serialized /
+    // untrusted leaf, or a context-requiring leaf with no separable pure region,
+    // lands here. Sound (legacy is green).
+    if (unresolvedLeafSet.size > 0) bumpAndThrow("unresolved_leaf");
 
     // This step interprets the non-collection vocabulary plus a TOP-LEVEL,
     // in-memory, PURE-computation INLINED nested pattern. `leaf` (opaque
@@ -2919,25 +2936,66 @@ export class Runner {
     _bumpAndThrow: (reason: InterpreterFallbackReason) => never,
     _resultCell: Cell<any>,
     internedArg: JSONSchema,
+    /** Leaf op ids that did NOT resolve (`resolveLeafImpls`): a context-requiring
+     * lift (`asCell`/`asStream` input, `Cell.for`), a pattern-returning factory
+     * (launched-child-via-lift), or a serialized/untrusted leaf. Each becomes an
+     * `unresolved-leaf` boundary kept VERBATIM as a legacy node — the surrounding
+     * pure region still interprets. Empty set ⇒ effect-only partition (the
+     * original spike behavior). */
+    unresolvedLeafOps: ReadonlySet<OpId> = new Set<OpId>(),
   ): Pattern | null {
     // (a) Partition the extracted ROG structurally. No `resolveInner` (the spike
     // does not recurse into collection/pattern boundaries — those are gated out
-    // below). An unresolved leaf would be a boundary; we pass an empty set
-    // because `resolveLeafImpls` already ran in the caller and a non-empty
-    // unresolved set falls back via `unresolved_leaf` before we are reached.
+    // below). An unresolved leaf is a BOUNDARY (kept verbatim as a legacy node);
+    // `unresolvedLeafOps` carries the set the caller resolved so the partition
+    // can cut the pure region around it instead of falling the whole pattern back.
     const part = partition({
       rog: extracted.rog,
       internalToOp,
-      unresolvedLeafOps: new Set<OpId>(),
+      unresolvedLeafOps,
     });
     if (!part.partitionable) return null;
 
     // (b) SPIKE GATES — deliberate scope cuts (NOT green-dodging). Any miss →
     // null → caller falls through to the single-node path.
 
-    // Effect-only boundaries: handlers/effects only. A collection / pattern /
-    // unresolved-leaf boundary needs machinery this spike does not build.
-    if (part.boundaries.some((b) => b.kind !== "effect")) return null;
+    // Boundaries this partition can KEEP VERBATIM as legacy nodes: `effect`
+    // (handlers / I/O builtins) and `unresolved-leaf` (a context-requiring or
+    // child-launching lift). Both pass through `(d)` as the original node, so the
+    // legacy node runs / launches exactly as today while the pure segments around
+    // it interpret. A `collection` / `pattern` boundary still needs the recursion
+    // machinery this spike does not build → fall through.
+    if (
+      part.boundaries.some((b) =>
+        b.kind !== "effect" && b.kind !== "unresolved-leaf"
+      )
+    ) {
+      return null;
+    }
+
+    // `asCell`/`asStream` ARGUMENT with an unresolved-leaf boundary: when the
+    // pattern argument schema marks an input as a live Cell/Stream handle
+    // (`Cell<…>` / `Stream<…>` arg, e.g. `ifElse(enabledCell, …)`), the segment's
+    // deep-resolved `$arg` surfaces that field as a HANDLE object, not the
+    // unwrapped value — so a segment `control` predicate / `leaf` input reading it
+    // mis-evaluates (a truthy handle always takes the true branch). Legacy reads
+    // through the live cell and gets the unwrapped value. This is a latent hazard
+    // for ANY segment reading an `asCell` arg, but it only became reachable when
+    // the unresolved-leaf path engaged these context-bearing patterns; gating it
+    // to that path keeps the effect-only engagement strictly unchanged (monotonic)
+    // while staying sound. Fall back to legacy (green).
+    const hasUnresolvedLeafBoundary = part.boundaries.some((b) =>
+      b.kind === "unresolved-leaf"
+    );
+    if (
+      hasUnresolvedLeafBoundary &&
+      schemaNeedsCellContext(pattern.argumentSchema)
+    ) {
+      return null;
+    }
+
+    // (Cross-segment `opOut` externals are MATERIALIZED via synthetic `$ri-op-<id>`
+    // cells in step (c) below — not gated out.)
 
     // No fan-out: a segment feeding >1 boundary needs a multi-output / container-
     // of-links emission (§4.4). Defer.
@@ -2957,6 +3015,14 @@ export class Runner {
     // deadlock the single-pass segment eval. Structural over-approximation: we
     // compare each boundary's original-node OUTPUT internal-cell name against the
     // set of internal-cell names any segment reads. Any overlap → fall through.
+    //
+    // ONLY `effect` boundaries: a handler's output is a SIDE-EFFECT write (via
+    // `$ctx`) NOT a tracked dataflow output, so a segment reading it back is a
+    // genuine cycle. An `unresolved-leaf` boundary's output is a NORMAL dataflow
+    // output (the lift's value), so a downstream segment reading it is a sound
+    // `bnd→seg` edge — exactly the case we now engage (e.g. a `detail` segment
+    // reading a context-requiring `summary` lift's `.trend`). Excluding
+    // unresolved-leaf boundaries here is what lets their pure region interpret.
     const segmentReadNames = new Set<string>();
     for (const seg of part.segments) {
       for (const ref of seg.inputs) {
@@ -2964,22 +3030,26 @@ export class Runner {
       }
     }
     for (const b of part.boundaries) {
+      if (b.kind !== "effect") continue;
       const bNode = pattern.nodes?.[b.opId];
       if (!bNode) continue;
       const outName = outputInternalName(bNode.outputs);
       if (outName !== null && segmentReadNames.has(outName)) return null;
     }
 
-    // NOTE on launched-child-via-lift (`entries.map(() => childPattern(...))`):
-    // a segment leaf whose body instantiates a pattern factory cannot be
-    // interpreted (it needs a reactive runtime frame the synthetic node lacks).
-    // That is caught STRUCTURALLY and BODY-FREE upstream by
-    // `liveLeafCanInstantiatePattern` (extract.ts) — such a leaf is reported as an
-    // UNRESOLVED leaf, so the caller's `unresolved_leaf` gate already fell the
-    // pattern back to legacy BEFORE this partition is attempted. (We must NOT run
-    // leaf bodies here to detect it: a non-probe eval would re-execute pure lifts
-    // and double their observable run counts — the laziness invariant the
-    // single-node `probe:true` path preserves.)
+    // NOTE on launched-child-via-lift (`entries.map(() => childPattern(...))`)
+    // and context-requiring lifts (`asCell`/`asStream` input, `Cell.for`): a leaf
+    // whose body instantiates a pattern factory, or needs a live Cell handle /
+    // builder frame, cannot be INTERPRETED (it needs a reactive runtime frame the
+    // synthetic segment node lacks). It is caught STRUCTURALLY and BODY-FREE
+    // upstream by `liveLeafCanInstantiatePattern` / `schemaNeedsCellContext` /
+    // `liveLeafNeedsBuilderContext` (extract.ts) and reported as an UNRESOLVED
+    // leaf. Such a leaf is now kept as an `unresolved-leaf` BOUNDARY (the original
+    // legacy node, verbatim, in `(d)`) — it launches its children / reads its live
+    // cell exactly as legacy does, while the pure region around it interprets. We
+    // must NOT run leaf bodies here to detect it: a non-probe eval would
+    // re-execute pure lifts and double their observable run counts — the laziness
+    // invariant the single-node `probe:true` path preserves.
 
     // (c) Build one raw interpreter node per segment. `byId` indexes the
     // extracted ROG's ops by id so a segment's sub-op-set is a real op list.
@@ -3048,6 +3118,88 @@ export class Runner {
     for (const b of part.boundaries) {
       collectAliases(pattern.nodes?.[b.opId]?.inputs);
     }
+    // OP-BACKED external sources: a segment that reads an upstream PRODUCER's
+    // output (another segment's materialized output, or an `unresolved-leaf`
+    // boundary's dataflow output — e.g. a context-requiring `summary` lift) needs
+    // an `$in[name]` alias to that producer's OUTPUT cell. The producer node's own
+    // `outputs` `$alias` carries the correct `partialCause` + schema (the manifest
+    // / boundary-input scan above only covers derived-internal + handler-INPUT
+    // cells, never these producer outputs). Register each so `aliasFor` resolves
+    // by the real `partialCause`, never the unresolvable normalized string key.
+    for (const [name, outputs] of nodeOutputsByName) {
+      if (internalCellAliasByName.has(name)) continue;
+      const alias =
+        (outputs as { $alias?: Record<string, unknown> } | undefined)?.$alias;
+      if (alias && typeof alias === "object") {
+        internalCellAliasByName.set(name, {
+          partialCause: alias.partialCause as JSONValue,
+          schema: alias.schema as JSONValue | undefined,
+        });
+      }
+    }
+
+    // CROSS-SEGMENT `opOut` materialization. A pure op consumed by a DIFFERENT
+    // segment via a raw `opOut` ref (an intermediate / SYNTHETIC construct — a
+    // structured leaf-input or result projection, id < 0 — with no declared
+    // internal-cell name) must round-trip through a cell so the consumer can seed
+    // it. This shape arises when an `unresolved-leaf` boundary pushes its
+    // downstream pure ops into a LATER layer, splitting them from upstream pure
+    // constructs that feed them by `opOut`. We mint a SYNTHETIC derived internal
+    // cell `$ri-op-<id>` for each such op: the PRODUCER segment writes its value,
+    // the CONSUMER segment seeds from it (schemaless — the value is pure JSON
+    // computed by a pure op, so it round-trips verbatim). The synthetic cells are
+    // appended to `derivedInternalCells` so the manifest materializes them; they
+    // are NOT in the result tree, so projection is unaffected. (The effect-only
+    // spike never needed this — effect outputs always materialize a named cell.)
+    const segOfOp = new Map<OpId, number>(); // op id → owning segment index
+    part.segments.forEach((s, i) => {
+      for (const id of s.opIds) segOfOp.set(id, i);
+    });
+    const crossSegOpName = new Map<OpId, string>(); // op id → `$ri-op-<id>`
+    for (let si = 0; si < part.segments.length; si++) {
+      const seg = part.segments[si];
+      for (const ref of seg.inputs) {
+        if (ref.kind !== "opOut") continue;
+        if (seg.opIds.includes(ref.op)) continue; // intra-segment
+        const producerSeg = segOfOp.get(ref.op);
+        // The producer must be a SEGMENT op (a boundary output is a named cell,
+        // handled by the internal-ref path; a producer in no segment is a bug).
+        if (producerSeg === undefined || producerSeg === si) return null;
+        if (!crossSegOpName.has(ref.op)) {
+          const name = "$ri-op-" + ref.op;
+          crossSegOpName.set(ref.op, name);
+          // Register a schemaless alias so `aliasFor(name)` resolves by the
+          // synthetic partialCause (never the unresolvable normalized key).
+          internalCellAliasByName.set(name, {
+            partialCause: name,
+            schema: undefined,
+          });
+        }
+      }
+    }
+    // Synthetic derived-internal-cell descriptors for the manifest. Shape matches
+    // `pattern.derivedInternalCells` ({ partialCause, schema? }) — schemaless, as
+    // the routed value is arbitrary pure JSON from an intermediate op.
+    const syntheticDerivedCells = [...crossSegOpName.values()].map((name) => ({
+      partialCause: name,
+    }));
+
+    // Alias a (named-internal OR synthetic `$ri-op-<id>`) cell by its ORIGINAL
+    // `partialCause` (a string / `{$generated:N}` object — never the normalized
+    // string key, which the binding layer cannot resolve), carrying its declared
+    // schema so a default surfaces rather than `undefined`. Used for BOTH a
+    // segment's external `$in` reads and its synthetic cross-segment outputs (so
+    // the producer's write and the consumer's read resolve to the SAME cell).
+    const aliasFor = (name: string): JSONValue => {
+      const meta = internalCellAliasByName.get(name);
+      const partialCause = meta?.partialCause ?? name;
+      const schema = meta?.schema;
+      return {
+        $alias: schema !== undefined
+          ? { partialCause, path: [], schema }
+          : { partialCause, path: [] },
+      } as unknown as JSONValue;
+    };
 
     const segmentNodes: Pattern["nodes"] = [];
     for (const seg of part.segments) {
@@ -3069,10 +3221,23 @@ export class Runner {
       //   (2) CELL-ONLY externals — a producer-LESS internal cell (a `cell(…)`
       //       written only by a handler, or a `derivedInternalCells` default);
       //       seeded by NAME, read from the live cell (schema-defaulted).
-      const externalNames: string[] = []; // op-backed (seed by op id)
+      const externalNames: string[] = []; // op-backed (seed by op id by name)
       const cellOnlyNames: string[] = []; // producer-less (seed by name)
+      // Cross-segment `opOut` externals: synthetic-cell name → producing op id,
+      // seeded by op id (the consumer's `internal`→opId map has no entry for a
+      // synthetic op, so the impl seeds these explicitly by their op id).
+      const crossSegExt: Array<{ name: string; opId: OpId }> = [];
       const seenExt = new Set<string>();
       for (const ref of seg.inputs) {
+        if (ref.kind === "opOut") {
+          if (segOpIds.has(ref.op)) continue; // produced WITHIN the segment
+          const name = crossSegOpName.get(ref.op);
+          if (name === undefined) return null; // not materialized ⇒ fall back
+          if (seenExt.has(name)) continue;
+          seenExt.add(name);
+          crossSegExt.push({ name, opId: ref.op });
+          continue;
+        }
         if (ref.kind !== "internal") continue;
         if (seenExt.has(ref.name)) continue;
         const producerOp = internalToOp.get(ref.name);
@@ -3102,6 +3267,17 @@ export class Runner {
         segOutputNames.push(name);
         segOutputsBinding[name] = nodeOutputsByName.get(name)!;
       }
+      // CROSS-SEGMENT `opOut` outputs this segment PRODUCES: each synthetic
+      // `$ri-op-<id>` cell whose op lives in this segment. Written by op id (the
+      // impl maps the synthetic name → op id via `crossSegOutputNameToOpId`),
+      // aliased by its synthetic partialCause so a later segment can seed it.
+      const crossSegOutputNameToOpId = new Map<string, OpId>();
+      for (const [opId, name] of crossSegOpName) {
+        if (!segOpIds.has(opId)) continue;
+        segOutputNames.push(name);
+        segOutputsBinding[name] = aliasFor(name);
+        crossSegOutputNameToOpId.set(name, opId);
+      }
       // A segment that materializes nothing downstream-consumers read is dead
       // weight (it would write an empty value object). Skip emitting it; its op
       // values are recomputed by any consumer segment that seeds from it. (In the
@@ -3128,22 +3304,25 @@ export class Runner {
       // touched) surfaces as the default value rather than `undefined` — matching
       // what legacy reads through the cell.
       const inBinding: Record<string, JSONValue> = {};
-      const aliasFor = (name: string): JSONValue => {
-        const meta = internalCellAliasByName.get(name);
-        const partialCause = meta?.partialCause ?? name;
-        const schema = meta?.schema;
-        return {
-          $alias: schema !== undefined
-            ? { partialCause, path: [], schema }
-            : { partialCause, path: [] },
-        } as unknown as JSONValue;
-      };
       for (const name of externalNames) inBinding[name] = aliasFor(name);
       for (const name of cellOnlyNames) inBinding[name] = aliasFor(name);
+      for (const { name } of crossSegExt) inBinding[name] = aliasFor(name);
       const inputsBinding = {
         $arg: { $alias: { cell: "argument", path: [] } },
         $in: inBinding,
       } as unknown as JSONValue;
+
+      // The impl seeds op values by op id. Named-internal externals key on
+      // `internalToOp`; synthetic cross-segment externals carry their own op id.
+      // Outputs likewise: named-internal outputs key on `outputNameToOpId`,
+      // synthetic outputs on `crossSegOutputNameToOpId`. Merge both maps so the
+      // impl resolves every output/external name → op id uniformly.
+      const segOutputNameToOpId = new Map<string, OpId>(outputNameToOpId);
+      for (const [name, opId] of crossSegOutputNameToOpId) {
+        segOutputNameToOpId.set(name, opId);
+      }
+      const crossSegSeed = new Map<string, OpId>();
+      for (const { name, opId } of crossSegExt) crossSegSeed.set(name, opId);
 
       const segImpl = this.buildSegmentInterpreterImpl(
         segRog,
@@ -3152,8 +3331,9 @@ export class Runner {
         externalNames,
         cellOnlyNames,
         segOutputNames,
-        outputNameToOpId,
+        segOutputNameToOpId,
         internedArg,
+        crossSegSeed,
       );
 
       segmentNodes.push({
@@ -3183,12 +3363,22 @@ export class Runner {
     // (e) Assemble the synthetic mixed Pattern. The result tree +
     // derivedInternalCells are preserved verbatim so projection/materialization
     // is identical to legacy; only the COMPUTE nodes are replaced by segments,
-    // while boundaries pass through unchanged.
+    // while boundaries pass through unchanged. The synthetic `$ri-op-<id>`
+    // cross-segment cells are APPENDED to the manifest (they carry NO result-tree
+    // projection, so the output is identical to legacy — they exist only to route
+    // a value between two segments).
+    const mergedDerivedCells = [
+      ...(pattern.derivedInternalCells ?? []),
+      ...syntheticDerivedCells,
+    ];
     return {
       argumentSchema,
       resultSchema,
-      ...(pattern.derivedInternalCells !== undefined
-        ? { derivedInternalCells: pattern.derivedInternalCells }
+      ...(mergedDerivedCells.length > 0
+        ? {
+          derivedInternalCells:
+            mergedDerivedCells as Pattern["derivedInternalCells"],
+        }
         : {}),
       result: pattern.result,
       nodes: [...segmentNodes, ...boundaryNodes],
@@ -3216,6 +3406,9 @@ export class Runner {
     segOutputNames: string[],
     outputNameToOpId: Map<string, OpId>,
     internedArg: JSONSchema,
+    /** Synthetic cross-segment `$ri-op-<id>` externals: `$in[name]` → producing
+     * op id. Seeded by op id (these have no `internalToOp` entry). */
+    crossSegSeed: Map<string, OpId> = new Map<string, OpId>(),
   ): (
     inputsCell: Cell<unknown>,
     sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
@@ -3253,6 +3446,9 @@ export class Runner {
           const opId = internalToOp.get(name);
           if (opId !== undefined) seed.set(opId, inObj[name]);
         }
+        // Seed synthetic cross-segment `opOut` externals by their producing op id
+        // (an intermediate construct's value routed through a `$ri-op-<id>` cell).
+        for (const [name, opId] of crossSegSeed) seed.set(opId, inObj[name]);
         // Seed producer-LESS internal cells by name (handler-written `cell(…)` /
         // `derivedInternalCells` defaults) — these have no op id to key on.
         const seedByName = new Map<string, unknown>();
