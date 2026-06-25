@@ -251,10 +251,42 @@ export class ShellIntegration {
     const page = this.page();
     await page.goto(url);
     await page.applyConsoleFormatter();
+    // CF_FWD_WORKER_CONSOLE=1: forward the runtime worker's console to the page
+    // (→ PIPE_CONSOLE test output) so worker-side diagnostics are captured.
+    // Seed localStorage BEFORE the runtime is created (at login) so the worker
+    // is spawned with forwarding on (the worker can't read localStorage; the
+    // main thread seeds it at runtime creation).
+    const fwdWorkerConsole = Deno.env.get("CF_FWD_WORKER_CONSOLE") === "1";
+    if (fwdWorkerConsole) {
+      try {
+        await page.evaluate(() => {
+          try {
+            globalThis.localStorage?.setItem("forwardWorkerConsole", "true");
+          } catch { /* ignore */ }
+        });
+      } catch (_e) {
+        // best-effort diagnostic toggle
+      }
+    }
     await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
       await this.waitForState({ identity, view });
+    }
+    // Also live-apply, in case a runtime already existed before seeding.
+    if (fwdWorkerConsole) {
+      try {
+        await page.evaluate(() => {
+          const cf = (globalThis as { commonfabric?: Record<string, unknown> })
+            .commonfabric;
+          const fn = cf?.forwardWorkerConsole as
+            | ((enabled?: boolean) => void)
+            | undefined;
+          fn?.(true);
+        });
+      } catch (_e) {
+        // best-effort diagnostic toggle
+      }
     }
   }
 

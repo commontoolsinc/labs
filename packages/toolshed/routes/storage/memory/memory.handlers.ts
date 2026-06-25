@@ -133,6 +133,13 @@ export const bufferTextMessagesUntilNegotiated = (
   };
 };
 
+// Per-connection ordinal for CF_DEBUG_MEMORY_WRITES. Each WebSocket connection
+// is one client (one browser profile), so tagging every `[memwrite]` with this
+// `c=<n>` attributes a storm's writes to specific clients — e.g. whether two
+// divergent link targets come from two distinct clients (per-client identity
+// divergence) or one client alternating (a condition flip).
+let memwriteConnSeq = 0;
+
 const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
@@ -164,7 +171,48 @@ const attachMemorySocketPipeline = (
   // CF_DEBUG_MEMORY_WRITES=1: per-commit write trace (id + scope), mirrors the
   // standalone server's logging. Server-side, so it sees every client's commits
   // — the fastest way to see which doc a storm actually keeps writing.
+  //
+  // It also emits, per op, a content hash (`vhash`) and a capped canonical
+  // rendering (`val`) of the written value plus the changed sub-paths
+  // (`paths`). The write-contention investigation needs this: a non-terminating
+  // multi-client storm requires a hot entity whose committed value genuinely
+  // keeps CHANGING (value-equal writes are already short-circuited client-side
+  // before commit). Grouping a hot id's `vhash` over time discriminates the
+  // root cause — alternating hashes ⇒ different clients write structurally
+  // different values (e.g. divergent link serialization); a single stable hash
+  // ⇒ the churn is not value-divergence. `vhash` is over a key-sorted
+  // serialization so it tracks content (not key-order) equality, the way the
+  // runtime's `valueEqual` does.
   const debugMemWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+  const memConnId = debugMemWrites ? ++memwriteConnSeq : 0;
+  const stableStringify = (value: unknown): string => {
+    const seen = new WeakSet<object>();
+    const walk = (x: unknown): unknown => {
+      if (x === null || typeof x !== "object") return x;
+      if (seen.has(x as object)) return "[circular]";
+      seen.add(x as object);
+      if (Array.isArray(x)) return x.map(walk);
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(x as Record<string, unknown>).sort()) {
+        out[k] = walk((x as Record<string, unknown>)[k]);
+      }
+      return out;
+    };
+    try {
+      return JSON.stringify(walk(value)) ?? "undefined";
+    } catch {
+      return String(value);
+    }
+  };
+  // FNV-1a/32, stable across runs and processes (unlike object identity).
+  const hash32 = (s: string): string => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+  };
   const logMemWrites = (payload: string): void => {
     if (!debugMemWrites) return;
     try {
@@ -172,10 +220,27 @@ const attachMemorySocketPipeline = (
         commit?: { operations?: Array<Record<string, any>> };
       };
       for (const op of parsed?.commit?.operations ?? []) {
+        // For `set`/`delete` the written value is `op.value`; for `patch` the
+        // value lives inside the JSON-patch entries (`op.patches[*].value`),
+        // and `op.value` is absent. Hash whichever is present so a patch's
+        // value isn't silently dropped (the `paths` are extracted separately).
+        const payload = op?.patches !== undefined ? op.patches : op?.value;
+        const hasValue = payload !== undefined;
+        const canon = hasValue ? stableStringify(payload) : "";
+        const vhash = hasValue ? hash32(canon) : "--------";
+        const paths = Array.isArray(op?.patches)
+          ? op.patches
+            .map((p: Record<string, any>) => p?.path)
+            .filter((p: unknown) => p !== undefined)
+            .slice(0, 4)
+            .join(",")
+          : "";
         console.error(
-          `[memwrite] op=${op?.op} id=${String(op?.id).slice(0, 28)} scope=${
+          `[memwrite] c=${memConnId} op=${op?.op} id=${
+            String(op?.id).slice(0, 28)
+          } scope=${
             op?.scope ?? "(space)"
-          }`,
+          } vhash=${vhash} paths=[${paths}] val=${canon.slice(0, 600)}`,
         );
       }
     } catch {

@@ -1,3 +1,10 @@
+> ⚠️ **SUPERSEDED — read [`IDENTITY-DIVERGENCE-HANDOFF.md`](./IDENTITY-DIVERGENCE-HANDOFF.md) first.**
+> This doc's core premise ("value-identical writes losing a seq race") is **wrong**.
+> Root cause is **fresh-create vs resume-from-sync cell-identity divergence** (two
+> channels: `awaitSync` in the cause; schema `$defs` placement). Kept for the
+> instrumentation history only. The "value-equal write short-circuit" experiment in
+> §8 below is moot — three such gates already exist; the writes genuinely differ.
+
 # Lunch Poll — Multi-User Contention: Findings & Handoff
 
 **Status:** root cause **instrumented and characterized**, no fix yet. The
