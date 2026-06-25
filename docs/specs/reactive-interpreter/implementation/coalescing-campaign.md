@@ -116,3 +116,38 @@ The coalescing campaign is **COMPLETE**. The reactive interpreter is engaged on 
 - **D-EMISSION-SCOPE conservative boundary HONORED:** scope-narrowed / session/user / cross-space per-element collections are PERMANENT legacy fallback (a deliberate decision, not an unfinished gap). The flag-ON unit cleanup added the runtime guard that falls collection-bearing partitions back to legacy when the bound argument tree carries a non-default scope, restoring the correct per-element scope label. This guard is dormant on the realistic integration corpus (census `scoped` = 0) but pins the conservative boundary for any future scoped-collection pattern.
 - **Footprint:** LEVEL-1 boundaries keep the legacy ~3N-docs map verbatim; LEVEL-2 eligible per-element renders interpret via `$ri-collection-map` for the ~3N→~1+N doc win. Sub-1-per-element doc elimination remains an explicitly-deferred future increment (O(N) docs persist — see DECISIONS.md D-OQ4-FINDING / D-W3-PRECISION). The fan-out emission landed as one-value/N-readers (no §4.4 multi-output machinery was required for this corpus).
 - **CAMPAIGN STATUS: COMPLETE.** Integration green (147/0), flag-off green (696/0), flag-ON green (696/0), engagement 142/146 with only documented rare/non-core exceptions. Nothing core (handlers, computeds, lifts, ifElse/when, derived, maps-as-boundary, eligible per-element map render, fan-out segments, non-effect bnd->bnd producers) falls back.
+
+## FOOTPRINT MEASUREMENT (2026-06-25) — the original motivation
+
+Measured docs + scheduler nodes OFF vs ON. Engagement ≠ payoff, so this is the
+real test. Honest, mixed result: a SOLID node win, NO doc win, small overhead at
+the extremes.
+
+**Integration aggregate (142 engaged / 4 fallback, headless), independently re-verified:**
+- scheduler nodes 2398 → 1766 = **−632 (−26.4%)**. Mechanism: computation nodes
+  1156→258 (−898, pure leaves folded into one segment node) offset by input/read-source
+  markers 738→1001 (+263). The 4 fallback scenarios are BYTE-IDENTICAL OFF vs ON
+  (perfect control — measurement isolates the interpreter path).
+- documents +0.3% = **FLAT** (commit-tap count). No reduction, no regression; the
+  §4.8 VNode-doc inflation does NOT appear headless (no rendered VNode subtrees).
+- Per-scenario: nodes reduced in 109, increased in 22 (all small +1..+7, on the
+  TRIVIAL single-leaf patterns where per-segment/boundary overhead > benefit;
+  crossover ≈ 3 pure leaves), flat in 11. Big wins on computation-heavy: leadScoring
+  35→15, surveyResponseAnalyzer 30→11, counterWithNestedComputedTotals 46→29.
+
+**Scaled benches:**
+- notes-list (collection-interpreter path, VNode render, N=10..100): nodes/note
+  **−20%** (5→4), docs/note FLAT (improved from the old +2/elem §4.8 inflation).
+- lunch-poll (coalescing path, complex multi-user): nodes/docs **+2% (WORSE)** at only
+  **18% engaged** — overhead dominates when engagement is low (nested per-option/per-user
+  collections need §4.7 recursion; voting handlers are context-requiring). The opposite
+  of the integration result precisely because engagement+leaf-density are low.
+
+**Bottom line:** the NODE half of the `nodes≈8+4N` tax IS reduced (−26% on
+computation-heavy engaged patterns) — the core motivation's node win is real. The
+DOC half (`docs≈5+3N`) is FLAT, not reduced. Remaining to make the win uniform:
+(a) reduce the +263 input-marker overhead (bigger node win); (b) the doc win =
+§4.8 VNode consolidation on rendered maps; (c) §4.7 nested-collection recursion to
+lift complex-app engagement (lunch-poll); (d) a cost-gate so trivial single-leaf
+patterns don't partition (avoid the +1). Instrumentation: RI_FOOTPRINT_DUMP (env-gated)
+in pattern-harness.ts.
