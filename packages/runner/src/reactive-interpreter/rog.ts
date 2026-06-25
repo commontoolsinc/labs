@@ -55,7 +55,7 @@ export type OpKind =
 
 export type CollectionOp = "map" | "filter" | "flatMap";
 export type ControlOp = "ifElse" | "when" | "unless";
-export type EffectSink = "render" | "pull" | "handler";
+export type EffectSink = "render" | "pull" | "handler" | "io";
 
 /** An inlined, in-memory nested pattern: the sub-pattern's own ROG plus the
  * local wiring needed to evaluate it in isolation against a resolved argument.

@@ -98,6 +98,7 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import {
+  argumentPathNeedsCellContext,
   type ExtractResult,
   extractRog,
   extractRogBaseDefer,
@@ -669,6 +670,108 @@ function hasNonDefaultScope(value: unknown): boolean {
     if (hasNonDefaultScope(v)) return true;
   }
   return false;
+}
+
+/** Enumerate every {@link ValueRef} an op reads — flat `inputs` plus the
+ * structural detail refs (collection `listInput`, pattern `argument`, control
+ * `pred`/`branches`, construct template leaves). Used to find a segment's
+ * argument reads in ANY op position (predicate, branch, list input, template
+ * field), not just the flat `inputs`. PURE. */
+function argRefsOfOpFull(op: Op): ValueRef[] {
+  const refs: ValueRef[] = [...op.inputs];
+  const d = op.detail;
+  if (d.kind === "collection") refs.push(d.listInput);
+  if (d.kind === "pattern") refs.push(d.argument);
+  if (d.kind === "control") refs.push(d.pred, ...d.branches);
+  if (d.kind === "construct") {
+    refs.push(
+      ...(d.template.shape === "object"
+        ? Object.values(d.template.fields)
+        : d.template.items),
+    );
+  }
+  return refs;
+}
+
+/** A prefix-tree of the argument PATHS a segment reads (07 §4.8 per-segment read
+ * narrowing). `whole` at a node means a segment reads that node ENTIRELY (a bare
+ * `argument.option` with no further key) — its full sub-schema is kept; otherwise
+ * only the `children` paths are kept. */
+interface ArgPathTree {
+  whole: boolean;
+  children: Map<string, ArgPathTree>;
+}
+
+function newArgPathTree(): ArgPathTree {
+  return { whole: false, children: new Map() };
+}
+
+/** Insert one argument read path into the tree. An EMPTY path marks the whole
+ * argument read (the segment depends on everything → no narrowing). */
+function insertArgPath(tree: ArgPathTree, path: readonly string[]): void {
+  if (path.length === 0) {
+    tree.whole = true;
+    return;
+  }
+  let node = tree;
+  for (const step of path) {
+    if (node.whole) return; // an ancestor is read whole — finer paths subsumed
+    let child = node.children.get(step);
+    if (!child) node.children.set(step, child = newArgPathTree());
+    node = child;
+  }
+  node.whole = true; // the terminal path component is read as a value
+}
+
+/** Project an argument JSON schema down to ONLY the paths in `tree` (07 §4.8
+ * per-segment read narrowing). Reading the WHOLE argument schema makes a segment
+ * re-run on (and deep-traverse) every field — for a wide sub-pattern that floods
+ * the scheduler read-set and provokes stale-read conflicts on shared docs. This
+ * builds a minimal schema covering only the property paths the segment's ops
+ * actually navigate, so the segment's tracked read-set matches legacy's
+ * fine-grained per-computed subscription. Each kept LEAF (a `whole` node) carries
+ * its sub-schema VERBATIM (so `asCell`/`asStream` annotations + nested defaults
+ * survive); an intermediate object node is rebuilt with only its read children.
+ * A non-object schema, or a path that cannot be followed structurally (an open
+ * record / array / combinator), keeps the sub-schema verbatim (sound: cannot
+ * narrow further). PURE — read-only projection. */
+function narrowArgumentSchemaByTree(
+  schema: JSONSchema | undefined,
+  tree: ArgPathTree,
+): JSONSchema {
+  if (tree.whole) return (schema ?? true) as JSONSchema;
+  if (
+    !schema || typeof schema !== "object" || Array.isArray(schema) ||
+    tree.children.size === 0
+  ) {
+    return (schema ?? true) as JSONSchema;
+  }
+  const obj = schema as Record<string, unknown>;
+  const props = obj.properties as Record<string, unknown> | undefined;
+  // Only an OBJECT schema with declared properties can be narrowed by key. Any
+  // other shape (open record, array index, combinator) keeps the full sub-schema
+  // for the read children (cannot prove a tighter projection structurally).
+  if (!props || typeof props !== "object") return schema;
+  const narrowedProps: Record<string, unknown> = {};
+  const keptKeys = new Set<string>();
+  for (const [key, childTree] of tree.children) {
+    if (Object.hasOwn(props, key)) {
+      narrowedProps[key] = narrowArgumentSchemaByTree(
+        props[key] as JSONSchema,
+        childTree,
+      );
+      keptKeys.add(key);
+    }
+  }
+  const out: Record<string, unknown> = {
+    type: "object",
+    properties: narrowedProps,
+  };
+  if (Array.isArray(obj.required)) {
+    const req = (obj.required as string[]).filter((k) => keptKeys.has(k));
+    if (req.length > 0) out.required = req;
+  }
+  return internSchema(out) as JSONSchema;
 }
 
 /** True iff ANY node in the pattern carries cross-space / non-default-scope
@@ -2259,8 +2362,18 @@ export class Runner {
      * per-element link scopes. Read-only — the probe never writes. */
     setupTx?: IExtendedStorageTransaction,
   ): Pattern {
+    const riLabel = (): string => {
+      const t = (s: JSONSchema | undefined) =>
+        (s as { title?: string } | undefined)?.title;
+      return t(pattern.resultSchema) ?? t(pattern.argumentSchema) ??
+        `nodes=${pattern.nodes?.length ?? 0}`;
+    };
+    const RI_DISPATCH_DEBUG = Deno.env.get("RI_DISPATCH_DEBUG") === "1";
     const bumpAndThrow = (reason: InterpreterFallbackReason): never => {
       this.interpreterCensus.fallback_by_reason[reason]++;
+      if (RI_DISPATCH_DEBUG) {
+        console.error(`RI_DISPATCH fallback ${reason} [${riLabel()}]`);
+      }
       throw new NotInterpretedHere(reason);
     };
 
@@ -2315,6 +2428,9 @@ export class Runner {
     );
     if (collectionPattern) {
       this.interpreterCensus.interpreted_ok++;
+      if (RI_DISPATCH_DEBUG) {
+        console.error(`RI_DISPATCH ok collection [${riLabel()}]`);
+      }
       return collectionPattern;
     }
 
@@ -2438,6 +2554,9 @@ export class Runner {
       );
       if (partitioned) {
         this.interpreterCensus.interpreted_ok++;
+        if (RI_DISPATCH_DEBUG) {
+          console.error(`RI_DISPATCH ok partition [${riLabel()}]`);
+        }
         return partitioned;
       }
     }
@@ -2889,6 +3008,9 @@ export class Runner {
 
     // Probe succeeded: this pattern WILL be instantiated through the interpreter.
     this.interpreterCensus.interpreted_ok++;
+    if (RI_DISPATCH_DEBUG) {
+      console.error(`RI_DISPATCH ok single-node [${riLabel()}]`);
+    }
 
     return {
       argumentSchema: argumentSchema as JSONSchema,
@@ -2964,13 +3086,29 @@ export class Runner {
     // below). An unresolved leaf is a BOUNDARY (kept verbatim as a legacy node);
     // `unresolvedLeafOps` carries the set the caller resolved so the partition
     // can cut the pure region around it instead of falling the whole pattern back.
+    const PART_DBG = Deno.env.get("RI_PART_DEBUG2") === "1";
+    const partDbg = (why: string) => {
+      if (PART_DBG) {
+        console.error(
+          `RI_PART2 decline ${why} [nodes=${pattern.nodes?.length ?? 0}]`,
+        );
+      }
+    };
     const part = partition({
       rog: extracted.rog,
       internalToOp,
       unresolvedLeafOps,
     });
     if (!part.partitionable) {
+      partDbg("not-partitionable:" + (part.reason ?? ""));
       return null;
+    }
+    if (PART_DBG) {
+      const kinds = part.boundaries.map((b) => b.kind).join(",");
+      console.error(
+        `RI_PART2 boundaries=[${kinds}] segs=${part.segments.length} ` +
+          `[nodes=${pattern.nodes?.length ?? 0}]`,
+      );
     }
 
     // (b) SPIKE GATES — deliberate scope cuts (NOT green-dodging). Any miss →
@@ -2996,6 +3134,7 @@ export class Runner {
         b.kind !== "collection"
       )
     ) {
+      partDbg("boundary-kind-pattern");
       return null;
     }
 
@@ -3024,28 +3163,78 @@ export class Runner {
       part.boundaries.some((b) => b.kind === "collection") &&
       hasNonDefaultScope(this.readRawArgumentSnapshot(resultCell, setupTx))
     ) {
+      partDbg("scoped-collection");
       return null;
     }
 
-    // `asCell`/`asStream` ARGUMENT with an unresolved-leaf boundary: when the
-    // pattern argument schema marks an input as a live Cell/Stream handle
-    // (`Cell<…>` / `Stream<…>` arg, e.g. `ifElse(enabledCell, …)`), the segment's
-    // deep-resolved `$arg` surfaces that field as a HANDLE object, not the
-    // unwrapped value — so a segment `control` predicate / `leaf` input reading it
-    // mis-evaluates (a truthy handle always takes the true branch). Legacy reads
-    // through the live cell and gets the unwrapped value. This is a latent hazard
-    // for ANY segment reading an `asCell` arg, but it only became reachable when
-    // the unresolved-leaf path engaged these context-bearing patterns; gating it
-    // to that path keeps the effect-only engagement strictly unchanged (monotonic)
-    // while staying sound. Fall back to legacy (green).
+    // `asCell`/`asStream` ARGUMENT read BY A SEGMENT: when the pattern argument
+    // schema marks an input as a live Cell/Stream handle (`Cell<…>` / `Stream<…>`
+    // arg, e.g. `ifElse(enabledCell, …)`), the segment's deep-resolved `$arg`
+    // surfaces that field as a HANDLE object, not the unwrapped value — so a
+    // segment `control` predicate / `leaf` input reading it mis-evaluates (a
+    // truthy handle always takes the true branch). Legacy reads through the live
+    // cell and gets the unwrapped value.
+    //
+    // §4.7 REFINEMENT (was: coarse whole-pattern `schemaNeedsCellContext`): the
+    // hazard requires a SEGMENT to actually NAVIGATE INTO a handle-typed argument
+    // path. A pattern whose `asCell`/`asStream` fields are handed only to HANDLER
+    // / effect boundaries (e.g. lunch-poll's PollOptionCard, whose `castVote` …
+    // `Stream`s and `homePageRefresh` … `Cell`s are passed to handlers, never
+    // read by a pure segment) is SOUND to coalesce: no segment ever surfaces a
+    // handle. Gate per-SEGMENT — enumerate every `argument`-kind ValueRef the
+    // segment ops read and fall back ONLY if one navigates into an
+    // `asCell`/`asStream` schema node (`argumentPathNeedsCellContext`). This
+    // un-traps the deeply-nested handler/effect-bearing element sub-patterns the
+    // coarse gate previously fell back wholesale (07 §4.7) while keeping the
+    // genuine "segment reads a Cell-typed arg" case fallback. Sound — a segment
+    // reading only plain argument paths deep-resolves to plain values exactly as
+    // the whole-pattern interpreter already does.
     const hasUnresolvedLeafBoundary = part.boundaries.some((b) =>
       b.kind === "unresolved-leaf"
     );
-    if (
-      hasUnresolvedLeafBoundary &&
-      schemaNeedsCellContext(pattern.argumentSchema)
-    ) {
-      return null;
+    const argSchema = pattern.argumentSchema;
+    if (hasUnresolvedLeafBoundary && schemaNeedsCellContext(argSchema)) {
+      const segByIdLocal = new Map<OpId, Op>();
+      for (const op of extracted.rog.ops) segByIdLocal.set(op.id, op);
+      // A handle arg read is only HAZARDOUS when the consuming segment op
+      // INTERPRETS the value: a `leaf` body calls `.get()`/`.key()` on what it
+      // expects to be a plain value (it gets a handle → wrong), and a `control`
+      // op's predicate/branch coerces a handle as truthy (always-true → wrong).
+      // A `construct` / `access` op merely RE-PROJECTS the handle structurally
+      // into its output (a VNode prop, a handler-input object) — exactly as
+      // legacy's binding layer wires the live cell into that downstream
+      // structure. `asSchema(internedArg).get()` already surfaces the handle for
+      // an `asCell`/`asStream` field (the annotation rides `internedArg`), so the
+      // construct re-emits the SAME live handle legacy would, and a downstream
+      // handler reads it through. So gate ONLY on a `leaf`/`control` op reading a
+      // handle arg path; a `construct`/`access` handle pass-through is sound and
+      // is exactly the lunch-poll PollOptionCard case the coarse gate trapped
+      // (its handle reads are all VNode/handler-input CONSTRUCTS — 07 §4.7/§4.8).
+      const HANDLE_HAZARD_KINDS = new Set(["leaf", "control"]);
+      const handleArgPaths: string[] = [];
+      let segmentReadsHandleArg = false;
+      for (const seg of part.segments) {
+        for (const id of seg.opIds) {
+          const op = segByIdLocal.get(id);
+          if (!op) continue;
+          if (!HANDLE_HAZARD_KINDS.has(op.kind)) continue;
+          for (const ref of argRefsOfOpFull(op)) {
+            if (
+              ref.kind === "argument" &&
+              argumentPathNeedsCellContext(argSchema, ref.path)
+            ) {
+              segmentReadsHandleArg = true;
+              if (PART_DBG) {
+                handleArgPaths.push(`${op.kind}#${op.id}:${ref.path.join(".")}`);
+              }
+            }
+          }
+        }
+      }
+      if (segmentReadsHandleArg) {
+        partDbg("segment-reads-handle-arg:" + handleArgPaths.join("|"));
+        return null;
+      }
     }
 
     // (Cross-segment `opOut` externals are MATERIALIZED via synthetic `$ri-op-<id>`
@@ -3097,12 +3286,16 @@ export class Runner {
         e.kind === "bnd->bnd" && effectBoundaryIds.has(e.from)
       )
     ) {
+      partDbg("effect-bnd-bnd");
       return null;
     }
 
     // A boundary with no segment to interpret is just the whole-legacy pattern —
     // nothing gained. Require at least one segment so the interpreter ENGAGES.
-    if (part.segments.length === 0) return null;
+    if (part.segments.length === 0) {
+      partDbg("no-segments");
+      return null;
+    }
 
     // F4 (coarse write-back-cycle gate): a handler whose ORIGINAL node writes a
     // cell that ANY segment reads as an input would create a write-back cycle
@@ -3128,12 +3321,62 @@ export class Runner {
         if (ref.kind === "internal") segmentReadNames.add(ref.name);
       }
     }
+    // op id → op (for the I/O-vs-handler effect-sink discrimination below).
+    const opById = new Map<OpId, Op>();
+    for (const op of extracted.rog.ops) opById.set(op.id, op);
+    // Does this partition carry any HANDLER-SINK effect (a `cf.handler`
+    // event-stream node that writes back to SHARED parent state)? That is the
+    // structural fingerprint of a per-element ROW that, under CONCURRENT
+    // multi-user load, contends on the hot aggregate doc when its coalesced
+    // segments read the shared list and commit independently (07 §4.8). An I/O
+    // effect whose output a segment reads is otherwise a clean `bnd→seg` dataflow
+    // win — see the per-boundary gate below.
+    const hasHandlerSinkEffect = part.boundaries.some((b) => {
+      if (b.kind !== "effect") return false;
+      const op = opById.get(b.opId);
+      return op?.detail.kind === "effect" && op.detail.sink === "handler";
+    });
     for (const b of part.boundaries) {
       if (b.kind !== "effect") continue;
+      // §4.7: the single-pass-deadlock cycle concern is specific to a HANDLER sink
+      // (an event-stream / `$ctx` side-effect write a segment could feed back
+      // into). An I/O-builtin effect (`fetchData`/`generateText`/`llm`/
+      // `sqliteQuery`/`wish`/…) produces a TRACKED DATAFLOW result cell — a
+      // downstream segment reading it is a sound `bnd→seg` edge (the segment
+      // journals the read, so the builtin's intrinsic label flows through it
+      // exactly as legacy's computed does), NOT a cycle. The `io` sink is
+      // classified (extract.ts) so this discrimination is available.
+      //
+      // ENGAGE the I/O→segment dataflow edge — but ONLY when the partition has NO
+      // handler-sink effect. A pattern that combines an I/O builtin with a
+      // downstream display computed and NO event-stream write-back (e.g.
+      // CT-1334's `fetchData` + computed-projection sub-pattern) coalesces the
+      // post-fetch pure region cleanly (sound, verified output-equivalent, +1
+      // integration scenario). A pattern that ALSO carries handler sinks is a
+      // per-element interactive ROW (lunch-poll's PollOptionCard: `fetchData`/
+      // `generateText` alongside `castVote`/`removeOption`/… handlers): under
+      // CONCURRENT multi-user load its coalesced segments multiply the stale-
+      // confirmed-read surface on the hot shared poll doc → a cross-session
+      // conflict ratchet (measured 4–10× commit-conflicts / 2–6× wall-clock vs
+      // flat OFF↔ON when the I/O edge stays a boundary). That contention is the
+      // §4.8 doc-fragmentation + per-element read-isolation hazard, a SEPARATE
+      // increment (consolidated VNode docs + element-scoped segment writes). Until
+      // then a handler-bearing partition keeps the I/O edge a BOUNDARY (the cycle
+      // gate fires), so its per-element row stays sound legacy — the surrounding
+      // pure region still interprets. (`RI_F4_IO_COALESCE=1` forces the engage for
+      // measurement of the deferred case.)
+      const op = opById.get(b.opId);
+      const sink = op?.detail.kind === "effect" ? op.detail.sink : "handler";
+      const coalesceIo = Deno.env.get("RI_F4_IO_OFF") === "1"
+        ? false
+        : (!hasHandlerSinkEffect ||
+          Deno.env.get("RI_F4_IO_COALESCE") === "1");
+      if (sink === "io" && coalesceIo) continue;
       const bNode = pattern.nodes?.[b.opId];
       if (!bNode) continue;
       const outName = outputInternalName(bNode.outputs);
       if (outName !== null && segmentReadNames.has(outName)) {
+        partDbg("f4-writeback-cycle:" + outName);
         return null;
       }
     }
@@ -3266,6 +3509,7 @@ export class Runner {
         // The producer must be a SEGMENT op (a boundary output is a named cell,
         // handled by the internal-ref path; a producer in no segment is a bug).
         if (producerSeg === undefined || producerSeg === si) {
+          partDbg("cross-seg-opout-producer:" + ref.op);
           return null;
         }
         if (!crossSegOpName.has(ref.op)) {
@@ -3310,7 +3554,10 @@ export class Runner {
       const segOps: Op[] = [];
       for (const id of seg.opIds) {
         const op = byId.get(id);
-        if (!op) return null;
+        if (!op) {
+          partDbg("seg-op-missing:" + id);
+          return null;
+        }
         segOps.push(op);
       }
       const segOpIds = new Set<OpId>(seg.opIds);
@@ -3335,7 +3582,10 @@ export class Runner {
         if (ref.kind === "opOut") {
           if (segOpIds.has(ref.op)) continue; // produced WITHIN the segment
           const name = crossSegOpName.get(ref.op);
-          if (name === undefined) return null; // not materialized ⇒ fall back
+          if (name === undefined) {
+            partDbg("cross-seg-unmaterialized:" + ref.op);
+            return null; // not materialized ⇒ fall back
+          }
           if (seenExt.has(name)) continue;
           seenExt.add(name);
           crossSegExt.push({ name, opId: ref.op });
@@ -3427,6 +3677,32 @@ export class Runner {
       const crossSegSeed = new Map<string, OpId>();
       for (const { name, opId } of crossSegExt) crossSegSeed.set(name, opId);
 
+      // PER-SEGMENT ARGUMENT READ NARROWING (07 §4.8 over-subscription fix). The
+      // segment impl deep-reads `$arg` under a schema to track its argument
+      // dependencies. Reading the WHOLE argument schema makes EVERY segment
+      // re-run whenever ANY argument field changes — for a wide sub-pattern (e.g.
+      // lunch-poll's PollOptionCard with `option`/`votes`/`me`/… and ~28
+      // segments) that is a re-run storm that floods the scheduler and provokes
+      // cross-session write contention (conflict ratchet). Legacy's per-computed
+      // nodes each subscribe ONLY to their own inputs; mirror that by narrowing
+      // each segment's `$arg` schema to the TOP-LEVEL argument properties its ops
+      // actually read. A segment that reads the argument ROOT directly (a bare
+      // `argument` ref with an empty path — e.g. spreads the whole arg) keeps the
+      // full schema (sound: it genuinely depends on everything). The narrowed
+      // schema PRESERVES each kept property's sub-schema verbatim (including any
+      // `asCell`/`asStream` annotation), so the construct handle pass-through is
+      // unchanged. Off the eligibility path — pure schema projection.
+      const segArgTree = newArgPathTree();
+      for (const op of segOps) {
+        for (const ref of argRefsOfOpFull(op)) {
+          if (ref.kind !== "argument") continue;
+          insertArgPath(segArgTree, ref.path.map(String));
+        }
+      }
+      const segInternedArg = segArgTree.whole
+        ? internedArg
+        : narrowArgumentSchemaByTree(argumentSchema, segArgTree);
+
       const segImpl = this.buildSegmentInterpreterImpl(
         segRog,
         leafImpls,
@@ -3435,7 +3711,7 @@ export class Runner {
         cellOnlyNames,
         segOutputNames,
         segOutputNameToOpId,
-        internedArg,
+        segInternedArg,
         crossSegSeed,
       );
 
@@ -3452,7 +3728,10 @@ export class Runner {
 
     // No segment actually materialized an output ⇒ nothing for the interpreter
     // to do; let the legacy single-node path (or full legacy) handle it.
-    if (segmentNodes.length === 0) return null;
+    if (segmentNodes.length === 0) {
+      partDbg("no-segment-nodes-emitted");
+      return null;
+    }
 
     // (d) Emit boundary nodes. Effect / unresolved-leaf boundaries are kept
     // VERBATIM as the original legacy node (their input aliases already reference

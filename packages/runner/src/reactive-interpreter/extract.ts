@@ -21,10 +21,12 @@
 import type {
   CollectionOp,
   ControlOp,
+  EffectSink,
   ImplRef,
   Op,
   OpId,
   OpKind,
+  PathStep,
   Rog,
   ValueRef,
 } from "./rog.ts";
@@ -116,7 +118,18 @@ function isPatternLike(m: unknown): m is RawPattern {
 
 function classifyModule(
   module: RawModule | RawPattern | undefined,
-): { kind: OpKind; impl?: ImplRef; collOp?: CollectionOp; ctrlOp?: ControlOp } {
+): {
+  kind: OpKind;
+  impl?: ImplRef;
+  collOp?: CollectionOp;
+  ctrlOp?: ControlOp;
+  /** For an `effect` kind: distinguish an I/O-builtin DATAFLOW producer
+   * (`fetchData`/`generateText`/`llm`/`sqliteQuery` — output is a tracked result
+   * cell a downstream segment reads, NOT a `$ctx` side-effect write) from an
+   * event-stream HANDLER sink (`cf.handler` / `isEffect` javascript). The F4
+   * write-back-cycle gate fires only for the latter (07 §4.7). */
+  effectSink?: EffectSink;
+} {
   if (isPatternLike(module)) return { kind: "pattern" };
   const m = (module ?? {}) as RawModule;
   if (m.$patternRef) return { kind: "pattern", impl: m.$patternRef };
@@ -137,7 +150,10 @@ function classifyModule(
     // A bare lift/computed/derive/str-lowered module (no wrapper, no isEffect)
     // is the genuine pure leaf and stays `leaf` so real coverage is preserved.
     if (m.wrapper === "handler" || m.isEffect === true) {
-      return { kind: "effect" };
+      // A `cf.handler` / `isEffect` javascript node is an EVENT-STREAM SINK (its
+      // application produces a stream link / `$ctx` side-effect write), not an
+      // I/O dataflow producer → handler sink (F4 cycle gate applies).
+      return { kind: "effect", effectSink: "handler" };
     }
     return { kind: "leaf", impl: m.$implRef };
   }
@@ -150,11 +166,20 @@ function classifyModule(
     if (CONTROL_OPS.has(ref)) {
       return { kind: "control", ctrlOp: ref as ControlOp };
     }
-    if (EFFECT_REFS.has(ref)) return { kind: "effect" };
+    if (EFFECT_REFS.has(ref)) {
+      // `navigateTo`/`streamData` write a stream/navigation SINK (no consumable
+      // dataflow result); the rest (`fetchData`/`generateText`/`llm*`/`sqlite*`/
+      // `wish`/`fetchProgram`/`compileAndRun`) are I/O DATAFLOW PRODUCERS whose
+      // output result cell a downstream segment legitimately reads (a sound
+      // `bnd→seg` edge, NOT a write-back cycle). Distinguish so the F4 gate fires
+      // only for the sink forms (07 §4.7).
+      const sinkOnly = ref === "navigateTo" || ref === "streamData";
+      return { kind: "effect", effectSink: sinkOnly ? "handler" : "io" };
+    }
     // A ref module the builder marked as an effect (`raw(..., {isEffect:true})`
     // lowerings may surface it on the in-memory module) is a side-effecting /
     // stream-producing builtin — fail closed to `effect`, never an opaque leaf.
-    if (m.isEffect === true) return { kind: "effect" };
+    if (m.isEffect === true) return { kind: "effect", effectSink: "handler" };
     // Other PURE builtins (str, …) are opaque value leaves.
     return { kind: "leaf" };
   }
@@ -163,7 +188,9 @@ function classifyModule(
   // whose pure-ness we can read off the module; anything else fails closed to
   // `effect` so an unmodeled side-effecting/stream-bearing module is rejected by
   // the eligibility gates rather than silently mis-evaluated as a pure leaf.
-  return { kind: "effect" };
+  // Fail closed to the HANDLER sink (the F4 gate applies — we cannot prove the
+  // unknown module's output is a consumable dataflow value).
+  return { kind: "effect", effectSink: "handler" };
 }
 
 /** Map a `partialCause` (the opaque derived-internal-cell identity, an arbitrary
@@ -894,7 +921,10 @@ export function extractRog(
           inlined,
         };
       } else if (c.kind === "effect") {
-        op.detail = { kind: "effect", sink: "handler" };
+        // Carry the I/O-vs-handler discrimination (07 §4.7) so the F4 write-back
+        // gate fires only for handler sinks; an I/O-builtin (`fetchData`/`llm`/…)
+        // output read by a downstream segment is a sound `bnd→seg` dataflow edge.
+        op.detail = { kind: "effect", sink: c.effectSink ?? "handler" };
       }
       ops.push(op);
     }
@@ -1015,6 +1045,67 @@ export function schemaNeedsCellContext(schema: unknown): boolean {
     if (k === "default") continue;
     if (schemaNeedsCellContext(v)) return true;
   }
+  return false;
+}
+
+/**
+ * Path-aware refinement of {@link schemaNeedsCellContext}: true iff navigating
+ * the argument `schema` along `path` (the `.key(...)` chain a segment's
+ * `argument` ValueRef carries) passes THROUGH or TERMINATES AT an
+ * `asCell`/`asStream` node — i.e. the segment's deep-resolved `$arg` read would
+ * surface a live Cell/Stream HANDLE at that path rather than the unwrapped value
+ * (the §4.5 segment hazard). Used to gate the coalescing partition per-SEGMENT
+ * (07 §4.7): a segment that reads only PLAIN argument paths is sound even when a
+ * SIBLING argument field is a `Cell`/`Stream` handed to a handler boundary (a
+ * `Stream` arg passed only to `.send()` is never in any pure segment, so it must
+ * not fall the whole pattern back). The walk is conservative:
+ *   - an `asCell`/`asStream` AT or ABOVE the navigated node ⇒ true (reading a
+ *     sub-path of a Cell still surfaces the handle root);
+ *   - `properties[key]` / `items` are followed by the path step;
+ *   - a step into an `additionalProperties` / unknown sub-schema that ITSELF (or
+ *     anything below it) needs cell context ⇒ true (we cannot prove the concrete
+ *     key is handle-free, so fall back — sound);
+ *   - a path that runs off a concrete value schema (no further sub-schema) ⇒
+ *     false (it reached a plain leaf).
+ * PURE — read-only structural walk.
+ */
+export function argumentPathNeedsCellContext(
+  schema: unknown,
+  path: readonly PathStep[],
+): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  const obj = schema as Record<string, unknown>;
+  // A handle annotation AT this level dominates: every sub-path reads the handle.
+  if (obj.asCell !== undefined || obj.asStream !== undefined) return true;
+  if (path.length === 0) {
+    // The segment reads THIS node directly (deep-resolved) — only a handle here
+    // surfaces a Cell/Stream, which we already checked. A plain object/array
+    // node deep-resolves to a plain value, so it is safe.
+    return false;
+  }
+  const [step, ...rest] = path;
+  // Object property navigation.
+  const props = obj.properties as Record<string, unknown> | undefined;
+  if (props && Object.hasOwn(props, step)) {
+    return argumentPathNeedsCellContext(props[step], rest);
+  }
+  // Array index navigation (a numeric step into `items`).
+  if (obj.items !== undefined && /^\d+$/.test(step)) {
+    if (Array.isArray(obj.items)) {
+      const idx = Number(step);
+      return argumentPathNeedsCellContext(obj.items[idx], rest);
+    }
+    return argumentPathNeedsCellContext(obj.items, rest);
+  }
+  // `additionalProperties` / open record: we cannot prove the concrete key is
+  // handle-free, so fall back if that sub-schema needs cell context anywhere.
+  const addl = obj.additionalProperties;
+  if (addl && typeof addl === "object") {
+    return schemaNeedsCellContext(addl);
+  }
+  // No declared sub-schema for this step: the path reached an untyped / plain
+  // region. Be conservative ONLY if the WHOLE remaining schema below needs a
+  // handle (it cannot, since we have no sub-schema), so this is a plain leaf.
   return false;
 }
 
