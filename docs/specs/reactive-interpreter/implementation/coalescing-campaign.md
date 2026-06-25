@@ -689,3 +689,52 @@ are the precise tracker exceptions: WRITE-capable leaves (effectful), and
 internal/opOut/const-fed asCell inputs (2(b) — no live handle in the arg tree;
 deferred). Nested-pattern context leaves (child op-id space) also stay legacy
 boundaries (deferred). NONE is a core gap.
+
+**§4.9 INDEPENDENT RE-VERIFY (FINAL GATE re-measured fresh on HEAD `f04229256`, no
+working-tree changes — confirms the committed state, NOT a new increment):** every
+gate re-run from scratch and CONFIRMED.
+- STATIC: `deno check` clean; `deno lint` clean (6 files: `runner.ts` + `cell.ts` +
+  `reactive-interpreter/{extract,interpret}.ts` + `test/cell-readonly.test.ts` +
+  `test/reactive-interpreter/leaf-scan-precision.test.ts`); `deno fmt --check` no
+  diff (no re-commit needed).
+- INTEGRATION under flag: **147 passed / 0 failed**; ENGAGEMENT **145 engaged / 147
+  census lines** (= 144/146 distinct scenarios; `counterAggregator` twice), UP from
+  the §4.8 baseline 143/146. `unresolved_leaf` **3**, `ineligible_opkind` 2,
+  `launched_child` 14; `unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/
+  `argument_writeback` all 0. `counterWithConditionalBranch` ENGAGED
+  (`interpreted_ok:1`, all fallback reasons 0) — the asCell-arg control predicate
+  context leaf the increment targets. NOT-ENGAGED 2 (both documented genuine
+  exceptions): `Cell<unknown> capture …` (cell-capture-diagnostic feeder, no output
+  to materialize) + `counterWithHandlerSpawn` (launched_child launcher contract).
+- RI unit `test/reactive-interpreter/*.test.ts`: **41 passed / 0 failed** (flag-ON).
+- CFC POINTWISE ORACLE (the correctness gate for this increment) — **GREEN, named +
+  byte-verified:** `collection-interpret.test.ts` test **(3) "pointwise labels:
+  per-element secrets stay on their own index, parity with legacy"** PASSES — fresh
+  output confirms `interp mapped = [2,4,6,8]` == `legacy mapped = [2,4,6,8]` AND
+  `interp mapped[0] conf = ["alice-secret"]`, `[1] = ["bob-secret"]`, `[2]/[3] = []`
+  — BYTE-IDENTICAL to legacy, NO cross-element smear. The read-only view's `.get()`
+  reads journal the source label through the segment tx → per-path content labels
+  propagate, no CFC regression. (The `spike-cfc-oracle.test.ts` name in the prior
+  note is a stale working title; the pointwise oracle lives in
+  `collection-interpret.test.ts` test (3), and the smear-detector/sibling-read teeth
+  ride the same file's (1)+(2) parity step, also green.)
+- flag-OFF `packages/runner` `deno task test`: **700 passed / 0 failed** (HARD
+  invariant held). flag-ON `packages/runner` `deno task test`: **700 passed / 0
+  failed** (no new reds; matches flag-off).
+- LUNCH-POLL `--cases=3x3,5x5 --rounds=2` (fresh): **5x5** votes 10/10
+  **equivalent=YES**, engaged **75/135 (55.6%)** `unresolved_leaf` **25**, docs OFF
+  622/ON 625, nodes OFF 3139/ON 3034 (**−3.3%**), wall OFF 11180ms/ON 9652ms
+  (**−13.7%, ON faster**), conflicts OFF 808/ON 422 (**rejected 0 both arms**, ON
+  LOWER — NO ratchet). **3x3** votes 6/6 equivalent=YES, engaged 27/51 (52.9%)
+  `unresolved_leaf` 9, docs −1.2%, nodes +1.5%, conflicts OFF 124/ON 136 (rejected 0
+  both), wall +28.1% (3x3 is small/single-run noisy — the 5x5 scaled case is the
+  representative measure). The footprint deltas sit in the prior-note's run-to-run
+  noise band (the doc-written Δ floats ±2% around flat; nodes −2.5..−3.3%; wall
+  −13.7..−15.0%); ALL conclusions hold: engagement DOUBLED + held at 55.6%, output
+  byte-equivalent, NO conflict/wall ratchet.
+- RE-VERIFY VERDICT: the §4.9 committed state is CONFIRMED on a clean fresh measure —
+  context leaves ENGAGED (`counterWithConditionalBranch` + lunch-poll's 30
+  context leaves), output-equivalent, CFC pointwise oracle byte-identical, no
+  ratchet, all suites green. No working-tree change; already committed
+  (`9b019c057`/`a0948d6ca`/`f04229256`) and pushed to
+  `origin/claude/nervous-kilby-83b75b`.
