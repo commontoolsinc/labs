@@ -130,6 +130,14 @@ function asReactions(
   return Array.isArray(reactions) ? [...reactions] : [];
 }
 
+function currentViewerName(value: unknown): string {
+  const maybeWritable = value as { get?: () => unknown };
+  const current = typeof maybeWritable?.get === "function"
+    ? maybeWritable.get()
+    : value;
+  return typeof current === "string" ? current.trim() : "";
+}
+
 export function groupMessages(
   messages: readonly ChatMessage[],
 ): MessageGroup[] {
@@ -260,7 +268,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const react = toggleReaction({ messages, name });
     const groups = computed(() => groupMessages([...messages]));
     const rows = computed(() =>
-      displayMessages([...messages], String(name).trim())
+      displayMessages([...messages], currentViewerName(name))
     );
     const visibleRows = computed(() => [...rows].reverse());
 
@@ -277,8 +285,36 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 transition: opacity 120ms ease;
               }
 
+              .pico-reaction-choice {
+                appearance: none;
+                align-items: center;
+                background: transparent;
+                border: 0;
+                border-radius: 4px;
+                color: inherit;
+                cursor: pointer;
+                display: inline-flex;
+                font: inherit;
+                height: 1.75rem;
+                justify-content: center;
+                line-height: 1;
+                padding: 0;
+                transition: filter 120ms ease, transform 120ms ease;
+                width: 1.75rem;
+              }
+
+              .pico-reaction-choice:hover,
+              .pico-reaction-choice:focus-visible {
+                transform: translateY(-1px) scale(1.08);
+              }
+
+              .pico-reaction-choice:focus-visible {
+                outline: 2px solid currentColor;
+                outline-offset: 2px;
+              }
+
               .pico-reaction-choice-picked {
-                background: var(--cf-colors-muted, #e2e8f0);
+                filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.75));
               }
 
               .pico-message-row {
@@ -373,12 +409,12 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                               className="pico-reaction-picker"
                               style={reactionPickerStyle}
                             >
-                              <cf-button
+                              <button
+                                type="button"
                                 className={reactionChoiceClass(
                                   row.thumbsPicked,
                                 )}
-                                size="sm"
-                                variant="ghost"
+                                aria-label="React with thumbs up"
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
@@ -386,13 +422,13 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   })}
                               >
                                 👍
-                              </cf-button>
-                              <cf-button
+                              </button>
+                              <button
+                                type="button"
                                 className={reactionChoiceClass(
                                   row.heartPicked,
                                 )}
-                                size="sm"
-                                variant="ghost"
+                                aria-label="React with heart"
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
@@ -400,13 +436,13 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   })}
                               >
                                 ❤️
-                              </cf-button>
-                              <cf-button
+                              </button>
+                              <button
+                                type="button"
                                 className={reactionChoiceClass(
                                   row.laughPicked,
                                 )}
-                                size="sm"
-                                variant="ghost"
+                                aria-label="React with laughing face"
                                 onClick={() =>
                                   react.send({
                                     messageIndex: row.index,
@@ -414,7 +450,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                   })}
                               >
                                 😂
-                              </cf-button>
+                              </button>
                             </div>
                           )
                           : null}
