@@ -58,6 +58,17 @@ export {
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
+export {
+  PatternCoverageCollector,
+  type PatternCoverageFileReport,
+  type PatternCoverageKind,
+  patternCoverageOutputPath,
+  type PatternCoverageReport,
+  type PatternCoverageReportOptions,
+  patternCoverageReportToLcov,
+  type PatternCoverageSpan,
+  writePatternCoverageLcov,
+} from "./pattern-coverage.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {

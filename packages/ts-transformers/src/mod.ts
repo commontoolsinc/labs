@@ -1,5 +1,8 @@
 export type {
   DiagnosticSeverity,
+  PatternCoverageKind,
+  PatternCoverageOptions,
+  PatternCoverageSpan,
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
@@ -9,6 +12,7 @@ export {
   CrossStageState,
   injectCfDataHelper,
   injectCfHelpers,
+  PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   sourceDisablesCfTransform,
   transformCfDirective,

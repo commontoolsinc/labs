@@ -10,6 +10,7 @@ import {
   OpaqueGetValidationTransformer,
   PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
+  PatternCoverageTransformer,
   PatternOwnedExpressionSiteLoweringTransformer,
   ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
@@ -101,6 +102,13 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "ModuleScopeCfDataTransformer",
     create: (options) => new ModuleScopeCfDataTransformer(options),
+  },
+  // Coverage runs before function hardening. That keeps coverage counters out
+  // of the hardening helper output. The transformer does no work unless
+  // pattern coverage is enabled.
+  {
+    name: "PatternCoverageTransformer",
+    create: (options) => new PatternCoverageTransformer(options),
   },
   {
     name: "ModuleScopeFunctionHardeningTransformer",

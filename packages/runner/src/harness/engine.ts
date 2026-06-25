@@ -23,6 +23,9 @@ import ts from "typescript";
 import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
+  PATTERN_COVERAGE_GLOBAL,
+  type PatternCoverageOptions,
+  sourceDisablesCfTransform,
 } from "@commonfabric/ts-transformers";
 import { getLogger } from "@commonfabric/utils/logger";
 import { type MemorySpace, Runtime } from "../runtime.ts";
@@ -61,6 +64,7 @@ import {
   verifyModuleGraph,
 } from "../sandbox/module-record-verifier.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
+import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import {
   ensureSESLockdown,
   getRuntimeModuleExports,
@@ -173,6 +177,10 @@ export class Engine extends EventTarget implements Harness {
   private canonicalSourceByPrefixed = new Map<string, string>();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
+  private readonly patternCoverageByGraph = new WeakMap<
+    CompiledModuleGraph,
+    PatternCoverageCollector
+  >();
 
   constructor(
     ctRuntime: Runtime,
@@ -281,6 +289,19 @@ export class Engine extends EventTarget implements Harness {
       const authoredByStoredName = new Map(
         program.files.map((f) => [f.name, f.contents]),
       );
+      const patternCoverage = patternCoverageOptionsForCompile(
+        options.patternCoverage,
+        {
+          id,
+          mounts,
+          sourceFiles: [
+            ...program.files,
+            ...resolvedFiles.filter((file) =>
+              file.name.startsWith(FABRIC_MOUNT_ROOT)
+            ),
+          ],
+        },
+      );
       const pristineModuleFiles = pristineModuleSources(
         moduleFiles,
         authoredByStoredName,
@@ -305,13 +326,17 @@ export class Engine extends EventTarget implements Harness {
       // transitively sensitive, so a partial set cannot be trusted — fall back
       // to a full recompile. The cache is queried by identity (directly, or
       // lazily once identities are known) without leaking the engine's prefix.
-      const cached = options.precompiledModules ??
-        (options.precompiledModulesFor
-          ? await options.precompiledModulesFor({
-            entryIdentity,
-            identities: [...new Set(identityByPath.values())],
-          })
-          : undefined);
+      // Coverage compiles need fresh emitted JavaScript because cached bodies do
+      // not include counters.
+      const cached = patternCoverage !== undefined
+        ? undefined
+        : options.precompiledModules ??
+          (options.precompiledModulesFor
+            ? await options.precompiledModulesFor({
+              entryIdentity,
+              identities: [...new Set(identityByPath.values())],
+            })
+            : undefined);
       const fullHit = cached !== undefined &&
         moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
 
@@ -345,7 +370,9 @@ export class Engine extends EventTarget implements Harness {
             verbose: options.verboseErrors,
           }),
           beforeTransformers: (program) => {
-            const pipeline = new CommonFabricTransformerPipeline();
+            const pipeline = new CommonFabricTransformerPipeline({
+              patternCoverage,
+            });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -390,6 +417,9 @@ export class Engine extends EventTarget implements Harness {
         // a second hashing/import-resolution pass over the module set.
         identityByPath,
       });
+      if (options.patternCoverage) {
+        this.patternCoverageByGraph.set(graph, options.patternCoverage);
+      }
 
       // Register runtime-module records so cf:runtime/* imports resolve.
       const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
@@ -812,8 +842,12 @@ export class Engine extends EventTarget implements Harness {
       // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
       ctx.registerHashes();
 
+      const patternCoverage = this.patternCoverageByGraph.get(graph);
       const globals = createModuleCompartmentGlobals({
         console: this.consoleShim,
+        ...(patternCoverage
+          ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
+          : {}),
       });
       // Concatenated module bodies give the source-location frame a `script`
       // for fn.src `indexOf` resolution. (Insertion order need not match the
@@ -1404,6 +1438,61 @@ function injectMountSources(files: readonly Source[]): Source[] {
     const next = injected.get(f.name);
     return next === undefined ? f : { ...f, contents: next };
   });
+}
+
+// Pattern coverage runs after helper injection. This maps spans back to the
+// authored file and skips spans from helper code added around the source.
+// The normal line offset depends on the one-line helper import from
+// packages/ts-transformers/src/core/cf-helpers.ts.
+function patternCoverageOptionsForCompile(
+  collector: PatternCoverageCollector | undefined,
+  params: {
+    id: string;
+    mounts: readonly FabricMount[];
+    sourceFiles: readonly Source[];
+  },
+): PatternCoverageOptions | undefined {
+  if (collector === undefined) return undefined;
+
+  const sourceInfo = new Map(
+    params.sourceFiles.map((file) => [
+      coverageFilenameFor(file.name, params.id, params.mounts),
+      {
+        lineOffset: sourceDisablesCfTransform(file.contents) ? 0 : -1,
+        lineCount: file.contents.split(/\r\n|\r|\n/).length,
+      },
+    ]),
+  );
+
+  return {
+    fileName: (sourceFileName) =>
+      coverageFilenameFor(sourceFileName, params.id, params.mounts),
+    mapSpan: (span) => {
+      const info = sourceInfo.get(span.fileName);
+      if (info === undefined) return span;
+
+      const startLine = span.startLine + info.lineOffset;
+      if (startLine < 1 || startLine > info.lineCount) return undefined;
+
+      return {
+        ...span,
+        startLine,
+        endLine: Math.min(span.endLine + info.lineOffset, info.lineCount),
+      };
+    },
+    registerSpan: (span) => collector.registerSpan(span),
+  };
+}
+
+function coverageFilenameFor(
+  name: string,
+  id: string,
+  mounts: readonly FabricMount[],
+): string {
+  // Mount paths carry the imported module identity. The coverage collector keys
+  // spans by file name and span id, and span ids restart for each source file.
+  if (name.startsWith(FABRIC_MOUNT_ROOT)) return name;
+  return storedFilenameFor(name, id, mounts);
 }
 
 function uniqueSourcesByName(files: readonly Source[]): Source[] {

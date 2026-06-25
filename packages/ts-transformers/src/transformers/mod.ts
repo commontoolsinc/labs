@@ -8,6 +8,7 @@ export { ModuleScopeCfDataTransformer } from "./module-scope-cf-data.ts";
 export { ModuleScopeFunctionHardeningTransformer } from "./module-scope-function-hardening.ts";
 export { ModuleScopeShadowingTransformer } from "./module-scope-shadowing.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
+export { PatternCoverageTransformer } from "./pattern-coverage.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
 export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";
 export { ReactiveVariableForTransformer } from "./reactive-variable-for.ts";
