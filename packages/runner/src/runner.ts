@@ -780,8 +780,9 @@ function computeArgumentFedContextLeaves(
 
   for (const op of rog.ops) {
     if (op.kind !== "leaf" || op.id < 0) continue;
-    const argSchema = (nodes[op.id] as { module?: { argumentSchema?: unknown } })
-      ?.module?.argumentSchema;
+    const argSchema =
+      (nodes[op.id] as { module?: { argumentSchema?: unknown } })
+        ?.module?.argumentSchema;
     if (!schemaNeedsCellContext(argSchema)) continue;
 
     const inputRef = op.inputs[0];

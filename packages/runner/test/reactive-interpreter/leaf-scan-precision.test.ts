@@ -304,7 +304,9 @@ describe("read-only context-leaf split (readOnlyCellLeafOps)", () => {
       (i: { c: { key(k: string): { get(): unknown } } }) => i.c.key("x").get(),
     ];
     for (const fn of reads) {
-      expect(liveLeafWritesCellInput(fn as (i: unknown) => unknown)).toBe(false);
+      expect(liveLeafWritesCellInput(fn as (i: unknown) => unknown)).toBe(
+        false,
+      );
     }
   });
 });
