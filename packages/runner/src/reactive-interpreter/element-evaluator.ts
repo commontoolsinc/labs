@@ -27,6 +27,7 @@
 
 import {
   extractRog,
+  extractRogBaseDefer,
   type ImplRefResolver,
   type LiveLeafTrustCheck,
   resolveLeafImpls,
@@ -45,8 +46,11 @@ interface ElementPatternLike {
 }
 
 export interface ElementEvaluator {
-  /** Evaluate the element op for one element value (the `element` argument). */
-  (elementValue: unknown): unknown;
+  /** Evaluate the element op for one element value (the `element` argument), and
+   * its positional `index` (the `index` argument the builder's `mapWithPattern`
+   * element pattern also exposes; defaults to `undefined` for callers that do not
+   * track it). */
+  (elementValue: unknown, index?: number): unknown;
   /** Leaf ops that could not be resolved to an in-memory callable. Empty for an
    * in-memory built pattern; non-empty signals the serialized/SES boundary. */
   readonly unresolvedLeafOps: readonly OpId[];
@@ -68,8 +72,35 @@ export function buildElementEvaluator(
    * callback is reported as unresolved (→ legacy fallback) so it never runs as a
    * raw host closure inside the interpreter. Mirrors the scalar leaf path. */
   liveLeafTrustCheck?: LiveLeafTrustCheck,
+  /** Resolve the element pattern's argument aliases RELATIVE to the frame the
+   * builder serialized them in (their inferred base `defer`), rather than as a
+   * standalone depth-0 root. TRUE for the partition collection-boundary lowering
+   * + the runtime `$ri-collection-map` builtin (which interpret an authored
+   * `array.map((value, index) => …)` element whose `element`/`index` aliases sit
+   * at `defer === 1` under the parent map frame). FALSE (default) for the
+   * single-node collection-eligibility probe, which keeps its pre-existing
+   * standalone-root semantics — so a build-time nested child / launched-child map
+   * whose element only resolves under a non-zero base defer DECLINES there and
+   * stays a legacy boundary (it is NOT the increment's target; engaging it would
+   * diverge from legacy's launched-child projection). */
+  applyBaseDefer = false,
 ): ElementEvaluator {
-  const ex = extractRog(elementPattern as Parameters<typeof extractRog>[0]);
+  // A collection ELEMENT pattern is extracted as its OWN root here, but the
+  // builder serialized its `element`/`index` argument aliases relative to the
+  // PARENT map frame (so they carry `defer === 1`, not 0). When `applyBaseDefer`,
+  // infer that base so the extractor's defer gate treats the element's top-frame
+  // argument reads as LOCAL (otherwise every authored
+  // `array.map((value, index) => …)` element — which inlines under its parent —
+  // would be rejected as an unrecognized deferred alias and the per-element
+  // render would never interpret). When NOT set, the element is extracted as a
+  // standalone depth-0 root (the original single-node-probe contract).
+  const baseDefer = applyBaseDefer
+    ? extractRogBaseDefer(elementPattern as Parameters<typeof extractRog>[0])
+    : 0;
+  const ex = extractRog(
+    elementPattern as Parameters<typeof extractRog>[0],
+    baseDefer,
+  );
   const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
     elementPattern as Parameters<typeof resolveLeafImpls>[0],
     ex.rog,
@@ -77,10 +108,14 @@ export function buildElementEvaluator(
     liveLeafTrustCheck,
   );
 
-  const evaluate = ((elementValue: unknown): unknown => {
+  const evaluate = ((elementValue: unknown, index?: number): unknown => {
     const { result } = evalRog(ex.rog, {
-      // The element pattern reads its input via the `element` argument alias.
-      argument: { element: elementValue },
+      // The element pattern reads its input via the `element` argument alias, and
+      // (for `array.map((value, index) => …)` shapes) the positional `index`
+      // alias — the builder's `mapWithPattern` exposes BOTH on the element
+      // argument cell, so provide both (an element pattern that ignores `index`
+      // simply never reads it).
+      argument: { element: elementValue, index },
       leafImpls,
       internalToOp: ex.internalToOp,
     });

@@ -598,7 +598,66 @@ export interface ExtractResult {
   internalToOp: Map<string, OpId>;
 }
 
-export function extractRog(pattern: RawPattern): ExtractResult {
+/**
+ * Infer the `baseDefer` of a sub-graph extracted in ISOLATION (a collection
+ * element pattern). The builder serializes a pattern's argument aliases with a
+ * `defer` equal to the number of nesting levels it sits below the SERIALIZATION
+ * root — so an element pattern inlined under its parent `map` carries
+ * `defer === 1` on its `element`/`index` argument reads, even though it is the
+ * element evaluator's OWN root (depth 0). We scan the pattern's TOP-frame
+ * argument-cell aliases (in `result` + each node's `inputs`/`outputs`, NOT
+ * recursing into a nested element pattern's `op`) and return the MINIMUM `defer`
+ * observed — that minimum is the element frame's own base (a deeper nested alias
+ * carries a higher defer the recursion handles relative to it). Returns 0 when
+ * no `cell:"argument"` alias carries a numeric `defer` (a standalone root, or an
+ * element reading only internals/consts), which leaves the default behavior
+ * unchanged. PURE — read-only structural scan, no side effects.
+ */
+export function extractRogBaseDefer(pattern: RawPattern): number {
+  let min = Infinity;
+  const visit = (v: unknown): void => {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const el of v) visit(el);
+      return;
+    }
+    const obj = v as Record<string, unknown>;
+    const alias = obj.$alias as Record<string, unknown> | undefined;
+    if (
+      alias && typeof alias === "object" && alias.cell === "argument" &&
+      typeof alias.defer === "number"
+    ) {
+      if (alias.defer < min) min = alias.defer;
+      // Do not descend into a resolved alias payload.
+      return;
+    }
+    for (const val of Object.values(obj)) visit(val);
+  };
+  const p = pattern as { result?: unknown; nodes?: unknown[] };
+  visit(p.result);
+  for (const node of p.nodes ?? []) {
+    const n = node as { inputs?: unknown; outputs?: unknown };
+    visit(n.inputs);
+    visit(n.outputs);
+  }
+  return Number.isFinite(min) ? min : 0;
+}
+
+export function extractRog(
+  pattern: RawPattern,
+  /** Defer level of THIS pattern's OWN top frame, as the builder serialized it.
+   * Default 0 — a pattern authored as a standalone root (its argument aliases
+   * carry `defer === 0`). A NON-zero value is for a sub-graph extracted in
+   * isolation whose argument aliases were serialized relative to an OUTER frame
+   * (e.g. a collection ELEMENT pattern the builder inlined under its parent map,
+   * so its `element`/`index` argument aliases carry `defer === 1`). The
+   * collection element evaluator re-extracts the element pattern as its OWN root
+   * but the serialized `defer` still reflects the parent nesting; passing the
+   * observed base aligns `expectedDefer` so those local argument reads resolve
+   * (and any DEEPER nesting inside the element still increments correctly from
+   * the base). Inferred by `extractRogBaseDefer` for the element-evaluator. */
+  baseDefer = 0,
+): ExtractResult {
   const unrecognized = new Set<string>();
   const byKind = {} as Record<OpKind | "unknown", number>;
   let nodeCount = 0;
@@ -633,9 +692,12 @@ export function extractRog(pattern: RawPattern): ExtractResult {
     // parent's map (Change B).
     const internalToOp = new Map<string, OpId>();
     // At recursion depth `d` a LOCAL alias (one resolving to this frame's own
-    // argument/internal) carries `defer === d`; the builder increments `defer`
-    // once per nesting level it serializes through (json-utils.ts:87-98).
-    const expectedDefer = depth;
+    // argument/internal) carries `defer === d` RELATIVE TO THIS ROOT — but if the
+    // root was itself serialized under an outer frame (`baseDefer > 0`, e.g. a
+    // collection element pattern), its own top frame's locals carry
+    // `defer === baseDefer`, so offset by it (the builder still increments once
+    // per nesting level it serializes through, json-utils.ts:87-98).
+    const expectedDefer = baseDefer + depth;
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       nodeCount++;

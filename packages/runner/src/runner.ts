@@ -100,6 +100,7 @@ import { SigilLink } from "./sigil-types.ts";
 import {
   type ExtractResult,
   extractRog,
+  extractRogBaseDefer,
   hasArgumentWritebackMarker,
   type ImplRefResolver,
   outputInternalName,
@@ -2963,7 +2964,9 @@ export class Runner {
       internalToOp,
       unresolvedLeafOps,
     });
-    if (!part.partitionable) return null;
+    if (!part.partitionable) {
+      return null;
+    }
 
     // (b) SPIKE GATES — deliberate scope cuts (NOT green-dodging). Any miss →
     // null → caller falls through to the single-node path.
@@ -3021,7 +3024,9 @@ export class Runner {
 
     // No boundary→boundary edge: an effect→effect hop is the §4.5 CFC read-
     // through hazard (an unread labeled hop). Defer.
-    if (part.edges.some((e) => e.kind === "bnd->bnd")) return null;
+    if (part.edges.some((e) => e.kind === "bnd->bnd")) {
+      return null;
+    }
 
     // A boundary with no segment to interpret is just the whole-legacy pattern —
     // nothing gained. Require at least one segment so the interpreter ENGAGES.
@@ -3056,7 +3061,9 @@ export class Runner {
       const bNode = pattern.nodes?.[b.opId];
       if (!bNode) continue;
       const outName = outputInternalName(bNode.outputs);
-      if (outName !== null && segmentReadNames.has(outName)) return null;
+      if (outName !== null && segmentReadNames.has(outName)) {
+        return null;
+      }
     }
 
     // NOTE on launched-child-via-lift (`entries.map(() => childPattern(...))`)
@@ -3186,7 +3193,9 @@ export class Runner {
         const producerSeg = segOfOp.get(ref.op);
         // The producer must be a SEGMENT op (a boundary output is a named cell,
         // handled by the internal-ref path; a producer in no segment is a bug).
-        if (producerSeg === undefined || producerSeg === si) return null;
+        if (producerSeg === undefined || producerSeg === si) {
+          return null;
+        }
         if (!crossSegOpName.has(ref.op)) {
           const name = "$ri-op-" + ref.op;
           crossSegOpName.set(ref.op, name);
@@ -3373,12 +3382,25 @@ export class Runner {
     // to do; let the legacy single-node path (or full legacy) handle it.
     if (segmentNodes.length === 0) return null;
 
-    // (d) Keep boundary nodes verbatim (the original handler/effect nodes — their
-    // input aliases already reference the internal cells segments now write).
+    // (d) Emit boundary nodes. Effect / unresolved-leaf boundaries are kept
+    // VERBATIM as the original legacy node (their input aliases already reference
+    // the internal cells segments now write). A `collection` boundary whose
+    // element render is a PURE, eligible `map` (LEVEL-2) is lowered to the
+    // registered `$ri-collection-map` builtin so its per-element render
+    // INTERPRETS via the collection path — the surrounding pure region (segments)
+    // and the per-element op both run through the interpreter. An ineligible
+    // collection boundary (filter/flatMap, scoped, nested pattern/effect element,
+    // serialized/unresolved element leaf) is kept VERBATIM as the legacy map node
+    // (LEVEL-1) so its element render runs exactly as today — sound, green.
     const boundaryNodes: Pattern["nodes"] = [];
     for (const b of part.boundaries) {
       const bNode = pattern.nodes?.[b.opId];
       if (!bNode) return null; // boundary op id not a real node ⇒ fall through
+      if (b.kind === "collection") {
+        const lowered = this.tryLowerCollectionBoundaryNode(bNode);
+        boundaryNodes.push(lowered ?? bNode);
+        continue;
+      }
       boundaryNodes.push(bNode);
     }
 
@@ -3493,6 +3515,213 @@ export class Runner {
         sendResult(tx, out);
       };
     };
+  }
+
+  /**
+   * LEVEL-2 collection-boundary lowering (§4.7 per-element recursion, first cut).
+   * Given the ORIGINAL `map` node of a `collection` partition boundary, decide
+   * whether its per-element render is a PURE, eligible `map` that the registered
+   * `$ri-collection-map` builtin can interpret per element. If so, return a
+   * replacement node dispatching to that builtin (reusing the original node's
+   * `inputs.{list,op}` and `outputs` verbatim, so the projection / item schema /
+   * declared scope are inherited for free). If NOT — `filter`/`flatMap` (the
+   * builtin only implements `map`), a non-default scope on the list or element
+   * graph, a serialized / non-inline element pattern, an element graph carrying a
+   * nested `pattern`/`effect`/`collection` op, or an element leaf the verified-
+   * impl resolver cannot bind — return `null` so the caller keeps the LEGACY map
+   * node VERBATIM (LEVEL-1, sound, green).
+   *
+   * Soundness mirrors `tryBuildCollectionInterpreterPattern` but scoped to ONE
+   * element pattern: the per-element evaluator re-extracts the element graph at
+   * depth 0 (`buildElementEvaluator`) and reports any unresolved leaf; a fresh
+   * `extractRog` over the element pattern supplies its `coverage.byKind` /
+   * `coverage.nested` so a nested pattern/effect/collection element (which the
+   * single-node `$ri-collection-map` path would silently mis-evaluate) is
+   * declined. Pure — no tx writes, no leaf-body execution (the evaluator only
+   * RESOLVES leaf impls; it runs them per element later, inside the builtin).
+   */
+  private tryLowerCollectionBoundaryNode(
+    mapNode: NonNullable<Pattern["nodes"]>[number],
+  ): NonNullable<Pattern["nodes"]>[number] | null {
+    const DBG = Deno.env.get("RI_LOWER_DEBUG") === "1";
+    const dbg = (why: string) => {
+      if (DBG) console.error("RI_LOWER decline:", why);
+    };
+    const module = mapNode.module as
+      | { type?: string; implementation?: unknown }
+      | undefined;
+    // Only a `map` ref node is lowerable: `filter`/`flatMap` are not implemented
+    // by the `$ri-collection-map` builtin (the boundary stays a verbatim legacy
+    // node). A non-ref / non-map module (already-lowered, or a different builtin)
+    // is likewise kept verbatim.
+    if (module?.type !== "ref" || module.implementation !== "map") {
+      dbg("not-map-ref:" + JSON.stringify(module?.implementation));
+      return null;
+    }
+
+    const mapNodeInputs = mapNode.inputs as Record<string, unknown> | undefined;
+    if (!mapNodeInputs) {
+      dbg("no-inputs");
+      return null;
+    }
+    const elementPattern = mapNodeInputs.op;
+    // A serialized `$patternRef` element (not an inline pattern) is out of scope
+    // for the in-memory-element first cut → keep verbatim (LEVEL-1).
+    if (!isPatternLike(elementPattern)) {
+      dbg("element-not-inline");
+      return null;
+    }
+
+    // Unscoped-only: a PerUser/PerSession narrowing on the list input or the
+    // element graph is the unmodeled indirection the unscoped `$ri-collection-map`
+    // builtin cannot reproduce → keep verbatim (legacy narrows per element).
+    if (
+      hasNonDefaultScope(mapNodeInputs.list) ||
+      hasNonDefaultScope(elementPattern)
+    ) {
+      dbg("scoped");
+      return null;
+    }
+
+    // Element graph must be PURE: re-extract it as its OWN root and consult its
+    // coverage. A nested `pattern`/`effect`/`collection` element op would
+    // mis-evaluate through the single-node per-element path (it iterates the
+    // element render as DATA, not as a launched child / I/O effect / nested map)
+    // → keep verbatim. (`extractRog`'s element coverage is computed fresh here, so
+    // it reflects ONLY this element graph, independent of the parent pattern.) The
+    // element's argument aliases are serialized RELATIVE to the parent map frame
+    // (`defer === 1`), so pass the inferred base defer — exactly as the element
+    // evaluator does — or the coverage scan would flag those local argument reads
+    // as unrecognized deferred aliases and spuriously decline a pure element.
+    const elementBaseDefer = extractRogBaseDefer(
+      elementPattern as unknown as Parameters<typeof extractRog>[0],
+    );
+    const elementExtract = extractRog(
+      elementPattern as unknown as Parameters<typeof extractRog>[0],
+      elementBaseDefer,
+    );
+    const elByKind = elementExtract.coverage.byKind;
+    if ((elByKind.pattern ?? 0) > 0) {
+      dbg("element-has-pattern");
+      return null;
+    }
+    if ((elByKind.effect ?? 0) > 0) {
+      dbg("element-has-effect");
+      return null;
+    }
+    if ((elByKind.collection ?? 0) > 0) {
+      dbg("element-has-collection");
+      return null;
+    }
+    // Any unrecognized alias / writeback marker in the element graph makes the
+    // per-element evaluation unsound → keep verbatim.
+    if (elementExtract.coverage.unrecognizedAliases.length > 0) {
+      dbg(
+        "element-unrecognized:" +
+          JSON.stringify(elementExtract.coverage.unrecognizedAliases),
+      );
+      return null;
+    }
+
+    // The per-element evaluator must fully resolve (no unresolved leaf op): a
+    // context-requiring / untrusted element leaf cannot be interpreted as data →
+    // keep verbatim (the legacy node runs it in the SES sandbox / with a live
+    // frame).
+    const evaluator = buildElementEvaluator(
+      elementPattern as Record<string, unknown>,
+      this.interpreterImplRefResolver,
+      this.interpreterLiveLeafTrustCheck,
+      // Resolve the element's argument aliases relative to the parent map frame
+      // (`defer === 1`) — matching the runtime `$ri-collection-map` builtin.
+      true,
+    );
+    if (evaluator.unresolvedLeafOps.length > 0) {
+      dbg(
+        "element-unresolved-leaf:" +
+          JSON.stringify(evaluator.unresolvedLeafOps),
+      );
+      return null;
+    }
+
+    // GATE↔RUNTIME PARITY. The eligibility evaluator above resolves the element's
+    // leaves from their LIVE in-memory `module.implementation` callables — but the
+    // RUNTIME `$ri-collection-map` builtin reads the element pattern back from a
+    // cell (`getRaw()`), where the live function is GONE and only a `$implRef`
+    // survives. A leaf with a live function but NO content-addressed `$implRef`
+    // (e.g. a `str` template, which compiles to a bare `javascript` module) passes
+    // the live gate yet CANNOT be recovered at runtime → the builtin would throw
+    // `unresolved element leaf ops`. Decline such an element here (keep verbatim,
+    // LEVEL-1) so we only lower an element whose leaves survive serialization. A
+    // `ref`-module leaf (a registered builtin name) is always recoverable; a
+    // function-bearing module must carry a `$implRef` the implRef resolver binds.
+    if (!this.elementLeavesSurviveSerialization(elementPattern)) {
+      dbg("element-leaf-no-implref");
+      return null;
+    }
+
+    // Eligible: dispatch this boundary to the `$ri-collection-map` builtin,
+    // reusing the original node's `{list, op, …}` inputs and its output binding
+    // (which carries the author-declared scope + item schema downstream `.key(i)`
+    // consumers need) verbatim. Keeping the original inputs/outputs inherits the
+    // exact projection + reactivity for free.
+    return {
+      module: {
+        type: "ref",
+        implementation: "$ri-collection-map",
+      } as Module,
+      inputs: mapNode.inputs,
+      outputs: mapNode.outputs,
+    };
+  }
+
+  /**
+   * GATE↔RUNTIME parity check for a collection element pattern (see
+   * `tryLowerCollectionBoundaryNode`). True iff EVERY leaf node in the element
+   * graph (recursing into any nested inline element/sub pattern) is recoverable
+   * from the SERIALIZED form the runtime `$ri-collection-map` builtin reads —
+   * i.e. either a `ref`-module leaf (a registered builtin name, always present
+   * post-serialization) or a function-bearing module that ALSO carries a
+   * `$implRef` the implRef resolver binds. A bare `javascript` leaf with a live
+   * `implementation` but NO `$implRef` (e.g. a `str` template) does NOT survive
+   * the `getRaw()` round-trip — the live function is dropped and there is no ref
+   * to recover it — so the element must stay a verbatim legacy boundary.
+   *
+   * PURE — read-only structural scan; resolves refs through the same content-
+   * addressed resolver the runtime builtin uses (`interpreterImplRefResolver`),
+   * never runs a leaf body.
+   */
+  private elementLeavesSurviveSerialization(
+    elementPattern: unknown,
+  ): boolean {
+    const nodes = (elementPattern as { nodes?: unknown[] }).nodes;
+    if (!Array.isArray(nodes)) return true; // no nodes ⇒ pure projection
+    for (const node of nodes) {
+      const module = (node as { module?: Record<string, unknown> }).module;
+      if (!module || typeof module !== "object") continue;
+      const type = module.type as string | undefined;
+      // A `ref`-module leaf names a registered builtin — always recoverable.
+      if (type === "ref") continue;
+      // A nested inline element/sub pattern: recurse (its own leaves must survive
+      // too). A `javascript`/`raw` module carrying an inline Pattern object as its
+      // `implementation` is such a nest.
+      const impl = module.implementation;
+      if (isPatternLike(impl)) {
+        if (!this.elementLeavesSurviveSerialization(impl)) return false;
+        continue;
+      }
+      // A function-bearing leaf must carry a `$implRef` the resolver can bind, or
+      // the serialized runtime form is unresolvable.
+      if (typeof impl === "function" || typeof impl === "string") {
+        const ref = module.$implRef as
+          | { identity: string; symbol: string }
+          | undefined;
+        const resolved = ref
+          ? this.interpreterImplRefResolver(ref.identity, ref.symbol)
+          : undefined;
+        if (typeof resolved !== "function") return false;
+      }
+    }
+    return true;
   }
 
   /**

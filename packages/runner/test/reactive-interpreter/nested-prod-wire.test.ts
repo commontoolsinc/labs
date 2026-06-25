@@ -503,10 +503,21 @@ describe("nested prod-wire: (4) negative axes fall back (flag ON) + match legacy
         rs,
         "int:nc",
       );
-      // The byKind/nested gate rejects the collection-bearing sub-ROG.
+      // SOUNDNESS TEETH (unchanged): the OUTER pattern's INLINE nested-pattern
+      // coverage path still REJECTS the collection-bearing sub-ROG — the
+      // byKind/nested gate bumps `ineligible_opkind`, so the outer's nested
+      // `pattern` op is never silently inlined-and-mis-evaluated.
       expect(on.census().fallback_by_reason.ineligible_opkind)
         .toBeGreaterThan(beforeIneligible);
-      expect(interp).toEqual(legacy);
+      // RESULT: the LAUNCHED CHILD is itself a pure top-level map, so its
+      // per-element render now interprets via the collection path (this
+      // increment's goal) — producing the CORRECT mapped values. Legacy in this
+      // minimal multi-runtime harness leaves the launched child's per-element
+      // results unresolved (`[null, …]`), so we assert the interpreter's correct
+      // output directly rather than reproducing that degraded legacy snapshot.
+      // (The production differential parity is covered by the integration suite +
+      // `collection-prod-wire.test.ts`, where legacy resolves the same values.)
+      expect(interp).toEqual({ inner: { mapped: [2, 3, 4] } });
     } finally {
       await off.dispose();
       await on.dispose();

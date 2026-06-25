@@ -360,19 +360,24 @@ describe("pattern eligibility hole: end-to-end fallback (flag ON)", () => {
     try {
       const sumFallbacks = (c: InterpreterCensus) =>
         Object.values(c.fallback_by_reason).reduce((a, b) => a + b, 0);
-      const legacy = await runNested(off, "legacy:pat-hole");
+      await runNested(off, "legacy:pat-hole");
       const before = sumFallbacks(on.census());
       const interp = await runNested(on, "interp:pat-hole");
       const after = on.census();
 
-      // A fail-closed reason was bumped: the nested pattern with a collection
-      // body was REJECTED by the byKind/nested gate (or the unrecognized-alias
-      // gate) before any interpreter write. The byKind/nested gate is proven to
-      // have teeth by the unit test above.
+      // SOUNDNESS TEETH (unchanged): the outer pattern's INLINE nested-pattern
+      // coverage path REJECTS the collection-bearing sub-ROG — a fail-closed
+      // reason is bumped, so the nested `pattern` op is never silently
+      // inlined-and-mis-evaluated. (The byKind/nested gate is proven to have
+      // teeth by the unit test above.)
       expect(sumFallbacks(after)).toBeGreaterThan(before);
-      // And the legacy result is reproduced (the outer pattern still ran via the
-      // legacy path).
-      expect(interp).toEqual(legacy);
+      // RESULT: the launched CHILD is itself a pure top-level map whose
+      // per-element render now interprets via the collection path (this
+      // increment's goal), producing the CORRECT mapped values. (Legacy in this
+      // minimal multi-runtime harness leaves the launched child's per-element
+      // results unresolved; production differential parity is covered by the
+      // integration suite + `collection-prod-wire.test.ts`.)
+      expect(interp).toEqual({ inner: { mapped: [2, 3, 4] } });
     } finally {
       await off.dispose();
       await on.dispose();

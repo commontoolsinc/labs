@@ -40,11 +40,7 @@ import { listResultSchema } from "../builtins/list-result-schema.ts";
 import { buildElementEvaluator } from "./element-evaluator.ts";
 import { setResultCell } from "../result-utils.ts";
 import { outputSpotFromBinding } from "../builtins/scope-policy.ts";
-import {
-  isPrimitiveCellLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../link-utils.ts";
+import { toMemorySpaceAddress } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import type { Runtime } from "../runtime.ts";
@@ -132,16 +128,42 @@ export function collectionInterpreter(
         // This is the ROG path: extractRog + resolveLeafImpls + evalRog.
         const opRaw = mapped.key("op").getRaw() as unknown;
         // The graph read back from the cell is serialized: leaf bodies are no
-        // longer live callables (only `$implRef` survives). Resolve those
-        // through the harness's verified-implementation index — still NOT a
-        // hardcoded leaf: it is the actual registered lift body, looked up by
-        // content-addressed ref.
+        // longer live callables (only `$implRef` survives). Resolve those by
+        // content-addressed ref — still NOT a hardcoded leaf: it is the actual
+        // registered lift / `str` / builder-primitive body. Mirror the runner's
+        // `interpreterImplRefResolver`: try the pattern-manager ARTIFACT index
+        // first (which carries builder primitives like `str` that are not in the
+        // harness's verified-implementation index), then fall back to the harness.
+        // The runner's lowering eligibility probe uses the SAME two-tier resolver,
+        // so a leaf that passes the gate also resolves here (no gate↔runtime skew).
         // deno-lint-ignore no-explicit-any
-        const harness = (runtime as any).harness;
+        const rt = runtime as any;
+        const resolveImplRef = (identity: string, symbol: string) => {
+          const artifact = rt.patternManager?.artifactFromIdentitySync?.(
+            identity,
+            symbol,
+          );
+          const fromArtifact = artifact &&
+              typeof artifact.implementation === "function"
+            ? artifact.implementation
+            : typeof artifact === "function"
+            ? artifact
+            : undefined;
+          if (fromArtifact) return fromArtifact;
+          const verified = rt.harness?.getVerifiedImplementation?.(
+            identity,
+            symbol,
+          );
+          return typeof verified === "function" ? verified : undefined;
+        };
         evaluate = buildElementEvaluator(
           opRaw as Record<string, unknown>,
-          (identity: string, symbol: string) =>
-            harness?.getVerifiedImplementation?.(identity, symbol),
+          resolveImplRef,
+          undefined,
+          // Resolve the element's `element`/`index` argument aliases relative to
+          // the parent map frame (`defer === 1`) — the authored
+          // `array.map((value, index) => …)` element shape this builtin renders.
+          true,
         );
         // Honest boundary check: an in-memory element pattern must fully
         // resolve. (The runner's eligibility probe already enforces this before
@@ -194,22 +216,32 @@ export function collectionInterpreter(
         linkResolutionProbe,
         () => inputsCell.key("list").withTx(tx).resolveAsCell(),
       );
-      const listBase = listCell.getAsNormalizedFullLink();
       const rawList = tx.runWithAmbientReadMeta(
         linkResolutionProbe,
         () => listCell.withTx(tx).getRaw() as unknown,
       );
       const len = Array.isArray(rawList) ? rawList.length : 0;
-      const slotLink = (i: number): NormalizedFullLink => {
-        const slot = (rawList as unknown[])[i];
-        const link: NormalizedFullLink = isPrimitiveCellLink(slot)
-          ? parseLink(slot, listBase)
-          : { ...listBase, path: [...listBase.path, String(i)] };
-        return tx.runWithAmbientReadMeta(
-          linkResolutionProbe,
-          () => resolveLink(runtime, tx, link, "value"),
-        );
-      };
+      // Per-element slot link. Derive it via `listCell.key(i)` (schema-aware
+      // navigation that follows any alias/redirect and an element cell-LINK slot)
+      // rather than appending `[i]` to the raw `getAsNormalizedFullLink()` base:
+      // when the list is a derived/segment output cell (the partition case — e.g.
+      // a `normalizeItems(items)` lift feeding the map), a raw link-path append
+      // resolves into the cell WRAPPER and reads `undefined` (the array root sits
+      // behind the cell's own schema/redirect), whereas `key(i)` navigates to the
+      // real element. `resolveAsCell()` + `getAsNormalizedFullLink()` then yields
+      // the canonical per-element link the per-element effect subscribes on. (For
+      // an inline-argument list — the single-node path — `key(i)` lands on the
+      // same place the old append did, so behaviour is unchanged there.)
+      const slotLink = (i: number): NormalizedFullLink =>
+        tx.runWithAmbientReadMeta(linkResolutionProbe, () => {
+          const elemCell = listCell.key(i as never).withTx(tx).resolveAsCell();
+          return resolveLink(
+            runtime,
+            tx,
+            elemCell.getAsNormalizedFullLink(),
+            "value",
+          );
+        });
 
       const resultPresence = resultCell.asSchema(presenceSchema);
       // deno-lint-ignore no-explicit-any
@@ -252,8 +284,10 @@ export function collectionInterpreter(
             undefined,
             childTx,
           )!.withTx(childTx).get() as unknown;
-          // ELEMENT OP VIA evalRog over the element ROG (not a hardcoded leaf):
-          const out = evaluateElement(elemValue);
+          // ELEMENT OP VIA evalRog over the element ROG (not a hardcoded leaf).
+          // Pass the positional `index` too (the `mapWithPattern` element pattern
+          // exposes `{element, index}`); an element ignoring `index` never reads it.
+          const out = evaluateElement(elemValue, index);
           elemResult.withTx(childTx).set(out);
         };
         setResultCell(elemResult, parentCell);
