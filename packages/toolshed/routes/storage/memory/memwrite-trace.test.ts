@@ -1,42 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import {
-  formatMemWriteTrace,
-  memwriteHash,
-  stableStringify,
-} from "./memwrite-trace.ts";
+import { formatMemWriteTrace } from "./memwrite-trace.ts";
+
+const vhashOf = (line: string) => line.match(/vhash=(\S+)/)?.[1];
 
 describe("memwrite-trace", () => {
-  describe("stableStringify", () => {
-    it("sorts object keys, so equal content renders identically", () => {
-      expect(stableStringify({ b: 1, a: 2 })).toBe(
-        stableStringify({ a: 2, b: 1 }),
-      );
-      expect(stableStringify({ b: 1, a: 2 })).toBe('{"a":2,"b":1}');
-    });
-
-    it("preserves array order and tolerates cycles", () => {
-      expect(stableStringify([3, 1, 2])).toBe("[3,1,2]");
-      const cyclic: Record<string, unknown> = {};
-      cyclic.self = cyclic;
-      expect(stableStringify(cyclic)).toContain("[circular]");
-    });
-
-    it("falls back to String(value) when a value is not JSON-serializable", () => {
-      // BigInt can't be JSON.stringify'd, so the catch fallback runs.
-      expect(stableStringify(1n)).toBe("1");
-    });
-  });
-
-  describe("memwriteHash", () => {
-    it("is deterministic and distinguishes different content", () => {
-      expect(memwriteHash("abc")).toBe(memwriteHash("abc"));
-      expect(memwriteHash("abc")).not.toBe(memwriteHash("abd"));
-      expect(memwriteHash("")).toMatch(/^[0-9a-f]{8}$/);
-    });
-  });
-
   describe("formatMemWriteTrace", () => {
     it("tags the connection and includes op/id/scope/vhash/paths", () => {
       const line = formatMemWriteTrace(
@@ -48,6 +17,17 @@ describe("memwrite-trace", () => {
       expect(line).toContain("op=set");
       expect(line).toContain("vhash=");
       expect(line).toContain("paths=[]");
+    });
+
+    it("renders vhash as a fixed-length base64url prefix of the canonical hash", () => {
+      const line = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: { x: 1 } },
+        1,
+        false,
+      );
+      // 12-char base64url display form; the full canonical hash is the source
+      // of truth, this is only its truncation.
+      expect(vhashOf(line)).toMatch(/^[A-Za-z0-9_-]{12}$/);
     });
 
     it("omits raw values by default and includes them only when asked", () => {
@@ -87,10 +67,9 @@ describe("memwrite-trace", () => {
     });
 
     it("hashes equal content equally regardless of key order", () => {
-      // This is the property the storm investigation leans on: two writes with
-      // the same content get the same vhash, so a *different* vhash means a
-      // genuinely divergent value, not just reordered keys.
-      const vhashOf = (s: string) => s.match(/vhash=(\S+)/)?.[1];
+      // The property the storm investigation leans on: two writes with the same
+      // content get the same vhash, so a *different* vhash means a genuinely
+      // divergent value, not just reordered keys.
       const a = formatMemWriteTrace(
         { op: "set", id: "i", scope: "space", value: { x: 1, y: 2 } },
         1,
@@ -102,6 +81,53 @@ describe("memwrite-trace", () => {
         false,
       );
       expect(vhashOf(a)).toBe(vhashOf(b));
+    });
+
+    // The reason for using the canonical Fabric hash over a JSON round-trip: a
+    // JSON-derived hash collapses values that the runtime treats as distinct, so
+    // the trace would report a false "same value" and hide a real divergence.
+    it("distinguishes values a JSON round-trip would collapse (undefined fields)", () => {
+      // `JSON.stringify` drops `undefined`-valued keys, so both would serialize
+      // to `{}`; the canonical hash keys on the present `a` field.
+      const withUndef = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: { a: undefined } },
+        1,
+        false,
+      );
+      const empty = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: {} },
+        1,
+        false,
+      );
+      expect(vhashOf(withUndef)).not.toBe(vhashOf(empty));
+    });
+
+    it("distinguishes values a JSON round-trip would collapse (non-finite numbers)", () => {
+      // `JSON.stringify(Infinity)` is `null`, so a JSON hash can't tell these
+      // apart; the canonical number encoding can.
+      const inf = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: { n: Infinity } },
+        1,
+        false,
+      );
+      const nul = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: { n: null } },
+        1,
+        false,
+      );
+      expect(vhashOf(inf)).not.toBe(vhashOf(nul));
+    });
+
+    it("never throws on a value the canonical hasher rejects", () => {
+      // Not expected for a real FabricValue, but the trace must stay alive: a
+      // value the hasher can't encode (here, a function) yields a sentinel
+      // rather than an exception that would abort the rest of the commit's ops.
+      const line = formatMemWriteTrace(
+        { op: "set", id: "i", scope: "space", value: { fn: () => {} } },
+        1,
+        false,
+      );
+      expect(line).toContain("vhash=<unhashable>");
     });
   });
 });
