@@ -22,6 +22,11 @@ describe("memwrite-trace", () => {
       cyclic.self = cyclic;
       expect(stableStringify(cyclic)).toContain("[circular]");
     });
+
+    it("falls back to String(value) when a value is not JSON-serializable", () => {
+      // BigInt can't be JSON.stringify'd, so the catch fallback runs.
+      expect(stableStringify(1n)).toBe("1");
+    });
   });
 
   describe("memwriteHash", () => {
