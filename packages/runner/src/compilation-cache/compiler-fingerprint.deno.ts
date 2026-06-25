@@ -28,6 +28,11 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
  * any dependency bump. The result over-invalidates rather than under-
  * invalidates: a redundant recompile, never a stale read.
  *
+ * This is the single definition of the input set. The CI compile-cache key
+ * fingerprints the same inputs; {@link ciHashFilesArgs} renders this list into
+ * that key's `hashFiles(...)` arguments, and `compiler-fingerprint.test.ts`
+ * fails if the workflow drifts from it.
+ *
  *  - `packages/ts-transformers` — the CF transformer pipeline, including the
  *    `SchemaGeneratorTransformer` that bakes schemas into the emitted bytes;
  *  - `packages/js-compiler` — the TypeScript-to-JS compiler driver;
@@ -46,6 +51,26 @@ export const COMPILE_FINGERPRINT_INPUTS: readonly string[] = [
   "deno.json",
   "deno.lock",
 ];
+
+/**
+ * Render {@link COMPILE_FINGERPRINT_INPUTS} into the argument list of the CI
+ * compile-cache key's `hashFiles(...)` expression (see
+ * `.github/workflows/deno.yml`). GitHub Actions cannot import the list, so the
+ * workflow carries a literal copy that a test checks against this rendering.
+ * Directory inputs become `<dir>/**` globs; a file input (a `.` in its last path
+ * segment) is passed through verbatim. Quoting and `, ` separators match the
+ * `hashFiles(...)` call exactly so the comparison is a plain string match.
+ */
+export function ciHashFilesArgs(
+  inputs: readonly string[] = COMPILE_FINGERPRINT_INPUTS,
+): string {
+  return inputs
+    .map((input) => {
+      const base = input.slice(input.lastIndexOf("/") + 1);
+      return base.includes(".") ? `'${input}'` : `'${input}/**'`;
+    })
+    .join(", ");
+}
 
 /** Cache-key namespace prefix kept ahead of the fingerprint, for legibility. */
 export const VERSION_NAMESPACE = "cf/esm-compile";

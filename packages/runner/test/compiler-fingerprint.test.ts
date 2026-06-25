@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 
 import {
+  ciHashFilesArgs,
   COMPILE_FINGERPRINT_INPUTS,
   computeCompilerFingerprint,
   computeCompilerVersion,
@@ -14,6 +15,10 @@ import { COMPILE_CACHE_RUNTIME_VERSION } from "../src/compilation-cache/cell-cac
 
 const versionModulePath = fromFileUrl(
   new URL("../src/compilation-cache/compile-cache-version.ts", import.meta.url),
+);
+
+const denoWorkflowPath = fromFileUrl(
+  new URL("../../../.github/workflows/deno.yml", import.meta.url),
 );
 
 /** Write a temp tree and return its root; caller removes it. */
@@ -132,6 +137,23 @@ describe("compile-cache version axis", () => {
     ) {
       expect(COMPILE_FINGERPRINT_INPUTS).toContain(input);
     }
+  });
+
+  it("CI compile-cache key mirrors the fingerprint input set", async () => {
+    // The workflow carries a literal copy of the input globs (GitHub Actions
+    // cannot import the TS list). Both the `key` and `restore-keys` lines must
+    // hash exactly the args `ciHashFilesArgs()` renders, so editing the input
+    // set without updating the workflow (or vice versa) fails here.
+    const workflow = await Deno.readTextFile(denoWorkflowPath);
+    const expected = `hashFiles(${ciHashFilesArgs()})`;
+    const occurrences = workflow.split(expected).length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  it("renders directory inputs as globs and file inputs verbatim", () => {
+    expect(ciHashFilesArgs(["packages/api", "deno.lock"])).toBe(
+      "'packages/api/**', 'deno.lock'",
+    );
   });
 
   it("a baked version over the real inputs differs from the sentinel", async () => {
