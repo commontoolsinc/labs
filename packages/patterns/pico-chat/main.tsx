@@ -51,6 +51,7 @@ interface DisplayMessage {
   body: string;
   message: ChatMessage;
   showAuthor: boolean;
+  endGroup: boolean;
 }
 
 export interface PicoChatInput {
@@ -140,6 +141,8 @@ function displayMessages(messages: readonly ChatMessage[]): DisplayMessage[] {
     body: message.body,
     message,
     showAuthor: index === 0 || messages[index - 1].from !== message.from,
+    endGroup: index === messages.length - 1 ||
+      messages[index + 1].from !== message.from,
   }));
 }
 
@@ -172,21 +175,32 @@ const messageListStyle = {
   justifyContent: "flex-end",
 };
 
-const groupStyle = {
-  padding: "10px 0",
+const groupStartStyle = {
+  padding: "10px 0 4px",
+};
+
+const groupEndStyle = {
+  padding: "4px 0 10px",
   borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
 };
 
 const continuationStyle = {
-  padding: "4px 0 10px",
-  borderBottom: "1px solid var(--cf-colors-border, #e2e8f0)",
+  padding: "4px 0",
 };
 
 const reactionRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: "0.25rem",
+  minHeight: "1.75rem",
 };
+
+function rowStyle(row: DisplayMessage) {
+  if (row.showAuthor && row.endGroup) return groupEndStyle;
+  if (row.showAuthor) return groupStartStyle;
+  if (row.endGroup) return groupEndStyle;
+  return continuationStyle;
+}
 
 export default pattern<PicoChatInput, PicoChatOutput>(
   ({ messages, name }) => {
@@ -199,6 +213,21 @@ export default pattern<PicoChatInput, PicoChatOutput>(
       [NAME]: "Pico chat",
       [UI]: (
         <cf-screen>
+          <style>
+            {`
+              .pico-reactions {
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 120ms ease;
+              }
+
+              .pico-message-row:hover .pico-reactions,
+              .pico-message-row:focus-within .pico-reactions {
+                opacity: 1;
+                pointer-events: auto;
+              }
+            `}
+          </style>
           <cf-vstack gap="4" padding="6" style="max-width: 720px;">
             <cf-heading level={2}>Pico chat</cf-heading>
 
@@ -227,7 +256,8 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                     )
                     : rows.map((row) => (
                       <div
-                        style={row.showAuthor ? groupStyle : continuationStyle}
+                        className="pico-message-row"
+                        style={rowStyle(row)}
                       >
                         {row.showAuthor
                           ? (
@@ -239,7 +269,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                         <div dir="ltr" style={textStyle}>
                           {row.body}
                         </div>
-                        <div style={reactionRowStyle}>
+                        <div
+                          className="pico-reactions"
+                          style={reactionRowStyle}
+                        >
                           <cf-button
                             size="sm"
                             variant="ghost"
