@@ -65,10 +65,10 @@ App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
 `contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lunch-poll/`, `pico-chat/`,
-`profile-group-chat/`, `project-list/`, `router/`, `scoped-group-chat/`,
-`scoped-user-directory/`, `scrabble/`, `shared-profile-demo/`,
-`shared-profile-roster/`, `suggestable/`, `weekly-calendar/`.
+legacy), `habit-tracker/`, `lunch-poll/`, `pico-chat/`, `profile-group-chat/`,
+`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
+`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
+`weekly-calendar/`.
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
