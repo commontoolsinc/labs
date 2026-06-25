@@ -226,3 +226,94 @@ re-dispatches.
 - `resolveInner`/`b.inner` per-element partition EMISSION stays UNWIRED by
   design — the runtime child re-dispatch is the sound recursion; emitting
   `b.inner` is the storming path and is unnecessary for the win.
+
+### §4.7 FINAL MEASURE + GATE (2026-06-25, this branch HEAD `ec0559c29`)
+
+Re-measured ALL gates fresh + the §4.7 PRIMARY metric (lunch-poll 3x3 + 5x5,
+mean of 3 runs) and the integration aggregate (footprint + engagement). The
+§4.7 work was already committed + pushed; this is the standalone verification
+pass the campaign's "measure real engagement, never green-via-fallback" contract
+requires.
+
+**GATES — ALL GREEN:**
+- STATIC: `deno check` clean; `deno lint` clean (7 files: `runner.ts` +
+  `reactive-interpreter/{collection-interpreter,element-evaluator,extract,interpret,partition,rog}.ts`);
+  `deno fmt --check` no diff.
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed**
+  — green WITH the interpreter engaged (verified by the engagement census below,
+  NOT green-via-fallback).
+- RI unit (`test/reactive-interpreter/*.test.ts`, flag-off): **40 passed / 0
+  failed**.
+- flag-OFF `packages/runner` `deno task test`: **698 passed / 0 failed** (HARD
+  invariant held; count moved 696→698 only because §4.7 added unit tests to
+  discovery, never from a regression).
+- flag-ON `packages/runner` `deno task test`: **698 passed / 0 failed** — NO new
+  reds. The §4.7 flag-ON unit fixes fully landed (the prior 3 flag-on-only reds
+  are cleared; flag-on now matches flag-off at 698/0).
+
+**§4.7 PRIMARY METRIC — lunch-poll (`packages/patterns/tools/lunch-poll-interpreter-bench.ts --cases=3x3,5x5 --rounds=2`, mean of 3 runs):**
+
+| case | BEFORE §4.7 (engaged / footprint) | AFTER §4.7 (engaged / footprint) |
+| --- | --- | --- |
+| 3x3 | (n/a baseline) | **35.3% engaged** (18/51, stable all 3 runs); docs Δ **−0.5%** mean, nodes Δ **+2.9%** mean |
+| 5x5 | **~18–21% engaged / +2% footprint** | **41.3% engaged** mean (range 37.0–47.2%; `ineligible_opkind` for the nested per-option collections **50→0**); docs Δ **+1.1%** mean, nodes Δ **+2.0%** mean |
+
+- **Engagement on the complex multi-user app DOUBLED** (5x5 ~18–21% → 41.3%),
+  exactly the §4.7 payoff: the nested per-option→per-user collections that used
+  to bump `ineligible_opkind` (50 bumps) now engage per-element via the runtime
+  child re-dispatch (`ineligible_opkind` 0 in census), and the per-option
+  wrappers / OptionSummaryRow `voters.map` interpret recursively.
+- **Output EQUIVALENCE: PASS every run** — vote tallies (per-option green/yellow/red
+  + user/option/vote counts) byte-identical OFF vs ON across all 6 arms. The
+  interpreter does not change results.
+- **Conflicts NOT a correctness ratchet:** `rejected=0` in EVERY run OFF and ON;
+  `conflicts == reverts` throughout (the [[cfc-multibrowser-slowness-instrumentation]]
+  signature of retry-that-succeeds, NOT a newer-seq stomp / storm). ON revert
+  counts run somewhat higher than OFF and are noisy (3x3 ON 146–322, sometimes
+  BELOW OFF; 5x5 ON ~706–790 vs OFF ~518–565) — genuine cross-session
+  write-write ping-pong that #4237 already made cheap, no newer-seq stomp.
+
+**FOOTPRINT verdict on lunch-poll — STILL FLAT (toward-a-win but not yet a win):**
+the doc/node footprint on lunch-poll is essentially **FLAT** (docs within ±1%
+mean, nodes +2% mean) despite engagement doubling — UNCHANGED in character from
+the pre-§4.7 +2%. Engagement doubled but the footprint did NOT improve because
+the dominant per-element footprint driver (PollOptionCard's interactive I/O rows
++ handler sinks) and the MAIN poll pattern's `__patternResult` self-reference are
+STILL kept boundaries (the two DEFERRED items above). §4.7 lifted ENGAGEMENT on
+the complex app (the goal it set out to deliver — the nested-collection recursion)
+but the lunch-poll *footprint* win is gated on those two deferred increments
+(§4.8 I/O-edge doc-consolidation, which is measured net-negative under concurrent
+load until the conflict ratchet is removed; and `__patternResult` self-reference
+handling). So: §4.7 DELIVERED the complex-app *engagement* win (DOUBLED), and the
+complex-app *footprint* win remains explicitly deferred to §4.8.
+
+**INTEGRATION aggregate (the simple-app corpus, fresh re-measure):**
+- ENGAGEMENT (`interpreted_ok>0`): **143 / 146** distinct scenarios (147 census
+  lines; `counterAggregator` appears twice) — UP from the pre-§4.7 **142/146**.
+  `ineligible_opkind` 6→2 (CT-1334 and budgetPlanner/supportTicketTriage now
+  engage via the §4.7 routing + the prior fan-out / bnd->bnd work). NOT-ENGAGED 3,
+  all GENUINE non-core exceptions: `counterWithHandlerSpawn` (launched_child
+  launcher contract), `counterWithConditionalBranch` (asCell-arg control
+  predicate), `Cell<unknown> capture …` (cell-capture-diagnostic feeder — no
+  output to materialize). fallback_by_reason summed: `launched_child` 14,
+  `unresolved_leaf` 4, `ineligible_opkind` 2; `unrecognized_alias`/`eval_threw`/
+  `scoped`/`cross_space`/`argument_writeback` all 0.
+- FOOTPRINT (RI_FOOTPRINT_DUMP, OFF vs ON): scheduler nodes **2398 → 1764 =
+  −634 (−26.4%)**; documents **2931 → 2939 = +0.3% (FLAT)**. Per-scenario: nodes
+  reduced in 111, increased in 22 (small +1..+7 on trivial single-leaf patterns),
+  flat in 13. UNCHANGED in character from the pre-§4.7 −26% nodes / flat docs —
+  the integration node win held while engagement ticked up.
+
+**DID §4.7 DELIVER THE COMPLEX-APP WIN?** YES for ENGAGEMENT (the stated §4.7
+goal: nested-collection recursion to lift complex-app engagement — lunch-poll 5x5
+~18–21% → 41.3%, DOUBLED, `ineligible_opkind` 50→0, output-equivalent, no
+correctness ratchet). The complex-app FOOTPRINT win is NOT yet realized (lunch-poll
+docs/nodes FLAT) and remains explicitly deferred to §4.8 (PollOptionCard I/O-edge
+doc-consolidation + `__patternResult` self-reference), unchanged from the prior
+§4.7 phase note. Still DEFERRED (and why): the two boundary drivers above
+(§4.8 + result-self-reference) and the `resolveInner`/`b.inner` per-element
+emission (the storming path — the runtime child re-dispatch is the sound
+recursion and needs no `b.inner` emit). D-EMISSION-SCOPE honored: scoped /
+cross-space per-element collections stay legacy fallback (census `scoped`/
+`cross_space` = 0 on this corpus).
