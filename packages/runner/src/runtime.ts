@@ -74,6 +74,7 @@ import {
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -170,6 +171,45 @@ export interface ExperimentalOptions {
   commitPreconditions?: boolean | undefined;
 }
 
+/**
+ * Content-addressed cache of compiled MODULE BYTES, injected via
+ * `RuntimeOptions.moduleByteCache`. The ESM cell-cache compile path consults it
+ * before the per-space storage read — a full hit skips both the storage read and
+ * the whole transform-and-emit step (`compileToModules`) — and populates it after
+ * a compile, so a module compiled in one runtime or space serves another
+ * compiling the same module.
+ *
+ * Entries are keyed by a module's content identity scoped by the compiled-set
+ * `runtimeVersion`; the emitted bytes are a deterministic function of that pair
+ * (the emitter strips the whole-program path prefix, so a module's bytes are the
+ * same in every program that contains it), so a hit always returns the bytes the
+ * identity addresses.
+ *
+ * The runtime defines only this interface. The implementation, and its
+ * persistence, live in test code, so the cache is instantiated only from tests
+ * and never in production.
+ */
+export interface ModuleByteCache {
+  /**
+   * The cached bodies for `identities` iff EVERY identity is present, else
+   * `undefined`. The transform-and-emit step is whole-program, so only a full
+   * set lets a compile skip it.
+   */
+  getCompleteSet(
+    runtimeVersion: string,
+    identities: readonly string[],
+  ): Map<string, CompiledModuleArtifact> | undefined;
+
+  /**
+   * Store a freshly compiled (or reused) module set, keyed by content identity
+   * scoped by `runtimeVersion`. Idempotent and content-addressed.
+   */
+  putAll(
+    runtimeVersion: string,
+    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+  ): void;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -213,6 +253,16 @@ export interface RuntimeOptions {
    * and retry window. See scheduler/backpressure.ts.
    */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
+  /**
+   * Process-level, content-addressed cache of compiled MODULE BYTES, shared
+   * across runtimes. When set, the ESM cell-cache compile path consults it before
+   * the per-space storage read and populates it after a compile, so a module
+   * compiled in one runtime or space serves another runtime or space compiling
+   * the same module. When unset, the byte cache is off and only the per-space
+   * cache applies. Holds emitted JS only, never live pattern instances. See
+   * {@link ModuleByteCache}.
+   */
+  moduleByteCache?: ModuleByteCache;
 }
 
 export interface CfcRuntimeStats {
@@ -319,6 +369,8 @@ export class Runtime {
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
+  readonly moduleByteCache?: ModuleByteCache;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
@@ -408,6 +460,7 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    this.moduleByteCache = options.moduleByteCache;
     const actingPrincipal = options.storageManager.as.did() as DID;
     this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
       id: `principal:${actingPrincipal}`,

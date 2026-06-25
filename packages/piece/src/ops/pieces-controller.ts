@@ -2,6 +2,7 @@ import {
   type Cell,
   entityIdFrom,
   type JSONSchema,
+  type ModuleByteCache,
   Runtime,
   RuntimeProgram,
   type Schema,
@@ -145,10 +146,14 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName }: {
+  static async initialize({ apiUrl, identity, spaceName, moduleByteCache }: {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
+    // Optional compiled-module-byte cache to share across controllers. Supplied
+    // only by test code (see the integration suite's compile-byte-cache helper);
+    // unset in production, so no cache is installed.
+    moduleByteCache?: ModuleByteCache;
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
@@ -159,6 +164,7 @@ export class PiecesController<T = unknown> {
         spaceIdentity: session.spaceIdentity,
       }),
       cfcEnforcementMode: "enforce-explicit",
+      moduleByteCache,
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
