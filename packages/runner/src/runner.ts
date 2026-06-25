@@ -2447,6 +2447,10 @@ export class Runner {
       );
     }
 
+    // Set when the nested-pattern closure carries a boundary so the single-node
+    // INLINE path declines cleanly (the partition handles it under recursion);
+    // see the §4.7 recursion comment in the PATTERN gate below.
+    let nestedInlineIneligible = false;
     // --- PATTERN gate (mirror the collection gate; MUTUALLY LOAD-BEARING with
     // the extraction recursion, R1). A top-level INLINED nested pattern (the
     // `pattern` op) is now eligible — BUT only when it is a PURE computation
@@ -2458,18 +2462,55 @@ export class Runner {
     // contains a collection/effect/deeper-nest — so we gate on the COVERAGE.
     if ((extracted.coverage.byKind.pattern ?? 0) > 0) {
       const byKind = extracted.coverage.byKind;
-      // Sub-ROG must be PURE: no collection / effect anywhere in the closure.
-      if ((byKind.collection ?? 0) > 0) bumpAndThrow("ineligible_opkind");
-      if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
-      // Exactly the single OUTER pattern op — >1 means a DEEPER nest (a nested
-      // pattern inside the nested pattern) which this first cut does not model.
-      if ((byKind.pattern ?? 0) > 1) bumpAndThrow("ineligible_opkind");
-      // The extractor recurses into the inline sub-pattern exactly once; >1 is a
-      // deeper / multiple nested graph beyond the single top-level inline.
-      if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+      // §4.7 NESTED-PATTERN RECURSION. A top-level inlined nested `pattern` op
+      // whose CLOSURE contains a boundary (a `collection` / `effect` / a deeper
+      // nested pattern) is NOT eligible for the single-node INLINE path (that path
+      // inlines the whole sub-ROG into one segment, which only models a PURE
+      // closure). But it IS a valid PARTITION case: the `pattern` op is kept as a
+      // VERBATIM legacy boundary node, and the inlined CHILD pattern re-dispatches
+      // through `buildInterpreterPattern` at runtime (instantiatePatternNode →
+      // this.run → instantiatePattern → buildInterpreterPattern), so the child's
+      // OWN pure regions / collections / nested patterns interpret RECURSIVELY at
+      // the runtime level — the sound §4.7 recursion mechanism (07 §4.7; the
+      // per-element CHILD re-dispatch, NOT a bespoke per-element `b.inner` emit).
+      // The surrounding pure region of THIS pattern (the result projection, any
+      // sibling computeds) interprets as segments. So instead of bumping
+      // `ineligible_opkind` for a collection/effect/deeper-nest closure, FALL
+      // THROUGH to the partition path below (gated to the experimental flag — the
+      // partition path is the interpreter; flag-off never reaches here). The
+      // partition keeps the `pattern` op as a boundary (allowed in
+      // `tryBuildPartitionedInterpreterPattern`); if it cannot find a pure region
+      // to interpret it returns null and the downstream gates supply the
+      // fail-closed reason, so the verdict is deferred, never lost.
+      const recurseNested = this.runtime.experimental.experimentalInterpreter;
+      // The nested-pattern closure carries a boundary (collection / effect / a
+      // DEEPER nested pattern): the single-node INLINE path cannot model it (it
+      // would inline a collection/effect into one segment, which `evalRog` cannot
+      // evaluate — it throws / records errors → `eval_threw`). Whether or not we
+      // recurse, the single-node inline path must DECLINE such a closure. Under
+      // recursion we DEFER it to the partition (which keeps the `pattern` op as a
+      // verbatim boundary + re-dispatches the child); without recursion we fall
+      // back to legacy right here. This flag (consumed by the single-node gate
+      // below) keeps the inline dry-run from ever seeing a non-inlinable closure.
+      const nestedClosureHasBoundary = (byKind.collection ?? 0) > 0 ||
+        (byKind.effect ?? 0) > 0 || (byKind.pattern ?? 0) > 1 ||
+        extracted.coverage.nested > 1;
+      if (!recurseNested) {
+        // Sub-ROG must be PURE: no collection / effect anywhere in the closure.
+        if ((byKind.collection ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+        if ((byKind.effect ?? 0) > 0) bumpAndThrow("ineligible_opkind");
+        // Exactly the single OUTER pattern op — >1 means a DEEPER nest (a nested
+        // pattern inside the nested pattern) which this first cut does not model.
+        if ((byKind.pattern ?? 0) > 1) bumpAndThrow("ineligible_opkind");
+        // The extractor recurses into the inline sub-pattern exactly once; >1 is a
+        // deeper / multiple nested graph beyond the single top-level inline.
+        if (extracted.coverage.nested > 1) bumpAndThrow("ineligible_opkind");
+      }
+      nestedInlineIneligible = nestedClosureHasBoundary;
       // A serialized $patternRef element (no in-memory `.nodes`) is recorded as
       // an unrecognized alias / leaves `inlined` undefined; either way it falls
-      // back. Unrecognized aliases anywhere → fall back.
+      // back. Unrecognized aliases anywhere → fall back. (Kept under recursion: a
+      // truly unrecognized alias is never partitionable — fail closed.)
       if (extracted.coverage.unrecognizedAliases.length > 0) {
         bumpAndThrow("unrecognized_alias");
       }
@@ -2536,8 +2577,16 @@ export class Runner {
     const hasCollectionOp = extracted.rog.ops.some((op) =>
       op.kind === "collection"
     );
+    // §4.7: a top-level `pattern` op is a partition BOUNDARY too — kept verbatim
+    // so the inlined child re-dispatches through the interpreter recursively. Only
+    // the experimental flag reaches here (the partition path IS the interpreter),
+    // so the flag-off legacy path is untouched.
+    const hasPatternOp = extracted.rog.ops.some((op) => op.kind === "pattern");
     const hasUnresolvedLeafBoundary = unresolvedLeafSet.size > 0;
-    if (hasEffectOp || hasUnresolvedLeafBoundary || hasCollectionOp) {
+    if (
+      hasEffectOp || hasUnresolvedLeafBoundary || hasCollectionOp ||
+      hasPatternOp
+    ) {
       const internedArgForPartition = internSchema(
         (pattern.argumentSchema ?? {}) as JSONSchema,
       );
@@ -2560,6 +2609,15 @@ export class Runner {
         return partitioned;
       }
     }
+
+    // §4.7: the nested-pattern closure carries a boundary (collection / effect /
+    // deeper nest) so the single-node INLINE path cannot model it (it would inline
+    // a non-pure closure into one segment — `evalRog` throws / records errors →
+    // `eval_threw`). The partition above already had its chance (and declined, or
+    // there was no separable pure region around the `pattern` op). Fall back
+    // CLEANLY with the same `ineligible_opkind` reason the pre-recursion coverage
+    // gate used, so the single-node dry-run never sees a non-inlinable closure.
+    if (nestedInlineIneligible) bumpAndThrow("ineligible_opkind");
 
     // The partition could not interpret a pure region around the unresolved
     // leaf (no usable segment, fan-out, a boundary→boundary read-through, etc.),
@@ -3126,15 +3184,21 @@ export class Runner {
     // `internalToOp` like any node). The element render stays inside the legacy
     // node verbatim (LEVEL-1: no `resolveInner` recursion below, so the per-
     // element CFC labelling and consolidated VNode doc are unchanged). A
-    // `pattern` boundary still needs the recursion machinery this spike does not
-    // build → fall through.
+    // A `pattern` boundary (§4.7) is kept VERBATIM as the legacy nested-pattern
+    // node; the inlined child re-dispatches through `buildInterpreterPattern` at
+    // runtime (instantiatePatternNode → this.run → instantiatePattern), so the
+    // child's own pure regions / collections / nested patterns interpret
+    // RECURSIVELY — no per-element `b.inner` emission is needed (the runtime child
+    // re-dispatch IS the recursion). The surrounding pure region of THIS pattern
+    // interprets as segments. All four boundary kinds now pass through (d) as a
+    // legacy node.
     if (
       part.boundaries.some((b) =>
         b.kind !== "effect" && b.kind !== "unresolved-leaf" &&
-        b.kind !== "collection"
+        b.kind !== "collection" && b.kind !== "pattern"
       )
     ) {
-      partDbg("boundary-kind-pattern");
+      partDbg("boundary-kind-unknown");
       return null;
     }
 
