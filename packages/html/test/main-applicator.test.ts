@@ -480,6 +480,46 @@ Deno.test("DomApplicator - child operations", async (t) => {
     assertEquals(pendingChild.parentNode, null);
   });
 
+  await t.step(
+    "appends pending insert when only beforeId anchor is removed",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "section" },
+          { op: "create-element", nodeId: 2, tagName: "a" },
+          { op: "create-element", nodeId: 3, tagName: "b" },
+          { op: "insert-child", parentId: 1, childId: 2, beforeId: 3 },
+        ],
+      });
+
+      const parent = applicator.getNode(1) as unknown as {
+        childNodes: Array<{ tagName: string }>;
+      };
+      const pendingChild = applicator.getNode(2) as unknown as {
+        parentNode: unknown;
+        tagName: string;
+      };
+      assertEquals(parent.childNodes, []);
+      assertEquals(pendingChild.parentNode, null);
+
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [{ op: "remove-node", nodeId: 3 }],
+      });
+
+      assertEquals(parent.childNodes.map((child) => child.tagName), ["A"]);
+      assertEquals(pendingChild.parentNode, parent);
+    },
+  );
+
   await t.step("moves child to new position", () => {
     const doc = createMockDocument();
     const applicator = createDomApplicator({

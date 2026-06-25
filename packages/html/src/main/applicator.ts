@@ -513,10 +513,19 @@ export class DomApplicator {
   }
 
   private discardPendingForNodeIds(nodeIds: ReadonlySet<number>): void {
-    this.pendingChildInserts = this.pendingChildInserts.filter((pending) =>
-      !nodeIds.has(pending.parentId) && !nodeIds.has(pending.childId) &&
-      (pending.beforeId === null || !nodeIds.has(pending.beforeId))
-    );
+    const remaining: PendingChildInsert[] = [];
+    for (const pending of this.pendingChildInserts) {
+      if (nodeIds.has(pending.parentId) || nodeIds.has(pending.childId)) {
+        continue;
+      }
+
+      remaining.push(
+        pending.beforeId !== null && nodeIds.has(pending.beforeId)
+          ? { ...pending, beforeId: null }
+          : pending,
+      );
+    }
+    this.pendingChildInserts = remaining;
   }
 
   private replayPendingChildInserts(): void {
