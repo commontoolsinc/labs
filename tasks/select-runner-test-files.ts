@@ -22,11 +22,25 @@ export async function listRunnerTests(): Promise<{ name: string }[]> {
   const testDir = new URL("../packages/runner/test/", import.meta.url);
   const files: { name: string }[] = [];
 
-  for await (const entry of Deno.readDir(testDir)) {
-    if (entry.isFile && entry.name.endsWith(".test.ts")) {
-      files.push({ name: entry.name });
+  // Recurse so test files in subdirectories (e.g. test/reactive-interpreter/*)
+  // are sharded too. The non-recursive readDir used to silently drop every
+  // nested test: CI ran green because dropped files simply never executed.
+  // Names are stored as POSIX-relative paths from test/ (e.g.
+  // "reactive-interpreter/partition.test.ts"); the CLI prefixes "./test/".
+  async function walk(dir: URL, prefix: string): Promise<void> {
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isDirectory) {
+        await walk(
+          new URL(`${entry.name}/`, dir),
+          `${prefix}${entry.name}/`,
+        );
+      } else if (entry.isFile && entry.name.endsWith(".test.ts")) {
+        files.push({ name: `${prefix}${entry.name}` });
+      }
     }
   }
+
+  await walk(testDir, "");
 
   files.sort((a, b) => a.name.localeCompare(b.name));
   return files;
