@@ -101,7 +101,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const rootCell = new MockCell(rootVNode);
 
       // Mount
-      reconciler.mount(rootCell as any);
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const createOps = collector.getOpsOfType("create-element");
@@ -195,6 +195,150 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         ),
         true,
         "new cell child should render its current value",
+      );
+    },
+  );
+
+  await t.step(
+    "updates cell-backed conditional row children at first middle and last positions",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const voteSpan = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "span",
+        props: { "data-vote-swatch-name": id },
+        children: [id],
+      });
+
+      const firstChildren = new MockCell([]);
+      const middleChildren = new MockCell([]);
+      const lastChildren = new MockCell([]);
+
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [
+          {
+            type: "vnode",
+            name: "div",
+            props: { "data-option-id": "first" },
+            children: firstChildren,
+          },
+          {
+            type: "vnode",
+            name: "div",
+            props: { "data-option-id": "middle" },
+            children: middleChildren,
+          },
+          {
+            type: "vnode",
+            name: "div",
+            props: { "data-option-id": "last" },
+            children: lastChildren,
+          },
+        ],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      firstChildren.set([voteSpan("Alice")]);
+      middleChildren.set([null, voteSpan("Alice")]);
+      lastChildren.set([null, null, voteSpan("Alice")]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const spanCreates = collector.getOpsOfType("create-element").filter(
+        (op) => "tagName" in op && op.tagName === "span",
+      );
+      assertEquals(
+        spanCreates.length,
+        3,
+        "should create one swatch span for each cell-backed row",
+      );
+
+      const swatchPropOps = collector.getOpsOfType("set-prop").filter(
+        (op) =>
+          op.op === "set-prop" && op.key === "data-vote-swatch-name" &&
+          op.value === "Alice",
+      );
+      assertEquals(
+        swatchPropOps.length,
+        3,
+        "each cell-backed swatch span should receive the voter data attribute",
+      );
+    },
+  );
+
+  await t.step(
+    "inserts pending mapped child cells when they resolve after parent array update",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const voteSpan = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "span",
+        props: { "data-vote-swatch-name": id },
+        children: [id],
+      });
+
+      const firstMappedResult = new MockCell(undefined);
+      const middleMappedResult = new MockCell(undefined);
+      const lastMappedResult = new MockCell(undefined);
+
+      const mappedChildren = new MockCell([]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: { "data-option-id": "mapped" },
+        children: mappedChildren,
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      mappedChildren.set([
+        firstMappedResult,
+        middleMappedResult,
+        lastMappedResult,
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      firstMappedResult.set(voteSpan("Alice"));
+      middleMappedResult.set(voteSpan("Alice"));
+      lastMappedResult.set(voteSpan("Alice"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const spanCreates = collector.getOpsOfType("create-element").filter(
+        (op) => "tagName" in op && op.tagName === "span",
+      );
+      assertEquals(
+        spanCreates.length,
+        3,
+        "should create one swatch span for each late-resolving mapped child cell",
+      );
+
+      const spanInserts = collector.getOpsOfType("insert-child").filter(
+        (op) =>
+          op.op === "insert-child" &&
+          spanCreates.some((createOp) =>
+            "nodeId" in createOp && createOp.nodeId === op.childId
+          ),
+      );
+      assertEquals(
+        spanInserts.length,
+        3,
+        "each late-resolving swatch span should be inserted into the parent row",
       );
     },
   );
