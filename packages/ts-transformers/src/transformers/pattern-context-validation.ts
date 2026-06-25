@@ -662,7 +662,9 @@ export class PatternContextValidationTransformer
     // descend into it either.
     if (this.isObjectLiteralPropertyValueFunction(node)) {
       const kind = this.propertyValueFunctionKind(node);
-      if (kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)) {
+      if (
+        kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
+      ) {
         return;
       }
       this.reportObjectMember(node, kind, context);
@@ -766,7 +768,9 @@ export class PatternContextValidationTransformer
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
     const kind = this.objectMemberKind(node);
-    if (kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)) {
+    if (
+      kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
+    ) {
       return;
     }
     this.reportObjectMember(node.name, kind, context);
@@ -792,7 +796,9 @@ export class PatternContextValidationTransformer
     if (ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
       return name.text;
     }
-    if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    if (
+      ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)
+    ) {
       return name.expression.text;
     }
     return undefined;

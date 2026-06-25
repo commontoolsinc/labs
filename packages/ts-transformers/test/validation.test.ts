@@ -2085,33 +2085,39 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
       });
     `;
 
-  await t.step("errors on a method, naming the unstorable-function reason", async () => {
-    const { diagnostics } = await validateSource(
-      withReactiveLocal("{ read() { return value?.token; } }"),
-      { types: COMMONFABRIC_TYPES },
-    );
-    const errs = memberErrors(diagnostics);
-    assertEquals(errs.length, 1);
-    assertStringIncludes(
-      errs[0]!.message,
-      "function value, which the reactive data model cannot store",
-    );
-    assertStringIncludes(errs[0]!.message, "handler()");
-  });
+  await t.step(
+    "errors on a method, naming the unstorable-function reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ read() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "function value, which the reactive data model cannot store",
+      );
+      assertStringIncludes(errs[0]!.message, "handler()");
+    },
+  );
 
-  await t.step("errors on a getter, naming the serialization-snapshot reason", async () => {
-    const { diagnostics } = await validateSource(
-      withReactiveLocal("{ get t() { return value?.token; } }"),
-      { types: COMMONFABRIC_TYPES },
-    );
-    const errs = memberErrors(diagnostics);
-    assertEquals(errs.length, 1);
-    assertStringIncludes(
-      errs[0]!.message,
-      "evaluated when the pattern result is stored",
-    );
-    assertStringIncludes(errs[0]!.message, "one-time snapshot");
-  });
+  await t.step(
+    "errors on a getter, naming the serialization-snapshot reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ get t() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "evaluated when the pattern result is stored",
+      );
+      assertStringIncludes(errs[0]!.message, "one-time snapshot");
+    },
+  );
 
   await t.step("errors on a setter, advising handler()", async () => {
     const source = `      import { pattern } from "commonfabric";
@@ -2130,19 +2136,25 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     assertStringIncludes(errs[0]!.message, "module-scope handler()");
   });
 
-  await t.step("errors on a toJSON() method with the serialization reason", async () => {
-    const { diagnostics } = await validateSource(
-      withReactiveLocal("{ toJSON() { return value?.token; } }"),
-      { types: COMMONFABRIC_TYPES },
-    );
-    const errs = memberErrors(diagnostics);
-    assertEquals(errs.length, 1);
-    assertStringIncludes(errs[0]!.message, "toJSON() member on an object literal");
-    assertStringIncludes(
-      errs[0]!.message,
-      "runs when the pattern result is stored",
-    );
-  });
+  await t.step(
+    "errors on a toJSON() method with the serialization reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ toJSON() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "toJSON() member on an object literal",
+      );
+      assertStringIncludes(
+        errs[0]!.message,
+        "runs when the pattern result is stored",
+      );
+    },
+  );
 
   await t.step(
     "a toJSON property (arrow) gets the serialization message, not unstorable",
@@ -2153,7 +2165,10 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
       );
       const errs = memberErrors(diagnostics);
       assertEquals(errs.length, 1);
-      assertStringIncludes(errs[0]!.message, "toJSON() member on an object literal");
+      assertStringIncludes(
+        errs[0]!.message,
+        "toJSON() member on an object literal",
+      );
       assertStringIncludes(
         errs[0]!.message,
         "runs when the pattern result is stored",
@@ -2182,9 +2197,11 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     assertEquals(memberErrors(diagnostics).length, 1);
   });
 
-  await t.step("errors on a returned-object member as well as a local one", async () => {
-    const { diagnostics } = await validateSource(
-      `      import { computed, pattern } from "commonfabric";
+  await t.step(
+    "errors on a returned-object member as well as a local one",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { computed, pattern } from "commonfabric";
 
       interface Auth { token?: string; }
 
@@ -2193,32 +2210,36 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
         return { read() { return value?.token; } };
       });
     `,
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(memberErrors(diagnostics).length, 1);
-  });
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
 
   // The rule ignores the body, so reactive reads laundered through these shapes
   // are caught without a body scanner.
-  await t.step("errors regardless of how the body reads the reactive value", async () => {
-    const bodies = [
-      "{ get t() { const { token } = value; return token; } }", // destructuring
-      "{ read() { return { ...value }; } }", // spread
-      `{ ["read"]() { return value?.token; } }`, // computed member name
-      "{ read(a = value?.token) { return a; } }", // parameter default
-    ];
-    for (const body of bodies) {
-      const { diagnostics } = await validateSource(
-        withReactiveLocal(body),
-        { types: COMMONFABRIC_TYPES },
-      );
-      assertEquals(
-        memberErrors(diagnostics).length,
-        1,
-        `expected an object-member error for ${body}`,
-      );
-    }
-  });
+  await t.step(
+    "errors regardless of how the body reads the reactive value",
+    async () => {
+      const bodies = [
+        "{ get t() { const { token } = value; return token; } }", // destructuring
+        "{ read() { return { ...value }; } }", // spread
+        `{ ["read"]() { return value?.token; } }`, // computed member name
+        "{ read(a = value?.token) { return a; } }", // parameter default
+      ];
+      for (const body of bodies) {
+        const { diagnostics } = await validateSource(
+          withReactiveLocal(body),
+          { types: COMMONFABRIC_TYPES },
+        );
+        assertEquals(
+          memberErrors(diagnostics).length,
+          1,
+          `expected an object-member error for ${body}`,
+        );
+      }
+    },
+  );
 
   // Closing the JSX hole: an object-literal member function in a JSX data
   // position is not lowered there and is rejected, but JSX event handlers and
@@ -2267,13 +2288,16 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     assertEquals(getErrors(diagnostics).length, 0);
   });
 
-  await t.step("allows a plain reactive property read (it lowers)", async () => {
-    const { diagnostics } = await validateSource(
-      withReactiveLocal("{ token: value?.token }", "api"),
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(getErrors(diagnostics).length, 0);
-  });
+  await t.step(
+    "allows a plain reactive property read (it lowers)",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ token: value?.token }", "api"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(getErrors(diagnostics).length, 0);
+    },
+  );
 
   await t.step("allows an object member inside computed()", async () => {
     const { diagnostics } = await validateSource(
@@ -2392,46 +2416,57 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
   // A toJSON member is storable (the data model converts a toJSON-bearing
   // object), so a pure toJSON that reads no reactive value is allowed, while one
   // that reads a reactive value still freezes a snapshot and is reported.
-  await t.step("allows a pure toJSON() member with no reactive read", async () => {
-    const { diagnostics } = await validateSource(
-      `      import { pattern } from "commonfabric";
+  await t.step(
+    "allows a pure toJSON() member with no reactive read",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
 
       export default pattern<{ n: number }>(({ n }) => {
         return { v: n, toJSON() { return { v: 1 }; } };
       });
     `,
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(memberErrors(diagnostics).length, 0);
-  });
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
 
-  await t.step("allows a pure toJSON property (arrow) with no reactive read", async () => {
-    const { diagnostics } = await validateSource(
-      `      import { pattern } from "commonfabric";
+  await t.step(
+    "allows a pure toJSON property (arrow) with no reactive read",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
 
       export default pattern<{ n: number }>(({ n }) => {
         return { v: n, toJSON: () => ({ v: 1 }) };
       });
     `,
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(memberErrors(diagnostics).length, 0);
-  });
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
 
-  await t.step("still flags a toJSON() member that reads a reactive value", async () => {
-    const { diagnostics } = await validateSource(
-      withReactiveLocal("{ toJSON() { return { t: value?.token }; } }"),
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(memberErrors(diagnostics).length, 1);
-  });
+  await t.step(
+    "still flags a toJSON() member that reads a reactive value",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ toJSON() { return { t: value?.token }; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
 
   // The toJSON body check follows reactive values laundered through plain local
   // bindings (a destructured parameter, a re-alias) and reads of an outer
   // pattern value from a toJSON nested in a callback.
-  await t.step("flags a toJSON() that reads a destructured pattern parameter", async () => {
-    const { diagnostics } = await validateSource(
-      `      import { pattern } from "commonfabric";
+  await t.step(
+    "flags a toJSON() that reads a destructured pattern parameter",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
 
       interface Auth { token?: string; }
 
@@ -2440,10 +2475,11 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
         return { v: 1, toJSON() { return { t: auth?.token }; } };
       });
     `,
-      { types: COMMONFABRIC_TYPES },
-    );
-    assertEquals(memberErrors(diagnostics).length, 1);
-  });
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
 
   await t.step(
     "flags a toJSON() nested in a callback that reads an outer pattern value",
