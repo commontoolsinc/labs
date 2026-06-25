@@ -200,6 +200,63 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "replaces same-key text Cell when parent supplies a literal child",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const oldChild = new MockCell("cell text");
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [oldChild as unknown as WorkerRenderNode],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: ["literal text"],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").length > 0,
+        true,
+        "old cell-backed text child should be removed",
+      );
+      assertEquals(
+        collector.getOpsOfType("create-text").some((op) =>
+          "text" in op && op.text === "literal text"
+        ),
+        true,
+        "literal replacement should render as a new static text node",
+      );
+
+      collector.clear();
+      oldChild.set("stale cell update");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      assertEquals(
+        collector.getOps().length,
+        0,
+        "old cell subscription should be cancelled after literal replacement",
+      );
+    },
+  );
+
+  await t.step(
     "updates cell-backed conditional row children at first middle and last positions",
     async () => {
       const collector = createOpsCollector();

@@ -3014,6 +3014,7 @@ export class WorkerReconciler {
 
     if (
       childState.isText &&
+      childState.cell === undefined &&
       (typeof child === "string" || typeof child === "number" ||
         typeof child === "boolean" || child === null || child === undefined)
     ) {
