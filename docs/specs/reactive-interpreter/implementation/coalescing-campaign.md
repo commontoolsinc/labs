@@ -317,3 +317,132 @@ emission (the storming path — the runtime child re-dispatch is the sound
 recursion and needs no `b.inner` emit). D-EMISSION-SCOPE honored: scoped /
 cross-space per-element collections stay legacy fallback (census `scoped`/
 `cross_space` = 0 on this corpus).
+
+## §4.8 — VNode-doc consolidation on rendered maps (THE DOC HALF) — FINAL GATE (2026-06-25, this branch HEAD `d6b11688c`)
+
+GOAL (Berni, AFK autonomous): land the DOC half of the `docs≈5+3N` tax that the
+node-half work left FLAT. §4.8 (07 §4.8 + DECISIONS §D-VNODE-DOC-FRAGMENTATION):
+a `.map` whose element renders a VNode subtree must write ONE consolidated
+element-result doc, not fragment it per VNode node. The two bug fixes the task
+called for (per-element doc shape + the over-conservative lowering gate) landed
+in commit `d6b11688c`; this section is the standalone re-measure + gate that the
+campaign's "measure real footprint honestly, never green-via-fallback" contract
+requires. Engaging the consolidated per-element write + the broadened lowering
+gate is exactly the §4.8 "desired red-with-partitions" — driven back to GREEN by
+FIXING the doc shape + gate (NOT by widening fallback; the gate change NARROWS
+fallback — it lowers MORE maps to `$ri-collection-map`).
+
+**BUGS FIXED (both in `packages/runner/src`, commit `d6b11688c`):**
+1. **Per-element doc SHAPE — VNode fragmentation** (`collection-interpreter.ts`):
+   the per-element write was `elemResult.set(out)`, whose `recursivelyAddIDIfNeeded`
+   stamps `[ID]` on every object-inside-an-array (a rendered VNode's `children`),
+   which `normalizeAndDiff` then hoists into one entity doc PER nested VNode node
+   (`tr`/`td`/`cf-vstack`/3×`span`) → the per-element result fragmented into ~6
+   docs (the D-VNODE-DOC-FRAGMENTATION tax). FIX: write RAW consolidated, exactly
+   legacy `updateResultProjection`'s primitive —
+   `elemResult.setRawUntyped(fabricFromNativeValue(convertCellsToLinks(out)))` —
+   so the whole VNode subtree stores INLINE in one element doc. Scalar/object
+   element results (W3 `{doubled:N}`) are output-IDENTICAL (the object is the doc
+   root, never an object-inside-an-array, so it already lived inline) — the
+   docs/element slope only tightens.
+2. **The ACTUAL default-app blocker — over-conservative lowering GATE**
+   (`runner.ts` `tryLowerCollectionBoundaryNode` → `elementLeavesSurviveSerialization`):
+   a transformer-compiled rendered row's inline `computed()`/`lift()` leaves
+   serialize as module-level `__cfLift_N` lifts with NO `$implRef` *field* on the
+   live in-builder module (that field is minted only at `moduleToJSON` time). The
+   old gate checked `module.$implRef` directly → declined EVERY such element, so
+   the notes map NEVER reached `$ri-collection-map` and each element ran as a full
+   legacy CHILD PATTERN (the doc tax mis-attributed to "$ri-collection-map VNode
+   fragmentation" was in fact the per-element child-pattern instantiation — the
+   builtin was never reached). FIX: new `elementLeafImplRefResolvable` consults the
+   SAME thing `moduleToJSON` uses to mint `$implRef` — the explicit field, else the
+   live function's `getVerifiedProvenance` (content-addressed `{identity,__cfLift_N}`,
+   keyed into the artifact index that SURVIVES the `getRaw()` round-trip). It
+   DELIBERATELY EXCLUDES the host entry-ref (`host:N/fnN`): registry-/session-
+   scoped, NOT content-addressed; a builder-direct `cf.str` resolves to it HERE
+   yet the runtime builtin throws `unresolved element leaf ops` (a real gate↔runtime
+   skew the LEVEL-1 coalescing-spike oracle catches). Per D-EMISSION-SCOPE we admit
+   only what is provably recoverable post-serialization.
+
+**GATES — ALL GREEN (no reds to fix; the two bug fixes above drove the §4.8
+desired-red back to green before the commit; re-verified fresh on HEAD):**
+- STATIC: `deno check` clean; `deno lint` clean (`runner.ts` +
+  `reactive-interpreter/collection-interpreter.ts`); `deno fmt --check` no diff.
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed**
+  — green WITH the interpreter engaged (NOT green-via-fallback; engagement census
+  below).
+- RI unit (`test/reactive-interpreter/*.test.ts`, flag-off): **40 passed / 0
+  failed**.
+- flag-OFF `packages/runner` `deno task test`: **698 passed / 0 failed** (HARD
+  invariant — `$ri-collection-map` never registers flag-off + the lowering gate is
+  on the interpreter dispatch path only; flag-off byte-unchanged).
+- flag-ON `packages/runner` `deno task test`: **698 passed / 0 failed** — NO new
+  reds. The three canary tests are GREEN: `pattern-scope` "map updates when
+  derived list is narrowed by session input" + "ifElse selected VNode branch
+  materializes map over session-derived list" (the per-element scope-label
+  divergence the D-EMISSION-SCOPE guard fixes — the §4.8 lowering broadening did
+  NOT reintroduce it) and `patterns-lift` "patterns returned by lifted functions".
+
+**ENGAGEMENT (`RI_CENSUS_DUMP`, `interpreted_ok>0`):** **142 engaged / 144 census
+lines** — at/above the §4.7 baseline (143/146), NO regression. NOT-ENGAGED 2, both
+DOCUMENTED genuine exceptions: `counterWithConditionalBranch` (asCell-arg control
+predicate), `counterWithHandlerSpawn` (launched_child launcher contract).
+fallback_by_reason: `launched_child` 14, `unresolved_leaf` 3, `ineligible_opkind`
+1; `unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/`argument_writeback`
+all **0** — the §4.8 lowering broadening admitted NO scoped/cross-space element
+(D-EMISSION-SCOPE guard holds).
+
+**FOOTPRINT — THE DOC WIN LANDED (notes-list, the rendered-map corpus pattern):**
+default-app notes bench OFF vs ON (`tools/default-app-interpreter-bench.ts
+--notes=30,100`), output-EQUIVALENT (note count + titles identical):
+
+| metric | OFF | ON | Δ |
+| --- | --- | --- | --- |
+| **docs/note (slope)** | **5.00** | **2.00** | **−60%** |
+| docs @N=100 (abs) | 515 | 220 | −57% |
+| nodes/note (slope) | 5.00 | 3.00 | −40% |
+| wall-clock @N=100 | 10663ms | 9054ms | −15% |
+| conflicts | 0 | 0 | flat |
+
+The map lowers cleanly (census `interpreted_ok=1/1 fallback{none}`). **The DOC
+half of the tax IS now reduced on rendered maps** — docs/note ON (2.00) < OFF
+(5.00), the §4.8 success criterion (coalesced docs ≤ legacy on a rendered-element
+pattern, oracle-verified output-equivalent). This is the headline §4.8 win: the
+node-half work left docs FLAT; §4.8 makes the doc count DROP on the exact shape
+(rendered `.map`) coalescing most wants to help.
+
+**lunch-poll — output-EQUIVALENT, conflicts NOT a ratchet** (4 runs: 1 standalone
++ 3×; `tools/lunch-poll-interpreter-bench.ts --cases=3x3,5x5 --rounds=2`):
+- **OUTPUT EQUIVALENCE: PASS every run** (vote tallies byte-identical OFF vs ON);
+  `rejected=0` in EVERY arm OFF and ON; `conflicts==reverts` throughout (the
+  retry-that-succeeds signature, NOT a newer-seq stomp / storm).
+- 3x3 conflicts — OFF {139,224,143,155} mean ~165 vs ON {256,150,164,247} mean
+  ~204; 5x5 conflicts — OFF {804,565,595,530} mean ~624 vs ON {638,853,748,1255}
+  mean ~874. ON runs somewhat higher with WIDE overlap (ON dips BELOW OFF in
+  several runs: 3x3 150<224, 5x5 638<804) — genuine cross-session write-write
+  ping-pong #4237 already made cheap, **NOT the 4–10× `RI_F4_IO_COALESCE` ratchet**
+  (that path stays gated default-off; §4.8 doc-consolidation does NOT engage the
+  PollOptionCard I/O edge — lunch-poll engagement unchanged at 35–37%, the per-
+  option/per-user collections engage via the §4.7 runtime child re-dispatch, not
+  the §4.8 lowering). The elevated ON conflicts are the pre-existing §4.7 nested-
+  recursion engagement, unchanged in character by §4.8.
+- lunch-poll docs/nodes stay FLAT (3x3 docs +2.1% / nodes +4.9%; 5x5 docs −6.9% /
+  nodes −2.4%; within run noise) — UNCHANGED from §4.7: lunch-poll's dominant
+  per-element footprint driver (PollOptionCard's interactive I/O rows + handler
+  sinks, and the MAIN poll pattern's `__patternResult` result-self-reference)
+  remains a boundary, so the §4.8 rendered-map doc win (which lands on the SIMPLE
+  notes-list map) does not reach it. The complex-app doc win stays deferred to the
+  two boundary-driver increments (the I/O-edge read-isolation half, gated
+  `RI_F4_IO_COALESCE` default-off because it ratchets conflicts; and
+  `__patternResult` self-reference handling).
+
+**§4.8 STATUS — DOC HALF DONE.** The rendered-map doc win LANDED and is oracle-
+verified (notes-list docs/note 5.00→2.00, −60%, output-equivalent), the §4.8
+gating precondition for the doc-win on rendered collections (07 §4.8) is
+SATISFIED. All four gates GREEN (integration 147/0 engaged 142/144, RI unit 40/0,
+flag-off 698/0, flag-ON 698/0). lunch-poll output-equivalent with no conflict
+ratchet. The READ-ISOLATION / I/O-coalesce half (`RI_F4_IO_COALESCE`) stays OPEN +
+gated default-off — a SEPARATE cross-document contention problem the doc-
+consolidation half does not touch; engaging PollOptionCard's I/O edge is still
+measured net-negative under concurrent load until that ratchet is removed.
