@@ -117,7 +117,6 @@ export function flatMap(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
-      result.send([]);
       // Link this cell to the parent cell
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
@@ -139,7 +138,11 @@ export function flatMap(
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
 
-    if (resultWithLog.get() === undefined) {
+    const existingResult = resultWithLog.get();
+    const preserveResumeResult = elementAwaitSync &&
+      Array.isArray(existingResult) &&
+      existingResult.length > 0;
+    if (existingResult === undefined) {
       resultWithLog.set([]);
     }
     if (list === undefined) {
@@ -155,10 +158,9 @@ export function flatMap(
       throw new Error("flatMap currently only supports arrays");
     }
 
-    if (list.length > 0) resumeBatchAwaitSync = false;
-
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
+    let hasPendingElementResult = false;
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
@@ -219,8 +221,12 @@ export function flatMap(
         });
       } else if (elemResult !== undefined) {
         newArrayValue.push(elemResult);
+      } else {
+        hasPendingElementResult = true;
       }
     }
+    if (preserveResumeResult && hasPendingElementResult) return;
+    resumeBatchAwaitSync = false;
     resultWithLog.set(newArrayValue);
 
     // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.

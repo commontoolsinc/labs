@@ -115,7 +115,6 @@ export function filter(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
-      result.send([]);
       // Link this cell to the parent cell
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
@@ -137,7 +136,11 @@ export function filter(
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
 
-    if (resultWithLog.get() === undefined) {
+    const existingResult = resultWithLog.get();
+    const preserveResumeResult = elementAwaitSync &&
+      Array.isArray(existingResult) &&
+      existingResult.length > 0;
+    if (existingResult === undefined) {
       resultWithLog.set([]);
     }
     if (list === undefined) {
@@ -153,10 +156,9 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
-    if (list.length > 0) resumeBatchAwaitSync = false;
-
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
+    let hasPendingPredicate = false;
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create predicate runs for them
       if (!(i in list)) continue;
@@ -210,10 +212,15 @@ export function filter(
       // Read predicate result — creates subscription for reactivity.
       // Truthy/falsy coercion, not strict boolean.
       const included = elementRuns.get(elementKey)!.resultCell.withTx(tx).get();
+      if (included === undefined) {
+        hasPendingPredicate = true;
+      }
       if (included) {
         newArrayValue.push(list[i]); // Original element cell reference
       }
     }
+    if (preserveResumeResult && hasPendingPredicate) return;
+    resumeBatchAwaitSync = false;
     resultWithLog.set(newArrayValue);
 
     // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.
