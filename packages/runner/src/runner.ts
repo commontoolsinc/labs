@@ -3225,7 +3225,9 @@ export class Runner {
             ) {
               segmentReadsHandleArg = true;
               if (PART_DBG) {
-                handleArgPaths.push(`${op.kind}#${op.id}:${ref.path.join(".")}`);
+                handleArgPaths.push(
+                  `${op.kind}#${op.id}:${ref.path.join(".")}`,
+                );
               }
             }
           }
