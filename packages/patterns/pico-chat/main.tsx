@@ -180,6 +180,12 @@ function hasAnyReaction(message: ChatMessage) {
     hasReaction(message, "😂");
 }
 
+function reactionOptionClass(message: ChatMessage, emoji: string) {
+  return hasReaction(message, emoji)
+    ? "pico-reaction-option pico-reaction-option-active"
+    : "pico-reaction-option";
+}
+
 const textStyle = {
   unicodeBidi: "plaintext",
   whiteSpace: "pre-wrap",
@@ -227,10 +233,15 @@ export default pattern<PicoChatInput, PicoChatOutput>(
         <cf-screen>
           <style>
             {`
-              .pico-reactions {
+              .pico-reaction-option {
                 opacity: 0;
                 pointer-events: none;
                 transition: opacity 120ms ease;
+              }
+
+              .pico-reaction-option-active {
+                opacity: 1;
+                pointer-events: auto;
               }
 
               .pico-message-row {
@@ -246,8 +257,8 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                 border-bottom: 1px solid var(--cf-colors-border, #e2e8f0);
               }
 
-              .pico-message-row:hover .pico-reactions,
-              .pico-message-row:focus-within .pico-reactions {
+              .pico-message-row:hover .pico-reaction-option,
+              .pico-message-row:focus-within .pico-reaction-option {
                 opacity: 1;
                 pointer-events: auto;
               }
@@ -298,6 +309,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                               style={reactionRowStyle}
                             >
                               <cf-button
+                                className={reactionOptionClass(
+                                  row.message,
+                                  "👍",
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -309,6 +324,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                 {reactionLabel(row.message, "👍")}
                               </cf-button>
                               <cf-button
+                                className={reactionOptionClass(
+                                  row.message,
+                                  "❤️",
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
@@ -320,6 +339,10 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                                 {reactionLabel(row.message, "❤️")}
                               </cf-button>
                               <cf-button
+                                className={reactionOptionClass(
+                                  row.message,
+                                  "😂",
+                                )}
                                 size="sm"
                                 variant="ghost"
                                 onClick={() =>
