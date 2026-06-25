@@ -150,6 +150,23 @@ Deno.test("emo chat prevents reactions to own display-name messages", () => {
   assertEquals(message.reactions, []);
 });
 
+Deno.test("emo chat lets authors remove legacy own reactions", () => {
+  const subject = PicoChat({
+    messages: [{
+      from: "Alex",
+      body: "Old self reaction",
+      reactions: [{ emoji: "❤️", byName: "Alex" }],
+    }],
+    name: "Alex",
+  });
+
+  subject.react.send({ messageIndex: 0, emoji: "❤️" });
+  assertEquals(subject.messages.get()[0].reactions, []);
+
+  subject.react.send({ messageIndex: 0, emoji: "👍" });
+  assertEquals(subject.messages.get()[0].reactions, []);
+});
+
 Deno.test("emo chat ignores blank names and messages", () => {
   const emptyNameSubject = PicoChat({
     messages: [],
