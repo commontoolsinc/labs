@@ -2,13 +2,13 @@ import { assertEquals, assertExists } from "@std/assert";
 import { NAME, UI } from "commonfabric";
 import PicoChat, { groupMessages } from "./main.tsx";
 
-Deno.test("pico chat sends trimmed messages from a named user", () => {
+Deno.test("emo chat sends trimmed messages from a named user", () => {
   const subject = PicoChat({
     messages: [],
     name: " Alex ",
   });
 
-  assertEquals(subject[NAME], "Pico chat");
+  assertEquals(subject[NAME], "Emo chat");
   assertExists(subject[UI]);
   assertEquals(subject.messages.get(), []);
 
@@ -23,7 +23,7 @@ Deno.test("pico chat sends trimmed messages from a named user", () => {
   );
 });
 
-Deno.test("pico chat renders existing messages", () => {
+Deno.test("emo chat renders existing messages", () => {
   const subject = PicoChat({
     messages: [{ from: "Robin", body: "Already here" }],
     name: "Alex",
@@ -36,7 +36,7 @@ Deno.test("pico chat renders existing messages", () => {
   }]);
 });
 
-Deno.test("pico chat groups sequential messages from the same user", () => {
+Deno.test("emo chat groups sequential messages from the same user", () => {
   const subject = PicoChat({
     messages: [],
     name: "Alex",
@@ -53,7 +53,7 @@ Deno.test("pico chat groups sequential messages from the same user", () => {
   );
 });
 
-Deno.test("pico chat starts a new group when the sender changes", () => {
+Deno.test("emo chat starts a new group when the sender changes", () => {
   const alex = PicoChat({
     messages: [],
     name: "Alex",
@@ -72,7 +72,7 @@ Deno.test("pico chat starts a new group when the sender changes", () => {
   ]);
 });
 
-Deno.test("pico chat groups legacy same-name messages without cell links", () => {
+Deno.test("emo chat groups legacy same-name messages without cell links", () => {
   const groups = groupMessages([
     { from: "Robin", body: "First" },
     { from: "Robin", body: "Second" },
@@ -85,7 +85,7 @@ Deno.test("pico chat groups legacy same-name messages without cell links", () =>
   ]);
 });
 
-Deno.test("pico chat lets another named user toggle emoji reactions", () => {
+Deno.test("emo chat lets another named user toggle emoji reactions", () => {
   const author = PicoChat({
     messages: [],
     name: "Tony",
@@ -110,7 +110,7 @@ Deno.test("pico chat lets another named user toggle emoji reactions", () => {
   assertEquals(author.messages.get()[0].reactions, []);
 });
 
-Deno.test("pico chat ignores invalid reaction attempts", () => {
+Deno.test("emo chat ignores invalid reaction attempts", () => {
   const subject = PicoChat({
     messages: [],
     name: "Alex",
@@ -131,7 +131,7 @@ Deno.test("pico chat ignores invalid reaction attempts", () => {
   assertEquals(subject.messages.get()[0].reactions, []);
 });
 
-Deno.test("pico chat prevents reactions to own display-name messages", () => {
+Deno.test("emo chat prevents reactions to own display-name messages", () => {
   const firstAlex = PicoChat({
     messages: [],
     name: "Alex",
@@ -150,7 +150,7 @@ Deno.test("pico chat prevents reactions to own display-name messages", () => {
   assertEquals(message.reactions, []);
 });
 
-Deno.test("pico chat ignores blank names and messages", () => {
+Deno.test("emo chat ignores blank names and messages", () => {
   const emptyNameSubject = PicoChat({
     messages: [],
     name: " ",

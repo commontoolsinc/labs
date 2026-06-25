@@ -251,7 +251,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
     const visibleRows = computed(() => [...rows].reverse());
 
     return {
-      [NAME]: "Pico chat",
+      [NAME]: "Emo chat",
       [UI]: (
         <cf-screen>
           <style>
@@ -288,7 +288,7 @@ export default pattern<PicoChatInput, PicoChatOutput>(
             `}
           </style>
           <cf-vstack gap="4" padding="6" style="max-width: 720px;">
-            <cf-heading level={2}>Pico chat</cf-heading>
+            <cf-heading level={2}>Emo chat</cf-heading>
 
             <cf-vstack gap="2">
               <cf-label>Your name</cf-label>
