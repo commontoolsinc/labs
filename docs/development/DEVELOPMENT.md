@@ -38,6 +38,33 @@ This guide covers coding standards, design principles, and build/test workflows 
 - Prefer strong typing with interfaces or types instead of `any`.
 - Update package-level README.md files.
 
+### Async only when you await
+
+The `require-await` lint flags any `async` function whose body has no `await`,
+`for await`, or `await using`. The fix is almost always to make the function
+synchronous, not to keep it asynchronous:
+
+- Remove the `async` keyword and drop the `Promise<...>` from the return type.
+- Update callers to invoke it directly and delete the now-redundant `await`.
+
+> **❌ Avoid**
+
+- Reaching for `.then()`, `Promise.resolve()`, or `new Promise(...)` to keep the
+  `Promise` return type only so the lint passes. That dresses a synchronous
+  operation up as an asynchronous one, which forces every caller to keep
+  awaiting it for no reason.
+
+> **✅ Prefer**
+
+- A synchronous signature when the work is synchronous. Add `async` back only
+  when you introduce a real `await`.
+
+Keep `async` and suppress the lint with `// deno-lint-ignore require-await` only
+when the asynchronous signature is fixed by a contract the body does not yet
+exercise. An interface method whose other implementations await, or an
+overridable hook that callers already await, are the usual cases. Write that
+reason in a comment next to the suppression.
+
 ### Keep the Module Graph clean
 
 We execute our JavaScript modules in many different environments:
