@@ -115,34 +115,26 @@ const scopedLinkForPath = (
   path: readonly string[],
   schemaOverride?: JSONSchema,
 ): NormalizedFullLink => {
-  let scope = link.scope;
   let schema = link.schema;
   let childSchema: JSONSchema | undefined;
 
   for (const key of path) {
     childSchema = cfc.getSchemaAtPath(schema, [key]);
-    if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
-      scope = childSchema.scope;
-    }
     schema = childSchema;
   }
 
-  const finalSchema = schemaOverride ?? childSchema;
-  if (isRecord(finalSchema)) {
-    if (isCellScope(finalSchema.scope)) {
-      scope = finalSchema.scope;
-    }
+  let finalSchema = schemaOverride ?? childSchema;
+  if (isRecord(finalSchema) && !isCellScope(finalSchema.scope)) {
     const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
     const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
     if (isCellScope(asCellScope)) {
-      scope = asCellScope;
+      finalSchema = { ...finalSchema, scope: asCellScope };
     }
   }
 
   return {
     ...link,
     path: [...path],
-    scope,
     ...(finalSchema !== undefined && { schema: finalSchema }),
   };
 };
@@ -241,6 +233,8 @@ export function sendValueToBinding<T>(
       scopeRank(outputScope) > scopeRank(ref.scope)
     ) {
       const scopedRef = { ...ref, scope: outputScope };
+      const baseBindingLink: NormalizedFullLink = { ...bindingLink };
+      delete baseBindingLink.schema;
       const valueLink = isCellLink(value) ? parseLink(value, ref) : undefined;
       if (
         valueLink === undefined ||
@@ -256,9 +250,9 @@ export function sendValueToBinding<T>(
         );
       }
       tx.writeValueOrThrow(
-        bindingLink,
+        baseBindingLink,
         createSigilLinkFromParsedLink(scopedRef, {
-          base: bindingLink,
+          base: baseBindingLink,
         }) as FabricValue,
       );
       return;

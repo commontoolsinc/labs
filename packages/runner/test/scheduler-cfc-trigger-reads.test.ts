@@ -207,9 +207,14 @@ describe("trigger reads survive failed runs", () => {
   function watchWith(args: {
     retries?: WeakMap<Action, number>;
     error?: unknown;
+    log?: { reads: []; shallowReads: []; writes: IMemorySpaceAddress[] };
+    prepareAddedReads?: IMemorySpaceAddress[];
+    consumedCfcTriggerReads?: boolean;
+    dirtySeqAtRunStart?: number;
     onRestore: () => void;
     onResubscribe?: () => void;
     onMarkDirectDirty?: () => void;
+    onClearDirectDirtyAfterCommit?: () => void;
     onQueueExecution?: () => void;
   }): Promise<void> {
     const action: Action = () => {};
@@ -222,14 +227,18 @@ describe("trigger reads survive failed runs", () => {
     watchReactiveActionCommit({
       action,
       tx,
-      log: { reads: [], shallowReads: [], writes: [] },
+      log: args.log ?? { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
       pending: new Set(),
       commitPromise,
       resubscribe: () => args.onResubscribe?.(),
       markDirectDirty: () => args.onMarkDirectDirty?.(),
+      clearDirectDirtyAfterCommit: () => args.onClearDirectDirtyAfterCommit?.(),
       queueExecution: () => args.onQueueExecution?.(),
       restoreCfcTriggerReads: args.onRestore,
+      prepareAddedReads: args.prepareAddedReads ?? [],
+      consumedCfcTriggerReads: args.consumedCfcTriggerReads ?? false,
+      dirtySeqAtRunStart: args.dirtySeqAtRunStart,
     });
     return commitPromise.then(async () => {
       await Promise.resolve();
@@ -251,15 +260,7 @@ describe("trigger reads survive failed runs", () => {
     expect(queued).toBe(1);
   });
 
-  it("a commit conflict re-arms via resubscribe and re-queues after catch-up", async () => {
-    // A ConflictError is a stale read: the authoritative version is ahead of
-    // this replica. The handler re-arms the subscription (restore + resubscribe)
-    // so reader-dirty can re-trigger, waits for the conflict's `readyToRetry`
-    // catch-up, then re-queues the action (dirty + pending + tick) so it re-runs
-    // against the fresh state. The re-queue is the recovery mechanism: reader-
-    // dirty does not re-trigger every conflict (a conflict whose triggering
-    // write has already been delivered leaves no future dirty), so relying on it
-    // alone would strand the action with its stale committed value.
+  it("ordinary commit conflicts re-arm without forcing a duplicate requeue", async () => {
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
       readyToRetry: () => Promise.resolve(),
@@ -270,19 +271,76 @@ describe("trigger reads survive failed runs", () => {
       onRestore: () => calls.push("restore"),
       onResubscribe: () => calls.push("resubscribe"),
       onMarkDirectDirty: () => calls.push("dirty"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe"]);
+  });
+
+  it("structured own-write conflicts re-queue after catch-up", async () => {
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      conflictingRead: {
+        kind: "confirmed",
+        space: "did:key:test",
+        id: "of:test",
+        path: ["value"],
+      },
+      readyToRetry: () => Promise.resolve(),
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      log: {
+        reads: [],
+        shallowReads: [],
+        writes: [{ space: "did:key:test", id: "of:test", path: ["value"] }],
+      },
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
       onQueueExecution: () => calls.push("queue"),
     });
     expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
   });
 
-  it("a commit conflict bypasses the retry budget (re-queues even when exhausted)", async () => {
-    // A non-conflict error stops re-arming once the budget is exhausted (see
-    // "does not restore when retries are exhausted"). A conflict must NOT: it is
-    // a wait-for-catch-up, not a failure, so it always re-arms and re-queues
-    // (restore + resubscribe + dirty + queue) regardless of the budget and never
-    // falls into the exhausted-retries branch.
+  it("structured prepare-added conflicts re-queue after catch-up", async () => {
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
+      conflictingRead: {
+        kind: "confirmed",
+        space: "did:key:test",
+        id: "of:test",
+        path: ["value", "cfc"],
+      },
+      readyToRetry: () => Promise.resolve(),
+    });
+    const calls: string[] = [];
+    await watchWith({
+      error,
+      prepareAddedReads: [{
+        space: "did:key:test",
+        id: "of:test",
+        path: ["value"],
+      }],
+      onRestore: () => calls.push("restore"),
+      onResubscribe: () => calls.push("resubscribe"),
+      onMarkDirectDirty: () => calls.push("dirty"),
+      onQueueExecution: () => calls.push("queue"),
+    });
+    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+  });
+
+  it("structured conflicts do not re-queue when the retry budget is exhausted", async () => {
+    const error = Object.assign(new Error("conflict"), {
+      name: "ConflictError",
+      conflictingRead: {
+        kind: "confirmed",
+        space: "did:key:test",
+        id: "of:test",
+        path: ["value"],
+      },
     });
     const retries = new WeakMap<Action, number>();
     retries.get = () => MAX_RETRIES_FOR_REACTIVE;
@@ -290,56 +348,54 @@ describe("trigger reads survive failed runs", () => {
     await watchWith({
       retries,
       error,
+      log: {
+        reads: [],
+        shallowReads: [],
+        writes: [{ space: "did:key:test", id: "of:test", path: ["value"] }],
+      },
       onRestore: () => calls.push("restore"),
       onResubscribe: () => calls.push("resubscribe"),
       onMarkDirectDirty: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
-  it("re-queues a conflict even when the readyToRetry catch-up rejects", async () => {
-    // The catch-up readiness gate rejects by design when the session is closed,
-    // revoked, or replaced mid-wait. That abort must not strand the action: it is
-    // swallowed and the action is re-queued anyway (restore + resubscribe + dirty
-    // + queue) so it re-runs on the next input change or pull.
+  it("structured conflicts stay subscribed if readyToRetry rejects", async () => {
     const error = Object.assign(new Error("conflict"), {
       name: "ConflictError",
+      conflictingRead: {
+        kind: "confirmed",
+        space: "did:key:test",
+        id: "of:test",
+        path: ["value"],
+      },
       readyToRetry: () => Promise.reject(new Error("session replaced")),
     });
     const calls: string[] = [];
     await watchWith({
       error,
+      log: {
+        reads: [],
+        shallowReads: [],
+        writes: [{ space: "did:key:test", id: "of:test", path: ["value"] }],
+      },
       onRestore: () => calls.push("restore"),
       onResubscribe: () => calls.push("resubscribe"),
       onMarkDirectDirty: () => calls.push("dirty"),
       onQueueExecution: () => calls.push("queue"),
     });
-    // The rejected readiness gate adds microtask hops before the re-queue; a
-    // macrotask flush drains them so the assertion sees the final state.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["restore", "resubscribe"]);
   });
 
-  it("re-queues a conflict when readyToRetry throws synchronously", async () => {
-    // A readyToRetry that throws synchronously is handled the same as a rejected
-    // one — swallowed, and the action re-queued.
-    const error = Object.assign(new Error("conflict"), {
-      name: "ConflictError",
-      readyToRetry: () => {
-        throw new Error("gate threw");
-      },
-    });
+  it("clears direct dirty only after a successful commit", async () => {
     const calls: string[] = [];
     await watchWith({
-      error,
+      error: undefined,
       onRestore: () => calls.push("restore"),
-      onResubscribe: () => calls.push("resubscribe"),
-      onMarkDirectDirty: () => calls.push("dirty"),
-      onQueueExecution: () => calls.push("queue"),
+      onClearDirectDirtyAfterCommit: () => calls.push("clear"),
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["restore", "resubscribe", "dirty", "queue"]);
+    expect(calls).toEqual(["clear"]);
   });
 
   it("requeues primitive retryable errors without retry readiness", async () => {

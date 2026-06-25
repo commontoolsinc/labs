@@ -655,7 +655,30 @@ export interface ConflictError extends Error {
   conflict: Conflict;
   retryAfterSeq?: number;
   readyToRetry?: () => Promise<void>;
+  conflictingRead?: ConflictReadIdentity;
 }
+
+export type ConflictReadIdentity =
+  | {
+    kind: "confirmed";
+    space?: string;
+    id: string;
+    scope?: string;
+    branch?: string;
+    path: readonly string[];
+    seq: number;
+    nonRecursive?: boolean;
+  }
+  | {
+    kind: "pending";
+    space?: string;
+    id: string;
+    scope?: string;
+    branch?: string;
+    path: readonly string[];
+    localSeq: number;
+    nonRecursive?: boolean;
+  };
 
 export interface SystemError extends Error {
   code: number;

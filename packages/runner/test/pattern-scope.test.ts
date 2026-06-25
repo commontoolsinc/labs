@@ -1383,12 +1383,15 @@ Deno.test("opaque JS action result schema scope participates in effective output
     await result.pull();
 
     // The result schema's scope:session participates in the effective output
-    // scope: the output is addressed at the session instance. The output is
-    // reachable via the result's `value` link, which carries scope:session
-    // (the output's content lives in the session instance, not the base).
-    const outputLink = parseLink(result.key("value").getRaw(), result);
+    // scope. The parent result slot links to the stable space-scoped internal
+    // action cell; that internal cell redirects to the session instance where
+    // the structured output lives.
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    assertEquals(internalLink.scope, "space");
+    const internalCell = runtime.getCellFromLink(internalLink);
+    const outputLink = parseLink(internalCell.getRaw(), internalCell);
     assertEquals(outputLink?.scope, "session");
-    // Following that link resolves the session-scoped structured output.
+    // Following the chain resolves the session-scoped structured output.
     assertEquals(result.key("value").get() as unknown, { nested: 42 });
   } finally {
     await runtime.dispose();

@@ -2086,8 +2086,13 @@ export class Scheduler {
           memo,
         ),
       getActionId: (action) => this.getActionId(action),
-      clearDirty: (action) =>
-        clearSchedulerDirty(this.dirtySchedulingState, action),
+      getDirectDirtySeq: (action) => this.staleness.getDirectDirtySeq(action),
+      clearDirty: (action, expectedSeq) =>
+        clearSchedulerDirectDirty(
+          this.dirtySchedulingState,
+          action,
+          expectedSeq,
+        ),
       markDirectDirty: (action) => this.staleness.markDirectDirty(action),
       isThrottled: (action) => this.delays.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
@@ -2299,6 +2304,15 @@ export class Scheduler {
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),
+      getDirectDirtySeq: (target) => this.staleness.getDirectDirtySeq(target),
+      clearDirectDirtyAfterCommit: (target, expectedSeq) => {
+        if (!this.nodes.computations.has(target)) return;
+        clearSchedulerDirectDirty(
+          this.dirtySchedulingState,
+          target,
+          expectedSeq,
+        );
+      },
       recordChangedComputationWrites: (target, tx, log) => {
         return recordChangedComputationWrites(
           this.writePropagationState,
@@ -2309,7 +2323,6 @@ export class Scheduler {
       },
       markReadersDirtyForChangedWrites: (target, changedWrites) => {
         if (!this.nodes.computations.has(target)) return;
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
         markReadersDirtyForChangedWrites(
           this.writePropagationState,
           target,

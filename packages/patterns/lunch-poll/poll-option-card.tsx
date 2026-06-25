@@ -117,6 +117,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       [NAME]: optionTitle,
       [UI]: (
         <div
+          data-option-card="true"
+          data-option-card-id={oid}
+          data-option-card-title={optionTitle}
+          data-option-card-my-vote={myVote ?? ""}
+          data-option-card-me={me}
+          data-option-card-is-joined={me !== "" ? "true" : "false"}
+          data-option-card-is-admin={isAdmin ? "true" : "false"}
           style={{
             marginBottom: "10px",
             padding: "10px 12px",
@@ -257,6 +264,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                 }}
               >
                 <cf-button
+                  data-vote-control="green"
                   aria-label={myVote === "green"
                     ? "Clear my green vote"
                     : "Love it"}
@@ -274,6 +282,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                   🟢
                 </cf-button>
                 <cf-button
+                  data-vote-control="yellow"
                   aria-label={myVote === "yellow"
                     ? "Clear my yellow vote"
                     : "Okay with it"}
@@ -291,6 +300,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                   🟡
                 </cf-button>
                 <cf-button
+                  data-vote-control="red"
                   aria-label={myVote === "red" ? "Clear my red vote" : "Veto"}
                   style={myVote === "red"
                     ? "background-color: #ef4444; color: white; font-weight: bold; border: 2px solid #dc2626;"

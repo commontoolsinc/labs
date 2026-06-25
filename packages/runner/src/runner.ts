@@ -2821,6 +2821,10 @@ export class Runner {
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
+    const directResultOutputScope = narrowestScope([
+      schemaCellScope(resultSchema),
+      narrowestReadScope,
+    ]);
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
       frame.opaqueRefs.size === 0
@@ -2839,7 +2843,7 @@ export class Runner {
         outputs,
         result,
         {
-          narrowestReadScope,
+          narrowestReadScope: directResultOutputScope,
         },
       );
       return result;
@@ -3901,10 +3905,13 @@ export class Runner {
             }
           }
         } else {
-          // Default: read all inputs
-          for (const input of inputCells) {
-            this.runtime.getCellFromLink(input, undefined, depTx)?.get();
-          }
+          // Default: read all inputs. Resolve write redirects before reading so
+          // raw builtins subscribe to the data their inputs point at, not just
+          // the alias cells that carry those redirects. This matters for list
+          // builtin `params` captured from derived cells: remote writes update
+          // the derived target, and the map/filter coordinator must rerun even
+          // though the serialized params alias itself did not change.
+          this.populateDeclaredSchedulerReads(inputCells, depTx);
         }
         // Always capture write dependencies by marking outputs as attempted writes
         for (const output of outputCells) {

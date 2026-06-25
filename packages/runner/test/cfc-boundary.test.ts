@@ -33,7 +33,10 @@ import {
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
-import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  isInternalVerifierRead,
+} from "../src/storage/reactivity-log.ts";
 import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
@@ -215,6 +218,106 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     });
     return { runtime, storageManager };
   };
+
+  it("records internal verifier reads at metadata field paths", async () => {
+    const { runtime, storageManager } = createRuntime("enforce-explicit");
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+
+      const sourceCell = runtime.getCell(
+        signer.did(),
+        "internal-verifier-field-source",
+        {
+          type: "object",
+          properties: { foo: { type: "number" } },
+        },
+        tx,
+      );
+      sourceCell.set({ foo: 1 });
+
+      const targetCell = runtime.getCell(
+        signer.did(),
+        "internal-verifier-field-target",
+        {
+          type: "object",
+          properties: {
+            bar: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+          },
+          required: ["bar"],
+        },
+        tx,
+      );
+      targetCell.set({ bar: "seed" });
+      setResultCell(targetCell, sourceCell);
+
+      runtime.prepareTxForCommit(tx);
+
+      const sourceId = parseLink(sourceCell.getAsLink()).id;
+      const targetId = parseLink(targetCell.getAsLink()).id;
+      const relevantIds = new Set([sourceId, targetId]);
+      const verifierReads = [...(tx.getReadActivities?.() ?? [])].filter(
+        (read) => relevantIds.has(read.id) && isInternalVerifierRead(read.meta),
+      );
+
+      expect(verifierReads.some((read) => read.path.length === 0)).toBe(false);
+      expect(verifierReads.some((read) => read.path[0] === "cfc")).toBe(true);
+      tx.abort?.();
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      const linkedTargetSeed = runtime.getCell(
+        signer.did(),
+        "internal-verifier-field-linked-target",
+        {
+          type: "object",
+          ifc: { confidentiality: ["personal-space"] },
+        },
+        seed,
+      );
+      linkedTargetSeed.set({ existing: true });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const linkTx = runtime.edit();
+      linkTx.setCfcEnforcementMode("enforce-explicit");
+      const piece = runtime.getCell(
+        signer.did(),
+        "internal-verifier-field-schema-source",
+        undefined,
+        linkTx,
+      );
+      piece.set({ title: "fresh card" });
+      piece.setMetaRaw("schema", {
+        type: "object",
+        ifc: { confidentiality: ["card-space"] },
+        properties: { title: { type: "string" } },
+      });
+      const linkedTarget = runtime.getCell(
+        signer.did(),
+        "internal-verifier-field-linked-target",
+        undefined,
+        linkTx,
+      );
+      linkedTarget.set(piece);
+      linkTx.prepareCfc();
+
+      const pieceId = parseLink(piece.getAsLink()).id;
+      const schemaReads = [...(linkTx.getReadActivities?.() ?? [])].filter(
+        (read) => read.id === pieceId && isInternalVerifierRead(read.meta),
+      );
+
+      expect(schemaReads.some((read) => read.path.length === 0)).toBe(false);
+      expect(schemaReads.some((read) => read.path[0] === "schema")).toBe(true);
+      linkTx.abort?.();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 
   it("allows setup to install alias-backed CFC result projections", async () => {
     const storageManager = StorageManager.emulate({

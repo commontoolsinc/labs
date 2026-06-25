@@ -12,7 +12,7 @@
 import { assertEquals } from "@std/assert";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
-import type { WorkerVNode } from "../src/worker/types.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 // Import the actual Cell implementation to create test cells
 import { Identity } from "@commonfabric/identity";
@@ -290,6 +290,97 @@ Deno.test("worker reconciler diffing - same tag updates in place", async (t) => 
 
       cancel();
     });
+
+    await t.step(
+      "conditional mapped children insert spans at first middle and last positions",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const vnodeCell = runtime.getCell<WorkerVNode>(
+          space,
+          "test-conditional-mapped-children",
+          undefined,
+          tx,
+        );
+
+        const voteSpan = (id: string): WorkerVNode => ({
+          type: "vnode",
+          name: "span",
+          props: { "data-vote-swatch-name": id },
+          children: [id],
+        });
+
+        const row = (
+          id: string,
+          children: WorkerRenderNode[],
+        ): WorkerVNode => ({
+          type: "vnode",
+          name: "div",
+          props: { "data-option-id": id },
+          children,
+        });
+
+        vnodeCell.set({
+          type: "vnode",
+          name: "div",
+          props: { id: "root" },
+          children: [
+            row("first", []),
+            row("middle", []),
+            row("last", []),
+          ],
+        } as WorkerVNode);
+        await tx.commit();
+        tx = runtime.edit();
+
+        const cancel = reconciler.mount(vnodeCell as Cell<WorkerVNode>);
+        await runtime.idle();
+        collector.clear();
+
+        vnodeCell.withTx(tx).set({
+          type: "vnode",
+          name: "div",
+          props: { id: "root" },
+          children: [
+            row("first", [voteSpan("Alice")]),
+            row("middle", [null, voteSpan("Alice")]),
+            row("last", [
+              null,
+              null,
+              voteSpan("Alice"),
+            ]),
+          ],
+        } as WorkerVNode);
+        await tx.commit();
+        tx = runtime.edit();
+        await runtime.idle();
+
+        const spanCreates = collector.getOpsOfType("create-element").filter(
+          (op) => "tagName" in op && op.tagName === "span",
+        );
+        assertEquals(
+          spanCreates.length,
+          3,
+          "should create one swatch span for each conditional child position",
+        );
+
+        const swatchPropOps = collector.getOpsOfType("set-prop").filter(
+          (op) =>
+            op.op === "set-prop" && op.key === "data-vote-swatch-name" &&
+            op.value === "Alice",
+        );
+        assertEquals(
+          swatchPropOps.length,
+          3,
+          "each created swatch span should receive the voter data attribute",
+        );
+
+        cancel();
+      },
+    );
 
     await t.step("clears root when Cell emits undefined", async () => {
       const collector = createOpsCollector();

@@ -818,6 +818,373 @@ export default pattern<Input, Output>(({ question, myName }) => {
       }
     });
 
+    it("updates slotted header array length after external output-cell writes", async () => {
+      const arrayHeaderPattern = `import {
+  action,
+  computed,
+  Default,
+  NAME,
+  pattern,
+  type Stream,
+  UI,
+  type VNode,
+  type Writable,
+} from "commonfabric";
+
+interface Item {
+  name: string;
+}
+
+interface Input {
+  items: Writable<Item[] | Default<[]>>;
+}
+
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  items: Writable<Item[]>;
+  addItem: Stream<{ name: string }>;
+}
+
+export default pattern<Input, Output>(({ items }) => {
+  const addItem = action<{ name: string }>(({ name }) => {
+    items.push({ name });
+  });
+  const itemCount = computed(() => items.get().length);
+
+  return {
+    [NAME]: "array-header-length",
+    items,
+    [UI]: (
+      <cf-screen>
+        <div slot="header">
+          <span data-array-summary="true">Items: {itemCount}</span>
+        </div>
+        <div>
+          {items.map((item) => <span data-array-row="true">{item.name}</span>)}
+        </div>
+      </cf-screen>
+    ),
+    addItem,
+  };
+});`;
+
+      type Item = { name: string };
+      interface Output {
+        items: Item[];
+      }
+
+      const arrayHeaderProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: arrayHeaderPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(arrayHeaderProgram, session.space, {
+        run: true,
+      });
+      const renderCell = page.cell() as CellHandle<VNode>;
+      const outputCell = page.cell() as CellHandle<Output>;
+      const itemsCell = outputCell.key("items") as CellHandle<Item[]>;
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, renderCell, renderOptions);
+
+      try {
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes("Items: 0")),
+          { timeout: 15000 },
+        );
+
+        await itemsCell.set([{ name: "One" }]);
+
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("Items: 1") && html.includes("One"),
+            );
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("renders mapped child conditional UI after captured params change", async () => {
+      const mappedChildPattern = `import {
+  Default,
+  NAME,
+  pattern,
+  type PerUser,
+  UI,
+  type VNode,
+} from "commonfabric";
+
+interface Item {
+  name: string;
+}
+
+interface Input {
+  items: Item[];
+  myName?: PerUser<string | Default<"">>;
+}
+
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  myName: string;
+  rows: VNode[];
+}
+
+const Identity = pattern<
+  { myName?: PerUser<string | Default<"">> },
+  { me: string }
+>(({ myName }) => ({ me: myName }));
+
+const Child = pattern<{ item: Item; viewer: string }, { [UI]: VNode }>(
+  ({ item, viewer }) => ({
+    [UI]: (
+      <div data-row={item.name}>
+        {viewer ? <button data-control={item.name}>Vote</button> : null}
+      </div>
+    ),
+  }),
+);
+
+export default pattern<Input, Output>(({ items, myName }) => {
+  const identity = Identity({ myName });
+  const viewer = identity.me;
+  const rows = items.map((item) => {
+    const child = Child({ item, viewer });
+    return child[UI];
+  });
+
+  return {
+    [NAME]: "mapped-child-conditional",
+    myName,
+    rows,
+    [UI]: <div>{rows}</div>,
+  };
+});`;
+
+      interface Output {
+        myName: string;
+        rows: VNode[];
+      }
+
+      const mappedChildProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: mappedChildPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(mappedChildProgram, session.space, {
+        run: true,
+        argument: { items: [{ name: "One" }, { name: "Two" }] },
+      });
+      const renderCell = page.cell() as CellHandle<VNode>;
+      const outputCell = page.cell() as CellHandle<Output>;
+      const nameCell = outputCell.key("myName").asSchema<string>({
+        type: "string",
+        scope: "user",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, renderCell, renderOptions);
+
+      try {
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes('data-row="One"') &&
+                html.includes('data-row="Two"') &&
+                !html.includes("data-control="),
+            );
+          },
+          { timeout: 15000 },
+        );
+
+        await nameCell.set("Bob");
+
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes('data-control="One"') &&
+                html.includes('data-control="Two"'),
+            );
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
+    it("renders mapped rows after external writes to a derived array dependency", async () => {
+      const mappedDerivedArrayPattern = `import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  type Writable,
+} from "commonfabric";
+
+interface Option {
+  id: string;
+  title: string;
+}
+
+interface Vote {
+  optionId: string;
+  voterName: string;
+}
+
+interface Tally {
+  option: Option;
+  count: number;
+}
+
+interface Input {
+  options: Option[];
+  votes: Writable<Vote[] | Default<[]>>;
+}
+
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  votes: Writable<Vote[]>;
+}
+
+const tallyOptions = (options: readonly Option[], votes: readonly Vote[]): Tally[] =>
+  options.map((option) => ({
+    option,
+    count: votes.filter((vote) => vote.optionId === option.id).length,
+  }));
+
+export default pattern<Input, Output>(({ options, votes }) => {
+  const ranked = computed(() => tallyOptions(options, votes.get()));
+  const voteCount = computed(() =>
+    ranked.reduce((total, tally) => total + tally.count, 0)
+  );
+
+  return {
+    [NAME]: "mapped-derived-array",
+    votes,
+    [UI]: (
+      <div>
+        <span data-summary="true">{voteCount} votes</span>
+        {options.map((option) => {
+          const oid = option.id;
+          const rowCount = computed(() => {
+            const tally = ranked.find((item) => item.option.id === oid);
+            return tally?.count ?? 0;
+          });
+          return (
+            <div data-row={option.title} data-count={rowCount}>
+              {option.title}: {rowCount}
+            </div>
+          );
+        })}
+      </div>
+    ),
+  };
+});`;
+
+      type Vote = { optionId: string; voterName: string };
+      interface Output {
+        votes: Vote[];
+      }
+
+      const mappedDerivedArrayProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: mappedDerivedArrayPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(
+        mappedDerivedArrayProgram,
+        session.space,
+        {
+          run: true,
+          argument: {
+            options: [
+              { id: "a", title: "Alpha" },
+              { id: "b", title: "Beta" },
+            ],
+            votes: [],
+          },
+        },
+      );
+      const renderCell = page.cell() as CellHandle<VNode>;
+      const outputCell = page.cell() as CellHandle<Output>;
+      const votesCell = outputCell.key("votes") as CellHandle<Vote[]>;
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, renderCell, renderOptions);
+
+      try {
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.includes("0 votes")),
+          { timeout: 15000 },
+        );
+
+        await votesCell.set([
+          { optionId: "a", voterName: "Alice" },
+          { optionId: "a", voterName: "Bob" },
+          { optionId: "b", voterName: "Alice" },
+        ]);
+
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("3 votes") &&
+                html.includes('data-row="Alpha"') &&
+                html.includes('data-count="2"') &&
+                html.includes('data-row="Beta"') &&
+                html.includes('data-count="1"'),
+            );
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
     it("dispatches click events through rendered page handlers", async () => {
       const clickPattern =
         `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";

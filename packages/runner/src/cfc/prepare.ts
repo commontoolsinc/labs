@@ -653,13 +653,11 @@ const storedMetadataFor = (
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isRecord(document) && isRecord(document.cfc)
-    ? document.cfc as CfcMetadata
-    : undefined;
+  return isRecord(document) ? document as CfcMetadata : undefined;
 };
 
 /**
@@ -2776,17 +2774,14 @@ const setupResultSchemaFor = (
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: [],
+    path: ["schema"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isRecord(document)) {
     return undefined;
   }
-  const schema = (document as Record<string, unknown>).schema;
-  return schema === undefined || schema === null
-    ? undefined
-    : schema as JSONSchema;
+  return document as JSONSchema;
 };
 
 const derivePersistedLinkLabel = (

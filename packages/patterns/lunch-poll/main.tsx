@@ -304,7 +304,7 @@ const castVote = handler<CastVoteEvent, {
 }>(({ optionId, voteType }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  const current = votes.get();
+  const current = votes.get() ?? [];
   const existingIdx = current.findIndex(
     (v) => v.voterName === me && v.optionId === optionId,
   );
@@ -448,39 +448,125 @@ const clearHistory = handler<ClearHistoryEvent, {
   visits.set([]);
 });
 
+interface OptionTallyVoter {
+  name: string;
+  voteType: VoteColor;
+}
+
 interface OptionTally {
+  order: number;
   option: Option;
   green: number;
   yellow: number;
   red: number;
-  voters: Array<{ name: string; voteType: VoteColor; color: string }>;
 }
 
 const tallyOptions = (
   options: readonly Option[],
   votes: readonly Vote[],
-  users: readonly User[],
 ): OptionTally[] => {
-  const colorByName = new Map(users.map((u) => [u.name, u.color]));
-  const tallies = options.map((option): OptionTally => {
+  const tallies = options.map((option, order): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
+      order,
       option,
       green: optionVotes.filter((v) => v.voteType === "green").length,
       yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
       red: optionVotes.filter((v) => v.voteType === "red").length,
-      voters: optionVotes.map((v) => ({
-        name: v.voterName,
-        voteType: v.voteType,
-        color: colorByName.get(v.voterName) ?? "#888",
-      })),
     };
   });
   return [...tallies].sort((a, b) => {
     if (a.red !== b.red) return a.red - b.red;
-    return b.green - a.green;
+    if (a.green !== b.green) return b.green - a.green;
+    return a.order - b.order;
   });
 };
+
+interface OptionSummaryRowInput {
+  optionId: string;
+  title: string;
+  votes: readonly Vote[];
+  me: string;
+}
+
+interface OptionSummaryRowOutput {
+  [UI]: VNode;
+}
+
+const OptionSummaryRow = pattern<OptionSummaryRowInput, OptionSummaryRowOutput>(
+  ({ optionId, title, votes, me }) => {
+    const rowVotes = computed((): OptionTallyVoter[] =>
+      votes
+        .filter((vote) => vote.optionId === optionId)
+        .map((vote) => ({
+          name: vote.voterName,
+          voteType: vote.voteType,
+        }))
+    );
+    return {
+      [UI]: (
+        <div
+          data-all-options-row="true"
+          data-option-id={optionId}
+          data-option-title={title}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "6px 10px",
+            backgroundColor: "white",
+            border: "1px solid #e5e7eb",
+            borderRadius: "6px",
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "#111827",
+            }}
+          >
+            {title}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: "4px",
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+            }}
+          >
+            {rowVotes.map((vote) => (
+              <span
+                title={vote.name}
+                data-vote-swatch-name={vote.name}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: "22px",
+                  height: "22px",
+                  padding: "0 6px",
+                  borderRadius: "9999px",
+                  backgroundColor: VOTE_SWATCH[vote.voteType],
+                  color: "white",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  boxShadow: vote.name === me
+                    ? "0 0 0 2px white, 0 0 0 3px #111827"
+                    : "none",
+                }}
+              >
+                {getInitials(vote.name)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ),
+    };
+  },
+);
 
 // 📊 Lunch stats: per-place visit count + green/yellow/red tallies, derived from
 // the embedded vote snapshots. Each entry's `votes` already hold the snapshot
@@ -672,7 +758,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const isClearHistoryConfirm = computed(() =>
       clearHistoryConfirmPending.get()
     );
-    const ranked = tallyOptions(options, votes, users);
+    const ranked = tallyOptions(options, votes);
 
     const topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
 
@@ -723,6 +809,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       : "";
                     return (
                       <div
+                        data-poll-summary="true"
                         style={{
                           marginTop: "4px",
                           fontSize: "13px",
@@ -749,6 +836,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       {amAdmin
                         ? (
                           <span
+                            data-viewer-host-chip="true"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
@@ -769,6 +857,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         : null}
                       <span
                         title={viewer}
+                        data-viewer-name={viewer}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -818,6 +907,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   const hasReds = tally.red > 0;
                   return (
                     <div
+                      data-top-choice="true"
+                      data-top-choice-title={tally.option.title}
+                      data-top-choice-summary={summary}
                       style={{
                         padding: "16px",
                         marginBottom: "16px",
@@ -870,7 +962,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 })}
 
                 {/* All options summary — only when there are options */}
-                {options.length > 0
+                {ranked.length > 0
                   ? (
                     <div
                       style={{
@@ -900,74 +992,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {options.map((option) => {
-                          const oid = option.id;
-                          const summaryRank = computed(() => {
-                            const idx = ranked.findIndex(
-                              (t) => t.option.id === oid,
-                            );
-                            return idx >= 0 ? idx + 1 : 9999;
+                        {ranked.map((tally) => {
+                          const row = OptionSummaryRow({
+                            optionId: tally.option.id,
+                            title: tally.option.title,
+                            votes,
+                            me,
                           });
-                          return (
-                            <div
-                              style={{
-                                order: summaryRank,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                                padding: "6px 10px",
-                                backgroundColor: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "6px",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  flex: 1,
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  color: "#111827",
-                                }}
-                              >
-                                {option.title}
-                              </div>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "4px",
-                                  flexWrap: "wrap",
-                                  justifyContent: "flex-end",
-                                }}
-                              >
-                                {votes.filter((vote) => vote.optionId === oid)
-                                  .map((vote) => (
-                                    <span
-                                      title={vote.voterName}
-                                      data-vote-swatch-name={vote.voterName}
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        minWidth: "22px",
-                                        height: "22px",
-                                        padding: "0 6px",
-                                        borderRadius: "9999px",
-                                        backgroundColor:
-                                          VOTE_SWATCH[vote.voteType],
-                                        color: "white",
-                                        fontSize: "11px",
-                                        fontWeight: 700,
-                                        boxShadow: vote.voterName === me
-                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                          : "none",
-                                      }}
-                                    >
-                                      {getInitials(vote.voterName)}
-                                    </span>
-                                  ))}
-                              </div>
-                            </div>
-                          );
+                          return row[UI];
                         })}
                       </div>
                     </div>

@@ -12,6 +12,7 @@ import {
   type BranchName,
   type CellScope,
   type ClientCommit,
+  type ConflictReadIdentity,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -675,9 +676,12 @@ export interface Engine {
 }
 
 export class ConflictError extends Error {
-  constructor(message: string) {
+  readonly conflictingRead?: ConflictReadIdentity;
+
+  constructor(message: string, conflictingRead?: ConflictReadIdentity) {
     super(message);
     this.name = "ConflictError";
+    this.conflictingRead = conflictingRead;
   }
 }
 
@@ -3516,6 +3520,15 @@ const validateConfirmedReads = (
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
+        {
+          kind: "confirmed",
+          id: read.id,
+          scope: normalizeScope(read.scope),
+          branch: readBranch,
+          path: [...read.path],
+          seq: read.seq,
+          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+        },
       );
     }
   }
@@ -3541,6 +3554,15 @@ const resolvePendingReads = (
       if (!row) {
         throw new ConflictError(
           `pending dependency not resolved: ${read.localSeq}`,
+          {
+            kind: "pending",
+            id: read.id,
+            scope: normalizeScope(read.scope),
+            branch,
+            path: [...read.path],
+            localSeq: read.localSeq,
+            ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+          },
         );
       }
       resolution = {
@@ -3562,6 +3584,15 @@ const resolvePendingReads = (
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+        {
+          kind: "pending",
+          id: read.id,
+          scope: normalizeScope(read.scope),
+          branch,
+          path: [...read.path],
+          localSeq: read.localSeq,
+          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+        },
       );
     }
   }

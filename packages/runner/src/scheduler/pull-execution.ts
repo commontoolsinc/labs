@@ -317,6 +317,9 @@ async function runPullSettleAction(
   // Clean up from pending/dirty before running
   state.pending.delete(fn);
   state.conditionallyScheduledEffects.delete(fn);
+  const computationDirtySeqAtRunStart = state.computations.has(fn)
+    ? state.getDirectDirtySeq(fn)
+    : undefined;
   if (state.computations.has(fn)) {
     state.clearComputationDebounceState(fn);
   }
@@ -328,6 +331,9 @@ async function runPullSettleAction(
   if (!recordSettleActionRun(state, fn)) return 1;
 
   await state.runAction(fn);
+  if (state.computations.has(fn)) {
+    state.clearDirty(fn, computationDirtySeqAtRunStart);
+  }
   return 1;
 }
 

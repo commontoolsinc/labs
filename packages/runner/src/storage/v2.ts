@@ -2644,6 +2644,8 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
+    const conflictingRead = (error as { conflictingRead?: unknown })
+      ?.conflictingRead;
     const firstOperation = (commit as Partial<NativeStorageCommit>)
       .operations?.[0];
     const rejected: IConflictError = {
@@ -2673,6 +2675,9 @@ const toRejectedError = (
     if (typeof readyToRetry === "function") {
       rejected.readyToRetry = () => Promise.resolve(readyToRetry.call(error));
     }
+    if (isConflictReadIdentity(conflictingRead)) {
+      rejected.conflictingRead = conflictingRead;
+    }
     return rejected;
   }
 
@@ -2686,4 +2691,33 @@ const toRejectedError = (
     },
     transaction: commit as Transaction,
   } as unknown as TransactionError;
+};
+
+const isConflictReadIdentity = (
+  value: unknown,
+): value is NonNullable<IConflictError["conflictingRead"]> => {
+  if (value === null || typeof value !== "object") return false;
+  const read = value as Record<string, unknown>;
+  if (read.kind !== "confirmed" && read.kind !== "pending") return false;
+  if (typeof read.id !== "string") return false;
+  if (
+    !Array.isArray(read.path) ||
+    !read.path.every((part) => typeof part === "string")
+  ) {
+    return false;
+  }
+  if (read.space !== undefined && typeof read.space !== "string") return false;
+  if (read.scope !== undefined && typeof read.scope !== "string") return false;
+  if (read.branch !== undefined && typeof read.branch !== "string") {
+    return false;
+  }
+  if (
+    read.nonRecursive !== undefined && typeof read.nonRecursive !== "boolean"
+  ) {
+    return false;
+  }
+  if (read.kind === "confirmed") {
+    return typeof read.seq === "number";
+  }
+  return typeof read.localSeq === "number";
 };

@@ -40,7 +40,10 @@ import {
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  schedulerDependencyRead,
+} from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
@@ -149,6 +152,11 @@ export function map(
     // identity) or, on the legacy path, the embedded pattern graph itself.
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    if (argumentUsage.usesParams) {
+      tx.runWithAmbientReadMeta(schedulerDependencyRead, () => {
+        inputsCell.key("params").withTx(tx).get();
+      });
+    }
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);
@@ -240,7 +248,10 @@ export function map(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        if (
+          (argumentUsage.usesIndex && existing.lastIndex !== i) ||
+          argumentUsage.usesParams
+        ) {
           runtime.runner.run(
             tx,
             opPattern,

@@ -201,12 +201,10 @@ export default pattern(() => {
       v?.voterName === "Alex";
   });
 
-  // The "All options" overview renders one swatch per voter, sourced from a
-  // per-option `votes.filter((v) => v.optionId === oid)`. Regression guard for
-  // the transformer filter/map lift bug (CT-1777) where the predicate compiled
-  // to a proxy-vs-proxy `===` (always false), so the filter dropped every vote
-  // and the swatches silently stopped rendering: after Alex's green vote, his
-  // swatch must appear in the rendered UI tree.
+  // The "All options" overview renders one swatch per voter from each option's
+  // precomputed tally. Regression guard for CT-1777: after Alex's green vote,
+  // his swatch must appear in the rendered UI tree instead of only in the raw
+  // vote cell/state snapshots.
   const assert_alex_swatch_renders = computed(() =>
     findNodeByProp(poll[UI], "data-vote-swatch-name", "Alex") !== undefined
   );
