@@ -44,8 +44,22 @@ Vote-flicker-on-reload root cause = **resume init-order** (`send([])` clobbering
 the **conflict-rollback window** (an optimistic compute writes a value, the newer durable doc arrives
 and rolls it back, leaving a transient `undefined` while the confirmed value re-derives). *Not* the storm.
 - **#4365** (Wilk, runner preserve) — CLOSED (superseded).
-- **#4366** (HTML VDOM list settling) — MERGED 06-26. Our trust-boundary review of the
-  authorship-boundary-reset fix is the last open verification (workflow `wgnb7wvd5`, running).
+- **#4366** (HTML VDOM list settling) — MERGED 06-26; our three review points all landed in the merge
+  (beforeId-strand → degrade-to-append; over-reset → derive-from-descendants; cubic-P1 → literal reuse
+  requires `cell===undefined`). Trust-boundary review (`wgnb7wvd5`, done 06-26): clear lifecycle is
+  **sound** (self-healing, fail-closed) and the dangerous direction is **mostly closed** — EXCEPT one
+  real follow-up:
+  - **cf-fragment derive-coverage gap** *[FOLLOW-UP · trust boundary · code already merged]:*
+    `hasTextIntegrityBlockForBoundary` recurses `state.children`, but `renderArrayAsFragment` leaves the
+    `cf-fragment`'s children Map **empty**, so an integrity block nested inside an array/fragment under a
+    `cf-cfc-authorship` boundary is invisible to the recursion → a refresh can derive `"ok"` over
+    live-blocked content (false "verified author" badge — the dangerous direction). Found independently
+    by 3 of 5 attack angles; verified real (severity split concern↔blocking). **Reachability is the open
+    question** — needs blocked content rendered *inside an array/fragment* under a boundary (plausible
+    for multi-segment messages; not confirmed under read-only). Fix is contained: populate the
+    fragment's children Map so the walk sees them. *Pending decisions:* (a) confirm reachability against
+    real authorship surfaces; (b) Wilk heads-up + Linear ticket; (c) the spun-off "nested
+    cf-cfc-authorship test" chip should encode this fragment case.
 - **#4367** (Hixie, read-mostly resume) — OPEN, in flight. Converged direction: **pull each level's
   durable doc *before* the optimistic compute** (extend the owned-cell pre-sync to the dynamic
   per-element child cells *and* the input list), so no level ever reads a transient `undefined`.
@@ -61,6 +75,12 @@ merged. But the resume conflict-rollback (thread 2) is the *same mechanism* — 
 strand work; the general "conflict-revert under async load" question persists, partially addressed by
 read-mostly resume. No deterministic in-process repro (needs a white-box storage seam — re-confirmed
 this session). See memory note `reactive-conflict-strand-repro`.
+- **CI data point (06-26):** `cfc-group-chat-demo.test.ts:116` ("authorship verification reject
+  imported claims") timed out (30s `waitForCondition`) waiting for `admin-user-toggle` to reflect an
+  admin-role change — on a clean rebase of #4361 (toolshed-only) onto `main@ac73a4e8`, so **not** caused
+  by the PR (#4366 passed this same test pre-merge). A reactive update failing to converge under CI
+  async load is the strand signature. Concrete target for the (still-never-done) flake-rate check, and
+  worth a glance at its recent-main flake history before ruling out any #4366-authorship interaction.
 
 ### 4. Open PRs / loose ends
 - **#4361** (ours — gated per-connection memwrite trace) — fixed (now derives `vhash` from the
@@ -95,9 +115,10 @@ as the principled fix for the resume-flicker family. Shared insight: the "not-lo
 mid-rollback), so the fix is to **pull durable docs before computing** rather than classify reads.
 
 ## At risk of being lost (no tracker but this doc)
-The scopes question (#1), the strand general-mechanism (#3), the otel + flaky-notebook follow-ups (#5),
-and the read-mostly-resume meta-question (#2) live only in handoff docs on `gideon/*` branches. Before
-deleting those branches, capture these in Linear.
+The scopes question (#1), the strand general-mechanism (#3), the **cf-fragment trust-boundary gap (#2)**,
+the otel + flaky-notebook follow-ups (#5), and the read-mostly-resume meta-question (#2) live only in
+handoff docs on `gideon/*` branches. Before deleting those branches, capture these in Linear. (The
+cf-fragment gap is the highest-priority orphan — it's a real, already-merged trust-boundary gap.)
 
 ---
 
