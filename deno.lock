@@ -2039,6 +2039,12 @@
           "npm:@lit/task@^1.0.2"
         ]
       },
+      "packages/state-inspector": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.12",
+          "jsr:@std/assert@1"
+        ]
+      },
       "packages/static": {
         "dependencies": [
           "npm:typescript@*"

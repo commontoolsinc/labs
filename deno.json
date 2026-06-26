@@ -35,6 +35,7 @@
     "./packages/leb128",
     "./packages/fuse",
     "./packages/fs-sync-example",
+    "./packages/state-inspector",
     "./tasks",
     "./scripts"
   ],
