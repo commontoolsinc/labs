@@ -3935,6 +3935,10 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
       return [from, to, parentPath(from), parentPath(to)];
     }
     case "splice":
+    case "append":
+    case "add-unique":
+    case "remove-by-value":
+    case "increment":
       return [parsePointer(patch.path)];
   }
 };
@@ -3964,6 +3968,10 @@ const touchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
   switch (patch.op) {
     case "replace":
     case "splice":
+    case "append":
+    case "add-unique":
+    case "remove-by-value":
+    case "increment":
       return [parsePointer(patch.path)];
     case "add":
     case "remove":

@@ -348,3 +348,224 @@ Deno.test("memory v2 patch reuses unchanged branches across sibling updates", ()
     },
   });
 });
+
+// An `append` op is tail-relative: it inserts `values` at the array's live tail,
+// creating the array (and the path to it) when absent. This is what lets a client
+// whose base is stale or empty still land its elements after whatever durably
+// precedes them.
+Deno.test("memory v2 append lands at the live tail", () => {
+  const out = applyPatch({ value: ["a", "b"] }, [
+    { op: "append", path: "/value", values: ["c"] },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["a", "b", "c"]);
+});
+
+Deno.test("memory v2 appends compose to land at successive tails", () => {
+  const out = applyPatch({ value: ["a"] }, [
+    { op: "append", path: "/value", values: ["b"] },
+    { op: "append", path: "/value", values: ["c"] },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["a", "b", "c"]);
+});
+
+Deno.test("memory v2 append creates the array when absent", () => {
+  const fromEmptyDoc = applyPatch({}, [
+    { op: "append", path: "/value", values: ["x"] },
+  ]) as { value: string[] };
+  assertEquals(fromEmptyDoc, { value: ["x"] });
+
+  const nested = applyPatch({ value: {} }, [
+    { op: "append", path: "/value/items", values: [1, 2] },
+  ]) as { value: { items: number[] } };
+  assertEquals(nested, { value: { items: [1, 2] } });
+});
+
+Deno.test("memory v2 append rejects a non-array target", () => {
+  let threw = false;
+  try {
+    applyPatch({ value: "not-an-array" }, [
+      { op: "append", path: "/value", values: ["b"] },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "append onto a non-array must throw");
+});
+
+// `add-unique` appends each value only if no existing element equals it, and
+// creates the array if absent. It is idempotent against durable state.
+Deno.test("memory v2 add-unique adds only absent elements", () => {
+  const out = applyPatch({ value: ["a", "b"] }, [
+    { op: "add-unique", path: "/value", values: ["b", "c", "c"] },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["a", "b", "c"]);
+});
+
+Deno.test("memory v2 add-unique on a present element is a no-op", () => {
+  const out = applyPatch({ value: ["a"] }, [
+    { op: "add-unique", path: "/value", values: ["a"] },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["a"]);
+});
+
+Deno.test("memory v2 add-unique creates the array when absent", () => {
+  const out = applyPatch({}, [
+    { op: "add-unique", path: "/value", values: ["x", "x"] },
+  ]) as { value: string[] };
+  assertEquals(out, { value: ["x"] });
+});
+
+Deno.test("memory v2 add-unique compares by stored value (objects)", () => {
+  const out = applyPatch({ value: [{ id: 1 }] }, [
+    { op: "add-unique", path: "/value", values: [{ id: 1 }, { id: 2 }] },
+  ]) as { value: { id: number }[] };
+  assertEquals(out.value, [{ id: 1 }, { id: 2 }]);
+});
+
+// `increment` adds `by` to the number at the path, treats an absent value as 0,
+// creates the path if absent, and sums when composed.
+Deno.test("memory v2 increment adds to an existing number", () => {
+  const out = applyPatch({ value: { count: 5 } }, [
+    { op: "increment", path: "/value/count", by: 3 },
+  ]) as { value: { count: number } };
+  assertEquals(out.value.count, 8);
+});
+
+Deno.test("memory v2 increments compose by summing", () => {
+  const out = applyPatch({ value: 0 }, [
+    { op: "increment", path: "/value", by: 1 },
+    { op: "increment", path: "/value", by: 1 },
+  ]) as { value: number };
+  assertEquals(out.value, 2);
+});
+
+Deno.test("memory v2 increment treats an absent value as zero and creates it", () => {
+  const created = applyPatch({}, [
+    { op: "increment", path: "/value", by: 4 },
+  ]) as { value: number };
+  assertEquals(created, { value: 4 });
+
+  const nested = applyPatch({ value: {} }, [
+    { op: "increment", path: "/value/count", by: -2 },
+  ]) as { value: { count: number } };
+  assertEquals(nested, { value: { count: -2 } });
+});
+
+Deno.test("memory v2 increment rejects a non-number target", () => {
+  let threw = false;
+  try {
+    applyPatch({ value: { count: "five" } }, [
+      { op: "increment", path: "/value/count", by: 1 },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "increment onto a non-number must throw");
+});
+
+Deno.test("memory v2 increment rejects a zero amount", () => {
+  let threw = false;
+  try {
+    applyPatch({ value: { count: 1 } }, [
+      { op: "increment", path: "/value/count", by: 0 },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "a zero increment must throw");
+});
+
+// `remove-by-value` removes every element equal to the given value (by stored
+// value), idempotently, and is a no-op on a missing/non-array target.
+Deno.test("memory v2 remove-by-value removes matching elements", () => {
+  const out = applyPatch({ value: ["a", "b", "a", "c"] }, [
+    { op: "remove-by-value", path: "/value", value: "a" },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["b", "c"]);
+});
+
+Deno.test("memory v2 remove-by-value matches by stored value (links/objects)", () => {
+  const link = { "/": { "link@1": { path: [], id: "of:fid1:vote-x" } } };
+  const other = { "/": { "link@1": { path: [], id: "of:fid1:vote-y" } } };
+  const out = applyPatch({ value: [link, other] }, [
+    {
+      op: "remove-by-value",
+      path: "/value",
+      value: { "/": { "link@1": { path: [], id: "of:fid1:vote-x" } } },
+    },
+  ]) as { value: unknown[] };
+  assertEquals(out.value, [other]);
+});
+
+Deno.test("memory v2 remove-by-value is a no-op when absent", () => {
+  const original = { value: ["a", "b"] };
+  const out = applyPatch(original, [
+    { op: "remove-by-value", path: "/value", value: "z" },
+  ]) as { value: string[] };
+  assertEquals(out.value, ["a", "b"]);
+
+  const missing = applyPatch({}, [
+    { op: "remove-by-value", path: "/value", value: "z" },
+  ]);
+  assertEquals(missing, {});
+});
+
+// A non-array target is rejected once the path resolves to a traversable
+// container (an object) rather than to a scalar. A scalar target is caught
+// earlier by the spine thaw with a "not traversable" message; an object target
+// reaches the op's own array-shape check.
+Deno.test("memory v2 append rejects a non-array object target", () => {
+  let threw = false;
+  try {
+    applyPatch({ value: {} }, [
+      { op: "append", path: "/value", values: ["b"] },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "append onto an object must throw");
+});
+
+Deno.test("memory v2 add-unique rejects a non-array object target", () => {
+  let threw = false;
+  try {
+    applyPatch({ value: {} }, [
+      { op: "add-unique", path: "/value", values: ["b"] },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "add-unique onto an object must throw");
+});
+
+Deno.test("memory v2 increment rejects the root path", () => {
+  let threw = false;
+  try {
+    applyPatch({ count: 0 }, [
+      { op: "increment", path: "", by: 1 },
+    ]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "increment at the root must throw");
+});
+
+// Both `increment` and `remove-by-value` read the current value by walking the
+// path through array indices as well as object keys. Incrementing a numeric
+// array element addresses it positionally and writes back into the array.
+Deno.test("memory v2 increment updates a numeric array element by index", () => {
+  const out = applyPatch({ scores: [10, 20, 30] }, [
+    { op: "increment", path: "/scores/1", by: 5 },
+  ]) as { scores: number[] };
+  assertEquals(out.scores, [10, 25, 30]);
+});
+
+// A path segment that names an out-of-range array index resolves to absent, so
+// remove-by-value finds no array there and leaves the document untouched.
+Deno.test("memory v2 remove-by-value is a no-op through a missing array index", () => {
+  const original = { items: [["a"]] };
+  const out = applyPatch(original, [
+    { op: "remove-by-value", path: "/items/5/inner", value: "a" },
+  ]) as typeof original;
+  assertEquals(out, { items: [["a"]] });
+});
