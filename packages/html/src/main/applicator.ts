@@ -20,6 +20,12 @@ const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 
+interface PendingChildInsert {
+  parentId: number;
+  childId: number;
+  beforeId: number | null;
+}
+
 function hasNodeType(node: unknown, nodeType: number): boolean {
   return typeof node === "object" && node !== null &&
     (node as { nodeType?: unknown }).nodeType === nodeType;
@@ -77,6 +83,7 @@ export class DomApplicator {
   private readonly runtimeClient: RuntimeClient;
   private readonly onError?: (error: Error) => void;
   private readonly setPropHandler: SetPropHandler;
+  private pendingChildInserts: PendingChildInsert[] = [];
 
   private rootNodeId: number | null = null;
 
@@ -98,12 +105,14 @@ export class DomApplicator {
     for (const op of batch.ops) {
       try {
         this.applyOp(op);
+        this.replayPendingChildInserts();
       } catch (error) {
         this.onError?.(
           error instanceof Error ? error : new Error(String(error)),
         );
       }
     }
+    this.replayPendingChildInserts();
 
     if (batch.rootId !== undefined) {
       this.rootNodeId = batch.rootId;
@@ -156,11 +165,15 @@ export class DomApplicator {
         break;
 
       case "insert-child":
-        this.insertChild(op.parentId, op.childId, op.beforeId);
+        if (!this.insertChild(op.parentId, op.childId, op.beforeId)) {
+          this.deferChildInsert(op.parentId, op.childId, op.beforeId);
+        }
         break;
 
       case "move-child":
-        this.moveChild(op.parentId, op.childId, op.beforeId);
+        if (!this.moveChild(op.parentId, op.childId, op.beforeId)) {
+          this.deferChildInsert(op.parentId, op.childId, op.beforeId);
+        }
         break;
 
       case "remove-node":
@@ -243,6 +256,7 @@ export class DomApplicator {
     this.nodes.clear();
     this.nodeParents.clear();
     this.nodeChildren.clear();
+    this.pendingChildInserts = [];
     this.rootNodeId = null;
 
     const elapsed = logger.timeEnd("dispose");
@@ -437,10 +451,19 @@ export class DomApplicator {
     parentId: number,
     childId: number,
     beforeId: number | null,
-  ): void {
+  ): boolean {
     const parent = this.nodes.get(parentId);
     const child = this.nodes.get(childId);
-    if (!parent || !child) return;
+    if (!parent || !child) return false;
+
+    const beforeNode = beforeId === null ? null : this.nodes.get(beforeId);
+    if (
+      beforeId !== null && (!beforeNode || beforeNode.parentNode !== parent)
+    ) {
+      return false;
+    }
+
+    this.discardPendingForChild(childId);
 
     // Update parent/children tracking
     // Remove from old parent if any
@@ -457,30 +480,77 @@ export class DomApplicator {
     }
     children.add(childId);
 
-    const beforeNode = beforeId !== null
-      ? this.nodes.get(beforeId) ?? null
-      : null;
-
-    if (beforeNode && beforeNode.parentNode === parent) {
-      // Only use insertBefore if the beforeNode is actually a child of parent
+    if (beforeNode) {
       parent.insertBefore(child, beforeNode);
     } else {
-      // Either no beforeNode, or it's not a child of this parent - just append
       parent.appendChild(child);
     }
+    return true;
   }
 
   private moveChild(
     parentId: number,
     childId: number,
     beforeId: number | null,
-  ): void {
+  ): boolean {
     // Move is the same as insert - insertBefore handles it
-    this.insertChild(parentId, childId, beforeId);
+    return this.insertChild(parentId, childId, beforeId);
+  }
+
+  private deferChildInsert(
+    parentId: number,
+    childId: number,
+    beforeId: number | null,
+  ): void {
+    this.discardPendingForChild(childId);
+    this.pendingChildInserts.push({ parentId, childId, beforeId });
+  }
+
+  private discardPendingForChild(childId: number): void {
+    this.pendingChildInserts = this.pendingChildInserts.filter((pending) =>
+      pending.childId !== childId
+    );
+  }
+
+  private discardPendingForNodeIds(nodeIds: ReadonlySet<number>): void {
+    const remaining: PendingChildInsert[] = [];
+    for (const pending of this.pendingChildInserts) {
+      if (nodeIds.has(pending.parentId) || nodeIds.has(pending.childId)) {
+        continue;
+      }
+
+      remaining.push(
+        pending.beforeId !== null && nodeIds.has(pending.beforeId)
+          ? { ...pending, beforeId: null }
+          : pending,
+      );
+    }
+    this.pendingChildInserts = remaining;
+  }
+
+  private replayPendingChildInserts(): void {
+    if (this.pendingChildInserts.length === 0) return;
+
+    const remaining: PendingChildInsert[] = [];
+    for (const pending of this.pendingChildInserts) {
+      if (
+        !this.insertChild(
+          pending.parentId,
+          pending.childId,
+          pending.beforeId,
+        )
+      ) {
+        remaining.push(pending);
+      }
+    }
+    this.pendingChildInserts = remaining;
   }
 
   private removeNode(nodeId: number): void {
     const node = this.nodes.get(nodeId);
+    const removedNodeIds = new Set([nodeId]);
+    this.collectDescendantNodeIds(nodeId, removedNodeIds);
+    this.discardPendingForNodeIds(removedNodeIds);
     if (!node) return;
 
     logger.timeStart("remove-node", String(nodeId));
@@ -558,6 +628,16 @@ export class DomApplicator {
     }
 
     return count;
+  }
+
+  private collectDescendantNodeIds(nodeId: number, into: Set<number>): void {
+    const children = this.nodeChildren.get(nodeId);
+    if (!children || children.size === 0) return;
+
+    for (const childId of children) {
+      into.add(childId);
+      this.collectDescendantNodeIds(childId, into);
+    }
   }
 
   private setAttrs(nodeId: number, attrs: Record<string, unknown>): void {
