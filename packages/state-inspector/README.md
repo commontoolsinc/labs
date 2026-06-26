@@ -8,10 +8,20 @@ recorder.** This package is the lens over it — open a space SQLite file
 read-only, reconstruct state-at-`(branch, seq)`, and answer who/what/when
 questions with no live runtime and no capture step.
 
-## Status: prototype (Milestones 1, 2, 2.5)
+## Status: usable (Milestones 1, 2, 2.5, 3)
 
-Tested against hermetic fixtures + real space DBs (a 571 MB legacy DB and a set
-of modern `fvj1:` DBs):
+Wired into the `cf` CLI as **`cf inspect`** with local-DB auto-discovery — no
+absolute paths needed. Tested end-to-end against real space DBs (a 571 MB legacy
+DB and a set of modern `fvj1:` DBs).
+
+**M3 — usable surface**
+- `cf inspect spaces` — discover local space DBs (walks up from cwd through
+  `cache/memory/…` and `packages/toolshed/cache/memory/…`, or honors
+  `MEMORY_DIR` / `DB_PATH` / `--dir`) and list them with quick stats.
+- All commands take a `<space>` as a **DID, DID-prefix, or path** (resolved via
+  discovery), so you go from `spaces` straight to drilling in.
+
+Underlying milestones: 
 
 **M1 — single-space autopsy core**
 - **read-only DB access** (`db.ts`)
@@ -81,26 +91,34 @@ The hermetic test guards `splice` + missing-key `add` against regressing to a fo
    replicas appear. (Verified: `converge-scan` over real `fvj1` DBs reports
    `0 cross-space link edges` and labels all 14 findings as instances.)
 
-## Usage
+## Usage (`cf inspect`)
+
+Run from a repo with local space DBs (discovery walks up to find the cache), or
+point at any directory with `--dir` / `MEMORY_DIR`. `<space>` is a DID, a unique
+DID-prefix, or a path.
 
 ```bash
-DIR=/abs/path/to/engine-v3   # a directory of <space-did>.sqlite files
-INSPECT="deno run --allow-read --allow-ffi --allow-env cli.ts"
+# discover what's inspectable
+deno task cf inspect spaces
 
-# single space
-$INSPECT summary  "$DIR/<did>.sqlite"
-$INSPECT hot      "$DIR/<did>.sqlite" --limit 10
-$INSPECT value-at "$DIR/<did>.sqlite" of:fid1:… --path value/count
+# single space (DID-prefix resolves via discovery)
+deno task cf inspect summary  z6Mkqa41
+deno task cf inspect hot      z6Mkqa41 --limit 10
+deno task cf inspect commits  z6Mkqa41 --limit 20
+deno task cf inspect history  z6Mkqa41 of:fid1:…
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count
 
-# cross-space convergence
-$INSPECT converge      of:fid1:… --dir "$DIR" --path value
-$INSPECT converge-scan --dir "$DIR" --limit 20 --json
+# cross-space convergence (--all discovered, or --spaces a,b, or --dir)
+deno task cf inspect converge      of:fid1:… --all --path value
+deno task cf inspect converge-scan --all --json
 ```
+
+Every command also accepts `--json` for agents. (A standalone `cli.ts` entry
+exists for use outside the `cf` CLI.)
 
 ## Not yet built (next milestones)
 
 - `ifc` / security-label decoding from stored schemas.
 - Snapshot-base optimization for reconstruction (currently replays from seq 0).
-- Wiring into `cf inspect` as a first-class subcommand.
 - Client-side correlation overlay (connectionId / eventId) for the per-session
   view dimension of convergence.
