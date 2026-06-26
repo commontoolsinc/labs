@@ -252,6 +252,44 @@ describe("pattern-binding", () => {
         ),
       ).toBe(true);
     });
+
+    it("does not stamp scoped asCell alias schemas onto write redirect links", () => {
+      const output = runtime.getCell<{ value: unknown }>(
+        space,
+        "scoped asCell alias write redirect output",
+        undefined,
+        tx,
+      );
+      output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+
+      const userScopedValue = runtime.getCellFromLink(
+        { ...output.key("value").getAsNormalizedFullLink(), scope: "user" },
+        undefined,
+        tx,
+      );
+
+      sendValueToBinding(
+        tx,
+        output,
+        argumentCellLink,
+        {
+          $alias: {
+            cell: "result",
+            path: ["value"],
+            schema: {
+              type: "string",
+              asCell: [{ kind: "cell", scope: "user" }],
+            },
+          },
+        },
+        "secret",
+      );
+
+      expect(output.key("value").getRaw()).toBe("secret");
+      expect(userScopedValue.getRaw()).toBeUndefined();
+    });
   });
 
   describe("mapBindingToCell", () => {

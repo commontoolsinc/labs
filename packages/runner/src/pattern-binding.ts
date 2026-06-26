@@ -129,14 +129,12 @@ const scopedLinkForPath = (
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  if (isRecord(finalSchema)) {
-    if (isCellScope(finalSchema.scope)) {
-      scope = finalSchema.scope;
-    }
-    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
-    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-    if (isCellScope(asCellScope)) {
-      scope = asCellScope;
+  const linkSchema = finalSchema === undefined
+    ? undefined
+    : sanitizeAliasSchemaForBinding(finalSchema);
+  if (isRecord(linkSchema)) {
+    if (isCellScope(linkSchema.scope)) {
+      scope = linkSchema.scope;
     }
   }
 
@@ -144,14 +142,14 @@ const scopedLinkForPath = (
     ...link,
     path: [...path],
     scope,
-    ...(finalSchema !== undefined && { schema: finalSchema }),
+    ...(linkSchema !== undefined && { schema: linkSchema }),
   };
 };
 
 const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
-  // Compiled aliases retain asCell for schema fidelity. Live redirects still
-  // use link schemas without cell wrappers so scoped asCell entries do not
-  // stamp the redirect link's own scope and bypass stored argument links.
+  // Compiled aliases retain asCell for schema fidelity. Live redirects use link
+  // schemas without cell wrappers so scoped asCell entries do not stamp the
+  // redirect link's own scope and bypass stored argument links.
   sanitizeSchemaForLinks(schema, { keepStreams: true });
 
 const descriptorForPartialCauseAlias = (
