@@ -1,10 +1,15 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   combineCoverageLcov,
+  main,
   mergeLcovReports,
   normalizeSourcePath,
+  parseArgs,
 } from "./combine-coverage-lcov.ts";
+
+const ROOT = path.join(import.meta.dirname!, "..");
 
 Deno.test("normalizeSourcePath strips a GitHub-hosted workspace root", () => {
   assertEquals(
@@ -191,6 +196,128 @@ Deno.test("combineCoverageLcov merges reports from a directory tree", async () =
       ],
     );
     assertEquals(lcov.endsWith("\n"), true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("combineCoverageLcov surfaces a non-NotFound read error", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "combine-lcov-" });
+  const file = path.join(dir, "not-a-directory");
+  await Deno.writeTextFile(file, "");
+  try {
+    // Walking a path that is a regular file is not a "no coverage" case; the
+    // error must propagate rather than be swallowed.
+    await assertRejects(() => combineCoverageLcov(file, "labs"));
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("parseArgs reads --key=value flags and ignores other tokens", () => {
+  const parsed = parseArgs(["--input-dir=a", "--repo-name=x=y", "stray", "-z"]);
+  assertEquals(parsed.get("input-dir"), "a");
+  // Everything after the first "=" is the value, so embedded "=" is preserved.
+  assertEquals(parsed.get("repo-name"), "x=y");
+  assertEquals(parsed.has("stray"), false);
+  assertEquals(parsed.size, 2);
+});
+
+Deno.test("main combines reports and writes the output file", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "combine-lcov-main-" });
+  try {
+    const inputDir = path.join(dir, "in");
+    await Deno.mkdir(inputDir);
+    await Deno.writeTextFile(
+      path.join(inputDir, "workspace.lcov"),
+      [
+        "SF:/home/runner/work/labs/labs/packages/a/mod.ts",
+        "DA:1,1",
+        "LF:1",
+        "LH:1",
+        "end_of_record",
+        "",
+      ].join("\n"),
+    );
+    const outputPath = path.join(dir, "nested", "labs-sha.lcov");
+
+    const code = await main([
+      `--input-dir=${inputDir}`,
+      `--output=${outputPath}`,
+      "--repo-name=labs",
+    ]);
+
+    assertEquals(code, 0);
+    assertEquals(
+      await Deno.readTextFile(outputPath),
+      [
+        "SF:packages/a/mod.ts",
+        "DA:1,1",
+        "LF:1",
+        "LH:1",
+        "end_of_record",
+        "",
+      ].join("\n"),
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("main returns exit code 2 when a required flag is missing", async () => {
+  assertEquals(await main(["--input-dir=a", "--output=b"]), 2);
+});
+
+// Run the task as its own process so the `import.meta.main` entry point is
+// exercised end to end. Lockfile isolation keeps the real deno.lock untouched,
+// and all inputs and outputs live under temporary directories.
+Deno.test("the CLI entry point runs the task as a process", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "combine-lcov-cli-" });
+  try {
+    const inputDir = path.join(dir, "in");
+    await Deno.mkdir(inputDir);
+    await Deno.writeTextFile(
+      path.join(inputDir, "workspace.lcov"),
+      [
+        "SF:/home/runner/work/labs/labs/packages/a/mod.ts",
+        "DA:1,1",
+        "LF:1",
+        "LH:1",
+        "end_of_record",
+        "",
+      ].join("\n"),
+    );
+    const outputPath = path.join(dir, "labs-sha.lcov");
+
+    const output = await runDenoCommandWithTemporaryLock({
+      root: ROOT,
+      args: (lockPath) => [
+        "run",
+        "--config",
+        path.join(ROOT, "deno.json"),
+        "--lock",
+        lockPath,
+        "--allow-read",
+        "--allow-write",
+        path.join(ROOT, "tasks/combine-coverage-lcov.ts"),
+        `--input-dir=${inputDir}`,
+        `--output=${outputPath}`,
+        "--repo-name=labs",
+      ],
+    });
+
+    assertEquals(output.code, 0);
+    assertEquals(
+      await Deno.readTextFile(outputPath),
+      [
+        "SF:packages/a/mod.ts",
+        "DA:1,1",
+        "LF:1",
+        "LH:1",
+        "end_of_record",
+        "",
+      ].join("\n"),
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

@@ -176,7 +176,7 @@ export async function combineCoverageLcov(
   return mergeLcovReports(reports, repoName);
 }
 
-function parseArgs(args: string[]): Map<string, string> {
+export function parseArgs(args: string[]): Map<string, string> {
   const parsed = new Map<string, string>();
   for (const arg of args) {
     const match = /^--([^=]+)=(.*)$/.exec(arg);
@@ -185,17 +185,18 @@ function parseArgs(args: string[]): Map<string, string> {
   return parsed;
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(Deno.args);
-  const inputDir = args.get("input-dir");
-  const outputPath = args.get("output");
-  const repoName = args.get("repo-name");
+/** Run the command-line interface; returns the process exit code. */
+export async function main(args: string[]): Promise<number> {
+  const parsed = parseArgs(args);
+  const inputDir = parsed.get("input-dir");
+  const outputPath = parsed.get("output");
+  const repoName = parsed.get("repo-name");
   if (!inputDir || !outputPath || !repoName) {
     console.error(
       "Usage: deno run --allow-read --allow-write tasks/combine-coverage-lcov.ts " +
         "--input-dir=<dir> --output=<combined.lcov> --repo-name=<repository name>",
     );
-    Deno.exit(2);
+    return 2;
   }
 
   const { lcov, fileCount, rewritten, unchanged } = await combineCoverageLcov(
@@ -210,8 +211,7 @@ async function main(): Promise<void> {
     `Merged line coverage for ${fileCount} source file(s) into ${outputPath} ` +
       `(${rewritten} normalized to repository-relative paths, ${unchanged} left as-is).`,
   );
+  return 0;
 }
 
-if (import.meta.main) {
-  await main();
-}
+if (import.meta.main) Deno.exit(await main(Deno.args));
