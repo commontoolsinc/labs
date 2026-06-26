@@ -622,6 +622,26 @@ export interface IStorageTransaction {
   ): void;
 
   /**
+   * Record a mergeable write against the document at `address`: `count` elements
+   * appended at the array's tail, `count` elements set-added by identity, or a
+   * numeric `by` increment. The commit emits these as the corresponding
+   * mergeable op (which the server resolves against durable state) and drops the
+   * op's path from the commit's conflict read set, so concurrent and stale-base
+   * writes merge rather than clobber.
+   */
+  recordArrayAppend?(address: IMemorySpaceAddress, count: number): void;
+  recordAddUnique?(address: IMemorySpaceAddress, count: number): void;
+  recordIncrement?(address: IMemorySpaceAddress, by: number): void;
+  recordRemoveByValue?(address: IMemorySpaceAddress, value: FabricValue): void;
+
+  /**
+   * The document addresses for which this transaction recorded a mergeable op.
+   * The commit's read-set builder uses these to drop reads of those paths from
+   * conflict detection.
+   */
+  getMergeableOpAddresses?(): Iterable<IMemorySpaceAddress>;
+
+  /**
    * Optional: record a folded SQLite write onto this transaction so it commits
    * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
@@ -799,6 +819,16 @@ export interface IExtendedStorageTransaction
   markCreateOnly?(
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void;
+
+  /**
+   * Record a mergeable write against the document addressed by `link` — a tail
+   * append, a set-add by identity, or a numeric increment — forwarded to the
+   * underlying transaction after resolving the link to a memory address.
+   */
+  recordArrayAppend?(link: NormalizedFullLink, count: number): void;
+  recordAddUnique?(link: NormalizedFullLink, count: number): void;
+  recordIncrement?(link: NormalizedFullLink, by: number): void;
+  recordRemoveByValue?(link: NormalizedFullLink, value: FabricValue): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;

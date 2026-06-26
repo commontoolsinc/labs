@@ -26,6 +26,10 @@ const linkResolutionProbeMarker: unique symbol = Symbol(
   "linkResolutionProbeMarker",
 );
 
+const mergeableOpReadMarker: unique symbol = Symbol(
+  "mergeableOpReadMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -55,12 +59,29 @@ export const linkResolutionProbe: Metadata = {
   [linkResolutionProbeMarker]: true,
 };
 
+/**
+ * Marks the reads a mergeable write (push / addUnique / increment / the keyed
+ * ops) issues as part of building its own write — the value it reads to compute
+ * the change. The commit's read-set builder drops these (and the write-target
+ * attempted-writes and the cfc label) from conflict detection so the op merges,
+ * while a handler's OWN explicit read of the same cell is left in place, so a
+ * conditional mergeable write still conflicts-and-retries. Does not affect
+ * scheduling.
+ */
+export const mergeableOpRead: Metadata = {
+  [mergeableOpReadMarker]: true,
+};
+
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
 
 export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {
   return meta?.[markReadAsAttemptedWriteMarker] === true;
+}
+
+export function isMergeableOpRead(meta?: Metadata): boolean {
+  return meta?.[mergeableOpReadMarker] === true;
 }
 
 export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {

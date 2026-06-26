@@ -285,6 +285,12 @@ export type IsThisArray =
   | AnyBrandedCell<unknown>
   | AnyBrandedCell<any>;
 
+// To constrain methods that only exist on number cells
+export type IsThisNumber =
+  | AnyBrandedCell<number>
+  | AnyBrandedCell<unknown>
+  | AnyBrandedCell<any>;
+
 /*
  * IAnyCell is an interface that is used by all calls and to which the runner
  * attaches the internal methods..
@@ -381,7 +387,30 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void;
+  /**
+   * Add one or more values to an array cell as a set: each value is appended
+   * only if no existing element equals it. Mergeable — concurrent adds of
+   * distinct elements merge and a repeated add is a no-op against durable state.
+   */
+  addUnique(
+    this: IsThisArray,
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
+  ): void;
+  /**
+   * Add `by` (default 1, may be negative) to a number cell. Mergeable —
+   * concurrent increments sum against durable state rather than clobber.
+   */
+  increment(this: IsThisNumber, by?: number): void;
   remove(
+    this: IsThisArray,
+    ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
+  ): void;
+  /**
+   * Remove every element equal to `ref` by stored value (a cell matches by its
+   * link). Mergeable — resolved against durable state, so concurrent removes of
+   * distinct entries merge instead of clobbering via a whole-array rewrite.
+   */
+  removeByValue(
     this: IsThisArray,
     ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
   ): void;
@@ -628,6 +657,17 @@ export interface IKeyable<out T, Wrap extends HKT> {
   ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
   // Fallback for 11+ keys or unknown keys
   key(...keys: PropertyKey[]): Apply<Wrap, any>;
+  /**
+   * A cell for the entity deterministically derived from this array and `idKey`
+   * — the entity a keyed element is identified by. The same `idKey` always
+   * resolves to the same entity (a content-only derivation), so a handler can
+   * read/edit one keyed element and manage its membership with addUnique /
+   * removeByValue, without reading the whole array.
+   */
+  elementById(
+    this: IsThisArray,
+    idKey: string,
+  ): Apply<Wrap, T extends (infer U)[] ? U : unknown>;
 }
 
 /**

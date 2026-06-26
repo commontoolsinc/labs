@@ -694,6 +694,10 @@ const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
     switch (patch.op) {
       case "replace":
       case "splice":
+      case "append":
+      case "add-unique":
+      case "remove-by-value":
+      case "increment":
         return [parsePointer(patch.path)];
       case "add":
       case "remove": {

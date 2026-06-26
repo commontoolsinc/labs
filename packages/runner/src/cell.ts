@@ -20,6 +20,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -82,7 +83,10 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   type CellViewRef,
@@ -436,8 +440,12 @@ const cellMethods = new Set<
   "send",
   "update",
   "push",
+  "addUnique",
+  "increment",
   "remove",
   "removeAll",
+  "removeByValue",
+  "elementById",
   "equals",
   "equalLinks",
   "key",
@@ -481,6 +489,26 @@ const cellMethods = new Set<
  *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
  *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
  *  insert's VALUES tuple is NOT mistaken for a column list. */
+// The schema for one element of an array schema, suitable for a standalone
+// element cell. The array's items schema is often a `$ref` into the array
+// schema's `$defs`; carry those `$defs` onto the element schema so the reference
+// (and any nested references) still resolve once the element is addressed on its
+// own, detached from the array.
+function elementSchemaFor(
+  arraySchema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!isRecord(arraySchema)) return undefined;
+  const items = arraySchema.items;
+  if (!isRecord(items) || Array.isArray(items)) {
+    return items as JSONSchema | undefined;
+  }
+  const defs = arraySchema.$defs;
+  if (defs && !("$defs" in items)) {
+    return { ...items, $defs: defs } as JSONSchema;
+  }
+  return items as JSONSchema;
+}
+
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
   const m = sql.match(
     /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
@@ -1382,7 +1410,11 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+    // Read marked as the op's own incidental read: dropped from the commit's
+    // conflict set so the append merges, while a handler's explicit read is not.
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
     const cause = this._frame?.cause;
 
     let array = currentValue as unknown[];
@@ -1429,6 +1461,226 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       recursivelyAddIDIfNeeded(combined, this._frame),
       cause,
+    );
+
+    // Record the append intent so the commit emits a tail-relative, mergeable
+    // operation instead of a position diffed against a possibly-stale base.
+    this.tx.recordArrayAppend?.(resolvedLink, value.length);
+  }
+
+  addUnique(
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.addUnique() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    const cause = this._frame?.cause;
+
+    let array = currentValue as unknown[];
+    if (array !== undefined && !Array.isArray(array)) {
+      throw new Error(
+        "Cell.addUnique() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (array === undefined) {
+      diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
+      const resolvedSchema = resolveSchema(this.schema);
+      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        ? processDefaultValue(
+          this.runtime,
+          this.tx,
+          this.link,
+          resolvedSchema.default,
+        )
+        : [];
+    }
+
+    // Anchor ids on the new values, then keep only those not already present
+    // (by stored-value equality, matching the server's add-unique dedup). The
+    // server re-dedups against durable state, catching elements the local
+    // replica had not loaded.
+    const anchored = recursivelyAddIDIfNeeded(
+      value as unknown[],
+      this._frame,
+    ) as unknown[];
+    const existing = array;
+    // A cell candidate matches an existing element by its (deterministic) link,
+    // so re-adding the same keyed entity is a local no-op; a plain value matches
+    // by stored-value equality, mirroring the server's keyless dedup.
+    const alreadyPresent = (candidate: unknown) =>
+      existing.some((element) =>
+        isCell(candidate)
+          ? areLinksSame(
+            element,
+            candidate,
+            this as unknown as Cell<any>,
+            true,
+            this.tx!,
+            this.runtime,
+          )
+          : deepEqual(element, candidate)
+      );
+    const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
+    if (toAdd.length === 0) {
+      return;
+    }
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolvedLink,
+      [...existing, ...toAdd],
+      cause,
+    );
+    this.tx.recordAddUnique?.(resolvedLink, toAdd.length);
+  }
+
+  increment(by: number = 1): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.increment() requires transaction and number value\n" +
+          "help: use in handlers only, ensure cell is typed as number",
+      );
+    }
+    if (by === 0) {
+      throw new Error(
+        "Cell.increment() requires a non-zero amount\n" +
+          "help: a zero increment is a no-op; drop the call",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    if (currentValue !== undefined && typeof currentValue !== "number") {
+      throw new Error(
+        "Cell.increment() requires transaction and number value\n" +
+          "help: use in handlers only, ensure cell is typed as number",
+      );
+    }
+    const cause = this._frame?.cause;
+    const next = (typeof currentValue === "number" ? currentValue : 0) + by;
+    diffAndUpdate(this.runtime, this.tx, resolvedLink, next, cause);
+
+    // Record the increment intent so the commit emits a mergeable increment the
+    // server resolves against durable state instead of a value diffed against a
+    // possibly-stale read.
+    this.tx.recordIncrement?.(resolvedLink, by);
+  }
+
+  // Remove every element of this array equal to `ref` by stored value. A cell
+  // ref matches by its (deterministic) link, so the membership entry is removed
+  // without depending on the list's prior contents — concurrent removes of
+  // distinct entries merge. The optimistic local filter and the committed op
+  // both match by the stored value.
+  removeByValue(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.removeByValue() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    const array = currentValue as unknown[];
+    if (array === undefined) {
+      return;
+    }
+    if (!Array.isArray(array)) {
+      throw new Error(
+        "Cell.removeByValue() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    // A cell ref matches an element by its (deterministic) link; a plain value
+    // matches by stored-value equality. The removed elements are the array's
+    // stored representations (links stay as their sigil), so recording each one
+    // as the op's value lets the server match the durable element exactly.
+    const matches = (element: unknown) =>
+      isCell(ref)
+        ? areLinksSame(
+          element,
+          ref,
+          this as unknown as Cell<any>,
+          true,
+          this.tx!,
+          this.runtime,
+        )
+        : deepEqual(element, ref);
+    const removed = array.filter(matches);
+    if (removed.length === 0) {
+      return;
+    }
+    const filtered = array.filter((element) => !matches(element));
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolvedLink,
+      filtered,
+      this._frame?.cause,
+    );
+    for (const element of removed) {
+      this.tx.recordRemoveByValue?.(resolvedLink, element as FabricValue);
+    }
+  }
+
+  // Returns a cell for the entity deterministically derived from this array and
+  // `idKey` — the entity a keyed element of this array is identified by. The
+  // derivation is content-only (no per-event cause), so the same `idKey` always
+  // resolves to the same entity. This lets a handler read/edit one keyed element
+  // (e.g. "my vote for this option") and add or remove its membership via
+  // addUnique / removeByValue, without ever reading the whole array.
+  elementById(idKey: string, schema?: JSONSchema): Cell<any> {
+    const tx = this.runtime.readTx(this.tx);
+    const resolvedLink = resolveLink(this.runtime, tx, this.link);
+    const entityId = createRef(
+      { id: idKey },
+      {
+        parent: { id: resolvedLink.id, space: resolvedLink.space },
+        path: resolvedLink.path,
+      },
+    );
+    const arraySchema = resolveSchema(resolvedLink.schema ?? this.schema);
+    const elementSchema = schema ?? elementSchemaFor(arraySchema);
+    return this.runtime.getCellFromEntityId(
+      resolvedLink.space,
+      entityId,
+      [],
+      elementSchema,
+      this.tx,
+      resolvedLink.scope,
     );
   }
 
