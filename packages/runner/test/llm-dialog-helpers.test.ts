@@ -1,9 +1,20 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
-import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import {
+  llmDialogTestHelpers,
+  llmToolExecutionHelpers,
+} from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+
+const {
+  buildAvailableCellsDocumentation,
+  buildAvailableCellsDocumentationWithObservation,
+  buildToolCatalog,
+  executeToolCalls,
+  PRESENT_RESULT_TOOL_NAME,
+} = llmToolExecutionHelpers;
 
 const {
   parseLLMFriendlyLink,
@@ -17,8 +28,44 @@ const {
   prepareSchemaForLLM,
   resolveRefsForLLM,
   serializeForLLMObservation,
+  traverseAndCellify,
   toolAllowsObservedConfidentiality,
 } = llmDialogTestHelpers;
+
+function makeDocumentationCell(params: {
+  id: string;
+  space: string;
+  path?: string[];
+  schema?: unknown;
+  value?: unknown;
+  rawValue?: unknown;
+  nested?: unknown;
+}) {
+  const link = {
+    id: params.id,
+    space: params.space,
+    scope: "space",
+    path: params.path ?? [],
+    schema: params.schema,
+  };
+  const cell: any = {
+    runtime: {},
+    schema: params.schema,
+    get: () => params.value,
+    getRaw: () => params.rawValue ?? params.value,
+    getMetaRaw: () => undefined,
+    getAsNormalizedFullLink: () => link,
+    resolveAsCell: () => cell,
+    asSchemaFromLinks: () => cell,
+    asSchema: () => cell,
+    key: () => ({ getRaw: () => undefined, get: () => undefined }),
+    pull: () => Promise.resolve(),
+  };
+  if (params.nested !== undefined) {
+    cell.get = () => params.nested;
+  }
+  return cell;
+}
 
 Deno.test("parseTargetString recognizes handle format", () => {
   const parsed = parseLLMFriendlyLink(
@@ -416,6 +463,429 @@ Deno.test("serializeForLLMObservation does not taint from redacted nested values
   assertEquals(result.observedConfidentiality, ["internal"]);
 });
 
+Deno.test("serializeForLLMObservation stops at the maximum depth", () => {
+  const result = serializeForLLMObservation({
+    value: { too: "deep" },
+    depth: 101,
+  });
+
+  assertEquals(result.value, "[Maximum depth reached]");
+  assertEquals(result.observedConfidentiality, []);
+});
+
+Deno.test("serializeForLLMObservation serializes arrays", () => {
+  const rootLink: NormalizedFullLink = {
+    id: "of:test-array",
+    space: "did:test:array",
+    scope: "space",
+    path: [],
+  };
+  const result = serializeForLLMObservation({
+    value: [{ title: "first" }, { title: "second" }],
+    schema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+        },
+      },
+    },
+    contextSpace: "did:test:array",
+    rootLink,
+  });
+
+  assertEquals(result.value, [{ title: "first" }, { title: "second" }]);
+  assertEquals(result.observedConfidentiality, []);
+});
+
+Deno.test("traverseAndCellify converts LLM-friendly links inside strings and objects", () => {
+  const parsedLinks: unknown[] = [];
+  const runtime = {
+    getCellFromLink(link: unknown) {
+      parsedLinks.push(link);
+      return { kind: "cell", link };
+    },
+  };
+  const target =
+    "/of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/path";
+
+  const direct = traverseAndCellify(
+    runtime as any,
+    "did:test:cellify",
+    JSON.stringify({ "@link": target }),
+  ) as any;
+  const nested = traverseAndCellify(
+    runtime as any,
+    "did:test:cellify",
+    {
+      keep: "value",
+      list: [{ "@link": target }],
+      malformed: '{"@link":',
+    },
+  ) as any;
+
+  assertEquals(direct.kind, "cell");
+  assertEquals(nested.keep, "value");
+  assertEquals(nested.list[0].kind, "cell");
+  assertEquals(nested.malformed, '{"@link":');
+  assertEquals(parsedLinks.length, 2);
+});
+
+Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
+  const childValues = new Map<string, unknown>([
+    [
+      "fromChildPattern",
+      {
+        pattern: {
+          get: () => ({
+            argumentSchema: {
+              type: "object",
+              properties: { prompt: { type: "string" } },
+            },
+          }),
+        },
+      },
+    ],
+  ]);
+  const childCells = new Map<string, unknown>();
+  const toolsCell = {
+    get: () => ({
+      fromInputSchema: {
+        description: "uses a parent schema",
+        inputSchema: {
+          type: "object",
+          properties: {
+            result: { type: "string" },
+            value: { type: "number" },
+          },
+          required: ["result", "value"],
+        },
+      },
+      fromChildPattern: {
+        description: "uses a child pattern schema",
+      },
+      booleanSchema: {
+        description: "uses a boolean schema",
+        inputSchema: true,
+      },
+      missingSchema: {
+        description: "skipped",
+      },
+      pieceTool: {
+        piece: {
+          get: () => ({ name: "piece" }),
+          getAsNormalizedFullLink: () => ({
+            id: "of:piece",
+            path: [],
+            space: "did:test:tools",
+            scope: "space",
+          }),
+        },
+      },
+    }),
+    key(name: string) {
+      const cell = {
+        get: () => childValues.get(name),
+      };
+      childCells.set(name, cell);
+      return cell;
+    },
+  };
+
+  const catalog = buildToolCatalog(toolsCell as any, false);
+
+  assertEquals(Object.keys(catalog.llmTools).sort(), [
+    "booleanSchema",
+    "fromChildPattern",
+    "fromInputSchema",
+  ]);
+  assertEquals(
+    catalog.llmTools.fromInputSchema.description,
+    "uses a parent schema",
+  );
+  assertEquals(
+    (catalog.llmTools.fromInputSchema.inputSchema as any).properties,
+    { value: { type: "number" } },
+  );
+  assertEquals(
+    (catalog.llmTools.fromInputSchema.inputSchema as any).required,
+    ["value"],
+  );
+  assertEquals(
+    (catalog.llmTools.fromChildPattern.inputSchema as any).properties.prompt
+      .type,
+    "string",
+  );
+  assertEquals(
+    (catalog.llmTools.booleanSchema.inputSchema as any).additionalProperties,
+    {},
+  );
+  assertEquals(
+    catalog.dynamicToolCells.get("fromChildPattern"),
+    childCells.get("fromChildPattern"),
+  );
+});
+
+Deno.test("buildToolCatalog adds built-in tools by default", () => {
+  const toolsCell = {
+    get: () => undefined,
+    key: () => ({ get: () => undefined }),
+  };
+
+  const catalog = buildToolCatalog(toolsCell as any);
+
+  assert("read" in catalog.llmTools);
+  assert("invoke" in catalog.llmTools);
+  assert("pin" in catalog.llmTools);
+  assert("unpin" in catalog.llmTools);
+  assert("updateArgument" in catalog.llmTools);
+  assert("schema" in catalog.llmTools);
+  assert(!(PRESENT_RESULT_TOOL_NAME in catalog.llmTools));
+  assertEquals(catalog.dynamicToolCells.size, 0);
+});
+
+Deno.test("buildAvailableCellsDocumentation documents context and pinned cells", () => {
+  const space = "did:test:docs";
+  const nestedCell = makeDocumentationCell({
+    id: "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
+    space,
+    path: ["project"],
+    schema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+    },
+    value: { name: "Ada" },
+  });
+  const outerCell = makeDocumentationCell({
+    id: "of:bafyreiearlyouterouterouterouterouterouterouterouterouteroutera",
+    space,
+    nested: nestedCell,
+  });
+  const pinnedCell = makeDocumentationCell({
+    id: "of:bafyreibbbbccccddddeeeeffffgggghhhhiiiijjjjkkkkllllmmmmnnoo",
+    space,
+    path: ["tasks"],
+    value: { title: "Todo", $hidden: "skip" },
+  });
+  const runtime = {
+    getCellFromLink: () => pinnedCell,
+  };
+  const pinnedCells = {
+    get: () => [{
+      path:
+        "/of:bafyreibbbbccccddddeeeeffffgggghhhhiiiijjjjkkkkllllmmmmnnoo/tasks",
+      name: "Pinned",
+    }],
+  };
+
+  const docs = buildAvailableCellsDocumentation(
+    runtime as any,
+    space,
+    {
+      Project: outerCell,
+      NotACell: { title: "ignored" },
+    },
+    pinnedCells as any,
+  );
+
+  assert(docs.includes("# Available Cells"));
+  assert(docs.includes("## Project"));
+  assert(docs.includes("## Pinned"));
+  assert(docs.includes("Ada"));
+  assert(docs.includes("Todo"));
+  assert(docs.includes("- Schema:"));
+  assert(docs.includes("title"));
+
+  const empty = buildAvailableCellsDocumentationWithObservation(
+    runtime as any,
+    space,
+    undefined,
+    { get: () => [] } as any,
+  );
+  assertEquals(empty, { docs: "", observedConfidentiality: [] });
+});
+
+Deno.test("executeToolCalls wraps denied, present-result, pin, and error results", async () => {
+  const space = "did:test:tools";
+  const emptyToolsCell = {
+    get: () => undefined,
+    key: () => ({ get: () => undefined }),
+  };
+  const catalog = buildToolCatalog(emptyToolsCell as any);
+  catalog.llmTools.secretTool = {
+    description: "secret",
+    inputSchema: {
+      type: "object",
+      ifc: { maxConfidentiality: [] },
+    },
+  };
+
+  const pinnedState = [{ path: "/of:already", name: "Already" }];
+  const pinnedCells = {
+    get: () => pinnedState,
+    withTx: () => ({
+      get: () => pinnedState,
+      set: (next: typeof pinnedState) => {
+        pinnedState.splice(0, pinnedState.length, ...next);
+      },
+    }),
+  };
+  const targetCell = makeDocumentationCell({
+    id: "of:bafyreiqqqqrrrrssssttttuuuuvvvvwwwwxxxxyyyyzzzzaaaabbbbccccd",
+    space,
+    path: ["target"],
+    schema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+    },
+    value: { value: 7 },
+  });
+  const runtime = {
+    editWithRetry: (fn: (tx: unknown) => void) => {
+      fn({});
+      return true;
+    },
+    getCellFromLink: () => targetCell,
+  };
+  const originalConsoleError = console.error;
+  const errors: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    errors.push(args);
+  };
+  try {
+    const results = await executeToolCalls(
+      runtime as any,
+      space,
+      catalog as any,
+      [
+        {
+          type: "tool-call",
+          toolCallId: "denied",
+          toolName: "secretTool",
+          input: {},
+        },
+        {
+          type: "tool-call",
+          toolCallId: "present",
+          toolName: PRESENT_RESULT_TOOL_NAME,
+          input: { answer: 42 },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "already",
+          toolName: "pin",
+          input: { path: "/of:already", name: "Already" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "new",
+          toolName: "pin",
+          input: { path: "/of:new", name: "New" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "missing",
+          toolName: "unpin",
+          input: { path: "/of:missing" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "remove",
+          toolName: "unpin",
+          input: { path: "/of:already" },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "schema",
+          toolName: "schema",
+          input: {
+            path:
+              "/of:bafyreiqqqqrrrrssssttttuuuuvvvvwwwwxxxxyyyyzzzzaaaabbbbccccd/target",
+          },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "bad-update",
+          toolName: "updateArgument",
+          input: {
+            path:
+              "/of:bafyreiqqqqrrrrssssttttuuuuvvvvwwwwxxxxyyyyzzzzaaaabbbbccccd/target",
+          },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "bad-invoke",
+          toolName: "invoke",
+          input: {
+            path:
+              "/of:bafyreiqqqqrrrrssssttttuuuuvvvvwwwwxxxxyyyyzzzzaaaabbbbccccd/target",
+          },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "unknown",
+          toolName: "unknownTool",
+          input: {},
+        },
+      ],
+      pinnedCells as any,
+      ["internal"],
+    );
+
+    assertEquals(
+      results.map((result) => result.id),
+      [
+        "denied",
+        "present",
+        "already",
+        "new",
+        "missing",
+        "remove",
+        "schema",
+        "bad-update",
+        "bad-invoke",
+        "unknown",
+      ],
+    );
+    assertEquals(
+      results[0].error,
+      "Tool call denied: observed confidentiality exceeds maxConfidentiality for secretTool",
+    );
+    assertEquals(results[1].result, {
+      type: "json",
+      value: { answer: 42 },
+    });
+    assertEquals(results[2].result?.value, {
+      success: false,
+      message: "Already pinned",
+    });
+    assertEquals(results[3].result?.value, { success: true });
+    assertEquals(results[4].result?.value, {
+      success: false,
+      message: "Not found",
+    });
+    assertEquals(results[5].result?.value, { success: true });
+    assertEquals(results[6].result?.value, {
+      type: "object",
+      properties: { value: { type: "number" } },
+    });
+    assertEquals(
+      results[7].error,
+      "updates must be an object with field names and values",
+    );
+    assertEquals(
+      results[8].error,
+      "target does not resolve to a handler stream or pattern.",
+    );
+    assertEquals(results[9].error, "Tool has neither pattern nor handler");
+    assertEquals(pinnedState, [{ path: "/of:new", name: "New" }]);
+    assertEquals(errors.length, 3);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
 Deno.test("toolAllowsObservedConfidentiality denies tools above maxConfidentiality", () => {
   const allowed = toolAllowsObservedConfidentiality(
     {
@@ -641,6 +1111,23 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
   );
 });
 
+Deno.test("simplifySchemaForContext handles primitive and composed schemas", () => {
+  assertEquals(simplifySchemaForContext("plain" as any), "plain" as any);
+
+  const result = simplifySchemaForContext({
+    type: "object",
+    description: "choice",
+    anyOf: [{ type: "string" }, "literal" as any],
+    oneOf: [{ type: "number" }],
+    allOf: [{ type: "object", properties: { id: { type: "string" } } }],
+  } as any) as any;
+
+  assertEquals(result.description, "choice");
+  assertEquals(result.anyOf, [{ type: "string" }, "literal"]);
+  assertEquals(result.oneOf, [{ type: "number" }]);
+  assertEquals(result.allOf?.[0]?.properties?.id?.type, "string");
+});
+
 // Tests for resolveRefsForLLM
 
 Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () => {
@@ -733,6 +1220,20 @@ Deno.test("resolveRefsForLLM truncates circular $ref", () => {
   assertEquals(result.$defs, undefined);
 });
 
+Deno.test("resolveRefsForLLM truncates unresolved $ref", () => {
+  const result = resolveRefsForLLM({
+    type: "object",
+    properties: {
+      missing: { $ref: "#/$defs/Missing" },
+    },
+  } as any) as any;
+
+  assertEquals(result.properties?.missing, {
+    type: "object",
+    additionalProperties: true,
+  });
+});
+
 Deno.test("resolveRefsForLLM passes through schema with no $ref unchanged", () => {
   const schema: any = {
     type: "object",
@@ -793,6 +1294,11 @@ Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
 });
 
 // Tests for prepareSchemaForLLM
+
+Deno.test("prepareSchemaForLLM returns primitive schemas unchanged", () => {
+  assertEquals(prepareSchemaForLLM("plain" as any), "plain" as any);
+  assertEquals(prepareSchemaForLLM(null as any), null as any);
+});
 
 Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () => {
   const schema: any = {
