@@ -3788,16 +3788,18 @@ export class Runner {
               },
             }
             : {}),
-          // Propagate the resumed-from-synced-state flag so container-minting
-          // builtins (map/filter/flatmap) defer their per-element sub-pattern
-          // runs until sync completes too.
-          ...(defersInitialRunUntilSynced(schedulerRehydration)
-            ? { awaitSync: true }
-            : {}),
         },
         processCell,
         this.runtime,
         outputBinding,
+        // The resumed-from-synced-state flag is passed out-of-band (a behavioral
+        // param, like `outputBinding`) instead of folded into the identity
+        // `cause` above. It is transient (present only on resume), so hashing it
+        // into the result-cell id would diverge a fresh runtime from a resumed
+        // one for the same logical node — the root of the cross-runtime write
+        // storm. Container-minting builtins (map/filter/flatMap) read it to
+        // defer their per-element sub-pattern runs until sync completes too.
+        defersInitialRunUntilSynced(schedulerRehydration),
       );
     } finally {
       popFrame(builtinFrame);

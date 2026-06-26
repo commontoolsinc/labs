@@ -64,10 +64,11 @@ export function filter(
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
-  cause: any,
+  _cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,
+  awaitSync?: boolean,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -81,8 +82,7 @@ export function filter(
   // Only the initial (resume) reconcile defers its per-element sub-pattern runs
   // until sync completes; elements from later (post-resume) reconciles are fresh
   // and must not wait. Cleared once a non-empty resume batch is processed.
-  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
-    ?.awaitSync;
+  let resumeBatchAwaitSync = !!awaitSync;
 
   return (tx: IExtendedStorageTransaction) => {
     const elementAwaitSync = resumeBatchAwaitSync;

@@ -13,7 +13,7 @@ signatures.
 This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
-1. Foundation: api, runtime, identity, memory
+1. Foundation: api, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
 4. Operation: background-piece-service, cli
@@ -67,8 +67,7 @@ already does).
   data types, and keywords. Check its "Status tiers" section before imitating
   any pattern — only `exemplar` entries are style references.
 
-**Important:** Ignore the top level `deprecated-patterns` folder - it is
-defunct.
+**Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
 
 ## Runtime Development
 

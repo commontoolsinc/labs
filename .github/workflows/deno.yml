@@ -515,6 +515,24 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      # Cross-run compile cache: persist the per-shard compiled-module-byte cache
+      # so unchanged patterns reuse last run's emitted bytes (skip the
+      # type-check + transform + emit). The key folds in a hash of everything
+      # that shapes the emitted bytes — the js-compiler, the CF transformer, the
+      # schema-generator it bakes schemas from, the root deno.json compiler
+      # options (jsx/jsxImportSource), and the lockfile — so any change to what
+      # emits the bytes invalidates the whole file even when it leaves module
+      # identity and the manual runtime-version tag untouched. The pattern-source
+      # hash rolls the key while `restore-keys` still seeds from the most recent
+      # prior cache.
+      - name: ♻️ Restore/save compile byte cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          restore-keys: |
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
         with:
@@ -548,6 +566,7 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
+          CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \

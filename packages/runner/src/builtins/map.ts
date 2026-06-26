@@ -76,10 +76,11 @@ export function map(
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
-  cause: any,
+  _cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
   outputBinding?: NormalizedFullLink,
+  awaitSync?: boolean,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -95,8 +96,7 @@ export function map(
   // runs until storage sync completes. This map action is itself sync-gated when
   // resumed, so its first reconcile already runs against synced data; elements
   // added by later (post-resume) reconciles are fresh and must not wait.
-  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
-    ?.awaitSync;
+  let resumeBatchAwaitSync = !!awaitSync;
 
   return (tx: IExtendedStorageTransaction) => {
     // Captured before the loop consumes it: this reconcile's element runs use
