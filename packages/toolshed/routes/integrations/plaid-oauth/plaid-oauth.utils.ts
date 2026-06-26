@@ -7,6 +7,11 @@ import {
 } from "@commonfabric/runner";
 import { Configuration, PlaidApi, PlaidEnvironments } from "plaid";
 import env from "@/env.ts";
+import {
+  custodyIngest,
+  durableSet,
+  type VouchedChannel,
+} from "@/lib/custody-ingest.ts";
 
 // Plaid Auth Schema
 export const PlaidAuthSchema = {
@@ -157,10 +162,27 @@ export async function getAuthData(
   }
 }
 
-// Save auth data to the auth cell
+// Build the vouched-ingest channel for a Plaid auth cell. As with OAuth,
+// channel/audience are recorded-not-enforced provenance: pre-grant-infra the
+// channel is the cell's own space and audience records the Plaid source.
+function plaidIngestChannel(
+  authCell: Awaited<ReturnType<typeof getAuthCell>>,
+): VouchedChannel {
+  return {
+    channel: authCell.getAsNormalizedFullLink().space,
+    audience: "did:web:commonfabric.org#plaid",
+  };
+}
+
+// Save auth data to the auth cell. Now a governed, retrying durable write
+// (replacing the divergent bare `.set()` + synced, which had no retry and a
+// read-modify-write race). When `ingest` is set the write is external data
+// arriving from Plaid, so it mints the ExternalIngest mark via custodyIngest;
+// otherwise (e.g. removing an item) it is a plain operator write with no mark.
 export async function saveAuthData(
   authCellDocLink: string | SigilLink,
   authData: PlaidAuthData,
+  options?: { ingest?: boolean },
 ) {
   try {
     const authCell = await getAuthCell(authCellDocLink);
@@ -169,9 +191,11 @@ export async function saveAuthData(
       throw new Error("Auth cell not found");
     }
 
-    authCell.set(authData);
-
-    await runtime.storageManager.synced();
+    if (options?.ingest) {
+      await custodyIngest.set(authCell, authData, plaidIngestChannel(authCell));
+    } else {
+      await durableSet(authCell, authData);
+    }
 
     return authData;
   } catch (error) {
@@ -205,7 +229,8 @@ export async function upsertPlaidItem(
       authData.items.push(item);
     }
 
-    return await saveAuthData(authCellDocLink, authData);
+    // A new/updated item is Plaid data arriving from the provider — mark it.
+    return await saveAuthData(authCellDocLink, authData, { ingest: true });
   } catch (error) {
     throw new Error(`Error upserting Plaid item: ${error}`);
   }
