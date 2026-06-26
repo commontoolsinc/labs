@@ -1,4 +1,5 @@
 import * as path from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 import ts from "typescript";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
@@ -135,7 +136,7 @@ export async function runBundleWithRetry(
 async function resolveBundleConfigPath(
   manifest: Manifest,
 ): Promise<string | undefined> {
-  const packageConfigPath = path.join(manifest.projectDir, "deno.json");
+  const packageConfigPath = await findDenoConfigPath(manifest.projectDir);
   const workspaceConfigPath = await findWorkspaceConfigPath(
     manifest.projectDir,
   );
@@ -212,7 +213,7 @@ async function resolveWorkspacePackageImports(
 
     const packageDir = path.resolve(workspaceRoot, entry);
     const packageConfig = await readConfigIfExists(
-      path.join(packageDir, "deno.json"),
+      await findDenoConfigPath(packageDir),
     );
     if (!packageConfig) {
       continue;
@@ -270,9 +271,9 @@ async function findWorkspaceConfigPath(
   let lastConfigPath: string | undefined;
 
   while (true) {
-    const configPath = path.join(currentDir, "deno.json");
+    const configPath = await findDenoConfigPath(currentDir);
     const config = await readConfigIfExists(configPath);
-    if (config) {
+    if (configPath && config) {
       lastConfigPath = configPath;
       if ("workspace" in config) {
         return configPath;
@@ -287,11 +288,36 @@ async function findWorkspaceConfigPath(
   }
 }
 
+// Deno resolves a directory's config from `deno.jsonc` first, then `deno.json`.
+// Mirror that order so workspace and package configs are found regardless of
+// which extension a project uses.
+async function findDenoConfigPath(dir: string): Promise<string | undefined> {
+  for (const name of ["deno.jsonc", "deno.json"]) {
+    const candidate = path.join(dir, name);
+    try {
+      await Deno.stat(candidate);
+      return candidate;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return undefined;
+}
+
 async function readConfigIfExists(
-  configPath: string,
+  configPath: string | undefined,
 ): Promise<Record<string, unknown> | undefined> {
+  if (configPath === undefined) {
+    return undefined;
+  }
   try {
-    return JSON.parse(await Deno.readTextFile(configPath));
+    return parseJsonc(await Deno.readTextFile(configPath)) as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       return undefined;

@@ -65,7 +65,7 @@ runs:
           ~/.deno
           ~/.cache/deno
           ~/Library/Caches/deno
-        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
+        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
         restore-keys: |
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-

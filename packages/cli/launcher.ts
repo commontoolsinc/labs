@@ -158,7 +158,7 @@ const usage =
 Options:
   --deno <path>              Deno executable to use for the child CLI process
   --labs-root <path>         Labs checkout root (defaults to this script's repo)
-  --config <path>            Child Deno config/import-map path (defaults to <labs-root>/deno.json)
+  --config <path>            Child Deno config/import-map path (defaults to <labs-root>/deno.jsonc)
   --cli-entrypoint <path>    CF CLI entrypoint (defaults to <labs-root>/packages/cli/mod.ts)
   --cwd <path>               Working directory for the CF CLI child process (defaults to INIT_CWD or current cwd)
   --launcher-help            Show this help text
@@ -229,7 +229,7 @@ export const parseCfLauncherArgs = (
     denoPath,
     labsRoot: resolvedLabsRoot,
     configPath: configPath ??
-      resolvePathSegments(resolvedLabsRoot, "deno.json"),
+      resolvePathSegments(resolvedLabsRoot, "deno.jsonc"),
     cliEntrypoint: cliEntrypoint ??
       resolvePathSegments(resolvedLabsRoot, "packages", "cli", "mod.ts"),
     cwd,

@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
 import * as path from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";
 
 export const ALL_DISABLED = [
@@ -88,7 +89,9 @@ export async function testPackage(
 export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const workspaceCwd = Deno.cwd();
   const suiteStartedAt = Date.now();
-  const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
+  const manifest = parseJsonc(await Deno.readTextFile("./deno.jsonc")) as {
+    workspace: string[];
+  };
   const members: string[] = manifest.workspace;
   // Resolve to an absolute path: each package's test subprocess runs with its
   // own cwd, so a relative DENO_COVERAGE_DIR would land under

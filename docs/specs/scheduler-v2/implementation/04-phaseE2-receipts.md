@@ -67,7 +67,7 @@ const cause = {
 
 Behavior-change sweep (G5-adjacent): run the FULL runner suite plus
 `cd packages/patterns && deno task test` (or the closest pattern test
-task — check that package's deno.json). Failures whose assertions baked in
+task — check that package's deno.jsonc). Failures whose assertions baked in
 per-attempt-unique ids must be listed in PROGRESS.md and individually
 justified before adjusting them; any failure you cannot attribute to id
 determinism: STOP.

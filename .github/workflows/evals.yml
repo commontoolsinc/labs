@@ -64,7 +64,7 @@ jobs:
           path: |
             ~/.deno
             ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.jsonc') }}
 
       - name: 🔑 Authenticate to Google Cloud
         uses: google-github-actions/auth@v1

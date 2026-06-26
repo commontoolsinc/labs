@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
 import { exists } from "@std/fs";
 import * as path from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 
 interface BuildConfigInitializer {
   root: string;
@@ -12,14 +13,14 @@ class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
   readonly cliOnly: boolean;
-  private _manifest: object;
+  private _manifestOriginal: string;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
     this.toolshedFlags = options.toolshedFlags;
     this.cliOnly = !!options.cliOnly;
-    this._manifest = JSON.parse(
-      Deno.readTextFileSync(this.workspaceManifestPath()),
+    this._manifestOriginal = Deno.readTextFileSync(
+      this.workspaceManifestPath(),
     );
   }
 
@@ -27,12 +28,19 @@ class BuildConfig {
     return path.join(this.root, ...args);
   }
 
-  manifest() {
-    return JSON.parse(JSON.stringify(this._manifest));
+  // A fresh, mutable copy of the workspace manifest, parsed from its original
+  // bytes. The build mutates this copy; the original bytes stay untouched so
+  // the revert can restore the file exactly.
+  manifest(): Record<string, any> {
+    return parseJsonc(this._manifestOriginal) as Record<string, any>;
+  }
+
+  manifestOriginal() {
+    return this._manifestOriginal;
   }
 
   workspaceManifestPath() {
-    return this.path("deno.json");
+    return this.path("deno.jsonc");
   }
 
   workspaceLockPath() {
@@ -365,11 +373,9 @@ async function revertWorkspace(config: BuildConfig): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
   const toolshedEnvPath = config.toolshedEnvPath();
 
-  // Restore the workspace manifest
-  await Deno.writeTextFile(
-    denoJsonPath,
-    `${JSON.stringify(config.manifest(), null, 2)}\n`,
-  );
+  // Restore the workspace manifest from its original bytes, keeping any
+  // comments and formatting intact.
+  await Deno.writeTextFile(denoJsonPath, config.manifestOriginal());
 
   // Remove the COMPILED env file
   if ((await exists(toolshedEnvPath))) {

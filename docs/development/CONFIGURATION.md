@@ -283,7 +283,7 @@ Passed before the CLI args; rarely needed:
 |---|---|---|
 | `--deno <path>` | system `deno` | Use a specific Deno binary. |
 | `--labs-root <path>` | auto-detected from launcher location | Override the labs checkout root. |
-| `--config <path>` | `<labs-root>/deno.json` | Override the Deno config. |
+| `--config <path>` | `<labs-root>/deno.jsonc` | Override the Deno config. |
 | `--cli-entrypoint <path>` | `<labs-root>/packages/cli/mod.ts` | Override the CLI entry. |
 | `--cwd <path>` | `INIT_CWD` env or `process.cwd()` | Override the working directory passed to the CLI. |
 
@@ -316,7 +316,7 @@ when you run `deno task integration`:
 Additionally, [`tasks/integration.ts`](../../tasks/integration.ts) sets
 `INTEGRATION_TEST_FLAGS` (default: unset; populated with `--junit-path=…` when
 `--junit-dir` is passed, or passed through from the environment otherwise).
-Per-package `deno.json` `integration` scripts pick it up via `$INTEGRATION_TEST_FLAGS`
+Per-package `deno.jsonc` `integration` scripts pick it up via `$INTEGRATION_TEST_FLAGS`
 shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 
 ---
