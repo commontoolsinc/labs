@@ -1,6 +1,7 @@
 import { walk } from "@std/fs";
 import { join, relative } from "@std/path";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 /**
  * Build-time fingerprint of the inputs that shape the compiler's emitted bytes.
@@ -135,7 +136,7 @@ export async function computeCompilerFingerprint(
     }
   }
 
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  files.sort((a, b) => utf8Compare(a.path, b.path));
   const digest = hashStringOf({
     v: FINGERPRINT_TAG,
     files: files.map((file) => [file.path, file.content]),
