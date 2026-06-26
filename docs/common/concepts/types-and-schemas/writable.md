@@ -13,12 +13,115 @@ With `Writable<T>` in your signature:
 | `.get()` | Read current value |
 | `.set(value)` | Replace entire value |
 | `.update({ key: value })` | Partial update (objects) |
-| `.push(...items)` | Add to array |
+| `.push(...items)` | Append to an array (mergeable — see below) |
+| `.addUnique(...items)` | Append each item only if not already present (mergeable) |
+| `.increment(by?)` | Add a number (default `+1`, may be negative) to a number cell (mergeable) |
 | `.remove(item)` | Remove first `item` from array |
 | `.removeAll(item)` | Remove all `item` from array |
+| `.removeByValue(item)` | Remove every element equal to `item` by stored value (mergeable) |
 | `.key(...keys)` | Navigate nested data, e.g. `.key("property")` |
+| `.elementById(idKey)` | Cell for one array element addressed by a stable key (see below) |
 
 Without `Writable<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: Outside of JSX, filtering and transformations must be done in `computed()`.
+
+## Mergeable writes (for shared, multi-user state)
+
+The runtime applies a handler's write locally first, then commits it to the
+server in the background, and undoes it if the server rejects the commit. The
+server rejects a commit when one of the reads it recorded has gone stale —
+someone else changed the same data since the read. A write written as
+read-the-whole-value, change it, write-the-whole-value-back therefore conflicts
+under concurrency: two people editing the same list at the same time, and the
+second commit is rejected because its read of the list predates the first edit.
+On a list whose value was read as empty during loading, the same shape can
+overwrite the durable contents.
+
+The methods marked *mergeable* above avoid this. Instead of carrying a
+whole-value diff, the commit carries the operation's intent — "append these",
+"add if absent", "add this number", "remove elements equal to this" — and the
+server applies it against the current durable value rather than against the
+value the handler happened to read. The methods also drop the reads they make
+for themselves from the commit's conflict set, so two of them touching the same
+collection do not conflict with each other. The practical effect:
+
+- `push` / `addUnique`: concurrent appends from different users all land. With
+  `addUnique`, adding an item that is already present is a no-op (deduplicated
+  on the server too), so re-adding the same item is safe.
+- `increment`: concurrent increments sum instead of clobbering. A missing value
+  counts as zero, so a counter needs no initialization; a zero amount is
+  rejected.
+- `removeByValue`: concurrent removals of different elements all land.
+
+Use these for state that several users edit at once — a shared list, a vote
+count, a participant roster. For a counter, prefer `count.increment(1)` over
+`count.set(count.get() + 1)`; for a set-like list, prefer
+`list.addUnique(item)` over read-then-`push`.
+
+### When a write is NOT mergeable
+
+A write whose correctness depends on what it first read — for example "append
+only if this name is not already taken" — is not made safe by these methods. A
+mergeable method drops only the reads it makes for *itself*, not a read your
+handler makes explicitly. So if you call `list.get()` and then write based on
+what you read, that read stays in the conflict set, and two such handlers still
+conflict and retry — the protection an unconditional mergeable write gives up.
+Rely on that: keep the explicit `.get()` for a content-dependent condition. If
+the condition is uniqueness, prefer `addUnique`, which the server enforces
+without a retry. Otherwise keep a read-modify-write `set`.
+
+## Addressing one array element: `elementById`
+
+`array.elementById(idKey)` returns a cell for the array element identified by a
+stable string key, derived deterministically from the key (the same key always
+names the same element, in any session). This lets a handler read or edit one
+element, and add or remove it, without reading or rewriting the whole list:
+
+```typescript
+// Shown for illustration only.
+const myVote = votes.elementById(`${voterName}:${optionId}`);
+myVote.set({ voterName, optionId, color });   // set my vote
+votes.addUnique(myVote);                       // add it to the list (dedup by key)
+votes.removeByValue(myVote);                   // remove it later
+myVote.key("color").set("green");              // edit one field of it
+```
+
+Editing a field of the element writes that element's own document, not the
+list, so concurrent edits to different elements (or different fields of one
+element) merge. Note that the element's document outlives its membership in the
+list: removing it with `removeByValue` drops it from the list but does not clear
+the element's stored value, so a handler that decides anything by reading the
+element back must clear it when removing.
+
+Because keyed elements are stored as links to separate documents, **read the
+collection through a top-level `computed()` / derived value, not by
+`.filter()`/`.map()`-ing the array inline inside a nested reactive `map`**. A
+function or `computed()` that takes the collection resolves the links; an inline
+filter inside another `map`'s body can see only the links a replica has already
+materialized locally — so an element written on another replica (another user's
+keyed entry) is dropped and renders nothing, even though a top-level count over
+the same collection is correct. Compute the per-element data once at the top
+level, and render it from a single `computed()` rather than a reactive
+`map(...)` of sub-elements: a reactive map caches per-item instances whose
+inputs update flakily when a remote write changes one item, whereas one
+`computed` re-runs as a whole when the resolved data changes — the same
+reliability as the count.
+
+```typescript
+// Shown for illustration only.
+// In the pattern body — resolves the vote links:
+const tallies = tally(options, votes);
+// In JSX — one computed over the resolved tally, plain JS maps inside:
+computed(() =>
+  tallies.map((t) => (
+    <div>{t.voters.map((v) => <span>{v.name}</span>)}</div>
+  ))
+);
+```
+
+For the full model and trade-offs (including the add-wins-after-delete
+ordering), see
+[mergeable collection writes](../../../development/mergeable-collection-writes.md)
+and [keyed collection writes](../../../development/keyed-collection-writes.md).
 
 ## Passing Values to Pattern Inputs
 
