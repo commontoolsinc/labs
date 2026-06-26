@@ -307,3 +307,4 @@ const assert_total_correct = computed(() => {
 
 - [Testing Handlers via CLI](./handlers-cli-testing.md) - Manual CLI testing workflow
 - [Pattern Testing Spec](../../specs/PATTERN_TESTING_SPEC.md) - Technical specification
+- [Coverage in CI](../../development/COVERAGE.md) - How the pattern unit tests run here feed the coverage-debt gate

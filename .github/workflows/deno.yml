@@ -560,6 +560,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
@@ -616,6 +620,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run pattern reload integration tests
         run: |
           mkdir -p test-results

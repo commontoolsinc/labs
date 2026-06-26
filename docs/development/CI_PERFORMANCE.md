@@ -64,10 +64,12 @@ job and step carries `started_at` and `completed_at`.
 
 ## Coverage Debt Baselines
 
-Performance Check also tracks coverage debt as uncovered source lines. Coverage
-debt uses a latest-main ratchet for source groups changed by the PR: any
-increase in a changed group fails unless the PR explicitly accepts it. Debt
-metrics for unchanged groups are still reported, but they do not block the PR.
+Performance Check also tracks coverage debt as uncovered source lines. See
+[COVERAGE.md](COVERAGE.md) for how that coverage is collected and which CI job
+measures which code. Coverage debt uses a latest-main ratchet for source groups
+changed by the PR: any increase in a changed group fails unless the PR
+explicitly accepts it. Debt metrics for unchanged groups are still reported, but
+they do not block the PR.
 
 Use the narrow per-metric form when a PR intentionally increases one coverage
 debt metric:

@@ -85,3 +85,19 @@ Deno.exit(0);
 **Adding integration tests:**
 
 When adding runtime features, consider adding integration tests to `packages/runner/integration/` that verify the feature works end-to-end. See existing tests like `basic-persistence.test.ts` or `array_push.test.ts` for examples.
+
+## Related documentation
+
+- [COVERAGE.md](COVERAGE.md) — how CI measures coverage. It explains the two
+  mechanisms (Deno's V8 coverage for runtime code, and transformer-based
+  coverage for authored patterns) and how both feed the coverage-debt gate.
+- [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — the CI wall-time policy, and the
+  coverage-debt baseline and ratchet markers that gate a pull request.
+- [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
+  call the LLM, including the test-environment guard and conversation fixtures.
+- [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
+  integration tests.
+- [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
+  — writing and running pattern tests with `cf test`. The agent-oriented version
+  is [../common/ai/pattern-testing-guide.md](../common/ai/pattern-testing-guide.md),
+  and the design reference is [../specs/PATTERN_TESTING_SPEC.md](../specs/PATTERN_TESTING_SPEC.md).
