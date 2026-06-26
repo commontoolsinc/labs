@@ -1,6 +1,7 @@
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
+  cfcAtom,
 } from "@commonfabric/api/cfc";
 import {
   internSchema,
@@ -39,6 +40,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { externalIngestStamp } from "./external-ingest.ts";
 import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
@@ -3180,6 +3182,22 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  // A vouched ingest writes its provenance mark even when the payload write
+  // carries no schema candidate and flow labels are off, so the ingest target
+  // must enter the persist loop on its own. The anchor is the cell the helper
+  // declared, not whatever the value diff happened to touch (an array append
+  // diffs to `[...P,"N"]`/`[...P,"length"]`, never `P`).
+  const ingestStamp = externalIngestStamp(tx);
+  const ingestKey = ingestStamp !== undefined
+    ? targetKey({
+      space: ingestStamp.target.space,
+      scope: normalizeCellScope(ingestStamp.target.scope),
+      id: ingestStamp.target.id,
+    })
+    : undefined;
+  if (ingestKey !== undefined) {
+    targetKeys.add(ingestKey);
+  }
   if (flowPersist && flowTargets !== undefined) {
     // Flow targets enter the persist loop when there is taint to attach or
     // stale per-value components (derived/link) to replace under a written
@@ -3216,6 +3234,7 @@ export const prepareBoundaryCommit = (
     const undefinedCandidate = candidateSchema === undefined;
     const target = targetFromKey(key);
     const { space, id, scope } = target;
+    const isIngestTarget = ingestKey !== undefined && key === ingestKey;
     const existing = storedMetadataFor(
       tx,
       space,
@@ -3384,6 +3403,14 @@ export const prepareBoundaryCommit = (
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
         continue;
       }
+      // A fresh ingest re-mints the ExternalIngest mark for this doc below, so
+      // never carry the prior one forward — its payload digest is stale. The
+      // anchor is an ancestor of the element-wise-diffed writes, so the
+      // flow-style "written path covers entry" clear never fires for it;
+      // drop it by origin instead.
+      if (isIngestTarget && entry.origin === "external-ingest") {
+        continue;
+      }
       // Per-value components track the current value: a write at-or-above
       // them replaced that value, so stale derived/link/structure entries
       // under any written path are dropped (fresh ones for this tx are
@@ -3534,6 +3561,31 @@ export const prepareBoundaryCommit = (
           origin: "structure",
         });
       }
+    }
+
+    if (isIngestTarget && ingestStamp !== undefined) {
+      // The split-mint: a builtin-authored ExternalIngest provenance mark,
+      // derived ONLY from the verified channel metadata the operator-side
+      // helper stamped on this tx — channel, audience, receivedAt, and a digest
+      // of the payload the helper wrote — touching zero attacker bytes. Pushed
+      // with a runtime origin, so it bypasses gateRuntimeMintedIntegrity (the
+      // member-authored payload's `declared` label above is still gated,
+      // stripping any ExternalIngest atom an attacker smuggled into the
+      // payload). Anchored at the declared ingest target path; the stale prior
+      // mark for this doc was dropped from carry-forward above, so this
+      // replaces rather than accumulates.
+      persistedLabelEntries.push({
+        path: canonicalizeLogicalPath(ingestStamp.target.path),
+        label: {
+          integrity: [cfcAtom.externalIngest(
+            ingestStamp.channel,
+            ingestStamp.audience,
+            ingestStamp.receivedAt,
+            ingestStamp.valueDigest,
+          )],
+        },
+        origin: "external-ingest",
+      });
     }
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);

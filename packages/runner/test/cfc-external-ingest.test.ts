@@ -1,0 +1,225 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
+
+const signer = await Identity.fromPassphrase("runner-cfc-external-ingest");
+const space = signer.did();
+
+type StoredEntry = {
+  path: string[];
+  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  origin?: string;
+};
+
+// The Vouched Ingest Channel split-mint: a builtin-authored ExternalIngest
+// provenance mark, derived only from the verified channel metadata stamped on
+// the tx, that survives the runtime-minted gate while a copy smuggled into the
+// payload is stripped. The toolshed/operator runtime runs CFC *disabled*, so
+// the headline case proves the mark is still minted there.
+describe("CFC external-ingest provenance mint (split-mint)", () => {
+  const makeRuntime = (
+    overrides: { cfcEnforcementMode?: string; cfcFlowLabels?: string } = {},
+  ) => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime(
+      {
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        // Match the operator/toolshed posture unless a test overrides it.
+        cfcEnforcementMode: "disabled",
+        cfcFlowLabels: "off",
+        ...overrides,
+      } as ConstructorParameters<typeof Runtime>[0],
+    );
+    return { storageManager, runtime };
+  };
+
+  const entriesOf = (
+    storageManager: ReturnType<typeof StorageManager.emulate>,
+    id: string,
+  ): StoredEntry[] => {
+    const replica = storageManager.open(space).replica as unknown as {
+      getDocument(id: string): {
+        cfc?: { labelMap?: { entries: StoredEntry[] } };
+      } | undefined;
+    };
+    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  };
+
+  const ingestEntries = (
+    storageManager: ReturnType<typeof StorageManager.emulate>,
+    id: string,
+  ): StoredEntry[] =>
+    entriesOf(storageManager, id).filter((e) => e.origin === "external-ingest");
+
+  const meta = (id: string, valueDigest: string) => ({
+    channel: "did:key:channel",
+    audience: "did:key:presenter",
+    receivedAt: "2026-06-26T12:00:00.000Z",
+    valueDigest,
+    target: { space, id: id as never, scope: "space" as const, path: [] },
+  });
+
+  const externalIngestAtom = (valueDigest: string) => ({
+    type: CFC_ATOM_TYPE.ExternalIngest,
+    channel: "did:key:channel",
+    audience: "did:key:presenter",
+    receivedAt: "2026-06-26T12:00:00.000Z",
+    valueDigest,
+  });
+
+  it("mints the mark on the ingest target even when CFC is disabled", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      const { error } = await runtime.editWithRetry((tx) => {
+        const cell = runtime.getCell(space, "ingest-a", undefined, tx);
+        const id = cell.getAsNormalizedFullLink().id;
+        stampExternalIngest(tx, meta(id, "sha256:payload-1"));
+        tx.writeOrThrow({ space, scope: "space", id, path: ["value"] }, {
+          hello: "world",
+        });
+      });
+      expect(error).toBeUndefined();
+
+      const id =
+        runtime.getCell(space, "ingest-a").getAsNormalizedFullLink().id;
+      const entries = ingestEntries(storageManager, id);
+      expect(entries.length).toBe(1);
+      expect(entries[0].label.integrity).toContainEqual(
+        externalIngestAtom("sha256:payload-1"),
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("re-mints (replaces) on a second ingest — no stale-digest accumulation", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      const id =
+        runtime.getCell(space, "ingest-b").getAsNormalizedFullLink().id;
+
+      for (const [digest, payload] of [["sha256:p1", 1], ["sha256:p2", 2]]) {
+        const { error } = await runtime.editWithRetry((tx) => {
+          stampExternalIngest(tx, meta(id, digest as string));
+          // The real append idiom: read-modify-write the whole array.
+          const cell = runtime.getCell(space, "ingest-b", undefined, tx);
+          const current = (cell.getRaw() as { value?: number[] })?.value ?? [];
+          tx.writeOrThrow({ space, scope: "space", id, path: ["value"] }, [
+            ...current,
+            payload,
+          ]);
+        });
+        expect(error).toBeUndefined();
+      }
+
+      const entries = ingestEntries(storageManager, id);
+      // Exactly one mark, carrying the LATEST payload's digest — the first
+      // ingest's mark must not survive with its stale digest.
+      expect(entries.length).toBe(1);
+      expect(entries[0].label.integrity).toContainEqual(
+        externalIngestAtom("sha256:p2"),
+      );
+      expect(entries[0].label.integrity).not.toContainEqual(
+        externalIngestAtom("sha256:p1"),
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("strips a smuggled ExternalIngest from the payload while the minted mark survives", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      // An attacker controls the payload and tries to forge the provenance
+      // mark by declaring an ExternalIngest atom in the value's schema. The
+      // payload is authored under the (unattributed, non-builtin) member
+      // identity, so the runtime-minted gate must strip it.
+      const forged = internSchema(
+        {
+          type: "object",
+          properties: {
+            field: {
+              type: "string",
+              ifc: {
+                integrity: [
+                  cfcAtom.externalIngest(
+                    "did:key:attacker-channel",
+                    "did:key:attacker",
+                    "1999-01-01T00:00:00.000Z",
+                    "sha256:evil",
+                  ),
+                  "plain-claim",
+                ],
+              },
+            },
+          },
+          required: ["field"],
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const id =
+        runtime.getCell(space, "ingest-forge").getAsNormalizedFullLink().id;
+      const { error } = await runtime.editWithRetry((tx) => {
+        stampExternalIngest(tx, meta(id, "sha256:real-payload"));
+        const cell = runtime.getCell(space, "ingest-forge", forged.schema, tx);
+        cell.set({ field: "hello" });
+      });
+      expect(error).toBeUndefined();
+
+      const declared = entriesOf(storageManager, id)
+        .filter((e) => e.origin === "declared")
+        .flatMap((e) => e.label.integrity ?? []);
+      // The author keeps their plain claim, but the forged ExternalIngest is
+      // gone — bytes cannot mint the trusted mark.
+      expect(declared).toContainEqual("plain-claim");
+      expect(declared).not.toContainEqual(
+        externalIngestAtom("sha256:evil"),
+      );
+      expect(
+        declared.some((a) =>
+          (a as { type?: string })?.type === CFC_ATOM_TYPE.ExternalIngest
+        ),
+      ).toBe(false);
+
+      // The ONLY ExternalIngest mark on the doc is the runtime-minted one,
+      // carrying the operator's verified metadata — not the attacker's.
+      const ingest = ingestEntries(storageManager, id)
+        .flatMap((e) => e.label.integrity ?? []);
+      expect(ingest).toEqual([externalIngestAtom("sha256:real-payload")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not mint a mark when the tx is not stamped", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      const { error } = await runtime.editWithRetry((tx) => {
+        const cell = runtime.getCell(space, "ingest-c", undefined, tx);
+        const id = cell.getAsNormalizedFullLink().id;
+        tx.writeOrThrow({ space, scope: "space", id, path: ["value"] }, {
+          hello: "world",
+        });
+      });
+      expect(error).toBeUndefined();
+
+      const id =
+        runtime.getCell(space, "ingest-c").getAsNormalizedFullLink().id;
+      expect(ingestEntries(storageManager, id).length).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
