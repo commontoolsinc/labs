@@ -59,7 +59,6 @@ interface DisplayMessage {
   body: string;
   showAuthor: boolean;
   className: string;
-  canReact: boolean;
   thumbsCount: number;
   thumbsPicked: boolean;
   thumbsChoiceClass: string;
@@ -195,7 +194,6 @@ function displayMessages(
       from: message.from,
       body: message.body,
       showAuthor,
-      canReact: viewerName !== "" && message.from !== viewerName,
       thumbsCount,
       thumbsPicked,
       thumbsChoiceClass: reactionChoiceClass(thumbsPicked),
@@ -590,54 +588,50 @@ export default pattern<PicoChatInput, PicoChatOutput>(
                             </div>
                           )
                           : null}
-                        {row.canReact
-                          ? (
-                            <div
-                              className="pico-reaction-picker"
-                              style={reactionPickerStyle}
-                            >
-                              <button
-                                type="button"
-                                className={row.thumbsChoiceClass}
-                                aria-label="React with thumbs up"
-                                title={row.thumbsPickerTitle}
-                                onClick={() =>
-                                  react.send({
-                                    messageIndex: row.index,
-                                    emoji: "👍",
-                                  })}
-                              >
-                                👍
-                              </button>
-                              <button
-                                type="button"
-                                className={row.heartChoiceClass}
-                                aria-label="React with heart"
-                                title={row.heartPickerTitle}
-                                onClick={() =>
-                                  react.send({
-                                    messageIndex: row.index,
-                                    emoji: "❤️",
-                                  })}
-                              >
-                                ❤️
-                              </button>
-                              <button
-                                type="button"
-                                className={row.laughChoiceClass}
-                                aria-label="React with laughing face"
-                                title={row.laughPickerTitle}
-                                onClick={() =>
-                                  react.send({
-                                    messageIndex: row.index,
-                                    emoji: "😂",
-                                  })}
-                              >
-                                😂
-                              </button>
-                            </div>
-                          )
-                          : null}
+                        <div
+                          className="pico-reaction-picker"
+                          style={reactionPickerStyle}
+                        >
+                          <button
+                            type="button"
+                            className={row.thumbsChoiceClass}
+                            aria-label="React with thumbs up"
+                            title={row.thumbsPickerTitle}
+                            onClick={() =>
+                              react.send({
+                                messageIndex: row.index,
+                                emoji: "👍",
+                              })}
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            className={row.heartChoiceClass}
+                            aria-label="React with heart"
+                            title={row.heartPickerTitle}
+                            onClick={() =>
+                              react.send({
+                                messageIndex: row.index,
+                                emoji: "❤️",
+                              })}
+                          >
+                            ❤️
+                          </button>
+                          <button
+                            type="button"
+                            className={row.laughChoiceClass}
+                            aria-label="React with laughing face"
+                            title={row.laughPickerTitle}
+                            onClick={() =>
+                              react.send({
+                                messageIndex: row.index,
+                                emoji: "😂",
+                              })}
+                          >
+                            😂
+                          </button>
+                        </div>
                       </div>
                     ))}
                   <button
