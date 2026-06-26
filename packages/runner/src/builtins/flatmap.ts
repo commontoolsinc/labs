@@ -38,6 +38,7 @@ import {
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
+import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
@@ -129,7 +130,12 @@ export function flatMap(
             if (
               list === undefined || (Array.isArray(list) && list.length === 0)
             ) {
-              result.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set([]);
+              settleTx.runWithAmbientReadMeta(
+                linkResolutionProbe,
+                () =>
+                  result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx)
+                    .set([]),
+              );
             }
           }).then(({ error }) => {
             if (error) {
@@ -192,6 +198,15 @@ export function flatMap(
     // every element's taint into the coordinator's per-tx join.
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
+    // Container reads/writes run under the link-resolution-probe scope (S16):
+    // the presence probe and set() diffing materialize prior slots for identity
+    // comparison only — per-slot labels ride the link-write machinery, not these
+    // reads. See map.ts. Without it the asCell slot dereference journals a
+    // content read of every prior element, smearing element taint into the
+    // coordinator's per-tx join. The per-element result read below stays
+    // unprobed: the flattened output genuinely depends on those values.
+    const probeScoped = <T>(fn: () => T): T =>
+      tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -206,7 +221,10 @@ export function flatMap(
     // against the same absent value until it happens to sync. Pull the
     // container and defer; its arrival re-triggers this reconcile, which then
     // no-ops against the durable value.
-    if (elementAwaitSync && resultWithLog.get() === undefined) {
+    if (
+      elementAwaitSync &&
+      probeScoped(() => resultWithLog.get()) === undefined
+    ) {
       const pending = result.sync();
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the read above is journaled). If the
@@ -238,7 +256,7 @@ export function flatMap(
     // The durable aggregate currently in the container, read links-only
     // (presence schema), so this is a length comparison rather than a content
     // read of every element.
-    const priorSlots = resultWithLog.get();
+    const priorSlots = probeScoped(() => resultWithLog.get());
     const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
 
     // Resume preservation: on a resume reconcile the input list itself may not be
@@ -261,10 +279,10 @@ export function flatMap(
     // either holds for the still-loading container or sees the durable value, so
     // priorSlots is never undefined here.
     if (priorSlots === undefined) {
-      resultWithLog.set([]);
+      probeScoped(() => resultWithLog.set([]));
     }
     if (list === undefined) {
-      resultWithLog.set([]);
+      probeScoped(() => resultWithLog.set([]));
       for (const entry of elementRuns.values()) {
         runtime.runner.stop(entry.resultCell);
       }
@@ -364,7 +382,7 @@ export function flatMap(
       awaitPendingThenRepublish(pendingCells);
       return;
     }
-    resultWithLog.set(newArrayValue);
+    probeScoped(() => resultWithLog.set(newArrayValue));
 
     // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.
   };
