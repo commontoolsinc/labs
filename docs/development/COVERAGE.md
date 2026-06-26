@@ -76,6 +76,35 @@ count drops both because real lines became covered and because the lines the
 instrumentation never names leave the denominator. The second effect is an
 accounting artifact, not new test strength.
 
+## A combined report for IDEs
+
+The same `coverage-profile-*` artifacts feed a second consumer. On `main`, the
+`attest-binaries` job downloads all of them, runs
+`tasks/combine-coverage-lcov.ts` to merge them into one LCOV file, and uploads
+that file to the build-artifacts bucket next to the release tarball. The point
+is to give someone working in an IDE a single file that shows coverage for the
+whole repository, instead of one fragment per CI job.
+
+Two things happen during the merge. The source paths in each fragment are
+absolute paths rooted at whichever runner produced them, so they are rewritten
+to repository-relative paths that an IDE can map onto a local checkout. Records
+for the same source file are then combined into one, with the per-line hit
+counts added together, so a file exercised by several jobs is reported once with
+its combined coverage.
+
+The merged file carries line coverage only. LCOV identifies a function by its
+name, and `deno coverage --lcov` can emit several functions with the same name
+in one file (a free function and a method, for example), so function and branch
+records cannot be merged back together reliably from the fragments alone. Line
+coverage is what an IDE uses to colour the gutter, which is what this file is
+for.
+
+To download the report for a given commit:
+
+```
+gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
+```
+
 ## Which job collects which coverage
 
 | Job | Runtime (V8) coverage | Authored-pattern coverage |
