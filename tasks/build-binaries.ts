@@ -1,23 +1,18 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
 import { exists } from "@std/fs";
 import * as path from "@std/path";
-import {
-  computeCompilerVersion,
-  renderVersionModule,
-} from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 
-export interface BuildConfigInitializer {
+interface BuildConfigInitializer {
   root: string;
   toolshedFlags: string[];
   cliOnly?: boolean;
 }
 
-export class BuildConfig {
+class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
   readonly cliOnly: boolean;
   private _manifest: object;
-  private _compileCacheVersionOriginal: string;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
@@ -25,9 +20,6 @@ export class BuildConfig {
     this.cliOnly = !!options.cliOnly;
     this._manifest = JSON.parse(
       Deno.readTextFileSync(this.workspaceManifestPath()),
-    );
-    this._compileCacheVersionOriginal = Deno.readTextFileSync(
-      this.compileCacheVersionPath(),
     );
   }
 
@@ -39,22 +31,8 @@ export class BuildConfig {
     return JSON.parse(JSON.stringify(this._manifest));
   }
 
-  compileCacheVersionOriginal() {
-    return this._compileCacheVersionOriginal;
-  }
-
   workspaceManifestPath() {
     return this.path("deno.json");
-  }
-
-  compileCacheVersionPath() {
-    return this.path(
-      "packages",
-      "runner",
-      "src",
-      "compilation-cache",
-      "compile-cache-version.ts",
-    );
   }
 
   workspaceLockPath() {
@@ -352,7 +330,7 @@ function lockedCompileArgs(config: BuildConfig): string[] {
 // Some frontend types in the workspace manifest
 // must be removed from the compiler options
 // that do not work with toolshed.
-export async function prepareWorkspace(
+async function prepareWorkspace(
   config: BuildConfig,
 ): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
@@ -362,18 +340,6 @@ export async function prepareWorkspace(
       `Cannot build binaries without ${config.workspaceLockPath()}`,
     );
   }
-
-  // Bake the compile-cache version axis into the binary. A shipped binary
-  // cannot hash the source tree at runtime, so the durable cache's version
-  // (`compileCache:<version>/...`) is set here from a fingerprint of the
-  // compiler inputs and restored to the from-source sentinel on revert. Compute
-  // it before mutating `deno.json` below so the fingerprint reflects the
-  // committed compiler options.
-  const compileCacheVersion = await computeCompilerVersion(config.root);
-  await Deno.writeTextFile(
-    config.compileCacheVersionPath(),
-    renderVersionModule(compileCacheVersion),
-  );
 
   // Remove `compilerOptions.types`
   const manifest = config.manifest();
@@ -395,7 +361,7 @@ export async function prepareWorkspace(
   );
 }
 
-export async function revertWorkspace(config: BuildConfig): Promise<void> {
+async function revertWorkspace(config: BuildConfig): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
   const toolshedEnvPath = config.toolshedEnvPath();
 
@@ -405,39 +371,27 @@ export async function revertWorkspace(config: BuildConfig): Promise<void> {
     `${JSON.stringify(config.manifest(), null, 2)}\n`,
   );
 
-  // Restore the committed (from-source sentinel) compile-cache version module.
-  await Deno.writeTextFile(
-    config.compileCacheVersionPath(),
-    config.compileCacheVersionOriginal(),
-  );
-
   // Remove the COMPILED env file
   if ((await exists(toolshedEnvPath))) {
     await Deno.remove(toolshedEnvPath);
   }
 }
 
-// Only run the build when invoked directly (`deno task build-binaries`), not
-// when imported — tests import `BuildConfig` / `prepareWorkspace` /
-// `revertWorkspace` to exercise the workspace prep and revert against a
-// temporary tree.
-if (import.meta.main) {
-  const config = new BuildConfig({
-    root: Deno.cwd(),
-    toolshedFlags: [
-      "--allow-env",
-      "--allow-sys",
-      "--allow-read",
-      "--allow-ffi",
-      "--allow-net",
-      "--allow-write",
-    ],
-    cliOnly: Deno.args.includes("--cli-only"),
-  });
+const config = new BuildConfig({
+  root: Deno.cwd(),
+  toolshedFlags: [
+    "--allow-env",
+    "--allow-sys",
+    "--allow-read",
+    "--allow-ffi",
+    "--allow-net",
+    "--allow-write",
+  ],
+  cliOnly: Deno.args.includes("--cli-only"),
+});
 
-  Deno.addSignalListener("SIGINT", async () => {
-    await revertWorkspace(config);
-  });
+Deno.addSignalListener("SIGINT", async () => {
+  await revertWorkspace(config);
+});
 
-  await build(config);
-}
+await build(config);
