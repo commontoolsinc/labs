@@ -2567,6 +2567,85 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
       assertEquals(memberErrors(diagnostics).length, 1);
     },
   );
+
+  // A member named by a string literal is matched the same as an identifier
+  // name.
+  await t.step(
+    "flags a method whose name is a string literal",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal(`{ "read"() { return value?.token; } }`),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A member whose name is a non-static computed expression cannot be resolved
+  // to `toJSON`, so it takes the unstorable-method path.
+  await t.step(
+    "flags a method whose name is a computed expression",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ [1 + 1]() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A pattern with no inputs has no reactive roots, so a toJSON in its result
+  // reads nothing reactive and is allowed.
+  await t.step(
+    "allows a toJSON() in a pattern that has no inputs",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      export default pattern(() => {
+        return { v: 1, toJSON() { return { v: 1 }; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  // A toJSON that reads a reactive input through a `.get()` call is a reactive
+  // read and is flagged.
+  await t.step(
+    "flags a toJSON() that reads a reactive input via .get()",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { Cell, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Cell<Auth> }>(({ auth }) => {
+        return { toJSON() { return auth.get(); } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A toJSON body is walked past nested functions, and the reactive read it
+  // does contain is found even when it is not the last node in the body.
+  await t.step(
+    "flags a toJSON() with a nested function and a reactive read before more statements",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal(
+          "{ toJSON() { const f = () => 1; const a = value?.token; return { a, b: 1 }; } }",
+        ),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
