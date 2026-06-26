@@ -178,12 +178,6 @@ export function flatMap(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
-      // On a resume reconcile the container is durable (a flatMap that has run
-      // always persisted at least []); seeding [] here would write a stale
-      // basis that loses to the durable value on commit. Leave it for the
-      // defer-until-loaded guard below; a genuinely new flatMap (not resumed)
-      // still seeds [] so its first render has a value.
-      if (!elementAwaitSync) result.send([]);
       // Link this cell to the parent cell
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
@@ -268,6 +262,10 @@ export function flatMap(
       return;
     }
 
+    // A fresh (non-resume) reconcile has no container yet; seed [] so the first
+    // render has a value. On resume this is unreachable — the defer guard above
+    // either holds for the still-loading container or sees the durable value, so
+    // priorSlots is never undefined here.
     if (priorSlots === undefined) {
       resultWithLog.set([]);
     }
