@@ -20,13 +20,8 @@ export interface ChatMessage {
 const DEFAULT_MESSAGES: ChatMessage[] = [];
 const DEFAULT_NAME = "";
 
-type MessagesValue =
-  | ChatMessage[]
-  | Default<
-    ChatMessage[],
-    typeof DEFAULT_MESSAGES
-  >;
-type NameValue = string | Default<typeof DEFAULT_NAME>;
+type MessagesValue = Default<ChatMessage[], typeof DEFAULT_MESSAGES>;
+type NameValue = Default<typeof DEFAULT_NAME>;
 
 export type MessagesCell = Writable<MessagesValue>;
 export type NameCell = Writable<NameValue>;
