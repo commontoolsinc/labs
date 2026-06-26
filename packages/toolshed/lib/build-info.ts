@@ -2,8 +2,7 @@
 //
 // `tasks/build-binaries.ts` writes `packages/toolshed/COMPILED` and includes
 // it in the binary via `deno compile --include`. At runtime we read it
-// (synchronously, once) to surface the deployed commit on `/api/meta` and to
-// fingerprint the server-side compilation cache.
+// (synchronously, once) to surface the deployed commit on `/api/meta`.
 //
 // In non-compiled runs (e.g. `deno task production` from a checkout) the
 // file does not exist and `commitSha` is null — `resolveGitSha()` then
@@ -61,17 +60,15 @@ export function resolveGitShaFrom(
 }
 
 /**
- * Canonical git SHA for this server. Used by both `/api/meta` (to surface
- * the deployed commit) and `index.ts` (to fingerprint the compilation
- * cache), so the two stay in lockstep.
+ * Canonical git SHA for this server, surfaced on `/api/meta` to report
+ * the deployed commit.
  *
  * Precedence:
  *   1. `TOOLSHED_GIT_SHA` env var — operator attestation, useful for
  *      hot-patched binaries where you want to declare a different commit
  *      than what was compiled.
  *   2. SHA baked into the binary at build time (read above).
- *   3. `null` — caller decides what to do (the cache falls back to live
- *      git detection; `/api/meta` reports null).
+ *   3. `null` — `/api/meta` reports null.
  *
  * Empty / whitespace-only values at any level are treated as unset.
  */
