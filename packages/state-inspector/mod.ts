@@ -9,3 +9,4 @@ export * from "./db.ts";
 export * from "./decode.ts";
 export * from "./reconstruct.ts";
 export * from "./queries.ts";
+export * from "./multispace.ts";
