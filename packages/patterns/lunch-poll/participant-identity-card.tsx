@@ -213,13 +213,20 @@ export default pattern<
                 }}
               >
                 <cf-input
+                  id="lp-join-name"
                   $value={joinName}
                   placeholder="Your name…"
                   aria-label="Your name"
                   timing-strategy="immediate"
                   style="flex:1"
                 />
-                <cf-button onClick={() => boundJoin.send({})}>Join</cf-button>
+                <cf-button
+                  id="lp-join-button"
+                  aria-label="Join the poll"
+                  onClick={() => boundJoin.send({})}
+                >
+                  Join
+                </cf-button>
               </div>
             </div>
           )}
