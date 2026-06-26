@@ -677,8 +677,11 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/cf
-          mkdir -p test-results
-          DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          mkdir -p test-results coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }}
+          DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} \
+          CF_PATTERN_COVERAGE_DIR=coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }} \
+          CF_BINARY=./common-binaries/cf \
+          deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
       - name: 🧾 Write coverage report
         if: always()
@@ -689,7 +692,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-unit-${{ matrix.chunk }}
-          path: coverage/lcov/pattern-unit-${{ matrix.chunk }}.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 

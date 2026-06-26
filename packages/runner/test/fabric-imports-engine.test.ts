@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import { writeSourceDocs } from "../src/compilation-cache/cell-cache.ts";
 import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
@@ -315,6 +316,69 @@ describe("Engine fabric imports", () => {
       program.files,
     );
     expect(evaluated.main?.total()).toBe(4);
+  });
+
+  it("keeps mounted pattern coverage keys separate for matching stored filenames", async () => {
+    const first = await publish({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          `export const label = "first";`,
+          `export function value() {`,
+          `  return 10;`,
+          `}`,
+        ].join("\n"),
+      }],
+    });
+    const second = await publish({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          `export const label = "second";`,
+          `export function value() {`,
+          `  return 20;`,
+          `}`,
+        ].join("\n"),
+      }],
+    });
+    const firstPath = `${FABRIC_MOUNT_ROOT}${first.entryIdentity}/main.tsx`;
+    const secondPath = `${FABRIC_MOUNT_ROOT}${second.entryIdentity}/main.tsx`;
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          `import { value as firstValue } from "cf:pattern:${first.entryIdentity}";`,
+          `import { value as secondValue } from "cf:pattern:${second.entryIdentity}";`,
+          `export function total() {`,
+          `  return firstValue() + secondValue();`,
+          `}`,
+        ].join("\n"),
+      }],
+    };
+    const coverage = new PatternCoverageCollector();
+
+    const compiled = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+      patternCoverage: coverage,
+    });
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    expect(evaluated.main?.total()).toBe(30);
+
+    const filesByPath = new Map(
+      coverage.report().files.map((file) => [file.path, file]),
+    );
+    expect(filesByPath.has(firstPath)).toBe(true);
+    expect(filesByPath.has(secondPath)).toBe(true);
+    expect(filesByPath.get(firstPath)?.lines.runtime).toContain(3);
+    expect(filesByPath.get(secondPath)?.lines.runtime).toContain(3);
   });
 
   it("keeps old pins stable and changes importer identity when the pin text changes", async () => {

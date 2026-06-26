@@ -206,6 +206,9 @@ export type {
   DiagnosticInput,
   DiagnosticSeverity,
   FunctionCapabilitySummary,
+  PatternCoverageKind,
+  PatternCoverageOptions,
+  PatternCoverageSpan,
   ReactiveCapability,
   SchemaHint,
   SchemaHints,
@@ -216,6 +219,7 @@ export type {
 } from "./transformers.ts";
 export {
   HelpersOnlyTransformer,
+  PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   Transformer,
 } from "./transformers.ts";

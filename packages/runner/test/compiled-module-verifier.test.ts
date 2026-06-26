@@ -445,6 +445,125 @@ exports.default = build();
     expect(() => verify(body)).toThrow();
   });
 
+  it("accepts generated pattern coverage hits at module scope", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts generated pattern coverage hits with unparenthesized callees", () => {
+    const body = `
+globalThis.__cfPatternCoverage?.hit("/main.tsx", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("accepts generated pattern coverage hits with commas in filenames", () => {
+    const body = `
+globalThis.__cfPatternCoverage?.hit("/a,b.tsx", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("rejects coverage-looking hits with executable filename arguments", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx" + (() => {
+  throw new Error("ran");
+})() + "", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects coverage-looking hits with non-integer span ids", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx", 1 + 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects coverage-looking hits with the wrong callee", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.miss)("/main.tsx", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects coverage-looking hits with the wrong argument count", () => {
+    const oneArg = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx");
+exports.default = 42;
+`;
+    const threeArgs = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx", 1, true);
+exports.default = 42;
+`;
+
+    expect(() => verify(oneArg)).toThrow(
+      "unsupported top-level executable code",
+    );
+    expect(() => verify(threeArgs)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects coverage hits with trailing executable comma expressions", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx", 1), eval("x");
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects executable statements after generated coverage hits", () => {
+    const body = `
+(globalThis.__cfPatternCoverage?.hit)("/main.tsx", 1);eval("x");
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects a coverage callee split by Unicode whitespace", () => {
+    const nbsp = "\u00A0";
+    const body = `
+(globalThis.__cfPattern${nbsp}Coverage?.hit)("/main.tsx", 1);
+exports.default = 42;
+`;
+
+    expect(() => verify(body)).toThrow();
+    let v8Rejected = false;
+    try {
+      new Function(body);
+    } catch {
+      v8Rejected = true;
+    }
+    expect(v8Rejected).toBe(true);
+  });
+
   it("rejects compiled fragment mutation escape hatches at module scope", () => {
     const body = `
 function counter() {

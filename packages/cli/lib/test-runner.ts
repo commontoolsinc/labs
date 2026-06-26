@@ -26,7 +26,13 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { ConsoleMethod, Runtime } from "@commonfabric/runner";
+import {
+  ConsoleMethod,
+  PatternCoverageCollector,
+  patternCoverageOutputPath,
+  Runtime,
+  writePatternCoverageLcov,
+} from "@commonfabric/runner";
 import type {
   Cell,
   ConsoleHandler,
@@ -98,6 +104,12 @@ async function withPhase<T>(
     phaseLogger.timeEnd(...keys);
     performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
   }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error
+    ? error.stack || error.message || String(error)
+    : String(error);
 }
 
 /**
@@ -252,6 +264,8 @@ export interface TestRunnerOptions {
   storageStats?: boolean;
   /** Limit for storage timing/count tables when storageStats is enabled. */
   storageStatsLimit?: number;
+  /** Directory for pattern runtime coverage LCOV artifacts. */
+  patternCoverageDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -860,6 +874,10 @@ export async function runTestPattern(
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
+  const patternCoverage = options.patternCoverageDir
+    ? new PatternCoverageCollector()
+    : undefined;
+  let writeLocalPatternCoverage = patternCoverage !== undefined;
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
   // console event) and logger-level error/warn activity (channel 2: logger count
@@ -965,7 +983,7 @@ export async function runTestPattern(
     );
     const { main } = await withPhase(
       ["runTestPattern", "compile"],
-      () => engine.compileAndEvaluateModules(program),
+      () => engine.compileAndEvaluateModules(program, { patternCoverage }),
     );
 
     if (!main?.default) {
@@ -980,6 +998,7 @@ export async function runTestPattern(
     // runtime is only used for detection; the try/finally below disposes it).
     const multiUserMeta = multiUserDescriptorMeta(main.default);
     if (multiUserMeta) {
+      writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
         () => runMultiUserTestPattern(testPath, multiUserMeta, options),
@@ -1620,6 +1639,26 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    if (
+      patternCoverage && options.patternCoverageDir &&
+      writeLocalPatternCoverage
+    ) {
+      await withPhase(
+        ["runTestPattern", "coverage", "write"],
+        () =>
+          writePatternCoverageLcov(
+            patternCoverage,
+            patternCoverageOutputPath(options.patternCoverageDir!, testPath),
+            { root: options.root },
+          ),
+      ).catch((error) => {
+        console.error(
+          `[cf test] failed to write pattern coverage for ${testPath}: ${
+            formatError(error)
+          }`,
+        );
+      });
+    }
     // 6. Cleanup
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();

@@ -92,7 +92,7 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
-in this order (18 stages):
+in this order (19 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -111,7 +111,8 @@ in this order (18 stages):
 15. `ReactiveVariableForTransformer`
 16. `ModuleScopeShadowingTransformer`
 17. `ModuleScopeCfDataTransformer`
-18. `ModuleScopeFunctionHardeningTransformer`
+18. `PatternCoverageTransformer`
+19. `ModuleScopeFunctionHardeningTransformer`
 
 The order is behaviorally significant (invariant C-002). Two ordering facts
 worth calling out:
@@ -124,8 +125,12 @@ worth calling out:
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- The four module-scope stages (15–18) run last so they operate on fully lowered
-  and schema-injected output.
+- The final five stages (15–19) run last so they operate on fully lowered and
+  schema-injected output.
+- `PatternCoverageTransformer` (stage 18) does no work unless pattern runtime
+  coverage is enabled. When enabled, it runs before
+  `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
+  authored bodies before hardening helpers are emitted.
 
 ## 4. Global Modes
 

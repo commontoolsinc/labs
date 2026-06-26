@@ -1,3 +1,5 @@
+/// <reference lib="deno.unstable" />
+
 // Forbids bare `node.getText()` (called with no SourceFile argument) in the
 // transformer source.
 //
@@ -9,25 +11,45 @@
 //
 // Test files are exempt: they assert against source parsed in the test, whose
 // nodes always carry real positions, so `getText()` is safe and idiomatic there.
+interface LintContext {
+  readonly filename: string;
+  report(report: { node: unknown; message: string }): void;
+}
+
+interface LintCallExpression {
+  readonly callee: {
+    readonly type: string;
+    readonly computed?: boolean;
+    readonly property?: {
+      readonly type: string;
+      readonly name?: string;
+    };
+  };
+  readonly arguments: readonly unknown[];
+}
+
 export default {
   name: "cf-ts-transformers",
   rules: {
     "no-node-get-text": {
       create(context) {
-        if (context.filename.includes("/test/")) {
+        const localContext = context as unknown as LintContext;
+        if (localContext.filename.includes("/test/")) {
           return {};
         }
         return {
           CallExpression(node) {
-            const callee = node.callee;
+            const localNode = node as unknown as LintCallExpression;
+            const callee = localNode.callee;
             if (
               callee.type === "MemberExpression" &&
               !callee.computed &&
+              callee.property &&
               callee.property.type === "Identifier" &&
               callee.property.name === "getText" &&
-              node.arguments.length === 0
+              localNode.arguments.length === 0
             ) {
-              context.report({
+              localContext.report({
                 node,
                 message:
                   "Bare node.getText() throws on synthetic AST nodes. Use " +

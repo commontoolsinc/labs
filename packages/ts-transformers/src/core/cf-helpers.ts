@@ -7,6 +7,9 @@ const CF_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
+// Runner pattern coverage line remapping treats this helper import as a
+// one-line prelude. Changes to its line count need a matching update in
+// patternCoverageOptionsForCompile.
 const HELPERS_STMT =
   `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
 const CF_DATA_HELPER_STMT =

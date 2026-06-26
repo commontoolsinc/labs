@@ -58,6 +58,28 @@ export interface FunctionCapabilitySummary {
   readonly recursive?: boolean;
 }
 
+export type PatternCoverageKind = "runtime";
+
+export const PATTERN_COVERAGE_GLOBAL = "__cfPatternCoverage";
+
+export interface PatternCoverageSpan {
+  readonly fileName: string;
+  readonly id: number;
+  readonly kind: PatternCoverageKind;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly startColumn: number;
+  readonly endColumn: number;
+}
+
+export interface PatternCoverageOptions {
+  readonly fileName?: (sourceFileName: string) => string;
+  readonly mapSpan?: (
+    span: PatternCoverageSpan,
+  ) => PatternCoverageSpan | undefined;
+  readonly registerSpan: (span: PatternCoverageSpan) => void;
+}
+
 /**
  * Registry for passing schema hints between transformer stages.
  * Keyed by TypeNode (unique per usage) to avoid conflicts when the same
@@ -81,6 +103,7 @@ export interface TransformationOptions {
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
+  readonly patternCoverage?: PatternCoverageOptions;
 }
 
 export type DiagnosticSeverity = "error" | "warning";

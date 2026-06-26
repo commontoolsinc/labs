@@ -840,11 +840,10 @@ export function parseStringLiteralValue(
   start: number,
   end: number,
 ): string {
-  const trimmed = trimRange(source, start, end);
-  const quote = source[trimmed.start];
-  if ((quote !== "'" && quote !== '"') || source[trimmed.end - 1] !== quote) {
+  const trimmed = exactStringLiteralRange(source, start, end);
+  if (!trimmed) {
     throw new CompiledJsParseError(
-      trimmed.start,
+      trimRange(source, start, end).start,
       "Expected a string literal",
     );
   }
@@ -868,6 +867,32 @@ export function parseStringLiteralValue(
     }
   }
   return source.slice(trimmed.start + 1, trimmed.end - 1);
+}
+
+export function isStringLiteralRange(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  return exactStringLiteralRange(source, start, end) !== undefined;
+}
+
+function exactStringLiteralRange(
+  source: string,
+  start: number,
+  end: number,
+): SourceRange | undefined {
+  try {
+    const literalStart = skipTrivia(source, start, end);
+    const quoteCode = source.charCodeAt(literalStart);
+    if (quoteCode !== 34 && quoteCode !== 39) return undefined;
+    const literalEnd = scanStringLiteral(source, literalStart, quoteCode, end);
+    return skipTrivia(source, literalEnd, end) === end
+      ? { start: literalStart, end: literalEnd }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function tryParseCallExpression(

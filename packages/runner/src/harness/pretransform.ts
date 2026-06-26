@@ -93,96 +93,186 @@ function normalizeMixedModuleImports(source: string): string {
     true,
     ts.ScriptKind.TSX,
   );
-  let changed = false;
-  const statements = sourceFile.statements.flatMap((statement) => {
+  const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+  const replacements: { start: number; end: number; text: string }[] = [];
+
+  for (const statement of sourceFile.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
       !statement.importClause ||
       !statement.importClause.namedBindings ||
       !ts.isNamedImports(statement.importClause.namedBindings)
     ) {
-      return [statement];
+      continue;
     }
 
     const { importClause } = statement;
-    const namedBindings = importClause.namedBindings;
-    if (!namedBindings || !ts.isNamedImports(namedBindings)) {
-      return [statement];
-    }
+    const namedBindings = importClause.namedBindings as ts.NamedImports;
 
+    let rewrittenStatements: ts.ImportDeclaration[] | undefined;
     if (importClause.name) {
-      changed = true;
-      return [
+      rewrittenStatements = [
         ts.factory.createImportDeclaration(
           statement.modifiers,
           ts.factory.createImportClause(
             importClause.isTypeOnly,
-            importClause.name,
+            ts.factory.createIdentifier(importClause.name.text),
             undefined,
           ),
-          statement.moduleSpecifier,
-          statement.attributes,
+          cloneModuleSpecifier(statement.moduleSpecifier),
+          cloneImportAttributes(statement.attributes, sourceFile),
         ),
         ts.factory.createImportDeclaration(
           statement.modifiers,
           ts.factory.createImportClause(
             importClause.isTypeOnly,
             undefined,
-            namedBindings,
+            cloneNamedImports(namedBindings, sourceFile),
           ),
-          statement.moduleSpecifier,
-          statement.attributes,
+          cloneModuleSpecifier(statement.moduleSpecifier),
+          cloneImportAttributes(statement.attributes, sourceFile),
         ),
       ];
-    }
+    } else {
+      const defaultSpecifier = namedBindings.elements.find((
+        element,
+      ) => element.propertyName?.text === "default");
+      if (!defaultSpecifier) {
+        continue;
+      }
 
-    const defaultSpecifier = namedBindings.elements.find((
-      element,
-    ) => element.propertyName?.text === "default");
-    if (!defaultSpecifier) {
-      return [statement];
-    }
-
-    changed = true;
-    const remainingElements = namedBindings.elements.filter((
-      element,
-    ) => element !== defaultSpecifier);
-    const rewrittenStatements = [
-      ts.factory.createImportDeclaration(
-        statement.modifiers,
-        ts.factory.createImportClause(
-          importClause.isTypeOnly || defaultSpecifier.isTypeOnly,
-          defaultSpecifier.name,
-          undefined,
-        ),
-        statement.moduleSpecifier,
-        statement.attributes,
-      ),
-    ];
-
-    if (remainingElements.length > 0) {
-      rewrittenStatements.push(
+      const remainingElements = namedBindings.elements.filter((
+        element,
+      ) => element !== defaultSpecifier);
+      rewrittenStatements = [
         ts.factory.createImportDeclaration(
           statement.modifiers,
           ts.factory.createImportClause(
-            importClause.isTypeOnly,
+            importClause.isTypeOnly || defaultSpecifier.isTypeOnly,
+            ts.factory.createIdentifier(defaultSpecifier.name.text),
             undefined,
-            ts.factory.createNamedImports(remainingElements),
           ),
-          statement.moduleSpecifier,
-          statement.attributes,
+          cloneModuleSpecifier(statement.moduleSpecifier),
+          cloneImportAttributes(statement.attributes, sourceFile),
         ),
-      );
+      ];
+
+      if (remainingElements.length > 0) {
+        rewrittenStatements.push(
+          ts.factory.createImportDeclaration(
+            statement.modifiers,
+            ts.factory.createImportClause(
+              importClause.isTypeOnly,
+              undefined,
+              cloneNamedImportsFromElements(remainingElements, sourceFile),
+            ),
+            cloneModuleSpecifier(statement.moduleSpecifier),
+            cloneImportAttributes(statement.attributes, sourceFile),
+          ),
+        );
+      }
     }
 
-    return rewrittenStatements;
-  });
-
-  if (!changed) {
-    return source;
+    const start = statement.getStart(sourceFile);
+    const end = statement.getEnd();
+    replacements.push({
+      start,
+      end,
+      text: preserveLineCount(
+        source.slice(start, end),
+        rewrittenStatements.map((entry) =>
+          printer.printNode(ts.EmitHint.Unspecified, entry, sourceFile)
+        ).join(" "),
+      ),
+    });
   }
 
-  return ts.createPrinter({
-    newLine: ts.NewLineKind.LineFeed,
-  }).printFile(ts.factory.updateSourceFile(sourceFile, statements));
+  if (replacements.length === 0) return source;
+
+  let out = source;
+  for (const replacement of [...replacements].reverse()) {
+    out = out.slice(0, replacement.start) + replacement.text +
+      out.slice(replacement.end);
+  }
+  return out;
+}
+
+function cloneModuleSpecifier(moduleSpecifier: ts.Expression): ts.Expression {
+  return ts.isStringLiteral(moduleSpecifier)
+    ? ts.factory.createStringLiteral(moduleSpecifier.text)
+    : moduleSpecifier;
+}
+
+function cloneImportAttributes(
+  attributes: ts.ImportAttributes | undefined,
+  sourceFile: ts.SourceFile,
+): ts.ImportAttributes | undefined {
+  if (!attributes) return undefined;
+  const cloned = ts.factory.createImportAttributes(
+    ts.factory.createNodeArray(
+      attributes.elements.map((element) =>
+        ts.factory.createImportAttribute(
+          cloneModuleExportName(element.name, sourceFile),
+          cloneImportAttributeValue(element.value),
+        )
+      ),
+    ),
+    false,
+  );
+  return Object.assign(cloned, { token: attributes.token });
+}
+
+function cloneNamedImports(
+  namedImports: ts.NamedImports,
+  sourceFile: ts.SourceFile,
+): ts.NamedImports {
+  return cloneNamedImportsFromElements(namedImports.elements, sourceFile);
+}
+
+function cloneNamedImportsFromElements(
+  elements: readonly ts.ImportSpecifier[],
+  sourceFile: ts.SourceFile,
+): ts.NamedImports {
+  return ts.factory.createNamedImports(
+    elements.map((element) =>
+      ts.factory.createImportSpecifier(
+        element.isTypeOnly,
+        element.propertyName
+          ? cloneModuleExportName(element.propertyName, sourceFile)
+          : undefined,
+        ts.factory.createIdentifier(element.name.text),
+      )
+    ),
+  );
+}
+
+function cloneModuleExportName(
+  name: ts.ModuleExportName,
+  sourceFile: ts.SourceFile,
+): ts.ModuleExportName {
+  return ts.isIdentifier(name)
+    ? ts.factory.createIdentifier(name.text)
+    : ts.factory.createStringLiteral(name.text ?? name.getText(sourceFile));
+}
+
+function cloneImportAttributeValue(value: ts.Expression): ts.Expression {
+  if (ts.isStringLiteral(value)) {
+    return ts.factory.createStringLiteral(value.text);
+  }
+  return value;
+}
+
+export function preserveLineCount(
+  original: string,
+  replacement: string,
+): string {
+  const originalLineCount = original.split(/\r\n|\r|\n/).length;
+  const replacementLineCount = replacement.split(/\r\n|\r|\n/).length;
+  if (replacementLineCount > originalLineCount) {
+    throw new Error(
+      `Import rewrite expanded from ${originalLineCount} to ${replacementLineCount} lines`,
+    );
+  }
+  return replacement +
+    "\n".repeat(originalLineCount - replacementLineCount);
 }

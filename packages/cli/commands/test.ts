@@ -65,6 +65,10 @@ export const test = new Command()
     "Maximum number of storage timing/count entries to print with --storage-stats.",
     { default: 16 },
   )
+  .option(
+    "--pattern-coverage-dir <dir:string>",
+    "Write pattern runtime coverage LCOV artifacts to this directory.",
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -123,6 +127,11 @@ export const test = new Command()
 
     // Resolve root path if provided
     const root = options.root ? resolve(Deno.cwd(), options.root) : undefined;
+    const patternCoverageDir = options.patternCoverageDir
+      ? resolve(Deno.cwd(), options.patternCoverageDir)
+      : Deno.env.get("CF_PATTERN_COVERAGE_DIR")
+      ? resolve(Deno.cwd(), Deno.env.get("CF_PATTERN_COVERAGE_DIR")!)
+      : undefined;
     const statsInclude = options.statsInclude
       ? String(options.statsInclude)
         .split(",")
@@ -140,6 +149,7 @@ export const test = new Command()
       statsActionLimit: options.statsActionLimit,
       storageStats: options.storageStats,
       storageStatsLimit: options.storageStatsLimit,
+      patternCoverageDir,
     });
 
     // Exit with error code if any tests failed
