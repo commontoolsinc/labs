@@ -1,22 +1,29 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { NAME, UI } from "commonfabric";
-import PicoChat from "./main.tsx";
+import PicoChat, { groupMessages } from "./main.tsx";
 
-Deno.test("pico chat sends trimmed messages from a named user", () => {
+Deno.test("emo chat sends trimmed messages from a named user", () => {
   const subject = PicoChat({
     messages: [],
     name: " Alex ",
   });
 
-  assertEquals(subject[NAME], "Pico chat");
+  assertEquals(subject[NAME], "Emo chat");
   assertExists(subject[UI]);
   assertEquals(subject.messages.get(), []);
 
   subject.send.send({ detail: { message: " Hello " } });
-  assertEquals(subject.messages.get(), [{ from: "Alex", body: "Hello" }]);
+  assertEquals(
+    subject.messages.get().map(({ from, body, reactions }) => ({
+      from,
+      body,
+      reactions,
+    })),
+    [{ from: "Alex", body: "Hello", reactions: [] }],
+  );
 });
 
-Deno.test("pico chat renders existing messages", () => {
+Deno.test("emo chat renders existing messages", () => {
   const subject = PicoChat({
     messages: [{ from: "Robin", body: "Already here" }],
     name: "Alex",
@@ -29,7 +36,138 @@ Deno.test("pico chat renders existing messages", () => {
   }]);
 });
 
-Deno.test("pico chat ignores blank names and messages", () => {
+Deno.test("emo chat groups sequential messages from the same user", () => {
+  const subject = PicoChat({
+    messages: [],
+    name: "Alex",
+  });
+
+  subject.send.send({ detail: { message: "First" } });
+  subject.send.send({ detail: { message: "Second" } });
+
+  const groups = groupMessages(subject.messages.get());
+  assertEquals(groups.length, 1);
+  assertEquals(
+    groups[0].messages.map((message) => message.body),
+    ["First", "Second"],
+  );
+});
+
+Deno.test("emo chat starts a new group when the sender changes", () => {
+  const alex = PicoChat({
+    messages: [],
+    name: "Alex",
+  });
+  alex.send.send({ detail: { message: "Hello" } });
+
+  const mary = PicoChat({
+    messages: alex.messages,
+    name: "Mary",
+  });
+  mary.send.send({ detail: { message: "Hi" } });
+
+  assertEquals(groupMessages(alex.messages.get()).map((group) => group.from), [
+    "Alex",
+    "Mary",
+  ]);
+});
+
+Deno.test("emo chat groups legacy same-name messages without cell links", () => {
+  const groups = groupMessages([
+    { from: "Robin", body: "First" },
+    { from: "Robin", body: "Second" },
+  ]);
+
+  assertEquals(groups.length, 1);
+  assertEquals(groups[0].messages.map((message) => message.body), [
+    "First",
+    "Second",
+  ]);
+});
+
+Deno.test("emo chat lets another named user toggle emoji reactions", () => {
+  const author = PicoChat({
+    messages: [],
+    name: "Tony",
+  });
+  author.send.send({ detail: { message: "Reactable" } });
+
+  const reactor = PicoChat({
+    messages: author.messages,
+    name: "Alex",
+  });
+
+  reactor.react.send({ messageIndex: 0, emoji: "👍" });
+  assertEquals(
+    author.messages.get()[0].reactions?.map(({ emoji, byName }) => ({
+      emoji,
+      byName,
+    })),
+    [{ emoji: "👍", byName: "Alex" }],
+  );
+
+  reactor.react.send({ messageIndex: 0, emoji: "👍" });
+  assertEquals(author.messages.get()[0].reactions, []);
+});
+
+Deno.test("emo chat ignores invalid reaction attempts", () => {
+  const subject = PicoChat({
+    messages: [],
+    name: "Alex",
+  });
+  subject.send.send({ detail: { message: "Valid" } });
+
+  subject.react.send({ messageIndex: 0, emoji: "   " });
+  subject.react.send({ messageIndex: -1, emoji: "👍" });
+  subject.react.send({ messageIndex: 99, emoji: "👍" });
+  subject.react.send({ messageIndex: 0.5, emoji: "👍" });
+
+  const emptyNameSubject = PicoChat({
+    messages: subject.messages,
+    name: " ",
+  });
+  emptyNameSubject.react.send({ messageIndex: 0, emoji: "👍" });
+
+  assertEquals(subject.messages.get()[0].reactions, []);
+});
+
+Deno.test("emo chat prevents reactions to own display-name messages", () => {
+  const firstAlex = PicoChat({
+    messages: [],
+    name: "Alex",
+  });
+  firstAlex.send.send({ detail: { message: "Same names" } });
+  const [message] = firstAlex.messages.get();
+
+  const secondAlex = PicoChat({
+    messages: firstAlex.messages,
+    name: "Alex",
+  });
+
+  firstAlex.react.send({ messageIndex: 0, emoji: "❤️" });
+  secondAlex.react.send({ messageIndex: 0, emoji: "❤️" });
+
+  assertEquals(message.reactions, []);
+});
+
+Deno.test("emo chat lets authors remove legacy own reactions", () => {
+  const subject = PicoChat({
+    messages: [{
+      from: "Alex",
+      body: "Old self reaction",
+      reactions: [{ emoji: "❤️", byName: "Alex" }],
+    }],
+    name: "Alex",
+  });
+
+  subject.react.send({ messageIndex: 0, emoji: "❤️" });
+  assertEquals(subject.messages.get()[0].reactions, []);
+
+  subject.react.send({ messageIndex: 0, emoji: "👍" });
+  assertEquals(subject.messages.get()[0].reactions, []);
+});
+
+Deno.test("emo chat ignores blank names and messages", () => {
   const emptyNameSubject = PicoChat({
     messages: [],
     name: " ",

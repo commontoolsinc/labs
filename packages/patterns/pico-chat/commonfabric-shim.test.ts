@@ -32,6 +32,10 @@ export class TestWritable<T> {
     this.#value.push(value);
   }
 
+  key<K extends keyof NonNullable<T>>(key: K): TestWritable<NonNullable<T>[K]> {
+    return new TestKeyWritable(this, key);
+  }
+
   get length(): number {
     return Array.isArray(this.#value) ? this.#value.length : 0;
   }
@@ -42,6 +46,31 @@ export class TestWritable<T> {
     }
 
     return this.#value[Symbol.iterator]();
+  }
+}
+
+class TestKeyWritable<T, K extends keyof NonNullable<T>>
+  extends TestWritable<NonNullable<T>[K]> {
+  #parent: TestWritable<T>;
+  #key: K;
+
+  constructor(parent: TestWritable<T>, key: K) {
+    super((parent.get() as NonNullable<T>)?.[key]);
+    this.#parent = parent;
+    this.#key = key;
+  }
+
+  override get(): NonNullable<T>[K] {
+    return (this.#parent.get() as NonNullable<T>)?.[this.#key];
+  }
+
+  override set(value: NonNullable<T>[K]): void {
+    const parentValue = this.#parent.get();
+    if (typeof parentValue !== "object" || parentValue === null) {
+      throw new TypeError("Cannot set a key on a non-object cell");
+    }
+
+    (parentValue as NonNullable<T>)[this.#key] = value;
   }
 }
 
@@ -75,6 +104,10 @@ function wrapInput<T extends Record<string, unknown>>(input: T): T {
 
 export function computed<T>(fn: () => T): T {
   return fn();
+}
+
+export function equals(left: unknown, right: unknown): boolean {
+  return left === right;
 }
 
 export function handler<Event, State>(
