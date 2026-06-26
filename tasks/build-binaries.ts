@@ -187,9 +187,7 @@ async function buildShell(config: BuildConfig): Promise<void> {
       },
     }).output();
     if (!success) {
-      console.error("Failed to build shell app");
-      Deno.exit(1);
-      return;
+      throw new Error("Failed to build shell app");
     }
 
     // Shell now serves at root path
@@ -238,8 +236,7 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build toolshed binary");
-    Deno.exit(1);
+    throw new Error("Failed to build toolshed binary");
   }
   console.log("Toolshed binary built successfully");
 }
@@ -269,8 +266,7 @@ async function buildBgPieceService(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build background piece service binary");
-    Deno.exit(1);
+    throw new Error("Failed to build background piece service binary");
   }
   console.log("Background piece service binary built successfully");
 }
@@ -337,8 +333,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build CLI binary");
-    Deno.exit(1);
+    throw new Error("Failed to build CLI binary");
   }
   console.log("CLI binary built successfully");
 }
