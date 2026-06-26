@@ -103,6 +103,8 @@ deno task cf inspect spaces
 
 # single space (DID-prefix resolves via discovery)
 deno task cf inspect summary  z6Mkqa41
+deno task cf inspect entities z6Mkqa41           # what's in here: modules/instances/cells
+deno task cf inspect entities z6Mkqa41 --kind instance
 deno task cf inspect hot      z6Mkqa41 --limit 10
 deno task cf inspect commits  z6Mkqa41 --limit 20
 deno task cf inspect history  z6Mkqa41 of:fid1:…

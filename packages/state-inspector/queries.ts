@@ -4,10 +4,14 @@
 
 import type { CommitRow, SpaceDb } from "./db.ts";
 import { hasSchedulerTables } from "./db.ts";
+import { countLinks, decodeStored, summarize } from "./decode.ts";
+import { reconstructDocument } from "./reconstruct.ts";
 
 export interface SpaceSummary {
   path: string;
   hasSchedulerTables: boolean;
+  /** Persisted scheduler observation rows (0 even when the tables exist empty). */
+  schedulerObservations: number;
   commits: number;
   commitSeqRange: [number, number] | null;
   sessions: number;
@@ -40,9 +44,21 @@ export function summarizeSpace(space: SpaceDb): SpaceSummary {
     )
     .all<{ scope_key: string; count: number }>();
 
+  const hasSched = hasSchedulerTables(db);
+  let schedulerObservations = 0;
+  if (hasSched) {
+    try {
+      schedulerObservations =
+        one<{ n: number }>(`SELECT count(*) n FROM scheduler_observation`).n;
+    } catch {
+      schedulerObservations = 0;
+    }
+  }
+
   return {
     path: space.path,
-    hasSchedulerTables: hasSchedulerTables(db),
+    hasSchedulerTables: hasSched,
+    schedulerObservations,
     commits: commitAgg.n,
     commitSeqRange: commitAgg.lo === null ? null : [commitAgg.lo, commitAgg.hi!],
     sessions: commitAgg.s,
@@ -83,7 +99,11 @@ export function listCommits(
     let ops = 0;
     let reads = 0;
     try {
-      const parsed = JSON.parse(r.original);
+      // `original` is a ClientCommit, stored either fvj1-encoded or as plain JSON.
+      const parsed = decodeStored(r.original) as {
+        operations?: unknown[];
+        reads?: { confirmed?: unknown[]; pending?: unknown[] };
+      };
       ops = Array.isArray(parsed.operations) ? parsed.operations.length : 0;
       reads = (parsed.reads?.confirmed?.length ?? 0) +
         (parsed.reads?.pending?.length ?? 0);
@@ -181,4 +201,88 @@ export function hotEntities(
       writes: r.writes,
       sessions: r.sessions,
     }));
+}
+
+export type EntityKind = "module" | "instance" | "stream" | "value" | "empty";
+
+export interface EntityInfo {
+  id: string;
+  scope: string;
+  kind: EntityKind;
+  /** Human label: module filename, instance $NAME, or a value summary. */
+  name: string;
+  revisions: number;
+  links: number;
+}
+
+function classifyValue(value: unknown): { kind: EntityKind; name: string } {
+  if (value === undefined) return { kind: "empty", name: "(absent)" };
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const o = value as Record<string, unknown>;
+    // Module/program entity: carries source + filename.
+    if (typeof o.code === "string" && typeof o.filename === "string") {
+      const file = (o.filename as string).split("/").pop() ?? o.filename;
+      return { kind: "module", name: `module:${file}` };
+    }
+    // Pattern instance: has a resolved $NAME, or instance markers.
+    const named = typeof o.$NAME === "string" ? (o.$NAME as string) : undefined;
+    if (named || "$TYPE" in o || "resultRef" in o || "argument" in o) {
+      return { kind: "instance", name: named ?? "(instance)" };
+    }
+    if ((o as { $stream?: unknown }).$stream === true) {
+      return { kind: "stream", name: "(stream)" };
+    }
+  }
+  return { kind: "value", name: summarize(value) };
+}
+
+/**
+ * List the entities in a space with a derived kind + label — the "what is in
+ * this space?" view. Reconstructs each entity's head document (cheap for typical
+ * spaces; bounded by `limit`). Sorted modules → instances → streams → values.
+ */
+export function listEntities(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; limit?: number } = {},
+): EntityInfo[] {
+  const branch = opts.branch ?? "";
+  const scope = opts.scope ?? "space";
+  const limit = opts.limit ?? 2000;
+  const rows = space.db
+    .prepare(
+      `SELECT id, count(*) revisions FROM revision
+       WHERE branch = ? AND scope_key = ?
+       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
+    )
+    .all<{ id: string; revisions: number }>(branch, scope, limit);
+
+  const order: Record<EntityKind, number> = {
+    module: 0,
+    instance: 1,
+    stream: 2,
+    value: 3,
+    empty: 4,
+  };
+  return rows
+    .map((r): EntityInfo => {
+      let value: unknown;
+      let name = "(undecodable)";
+      let kind: EntityKind = "value";
+      try {
+        const doc = reconstructDocument(space, { id: r.id, branch, scope });
+        value = doc?.value;
+        ({ kind, name } = classifyValue(value));
+      } catch (e) {
+        name = `(error: ${(e as Error).message.slice(0, 40)})`;
+      }
+      return {
+        id: r.id,
+        scope,
+        kind,
+        name,
+        revisions: r.revisions,
+        links: countLinks(value),
+      };
+    })
+    .sort((a, b) => order[a.kind] - order[b.kind] || b.revisions - a.revisions);
 }

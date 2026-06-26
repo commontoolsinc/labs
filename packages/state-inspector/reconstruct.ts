@@ -20,19 +20,9 @@
 import { applyPatch } from "@commonfabric/memory/v2/patch";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
-import { valueFromJson } from "@commonfabric/data-model/codec-json";
 
 import type { SpaceDb } from "./db.ts";
-
-// Stored values come in TWO at-rest formats, both seen in real DBs:
-//   - modern: an `fvj1:`-prefixed codec-json envelope (decode via valueFromJson;
-//     embedded links are `/quote`-escaped literals, so a context-less decode is
-//     inert and does not try to reconstruct live cells)
-//   - legacy: plain JSON with inline sigil links
-// Route by the format tag.
-function decodeStored(data: string): unknown {
-  return data.startsWith("fvj1:") ? valueFromJson(data) : JSON.parse(data);
-}
+import { decodeStored } from "./decode.ts";
 
 export interface EntityAddress {
   id: string;

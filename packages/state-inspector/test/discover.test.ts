@@ -55,14 +55,14 @@ Deno.test("discovery + resolution", async (t) => {
     await Deno.writeTextFile(`${engine}/${DID_1}.sqlite-wal`, "");
 
     await t.step("discovers both DBs by walking the cache base", () => {
-      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`] });
+      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`], cwd: dir });
       assertEquals(found.length, 2);
       assertEquals(new Set(found.map((s) => s.did)), new Set([DID_1, DID_2]));
       assert(found.every((s) => s.sizeBytes > 0));
     });
 
     await t.step("resolveSpacePath matches by DID prefix", () => {
-      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`] });
+      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`], cwd: dir });
       const path = resolveSpacePath("zAlpha", found);
       assert(path.endsWith(`${DID_1}.sqlite`));
     });
@@ -73,7 +73,7 @@ Deno.test("discovery + resolution", async (t) => {
     });
 
     await t.step("ambiguous prefix throws", () => {
-      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`] });
+      const found = discoverSpaceDbs({ dirs: [`${dir}/cache/memory`], cwd: dir });
       assertThrows(() => resolveSpacePath("did:key:z", found), Error, "ambiguous");
     });
 

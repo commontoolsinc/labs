@@ -1,17 +1,23 @@
 // Decoding stored Fabric values into an inspectable form.
 //
-// Reality check (verified against real space DBs, 2026-06-26): today's stored
-// `revision.data` is plain JSON with inline *sigil links* of the legacy form
-//   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
-// entity references of the form
-//   { "/": "of:baedrei…" }   (or { "/": "fid1:…" } in modern cell-rep)
-// and streams of the form
-//   { "$stream": true }
-//
-// So decoding for current DBs is pure JSON walking + recognition — no live
-// runtime/Cell needed. The modern `fvj1:`-prefixed codec-json envelope
-// (@commonfabric/data-model/codec-json) is NOT what lands in these rows; if we
-// later meet it we can plug `valueFromJson` in at the leaves.
+// Stored payloads (`revision.data`, `commit.original`, …) come in TWO at-rest
+// formats, BOTH seen in real DBs:
+//   - modern: an `fvj1:`-prefixed codec-json envelope (decode via valueFromJson)
+//   - legacy: plain JSON
+// In both, links/refs/streams appear as plain-data sigils:
+//   link   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
+//   ref    { "/": "of:…" | "fid1:…" }
+//   stream { "$stream": true }
+// `decodeStored()` routes by the `fvj1:` tag; everything else here is pure JSON
+// walking + recognition (no live runtime/Cell needed). In the fvj1 form embedded
+// links are `/quote`-escaped literals, so a context-less decode is inert.
+
+import { valueFromJson } from "@commonfabric/data-model/codec-json";
+
+/** Decode a stored payload string, routing the `fvj1:` codec envelope. */
+export function decodeStored(data: string): unknown {
+  return data.startsWith("fvj1:") ? valueFromJson(data) : JSON.parse(data);
+}
 
 export interface DecodedLink {
   id?: string;

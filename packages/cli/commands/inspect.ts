@@ -20,6 +20,7 @@ import {
   getValueAt,
   hotEntities,
   listCommits,
+  listEntities,
   listSqliteFiles,
   openSpace,
   openSpaces,
@@ -43,6 +44,19 @@ function out(json: boolean, data: unknown, render: () => void): void {
 
 function splitPath(p?: string): string[] {
   return p ? p.split("/").filter(Boolean) : [];
+}
+
+// Session ids look like `session:did:key:<space>:<uuid>` (often %-encoded).
+// Surface the short space DID + uuid head instead of a uniform truncation.
+function fmtSession(s: string): string {
+  const decoded = decodeURIComponent(s);
+  const m = decoded.match(/^session:(did:key:)?([^:]+):([0-9a-f-]+)/i);
+  if (m) {
+    const did = m[2];
+    const short = did.length > 12 ? `${did.slice(0, 6)}…${did.slice(-4)}` : did;
+    return `${short}/${m[3].slice(0, 8)}`;
+  }
+  return decoded.length > 22 ? `${decoded.slice(0, 21)}…` : decoded;
 }
 
 // Resolve --all / --spaces / --dir into open spaces; caller must close them.
@@ -141,7 +155,15 @@ export const inspect = new Command()
         console.log(
           `branches: ${sum.branches.map((b) => `${b.name || "(default)"}@${b.head_seq}`).join(" ")}`,
         );
-        console.log(`scheduler tables: ${sum.hasSchedulerTables ? "yes" : "no"}`);
+        console.log(
+          `scheduler: ${
+            !sum.hasSchedulerTables
+              ? "absent"
+              : sum.schedulerObservations > 0
+              ? `${sum.schedulerObservations} observations`
+              : "tables present, empty (persistentSchedulerState off)"
+          }`,
+        );
       });
     } finally {
       s.close();
@@ -158,7 +180,7 @@ export const inspect = new Command()
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
-            `#${r.seq}\t${r.session.slice(0, 14)}\tlocal=${r.localSeq}\tops=${r.ops}\treads=${r.reads}\t${r.createdAt}`,
+            `#${r.seq}\t${fmtSession(r.session)}\tlocal=${r.localSeq}\tops=${r.ops}\treads=${r.reads}\t${r.createdAt}`,
           );
         }
       });
@@ -183,6 +205,38 @@ export const inspect = new Command()
       s.close();
     }
   })
+  /* inspect entities */
+  .command("entities <space:string>", "What's in the space: entities by kind + name.")
+  .option("--kind <kind:string>", "Filter: module | instance | stream | value | empty.")
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--limit <n:number>", "Max entities to reconstruct.", { default: 2000 })
+  .action((options, space) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      let rows = listEntities(s, { limit: options.limit, branch: options.branch });
+      if (options.kind) rows = rows.filter((r) => r.kind === options.kind);
+      out(!!options.json, rows, () => {
+        if (rows.length === 0) {
+          console.log("(no entities)");
+          return;
+        }
+        console.log(
+          Table.from([
+            ["KIND", "NAME", "REVS", "LINKS", "ID"],
+            ...rows.map((r) => [
+              r.kind,
+              r.name.length > 40 ? `${r.name.slice(0, 39)}…` : r.name,
+              String(r.revisions),
+              String(r.links),
+              r.id,
+            ]),
+          ]).toString(),
+        );
+      });
+    } finally {
+      s.close();
+    }
+  })
   /* inspect history */
   .command("history <space:string> <entity:string>", "Every write that touched an entity.")
   .option("--scope <scope:string>", "Scope key (default: space).")
@@ -200,7 +254,7 @@ export const inspect = new Command()
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
-            `seq=${r.seq}\tcommit=${r.commitSeq}\t${r.op}\t${r.session.slice(0, 14)}\tlocal=${r.localSeq}\t${r.createdAt}`,
+            `seq=${r.seq}\tcommit=${r.commitSeq}\t${r.op}\t${fmtSession(r.session)}\tlocal=${r.localSeq}\t${r.createdAt}`,
           );
         }
       });
@@ -269,7 +323,7 @@ export const inspect = new Command()
           }
           const cluster = r.clusters.findIndex((c) => c.valueKey === v.valueKey) + 1;
           console.log(
-            `  ${v.label}\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${(v.lastSession ?? "?").slice(0, 14)}\tcluster#${cluster}`,
+            `  ${v.label}\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${v.lastSession ? fmtSession(v.lastSession) : "?"}\tcluster#${cluster}`,
           );
         }
         console.log(`note: ${r.caveat}`);
