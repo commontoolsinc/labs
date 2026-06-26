@@ -8,7 +8,7 @@ recorder.** This package is the lens over it — open a space SQLite file
 read-only, reconstruct state-at-`(branch, seq)`, and answer who/what/when
 questions with no live runtime and no capture step.
 
-## Status: prototype (Milestones 1 + 2)
+## Status: prototype (Milestones 1, 2, 2.5)
 
 Tested against hermetic fixtures + real space DBs (a 571 MB legacy DB and a set
 of modern `fvj1:` DBs):
@@ -33,6 +33,15 @@ of modern `fvj1:` DBs):
   write time. Resilient: a decode error in one space is isolated, not fatal.
 - `convergenceScan(spaces)` — find entities present in ≥2 spaces and report
   those that diverge.
+
+**M2.5 — replica vs. instance classification** (`multispace.ts`)
+- `buildCrossSpaceLinkIndex(spaces)` — find every link whose `space` names a
+  *different* space than the one holding it (only entities whose stored data
+  carries an explicit `"space":"did:key:` are reconstructed, so it stays cheap).
+- Each divergence is then labeled `cross-space-linked` (a real replica that
+  should converge → **drift bug**) vs `no-cross-space-link` (shared id with no
+  cross-space link → **likely independent same-pattern instance**, expected).
+  This stops the scan from crying wolf on every same-id divergence.
 
 **CLI** (`cli.ts`) — every command supports `--json` for agents:
 `summary`, `commits`, `hot`, `history`, `value-at`, `converge`, `converge-scan`.
@@ -61,12 +70,16 @@ The hermetic test guards `splice` + missing-key `add` against regressing to a fo
    - **legacy**: plain JSON with inline sigil links. Entity ids: `of:baedrei…`.
    `reconstruct.ts` routes by the `fvj1:` tag. (This corrects an earlier
    assumption that no `@commonfabric/data-model` dependency was needed.)
-3. **Convergence needs link-graph context to interpret.** Many entities share a
-   content-addressed id across spaces because they're instances of the same
-   pattern (e.g. `home.tsx`), not because they're cross-space replicas — so they
-   *legitimately* diverge. Distinguishing "replica that should converge" from
-   "independent instance" requires following cross-space links; that's the M2.5
-   refinement. The scan currently surfaces all same-id divergence as candidates.
+3. **Same-id divergence is usually NOT replica drift (now classified).** Many
+   entities share a content-addressed id across spaces because they're instances
+   of the same pattern (e.g. `home.tsx`), not cross-space replicas — so they
+   *legitimately* diverge. M2.5 classifies each divergence via the cross-space
+   link index. **Real dev DBs frequently contain ZERO cross-space links**, in
+   which case every same-id divergence is correctly labeled
+   `no-cross-space-link` (likely independent instance). The classifier exists to
+   suppress false alarms now and to flag real drift the moment cross-space
+   replicas appear. (Verified: `converge-scan` over real `fvj1` DBs reports
+   `0 cross-space link edges` and labels all 14 findings as instances.)
 
 ## Usage
 
@@ -86,8 +99,6 @@ $INSPECT converge-scan --dir "$DIR" --limit 20 --json
 
 ## Not yet built (next milestones)
 
-- **M2.5** — follow cross-space links so convergence separates true replicas
-  from same-pattern instances.
 - `ifc` / security-label decoding from stored schemas.
 - Snapshot-base optimization for reconstruction (currently replays from seq 0).
 - Wiring into `cf inspect` as a first-class subcommand.

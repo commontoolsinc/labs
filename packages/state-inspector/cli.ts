@@ -24,6 +24,7 @@ import {
 } from "./queries.ts";
 import { getValueAt } from "./reconstruct.ts";
 import {
+  buildCrossSpaceLinkIndex,
   convergence,
   convergenceScan,
   listSqliteFiles,
@@ -113,14 +114,19 @@ function runMultiSpace(cmd: string, rest: string[], flags: Record<string, string
         console.error("error: converge needs <entity-id>");
         return 1;
       }
+      const index = buildCrossSpaceLinkIndex(refs, {
+        scope: str(flags.scope),
+        branch: str(flags.branch),
+      });
       const result = convergence(refs, {
         id,
         scope: str(flags.scope),
         branch: str(flags.branch),
         path: splitPath(flags.path),
-      });
+      }, index);
       out(json, result, () => {
-        console.log(`verdict: ${result.verdict.toUpperCase()}`);
+        console.log(`verdict: ${result.verdict.toUpperCase()}` +
+          (result.relationship && result.relationship !== "n/a" ? `  [${result.relationship}]` : ""));
         console.log(`entity:  ${result.id}  scope=${result.scope}  branch=${result.branch || "(default)"}` +
           (result.path.length ? `  path=/${result.path.join("/")}` : ""));
         for (const v of result.views) {
@@ -151,13 +157,22 @@ function runMultiSpace(cmd: string, rest: string[], flags: Record<string, string
       });
       out(json, result, () => {
         console.log(`shared entities (in >=2 spaces): ${result.sharedEntities}  examined: ${result.examined}`);
+        console.log(
+          `cross-space link edges: ${result.crossSpaceLinkEdges}` +
+            `  (${result.linkedFindings} real-drift / ${result.unlinkedFindings} likely-independent-instances)`,
+        );
         console.log(`findings (diverged/partial): ${result.findings.length}`);
         for (const f of result.findings) {
           const present = f.views.filter((v) => v.present).map((v) => v.label);
           const absent = f.views.filter((v) => !v.present).map((v) => v.label);
+          const rel = f.relationship === "cross-space-linked"
+            ? "DRIFT"
+            : f.relationship === "no-cross-space-link"
+            ? "instance?"
+            : "?";
           console.log(
-            `  ${f.verdict.toUpperCase()}\t${f.id}\tpresent=[${present.join(",")}]` +
-              (absent.length ? `\tmissing=[${absent.join(",")}]` : "") +
+            `  ${f.verdict.toUpperCase()}\t${rel}\t${f.id}\tpresent=${present.length}` +
+              (absent.length ? `\tmissing=${absent.length}` : "") +
               `\tclusters=${f.clusters.length}`,
           );
         }

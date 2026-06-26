@@ -130,6 +130,27 @@ export function summarize(v: Json): string {
   return String(v);
 }
 
+/** Collect every sigil link reachable in a value (does not descend into links). */
+export function collectLinks(v: Json, maxDepth = 12): DecodedLink[] {
+  const out: DecodedLink[] = [];
+  const walk = (x: Json, depth: number) => {
+    if (depth < 0) return;
+    const link = parseSigilLink(x);
+    if (link) {
+      out.push(link);
+      return;
+    }
+    if (isStream(x) || parseEntityRef(x) !== null) return;
+    if (Array.isArray(x)) {
+      for (const e of x) walk(e, depth - 1);
+    } else if (isPlainObject(x)) {
+      for (const e of Object.values(x)) walk(e, depth - 1);
+    }
+  };
+  walk(v, maxDepth);
+  return out;
+}
+
 /** Count links reachable in a value (a cheap fan-out proxy). */
 export function countLinks(v: Json, maxDepth = 8): number {
   if (maxDepth < 0) return 0;
