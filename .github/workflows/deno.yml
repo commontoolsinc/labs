@@ -798,6 +798,7 @@ jobs:
         "pattern-unit-test",
         "package-integration-test",
         "cli-integration-test",
+        "generated-patterns-integration-test",
       ]
     environment: ci
     permissions:
@@ -814,6 +815,29 @@ jobs:
         with:
           name: common-binaries
           path: common-binaries
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      # Merge every job's LCOV report into one line-coverage file with
+      # repository-relative paths, so IDE users can download a single artifact
+      # covering the whole repository. Uploaded to Cloud Storage below alongside
+      # the signed binaries. Best-effort: a coverage problem must not block
+      # binary attestation or the deploys that depend on it.
+      - name: 📥 Download coverage reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+
+      - name: 🧬 Combine coverage LCOV
+        continue-on-error: true
+        run: |
+          deno run --allow-read --allow-write tasks/combine-coverage-lcov.ts \
+            --input-dir=coverage-artifacts \
+            --output=release/labs-${{ github.sha }}.lcov \
+            --repo-name=${{ github.event.repository.name }}
 
       - name: 🔐 Process & sign binaries
         run: |
@@ -978,6 +1002,14 @@ jobs:
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
+
+          # The combined coverage report is best-effort; upload it only if the
+          # combine step produced it. To download it for a given commit:
+          #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
+          if [ -f release/labs-${{ github.sha }}.lcov ]; then
+            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
+          fi
           echo "::endgroup::"
 
   # Automatic deployment to staging (toolshed)
