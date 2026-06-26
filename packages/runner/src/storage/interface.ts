@@ -174,6 +174,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * observe held, not-yet-loaded state. This is the safe composition of
    * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
    * wiring the self-removing `finally` by hand at each call site.
+   *
+   * `work` must eventually settle (resolve or reject). A chain that never
+   * settles stays registered and keeps `Cell.pull()`/`idle()` from observing
+   * convergence until the scheduler's convergence bound trips, so a caller that
+   * wraps an external `sync()` should ensure it cannot hang unbounded.
    */
   trackUntilSettled(work: Promise<unknown>): void;
 
