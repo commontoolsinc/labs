@@ -19,6 +19,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -128,14 +129,12 @@ const scopedLinkForPath = (
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  if (isRecord(finalSchema)) {
-    if (isCellScope(finalSchema.scope)) {
-      scope = finalSchema.scope;
-    }
-    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
-    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-    if (isCellScope(asCellScope)) {
-      scope = asCellScope;
+  const linkSchema = finalSchema === undefined
+    ? undefined
+    : sanitizeAliasSchemaForBinding(finalSchema);
+  if (isRecord(linkSchema)) {
+    if (isCellScope(linkSchema.scope)) {
+      scope = linkSchema.scope;
     }
   }
 
@@ -143,9 +142,15 @@ const scopedLinkForPath = (
     ...link,
     path: [...path],
     scope,
-    ...(finalSchema !== undefined && { schema: finalSchema }),
+    ...(linkSchema !== undefined && { schema: linkSchema }),
   };
 };
+
+const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
+  // Compiled aliases retain asCell for schema fidelity. Live redirects use link
+  // schemas without cell wrappers so scoped asCell entries do not stamp the
+  // redirect link's own scope and bypass stored argument links.
+  sanitizeSchemaForLinks(schema, { keepStreams: true });
 
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,
@@ -417,7 +422,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           });
         const path = alias.path;
         const sourceSchema = alias.schema !== undefined
-          ? alias.schema
+          ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
@@ -439,7 +444,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         // we might have a schema in the alias, but if not, we may have one
         // in the link (from the pattern)
         const sourceSchema = alias.schema !== undefined
-          ? alias.schema
+          ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;

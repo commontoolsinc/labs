@@ -422,7 +422,10 @@ function factoryFromPattern<T, R>(
     }
 
     const sanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, { keepStreams: true })
+      ? sanitizeSchemaForLinks(cellReference.schema, {
+        keepStreams: true,
+        keepAsCell: true,
+      })
       : undefined;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
