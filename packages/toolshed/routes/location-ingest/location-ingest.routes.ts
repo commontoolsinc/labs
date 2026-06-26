@@ -65,6 +65,13 @@ export const ingest = createRoute({
       },
       description: "session.open verification failed.",
     },
+    [HttpStatusCodes.FORBIDDEN]: {
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+      description:
+        "The named channel space is not an authorized ingest channel.",
+    },
     [HttpStatusCodes.BAD_GATEWAY]: {
       content: {
         "application/json": { schema: z.object({ error: z.string() }) },

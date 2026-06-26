@@ -1,6 +1,10 @@
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import { runtime } from "@/index.ts";
+import {
+  assertIngestAuthorized,
+  ChannelNotAuthorizedError,
+} from "@/lib/channel-acl.ts";
 import { appendLocationPoints } from "./location-ingest.utils.ts";
 import type { IngestRoute } from "./location-ingest.routes.ts";
 
@@ -17,6 +21,24 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
   } catch (error) {
     logger.warn({ error }, "location-ingest: session.open verification failed");
     return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  // CRITICAL: a verified session.open proves only that the presenter controls
+  // its issuer DID — NOT any relationship to auth.space, which is
+  // attacker-chosen. Without this gate, any did:key holder could deposit
+  // operator-signed, ExternalIngest-stamped bytes into any space they name.
+  // Fail closed against the authorized-channel set before writing anything.
+  try {
+    assertIngestAuthorized(auth.space);
+  } catch (error) {
+    if (error instanceof ChannelNotAuthorizedError) {
+      logger.warn(
+        { presenter, channel: auth.space },
+        "location-ingest: rejected ingest to unauthorized channel space",
+      );
+      return c.json({ error: "Channel not authorized" }, 403);
+    }
+    throw error;
   }
 
   try {
