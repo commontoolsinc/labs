@@ -32,9 +32,10 @@
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
  * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
- * Live voting stays on the in-cell `votes` array. Each entry — and each embedded
- * vote — carries a frozen name snapshot plus a live `Cell<User>` profile link
- * (the shared-profile-roster live-link idiom).
+ * Live voting is stored on each user's roster row and projected back to the
+ * public `votes` output. Each embedded history vote carries a frozen name
+ * snapshot plus a live `Cell<User>` profile link (the shared-profile-roster
+ * live-link idiom).
  *
  * History was briefly backed by the SQLite builtin (#4144/#4145, to dogfood it),
  * but that brought a deployed-piece "invalid database handle" failure plus a
@@ -62,11 +63,15 @@ import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
 
 export interface User {
+  /** Stable participant id; keeps row-local child state anchored. */
+  id?: string;
   name: string;
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;
   joinedAt: number;
+  /** Row-local votes for this participant. */
+  votes?: UserVote[];
 }
 
 export interface Option {
@@ -76,6 +81,11 @@ export interface Option {
 }
 
 export type VoteColor = "green" | "yellow" | "red";
+
+export interface UserVote {
+  optionId: string;
+  voteType: VoteColor;
+}
 
 export interface Vote {
   voterName: string;
@@ -166,9 +176,9 @@ export type ClearHistoryEvent = Record<PropertyKey, never>;
 
 type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
-type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
+type UserIndexCell = Writable<number | Default<-1>>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 
 const POLL_THEME = {
@@ -284,10 +294,10 @@ const addOption = handler<AddOptionEvent, {
 
 const removeOption = handler<RemoveOptionEvent, {
   options: OptionsCell;
-  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
-}>(({ optionId }, { options, votes, myName, adminName }) => {
+}>(({ optionId }, { options, users, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -295,40 +305,82 @@ const removeOption = handler<RemoveOptionEvent, {
   const target = current.find((o) => o.id === optionId);
   if (!target) return;
   options.remove(target);
-  votes.set(votes.get().filter((v) => v.optionId !== optionId));
+  users.get().forEach((user, index) => {
+    const currentVotes: readonly UserVote[] = Array.isArray(user.votes)
+      ? user.votes
+      : [];
+    if (currentVotes.length === 0) return;
+    users.key(index).key("votes").set(
+      currentVotes.filter((v) => v.optionId !== optionId),
+    );
+  });
 });
 
-const castVote = handler<CastVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId, voteType }, { votes, myName }) => {
+const currentUserIndex = (
+  users: UsersCell,
+  myName: NameCell,
+  myUserIndex: UserIndexCell,
+): number => {
   const me = trimmedName(myName.get());
-  if (!me) return;
-  const current = votes.get();
+  if (!me) return -1;
+
+  const storedIndex = myUserIndex.get();
+  if (Number.isInteger(storedIndex) && storedIndex >= 0) {
+    const storedUser = users.key(storedIndex).get();
+    if (storedUser?.name === me) return storedIndex;
+  }
+
+  const foundIndex = users.get().findIndex((user) => user.name === me);
+  if (foundIndex >= 0) {
+    myUserIndex.set(foundIndex);
+    return foundIndex;
+  }
+  return -1;
+};
+
+const castVote = handler<CastVoteEvent, {
+  users: UsersCell;
+  myName: NameCell;
+  myUserIndex: UserIndexCell;
+}>(({ optionId, voteType }, { users, myName, myUserIndex }) => {
+  const userIndex = currentUserIndex(users, myName, myUserIndex);
+  if (userIndex < 0) return;
+
+  const userVotes = users.key(userIndex).key("votes");
+  const rawVotes = userVotes.get();
+  const current: readonly UserVote[] = Array.isArray(rawVotes)
+    ? rawVotes as readonly UserVote[]
+    : [];
+  if (!Array.isArray(rawVotes)) {
+    userVotes.set([]);
+  }
+
   const existingIdx = current.findIndex(
-    (v) => v.voterName === me && v.optionId === optionId,
+    (v) => v.optionId === optionId,
   );
   if (existingIdx >= 0) {
     const existing = current[existingIdx];
     if (existing.voteType === voteType) {
-      votes.remove(existing);
+      userVotes.remove(existing);
       return;
     }
-    votes.key(existingIdx).key("voteType").set(voteType);
+    userVotes.key(existingIdx).key("voteType").set(voteType);
     return;
   }
-  votes.push({ voterName: me, optionId, voteType });
+  userVotes.push({ optionId, voteType });
 });
 
 const resetVotes = handler<ResetVotesEvent, {
-  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
-}>((_, { votes, myName, adminName }) => {
+}>((_, { users, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  votes.set([]);
+  users.get().forEach((_user, index) => {
+    users.key(index).key("votes").set([]);
+  });
 });
 
 export interface ClearVoteEvent {
@@ -336,17 +388,32 @@ export interface ClearVoteEvent {
 }
 
 const clearMyVote = handler<ClearVoteEvent, {
-  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
+  myUserIndex: UserIndexCell;
+}>(({ optionId }, { users, myName, myUserIndex }) => {
+  const userIndex = currentUserIndex(users, myName, myUserIndex);
+  if (userIndex < 0) return;
+
+  const userVotes = users.key(userIndex).key("votes");
+  const rawVotes = userVotes.get();
+  const currentVotes: readonly UserVote[] = Array.isArray(rawVotes)
+    ? rawVotes as readonly UserVote[]
+    : [];
+  if (currentVotes.length === 0) return;
+  userVotes.set(currentVotes.filter((v) => v.optionId !== optionId));
 });
+
+const votesForUsers = (
+  users: readonly User[],
+): Vote[] =>
+  users.flatMap((user) =>
+    (user.votes ?? []).map((vote) => ({
+      voterName: user.name,
+      optionId: vote.optionId,
+      voteType: vote.voteType,
+    }))
+  );
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
 // group actually ate — by option id (resolved to its title) or a free title —
@@ -355,7 +422,6 @@ const clearMyVote = handler<ClearVoteEvent, {
 const logVisit = handler<LogVisitEvent, {
   visits: HistoryCell;
   options: OptionsCell;
-  votes: VotesCell;
   users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
@@ -363,7 +429,7 @@ const logVisit = handler<LogVisitEvent, {
 }>(
   (
     { optionId, title, wentAt },
-    { visits, options, votes, users, myName, adminName, visitDate },
+    { visits, options, users, myName, adminName, visitDate },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -391,7 +457,7 @@ const logVisit = handler<LogVisitEvent, {
     // option title (options can be removed later; the title is the record).
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
-    for (const v of votes.get()) {
+    for (const v of votesForUsers(users.get())) {
       const optTitle = trimmedName(titleById.get(v.optionId));
       if (!optTitle) continue; // vote for an already-removed option → skip
       voteSnapshot.push({
@@ -513,10 +579,13 @@ const summarizePlaces = (visits: readonly HistoryEntry[]): PlaceStat[] => {
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
   options?: PerSpace<Option[] | Default<[]>>;
+  // Deprecated storage slot retained for older callers. New live votes are
+  // stored on `users[].votes` and projected to the `votes` output.
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
+  myUserIndex?: PerUser<number | Default<-1>>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
   // at MAX_HISTORY most-recent entries in `logVisit`. optionDraft etc. are
   // internal form drafts, declared as local per-session cells in the pattern
@@ -565,7 +634,6 @@ export interface CozyPollOutput {
 // Stable empty fallbacks for the output snapshots below — fresh `[]` per
 // recompute would make the computed results non-idempotent.
 const EMPTY_OPTIONS: Option[] = [];
-const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
@@ -573,10 +641,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     {
       question,
       options,
-      votes,
       users,
       adminName,
       myName,
+      myUserIndex,
       visits,
     },
   ) => {
@@ -596,6 +664,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
+      myUserIndex,
       adminName,
     });
     const boundAddOption = addOption({
@@ -606,17 +675,24 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const boundRemoveOption = removeOption({
       options,
-      votes,
+      users,
       myName,
       adminName,
     });
-    const boundCastVote = castVote({ votes, myName });
-    const boundClearMyVote = clearMyVote({ votes, myName });
-    const boundResetVotes = resetVotes({ votes, myName, adminName });
+    const boundCastVote = castVote({
+      users,
+      myName,
+      myUserIndex,
+    });
+    const boundClearMyVote = clearMyVote({
+      users,
+      myName,
+      myUserIndex,
+    });
+    const boundResetVotes = resetVotes({ users, myName, adminName });
     const boundLogVisit = logVisit({
       visits,
       options,
-      votes,
       users,
       myName,
       adminName,
@@ -634,7 +710,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const userCount = users.length;
     const optionCount = options.length;
-    const voteCount = votes.length;
+    const liveVotes = computed(() => votesForUsers(users));
+    const voteCount = liveVotes.length;
     // The "Recently eaten" card: the 8 most-recent visits (newest first),
     // derived straight from the `visits` array. An array-shaped computed (not a
     // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
@@ -672,7 +749,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const isClearHistoryConfirm = computed(() =>
       clearHistoryConfirmPending.get()
     );
-    const ranked = tallyOptions(options, votes, users);
+    const ranked = tallyOptions(options, liveVotes, users);
 
     const topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
 
@@ -939,32 +1016,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {votes.filter((vote) => vote.optionId === oid)
-                                  .map((vote) => (
-                                    <span
-                                      title={vote.voterName}
-                                      data-vote-swatch-name={vote.voterName}
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        minWidth: "22px",
-                                        height: "22px",
-                                        padding: "0 6px",
-                                        borderRadius: "9999px",
-                                        backgroundColor:
-                                          VOTE_SWATCH[vote.voteType],
-                                        color: "white",
-                                        fontSize: "11px",
-                                        fontWeight: 700,
-                                        boxShadow: vote.voterName === me
-                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                          : "none",
-                                      }}
-                                    >
-                                      {getInitials(vote.voterName)}
-                                    </span>
-                                  ))}
+                                {liveVotes.filter((vote) =>
+                                  vote.optionId === oid
+                                ).map((vote) => (
+                                  <span
+                                    title={vote.voterName}
+                                    data-vote-swatch-name={vote.voterName}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      minWidth: "22px",
+                                      height: "22px",
+                                      padding: "0 6px",
+                                      borderRadius: "9999px",
+                                      backgroundColor:
+                                        VOTE_SWATCH[vote.voteType],
+                                      color: "white",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      boxShadow: vote.voterName === me
+                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                        : "none",
+                                    }}
+                                  >
+                                    {getInitials(vote.voterName)}
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           );
@@ -1034,7 +1112,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       me={me}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
-                      votes={votes}
+                      votes={liveVotes}
                       removeConfirmTarget={removeConfirmTarget}
                       castVote={boundCastVote}
                       removeOption={boundRemoveOption}
@@ -1374,10 +1452,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // indistinguishable from "not yet computed" for cross-runtime readers —
       // so every snapshot yields a real, stable value (the shared EMPTY
       // constants keep the fallback idempotent across recomputes). The visit
-      // history is no longer a PerSpace input — it lives in SQLite now and is
-      // surfaced via `recentVisits`/`mostRecentTitle` below.
+      // history is surfaced via `recentVisits`/`mostRecentTitle` below.
       options: computed(() => options ?? EMPTY_OPTIONS),
-      votes: computed(() => votes ?? EMPTY_VOTES),
+      votes: liveVotes,
       users: computed(() => users ?? EMPTY_USERS),
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,

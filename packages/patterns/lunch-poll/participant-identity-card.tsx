@@ -3,6 +3,7 @@ import {
   Default,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
   safeDateNow,
   type Stream,
@@ -19,6 +20,9 @@ export type ParticipantIdentityUsersCell = Writable<User[] | Default<[]>>;
 /** Parent-owned viewer/admin name cell. */
 export type ParticipantIdentityNameCell = Writable<string | Default<"">>;
 
+/** Parent-owned per-user pointer into the append-only participant roster. */
+export type ParticipantIdentityUserIndexCell = Writable<number | Default<-1>>;
+
 const PLAYER_COLORS = [
   "#2f8a64",
   "#c2573a",
@@ -30,10 +34,15 @@ const PLAYER_COLORS = [
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
+const newUserId = () =>
+  `u_${safeDateNow().toString(36)}_${
+    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  }`;
 
 const joinAs = handler<JoinEvent, {
   users: ParticipantIdentityUsersCell;
   myName: ParticipantIdentityNameCell;
+  myUserIndex: ParticipantIdentityUserIndexCell;
   adminName: ParticipantIdentityNameCell;
   joinName: ParticipantIdentityNameCell;
   profileName: string;
@@ -41,7 +50,15 @@ const joinAs = handler<JoinEvent, {
 }>(
   (
     { name },
-    { users, myName, adminName, joinName, profileName, profileAvatar },
+    {
+      users,
+      myName,
+      myUserIndex,
+      adminName,
+      joinName,
+      profileName,
+      profileAvatar,
+    },
   ) => {
     const override = trimmedName(name) || trimmedName(joinName.get());
     const trimmed = override || trimmedName(profileName);
@@ -50,14 +67,19 @@ const joinAs = handler<JoinEvent, {
     if (current) return;
     const existing = users.get();
     if (existing.some((u) => u.name === trimmed)) return;
+    const userIndex = existing.length;
+    const userId = newUserId();
     const user: User = {
+      id: userId,
       name: trimmed,
       avatar: override ? "" : (profileAvatar ?? "").trim(),
-      color: colorForIndex(existing.length),
+      color: colorForIndex(userIndex),
       joinedAt: safeDateNow(),
+      votes: [],
     };
     users.push(user);
     myName.set(trimmed);
+    myUserIndex.set(userIndex);
     if (trimmedName(adminName.get()) === "") {
       adminName.set(trimmed);
     }
@@ -99,6 +121,9 @@ export interface ParticipantIdentityCardInput {
   /** Per-user current viewer name cell. */
   myName: ParticipantIdentityNameCell;
 
+  /** Per-user append-only index of the current viewer's participant row. */
+  myUserIndex: ParticipantIdentityUserIndexCell;
+
   /** Shared admin name cell. */
   adminName: ParticipantIdentityNameCell;
 }
@@ -137,7 +162,7 @@ export default pattern<
   ParticipantIdentityCardInput,
   ParticipantIdentityCardOutput
 >(
-  ({ users, myName, adminName }) => {
+  ({ users, myName, myUserIndex, adminName }) => {
     const joinName = Writable.perSession.of<string>("");
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
@@ -147,6 +172,7 @@ export default pattern<
     const boundJoin = joinAs({
       users,
       myName,
+      myUserIndex,
       adminName,
       joinName,
       profileName,
