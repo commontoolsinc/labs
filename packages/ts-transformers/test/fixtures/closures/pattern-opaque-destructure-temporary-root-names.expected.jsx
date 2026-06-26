@@ -28,17 +28,19 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
-    result: any;
+    result?: any;
 }, any>(({ result }) => result?.title ?? "Untitled", {
     type: "object",
     properties: {
         result: true
-    },
-    required: ["result"]
+    }
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes
 //   const { result } = generateObject(...) uses the synthesized __cf_destructure_* binding consistently
+// NOTE (CT-1800): generateObject's `result` is declared optional, so the captured
+//   `result` is emitted optional (absent from `required`). The lift therefore
+//   fires while pending, keeping the `?? "Untitled"` fallback live.
 export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     const preview = __cfLift_1({ messages: messages }).for("preview", true);
