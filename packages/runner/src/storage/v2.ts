@@ -743,6 +743,13 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
+  trackUntilSettled(work: Promise<unknown>): void {
+    const tracked = work.finally(() =>
+      this.#crossSpacePromises.delete(tracked)
+    ) as Promise<void>;
+    this.#crossSpacePromises.add(tracked);
+  }
+
   pendingCrossSpacePromiseCount(): number {
     return this.#crossSpacePromises.size;
   }

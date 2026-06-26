@@ -750,13 +750,12 @@ export class Runtime {
     this.missingDocLoadKicks.add(key);
     const maybePromise = this.getCellFromLink(link).sync();
     if (maybePromise instanceof Promise) {
-      const promise = maybePromise.catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
-        this.missingDocLoadKicks.delete(key);
-      }).finally(() => {
-        this.storageManager.removeCrossSpacePromise(promise);
-      }) as unknown as Promise<void>;
-      this.storageManager.addCrossSpacePromise(promise);
+      this.storageManager.trackUntilSettled(
+        maybePromise.catch(() => {
+          // Allow a retry on failure (e.g. transient disconnect).
+          this.missingDocLoadKicks.delete(key);
+        }),
+      );
     }
   }
 
