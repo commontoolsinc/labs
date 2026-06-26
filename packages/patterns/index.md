@@ -65,7 +65,7 @@ App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
 `contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
+legacy), `habit-tracker/`, `lunch-poll/`, `pico-chat/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
@@ -931,6 +931,38 @@ interface LobbyOutput {
   messages: Message[];
   users: User[];
   sessionId: string;
+}
+```
+
+## `pico-chat/`
+
+Minimal shared chat demo. Each user keeps their own display name, while the
+message log is shared across the space. The composer sends on Return and keeps
+the latest messages visible at the bottom of the message pane.
+
+**Keywords:** chat, multiplayer, per-user, per-space, message-input
+
+### Input Schema
+
+```ts
+interface ChatMessage {
+  from: string;
+  body: string;
+}
+
+interface PicoChatInput {
+  messages?: PerSpace<ChatMessage[] | Default<[]>>;
+  name?: PerUser<string | Default<"">>;
+}
+```
+
+### Output Schema
+
+```ts
+interface PicoChatOutput {
+  messages: PerSpace<ChatMessage[] | Default<[]>>;
+  name: PerUser<string | Default<"">>;
+  send: Stream<{ detail?: { message?: string } }>;
 }
 ```
 
