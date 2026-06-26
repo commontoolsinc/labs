@@ -4,6 +4,7 @@ import * as MemoryServer from "@commonfabric/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
 import { memoryServer } from "../memory.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
+import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
 
 type NegotiatedSocketHandlers = {
   onMessage: (message: string) => void;
@@ -133,6 +134,12 @@ export const bufferTextMessagesUntilNegotiated = (
   };
 };
 
+// Per-connection ordinal for the gated `CF_DEBUG_MEMORY_WRITES` trace. Each
+// WebSocket connection is one client, so tagging every `[memwrite]` line with
+// this `c=<n>` attributes a write storm to specific clients. See
+// `memwrite-trace.ts`.
+let memwriteConnSeq = 0;
+
 const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
@@ -164,15 +171,47 @@ const attachMemorySocketPipeline = (
   const closeConnection = () => {
     connection.close();
   };
+
+  // Gated diagnostic write trace (off by default). `CF_DEBUG_MEMORY_WRITES=1`
+  // logs one `[memwrite]` line per committed op, tagged with this connection's
+  // `c=<n>` so a write storm can be attributed to specific clients;
+  // `CF_DEBUG_MEMORY_WRITE_VALUES=1` additionally dumps raw values (avoid on
+  // real data — see memwrite-trace.ts).
+  const debugMemWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+  const debugMemWriteValues =
+    Deno.env.get("CF_DEBUG_MEMORY_WRITE_VALUES") === "1";
+  const memConnId = debugMemWrites ? ++memwriteConnSeq : 0;
+  const logMemWrites = (payload: string): void => {
+    if (!debugMemWrites) return;
+    try {
+      const parsed = MemoryServer.parseClientMessage(payload) as unknown as {
+        commit?: { operations?: Array<Record<string, unknown>> };
+      };
+      for (const op of parsed?.commit?.operations ?? []) {
+        console.error(
+          formatMemWriteTrace(op as MemWriteOp, memConnId, debugMemWriteValues),
+        );
+      }
+    } catch {
+      // Logging only.
+    }
+  };
+
   void (async () => {
     try {
       await connection.receive(firstMessage);
+      logMemWrites(firstMessage);
       negotiation.handoff({
         onMessage(message) {
-          void connection.receive(message).catch(() => {
-            safeSocketClose(1011, "Memory websocket receive failure");
-            closeConnection();
-          });
+          // Trace only after the receive resolves, so a message whose receive
+          // fails (the fatal-error path below) is not logged as a write.
+          void connection.receive(message).then(
+            () => logMemWrites(message),
+            () => {
+              safeSocketClose(1011, "Memory websocket receive failure");
+              closeConnection();
+            },
+          );
         },
         onClose: closeConnection,
         onError(error) {
