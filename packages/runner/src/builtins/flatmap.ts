@@ -37,6 +37,10 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { createResumeRepublisher } from "./resume-republish.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -86,6 +90,63 @@ export function flatMap(
   // and must not wait. Cleared once a non-empty resume batch is processed.
   let resumeBatchAwaitSync = !!awaitSync;
 
+  // Rebuild the flattened list from the per-element results: spread an array
+  // result one level deep, push a defined scalar directly, and treat an undefined
+  // result as still streaming in. forEach over the array skips holes, so sparse
+  // per-element results densify here. See resume-republish.ts for the convergence
+  // machinery.
+  const { awaitPendingThenRepublish } = createResumeRepublisher({
+    runtime,
+    logger,
+    getResult: () => result,
+    inputsCell,
+    inputSchema: FLATMAP_INPUT_SCHEMA,
+    resultSchema: RESULT_PRESENCE_SCHEMA,
+    elementRuns,
+    aggregateNoun: "flatMap result",
+    elementNoun: "result",
+    contribute: (elemResult, _inputElement, out) => {
+      if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
+      else if (elemResult !== undefined) out.push(elemResult);
+      else return "pending";
+    },
+  });
+
+  // Hold the durable list while the input list itself confirms. On a resume
+  // reconcile the input can be undefined or a transient empty default standing in
+  // while the real list streams in; setting [] then would clobber the durable
+  // aggregate. Await the resolved input and, once it confirms, clear the result
+  // only if the input is genuinely empty — a non-empty input re-triggers the
+  // normal reconcile via its journaled read, so it converges either way.
+  const awaitInputThenSettle = (inputListCell: Cell<any>): void => {
+    runtime.storageManager.trackUntilSettled(
+      Promise.resolve(inputListCell.sync())
+        .then(() =>
+          runtime.editWithRetry((settleTx) => {
+            if (!result) return;
+            const { list } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
+              .withTx(settleTx).get();
+            if (
+              list === undefined || (Array.isArray(list) && list.length === 0)
+            ) {
+              result.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set([]);
+            }
+          }).then(({ error }) => {
+            if (error) {
+              logger.warn("resume-input", "settling the resumed input failed", {
+                error,
+              });
+            }
+          })
+        )
+        .catch((error) =>
+          logger.warn("resume-input", "the resumed input list sync rejected", {
+            error,
+          })
+        ),
+    );
+  };
+
   return (tx: IExtendedStorageTransaction) => {
     const elementAwaitSync = resumeBatchAwaitSync;
     const { list, op } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
@@ -117,7 +178,12 @@ export function flatMap(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
-      result.send([]);
+      // On a resume reconcile the container is durable (a flatMap that has run
+      // always persisted at least []); seeding [] here would write a stale
+      // basis that loses to the durable value on commit. Leave it for the
+      // defer-until-loaded guard below; a genuinely new flatMap (not resumed)
+      // still seeds [] so its first render has a value.
+      if (!elementAwaitSync) result.send([]);
       // Link this cell to the parent cell
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
@@ -139,7 +205,70 @@ export function flatMap(
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
 
-    if (resultWithLog.get() === undefined) {
+    // Resume against confirmed state, not the not-yet-loaded value: on the
+    // resume reconcile an undefined container is its durable value still
+    // streaming in (a flatMap that has run persisted at least []). Reconciling
+    // now would write a stale-basis result that conflicts on commit and re-runs
+    // against the same absent value until it happens to sync. Pull the
+    // container and defer; its arrival re-triggers this reconcile, which then
+    // no-ops against the durable value.
+    if (elementAwaitSync && resultWithLog.get() === undefined) {
+      const pending = result.sync();
+      // syncCell is async, so the container pull is always a Promise; the union
+      // on Cell.sync() is a vestigial synchronous fast path the storage manager
+      // no longer takes. Assert it to narrow before awaiting.
+      if (!(pending instanceof Promise)) {
+        throw new Error("flatMap: result.sync() returned a non-Promise");
+      }
+      // The container's durable value is still streaming in; its arrival
+      // re-triggers this reconcile (the read above is journaled). If the
+      // container was never persisted — so nothing will ever stream in to
+      // re-trigger — seed [] once the pull settles, so the coordinator is not
+      // left wedged waiting for a value that never arrives.
+      const seedIfStillAbsent = () =>
+        runtime.editWithRetry((seedTx) => {
+          const container = result!.withTx(seedTx);
+          if (container.getRaw() === undefined) container.set([]);
+        }).then(({ error }) => {
+          if (error) {
+            logger.warn(
+              "resume-seed",
+              "seeding the empty result container failed",
+              { error },
+            );
+          }
+        });
+      // Run on either outcome (resolve or reject); the seed recovers from the
+      // pull's own rejection, so log it rather than dropping it silently.
+      pending.finally(seedIfStillAbsent).catch((error) => {
+        logger.warn("resume-pull", "resume container pull rejected", {
+          error,
+        });
+      });
+      return;
+    }
+    // The durable aggregate currently in the container, read links-only
+    // (presence schema), so this is a length comparison rather than a content
+    // read of every element.
+    const priorSlots = resultWithLog.get();
+    const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
+
+    // Resume preservation: on a resume reconcile the input list itself may not be
+    // confirmed yet — undefined, or a transient empty default while the real list
+    // streams in. Setting [] now would clobber the durable aggregate the
+    // container already holds. Hold it and await the input; a non-empty input
+    // then re-triggers this reconcile via its journaled read, and a confirmed
+    // empty input clears the result. Outside resume the flag is clear, so a list
+    // set undefined at runtime still runs the cleanup below.
+    if (
+      elementAwaitSync && priorLen > 0 &&
+      (list === undefined || (Array.isArray(list) && list.length === 0))
+    ) {
+      awaitInputThenSettle(inputsCell.key("list").withTx(tx).resolveAsCell());
+      return;
+    }
+
+    if (priorSlots === undefined) {
       resultWithLog.set([]);
     }
     if (list === undefined) {
@@ -159,6 +288,11 @@ export function flatMap(
 
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
+    // Collected when an element contributes nothing only because its result is
+    // still streaming in (reads undefined). Their docs are awaited below so the
+    // list can be republished once they confirm — distinct from an op that has
+    // settled undefined (a real skip), which converges immediately.
+    const pendingCells: Cell<any>[] = [];
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
@@ -210,8 +344,8 @@ export function flatMap(
       // Matches JS flatMap semantics: arrays are spread, scalars are included
       // directly. undefined is skipped (two-pass convergence: new elements
       // have undefined result cells on the first pass before the pattern runs).
-      const elemResult = elementRuns.get(elementKey)!.resultCell.withTx(tx)
-        .get();
+      const childCell = elementRuns.get(elementKey)!.resultCell;
+      const elemResult = childCell.withTx(tx).get();
       if (Array.isArray(elemResult)) {
         // forEach skips holes in sub-arrays (sparse-safe)
         elemResult.forEach((v) => {
@@ -219,7 +353,24 @@ export function flatMap(
         });
       } else if (elemResult !== undefined) {
         newArrayValue.push(elemResult);
+      } else {
+        pendingCells.push(childCell);
       }
+    }
+
+    // Resume preservation: an element whose result is still streaming in reads
+    // undefined and contributes nothing, shrinking the aggregate below the
+    // durable value the container already holds. Republishing that shrink is the
+    // reload flicker — a populated list blinks to empty and refills. Hold the
+    // durable value and wait for the pending elements to confirm their docs, then
+    // republish against the confirmed results. An element whose result arrived is
+    // contributed; one confirmed undefined is skipped — so a genuine shrink still
+    // converges instead of freezing.
+    if (
+      priorLen > 0 && newArrayValue.length < priorLen && pendingCells.length > 0
+    ) {
+      awaitPendingThenRepublish(pendingCells);
+      return;
     }
     resultWithLog.set(newArrayValue);
 
