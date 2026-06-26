@@ -1596,6 +1596,114 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    // Reactive-update companions to the two mount-time tests above. They guard
+    // the composed semantics across cell updates: a block must reach every
+    // enclosing boundary, and an unblock must clear every enclosing boundary.
+    const nestedAuthorshipTree = (innerChild: unknown) => ({
+      type: "vnode",
+      name: "div",
+      props: {},
+      children: [{
+        type: "vnode",
+        name: "cf-cfc-authorship",
+        props: {
+          key: "outer",
+          verifyTextIntegrity: true,
+          requiredTextIntegrity: signedReleaseAtom,
+        },
+        children: [{
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            key: "inner",
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
+          },
+          children: [innerChild],
+        }],
+      }],
+    });
+
+    await t.step(
+      "nested text integrity propagates a reactive block to every enclosing boundary",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        // Start clean: verifiedText satisfies the requirement, nothing blocks.
+        const rootCell = new MockCell(nestedAuthorshipTree(verifiedText));
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          // Reactively swap to content that fails the requirement.
+          rootCell.set(nestedAuthorshipTree(unsignedReleaseText));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          // The failing text is hidden behind the integrity placeholder.
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Unsigned release note"), false);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
+          // The block reaches BOTH enclosing boundaries, never just the
+          // nearest — so neither can advertise a false "ok" over the failure.
+          const blockedBoundaries = new Set(
+            collector.getOpsOfType("set-prop")
+              .filter((op) =>
+                op.key === "textIntegrityState" && op.value === "blocked"
+              )
+              .map((op) => op.nodeId),
+          );
+          assertEquals(blockedBoundaries.size >= 2, true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "nested text integrity clears every enclosing boundary on a reactive unblock",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        // Start blocked: unsignedReleaseText fails the requirement.
+        const rootCell = new MockCell(
+          nestedAuthorshipTree(unsignedReleaseText),
+        );
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+          collector.clear();
+
+          // Reactively swap to content that satisfies the requirement.
+          rootCell.set(nestedAuthorshipTree(verifiedText));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          // The verified text renders and no enclosing boundary is left blocked.
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Verified release note"), true);
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
     await t.step(
       "strict text integrity allows matching visible content props",
       async () => {

@@ -121,7 +121,14 @@ export interface RenderPolicy {
   textIntegrity?: {
     requiredIntegrity: readonly unknown[];
     allowLiteralText: boolean;
-    boundaryNodeId: number;
+    /**
+     * The enclosing text-integrity boundaries this policy applies to, innermost
+     * included. A block under this policy is attributed to every id in the set
+     * so each enclosing boundary can observe it. Composed (not replaced) as
+     * boundaries nest — see childRenderPolicyForNode — so an inner boundary can
+     * only tighten, never relax, an enclosing one.
+     */
+    boundaryNodeIds: ReadonlySet<number>;
   };
 }
 
@@ -169,11 +176,11 @@ export interface NodeState {
   /** Original authored props, used to recompute child render policy. */
   sourceProps?: WorkerVNode["props"];
 
-  /** Text-integrity boundary that blocked this whole rendered node. */
-  textIntegrityBlockedFor?: number;
+  /** Text-integrity boundaries that blocked this whole rendered node. */
+  textIntegrityBlockedFor?: ReadonlySet<number>;
 
-  /** Text-integrity boundary that blocked each visible prop on this node. */
-  textIntegrityBlockedProps?: Map<string, number>;
+  /** Text-integrity boundaries that blocked each visible prop on this node. */
+  textIntegrityBlockedProps?: Map<string, ReadonlySet<number>>;
 }
 
 /**
