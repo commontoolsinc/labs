@@ -18,13 +18,13 @@ interface CounterInput {
 
 const increment = handler<void, { value: Writable<number> }>(
   (_, { value }) => {
-    value.set(value.get() + 1);
+    value.increment(1);
   },
 );
 
 const decrement = handler<void, { value: Writable<number> }>(
   (_, { value }) => {
-    value.set(value.get() - 1);
+    value.increment(-1);
   },
 );
 

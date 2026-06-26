@@ -34,7 +34,7 @@ export interface CounterOutput {
 
 const increment = handler<void, { value: Writable<number> }>(
   (_, { value }) => {
-    value.set(value.get() + 1);
+    value.increment(1);
   },
 );
 
@@ -59,7 +59,7 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
   // which closes over the pattern's values directly. This is simpler and clearer
   // than defining a reusable handler when you don't need reusability.
   const decrement = action(() => {
-    value.set(value.get() - 1);
+    value.increment(-1);
   });
 
   // Computed values

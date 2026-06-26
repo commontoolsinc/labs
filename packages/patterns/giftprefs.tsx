@@ -72,10 +72,7 @@ const addFavorite = handler<
 >((_event, { favorites, favoriteInput }) => {
   const newItem = favoriteInput.get().trim();
   if (!newItem) return;
-  const current = favorites.get() || [];
-  if (!current.includes(newItem)) {
-    favorites.set([...current, newItem]);
-  }
+  favorites.addUnique(newItem);
   favoriteInput.set("");
 });
 
@@ -94,10 +91,7 @@ const addAvoid = handler<
 >((_event, { avoid, avoidInput }) => {
   const newItem = avoidInput.get().trim();
   if (!newItem) return;
-  const current = avoid.get() || [];
-  if (!current.includes(newItem)) {
-    avoid.set([...current, newItem]);
-  }
+  avoid.addUnique(newItem);
   avoidInput.set("");
 });
 
