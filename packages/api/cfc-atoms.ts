@@ -3,6 +3,7 @@ export type {
   CfcAtomObject,
   CfcBuiltinAtom,
   CfcCaveatAtom,
+  CfcExternalIngestAtom,
   CfcInjectionSafeAtom,
   CfcJsonArray,
   CfcJsonValue,

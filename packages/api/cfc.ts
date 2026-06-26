@@ -27,6 +27,12 @@ export type CfcAtom = CfcJsonValue;
 export const CFC_ATOM_TYPE = {
   Builtin: "https://commonfabric.org/cfc/atom/Builtin",
   Caveat: "https://commonfabric.org/cfc/atom/Caveat",
+  // Runtime-minted external-ingest provenance: this value arrived through a
+  // vouched ingest channel (an owner-granted, revocable append authority held
+  // by an outside service). Mirrors `UserSurfaceInput` — human input gets its
+  // own origin class; external input is just another origin. Evidence, not
+  // authorable in schemas: the *channel* is vouched, the *contents* are not.
+  ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest",
   InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe",
   LinkReference: "https://commonfabric.org/cfc/atom/LinkReference",
   Origin: "https://commonfabric.org/cfc/atom/Origin",
@@ -105,6 +111,23 @@ export type CfcUserSurfaceInputAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
   readonly user: string;
   readonly surface: string;
+  readonly valueDigest: string;
+};
+
+export type CfcExternalIngestAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
+  // The ingest channel this value arrived through (a vouched, revocable append
+  // grant). Carried by the channel's own space, so this identifies the grant.
+  readonly channel: string;
+  // The presenter the grant was vouched to (the external service's DID).
+  // Recorded for audit/display; NOT enforced here (audience-binding is the
+  // federation PR5 dependency — see proposal).
+  readonly audience: string;
+  // When the operator runtime received the payload (ISO 8601).
+  readonly receivedAt: string;
+  // Digest of the payload bytes the mark is stamped on. The mark derives only
+  // from verified channel metadata plus this digest of the written value —
+  // never from attacker-controlled label atoms (the split-mint invariant).
   readonly valueDigest: string;
 };
 
@@ -194,6 +217,21 @@ export const cfcAtom = {
       type: CFC_ATOM_TYPE.UserSurfaceInput,
       user,
       surface,
+      valueDigest,
+    };
+  },
+
+  externalIngest(
+    channel: string,
+    audience: string,
+    receivedAt: string,
+    valueDigest: string,
+  ): CfcExternalIngestAtom {
+    return {
+      type: CFC_ATOM_TYPE.ExternalIngest,
+      channel,
+      audience,
+      receivedAt,
       valueDigest,
     };
   },

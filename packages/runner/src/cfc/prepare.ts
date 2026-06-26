@@ -2652,6 +2652,12 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   // Derivation provenance is evidence minted by the flow stage (§8.9.3).
   CFC_ATOM_TYPE.TransformedBy,
   CFC_ATOM_TYPE.UserSurfaceInput,
+  // External-ingest provenance is minted by the runtime-internal ingest seam
+  // from verified channel metadata only (the split-mint). Gating it here is
+  // load-bearing: the payload bytes are authored under the ordinary member
+  // identity, so any ExternalIngest atom an attacker smuggles into the payload
+  // is stripped — the trusted mark can only come from the builtin mint step.
+  CFC_ATOM_TYPE.ExternalIngest,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>

@@ -87,6 +87,10 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
       .toBe("value-bound");
     expect(atomPropagationClass({ type: CFC_ATOM_TYPE.Builtin, name: "x" }))
       .toBe("provenance");
+    // External-ingest is origin provenance (like UserSurfaceInput): the
+    // channel is vouched, the contents are not, so it never propagates.
+    expect(atomPropagationClass({ type: CFC_ATOM_TYPE.ExternalIngest }))
+      .toBe("provenance");
     // Unknown record types, plain strings, kind-shaped records: value-bound.
     expect(atomPropagationClass({ type: "https://example.com/custom" }))
       .toBe("value-bound");

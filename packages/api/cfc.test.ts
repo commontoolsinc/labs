@@ -57,6 +57,24 @@ Deno.test("cfcAtom.userSurfaceInput builds a user-surface-input atom", () => {
   });
 });
 
+Deno.test("cfcAtom.externalIngest builds an external-ingest atom", () => {
+  assertEquals(
+    cfcAtom.externalIngest(
+      "did:key:channel",
+      "did:key:presenter",
+      "2026-06-26T12:00:00.000Z",
+      "sha256:abc",
+    ),
+    {
+      type: CFC_ATOM_TYPE.ExternalIngest,
+      channel: "did:key:channel",
+      audience: "did:key:presenter",
+      receivedAt: "2026-06-26T12:00:00.000Z",
+      valueDigest: "sha256:abc",
+    },
+  );
+});
+
 Deno.test("cfcAtom.promptSlotBound builds a prompt-slot-bound atom", () => {
   const source = cfcAtom.userSurfaceInput("did:key:user", "chat", "digest123");
   assertEquals(
