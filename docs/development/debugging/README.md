@@ -88,9 +88,11 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
   - Reference tail covers logger counts/timing/baselines/flags and worker traces
 - **Server-side write trace** — set `CF_DEBUG_MEMORY_WRITES=1` on the toolshed to
   log every memory write as `[memwrite] c=<conn> op=… id=… scope=… vhash=…`,
-  per-connection-tagged (`c=`) so a cross-client write storm can be attributed to
+  per-connection-tagged (`c=`) so cross-client write churn can be attributed to
   specific clients. Add `CF_DEBUG_MEMORY_WRITE_VALUES=1` to also dump raw values
-  (avoid on real data — they can hold PII/secrets). See
+  (avoid on real data — they can hold PII/secrets). Output goes to the toolshed's
+  stderr — `packages/toolshed/local-dev-toolshed.log` under the local-dev scripts.
+  See
   [`memwrite-trace.ts`](../../../packages/toolshed/routes/storage/memory/memwrite-trace.ts).
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
 - [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
