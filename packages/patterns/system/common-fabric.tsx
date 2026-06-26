@@ -6,6 +6,7 @@ import {
   fetchProgram,
   handler,
   ifElse,
+  lift,
   NAME,
   navigateTo,
   pattern,
@@ -295,19 +296,32 @@ type BashResult = {
   exitCode: number;
 };
 
+// Build the request body. The optional fields are declared optional on the
+// input type, so only command and sandboxId gate the result; each optional
+// field appears in the body only when it is set.
+const buildBashRequestBody = lift((input: {
+  sandboxId: string;
+  command: string;
+  workingDirectory?: string;
+  timeout?: number;
+  environment?: Record<string, string>;
+}) => ({
+  sandboxId: input.sandboxId,
+  command: input.command,
+  ...(input.workingDirectory !== undefined &&
+    { workingDirectory: input.workingDirectory }),
+  ...(input.timeout !== undefined && { timeout: input.timeout }),
+  ...(input.environment !== undefined && { environment: input.environment }),
+}));
+
 export const bash = pattern<BashRequest, BashResult | { error: string }>(
   ({ command, workingDirectory, timeout, environment, sandboxId }) => {
-    // Since some of our input fields should not be included if they are
-    // undefined, we use computed to conditionally construct the body object.
-    const body = computed(() => {
-      return {
-        sandboxId,
-        command,
-        // optional parameters - only include if provided
-        ...(workingDirectory !== undefined && { workingDirectory }),
-        ...(timeout !== undefined && { timeout }),
-        ...(environment !== undefined && { environment }),
-      };
+    const body = buildBashRequestBody({
+      sandboxId,
+      command,
+      workingDirectory,
+      timeout,
+      environment,
     });
     const { result, error } = fetchData<BashResult>({
       url: "/api/sandbox/exec",
