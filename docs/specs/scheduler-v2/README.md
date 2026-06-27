@@ -1187,16 +1187,29 @@ Summary table; the full per-mechanism walkthrough with file references is in
 
 17. **Multi-user fan-out re-evaluation cost + push-pull completeness
     (2026-06-24).** On a multi-runtime CFC workload
-    (`cfc-group-chat-demo/multi-user`) v2 runs ~2.2× the action invocations of v1
-    (165 vs 74). Decomposed (per-node delta sums to exactly +91): +13 apex
-    render-effect re-runs + ~78 read-closure re-pulls (~6 closure nodes per apex
-    re-render). Root: the apex render effect is re-demanded once per **inbound
-    cross-runtime sync-apply** (each received message is a distinct external
-    write), and every re-demand re-pulls its whole transitive read-closure.
-    `compRunsNoChange=0` — each re-run observes a genuinely distinct intermediate
-    state, so these are real separate logical updates, not redundant recomputes
-    (the kind even a classic signal graph re-runs per external setter without an
-    explicit `batch()`).
+    (`cfc-group-chat-demo/multi-user`) v2 runs ~2.2× the *scheduled-action
+    executions* of v1 (165 vs 74) — **reproduced on clean trees**, non-windowed
+    (two independent counters agree), wall **+12–16%**. Decomposed by whether the
+    action site is scheduled by *both* schedulers (re-validated 2026-06-24 on fresh
+    v2 @2bbc029ad vs main @d8085d3eb, per-runtime `actionStats` counts, NOT
+    cross-tree node-id normalization): ~**+13 (14%)** is a real apex render-effect
+    re-fire (36 vs 23 — the only *product* site that genuinely fires more on v2);
+    ~**+5 (6%)** is test-harness assertion re-pulls (`multi-user.test.tsx`); the
+    remaining ~**+73 (80%)** is a **scheduling-*granularity* shift, not
+    over-execution** — 29 product computeds (per-row CFC labels `trusted.tsx:955-986`,
+    the message `raw:map`, aggregates `main.tsx:309-386`) that v2 schedules and
+    counts as *discrete reactive nodes* but that main runs **folded inline inside
+    the apex pull's read-closure** (literal 0 scheduled-action runs in main's
+    `actionStats`, yet 12/12 passes — same work, finer accounting). The clincher:
+    counted actions are +123% but wall is only +12–16%, so the +73 folded work is
+    cheap, not duplicated. The honest claim is therefore *v2 schedules ~2.2× more
+    reactive nodes for the same work*, **not** *v2 re-runs computeds 2.2× more*.
+    v2's memoization is sound (verified: an in-place single-row edit re-runs only
+    that row's node; a clean producer's committed cell is the memo and is never
+    re-invoked by a re-running consumer — see the Push-pull completeness note
+    below). The finer granularity is a **tradeoff, not a strict loss**: an
+    incremental single-row edit re-runs one node where main re-evaluates the whole
+    apex closure.
 
     *Efficiency-only and accepted.* Final results are identical and single-runtime
     / static-graph workloads are neutral-to-faster (note-create @128 −22%,
