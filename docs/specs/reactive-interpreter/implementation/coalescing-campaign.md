@@ -738,3 +738,101 @@ gate re-run from scratch and CONFIRMED.
   ratchet, all suites green. No working-tree change; already committed
   (`9b019c057`/`a0948d6ca`/`f04229256`) and pushed to
   `origin/claude/nervous-kilby-83b75b`.
+
+## §4.10 — 2(b) PRODUCER-FED READ-ONLY CELL CONTEXT (asCell INTERNAL/opOut-input leaves ENGAGED) — FINAL GATE (2026-06-27, commit `f03a61cd9`)
+
+GOAL (Berni, AFK autonomous): extend §4.9 (2(a), argument-fed context leaves) to
+the 2(b) case — a pure lift/computed whose `asCell`/`asStream` input fields are fed
+by an INTERNAL/opOut PRODUCER (an upstream lift's output), NOT a pattern argument.
+Pre-2(b) the interpreter held the producer's PLAIN value in `opValues`, so the
+leaf's `.get()`/`.sample()` would throw → it fell back as an `unresolved_leaf`
+boundary. 2(b) hands the leaf a READ-ONLY Cell VIEW of the producer's already-derived
+value so it INTERPRETS. CORRECTNESS PARAMOUNT (same as §4.9): writes stay boundaries
+(static write-scan `liveLeafWritesCellInput` + the `cell.ts` `readOnlyReason` freeze
+backstop); reads JOURNAL through the segment tx (CFC pointwise oracle stays green);
+output byte-equivalent vs legacy.
+
+**Mechanism (the sound one).**
+- `computeProducerFedContextLeaves` (`runner.ts`) classifies a top-level context
+  leaf as 2(b)-eligible when EVERY cell-context input field is fed by a PURE-kind
+  producer (leaf/access/construct/control) with a declared output cell AND the
+  source does not write its input. A field fed by `const`/argument disqualifies it
+  from 2(b) (the all-argument case is 2(a)).
+- A post-resolve DEMOTE pass keeps a candidate as a legacy `unresolved-leaf`
+  boundary if ANY producer is itself an unresolved leaf (e.g. a `computed` that
+  instantiates HANDLERS — wrapping its handle-bearing output in a data-URI immutable
+  cell would JSON-serialize and corrupt the live handles). Fail-closed.
+- `interpret.ts` `EvalContext.inputCellViews` (op id → field names) +
+  `wrapReadOnlyValue`: the leaf case shallow-clones the resolved input object and
+  overlays a read-only Cell view at each named field BEFORE the body runs.
+- `buildSegmentInterpreterImpl` builds the view via
+  `runtime.getImmutableCell(value).readOnly("ri-2b-producer-view")`. CFC soundness:
+  the producer value ALREADY journaled — intra-segment its own input read (the
+  schema-driven `$arg` read), cross-segment the `$in` read — so wrapping it adds NO
+  new tx dependency and the producer's label is already in the segment read-set.
+  CFC flow-join is per-TX, so the unlabeled data-URI re-read neither adds nor drops
+  taint; every output write in the segment inherits J. Producers are PURE ops only
+  (never a direct cell read), so none can introduce an un-journaled labeled read.
+- A producer-fed leaf routes through the PARTITION path (where the overlay is wired);
+  if the partition declines, the WHOLE pattern falls back to legacy (`bumpAndThrow`
+  `unresolved_leaf`), fail-closed — the single-node path would hand the leaf a plain
+  value and `.get()` would throw.
+
+**§4.10 FINAL GATE — INDEPENDENT RE-VERIFY (re-measured fresh on HEAD `f03a61cd9`,
+no working-tree changes — confirms the committed state, NOT a new increment):**
+every gate re-run from scratch and CONFIRMED.
+- STATIC: `deno check` clean (`runner.ts` + `reactive-interpreter/interpret.ts`);
+  `deno lint` clean; `deno fmt --check` no diff (`runner.ts` + `interpret.ts` +
+  `test/reactive-interpreter/prod-wire.test.ts`).
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed**;
+  ENGAGEMENT **145 engaged / 147 census lines**, UP from the §4.9 baseline 142/146
+  (4 producer-fed context leaves folded from boundary nodes into segments —
+  `counter-derived-summary`, `counter-reference-equality`, etc.). `unresolved_leaf`
+  **3**, `ineligible_opkind` 2, `launched_child` 14;
+  `unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/`argument_writeback` all
+  0. NOT-ENGAGED 2 (both documented genuine exceptions): `Cell<unknown> capture …`
+  (cell-capture-diagnostic feeder, no output to materialize) + `counterWithHandlerSpawn`
+  (launched_child launcher contract). NOT green-via-fallback — the prod-wire 2(b)
+  differential oracle asserts `interpreted_ok` rises by exactly one and
+  `unresolved_leaf` does NOT bump.
+- RI unit `test/reactive-interpreter/*.test.ts`: **42 passed / 0 failed** (flag-ON
+  AND flag-off) — incl. the new `prod-wire.test.ts` 2(b) differential oracle (VALUE
+  PARITY `summary == legacy.summary`, `interpreted_ok+1`) + reactivity-parity test
+  (producer changes → 2(b) leaf re-derives: `summary` 11→15).
+- CFC POINTWISE ORACLE (the correctness gate): **GREEN flag-ON** —
+  `spike-cfc-oracle.test.ts` (read-isolated coordinator keeps POINTWISE labels,
+  smear-detector + sibling-read teeth hold) + `cfc-flow-pointwise.test.ts` (phase-B
+  pointwise structure) both pass. The read-only view's `.get()` reads journal the
+  source label through the segment tx → no CFC regression. CFC soundness is
+  additionally guaranteed by construction (producers are PURE ops, per-tx flow-join,
+  DEMOTE pass excludes handle-bearing producers).
+- flag-OFF `packages/runner` `deno task test`: **701 passed / 0 failed** (HARD
+  invariant held; count moved 700→701 only because the increment ADDED the
+  `prod-wire.test.ts` 2(b) steps, never a regression — 2(b) is flag-ON-only).
+- flag-ON `packages/runner` `deno task test`: **701 passed / 0 failed** — NO new
+  reds (matches flag-off at 701/0).
+- LUNCH-POLL `--cases=5x5 --rounds=2` (the dominant context-leaf corpus, fresh
+  ×2): votes 10/10 **equivalent=YES** both runs; engaged **75/135 (55.6%)**
+  `unresolved_leaf` **25** (UNCHANGED vs §4.9 — lunch-poll's residual context leaves
+  are ARGUMENT-fed, ZERO producer-fed, so 2(b) correctly leaves them alone); docs
+  ON 625 (OFF 615–643 noise), nodes OFF 3109–3149/ON 3034 (**−2.4..−3.7%**), wall
+  OFF 10257–11053ms/ON 9752–9997ms (**ON faster, −2.5..−11.8%**), conflicts OFF
+  560–830/ON 460–479 (**rejected 0 both arms**, ON LOWER — NO ratchet,
+  `conflicts==reverts` = the retry-that-succeeds signature, not a storm). OUTPUT
+  EQUIVALENCE: PASS — vote tallies byte-identical OFF vs ON.
+- PRE-EXISTING BRANCH-STALENESS (NOT a 2(b) regression, NOT touched): the
+  `lunch-poll/*.test.tsx` `deno test` modules fail at LOAD with
+  `'commonfabric' does not provide an export named 'NAME'` from
+  `lunch-poll/generated-art.tsx:5`. This fails IDENTICALLY flag-off — main removed
+  `generated-art.tsx` entirely in `4699cea46` (#4325 "remove generated cuisine-image
+  feature"); this branch is behind main and carries the stale file + import. The
+  lunch-poll PATTERN itself runs correctly under the interpreter (the bench loads
+  `main.tsx` through the runtime compiler and passes output-equivalent). Orthogonal
+  to the interpreter; resolves on a main rebase / `generated-art.tsx` deletion.
+- §4.10 VERDICT — ALL TARGETS MET. Producer-fed context leaves ENGAGED (4 in the
+  integration corpus), output byte-equivalent, CFC pointwise oracle green, reads
+  journal, writes stay boundaries (write-scan + freeze backstop + DEMOTE), no
+  ratchet. Integration 147/0 engaged 145/147 (UP from 142/146), RI unit + CFC oracle
+  42/0, flag-off 701/0, flag-ON 701/0, lunch-poll 55.6% engaged output-equivalent
+  with conflicts/wall DOWN. Committed `f03a61cd9` (unpushed — final-phase push).
