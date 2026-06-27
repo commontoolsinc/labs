@@ -339,14 +339,12 @@ const removeByValueAtPath = (
     return root;
   }
   const { root: newRoot, container } = thawSpine(root, path, path);
-  if (!Array.isArray(container)) {
-    throw new Error(
-      `remove-by-value target is not an array at ${encodePointer(path)}`,
-    );
-  }
-  for (let index = container.length - 1; index >= 0; index -= 1) {
-    if (deepEqual(container[index], value)) {
-      container.splice(index, 1);
+  // The value at `path` was confirmed to be an array above, so its thawed
+  // container is that same array.
+  const array = container as FabricValue[];
+  for (let index = array.length - 1; index >= 0; index -= 1) {
+    if (deepEqual(array[index], value)) {
+      array.splice(index, 1);
     }
   }
   return newRoot;
