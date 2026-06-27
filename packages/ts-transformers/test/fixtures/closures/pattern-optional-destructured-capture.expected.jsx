@@ -16,11 +16,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     opt?: string;
     ud: string;
     renamed?: string;
-}, { renamed?: string | undefined; ud?: string | undefined; opt?: string | undefined; req: string; }>(({ req, opt, ud, renamed }) => ({
+    qOpt?: string;
+}, { qOpt?: string | undefined; renamed?: string | undefined; ud?: string | undefined; opt?: string | undefined; req: string; }>(({ req, opt, ud, renamed, qOpt }) => ({
     req: req,
     ...(opt !== undefined && { opt: opt }),
     ...(ud !== undefined && { ud: ud }),
     ...(renamed !== undefined && { renamed: renamed }),
+    ...(qOpt !== undefined && { qOpt: qOpt }),
 }), {
     type: "object",
     properties: {
@@ -35,12 +37,18 @@ const __cfLift_1 = __cfHelpers.lift<{
         },
         renamed: {
             type: "string"
+        },
+        qOpt: {
+            type: "string"
         }
     },
     required: ["req", "ud"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        qOpt: {
+            type: "string"
+        },
         renamed: {
             type: "string"
         },
@@ -59,18 +67,21 @@ const __cfLift_1 = __cfHelpers.lift<{
 // FIXTURE: pattern-optional-destructured-capture
 // Verifies: an optional pattern input (`opt?`) destructured and captured in a
 //   closure is emitted optional in the derived lift's input schema (so it does
-//   not gate the lift), while `ud: T | undefined` (no `?`) stays required, and a
-//   renamed binding (`ren: renamed`) tracks its source property's optionality.
+//   not gate the lift), while `ud: T | undefined` (no `?`) stays required. A
+//   renamed binding tracks its source property's optionality whether the source
+//   key is an identifier (`ren: renamed`) or a string literal (`"q-opt": qOpt`).
 export default pattern((__cf_pattern_input) => {
     const req = __cf_pattern_input.key("req");
     const opt = __cf_pattern_input.key("opt");
     const ud = __cf_pattern_input.key("ud");
     const renamed = __cf_pattern_input.key("ren");
+    const qOpt = __cf_pattern_input.key("q-opt");
     const body = __cfLift_1({
         req: req,
         opt: opt,
         ud: ud,
-        renamed: renamed
+        renamed: renamed,
+        qOpt: qOpt
     }).for("body", true);
     return <div>{body}</div>;
 }, {
@@ -86,6 +97,9 @@ export default pattern((__cf_pattern_input) => {
             type: ["string", "undefined"]
         },
         ren: {
+            type: "string"
+        },
+        "q-opt": {
             type: "string"
         }
     },

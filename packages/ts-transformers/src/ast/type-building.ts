@@ -799,11 +799,16 @@ export function buildTypeElementsFromCaptureTree(
             ? checker.getTypeAtLocation(host.initializer)
             : undefined;
           // For a renamed binding (`{ source: local }`) the optionality lives on
-          // the SOURCE property, not the local capture name.
-          const sourceName =
-            binding.propertyName && ts.isIdentifier(binding.propertyName)
-              ? binding.propertyName.text
-              : propName;
+          // the SOURCE property, not the local capture name. The source key may
+          // be an identifier, string, or numeric literal (`{ "k": local }`,
+          // `{ 0: local }`); computed keys (`{ [expr]: local }`) aren't
+          // statically resolvable and fall back to the local name.
+          const sourceName = binding.propertyName &&
+              (ts.isIdentifier(binding.propertyName) ||
+                ts.isStringLiteralLike(binding.propertyName) ||
+                ts.isNumericLiteral(binding.propertyName))
+            ? binding.propertyName.text
+            : propName;
           const sourceProp = aggregateType?.getProperty(sourceName);
           if (sourceProp && isOptionalSymbol(sourceProp)) {
             questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
