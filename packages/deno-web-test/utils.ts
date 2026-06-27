@@ -196,7 +196,7 @@ async function downlevelBundleIfNeeded(
   await Deno.writeTextFile(outputPath, transformed.outputText);
 }
 
-async function resolveWorkspacePackageImports(
+export async function resolveWorkspacePackageImports(
   workspaceConfigPath: string,
   workspaceConfig: Record<string, unknown>,
 ): Promise<Record<string, string>> {
