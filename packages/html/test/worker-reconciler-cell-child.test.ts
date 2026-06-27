@@ -156,6 +156,88 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "does not re-emit set-prop for unchanged static props on a reused child VNode (CT-1798)",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab", "data-role": "tab" },
+        children: ["A"],
+      } as WorkerVNode);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Re-set the reused child VNode with IDENTICAL props but changed children,
+      // so the reconcile path (updateChildrenInPlace -> updatePropsInPlace) runs
+      // in full. #4366 made this fire on every recompute; unchanged static props
+      // should no longer produce worker->main set-prop ops.
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab", "data-role": "tab" },
+        children: ["B"],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const unchangedPropOps = collector.getOpsOfType("set-prop").filter((op) =>
+        "key" in op && (op.key === "id" || op.key === "data-role")
+      );
+      assertEquals(
+        unchangedPropOps.length,
+        0,
+        "unchanged static props should not re-emit set-prop ops",
+      );
+      // Sanity: the reconcile path actually ran (children changed A -> B).
+      assertEquals(
+        collector.getOps().length > 0,
+        true,
+        "child reconcile should still emit ops for the changed children",
+      );
+
+      // A genuine prop change must still emit, while a still-unchanged sibling
+      // prop stays quiet.
+      collector.clear();
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab-2", "data-role": "tab" },
+        children: ["B"],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const idOps = collector.getOpsOfType("set-prop").filter((op) =>
+        "key" in op && op.key === "id"
+      );
+      assertEquals(idOps.length, 1, "changed static prop should re-emit once");
+      assertEquals(
+        (idOps[0] as any).value,
+        "tab-2",
+        "changed static prop should carry the new value",
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").filter((op) =>
+          "key" in op && op.key === "data-role"
+        ).length,
+        0,
+        "still-unchanged static prop should remain quiet",
+      );
+    },
+  );
+
+  await t.step(
     "replaces same-key child Cell when parent supplies a different cell",
     async () => {
       const collector = createOpsCollector();

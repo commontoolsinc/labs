@@ -1584,7 +1584,27 @@ export class WorkerReconciler {
           cancel,
         });
       } else {
-        // Static prop - just set it (cancel any existing subscription)
+        // Static prop. Skip the worker→main set-prop op when an unchanged
+        // primitive value would be a no-op on the main thread anyway: DOM
+        // writes are already value-guarded in setPropDefault, but the op and
+        // the JSON.stringify it carries are not. This matters because #4366
+        // made updateChildrenInPlace always reconcile reused inline-VNode
+        // children, so this path now fires on every parent recompute even when
+        // captured prop values are identical (CT-1798). Mirrors the Cell<Props>
+        // primitive-prop guard below. Restricted to primitive values (the same
+        // scope as that guard): object/array props compare by reference, which
+        // is unreliable here, so they always re-emit. Text-integrity props are
+        // never skipped either: their transform has policy-dependent side
+        // effects and must re-run.
+        const isPrimitiveValue = value === null ||
+          (typeof value !== "object" && typeof value !== "function");
+        if (
+          isPrimitiveValue && existingState && !existingState.cell &&
+          existingState.currentValue === value &&
+          !this.isTextIntegrityProp(state, key)
+        ) {
+          continue;
+        }
         if (existingState) {
           existingState.cancel();
         }
@@ -1598,6 +1618,7 @@ export class WorkerReconciler {
         state.propSubscriptions.set(key, {
           cell: undefined,
           cancel: () => {},
+          currentValue: value,
         });
       }
     }
@@ -2790,7 +2811,13 @@ export class WorkerReconciler {
           key,
           value: propValue,
         }]);
-        state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+        // Record the bound value so a later in-place update can skip the
+        // redundant set-prop op when it is unchanged (CT-1798).
+        state.propSubscriptions.set(key, {
+          cell: undefined,
+          cancel: () => {},
+          currentValue: value,
+        });
       }
     }
 
