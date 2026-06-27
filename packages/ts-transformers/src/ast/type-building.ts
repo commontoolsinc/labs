@@ -763,6 +763,57 @@ export function buildTypeElementsFromCaptureTree(
         ) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
+      } else if (
+        ts.isIdentifier(childNode.expression) &&
+        childNode.expression.getSourceFile()
+      ) {
+        // A bare-identifier capture (e.g. a field destructured from the
+        // pattern's typed parameter). Determine optionality the standard-TS way
+        // — the `?` flag on the SOURCE PROPERTY of the destructured aggregate,
+        // mirroring the intermediate-node branch below. The capture's own symbol
+        // doesn't carry it: a `{ x }` shorthand resolves to a value symbol, and
+        // the destructured binding element doesn't inherit `SymbolFlags.Optional`
+        // from the aggregate's property. So resolve to the binding element, then
+        // read the aggregate property's flag. A field declared `x?: T` is
+        // optional; `x: T | undefined` (no `?`) stays required (a required key
+        // whose value may be undefined), faithful to TS.
+        let symbol = checker.getSymbolAtLocation(childNode.expression);
+        if (
+          symbol?.valueDeclaration &&
+          ts.isShorthandPropertyAssignment(symbol.valueDeclaration)
+        ) {
+          symbol = checker.getShorthandAssignmentValueSymbol(
+            symbol.valueDeclaration,
+          ) ??
+            symbol;
+        }
+        const binding = symbol?.valueDeclaration;
+        if (
+          binding && ts.isBindingElement(binding) &&
+          ts.isObjectBindingPattern(binding.parent)
+        ) {
+          const host = binding.parent.parent;
+          const aggregateType = ts.isParameter(host)
+            ? checker.getTypeAtLocation(host)
+            : ts.isVariableDeclaration(host) && host.initializer
+            ? checker.getTypeAtLocation(host.initializer)
+            : undefined;
+          // For a renamed binding (`{ source: local }`) the optionality lives on
+          // the SOURCE property, not the local capture name. The source key may
+          // be an identifier, string, or numeric literal (`{ "k": local }`,
+          // `{ 0: local }`); computed keys (`{ [expr]: local }`) aren't
+          // statically resolvable and fall back to the local name.
+          const sourceName = binding.propertyName &&
+              (ts.isIdentifier(binding.propertyName) ||
+                ts.isStringLiteralLike(binding.propertyName) ||
+                ts.isNumericLiteral(binding.propertyName))
+            ? binding.propertyName.text
+            : propName;
+          const sourceProp = aggregateType?.getProperty(sourceName);
+          if (sourceProp && isOptionalSymbol(sourceProp)) {
+            questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+          }
+        }
       }
     } else {
       // Intermediate node - need to get type to check optionality. Every node
@@ -780,8 +831,9 @@ export function buildTypeElementsFromCaptureTree(
           // Get Type for this property to pass to children
           currentType = checker.getTypeOfSymbol(propSymbol);
 
-          // Check optionality using centralized logic
-          // This checks both `?` flag AND `T | undefined` union
+          // Check optionality from the source property's `?` flag
+          // (SymbolFlags.Optional). This is the standard-TS distinction:
+          // `x?: T` is optional; `x: T | undefined` (no `?`) stays required.
           if (isOptionalSymbol(propSymbol)) {
             questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
           }
