@@ -2,6 +2,10 @@
 import { exists } from "@std/fs";
 import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
+import {
+  computeCompilerVersion,
+  renderVersionModule,
+} from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 
 export interface BuildConfigInitializer {
   root: string;
@@ -14,6 +18,7 @@ export class BuildConfig {
   readonly toolshedFlags: string[];
   readonly cliOnly: boolean;
   private _manifestOriginal: string;
+  private _compileCacheVersionOriginal: string;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
@@ -21,6 +26,9 @@ export class BuildConfig {
     this.cliOnly = !!options.cliOnly;
     this._manifestOriginal = Deno.readTextFileSync(
       this.workspaceManifestPath(),
+    );
+    this._compileCacheVersionOriginal = Deno.readTextFileSync(
+      this.compileCacheVersionPath(),
     );
   }
 
@@ -39,8 +47,22 @@ export class BuildConfig {
     return this._manifestOriginal;
   }
 
+  compileCacheVersionOriginal() {
+    return this._compileCacheVersionOriginal;
+  }
+
   workspaceManifestPath() {
     return this.path("deno.jsonc");
+  }
+
+  compileCacheVersionPath() {
+    return this.path(
+      "packages",
+      "runner",
+      "src",
+      "compilation-cache",
+      "compile-cache-version.ts",
+    );
   }
 
   workspaceLockPath() {
@@ -349,6 +371,15 @@ export async function prepareWorkspace(
     );
   }
 
+  // Write the current compile-cache version before compiling binaries. The value
+  // is computed before `deno.jsonc` changes so it reflects the committed
+  // compiler options.
+  const compileCacheVersion = await computeCompilerVersion(config.root);
+  await Deno.writeTextFile(
+    config.compileCacheVersionPath(),
+    renderVersionModule(compileCacheVersion),
+  );
+
   // Remove `compilerOptions.types`
   const manifest = config.manifest();
   delete manifest.compilerOptions.types;
@@ -376,6 +407,12 @@ export async function revertWorkspace(config: BuildConfig): Promise<void> {
   // Restore the workspace manifest from its original bytes, keeping any
   // comments and formatting intact.
   await Deno.writeTextFile(denoJsonPath, config.manifestOriginal());
+
+  // Restore the checked-in compile-cache version module.
+  await Deno.writeTextFile(
+    config.compileCacheVersionPath(),
+    config.compileCacheVersionOriginal(),
+  );
 
   // Remove the COMPILED env file
   if ((await exists(toolshedEnvPath))) {

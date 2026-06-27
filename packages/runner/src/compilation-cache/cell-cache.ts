@@ -75,17 +75,27 @@ export interface CompiledDoc extends ModuleDocBase {
 
 /**
  * Version tag for the compiled-set axis (`compileCache:<runtimeVersion>/...`).
- * A compiled document is only reused under a matching tag, so bumping this
- * invalidates the whole compiled set after any change to the compiler /
+ * A compiled document is only reused under a matching tag, so a change to this
+ * value invalidates the whole compiled set after any change to the compiler /
  * transformer pipeline or SES verifier that alters emitted bytes (the source
- * set, keyed by content identity alone, persists across the bump). There is no
- * automatic build fingerprint at runtime, so this is bumped by hand.
+ * set, keyed by content identity alone, persists across the change).
+ *
+ * The value is set automatically rather than bumped by hand. A binary build
+ * bakes in `cf/esm-compile/<fingerprint>`, where `<fingerprint>` is a hash of
+ * the compiler inputs (ts-transformers, js-compiler, schema-generator, the
+ * `api` types lowered into baked schemas, the root `deno.jsonc` compiler options,
+ * and `deno.lock`), so editing any of those moves the tag and invalidates stale
+ * compiled docs without a human bump. Runs from
+ * source (dev / tests) use a stable `cf/esm-compile/source` sentinel in its own
+ * namespace, so they never collide with a baked fingerprint. See
+ * `compile-cache-version.ts` and `compiler-fingerprint.deno.ts`.
+ *
+ * History: compiled docs are stamped with the constant `cf-compiled-by:cf-
+ * compiler` atom instead of a per-user DID atom. Older per-DID-atom docs carry
+ * a different namespace tag; a write to their key would be rejected by the label
+ * merge (addIntegrity cannot be weakened), so a tag change orphans them instead.
  */
-// v2: compiled docs are stamped with the constant `cf-compiled-by:cf-compiler`
-// atom instead of a per-user DID atom. v1 docs carry the old per-DID atoms; a
-// v2 write to the same key would be rejected by the label merge (addIntegrity
-// cannot be weakened), so the namespace bump orphans them instead.
-export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/v2";
+export { COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts";
 
 /** Cell key (id) for a source-set document. */
 export function sourceDocKey(identity: string): string {
