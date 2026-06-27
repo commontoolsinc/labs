@@ -6,6 +6,7 @@ import {
   cloneIfNecessary,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -83,6 +84,14 @@ const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
         op.remove,
         op.add,
       );
+    case "append":
+      return appendAtPath(state, parsePointer(op.path), op.values);
+    case "add-unique":
+      return addUniqueAtPath(state, parsePointer(op.path), op.values);
+    case "remove-by-value":
+      return removeByValueAtPath(state, parsePointer(op.path), op.value);
+    case "increment":
+      return incrementAtPath(state, parsePointer(op.path), op.by);
   }
 };
 
@@ -262,6 +271,146 @@ const spliceAtPath = (
     throw new Error(`invalid splice at ${encodePointer(path)}`);
   }
   container.splice(index, remove, ...add.map((value) => cloneValue(value)));
+  return newRoot;
+};
+
+// A tail-relative append resolves its position against the array's live state
+// rather than any client-supplied index, and creates the array (and the path to
+// it) when absent. `validateAddSpine` keeps the parent descent from fabricating
+// missing array indices, exactly as `add` does.
+const appendAtPath = (
+  root: FabricValue,
+  path: string[],
+  values: FabricValue[],
+): FabricValue => {
+  validateAddSpine(root, path);
+  const { root: newRoot, container } = thawSpine(root, path, path, {
+    createMissing: true,
+    nextKeyAfterPath: "0",
+  });
+  if (!Array.isArray(container)) {
+    throw new Error(`append target is not an array at ${encodePointer(path)}`);
+  }
+  container.push(...values.map((value) => cloneValue(value)));
+  return newRoot;
+};
+
+// Set-add by identity: append each value to the tail only if no existing element
+// equals it (by stored-value deep equality), creating the array if absent. The
+// dedup runs against durable state on the server, so it is idempotent and merges
+// with concurrent adds of distinct elements.
+const addUniqueAtPath = (
+  root: FabricValue,
+  path: string[],
+  values: FabricValue[],
+): FabricValue => {
+  validateAddSpine(root, path);
+  const { root: newRoot, container } = thawSpine(root, path, path, {
+    createMissing: true,
+    nextKeyAfterPath: "0",
+  });
+  if (!Array.isArray(container)) {
+    throw new Error(
+      `add-unique target is not an array at ${encodePointer(path)}`,
+    );
+  }
+  for (const value of values) {
+    if (!container.some((existing) => deepEqual(existing, value))) {
+      container.push(cloneValue(value));
+    }
+  }
+  return newRoot;
+};
+
+// Remove every element of the array at `path` that equals `value` by stored-value
+// deep equality. A missing path or non-array target is a no-op (nothing to
+// remove). Resolved against durable state, so it never clobbers via a whole-array
+// rewrite.
+const removeByValueAtPath = (
+  root: FabricValue,
+  path: string[],
+  value: FabricValue,
+): FabricValue => {
+  const existing = readNumberOrAbsent(root, path);
+  if (!Array.isArray(existing)) {
+    return root;
+  }
+  if (!existing.some((element) => deepEqual(element, value))) {
+    return root;
+  }
+  const { root: newRoot, container } = thawSpine(root, path, path);
+  // The value at `path` was confirmed to be an array above, so its thawed
+  // container is that same array.
+  const array = container as FabricValue[];
+  for (let index = array.length - 1; index >= 0; index -= 1) {
+    if (deepEqual(array[index], value)) {
+      array.splice(index, 1);
+    }
+  }
+  return newRoot;
+};
+
+const readNumberOrAbsent = (
+  root: FabricValue,
+  path: string[],
+): FabricValue | undefined => {
+  let current: FabricValue = root;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      if (
+        !isArraySegment(segment) || !Object.hasOwn(current, Number(segment))
+      ) {
+        return undefined;
+      }
+      current = current[Number(segment)];
+    } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
+      current = current[segment];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+// Numeric increment: add `by` to the number at `path`, treating an absent value
+// as 0 and creating the path if absent. The add runs against durable state on
+// the server, so concurrent increments sum rather than clobber.
+const incrementAtPath = (
+  root: FabricValue,
+  path: string[],
+  by: number,
+): FabricValue => {
+  if (path.length === 0) {
+    throw new Error("increment requires a non-root path");
+  }
+  if (by === 0) {
+    throw new Error(
+      `increment requires a non-zero amount at ${encodePointer(path)}`,
+    );
+  }
+  const current = readNumberOrAbsent(root, path);
+  if (current !== undefined && typeof current !== "number") {
+    throw new Error(
+      `increment target is not a number at ${encodePointer(path)}`,
+    );
+  }
+  const next = (typeof current === "number" ? current : 0) + by;
+  validateAddSpine(root, path);
+  const { root: newRoot, container } = thawSpine(
+    root,
+    path.slice(0, -1),
+    path,
+    {
+      createMissing: true,
+      nextKeyAfterPath: path[path.length - 1]!,
+    },
+  );
+  const key = path[path.length - 1]!;
+  if (Array.isArray(container)) {
+    container[parseArrayInsertIndex(key, container.length)] = next;
+  } else {
+    container[key] = next;
+  }
   return newRoot;
 };
 

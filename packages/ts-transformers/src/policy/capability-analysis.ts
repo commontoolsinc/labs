@@ -114,13 +114,15 @@ function extendSourceRef(
 
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
-const WRITER_METHODS = new Set(["set", "update"]);
+const WRITER_METHODS = new Set(["set", "update", "increment"]);
 const ARRAY_IDENTITY_WRITER_METHODS = new Set([
   "push",
+  "addUnique",
   "unshift",
   "splice",
   "remove",
   "removeAll",
+  "removeByValue",
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
@@ -1471,6 +1473,16 @@ export function analyzeFunctionCapabilities(
               dynamic: receiverBinding.dynamic,
             };
           }
+          // elementById addresses a separate, deterministically derived entity,
+          // not a static path into the array. Resolve it to a dynamic binding on
+          // the array root so reads and writes through it are attributed
+          // conservatively to the array the handler already touches.
+          if (methodName === "elementById") {
+            return {
+              ...receiverBinding,
+              dynamic: true,
+            };
+          }
         }
       }
 
@@ -2482,6 +2494,10 @@ export function analyzeFunctionCapabilities(
               } else {
                 trackReadRef(receiver);
               }
+            } else if (methodName === "elementById") {
+              // Addresses a separately derived entity; attribute the access
+              // conservatively to the whole array root.
+              markWildcard(receiver.root);
             } else if (methodName === "key") {
               const argPath = extractLiteralPathArguments(
                 node.arguments,

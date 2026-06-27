@@ -246,10 +246,7 @@ const addAllExtractedAisles = handler<
     }));
   aisles.set([...current, ...newAisles]);
   // Hide the photo after adding
-  const currentHidden = hiddenPhotoIds.get();
-  if (!currentHidden.includes(photoId)) {
-    hiddenPhotoIds.set([...currentHidden, photoId]);
-  }
+  hiddenPhotoIds.addUnique(photoId);
 });
 
 // Exported for tests. Writes the merged description through the element's
@@ -286,10 +283,7 @@ const hidePhoto = handler<
   unknown,
   { hiddenPhotoIds: Writable<string[]>; photoId: string }
 >((_event, { hiddenPhotoIds, photoId }) => {
-  const current = hiddenPhotoIds.get() || [];
-  if (!current.includes(photoId)) {
-    hiddenPhotoIds.set([...current, photoId]);
-  }
+  hiddenPhotoIds.addUnique(photoId);
 });
 
 export default pattern<Input, Output>(

@@ -13,6 +13,7 @@ import {
   type IExtendedStorageTransaction,
   type IReadOptions,
 } from "./storage/interface.ts";
+import { mergeableOpRead } from "./storage/reactivity-log.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type CfcLabelView,
@@ -375,7 +376,16 @@ export function createQueryResultProxy<T>(
               // The proxy target (value) is captured at proxy creation time and
               // becomes stale after writes. We must read current state from tx.
               const readTx = runtime.readTx(tx);
-              const currentValue = readTx.readValueOrThrow(link) as any[];
+              // For `push`, this base-array read is the op's own incidental read:
+              // mark it `mergeableOpRead` so the commit drops it from conflict
+              // detection and the tail append merges, matching `Cell.push`. The
+              // handler's own explicit `.get()` of the list stays in the conflict
+              // set. Other write-only methods (fill, unshift) are not mergeable
+              // tail appends and keep their read.
+              const currentValue = readTx.readValueOrThrow(
+                link,
+                prop === "push" ? { meta: mergeableOpRead } : undefined,
+              ) as any[];
               copy = [...currentValue];
             } else {
               copy = value.map((_, index) =>
@@ -421,6 +431,14 @@ export function createQueryResultProxy<T>(
               call: new Error().stack,
               context: frame?.cause ?? "unknown",
             });
+
+            // A tail append records its intent so the commit emits a
+            // tail-relative, mergeable operation rather than a position diffed
+            // against a possibly-stale base. Other mutators (splice, unshift,
+            // ...) are not tail appends and keep the read-modify-write path.
+            if (prop === "push") {
+              tx.recordArrayAppend?.(link, args.length);
+            }
 
             // CT-1173 FIX: Don't mutate proxy target (value) after writes.
             // The old code did `value.splice(0, value.length, ...newValue)` which

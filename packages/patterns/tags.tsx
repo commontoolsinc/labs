@@ -42,10 +42,7 @@ const addTag = handler<
   const newTag = tagInput.get().trim();
   if (!newTag) return;
 
-  const current = tags.get() || [];
-  if (!current.includes(newTag)) {
-    tags.set([...current, newTag]);
-  }
+  tags.addUnique(newTag);
   tagInput.set("");
 });
 

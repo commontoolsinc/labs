@@ -1,5 +1,6 @@
 import type {
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
   IReadActivity,
   IStorageTransaction,
   MemorySpace,
@@ -13,6 +14,13 @@ type TxLike = IStorageTransaction | IExtendedStorageTransaction;
 const unwrap = (tx: TxLike): IStorageTransaction => {
   return "tx" in tx ? tx.tx : tx;
 };
+
+export function getDirectTransactionMergeableOpAddresses(
+  tx: TxLike,
+): Iterable<IMemorySpaceAddress> | undefined {
+  return tx.getMergeableOpAddresses?.() ??
+    unwrap(tx).getMergeableOpAddresses?.();
+}
 
 export function getDirectTransactionReactivityLog(
   tx: TxLike,

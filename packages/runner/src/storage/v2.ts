@@ -76,8 +76,33 @@ import type {
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
-import { isReadExcludedFromConflict } from "./reactivity-log.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+} from "./transaction-inspection.ts";
+import {
+  isMergeableOpRead,
+  isReadExcludedFromConflict,
+  isReadMarkedAsAttemptedWrite,
+} from "./reactivity-log.ts";
+
+// A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
+// part of the write; that read is dropped from its conflict set.
+const isCfcLabelPath = (path: readonly string[]): boolean =>
+  path.length === 1 && path[0] === "cfc";
+
+const isStrictPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length < path.length &&
+  prefix.every((segment, index) => path[index] === segment);
+
+const isSamePath = (
+  a: readonly string[],
+  b: readonly string[],
+): boolean =>
+  a.length === b.length && a.every((segment, index) => b[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
@@ -314,6 +339,10 @@ const changedPathsForPendingPatch = (
     switch (patch.op) {
       case "replace":
       case "splice":
+      case "append":
+      case "add-unique":
+      case "remove-by-value":
+      case "increment":
         return [parsePointer(patch.path)];
       case "add":
       case "remove": {
@@ -2103,6 +2132,27 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
+    // A mergeable op resolves against durable state, so it does not depend on
+    // the document's prior value. On an entity touched by a mergeable op, the
+    // reads the op ITSELF issues are dropped from conflict detection — its own
+    // value read (marked `mergeableOpRead`), its write-target reads (marked
+    // attempted-write), and the CFC write-policy label at ["cfc"] — so disjoint
+    // and stale-base writes merge and the op applies on top of a concurrent
+    // whole-entity write. A handler's OWN explicit read of the entity is kept,
+    // so a conditional mergeable write (e.g. dedup-then-push) still conflicts
+    // and retries. Server-side write authorization is enforced at apply time.
+    const mergeableOpPathsByEntity = new Map<string, (readonly string[])[]>();
+    for (const op of getDirectTransactionMergeableOpAddresses(source) ?? []) {
+      if (op.space !== this.#space) continue;
+      const key = `${op.id}\0${normalizeCellScope(op.scope)}`;
+      const paths = mergeableOpPathsByEntity.get(key);
+      if (paths) {
+        paths.push(op.path);
+      } else {
+        mergeableOpPathsByEntity.set(key, [op.path]);
+      }
+    }
+
     for (const read of reads) {
       if (
         read.space !== this.#space ||
@@ -2123,6 +2173,27 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       const scope = normalizeCellScope(read.scope);
+
+      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      if (
+        opPaths !== undefined &&
+        (isMergeableOpRead(read.meta) ||
+          isReadMarkedAsAttemptedWrite(read.meta) ||
+          isCfcLabelPath(read.path) ||
+          // Deep reads under the op path (link resolution, element sub-reads) are
+          // incidental to the op. A shape-only (nonRecursive) read AT the op path
+          // is also incidental — it is the query-result proxy's container read of
+          // the array being mutated, which must not false-conflict with a
+          // concurrent mergeable op. A RECURSIVE read AT the op path is the
+          // handler's explicit read of the collection, and is kept so a
+          // conditional mergeable write still conflicts and retries.
+          opPaths.some((opPath) =>
+            isStrictPrefixPath(opPath, read.path) ||
+            (read.nonRecursive === true && isSamePath(opPath, read.path))
+          ))
+      ) {
+        continue;
+      }
       const record = this.#docs.get(docKey(read.id as URI, scope));
       const pendingLocalSeq = record?.pending
         .filter((version) => version.localSeq < localSeq)

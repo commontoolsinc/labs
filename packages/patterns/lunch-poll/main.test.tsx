@@ -345,8 +345,19 @@ export default pattern(() => {
       { action: action_vote_green_first_again },
       { assertion: assert_revote_green_cleared },
 
+      // Voting that same color once more re-adds it. A removed vote clears its
+      // entity, so the toggle decision does not see stale content and dead-click.
+      { action: action_vote_green_first_again },
+      { assertion: assert_green_vote_recorded },
+
       // Admin reset clears votes
+      { action: action_reset_votes },
+      { assertion: assert_votes_reset },
+
+      // After a reset, re-voting the same color also re-adds (reset clears the
+      // vote entities too, so the toggle is not fooled by stale content).
       { action: action_vote_green_first },
+      { assertion: assert_green_vote_recorded },
       { action: action_reset_votes },
       { assertion: assert_votes_reset },
 
