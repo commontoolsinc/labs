@@ -337,6 +337,40 @@ const FLATMAP_SKIP_PROGRAM: RuntimeProgram = {
 };
 const FLATMAP_SKIP_EXPECTED = [1, 2, 4, 5, 7, 8]; // omits 3 and 6 (non-keep)
 
+// As above but the op returns an array, which flatMap flattens one level into
+// the aggregate. This drives the array-spread branch of the flatMap
+// contribution that the scalar cases above do not reach.
+const FLATMAP_SPREAD_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { pattern } from 'commonfabric';",
+      "export default pattern<{ items: { keep: boolean; n: number; label: string }[] }>(({ items }) => {",
+      "  return { values: items.flatMap((item) => [item.n, item.n + 100]) };",
+      "});",
+    ].join("\n"),
+  }],
+};
+const FLATMAP_SPREAD_EXPECTED = [
+  1,
+  101,
+  2,
+  102,
+  3,
+  103,
+  4,
+  104,
+  5,
+  105,
+  6,
+  106,
+  7,
+  107,
+  8,
+  108,
+];
+
 const numbersOf = (v: unknown): number[] | null =>
   Array.isArray(v) ? (v as number[]) : v == null ? null : [NaN];
 
@@ -466,6 +500,14 @@ describe("flatMap builtin resume preservation", () => {
       FLATMAP_SKIP_PROGRAM,
       FLATMAP_ITEMS,
       FLATMAP_SKIP_EXPECTED,
+    );
+  });
+
+  it("spreads a flatMap element whose op returns an array across a resume", async () => {
+    await runFlatMapResume(
+      FLATMAP_SPREAD_PROGRAM,
+      FLATMAP_ITEMS,
+      FLATMAP_SPREAD_EXPECTED,
     );
   });
 });
