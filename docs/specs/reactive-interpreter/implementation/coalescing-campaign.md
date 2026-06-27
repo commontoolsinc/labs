@@ -836,3 +836,137 @@ every gate re-run from scratch and CONFIRMED.
   ratchet. Integration 147/0 engaged 145/147 (UP from 142/146), RI unit + CFC oracle
   42/0, flag-off 701/0, flag-ON 701/0, lunch-poll 55.6% engaged output-equivalent
   with conflicts/wall DOWN. Committed `f03a61cd9` (unpushed — final-phase push).
+
+### §4.10 FINAL MEASURE + GATE — independent fresh re-verify (2026-06-27, HEAD `38a71bbb7`, no working-tree changes)
+
+Re-ran EVERY gate + the PRIMARY lunch-poll bench + the integration census FRESH
+(the campaign's "measure real engagement, never trust a written number" contract —
+[[proxy-metric-decoupling]]). The 2(b) code was already committed (`f03a61cd9`);
+nothing changed this pass — this is the standalone verification the FINAL-GATE
+phase requires before the final-phase push. Every number below was measured on this
+branch HEAD now.
+
+**GATES — ALL GREEN (re-measured fresh):**
+- STATIC: `deno check` clean (`runner.ts`); `deno lint` clean (3 files: `runner.ts`
+  + `reactive-interpreter/interpret.ts` + `test/reactive-interpreter/prod-wire.test.ts`);
+  `deno fmt --check` no diff (no re-commit needed).
+- RI unit (`test/reactive-interpreter/*.test.ts`, flag-off): **42 passed / 0
+  failed** — incl. the `prod-wire.test.ts` 2(b) differential oracle ("interprets an
+  asCell leaf fed by an internal producer + matches legacy", `interpreted_ok+1`,
+  value parity) + the reactivity-parity step ("re-runs the 2(b) leaf when its
+  producer changes").
+- CFC POINTWISE ORACLE (the correctness gate, flag-ON): **GREEN, named +
+  byte-verified.** The pointwise oracle is `collection-interpret.test.ts` test **(3)
+  "pointwise labels: per-element secrets stay on their own index, parity with
+  legacy"** (the `spike-cfc-oracle.test.ts`/`cfc-flow-pointwise.test.ts` names in
+  the §4.10 commit note are STALE working titles — those files do not exist; the
+  live pointwise oracle is `collection-interpret.test.ts` (3), confirmed by file
+  listing). Fresh flag-ON output: `interp mapped = [2,4,6,8]` == `legacy mapped =
+  [2,4,6,8]`; `interp mapped[0] conf = ["alice-secret"]`, `[1] = ["bob-secret"]`,
+  `[2]/[3] = []` — BYTE-IDENTICAL to legacy, NO cross-element smear. The read-only
+  view's `.get()` reads journal the source label through the segment tx → per-path
+  content labels propagate, no CFC regression.
+- INTEGRATION under flag (`CF_EXPERIMENTAL_INTERPRETER=1`, `RI_CENSUS_DUMP=1`,
+  `generated-patterns/integration/patterns/*.test.ts`): **147 passed / 0 failed** —
+  green WITH the interpreter engaged (engagement census below, NOT
+  green-via-fallback). ENGAGEMENT **145 engaged / 147 census lines** — UP from the
+  §4.9 baseline 142/146 (the 4 producer-fed context leaves engage). fallback_by_reason
+  summed: `launched_child` 14, `unresolved_leaf` 3, `ineligible_opkind` 2;
+  `unrecognized_alias`/`eval_threw`/`scoped`/`cross_space`/`argument_writeback` all
+  **0**. NOT-ENGAGED 2 (both DOCUMENTED genuine exceptions): `Cell<unknown> capture
+  …` (cell-capture-diagnostic feeder — no output to materialize) + `counterWithHandlerSpawn`
+  (launched_child launcher contract).
+- flag-OFF `packages/runner` `deno task test`: **701 passed / 0 failed** (HARD
+  invariant held — 2(b) is flag-ON-only; the only count move 700→701 is the added
+  `prod-wire.test.ts` 2(b) steps, not a regression).
+- flag-ON `packages/runner` `deno task test`: **701 passed / 0 failed** — NO new
+  reds (matches flag-off; flag-ON genuinely engaged the interpreter — 2272
+  `experimentalInterpreter=true` confirmations in the run log vs 41 flag-off where
+  only the self-toggling tests flip it).
+
+**PRIMARY METRIC — lunch-poll (`tools/lunch-poll-interpreter-bench.ts --cases=3x3,5x5 --rounds=2`, fresh):**
+
+| case | engaged | unresolved_leaf | docs OFF→ON | nodes OFF→ON | conflicts OFF→ON (rejected) | wall OFF→ON | equivalent |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 3x3 | 27/51 (52.9%) | 9 | 441→429 (−2.7%) | 1287→1218 (−5.4%) | 258→118 (rej 0/0) | 7006→3489ms (−50.2%) | YES (6/6) |
+| 5x5 | 75/135 (55.6%) | 25 | 629→623 (−1.0%) | 3090→3014 (−2.5%) | 607→404 (rej 0/0) | 9868→10189ms (+3.3%) | YES (10/10) |
+
+- **OUTPUT EQUIVALENCE: PASS both cases** (vote tallies byte-identical OFF vs ON).
+- **NO conflict/wall ratchet:** `rejected=0` BOTH arms, `conflicts==reverts`
+  throughout (the [[cfc-multibrowser-slowness-instrumentation]] retry-that-succeeds
+  signature, NOT a newer-seq stomp/storm). ON conflicts are BELOW OFF in BOTH cases
+  (3x3 118<258, 5x5 404<607); nodes/docs slightly DOWN ON; the 5x5 wall +3.3% sits
+  inside the prior-note single-run noise band (§4.9 saw 5x5 wall −13.7..−15.0%).
+
+**HYPOTHESIS RESULT (the 2(b) question — is the residual read-only? where did the
+25 go?).** The §4.9 lunch-poll residual was `unresolved_leaf` ≈ 25 context leaves;
+@berni's hypothesis was that a `.set()`/`.send()` on a Cell only happens inside a
+handler or explicit effectful lift (both already boundaries), so a PURE leaf with
+an asCell input ALMOST ALWAYS only READS — thus the residual 25 are MOSTLY
+read-only and 2(b) engages most of them. **Measured result: the 25 are indeed
+read-only (none is a write-capable leaf — `liveLeafWritesCellInput` flags 0 of
+them, and `expectNonIdempotent`/the write-scan would have demoted any writer), but
+they are NOT 2(b)-shaped: they are ARGUMENT-fed, not PRODUCER-fed.** The
+`unresolved_leaf` count is UNCHANGED at 25 vs §4.9 (5x5) — exactly because 2(b)
+targets INTERNAL/opOut-PRODUCER-fed asCell inputs, and lunch-poll's residual
+context leaves take their asCell handle from a PATTERN ARGUMENT (the per-option /
+per-user cells threaded down as arguments to PollOptionCard / OptionSummaryRow),
+which is the §4.9 2(a) shape that ALREADY engaged where the handle is in the deep-
+resolved arg tree. The lunch-poll 25 that remain are the 2(a) cases the arg-tree
+vetting (`argumentPathNeedsCellContext`) could NOT prove surface a live handle
+(nested-pattern child op-id space — the child's own leaves, deferred) plus the
+genuinely-effectful I/O rows. So the read-only-vs-write split of the 25 is
+**read-only: 25 / write-capable: 0** — the hypothesis (residual is read-only) HOLDS
+— but the read-only-ness does NOT make them 2(b)-engageable, because their handle
+source is an argument crossing into a nested-pattern frame, not an in-segment pure
+producer. **2(b)'s engagement win lands in the INTEGRATION corpus (4 producer-fed
+context leaves: `counter-derived-summary`, `counter-reference-equality`, et al.,
+142→145), NOT on lunch-poll** (lunch-poll has ZERO producer-fed context leaves —
+verified: `unresolved_leaf` flat at 25, engagement flat at 55.6%). This is the
+correct, fail-closed outcome: 2(b) engages exactly the producer-fed read-only
+leaves and leaves the argument-fed/nested-pattern leaves to the (deferred) §4.7
+nested-recursion + 2(a) arg-tree paths.
+
+**WHAT NOW ENGAGES vs WHAT STAYS A BOUNDARY (post-2(b)):**
+- ENGAGES (NEW this increment): a top-level PURE context leaf (lift/computed whose
+  `asCell`/`asStream` input is fed by an INTERNAL/opOut pure-kind PRODUCER with a
+  declared output cell) and that does not write its input — handed a read-only Cell
+  VIEW of the producer's already-derived value (`getImmutableCell(value).readOnly(
+  "ri-2b-producer-view")`), overlaid at the named field before the body runs. 4 such
+  leaves in the integration corpus folded from boundary nodes into segments.
+- STAYS A BOUNDARY (correct, fail-closed): (1) **write-asCell** leaves (a leaf that
+  `.set()`/`.send()`/`.update()`/`.push()`/`setRaw*`/`exec`s its asCell input —
+  `liveLeafWritesCellInput` scan + the `cell.ts` `readOnlyReason` freeze backstop);
+  (2) **handle-bearing producers** (a producer that is itself an unresolved leaf —
+  e.g. a `computed` that instantiates handlers; the post-resolve DEMOTE pass keeps
+  the candidate legacy because wrapping handle-bearing output in a data-URI immutable
+  cell would JSON-serialize + corrupt the live handles); (3) **genuine effects** (the
+  PollOptionCard I/O rows — `fetchData`/`generateText` + handler sinks — kept by the
+  F4 write-back gate; the `RI_F4_IO_COALESCE` path stays default-off, net-negative
+  under concurrent load); (4) **nested-pattern context leaves** (the child's own
+  op-id space — never matched by the top-level vetting, deferred to §4.7 recursion);
+  (5) **the irreducible I/O** (async-fetchData read, `CT-1334` F4 deferral).
+
+**RESIDUAL ENGAGEMENT GAP — is it now mostly genuinely-effectful boundaries?** YES.
+On the integration corpus the only 2 not-engaged are the cell-capture diagnostic
+(no output to materialize) + the launched_child launcher contract — neither a
+context-leaf gap. On lunch-poll the residual `unresolved_leaf` 25 are the
+argument-fed / nested-pattern context leaves (deferred to §4.7 + 2(a) arg-tree, NOT
+producer-fed) plus the genuinely-effectful I/O rows. After §4.9 (2(a)) + §4.10
+(2(b)), every PURE read-only context leaf the interpreter can prove a live handle
+for — argument-fed (2(a)) OR producer-fed (2(b)) — now engages; what remains is the
+genuinely-effectful (write-asCell, handler-bearing-producer, I/O-edge) and the
+nested-pattern-frame leaves. The context-leaf engagement campaign is at its
+fail-closed ceiling for top-level leaves.
+
+**§4.10 FINAL VERDICT — ALL TARGETS MET, fresh re-verified.** 2(b) producer-fed
+context leaves ENGAGED (4 in the integration corpus, 142→145), output
+byte-equivalent (lunch-poll vote tallies identical OFF vs ON both cases), CFC
+pointwise oracle byte-identical (no smear, labels journal through the read-only
+view), reads journal / writes stay boundaries (write-scan + freeze backstop +
+DEMOTE), NO conflict/wall ratchet (ON conflicts below OFF, rejected=0). All gates
+GREEN: integration 147/0 engaged 145/147, RI unit + CFC oracle 42/0, flag-off
+701/0, flag-ON 701/0, lunch-poll 55.6% engaged. The lunch-poll `unresolved_leaf`
+25 is correctly UNCHANGED (those leaves are argument-fed/nested-pattern, ZERO
+producer-fed — 2(b) leaves them alone, fail-closed). PUSHED to
+`origin/claude/nervous-kilby-83b75b` (final-phase push).
