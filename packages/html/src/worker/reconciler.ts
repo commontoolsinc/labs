@@ -526,12 +526,24 @@ export class WorkerReconciler {
       this.requiredAuthorshipIntegrityFromAuthor(node) ??
       [];
 
+    // Compose (do not replace) the enclosing text-integrity policy so nesting
+    // can only TIGHTEN it: required integrity is the union of every enclosing
+    // boundary's atoms, literal text is allowed only if every enclosing
+    // boundary allows it, and the block-attribution set carries every enclosing
+    // boundary id. An inner boundary can never relax an outer one.
+    const parentTextIntegrity = policy.textIntegrity;
+    const boundaryNodeIds = new Set(parentTextIntegrity?.boundaryNodeIds ?? []);
+    boundaryNodeIds.add(nodeId);
     return {
       ...policy,
       textIntegrity: {
-        requiredIntegrity,
-        allowLiteralText,
-        boundaryNodeId: nodeId,
+        requiredIntegrity: [
+          ...(parentTextIntegrity?.requiredIntegrity ?? []),
+          ...requiredIntegrity,
+        ],
+        allowLiteralText: (parentTextIntegrity?.allowLiteralText ?? true) &&
+          allowLiteralText,
+        boundaryNodeIds,
       },
     };
   }
@@ -895,7 +907,18 @@ export class WorkerReconciler {
       rightPolicy.requiredIntegrity,
     ) &&
       leftPolicy.allowLiteralText === rightPolicy.allowLiteralText &&
-      leftPolicy.boundaryNodeId === rightPolicy.boundaryNodeId;
+      this.boundaryNodeIdsEqual(
+        leftPolicy.boundaryNodeIds,
+        rightPolicy.boundaryNodeIds,
+      );
+  }
+
+  private boundaryNodeIdsEqual(
+    left: ReadonlySet<number>,
+    right: ReadonlySet<number>,
+  ): boolean {
+    return left.size === right.size &&
+      [...left].every((id) => right.has(id));
   }
 
   private atomListsEqual(
@@ -1054,7 +1077,7 @@ export class WorkerReconciler {
     policy: RenderPolicy,
     nodeId: number,
   ): void {
-    if (policy.textIntegrity?.boundaryNodeId !== nodeId) {
+    if (!policy.textIntegrity?.boundaryNodeIds.has(nodeId)) {
       return;
     }
     this.queueOps([{
@@ -1074,7 +1097,7 @@ export class WorkerReconciler {
     }
     if (
       policy.textIntegrity !== undefined &&
-      policy.textIntegrity.boundaryNodeId !== state.nodeId
+      !policy.textIntegrity.boundaryNodeIds.has(state.nodeId)
     ) {
       return;
     }
@@ -1095,13 +1118,13 @@ export class WorkerReconciler {
     state: NodeState,
     boundaryNodeId: number,
   ): boolean {
-    if (state.textIntegrityBlockedFor === boundaryNodeId) {
+    if (state.textIntegrityBlockedFor?.has(boundaryNodeId)) {
       return true;
     }
     if (
       state.textIntegrityBlockedProps !== undefined &&
-      [...state.textIntegrityBlockedProps.values()].some((id) =>
-        id === boundaryNodeId
+      [...state.textIntegrityBlockedProps.values()].some((ids) =>
+        ids.has(boundaryNodeId)
       )
     ) {
       return true;
@@ -1120,18 +1143,24 @@ export class WorkerReconciler {
     return false;
   }
 
-  private markTextIntegrityBlocked(policy: RenderPolicy): number | undefined {
-    const boundaryNodeId = policy.textIntegrity?.boundaryNodeId;
-    if (boundaryNodeId === undefined) {
+  private markTextIntegrityBlocked(
+    policy: RenderPolicy,
+  ): ReadonlySet<number> | undefined {
+    const boundaryNodeIds = policy.textIntegrity?.boundaryNodeIds;
+    if (boundaryNodeIds === undefined || boundaryNodeIds.size === 0) {
       return undefined;
     }
-    this.queueOps([{
-      op: "set-prop",
-      nodeId: boundaryNodeId,
-      key: "textIntegrityState",
-      value: "blocked",
-    }]);
-    return boundaryNodeId;
+    // Attribute the block to EVERY enclosing boundary, not just the nearest, so
+    // an outer boundary cannot stay "ok" over content that failed its bar.
+    this.queueOps(
+      [...boundaryNodeIds].map((nodeId) => ({
+        op: "set-prop" as const,
+        nodeId,
+        key: "textIntegrityState",
+        value: "blocked",
+      })),
+    );
+    return boundaryNodeIds;
   }
 
   private canRenderCellTextUnderPolicy(
@@ -1277,12 +1306,12 @@ export class WorkerReconciler {
         state.textIntegrityBlockedProps?.delete(key);
         return this.transformPropValue(key, value);
       }
-      const boundaryNodeId = this.markTextIntegrityBlocked(state.renderPolicy);
-      if (boundaryNodeId !== undefined) {
+      const boundaryNodeIds = this.markTextIntegrityBlocked(state.renderPolicy);
+      if (boundaryNodeIds !== undefined) {
         if (state.textIntegrityBlockedProps === undefined) {
           state.textIntegrityBlockedProps = new Map();
         }
-        state.textIntegrityBlockedProps.set(key, boundaryNodeId);
+        state.textIntegrityBlockedProps.set(key, boundaryNodeIds);
       }
       this.queueOps([{
         op: "set-prop",
@@ -2496,7 +2525,7 @@ export class WorkerReconciler {
       childRenderPolicy: policy,
       childrenBlockedByPolicy: false,
       textIntegrityBlockedFor: integrityBlocked
-        ? policy.textIntegrity?.boundaryNodeId
+        ? policy.textIntegrity?.boundaryNodeIds
         : undefined,
     };
   }
