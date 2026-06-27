@@ -262,9 +262,7 @@ export function map(
       // syncCell is async, so the container pull is always a Promise; the union
       // on Cell.sync() is a vestigial synchronous fast path the storage manager
       // no longer takes. Assert it to narrow before awaiting.
-      if (!(pending instanceof Promise)) {
-        throw new Error("map: result.sync() returned a non-Promise");
-      }
+      if (!(pending instanceof Promise)) throw new Error("result.sync()");
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the probe read above is journaled). If the
       // container was never persisted — so nothing will ever stream in to
