@@ -917,15 +917,8 @@ export class WorkerReconciler {
     left: ReadonlySet<number>,
     right: ReadonlySet<number>,
   ): boolean {
-    if (left.size !== right.size) {
-      return false;
-    }
-    for (const id of left) {
-      if (!right.has(id)) {
-        return false;
-      }
-    }
-    return true;
+    return left.size === right.size &&
+      [...left].every((id) => right.has(id));
   }
 
   private atomListsEqual(
