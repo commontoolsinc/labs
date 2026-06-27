@@ -11,7 +11,7 @@ Deno.test("scoped group chat pattern schema generates scoped input cells", async
     args: (lockPath) => [
       "run",
       "--config",
-      join(ROOT, "deno.json"),
+      join(ROOT, "deno.jsonc"),
       "--lock",
       lockPath,
       "--allow-net",

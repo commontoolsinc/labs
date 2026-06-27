@@ -74,13 +74,13 @@ The codebase correctly follows the guideline for module-specific dependencies:
 
 ### Good Examples
 
-- `packages/llm/deno.json` - Correctly declares `json5` dependency
-- `packages/ui/deno.json` - Correctly declares `@shoelace-style/shoelace`
+- `packages/llm/deno.jsonc` - Correctly declares `json5` dependency
+- `packages/ui/deno.jsonc` - Correctly declares `@shoelace-style/shoelace`
   dependency
-- Most packages don't have unnecessary dependencies in their `deno.json`
+- Most packages don't have unnecessary dependencies in their `deno.jsonc`
 
 **This is a positive finding** - the codebase correctly avoids adding
-package-specific dependencies to the workspace `deno.json`.
+package-specific dependencies to the workspace `deno.jsonc`.
 
 ## Recommendations
 

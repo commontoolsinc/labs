@@ -57,7 +57,7 @@ Deno.test("parseCfLauncherArgs defaults to the launcher labs checkout", () => {
   assertEquals(parsed, {
     denoPath: "/usr/local/bin/deno",
     labsRoot: "/workspace/labs",
-    configPath: "/workspace/labs/deno.json",
+    configPath: "/workspace/labs/deno.jsonc",
     cliEntrypoint: "/workspace/labs/packages/cli/mod.ts",
     cwd: "/workspace/pattern-factory",
     cfArgs: ["--help"],

@@ -3,7 +3,7 @@
 ## Context
 
 The repo currently relies on TypeScript's legacy decorator mode in the root
-`deno.json` via `compilerOptions.experimentalDecorators`.
+`deno.jsonc` via `compilerOptions.experimentalDecorators`.
 
 That flag is deprecated. Removing it today is not safe: decorated Lit classes
 in the repo fail `deno check` under standard decorator semantics.

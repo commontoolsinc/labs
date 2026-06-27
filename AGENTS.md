@@ -102,10 +102,10 @@ deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 
 When adding a new workspace package:
 
-1. Add the package path (e.g., `./packages/my-package`) to the root `deno.json`
+1. Add the package path (e.g., `./packages/my-package`) to the root `deno.jsonc`
    `"workspace"` array.
-2. The package's `deno.json` **must** include a `"tasks"` object with a `"test"`
-   entry. Use `"deno test"` if the package has tests, or
+2. The package's `deno.jsonc` **must** include a `"tasks"` object with a
+   `"test"` entry. Use `"deno test"` if the package has tests, or
    `"echo 'No tests defined.'"` as a stub for packages without tests yet.
 
 This is required because the root test runner (`tasks/test.ts`) iterates all
@@ -113,4 +113,5 @@ workspace packages and runs `deno task test` in each. If a package has no test
 task, Deno falls back to the root workspace's test task, which re-runs the
 entire suite recursively — causing exponential process spawning and CI timeouts.
 
-See `packages/utils/deno.json` for an example of a correctly configured package.
+See `packages/utils/deno.jsonc` for an example of a correctly configured
+package.

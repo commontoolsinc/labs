@@ -1,6 +1,9 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
-import { runDenoCheckWithTemporaryConfig } from "@commonfabric/test-support/isolated-deno";
+import {
+  readDenoConfig,
+  runDenoCheckWithTemporaryConfig,
+} from "@commonfabric/test-support/isolated-deno";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
@@ -9,11 +12,9 @@ function decode(bytes: Uint8Array): string {
 }
 
 Deno.test("shell entrypoint type-checks under standard decorators", async () => {
-  const rootConfig = JSON.parse(
-    await Deno.readTextFile(join(ROOT, "deno.json")),
-  );
-  const packageConfig = JSON.parse(
-    await Deno.readTextFile(join(ROOT, "packages", "shell", "deno.json")),
+  const rootConfig = await readDenoConfig(join(ROOT, "deno.jsonc"));
+  const packageConfig = await readDenoConfig(
+    join(ROOT, "packages", "shell", "deno.jsonc"),
   );
 
   rootConfig.compilerOptions ??= {};

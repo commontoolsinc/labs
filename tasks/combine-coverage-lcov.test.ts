@@ -294,7 +294,7 @@ Deno.test("the CLI entry point runs the task as a process", async () => {
       args: (lockPath) => [
         "run",
         "--config",
-        path.join(ROOT, "deno.json"),
+        path.join(ROOT, "deno.jsonc"),
         "--lock",
         lockPath,
         "--allow-read",

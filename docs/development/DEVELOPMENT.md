@@ -81,7 +81,7 @@ We execute our JavaScript modules in many different environments:
 
 - Modules depending on each other
 - Large quantity of module exports
-- Adding module-specific dependencies to workspace deno.json
+- Adding module-specific dependencies to workspace deno.jsonc
 - Non-standard JS (env vars, vite-isms): All of our different invocation
   mechanisms/environments need to handle these
 
@@ -412,9 +412,9 @@ Every workspace package must be registered and configured correctly, or the test
 suite will break.
 
 1. **Register the package.** Add its path (e.g., `./packages/my-package`) to the
-   `"workspace"` array in the root `deno.json`.
+   `"workspace"` array in the root `deno.jsonc`.
 
-2. **Include a test task.** The package's `deno.json` **must** have a `"tasks"`
+2. **Include a test task.** The package's `deno.jsonc` **must** have a `"tasks"`
    object with a `"test"` entry. The root test runner (`tasks/test.ts`) iterates
    all workspace members and runs `deno task test` in each package directory. If
    a package lacks a test task, Deno resolves the task name against the root
@@ -424,7 +424,7 @@ suite will break.
    Use `"deno test"` for packages with tests, or `"echo 'No tests defined.'"` as
    a stub for packages that don't have tests yet.
 
-3. **Minimal `deno.json` example:**
+3. **Minimal `deno.jsonc` example:**
 
    ```json
    {

@@ -519,7 +519,7 @@ jobs:
       # so unchanged patterns reuse last run's emitted bytes (skip the
       # type-check + transform + emit). The key folds in a hash of everything
       # that shapes the emitted bytes — the js-compiler, the CF transformer, the
-      # schema-generator it bakes schemas from, the root deno.json compiler
+      # schema-generator it bakes schemas from, the root deno.jsonc compiler
       # options (jsx/jsxImportSource), and the lockfile — so any change to what
       # emits the bytes invalidates the whole file even when it leaves module
       # identity and the manual runtime-version tag untouched. The pattern-source
@@ -529,9 +529,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
           restore-keys: |
-            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8

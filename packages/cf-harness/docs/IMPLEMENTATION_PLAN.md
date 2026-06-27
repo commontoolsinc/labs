@@ -82,7 +82,7 @@ The package already includes:
 ### Stage A: Package skeleton and contracts
 
 - package scaffold under [packages/cf-harness](..)
-- package exports and tasks in [deno.json](../deno.json)
+- package exports and tasks in [deno.jsonc](../deno.jsonc)
 - initial contract surfaces:
   - [prompt-slot.ts](../src/contracts/prompt-slot.ts)
   - [run-manifest.ts](../src/contracts/run-manifest.ts)
