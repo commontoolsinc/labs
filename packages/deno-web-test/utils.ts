@@ -291,7 +291,9 @@ async function findWorkspaceConfigPath(
 // Deno resolves a directory's config from `deno.json` first, then `deno.jsonc`.
 // Mirror that order so a project with both files is bundled against the same
 // config Deno itself reads.
-async function findDenoConfigPath(dir: string): Promise<string | undefined> {
+export async function findDenoConfigPath(
+  dir: string,
+): Promise<string | undefined> {
   for (const name of ["deno.json", "deno.jsonc"]) {
     const candidate = path.join(dir, name);
     try {
@@ -307,7 +309,7 @@ async function findDenoConfigPath(dir: string): Promise<string | undefined> {
   return undefined;
 }
 
-async function readConfigIfExists(
+export async function readConfigIfExists(
   configPath: string | undefined,
 ): Promise<Record<string, unknown> | undefined> {
   if (configPath === undefined) {

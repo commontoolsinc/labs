@@ -86,13 +86,21 @@ export async function testPackage(
   };
 }
 
+// Read the workspace member list from the root manifest. Parsed with the JSONC
+// parser so a `deno.jsonc` carrying comments is read correctly.
+export async function readWorkspaceMembers(
+  configPath = "./deno.jsonc",
+): Promise<string[]> {
+  const manifest = parseJsonc(await Deno.readTextFile(configPath)) as {
+    workspace: string[];
+  };
+  return manifest.workspace;
+}
+
 export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const workspaceCwd = Deno.cwd();
   const suiteStartedAt = Date.now();
-  const manifest = parseJsonc(await Deno.readTextFile("./deno.jsonc")) as {
-    workspace: string[];
-  };
-  const members: string[] = manifest.workspace;
+  const members = await readWorkspaceMembers();
   // Resolve to an absolute path: each package's test subprocess runs with its
   // own cwd, so a relative DENO_COVERAGE_DIR would land under
   // packages/<pkg>/... instead of the shared workspace coverage directory.

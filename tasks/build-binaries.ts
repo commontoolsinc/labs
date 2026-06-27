@@ -3,13 +3,13 @@ import { exists } from "@std/fs";
 import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 
-interface BuildConfigInitializer {
+export interface BuildConfigInitializer {
   root: string;
   toolshedFlags: string[];
   cliOnly?: boolean;
 }
 
-class BuildConfig {
+export class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
   readonly cliOnly: boolean;
@@ -338,7 +338,7 @@ function lockedCompileArgs(config: BuildConfig): string[] {
 // Some frontend types in the workspace manifest
 // must be removed from the compiler options
 // that do not work with toolshed.
-async function prepareWorkspace(
+export async function prepareWorkspace(
   config: BuildConfig,
 ): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
@@ -369,7 +369,7 @@ async function prepareWorkspace(
   );
 }
 
-async function revertWorkspace(config: BuildConfig): Promise<void> {
+export async function revertWorkspace(config: BuildConfig): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
   const toolshedEnvPath = config.toolshedEnvPath();
 
@@ -383,21 +383,26 @@ async function revertWorkspace(config: BuildConfig): Promise<void> {
   }
 }
 
-const config = new BuildConfig({
-  root: Deno.cwd(),
-  toolshedFlags: [
-    "--allow-env",
-    "--allow-sys",
-    "--allow-read",
-    "--allow-ffi",
-    "--allow-net",
-    "--allow-write",
-  ],
-  cliOnly: Deno.args.includes("--cli-only"),
-});
+// Only run the build when invoked directly (`deno task build-binaries`), not
+// when imported by tests, which exercise BuildConfig / prepareWorkspace /
+// revertWorkspace against a temporary tree.
+if (import.meta.main) {
+  const config = new BuildConfig({
+    root: Deno.cwd(),
+    toolshedFlags: [
+      "--allow-env",
+      "--allow-sys",
+      "--allow-read",
+      "--allow-ffi",
+      "--allow-net",
+      "--allow-write",
+    ],
+    cliOnly: Deno.args.includes("--cli-only"),
+  });
 
-Deno.addSignalListener("SIGINT", async () => {
-  await revertWorkspace(config);
-});
+  Deno.addSignalListener("SIGINT", async () => {
+    await revertWorkspace(config);
+  });
 
-await build(config);
+  await build(config);
+}
