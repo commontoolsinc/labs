@@ -1229,6 +1229,25 @@ Summary table; the full per-mechanism walkthrough with file references is in
     sync→settle boundary** — a deliberate latency/consistency tradeoff, out of
     scope.
 
+    *Recoverable lever, kept as an option (not adopted): effect/wave-coalescing
+    for the apex re-fire.* The one real *product* surplus (per the clean-tree
+    re-validation) is the ~**+13** apex render-effect re-fire (the render effect
+    fires ~2× per single append). The writer-gated variants above cannot reach it —
+    the re-fires are direct cross-runtime cell writes (`writers=0`), so the reverse
+    read-set pull-gate is ~neutral (165→163). The viable shape is a **per-wave
+    render flush**: run a live, pure-render effect *once* at the settle-wave
+    boundary after its invalidations are absorbed (the standard "flush effects at
+    batch end"), collapsing the 2:1 over-fire. Parked prototype: `/tmp/effect-defer`
+    (`CF_EFFECT_COALESCE` — hold a pure read-only sink effect, gated on
+    `declaredWritesEmpty`, while a *runnable* upstream is still dirty this wave;
+    proven SAFE — convergence holds, `scheduler-pull:351` stays 2, byte-identical
+    tallies, no single-runtime bench regression). **Not adopted** — the win is
+    small (~+13) and the +73 granularity bulk is unaffected — but **kept as the one
+    viable lever** if multi-user render latency becomes a priority. *Re-entry gate:*
+    a variant that collapses the apex pull from 36 toward main's 23 **without**
+    regressing per-row incremental-edit granularity (a single-row edit must still
+    re-run only that row's node).
+
     *Push-pull completeness (Track 1 — measured NO-GO).* v2 lacks the classic
     3-color (clean/check/dirty) machinery — no CHECK color, no per-node output
     cache/version (`NodeStatus = never-ran | clean | invalid`; `SchedulerNode`
