@@ -833,3 +833,165 @@ describe("prod-wire: collection map dispatch (flag ON, single map)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2(b) PRODUCER-FED READ-ONLY CONTEXT LEAF.
+// A pure lift whose `asCell` INPUT is fed by an INTERNAL/opOut PRODUCER (another
+// lift's output), not a pattern argument. Pre-2(b) the interpreter held the
+// producer's PLAIN value, so the leaf's `.get()` would throw → the leaf stayed a
+// legacy `unresolved-leaf` boundary. 2(b) builds a READ-ONLY Cell VIEW of the
+// producer value and overlays it onto the leaf input so the leaf interprets. A
+// handler boundary keeps the pattern on the PARTITION path (where the cell-view
+// overlay is wired). The differential oracle proves the leaf output matches legacy
+// AND the leaf is genuinely INTERPRETED (no `unresolved_leaf` fallback).
+// ---------------------------------------------------------------------------
+const producerFedResultSchema = {
+  type: "object",
+  properties: { doubled: num, summary: num, bump: { asStream: true } },
+} as JSONSchema;
+
+// ({ x }) => {
+//   const doubled = double(x);              // producer lift → internal cell
+//   const summary = summarize(doubled);     // asCell-input leaf reads doubled.get()
+//   const bump = handler(...);              // boundary → partition path
+//   return { doubled, summary, bump: bump({ x }) };
+// }
+// deno-lint-ignore no-explicit-any
+function buildProducerFedContextLeaf(cf: any) {
+  const double = cf.lift((x: number) => x * 2, num, num);
+  // The context leaf: its INPUT schema is `asCell` (it receives a live Cell handle
+  // and reads it with `.get()`). Fed by `double(x)` — an internal PRODUCER, the
+  // 2(b) shape (not a pattern argument).
+  const summarize = cf.lift(
+    (c: any) => c.get() + 1,
+    { type: "number", asCell: ["readonly"] },
+    num,
+  );
+  return cf.pattern(
+    ({ x }: any) => {
+      const doubled = double(x);
+      const summary = summarize(doubled);
+      const bump = cf.handler(
+        { type: "object" },
+        { type: "object", properties: { x: num } },
+        (_e: any, s: any) => {
+          s.x = s.x + 1;
+        },
+      );
+      return { doubled, summary, bump: bump({ x }) };
+    },
+    { type: "object", properties: { x: num } },
+    producerFedResultSchema,
+  );
+}
+
+describe("prod-wire: 2(b) producer-fed read-only context leaf (flag ON)", () => {
+  it("interprets an asCell leaf fed by an internal producer + matches legacy", async () => {
+    const off = makeEnv(false);
+    const on = makeEnv(true);
+    try {
+      const legacy = await runAndPull(
+        off,
+        buildProducerFedContextLeaf,
+        { x: 5 },
+        producerFedResultSchema,
+        "legacy:2b",
+      );
+      const before = on.census();
+      const interp = await runAndPull(
+        on,
+        buildProducerFedContextLeaf,
+        { x: 5 },
+        producerFedResultSchema,
+        "interp:2b",
+      );
+      const after = on.census();
+
+      // VALUE PARITY: double(5)=10, summarize(10.get())=10+1=11. The producer-fed
+      // context leaf produced the SAME value the legacy binding-layer path does.
+      const l = legacy as { doubled?: unknown; summary?: unknown };
+      const i = interp as {
+        doubled?: unknown;
+        summary?: unknown;
+        bump?: unknown;
+      };
+      expect(i.doubled).toEqual(l.doubled);
+      expect(i.summary).toEqual(l.summary);
+      expect(i.doubled).toEqual(10);
+      expect(i.summary).toEqual(11);
+      // The handler stream is preserved (the boundary is kept verbatim).
+      expect(i.bump).toBeDefined();
+
+      // REAL ENGAGEMENT (not green-via-fallback): the partition interpreted the
+      // pure region INCLUDING the producer-fed context leaf — so `interpreted_ok`
+      // rose AND `unresolved_leaf` did NOT (the leaf is no longer a boundary).
+      expect(after.interpreted_ok).toBe(before.interpreted_ok + 1);
+      expect(after.fallback_by_reason.unresolved_leaf).toBe(
+        before.fallback_by_reason.unresolved_leaf,
+      );
+      expect(after.fallback_by_reason.eval_threw).toBe(
+        before.fallback_by_reason.eval_threw,
+      );
+    } finally {
+      await off.dispose();
+      await on.dispose();
+    }
+  });
+
+  it("re-runs the 2(b) leaf when its producer changes (reactivity parity)", async () => {
+    const on = makeEnv(true);
+    try {
+      const { runtime, cf, space } = on;
+      const double = cf.lift((x: number) => x * 2, num, num);
+      const summarize = cf.lift(
+        (c: any) => c.get() + 1,
+        { type: "number", asCell: ["readonly"] },
+        num,
+      );
+      const pattern = cf.pattern(
+        ({ x }: any) => {
+          const doubled = double(x);
+          const summary = summarize(doubled);
+          const bump = cf.handler(
+            { type: "object" },
+            { type: "object", properties: { x: num } },
+            (_e: any, s: any) => {
+              s.x = s.x + 1;
+            },
+          );
+          return { doubled, summary, bump: bump({ x }) };
+        },
+        { type: "object", properties: { x: num } },
+        producerFedResultSchema,
+      );
+
+      const tx = runtime.edit();
+      const argCell = runtime.getCell(space, "2b:react:arg", undefined, tx);
+      argCell.set({ x: 5 });
+      const res = runtime.getCell(
+        space,
+        "2b:react:res",
+        producerFedResultSchema,
+        tx,
+      );
+      const r = runtime.run(tx, pattern, argCell, res);
+      await tx.commit();
+      await runtime.idle();
+      r.sink(() => {});
+      await runtime.idle();
+      const first = await r.pull() as { summary?: unknown };
+      expect(first.summary).toEqual(11); // double(5)=10, +1=11
+
+      // Change the argument → producer re-derives (double=14) → the 2(b) leaf's
+      // read-only view re-reads the fresh producer value → summary=15.
+      const atx = runtime.edit();
+      argCell.withTx(atx).set({ x: 7 });
+      await atx.commit();
+      await runtime.idle();
+      const second = await r.pull() as { summary?: unknown };
+      expect(second.summary).toEqual(15); // double(7)=14, +1=15
+    } finally {
+      await on.dispose();
+    }
+  });
+});

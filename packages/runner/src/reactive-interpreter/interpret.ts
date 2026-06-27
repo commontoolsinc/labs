@@ -96,6 +96,26 @@ export interface EvalContext {
    * `.get()`) when interpreting a pattern with a context-requiring leaf.
    */
   unwrapCellForValue?: (value: unknown) => unknown;
+  /**
+   * 2(b) PRODUCER-FED READ-ONLY CONTEXT LEAF overlay. A pure lift/computed whose
+   * `asCell`/`asStream` input fields are fed by an INTERNAL/opOut PRODUCER (not a
+   * pattern argument) needs a live Cell HANDLE to `.get()`/`.sample()` — but the
+   * interpreter holds the producer's PLAIN value in `opValues`. For each such
+   * leaf, this maps its op id to the set of input FIELD NAMES whose resolved value
+   * must be wrapped in a READ-ONLY Cell view before the body runs. The leaf input
+   * is a synthesized object `construct`, so the resolved input is a plain object;
+   * we replace `input[field]` with `wrapReadOnlyValue(input[field])` for each named
+   * field. The reads journal at the producer's own input (same-segment) or at the
+   * `$in` read (cross-segment), so wrapping the already-resolved value is CFC-sound
+   * (no new dependency is introduced by reading a value the segment already
+   * derived). Absent ⇒ byte-identical to today (no caller wraps). PURE leaves only
+   * (writes excluded by `liveLeafWritesCellInput` + the read-only freeze backstop).
+   */
+  inputCellViews?: Map<OpId, ReadonlySet<string>>;
+  /** Wrap a plain value in a READ-ONLY Cell view for a 2(b) producer-fed field.
+   * Supplied by the runner (backed by `runtime.getImmutableCell(...).readOnly(...)`).
+   * Returns the value unchanged when no factory is supplied. */
+  wrapReadOnlyValue?: (value: unknown) => unknown;
 }
 
 export class NotInterpretedHere extends Error {
@@ -257,7 +277,28 @@ export function evalRog(
         // `argumentSchema === false` bypass: a no-argument lift runs and may
         // produce a constant); call it as before.
         if (op.inputs.length === 0) return impl(undefined);
-        const input = resolve(op.inputs[0]);
+        let input = resolve(op.inputs[0]);
+        // 2(b) PRODUCER-FED CONTEXT LEAF: overlay a READ-ONLY Cell view at each
+        // named field so the leaf's `.get()`/`.sample()` lands on a live frozen
+        // handle (the producer value the segment already derived), not the plain
+        // value. Only the vetted fields are wrapped; the rest of the input is
+        // untouched. The resolved input is a synthesized object `construct`, so it
+        // is a plain object we can shallow-clone and overlay.
+        const fieldsToWrap = ctx.inputCellViews?.get(op.id);
+        if (
+          fieldsToWrap && fieldsToWrap.size > 0 && ctx.wrapReadOnlyValue &&
+          input !== null && typeof input === "object" && !Array.isArray(input)
+        ) {
+          const overlaid: Record<string, unknown> = {
+            ...(input as Record<string, unknown>),
+          };
+          for (const field of fieldsToWrap) {
+            if (Object.hasOwn(overlaid, field)) {
+              overlaid[field] = ctx.wrapReadOnlyValue(overlaid[field]);
+            }
+          }
+          input = overlaid;
+        }
         // UNDEFINED-ARGUMENT RUN-GATE (legacy parity). Legacy gates each node on
         // `isValidArgument = argument !== undefined` (runner.ts `if
         // (isValidArgument)`) before invoking, so a node whose resolved input is

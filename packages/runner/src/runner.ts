@@ -104,6 +104,7 @@ import {
   extractRogBaseDefer,
   hasArgumentWritebackMarker,
   type ImplRefResolver,
+  liveLeafWritesCellInput,
   outputInternalName,
   resolveLeafImpls,
   schemaNeedsCellContext,
@@ -831,6 +832,147 @@ function computeArgumentFedContextLeaves(
       }
     }
     if (sawCellContextField && allArgumentFed) eligible.add(op.id);
+  }
+  return eligible;
+}
+
+/**
+ * 2(b): per-field PRODUCER source for a producer-fed READ-ONLY context leaf.
+ * `fields` maps each cell-context field NAME the leaf reads as a handle to the
+ * `internal`-cell NAME of the op that produces it. The segment impl resolves that
+ * cell, freezes it read-only, and overlays it onto the leaf's input at the field
+ * name so the leaf's `.get()`/`.sample()` lands on the live frozen handle.
+ */
+interface ProducerFedContextLeaf {
+  /** field NAME → producing op's declared internal-cell NAME (the `$in` key). */
+  fields: Map<string, string>;
+  /** The producing OP IDs (one per cell-context field). Used to DEMOTE a candidate
+   * whose producer is itself unresolved / a non-plain-data boundary (e.g. a
+   * `computed` that instantiates handlers — wrapping its output would serialize the
+   * live handles into a data-URI cell and corrupt them). */
+  producerOpIds: Set<OpId>;
+}
+
+/**
+ * Compute the TOP-LEVEL leaf op ids eligible to engage as READ-ONLY context
+ * leaves whose asCell/asStream input fields are fed by an INTERNAL/opOut PRODUCER
+ * (the 2(b) case) — distinct from the argument-fed 2(a) case
+ * (`computeArgumentFedContextLeaves`). Today the interpreter holds a PLAIN value
+ * in `opValues` for such a producer, so `.get()`/`.sample()` on it throws → the
+ * leaf stays a legacy `unresolved-leaf` boundary. 2(b) hands the leaf a READ-ONLY
+ * Cell VIEW of the producer's OUTPUT cell (built + frozen by the segment impl) so
+ * the leaf interprets, reads journaling through the segment tx (CFC + reactivity
+ * parity, same as 2(a)).
+ *
+ * Eligibility (per leaf), all must hold:
+ *  - the leaf's `module.argumentSchema` needs cell context (it is a context leaf);
+ *  - its input is a synthesized object `construct` (the only shape that names a
+ *    producer per field — a bare `opOut`/`internal` whole-input handle would need
+ *    a different overlay and does not arise for a multi-field lift in this corpus);
+ *  - EVERY cell-context field is fed by an `internal`/`opOut` ref whose producer
+ *    is a NAMED internal cell (`internalToOp` has it) — so a real output cell
+ *    exists to view. (A field fed by `const`/argument disqualifies the leaf from
+ *    2(b) here; the all-argument case is 2(a). A mixed arg+producer leaf is left
+ *    to a future increment — none appear in the measured corpus.)
+ *  - the source does not WRITE its input (`liveLeafWritesCellInput`) — a writing
+ *    leaf stays a legacy effectful boundary (same gate as 2(a)).
+ *
+ * Returns a map keyed by consuming leaf op id → its per-field producer sources.
+ * PURE structural read — no tx, no leaf-body execution.
+ */
+function computeProducerFedContextLeaves(
+  rog: Rog,
+  nodes: readonly unknown[],
+  internalToOp: Map<string, OpId>,
+): Map<OpId, ProducerFedContextLeaf> {
+  const eligible = new Map<OpId, ProducerFedContextLeaf>();
+  const opById = new Map<OpId, Op>();
+  for (const op of rog.ops) opById.set(op.id, op);
+  // Invert internalToOp so a producer OP id → its declared internal-cell name.
+  const opToInternalName = new Map<OpId, string>();
+  for (const [name, opId] of internalToOp) {
+    if (!opToInternalName.has(opId)) opToInternalName.set(opId, name);
+  }
+
+  for (const op of rog.ops) {
+    if (op.kind !== "leaf" || op.id < 0) continue;
+    const node = nodes[op.id] as
+      | { module?: { argumentSchema?: unknown; implementation?: unknown } }
+      | undefined;
+    const argSchema = node?.module?.argumentSchema;
+    if (!schemaNeedsCellContext(argSchema)) continue;
+
+    // WRITE gate: a leaf that mutates its handle input stays a legacy boundary.
+    const impl = node?.module?.implementation;
+    if (
+      typeof impl !== "function" ||
+      liveLeafWritesCellInput(impl as (input: unknown) => unknown)
+    ) {
+      continue;
+    }
+
+    const inputRef = op.inputs[0];
+    if (inputRef === undefined || inputRef.kind !== "opOut") continue;
+    const producer = opById.get(inputRef.op);
+    const tmpl = producer?.detail.kind === "construct"
+      ? producer.detail.template
+      : undefined;
+    if (tmpl?.shape !== "object") continue;
+    const fields = tmpl.fields;
+
+    const props = isRecord(argSchema)
+      ? (argSchema.properties as Record<string, unknown> | undefined)
+      : undefined;
+    if (!props) continue;
+
+    const fieldSources = new Map<string, string>();
+    const producerOpIds = new Set<OpId>();
+    let allProducerFed = true;
+    let sawCellContextField = false;
+    for (const [name, propSchema] of Object.entries(props)) {
+      if (!schemaNeedsCellContext(propSchema)) continue;
+      sawCellContextField = true;
+      const fieldRef = fields[name];
+      // The field must be fed by a producer ref whose producing op has a declared
+      // OUTPUT internal cell (a real cell to build a view over). `opOut` names the
+      // op directly; `internal` names the cell (→ its op via internalToOp).
+      let producerName: string | undefined;
+      let producerOpId: OpId | undefined;
+      if (fieldRef?.kind === "opOut") {
+        producerName = opToInternalName.get(fieldRef.op);
+        producerOpId = fieldRef.op;
+      } else if (fieldRef?.kind === "internal") {
+        // Only if a top-level op produces this internal cell (a real output cell).
+        if (internalToOp.has(fieldRef.name)) {
+          producerName = fieldRef.name;
+          producerOpId = internalToOp.get(fieldRef.name);
+        }
+      }
+      // The producing op MUST be a PURE op kind (leaf / access / construct /
+      // control) — a `collection`/`effect`/`pattern` producer emits a container of
+      // live links / a side-effect cell, not plain data. The post-resolve DEMOTE
+      // pass additionally excludes a producer that is itself an UNRESOLVED leaf
+      // (e.g. a `computed` that instantiates handlers — wrapping its output would
+      // serialize the live handle refs into a data-URI cell and corrupt them).
+      const producerOp = producerOpId !== undefined
+        ? opById.get(producerOpId)
+        : undefined;
+      const producerPure = producerOp !== undefined &&
+        (producerOp.kind === "leaf" || producerOp.kind === "access" ||
+          producerOp.kind === "construct" || producerOp.kind === "control");
+      if (
+        producerName === undefined || producerOpId === undefined ||
+        !producerPure
+      ) {
+        allProducerFed = false;
+        break;
+      }
+      fieldSources.set(name, producerName);
+      producerOpIds.add(producerOpId);
+    }
+    if (sawCellContextField && allProducerFed) {
+      eligible.set(op.id, { fields: fieldSources, producerOpIds });
+    }
   }
   return eligible;
 }
@@ -2736,14 +2878,61 @@ export class Runner {
       extracted.rog,
       patternNodes,
     );
+    // 2(b): a context leaf whose asCell input fields are fed by an INTERNAL/opOut
+    // PRODUCER (not a pattern argument). The interpreter holds a PLAIN value for
+    // each producer in `opValues`, so the segment impl builds + freezes a READ-
+    // ONLY Cell VIEW of each producer's OUTPUT cell and overlays it onto the leaf
+    // input (see `buildSegmentInterpreterImpl`). Such a leaf RESOLVES (it is no
+    // longer an unresolved-leaf boundary) but is NOT wrapped with
+    // `withReadOnlyCellInput` — its resolved input has no handle to freeze; the
+    // segment supplies already-frozen views. Empty on a corpus with no producer-
+    // fed context leaf (e.g. lunch-poll) → byte-for-byte the prior behavior.
+    const producerFedContextLeaves = computeProducerFedContextLeaves(
+      extracted.rog,
+      patternNodes,
+      extracted.internalToOp,
+    );
+    // The COMBINED set of context leaves the runner has proved resolvable (arg-fed
+    // 2(a) OR producer-fed 2(b)). `resolveLeafImpls` resolves a context leaf only
+    // when its op id is in this set; both classes must therefore be present so
+    // neither is reported as `unresolved`.
+    const resolvableContextLeafOps = new Set<OpId>(readOnlyCellLeafOps);
+    for (const opId of producerFedContextLeaves.keys()) {
+      resolvableContextLeafOps.add(opId);
+    }
     const { leafImpls, unresolvedLeafOps } = resolveLeafImpls(
       pattern as unknown as Parameters<typeof resolveLeafImpls>[0],
       extracted.rog,
       this.interpreterImplRefResolver,
       this.interpreterLiveLeafTrustCheck,
-      readOnlyCellLeafOps,
+      resolvableContextLeafOps,
     );
     const unresolvedLeafSet = new Set<OpId>(unresolvedLeafOps);
+
+    // 2(b) DEMOTE pass (correctness-first, fail-closed). A producer-fed context
+    // leaf is valid ONLY if EVERY producer it reads RESOLVED to plain data. A
+    // producer that is itself an UNRESOLVED leaf (e.g. a `computed` like
+    // `slots = computed(() => …adjustValue(…))` that instantiates HANDLERS) emits a
+    // value carrying LIVE handle/stream refs; wrapping that in a data-URI immutable
+    // cell would JSON-serialize the handles and corrupt them (stale closures →
+    // wrong writeback). Demote any such candidate back to an unresolved-leaf
+    // BOUNDARY: drop it from the 2(b) map, drop its resolved leafImpl, and add its
+    // op id to `unresolvedLeafSet` so the partition keeps it verbatim as a legacy
+    // node (its handler-bearing producer reads the live cell exactly as today).
+    for (const [leafOpId, meta] of [...producerFedContextLeaves]) {
+      let producerUnresolved = false;
+      for (const producerOpId of meta.producerOpIds) {
+        if (unresolvedLeafSet.has(producerOpId)) {
+          producerUnresolved = true;
+          break;
+        }
+      }
+      if (producerUnresolved) {
+        producerFedContextLeaves.delete(leafOpId);
+        leafImpls.delete(leafOpId);
+        unresolvedLeafSet.add(leafOpId);
+      }
+    }
 
     // READ-ONLY VIEW for the engaged argument-fed context leaves. Each was
     // resolved (rather than falling back) only because `readOnlyCellLeafOps`
@@ -2753,6 +2942,8 @@ export class Runner {
     // reactivity), and a write the source scan missed throws (error-isolated by
     // the interpreter, never a silent mis-write). Only these vetted ops are
     // wrapped; nested-pattern leaves (their own id space) are never in the set.
+    // (Producer-fed 2(b) leaves are NOT wrapped here — the segment impl freezes
+    // the producer cell views it overlays, so they arrive read-only already.)
     for (const opId of readOnlyCellLeafOps) {
       const leafImpl = leafImpls.get(opId);
       if (leafImpl) leafImpls.set(opId, withReadOnlyCellInput(leafImpl));
@@ -2785,9 +2976,19 @@ export class Runner {
     // so the flag-off legacy path is untouched.
     const hasPatternOp = extracted.rog.ops.some((op) => op.kind === "pattern");
     const hasUnresolvedLeafBoundary = unresolvedLeafSet.size > 0;
+    // 2(b): a producer-fed context leaf needs the SEGMENT impl's read-only cell-
+    // view overlay (`inputCellViews` + `wrapReadOnlyValue`), which only the
+    // partition path wires — so route any pattern carrying one through the
+    // partition (NOT the single-node path, which would hand the leaf a plain value
+    // → `.get()` throws). If the partition declines (returns null), the leaf is
+    // still in `unresolvedLeafSet`? No — it RESOLVED; so the fall-through below
+    // would mis-evaluate it on the single-node path. Guard: a producer-fed leaf
+    // that the partition could not engage falls the WHOLE pattern back to legacy
+    // (handled after the partition attempt).
+    const hasProducerFedContextLeaf = producerFedContextLeaves.size > 0;
     if (
       hasEffectOp || hasUnresolvedLeafBoundary || hasCollectionOp ||
-      hasPatternOp
+      hasPatternOp || hasProducerFedContextLeaf
     ) {
       const internedArgForPartition = internSchema(
         (pattern.argumentSchema ?? {}) as JSONSchema,
@@ -2803,6 +3004,7 @@ export class Runner {
         unresolvedLeafSet,
         setupTx,
         readOnlyCellLeafOps,
+        producerFedContextLeaves,
       );
       if (partitioned) {
         this.interpreterCensus.interpreted_ok++;
@@ -2812,6 +3014,16 @@ export class Runner {
         return partitioned;
       }
     }
+
+    // 2(b) FAIL-CLOSED: a producer-fed context leaf RESOLVED (it is not in
+    // `unresolvedLeafSet`), but its read-only cell-view overlay is wired ONLY on
+    // the partition path. If the partition declined (returned null above), the
+    // single-node path below would hand the leaf a PLAIN producer value → its
+    // `.get()`/`.sample()` throws → mis-evaluated. So fall the WHOLE pattern back
+    // to legacy here (treat as `unresolved_leaf` — a context-requiring leaf with
+    // no usable interpreted region). Sound: legacy materializes the leaf through
+    // its binding layer exactly as today.
+    if (producerFedContextLeaves.size > 0) bumpAndThrow("unresolved_leaf");
 
     // §4.7: the nested-pattern closure carries a boundary (collection / effect /
     // deeper nest) so the single-node INLINE path cannot model it (it would inline
@@ -3350,6 +3562,12 @@ export class Runner {
      * (see `computeArgumentFedContextLeaves`). Such a leaf WANTS the live handle,
      * so a segment reading the handle arg path for it is NOT a partition hazard. */
     readOnlyCellLeafOps: ReadonlySet<OpId> = new Set<OpId>(),
+    /** 2(b): top-level context leaves whose asCell input fields are fed by an
+     * INTERNAL/opOut PRODUCER (see `computeProducerFedContextLeaves`). The segment
+     * impl builds a read-only Cell VIEW of each producer's output cell and overlays
+     * it onto the leaf input. Empty on a producer-fed-leaf-free corpus. */
+    producerFedContextLeaves: ReadonlyMap<OpId, ProducerFedContextLeaf> =
+      new Map<OpId, ProducerFedContextLeaf>(),
   ): Pattern | null {
     // (a) Partition the extracted ROG structurally. No `resolveInner` (the spike
     // does not recurse into collection/pattern boundaries — those are gated out
@@ -3991,6 +4209,16 @@ export class Runner {
         ? internedArg
         : narrowArgumentSchemaByTree(argumentSchema, segArgTree);
 
+      // 2(b): the producer-fed context leaves IN this segment, mapped to the input
+      // FIELD NAMES whose resolved value the impl must wrap read-only. Restricted
+      // to this segment's op ids so a leaf only overlays in the segment that owns
+      // it. Empty unless this segment contains a 2(b) leaf.
+      const segInputCellViews = new Map<OpId, ReadonlySet<string>>();
+      for (const [leafOpId, meta] of producerFedContextLeaves) {
+        if (!segOpIds.has(leafOpId)) continue;
+        segInputCellViews.set(leafOpId, new Set(meta.fields.keys()));
+      }
+
       const segImpl = this.buildSegmentInterpreterImpl(
         segRog,
         leafImpls,
@@ -4001,6 +4229,7 @@ export class Runner {
         segOutputNameToOpId,
         segInternedArg,
         crossSegSeed,
+        segInputCellViews,
       );
 
       segmentNodes.push({
@@ -4092,6 +4321,14 @@ export class Runner {
     /** Synthetic cross-segment `$ri-op-<id>` externals: `$in[name]` → producing
      * op id. Seeded by op id (these have no `internalToOp` entry). */
     crossSegSeed: Map<string, OpId> = new Map<string, OpId>(),
+    /** 2(b): per-leaf input FIELD NAMES whose resolved producer value must be
+     * wrapped in a read-only Cell view before the leaf body runs (keyed by the
+     * consuming leaf op id, restricted to leaves in THIS segment). Empty ⇒ no 2(b)
+     * leaf in this segment → byte-identical to the prior behavior. */
+    inputCellViews: Map<OpId, ReadonlySet<string>> = new Map<
+      OpId,
+      ReadonlySet<string>
+    >(),
   ): (
     inputsCell: Cell<unknown>,
     sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
@@ -4137,6 +4374,28 @@ export class Runner {
         const seedByName = new Map<string, unknown>();
         for (const name of cellOnlyNames) seedByName.set(name, inObj[name]);
 
+        // 2(b): a factory that wraps a producer-fed context-leaf field value in a
+        // READ-ONLY in-memory Cell view (data-URI-backed `getImmutableCell`). The
+        // value the leaf reads was ALREADY derived by the segment (the producer is
+        // either intra-segment — computed in this same `evalRog` pass, its inputs
+        // journaled — or cross-segment — arriving via the `$in` read above, which
+        // journaled too), so wrapping the resolved value adds NO new tx dependency
+        // and the producer's label is already in the segment read-set (CFC-sound).
+        // The frozen view blocks any write the source scan missed (error-isolated,
+        // never a silent mis-write). Built lazily only when this segment has a 2(b)
+        // leaf.
+        const wrapReadOnlyValue = inputCellViews.size > 0
+          ? (value: unknown): unknown => {
+            // A nullish value has no handle in legacy either; keep it as-is so the
+            // leaf's own nullish-handling (the run-gate / `?? default`) is unchanged.
+            if (value === null || value === undefined) return value;
+            const link = inputsCell.getAsNormalizedFullLink();
+            return inputsCell.runtime
+              .getImmutableCell(link.space as MemorySpace, value, undefined, tx)
+              .readOnly("ri-2b-producer-view");
+          }
+          : undefined;
+
         const { opValues } = evalRog(segRog, {
           argument,
           leafImpls,
@@ -4146,6 +4405,10 @@ export class Runner {
           // See the whole-pattern impl: unwrap a Cell handle for a `control`
           // predicate (tracked read). Pure leaves keep the handle.
           unwrapCellForValue: unwrapReadOnlyCellValue,
+          // 2(b): producer-fed context leaves in this segment + the wrap factory.
+          ...(inputCellViews.size > 0
+            ? { inputCellViews, wrapReadOnlyValue }
+            : {}),
         });
 
         // Write each of THIS segment's output names from its producing op value.
