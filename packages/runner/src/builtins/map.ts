@@ -42,6 +42,9 @@ import { resolveLink } from "../link-resolution.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
 import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -97,6 +100,46 @@ export function map(
   // resumed, so its first reconcile already runs against synced data; elements
   // added by later (post-resume) reconciles are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
+
+  // Hold the durable container while the input list itself confirms. On a resume
+  // reconcile the input can be undefined or a transient empty default standing in
+  // while the real list streams in; setting [] then would clobber the durable
+  // container the resume loaded. Await the resolved input and, once it confirms,
+  // clear the container only if the input is genuinely empty — a non-empty input
+  // re-triggers the normal reconcile via its journaled read, so it converges
+  // either way.
+  const awaitInputThenSettle = (inputListCell: Cell<any>): void => {
+    runtime.storageManager.trackUntilSettled(
+      Promise.resolve(inputListCell.sync())
+        .then(() =>
+          runtime.editWithRetry((settleTx) => {
+            if (!result) return;
+            const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
+              .withTx(settleTx).getRaw();
+            if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
+              settleTx.runWithAmbientReadMeta(
+                linkResolutionProbe,
+                () =>
+                  result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set(
+                    [],
+                  ),
+              );
+            }
+          }).then(({ error }) => {
+            if (error) {
+              logger.warn("resume-input", "settling the resumed input failed", {
+                error,
+              });
+            }
+          })
+        )
+        .catch((error) =>
+          logger.warn("resume-input", "the resumed input list sync rejected", {
+            error,
+          })
+        ),
+    );
+  };
 
   return (tx: IExtendedStorageTransaction) => {
     // Captured before the loop consumes it: this reconcile's element runs use
@@ -172,7 +215,6 @@ export function map(
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, listScope);
-      result.send([]);
       setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
       setPatternCell(result, parentCell.key("pattern"));
@@ -205,7 +247,73 @@ export function map(
     // smearing it onto fresh elements' scaffolding (S16 pointwise).
     const probeScoped = <T>(fn: () => T): T =>
       tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
-    if (probeScoped(() => resultWithLog.get()) === undefined) {
+    // Resume against confirmed state, not the not-yet-loaded value: on the
+    // resume reconcile an undefined container is its durable value still
+    // streaming in (a map that has run persisted at least []). Reconciling now
+    // would write a stale-basis result that conflicts on commit and re-runs
+    // against the same absent value until it happens to sync — the reload
+    // commit storm. Pull the container and defer; its arrival re-triggers this
+    // reconcile, which then no-ops against the durable value.
+    if (
+      elementAwaitSync &&
+      probeScoped(() => resultWithLog.get()) === undefined
+    ) {
+      const pending = result.sync();
+      // syncCell is async, so the container pull is always a Promise; the union
+      // on Cell.sync() is a vestigial synchronous fast path the storage manager
+      // no longer takes. Assert it to narrow before awaiting.
+      if (!(pending instanceof Promise)) throw new Error("result.sync()");
+      // The container's durable value is still streaming in; its arrival
+      // re-triggers this reconcile (the probe read above is journaled). If the
+      // container was never persisted — so nothing will ever stream in to
+      // re-trigger — seed [] once the pull settles, so the coordinator is not
+      // left wedged waiting for a value that will never arrive.
+      const seedIfStillAbsent = () =>
+        runtime.editWithRetry((seedTx) => {
+          const container = result!.withTx(seedTx);
+          if (container.getRaw() === undefined) container.set([]);
+        }).then(({ error }) => {
+          if (error) {
+            logger.warn(
+              "resume-seed",
+              "seeding the empty result container failed",
+              { error },
+            );
+          }
+        });
+      // Run on either outcome (resolve or reject); the seed recovers from the
+      // pull's own rejection, so log it rather than dropping it silently.
+      pending.finally(seedIfStillAbsent).catch((error) => {
+        logger.warn("resume-pull", "resume container pull rejected", {
+          error,
+        });
+      });
+      return;
+    }
+    // Resume preservation: on a resume reconcile the input list itself may not be
+    // confirmed yet — undefined, or a transient empty default while the real list
+    // streams in. Setting [] now would clobber the durable container the resume
+    // loaded (map's output is link-shaped, so its slots survive a pending element,
+    // but a pending input would still blank the whole container). Hold it and
+    // await the input; a non-empty input then re-triggers this reconcile via its
+    // journaled read, and a confirmed empty input clears the container. Outside
+    // resume the flag is clear, so a list set undefined at runtime still runs the
+    // cleanup below.
+    const priorSlots = probeScoped(() => resultWithLog.get());
+    const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
+    if (
+      elementAwaitSync && priorLen > 0 &&
+      (list === undefined || (Array.isArray(list) && list.length === 0))
+    ) {
+      awaitInputThenSettle(listCell);
+      return;
+    }
+
+    // A fresh (non-resume) reconcile has no container yet; seed [] so the first
+    // render has a value. On resume this is unreachable — the defer guard above
+    // either holds for the still-loading container or sees the durable value, so
+    // priorSlots is never undefined here.
+    if (priorSlots === undefined) {
       probeScoped(() => resultWithLog.set([]));
     }
     // If the list is undefined it means the input isn't available yet.

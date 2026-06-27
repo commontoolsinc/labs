@@ -167,6 +167,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   removeCrossSpacePromise(promise: Promise<void>): void;
 
   /**
+   * Register a deferred async chain in the cross-space promise set so
+   * `Cell.pull()` and the scheduler's `idle()` await it, then drop it from the
+   * set once it settles. Until a chain is registered it is invisible to the
+   * convergence waiters: a pull can return before the chain has settled and
+   * observe held, not-yet-loaded state. This is the safe composition of
+   * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
+   * wiring the self-removing `finally` by hand at each call site.
+   */
+  trackUntilSettled(work: Promise<unknown>): void;
+
+  /**
    * Number of cross-space promises currently pending (async loads of link
    * targets in other spaces, kicked during link resolution or read
    * traversal). Zero in steady state — `Cell.pull()` uses this to decide
