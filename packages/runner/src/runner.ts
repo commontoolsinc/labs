@@ -547,10 +547,14 @@ type RunnerRunOptions = {
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
   // The pattern is a LAUNCHED CHILD (handler `this.run` receipt / navigateTo
-  // target / build-time `instantiatePatternNode`): the reactive interpreter must
-  // fall back to legacy for it (its result cell is consumed by a launcher
-  // contract the collapsed `$ri-result` alias does not preserve). Only consulted
-  // when the experimental interpreter flag is on; otherwise inert.
+  // target / deferred action-result pattern). The reactive interpreter now
+  // INTERPRETS a launched child like any pattern (the launcher owns its result
+  // cell's identity + the faithful emission preserves the result tree, so the
+  // receipt / navigateTo / redirect contract is honored either way) — EXCEPT the
+  // one wrapper shape whose result is a top-level `pattern` op (a handler that
+  // returns `childPattern({…})`), which still falls back so legacy materializes
+  // the child as its own piece. Only consulted when the experimental interpreter
+  // flag is on; otherwise inert.
   launchedChild?: boolean;
 };
 
@@ -586,10 +590,14 @@ export type InterpreterFallbackReason =
   // A node's OUTPUT aliases the ARGUMENT cell — a write-BACK side effect the
   // synthetic node cannot emit (see extract.ts ARGUMENT_WRITEBACK_MARKER).
   | "argument_writeback"
-  // The pattern is a LAUNCHED CHILD (handler `this.run` receipt / navigateTo
-  // target / build-time `instantiatePatternNode`) whose result cell is consumed
-  // by a launcher contract (firstResolvedOutputRedirect / receipt / navigable
-  // link) the single `$ri-result` alias does not preserve → legacy.
+  // A LAUNCHED-CHILD WRAPPER: a handler that RETURNS a pattern instantiation
+  // (`return childPattern({…})`) builds a wrapper result pattern whose result is
+  // a top-level `pattern` op. Legacy materializes that op as its OWN child piece
+  // via `instantiatePatternNode` (a distinct result cell the wrapper aliases /
+  // the navigateTo target derefs); inlining it would flatten the child into the
+  // wrapper cell → the launcher's deref reads `undefined`. Scoped to a LAUNCHED
+  // child carrying a `pattern` op (NOT every launched child — pure-compute /
+  // handler-bearing launched children now interpret; the broad gate was lifted).
   | "launched_child";
 
 /** Census of reactive-interpreter dispatch outcomes (see Runner field). */
@@ -1763,8 +1771,9 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
-      // Launched-child signal (see RunnerRunOptions.launchedChild): forces the
-      // reactive interpreter to fall back to legacy for this pattern.
+      // Launched-child signal (see RunnerRunOptions.launchedChild): the reactive
+      // interpreter interprets a launched child like any pattern; only a wrapper
+      // whose result is a top-level `pattern` op still falls back to legacy.
       launchedChild?: boolean;
     } = {},
   ): void {
@@ -2224,9 +2233,11 @@ export class Runner {
         startTx,
       );
       try {
-        // Launched child (navigateTo / handler-result deferred pattern): its
-        // result cell is consumed by a launcher contract the interpreter's
-        // collapsed result alias does not preserve → force legacy.
+        // Launched child (navigateTo / handler-result deferred pattern): the
+        // interpreter may interpret it; the `launchedChild` signal only forces
+        // legacy for the top-level-`pattern`-op wrapper shape (see
+        // buildInterpreterPattern step 1a). The launcher owns this result cell's
+        // identity, so the receipt / navigateTo contract holds either way.
         this.run(startTx, pattern, inputs, committedResultCell, {
           launchedChild: true,
         });
@@ -2651,10 +2662,22 @@ export class Runner {
     pattern: Pattern,
     resultCell: Cell<any>,
     /** True when this pattern is being instantiated as a LAUNCHED CHILD (handler
-     * `this.run` receipt / navigateTo target / build-time `instantiatePatternNode`).
+     * `this.run` receipt / navigateTo target / deferred action-result pattern).
      * Its result cell is consumed by a launcher contract (firstResolvedOutput
-     * Redirect / receipt / navigable link) the single `$ri-result` alias does not
-     * preserve, so always fall back to legacy. */
+     * Redirect / receipt / navigable link). The launcher OWNS that cell's
+     * identity — it mints it at the fixed `{resultFor: cause}` coordinate and
+     * passes it IN; the interpreter never re-mints it, it only decides how the
+     * pattern's nodes write into that fixed cell. Because the faithful emission
+     * (D-EMISSION-SCOPE) preserves `result: pattern.result` + the internal-cell
+     * manifest verbatim and projects onto the SAME result cell, the contract
+     * (receipt witness, navigateTo deref of the result tree, redirect identity)
+     * is honored whether the child interprets or falls back. So a launched child
+     * is interpreted like any pattern: its pure computeds/lifts coalesce into the
+     * result doc while its handlers/effects stay boundary nodes. The per-shape
+     * contract-breaking cases (cross-space / scope routing, arg write-back, mid-
+     * graph write-redirect leaf) are still caught by the downstream gates below,
+     * which run regardless of this flag. Retained for a narrow shape-specific
+     * guard and for census/diagnostics. */
     launchedChild = false,
     /** The in-flight setup transaction, if the caller has one. The argument is
      * written into this tx during setup and is NOT yet visible to a tx-less read,
@@ -2677,12 +2700,39 @@ export class Runner {
       throw new NotInterpretedHere(reason);
     };
 
-    // --- 0. LAUNCHED-CHILD gate (cluster: launched child result-cell contract).
-    // A handler-launched / navigateTo-target / build-time child pattern's result
-    // cell is consumed by a launcher contract (receipt resolution, navigateTo
-    // dereference, firstResolvedOutputRedirect) that the collapsed single
-    // `$ri-result` alias does not honor. Always fall back. Sound (legacy green).
-    if (launchedChild) bumpAndThrow("launched_child");
+    // --- 0. LAUNCHED-CHILD: interpret it (the gate was LIFTED, INC2 redesign).
+    // A handler-launched / navigateTo-target / deferred action-result child's
+    // result cell is consumed by a launcher contract (receipt resolution,
+    // navigateTo dereference, firstResolvedOutputRedirect). That contract is
+    // about the result cell's IDENTITY and its result-tree shape — both OWNED by
+    // the launcher, not the interpreter: the launcher mints the cell at the fixed
+    // `{resultFor: cause}` coordinate and passes it IN, and the faithful emission
+    // (D-EMISSION-SCOPE) preserves `result: pattern.result` + the internal-cell
+    // manifest verbatim, projecting onto that SAME cell (single-node path 3493+,
+    // partition path 4286+). So the receipt witness (create-only head minted by
+    // the launcher before `this.run`), the navigateTo deref (reads the preserved
+    // result tree), and the reload-stable redirect (anchored on the PARENT's
+    // output binding) are all honored whether the child interprets or not. The
+    // historical reason the gate existed — a collapsed single `$ri-result` alias
+    // that flattened the result tree — no longer applies (Wave-3 faithful
+    // emission replaced it). A launched child is therefore partitioned like any
+    // pattern: its pure computeds/lifts coalesce into the result doc, its
+    // handlers/effects stay boundary nodes. Genuinely contract-breaking child
+    // shapes (cross-space / scope routing, argument write-back, mid-graph
+    // write-redirect leaf) are still caught PER-SHAPE by the downstream gates
+    // (cross_space below, argument_writeback / write-redirect in the scalar
+    // probe), which run for every pattern regardless of `launchedChild`. The ONE
+    // launched-child-SPECIFIC shape that DOES break — a wrapper result pattern
+    // whose result is produced by INLINING a top-level `pattern` op (the launch
+    // wrapper a handler builds when it RETURNS a `childPattern({…})`, e.g.
+    // `scheduler-event-receipts`'s `launchChild`) — is gated narrowly AFTER
+    // extraction below (`launched_child`), because legacy materializes that child
+    // as its OWN piece via `instantiatePatternNode` (its own result cell, which
+    // the wrapper's result aliases / the navigateTo target derefs), whereas the
+    // single-node inline of a top-level `pattern` op flattens it into the wrapper
+    // cell and the launcher's deref reads `undefined`. That gate needs the
+    // extracted ROG (op kinds), so it lives at step 1b, not here.
+    void launchedChild;
 
     // --- 0b. CROSS-SPACE / SCOPE ROUTING gate (cluster: .inSpace / .asScope /
     // module.targetSpace / module.defaultScope). A child pattern node routed to
@@ -2701,6 +2751,32 @@ export class Runner {
     const extracted: ExtractResult = extractRog(
       pattern as unknown as Parameters<typeof extractRog>[0],
     );
+
+    // --- 1a. LAUNCHED-CHILD wrapper gate (the ONE launched-child-specific shape
+    // the lifted gate must still catch). A handler that RETURNS a pattern
+    // instantiation (`return childPattern({…})`) builds a wrapper result pattern
+    // whose result is produced by a top-level `pattern` op. Legacy materializes
+    // that op as its OWN child piece via `instantiatePatternNode` — a distinct
+    // result cell that the wrapper's result aliases (and the navigateTo target
+    // derefs). When this wrapper is a LAUNCHED CHILD, the partition has no pure
+    // region to separate (the result IS the pattern op), so it declines and the
+    // single-node path would INLINE the `pattern` op into the wrapper's own
+    // result cell — flattening the child and leaving the launcher's deref reading
+    // `undefined` (the `scheduler-event-receipts` "deduplicates redelivered
+    // pattern launches by receipt" contract). So a launched child that itself
+    // instantiates a pattern stays legacy. Sound (legacy is green); scoped to
+    // `launchedChild` so a NON-launched build-time nested-pattern node (which the
+    // partition / inline path DOES cover) is unaffected. Pure-compute / handler-
+    // bearing launched children (no `pattern` op — `parameterizedChildCounter`,
+    // `spawnedChild`) skip this gate and interpret / fall back on their own
+    // merits.
+    if (
+      launchedChild &&
+      extracted.rog.ops.some((op) => op.kind === "pattern")
+    ) {
+      bumpAndThrow("launched_child");
+    }
+
     // --- 1b. COLLECTION branch (single top-level `map`) --------------------
     // Placed BEFORE the unrecognizedAliases check because `extractRog` recurses
     // into the inline element pattern sharing ONE `unrecognized` set, and the
@@ -5742,9 +5818,12 @@ export class Runner {
         cause,
         true,
       )
-      // Handler-launched child pattern (receipt-anchored): its result cell is
-      // consumed by the receipt / launch contract the interpreter's collapsed
-      // result alias does not preserve → force legacy.
+      // Handler-launched child pattern (receipt-anchored): the interpreter may
+      // interpret it; `launchedChild` only forces legacy for the wrapper shape
+      // whose result is a top-level `pattern` op (a handler that returns
+      // `childPattern({…})` — its child must materialize as its own piece so the
+      // receipt at `{resultFor: cause}` resolves the child, not a flattened
+      // inline). The receipt witness rides this tx's `markCreateOnly` below.
       : this.run(tx, resultPattern, undefined, receiptCell, {
         launchedChild: true,
       });
@@ -5841,7 +5920,9 @@ export class Runner {
         tx,
         resultCell,
         resultSetup.pattern,
-        // Launched child (deferred navigateTo / handler result pattern) → legacy.
+        // Launched child (deferred navigateTo / handler result pattern): the
+        // interpreter may interpret it; `launchedChild` only forces legacy for
+        // the top-level-`pattern`-op wrapper (see buildInterpreterPattern 1a).
         { launchedChild: true },
         this.patternNeedsOneShotPull(resultSetup.pattern),
       );
@@ -5966,9 +6047,10 @@ export class Runner {
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
       });
-      // Action/computed-result child pattern: its result cell is consumed by
-      // the launcher contract the interpreter's collapsed result alias does not
-      // preserve → force legacy.
+      // Action/computed-result child pattern: the interpreter may interpret it;
+      // `launchedChild` only forces legacy for the top-level-`pattern`-op wrapper
+      // (see buildInterpreterPattern 1a). The launcher owns this result cell's
+      // identity, so its consumers resolve the same cell either way.
       this.run(
         childSetupTx,
         resultPattern,
