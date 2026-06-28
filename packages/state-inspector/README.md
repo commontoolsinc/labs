@@ -8,11 +8,26 @@ recorder.** This package is the lens over it — open a space SQLite file
 read-only, reconstruct state-at-`(branch, seq)`, and answer who/what/when
 questions with no live runtime and no capture step.
 
-## Status: usable (Milestones 1, 2, 2.5, 3 + model unification)
+## Status: usable (M1–M3 + model unification + comprehension surface)
 
 Wired into the `cf` CLI as **`cf inspect`** with local-DB auto-discovery — no
 absolute paths needed. Tested end-to-end against real space DBs (a 571 MB legacy
 DB and a set of modern `fvj1:` DBs).
+
+**Comprehension surface (Phase 2)** builds on the unified model:
+
+- **`group`** — a user's whole world. Discovers + groups local space DBs into
+  per-user worlds (home → profiles → main) from on-disk signals (home
+  `profiles[]` cross-space links, `commit.session_id` principal, cross-space
+  links). Compact by default; `--did <prefix>` expands one user.
+- **`graph`** — the entity graph. Nodes (pieces/modules/streams/schemas/cells)
+  + edges (`pattern` / `argument` / `owns` / `link`). `--root <entity> --depth`
+  drills into one piece's neighborhood; `--dot` emits Graphviz.
+- **`diff` / `timeline`** — time travel. `diff` shows what changed in an entity
+  between two seqs; `timeline` shows how a space grew (or how one entity
+  evolved). The engine already reconstructs at any seq.
+- **`html`** — a self-contained HTML inspector (Overview / Pieces / Entities /
+  Graph / Timeline) over the same JSON, for opening in a browser.
 
 **Model unification** (`model.ts`) makes the tool _fluent_: instead of guessing
 from the shape of `doc.value`, it reads the **whole entity document** (`value`
@@ -126,6 +141,8 @@ DID-prefix, or a path.
 ```bash
 # discover what's inspectable
 deno task cf inspect spaces
+deno task cf inspect group                       # per-user worlds (home→profiles→main)
+deno task cf inspect group --did z6MkeZZv        # expand one user's world fully
 
 # single space (DID-prefix resolves via discovery)
 deno task cf inspect summary  z6Mkqa41
@@ -137,6 +154,19 @@ deno task cf inspect hot      z6Mkqa41 --limit 10
 deno task cf inspect commits  z6Mkqa41 --limit 20
 deno task cf inspect history  z6Mkqa41 of:fid1:…
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count
+
+# the entity graph (relationships between pieces/cells/modules)
+deno task cf inspect graph    z6Mkqa41                       # whole-space stats + adjacency
+deno task cf inspect graph    z6Mkqa41 --root of:fid1:… --depth 2   # one piece's neighborhood
+deno task cf inspect graph    z6Mkqa41 --root of:fid1:… --dot | dot -Tsvg > piece.svg
+
+# time travel (the engine reconstructs at any seq)
+deno task cf inspect diff     z6Mkqa41 of:fid1:… --from 7 --to 12
+deno task cf inspect timeline z6Mkqa41                       # how the space grew
+deno task cf inspect timeline z6Mkqa41 of:fid1:…             # how one entity evolved
+
+# a self-contained HTML inspector to open in a browser
+deno task cf inspect html     z6Mkqa41 --out /tmp/space.html
 
 # cross-space convergence (--all discovered, or --spaces a,b, or --dir)
 deno task cf inspect converge      of:fid1:… --all --path value

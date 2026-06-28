@@ -41,6 +41,7 @@ Each PR's base is the branch below it, so each diff shows only its own delta.
 | 4 | `state-inspector-cf-inspect` | [#4386](https://github.com/commontoolsinc/labs/pull/4386) | #4377 | M3: `cf inspect` + local-DB discovery (usable) | MERGEABLE vs base |
 | 5 | `state-inspector-dogfood` | [#4393](https://github.com/commontoolsinc/labs/pull/4393) | #4386 | dogfood fixes: fvj1 commit decode, `entities`, scheduler/session legibility | MERGEABLE vs base |
 | 6 | `state-inspector-model-unification` | [#4395](https://github.com/commontoolsinc/labs/pull/4395) | #4393 | **Phase 1 model unification** (`model.ts`): whole-document read + path-set classification + lineage; `cf inspect piece`; design + handoff docs | MERGEABLE vs base |
+| 7 | `state-inspector-grouping` | (open when ready) | #4395 | **Phase 2** comprehension surface: `grouping.ts` + `graph.ts` + `timetravel.ts` + `html.ts` → `cf inspect group`/`graph`/`diff`/`timeline`/`html` | MERGEABLE vs base |
 
 All draft. `mergeable` for 2–5 is relative to their *parent branch*; once the base
 rebases onto live main, re-check.
@@ -91,23 +92,41 @@ piece→manifest (`internal`). `cf inspect entities` rewired onto
 `cf inspect piece <id>` shows pattern source + input + result/schema + owned
 cells. Verified on the real notes space; tests + fmt/lint/check green.
 
-## Next phase (Phase 2+) — start here
+## Phase 2: comprehension surface — ✅ DONE (branch `state-inspector-grouping`)
 
-Per `2026-06-28-state-inspector-model-unification.md` roadmap, in order:
-- **Space grouping** — discover + group a user's implicated spaces (home →
-  profiles → main; placeholders marked) via the §3.2 on-disk signals; grouped
-  tree in `cf inspect spaces`.
-- **`graph` command** — emit the real entity graph from the unified model
-  (nodes = pieces/cells/streams/modules; edges = ownership + `patternIdentity` +
-  `argument` + data links).
-- **Time travel** — `diff <entity> --from <a> --to <b>` + a `timeline`. The
-  engine already reconstructs at any seq (`atSeq`); this is surface work.
-- **Visual surface** — self-contained HTML over the existing `--json`.
+Four stacked commits on top of Phase 1 (`c31f856b8` → `4f54f49f1` →
+`426bbf474` → `23b1f79fb`):
+- **Space grouping** (`grouping.ts`, `cf inspect group`) — per-user worlds
+  (home → profiles → main) from on-disk signals (home `profiles[]` cross-space
+  links, `commit.session_id` principal, cross-space links). Placeholder/absent
+  spaces marked. Signals were verified against the real cache before building
+  (137 user groups).
+- **Entity graph** (`graph.ts`, `cf inspect graph`) — nodes + `pattern` /
+  `argument` / `owns` / `link` edges; `--root/--depth` neighborhood, `--dot`.
+- **Time travel** (`timetravel.ts`, `cf inspect diff` / `timeline`) — structural
+  value diff across seqs, entity + space timelines.
+- **Visual surface** (`html.ts`, `cf inspect html`) — one self-contained HTML
+  file (tabs + per-piece graph SVG + growth sparkline), browser-verified.
 
-Open: `value-at` could annotate the entity kind/lineage too (left as-is for now —
-`--doc` already shows the meta paths). Legacy-regime piece classification is
-best-effort (the notes space is fully modern); verify against the 571 MB legacy
-DB when convenient.
+Each has a hermetic test; full suite is 9 files / 41 steps green.
+
+## Next phase (Phase 3+) — candidates
+
+- **Group-aware graph / cross-space graph** — extend `graph` across a grouped
+  user-world (home→profile edges as first-class), or feed the group into `html`.
+- **Legacy-regime verification** — piece classification + lineage are
+  best-effort for the pre-#3522 regime (the notes space is fully modern); verify
+  against the 571 MB legacy DB.
+- **ifc / security-label decoding** from stored schemas; snapshot-base
+  reconstruction (currently replays from seq 0).
+- Open: `value-at` could annotate entity kind/lineage too (left as-is —
+  `--doc` already shows the meta paths).
+
+## Landing note
+
+The chain is now **7 branches** (was 6). Land procedure unchanged (see "How to
+land the chain" above); cascade-rebase #4376→…→`state-inspector-grouping` after
+rebasing the base onto live main.
 
 ## Resume gotchas
 

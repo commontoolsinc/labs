@@ -200,19 +200,28 @@ On-disk signals (each verifiable offline):
    not 4); new `cf inspect piece <id>` shows a piece's pattern source, input,
    result/schema keys, and owned cells. Verified end-to-end on the real notes
    space.
-2. **Space grouping.** Discover + group the implicated spaces for a user/session;
-   `cf inspect spaces` shows a grouped tree (home → profiles → main; placeholders
-   marked), recovered via §3.2 signals.
-3. **`graph` command.** Emit the real entity graph using the unified model:
-   nodes = pieces/cells/streams/modules with correct labels; edges = ownership +
-   `patternIdentity` + `argument` + data links. (The mislabeled demo graph from
-   2026-06-27 was blocked exactly by the missing model.)
-4. **Time travel.** `diff <entity> --from <seqA> --to <seqB>` + a `timeline` of how
-   a space/piece grew. The engine already reconstructs at any seq — this is surface
-   work.
-5. **Visual surface.** A self-contained HTML inspector (grouped spaces → entity
-   graph → timeline) consuming the `--json` we already emit, so a teammate opens it
-   in a browser, not a terminal.
+2. **Space grouping.** ✅ **DONE** — `grouping.ts` + `cf inspect group`.
+   Discovers + groups local space DBs into per-user worlds (home → profiles →
+   main) from §3.2 signals (home `profiles[]` cross-space links,
+   `commit.session_id` principal, cross-space links). Placeholder (0-commit) and
+   absent (referenced, no local DB) spaces marked. Compact by default,
+   `--did <prefix>` expands one user. Signals verified against the real cache
+   (137 user groups; clean home→profiles→main trees).
+3. **`graph` command.** ✅ **DONE** — `graph.ts` + `cf inspect graph`. Entity
+   graph from the unified model: nodes = pieces/modules/streams/schemas/cells
+   (fluent labels); edges = `pattern` (patternIdentity→module) + `argument` +
+   `owns` (internal manifest) + `link` (data links, cross-space marked).
+   `--root/--depth` for a neighborhood, `--dot` for Graphviz. Verified on the
+   notes space (147 nodes / 227 edges).
+4. **Time travel.** ✅ **DONE** — `timetravel.ts` + `cf inspect diff` /
+   `timeline`. `diffValues`/`diffEntity` (structural value diff across two seqs;
+   from defaults to birth), `entityTimeline` (write-by-write), `spaceTimeline`
+   (growth: per-commit created/touched + cumulative).
+5. **Visual surface.** ✅ **DONE** — `html.ts` + `cf inspect html`. One
+   self-contained HTML file (Overview / Pieces / Entities / Graph / Timeline)
+   over the same JSON; per-piece graph neighborhood as inline SVG, growth
+   sparkline, entity filter; dark-mode aware, no external resources. Verified in
+   a real browser (Playwright).
 
 Open cross-cutting items: handle legacy + modern regimes everywhere; decode the
 modern `{"/Link@1":…}` envelope as carefully as the legacy sigil; keep every
