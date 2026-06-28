@@ -19,6 +19,8 @@ import {
   discoverSpaceDbs,
   entityHistory,
   getValueAt,
+  groupDiscoveredSpaces,
+  type GroupedSpace,
   hotEntities,
   listCommits,
   listEntityModels,
@@ -45,6 +47,12 @@ function out(json: boolean, data: unknown, render: () => void): void {
 
 function splitPath(p?: string): string[] {
   return p ? p.split("/").filter(Boolean) : [];
+}
+
+// did:key:z6Mk…wQ2n  ->  z6Mk…wQ2n  (compact, still recognizable)
+function shortDid(did: string): string {
+  const tail = did.startsWith("did:key:") ? did.slice("did:key:".length) : did;
+  return tail.length > 14 ? `${tail.slice(0, 8)}…${tail.slice(-4)}` : tail;
 }
 
 // Session ids look like `session:did:key:<space>:<uuid>` (often %-encoded).
@@ -132,6 +140,80 @@ export const inspect = new Command()
           ]),
         ]).toString(),
       );
+    });
+  })
+  /* inspect group */
+  .command(
+    "group",
+    "Group discovered space DBs into per-user worlds (home → profiles → main).",
+  )
+  .option("--dir <dir:string>", "Extra directory to search for *.sqlite files.")
+  .option(
+    "--did <prefix:string>",
+    "Expand one user's world fully (match the principal DID).",
+  )
+  .action((options) => {
+    const discovered = discoverSpaceDbs(
+      options.dir ? { dirs: [options.dir] } : {},
+    );
+    const result = groupDiscoveredSpaces(discovered);
+    out(!!options.json, result, () => {
+      if (result.groups.length === 0 && result.ungrouped.length === 0) {
+        console.log("no space DBs found.");
+        return;
+      }
+      const roleCounts = (g: { spaces: GroupedSpace[] }) => {
+        const c = { home: 0, profile: 0, main: 0, unknown: 0, absent: 0 };
+        for (const s of g.spaces) {
+          c[s.role]++;
+          if (!s.present) c.absent++;
+        }
+        return c;
+      };
+      const tag = (s: GroupedSpace) =>
+        `${s.role.padEnd(7)} ${shortDid(s.did)}` +
+        (s.present
+          ? `  commits=${s.commits ?? 0} entities=${s.entities ?? 0}` +
+            (s.empty ? "  (placeholder/empty)" : "")
+          : "  (absent — referenced, no local DB)") +
+        (s.evidence.length ? `  · ${s.evidence.join("; ")}` : "");
+
+      // Focused view: expand the matching group(s) fully.
+      if (options.did) {
+        const matches = result.groups.filter((g) =>
+          g.principal.includes(options.did!)
+        );
+        if (matches.length === 0) {
+          console.log(`no group principal matches "${options.did}".`);
+          return;
+        }
+        for (const g of matches) {
+          console.log(
+            `● user ${shortDid(g.principal)}` +
+              (g.homePresent ? "" : "  (home absent/empty locally)"),
+          );
+          for (const s of g.spaces) console.log(`   ${tag(s)}`);
+        }
+        return;
+      }
+
+      // Default: one compact line per group, biggest first.
+      console.log(
+        `${result.groups.length} user group(s)` +
+          (result.ungrouped.length
+            ? `, ${result.ungrouped.length} ungrouped`
+            : "") +
+          `  —  use --did <prefix> to expand one`,
+      );
+      for (const g of result.groups) {
+        const c = roleCounts(g);
+        console.log(
+          `● ${shortDid(g.principal)}  ` +
+            `home=${g.homePresent ? "present" : "absent"}  ` +
+            `profiles=${c.profile}  main=${c.main}` +
+            (c.absent ? `  (+${c.absent} absent)` : ""),
+        );
+      }
     });
   })
   /* inspect summary */

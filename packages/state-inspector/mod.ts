@@ -12,3 +12,4 @@ export * from "./model.ts";
 export * from "./queries.ts";
 export * from "./multispace.ts";
 export * from "./discover.ts";
+export * from "./grouping.ts";
