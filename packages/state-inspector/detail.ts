@@ -184,31 +184,51 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
 
 /**
  * A stream / owned cell carries no schema of its own — its DECLARED schema (a
- * stream's event payload, a cell's value type) lives on the OWNER piece's
- * `schema.properties[<key>]` where `<key>` is the name that points at it. Resolve
- * that property, following a `$ref` into the owner's `$defs`.
+ * stream's event payload, a cell's value type) is attached where it is NAMED in
+ * its owner piece, under the key `<key>`. Two sources, link-first:
+ *   1. the inline `schema` on the LINK itself (`value[key]."/"."link@N".schema`)
+ *      — present even when the result schema omits the handler (e.g. addFavorite),
+ *   2. else the owner's `schema.properties[<key>]`, following a `$ref` into `$defs`.
  */
 function declaredSchemaFor(
   ownerDoc: EntityDocument | undefined,
   key: string,
-): { schema: unknown; keys?: string[]; isStream: boolean } | undefined {
-  const osch = ownerDoc?.schema;
-  if (!isObj(osch) || !isObj(osch.properties)) return undefined;
-  const prop = osch.properties[key];
-  if (!isObj(prop)) return undefined;
-  let resolved: Record<string, unknown> = prop;
-  const ref = typeof prop.$ref === "string" ? prop.$ref : undefined;
-  if (ref?.startsWith("#/$defs/") && isObj(osch.$defs)) {
-    const def = osch.$defs[ref.slice("#/$defs/".length)];
-    if (isObj(def)) resolved = def;
+): { schema: unknown; keys?: string[]; via: string } | undefined {
+  // 1. inline schema carried on the naming link.
+  const linkRaw = isObj(ownerDoc?.value)
+    ? (ownerDoc!.value as Record<string, unknown>)[key]
+    : undefined;
+  if (isObj(linkRaw) && isObj(linkRaw["/"])) {
+    const slash = linkRaw["/"] as Record<string, unknown>;
+    const linkKey = Object.keys(slash).find((k) => k.startsWith("link@"));
+    const inner = linkKey ? slash[linkKey] : undefined;
+    if (isObj(inner) && isObj(inner.schema)) {
+      return {
+        schema: annotate(inner.schema),
+        keys: Object.keys(inner.schema),
+        via: "link",
+      };
+    }
   }
-  const isStream = Array.isArray(prop.asCell) &&
-    (prop.asCell as unknown[]).includes("stream");
-  return {
-    schema: annotate(resolved),
-    keys: Object.keys(resolved),
-    isStream,
-  };
+  // 2. fallback: owner's result-schema property ($ref into $defs).
+  const osch = ownerDoc?.schema;
+  if (isObj(osch) && isObj(osch.properties)) {
+    const prop = osch.properties[key];
+    if (isObj(prop)) {
+      let resolved: Record<string, unknown> = prop;
+      const ref = typeof prop.$ref === "string" ? prop.$ref : undefined;
+      if (ref?.startsWith("#/$defs/") && isObj(osch.$defs)) {
+        const def = osch.$defs[ref.slice("#/$defs/".length)];
+        if (isObj(def)) resolved = def;
+      }
+      return {
+        schema: annotate(resolved),
+        keys: Object.keys(resolved),
+        via: "schema",
+      };
+    }
+  }
+  return undefined;
 }
 
 /** Collect every sigil link in a value, with its JSON path. */
@@ -351,8 +371,10 @@ function detailFromDoc(
     if (decl) {
       schema = decl.schema;
       schemaKeys = decl.keys;
-      streamPayload = decl.isStream;
-      schemaSource = `declared in owner · ${named.key}`;
+      streamPayload = c.kind === "stream";
+      schemaSource = decl.via === "link"
+        ? `declared at owner · ${named.key} (link)`
+        : `declared in owner schema · ${named.key}`;
     }
   }
   const ifc = isObj(value) && "ifc" in value ? annotate(value.ifc) : undefined;
