@@ -12,6 +12,7 @@ import { Table } from "@cliffy/table";
 import {
   annotate,
   buildCrossSpaceLinkIndex,
+  buildInspectorBundle,
   buildSpaceGraph,
   convergence,
   type ConvergenceResult,
@@ -32,6 +33,7 @@ import {
   openSpace,
   openSpaces,
   quickStats,
+  renderInspectorHtml,
   resolveSpacePath,
   type SpaceGraph,
   type SpaceRef,
@@ -514,6 +516,35 @@ export const inspect = new Command()
           );
         }
       });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect html */
+  .command(
+    "html <space:string>",
+    "Emit a self-contained HTML inspector (open in a browser).",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--out <file:string>", "Write to a file instead of stdout.")
+  .action((options, space) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const bundle = buildInspectorBundle(s, {
+        branch: options.branch,
+        scope: options.scope,
+        generatedAt: new Date().toISOString(),
+      });
+      const html = renderInspectorHtml(bundle);
+      if (options.out) {
+        Deno.writeTextFileSync(options.out, html);
+        console.error(
+          `wrote ${options.out}  (${bundle.entities.length} entities, ${bundle.pieces.length} pieces)`,
+        );
+      } else {
+        console.log(html);
+      }
     } finally {
       s.close();
     }

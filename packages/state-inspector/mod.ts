@@ -15,3 +15,4 @@ export * from "./discover.ts";
 export * from "./grouping.ts";
 export * from "./graph.ts";
 export * from "./timetravel.ts";
+export * from "./html.ts";
