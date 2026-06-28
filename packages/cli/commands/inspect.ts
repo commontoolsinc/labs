@@ -29,18 +29,22 @@ import {
   hotEntities,
   listCommits,
   listEntityModels,
+  listScopes,
   listSqliteFiles,
   openSpace,
   openSpaces,
   quickStats,
   renderInspectorHtml,
   resolveSpacePath,
+  type Scope,
+  scopeOverlay,
   type SpaceGraph,
   type SpaceRef,
   spaceTimeline,
   subgraphAround,
   summarize,
   summarizeSpace,
+  valueAsIdentity,
 } from "@commonfabric/state-inspector";
 
 function humanSize(bytes: number): string {
@@ -63,6 +67,18 @@ function splitPath(p?: string): string[] {
 function shortDid(did: string): string {
   const tail = did.startsWith("did:key:") ? did.slice("did:key:".length) : did;
   return tail.length > 14 ? `${tail.slice(0, 8)}…${tail.slice(-4)}` : tail;
+}
+
+// A scope as a compact, human label: "space", "user z6Mk…", "session z6Mk…/abc".
+function fmtScope(s: Scope): string {
+  if (s.kind === "space") return "space";
+  if (s.kind === "user") return `user ${shortDid(s.principal ?? "?")}`;
+  if (s.kind === "session") {
+    return `session ${shortDid(s.principal ?? "?")}/${
+      (s.sessionId ?? "").slice(0, 8)
+    }`;
+  }
+  return decodeURIComponent(s.raw).slice(0, 40);
 }
 
 // Session ids look like `session:did:key:<space>:<uuid>` (often %-encoded).
@@ -265,6 +281,44 @@ export const inspect = new Command()
               : "tables present, empty (persistentSchedulerState off)"
           }`,
         );
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect scopes */
+  .command(
+    "scopes <space:string>",
+    "Per-identity scopes in a space: shared/space + per-user + per-session.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action((options, space) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const scopes = listScopes(s, { branch: options.branch });
+      out(!!options.json, scopes, () => {
+        const space2 = scopes.find((x) => x.kind === "space");
+        console.log(
+          `${scopes.length} scope(s)` +
+            (space2
+              ? `  ·  shared 'space' has ${space2.entities} entities`
+              : ""),
+        );
+        for (const sc of scopes) {
+          console.log(
+            `  ${
+              fmtScope(sc).padEnd(34)
+            } entities=${sc.entities}\trevs=${sc.revisions}`,
+          );
+        }
+        if (scopes.some((x) => x.kind !== "space")) {
+          console.log(
+            "\ntip: `inspect value-at <space> <id> --as <DID>` reads as that identity;",
+          );
+          console.log(
+            "     `inspect overlay <space> <id>` shows a cell across all scopes.",
+          );
+        }
       });
     } finally {
       s.close();
@@ -595,12 +649,39 @@ export const inspect = new Command()
     "Reconstruct as of this commit seq (default: latest).",
   )
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
-  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--scope <scope:string>", "Raw scope key (default: space).")
+  .option(
+    "--as <did:string>",
+    "Read AS this identity (overlay session⊕user⊕space).",
+  )
+  .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--doc", "Show the whole document, not just value.")
   .action((options, space, entity) => {
     const s = openSpace(resolveSpacePath(space));
     try {
+      // --as composes the per-identity overlay; otherwise a single raw scope.
+      if (options.as) {
+        const r = valueAsIdentity(s, {
+          id: entity,
+          identity: options.as,
+          sessionId: options.session,
+          branch: options.branch,
+          atSeq: options.seq,
+        });
+        out(!!options.json, r, () => {
+          if (!r.exists) {
+            console.log("(absent for this identity)");
+            return;
+          }
+          console.log(
+            `resolved from: ${r.resolvedKind}` +
+              (r.overrides ? "  (overrides a more-general scope)" : ""),
+          );
+          console.log(JSON.stringify(r.value, null, 2));
+        });
+        return;
+      }
       const res = getValueAt(
         s,
         {
@@ -622,6 +703,46 @@ export const inspect = new Command()
           } else console.log(JSON.stringify(annotate(shown), null, 2));
         },
       );
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect overlay */
+  .command(
+    "overlay <space:string> <entity:string>",
+    "An entity's value across EVERY scope (per-user/session divergence).",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action((options, space, entity) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const o = scopeOverlay(s, entity, { branch: options.branch });
+      out(!!options.json, o, () => {
+        if (o.variants.length === 0) {
+          console.log("(entity absent)");
+          return;
+        }
+        console.log(
+          `${entity}` +
+            (o.overridden
+              ? o.divergent
+                ? `  —  ${o.variants.length} scopes, DIVERGENT`
+                : `  —  ${o.variants.length} scopes, identical`
+              : "  —  single scope"),
+        );
+        for (const v of o.variants) {
+          const label = v.kind === "space"
+            ? "space"
+            : v.kind === "user"
+            ? `user ${shortDid(v.principal ?? "?")}`
+            : v.kind === "session"
+            ? `session ${shortDid(v.principal ?? "?")}/${
+              (v.sessionId ?? "").slice(0, 8)
+            }`
+            : v.scope;
+          console.log(`  ${label.padEnd(34)} ${v.summary}`);
+        }
+      });
     } finally {
       s.close();
     }
