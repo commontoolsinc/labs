@@ -27,6 +27,7 @@
     "./packages/runner",
     "./packages/runtime-client",
     "./packages/shell",
+    "./packages/state-inspector",
     "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
