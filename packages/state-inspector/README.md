@@ -26,8 +26,14 @@ DB and a set of modern `fvj1:` DBs).
 - **`diff` / `timeline`** — time travel. `diff` shows what changed in an entity
   between two seqs; `timeline` shows how a space grew (or how one entity
   evolved). The engine already reconstructs at any seq.
-- **`html`** — a self-contained HTML inspector (Overview / Pieces / Entities /
-  Graph / Timeline) over the same JSON, for opening in a browser.
+- **`html`** — a self-contained HTML **explorer**. Two ways to navigate (a
+  **tree** from pieces down, and a re-rootable **graph** from any node) feeding
+  one detail pane that shows every salient field for the selected entity: value
+  (links clickable), schema, **CFC** information-flow labels, version history,
+  resolved lineage, outgoing links, and module source. Context-aware labels
+  (a stream named by its owner key → `⊙ createProfile`; `{link, specifier}` →
+  `import ./foo.tsx`), click-to-copy ids, and deep links into the live shell
+  (`--app-url`).
 
 **Model unification** (`model.ts`) makes the tool _fluent_: instead of guessing
 from the shape of `doc.value`, it reads the **whole entity document** (`value`
@@ -165,8 +171,9 @@ deno task cf inspect diff     z6Mkqa41 of:fid1:… --from 7 --to 12
 deno task cf inspect timeline z6Mkqa41                       # how the space grew
 deno task cf inspect timeline z6Mkqa41 of:fid1:…             # how one entity evolved
 
-# a self-contained HTML inspector to open in a browser
+# a self-contained HTML explorer to open in a browser (tree + graph + detail)
 deno task cf inspect html     z6Mkqa41 --out /tmp/space.html
+deno task cf inspect html     z6Mkqa41 --app-url https://host --out /tmp/space.html  # + live links
 
 # cross-space convergence (--all discovered, or --spaces a,b, or --dir)
 deno task cf inspect converge      of:fid1:… --all --path value

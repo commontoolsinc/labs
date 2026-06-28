@@ -528,6 +528,10 @@ export const inspect = new Command()
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--out <file:string>", "Write to a file instead of stdout.")
+  .option(
+    "--app-url <url:string>",
+    "Live shell base origin for deep links (e.g. https://host).",
+  )
   .action((options, space) => {
     const s = openSpace(resolveSpacePath(space));
     try {
@@ -535,12 +539,14 @@ export const inspect = new Command()
         branch: options.branch,
         scope: options.scope,
         generatedAt: new Date().toISOString(),
+        liveBase: options.appUrl,
       });
       const html = renderInspectorHtml(bundle);
       if (options.out) {
         Deno.writeTextFileSync(options.out, html);
+        const pieces = bundle.details.filter((d) => d.kind === "piece").length;
         console.error(
-          `wrote ${options.out}  (${bundle.entities.length} entities, ${bundle.pieces.length} pieces)`,
+          `wrote ${options.out}  (${bundle.details.length} entities, ${pieces} pieces)`,
         );
       } else {
         console.log(html);
