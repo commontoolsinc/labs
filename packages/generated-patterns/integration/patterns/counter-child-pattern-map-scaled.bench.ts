@@ -60,6 +60,20 @@ function buildScenario(n: number): PatternIntegrationScenario {
         expect: [
           { path: "rows.0.value", value: 2 },
           { path: "rows.0.label", value: "Row1 (row-1) value 2" },
+          // SIBLING-FIELD NON-INVALIDATION (per-field reactivity gate). `summary`
+          // depends only on identity/step — NOT value — so the value-changing
+          // `increment` must leave it byte-identical. This is the invariant any
+          // child-result-field INLINE (folding the per-field docs into one
+          // consolidated result doc) must preserve: a change to one addressed
+          // field must NOT re-derive a sibling addressed field. With the fields in
+          // SEPARATE per-field docs (today) this holds structurally (each doc is
+          // its own change envelope); the gate stands so a future inline that
+          // over-invalidates (e.g. a whole-result write that re-touches `summary`)
+          // is caught here rather than only by the doc-count slope.
+          { path: "rows.0.summary", value: "row-1 step 1" },
+          // ADDRESSABILITY: the sibling addressed scalars still resolve by path.
+          { path: "rows.0.identity", value: "row-1" },
+          { path: "rows.0.step", value: 1 },
         ],
       },
     ],
