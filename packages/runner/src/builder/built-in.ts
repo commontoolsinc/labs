@@ -34,6 +34,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
+import { recordVerifiedProvenance } from "../harness/verified-provenance.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
@@ -390,6 +391,34 @@ export function str(
       (result, str, i) => result + str + (i < values.length ? values[i] : ""),
       "",
     );
+
+  // PROVENANCE STAMP (reactive-interpreter str-resolution fix). `str` is pure
+  // framework code (no cell context, no I/O, no pattern instantiation — it reads
+  // `strings`/`values` from its lift INPUT and returns the concatenation), so
+  // trusting its body to run as a raw host closure inside the interpreter is
+  // sound. The interpreter's live-leaf trust gate
+  // (`interpreterLiveLeafTrustCheck`, runner.ts) admits a leaf only when
+  // `getVerifiedProvenance(impl) !== undefined`. This anonymous in-body closure
+  // is neither exported nor `__cfReg`-registered, so module indexing never
+  // stamps it — every `str` node fell back to `unresolved-leaf`, EVEN in a
+  // launched child whose parent was `unsafeTrustPattern`'d (the trust walk
+  // reaches the parent factory, never the child's str closures). Stamping the
+  // closure at construction makes it provenance-trusted in EVERY context
+  // (parent, launched child, reload) without a new trust-gate surface.
+  //
+  // We stamp the per-call closure (NOT a hoisted shared one) on purpose: a
+  // shared frozen closure would be re-wrapped into a fresh, UN-stamped function
+  // by `createNodeFactory`'s `prepareInspectableImplementation` on every call
+  // after the first (it clones non-extensible inputs), defeating the stamp. The
+  // freshly-minted closure here is extensible, so it passes through unchanged and
+  // carries the stamp into the module. The stamp is SYMBOL-LESS: a symbol would
+  // make `moduleToJSON` (json-utils.ts) emit an `$implRef` that no
+  // executable-registry entry resolves, forcing the stringified-body SES fallback
+  // to be dropped and breaking the serialized (getRaw) leaf path. Symbol-less
+  // provenance passes the `!== undefined` trust gate while keeping
+  // `provenance.symbol === undefined`, so serialization keeps the SES-fallback
+  // body exactly as today.
+  recordVerifiedProvenance(interpolatedString, { identity: "cf:builtin/str" });
 
   return lift(interpolatedString)({ strings, values });
 }

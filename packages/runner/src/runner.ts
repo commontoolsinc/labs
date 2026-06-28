@@ -107,6 +107,7 @@ import {
   type ImplRefResolver,
   liveLeafWritesCellInput,
   outputInternalName,
+  partialCauseToInternalName,
   resolveLeafImpls,
   schemaNeedsCellContext,
 } from "./reactive-interpreter/extract.ts";
@@ -1130,6 +1131,20 @@ export class Runner {
     MemorySpace[]
   >();
 
+  // CHILD-RESULT-FIELD INLINE (INC-LC3): the RESULT-DOC PATHS a synthetic
+  // interpreter pattern folds inline (a result-only segment output written at its
+  // result subpath instead of via a derived cell). Keyed weakly by the synthetic
+  // pattern object so `updateResultProjection` can PRESERVE a PERSISTED inline
+  // value at those paths on reload — the inline value lives in the result doc
+  // (persisted), not a separate derived doc, so a blind re-projection to the
+  // schema-default placeholder would clobber it before the rehydrated segment
+  // (which does NOT re-run under `persistentSchedulerState`) could refill it.
+  // Interpreter-only: a pattern with no entry is projected exactly as before.
+  private inlinedResultPathsByPattern = new WeakMap<
+    object,
+    ReadonlyArray<readonly (string | number)[]>
+  >();
+
   /**
    * Reactive-interpreter dispatch census (only mutated when the
    * `experimentalInterpreter` flag is on). Tallies how the corpus actually maps:
@@ -1450,6 +1465,54 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
+    // CHILD-RESULT-FIELD INLINE (INC-LC3): an inlined result field lives in the
+    // result doc (persisted), NOT a separate derived doc. The emitted result tree
+    // holds it as a schema-default/`null` PLACEHOLDER so the slot is present at
+    // cold start; the producing segment then fills it. But a RELOAD re-projects
+    // the placeholder over the PERSISTED value — and under
+    // `persistentSchedulerState` the segment REHYDRATES (does not re-run), so it
+    // never refills, leaving the placeholder (the `null`-vs-`5` reload break).
+    // PRESERVE the persisted value at each inlined path: when the previous (raw,
+    // persisted) result already carries a non-undefined value there, keep it. On
+    // cold start the path is absent/undefined → the placeholder stands and the
+    // segment fills it. Interpreter-only (no entry ⇒ legacy projection unchanged).
+    const inlinedPaths = this.inlinedResultPathsByPattern.get(
+      pattern as unknown as object,
+    );
+    if (
+      inlinedPaths !== undefined && isRecord(previousResult) &&
+      isRecord(result)
+    ) {
+      const readAtPath = (
+        root: unknown,
+        path: readonly (string | number)[],
+      ): unknown => {
+        let cur: unknown = root;
+        for (const key of path) {
+          if (cur === null || typeof cur !== "object") return undefined;
+          cur = (cur as Record<string | number, unknown>)[key];
+        }
+        return cur;
+      };
+      const grafted = result as Record<string | number, unknown>;
+      for (const path of inlinedPaths) {
+        if (path.length === 0) continue;
+        const persisted = readAtPath(previousResult, path);
+        if (persisted === undefined) continue; // cold start: keep placeholder
+        // Walk/clone to the parent of the leaf, then graft the persisted value.
+        let node: Record<string | number, unknown> = grafted;
+        let reachable = true;
+        for (let i = 0; i < path.length - 1; i++) {
+          const next = node[path[i]];
+          if (next === null || typeof next !== "object") {
+            reachable = false;
+            break;
+          }
+          node = next as Record<string | number, unknown>;
+        }
+        if (reachable) node[path[path.length - 1]] = persisted;
+      }
+    }
     // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
     // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
     // in private `#fields` and zero own-props, compare equal regardless of
@@ -1674,7 +1737,16 @@ export class Runner {
       });
     }
 
-    this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
+    // Project the SAME pattern that was materialized (`manifestPattern`), not the
+    // raw `pattern`: the synthetic interpreter pattern's manifest + result tree
+    // must agree. For a non-interpreted pattern `manifestPattern === pattern`
+    // (identical projection). For the CHILD-RESULT-FIELD INLINE this is
+    // load-bearing — the synthetic result tree holds the inlined fields as present
+    // inline slots (and prunes their derived cells), so projecting the RAW pattern
+    // (which still `{partialCause}`-redirects to the now-unmaterialized cells)
+    // would mis-project them. `updateResultProjection` then preserves any persisted
+    // inline value at those paths on reload (see `inlinedResultPathsByPattern`).
+    this.updateResultProjection(tx, manifestPattern, resultCell.withTx(tx), {
       preserveName: samePattern,
     });
   }
@@ -4145,6 +4217,195 @@ export class Runner {
       );
     }
 
+    // ── CHILD-RESULT-FIELD INLINE (INC-LC3) ─────────────────────────────────
+    // A segment-produced output whose ONLY surviving reference is the RESULT TREE
+    // (never a boundary input/output, never a cross-segment read) does not need
+    // its own derived-internal doc + `{partialCause}` redirect: the segment can
+    // write its value DIRECTLY at the result PATH (`{$alias:{cell:"result",…}}`),
+    // and the result slot holds the value INLINE. This folds the per-child pure
+    // display fields (`label`, `summary`, …) out of separate docs and into the one
+    // child result doc — the launched-child per-element doc tax the coalescing
+    // campaign targets. The addressable output value/path is UNCHANGED (the field
+    // resolves at `result.<path>` either way); only the DOC layout changes.
+    //
+    // PER-FIELD REACTIVITY is preserved because `sendValueToBinding` routes each
+    // inlined field through a per-PATH `normalizeAndDiff` (pattern-binding.ts):
+    // the segment writes ONLY its own result subpath, leaving sibling subpaths
+    // byte-identical — so a `value`-only change re-runs only the segment that
+    // feeds `value`/`label` and never re-touches `summary`. PER-PATH CFC labels
+    // are preserved because the result-path alias carries `schemaAtPath` exactly
+    // as the former derived-cell path did.
+    //
+    // ELIGIBILITY (fail-closed — a name failing ANY clause keeps its doc):
+    //   (a) produced by a SEGMENT op (`producerSegOfName`);
+    //   (b) referenced by the RESULT TREE at a WHOLE-cell path (`path: []`),
+    //       EXACTLY ONCE (a name read at a sub-path, or at multiple result paths,
+    //       is a derived/duplicated projection that a single result-subpath write
+    //       cannot reproduce);
+    //   (c) NOT referenced by ANY boundary input/output (a handler/effect that
+    //       reads or writes the cell needs the round-trip doc — and a folded field
+    //       co-located with handler-written state is the contention hazard part C
+    //       guards); and
+    //   (d) NOT read cross-segment (an inter-segment dataflow channel must
+    //       round-trip a cell).
+    // Clauses (c)+(d) are exactly `¬referencedByBoundaryOrCrossSeg`; clause (b) is
+    // the result-tree whole-cell single-reference test computed below.
+
+    // Boundary + cross-segment references ONLY (the result-tree class excluded), so
+    // a result-only name is `producerSeg ∧ resultRef ∧ ¬(boundaryRef ∨ crossSegRef)`.
+    const boundaryOrCrossSegRefs = new Set<string>();
+    for (const b of part.boundaries) {
+      const bNode = pattern.nodes?.[b.opId];
+      collectInternalAliasNames(bNode?.inputs, boundaryOrCrossSegRefs);
+      collectInternalAliasNames(bNode?.outputs, boundaryOrCrossSegRefs);
+    }
+    for (let i = 0; i < part.segments.length; i++) {
+      for (const ref of part.segments[i].inputs) {
+        if (ref.kind !== "internal") continue;
+        const prodSeg = producerSegOfName.get(ref.name);
+        if (prodSeg === undefined || prodSeg !== i) {
+          boundaryOrCrossSegRefs.add(ref.name);
+        }
+      }
+    }
+
+    // RESULT-TREE name → its single whole-cell projection: the path the result
+    // tree reads it at + the alias schema. A name read at a non-empty alias path,
+    // or read at MORE THAN ONE result location, is recorded as ineligible (its
+    // entry is set to `null`) so the fold never collapses a derived/duplicated
+    // projection. PURE structural scan of `pattern.result`.
+    const resultProjectionByName = new Map<
+      string,
+      { path: (string | number)[]; schema: JSONValue | undefined } | null
+    >();
+    const scanResultProjections = (
+      value: unknown,
+      treePath: (string | number)[],
+    ): void => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        value.forEach((el, i) => scanResultProjections(el, [...treePath, i]));
+        return;
+      }
+      const obj = value as Record<string, unknown>;
+      const alias = obj.$alias as Record<string, unknown> | undefined;
+      if (alias && typeof alias === "object") {
+        if (alias.cell === "argument") return; // argument ref, no internal name
+        if ("partialCause" in alias) {
+          const name = partialCauseToInternalName(alias.partialCause);
+          if (name !== null) {
+            // Eligible projection iff this alias reads the WHOLE derived cell
+            // (`path: []`) at defer 0 — a sub-path projection (e.g. `rowCount`
+            // reading `sanitizedConfigs.length`) or a DEFERRED alias (a nested-
+            // pattern reference `rewriteResultTreeForInline` does not replace) can
+            // NOT be reproduced by a single result-subpath write. A second
+            // reference (any path) marks the name ineligible.
+            const aliasPath = (alias.path as (string | number)[] | undefined) ??
+              [];
+            const deferred = ((alias.defer as number | undefined) ?? 0) > 0;
+            if (resultProjectionByName.has(name)) {
+              resultProjectionByName.set(name, null); // referenced twice ⇒ skip
+            } else if (aliasPath.length === 0 && !deferred) {
+              resultProjectionByName.set(name, {
+                path: [...treePath],
+                schema: alias.schema as JSONValue | undefined,
+              });
+            } else {
+              resultProjectionByName.set(name, null); // sub-path/deferred ⇒ skip
+            }
+          }
+        }
+        return; // do not descend into a resolved alias payload
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        scanResultProjections(v, [...treePath, k]);
+      }
+    };
+    scanResultProjections(pattern.result, []);
+
+    // CONTENTION GATE (part C). Folding co-locates the inlined display fields with
+    // any handler/effect-written state on the ONE child result doc. That is
+    // net-POSITIVE for single-instance per-row state (an interactive-list row whose
+    // handler writes its OWN argument), but net-NEGATIVE for SHARED multi-user
+    // write state (lunch-poll's PollOptionCard, whose `castVote`/aggregate writes
+    // contend across sessions on a hot poll doc — the `RI_F4_IO_COALESCE` conflict
+    // ratchet: +177% conflicts measured). The fold must apply ONLY where
+    // net-positive. SIGNAL: the child result doc is multi-user-shared iff there is
+    // an EFFECT boundary (a handler / I/O sink writes state) AND a NON-DEFAULT
+    // (PerUser/PerSpace/PerSession) scope is reachable through (i) the child's
+    // ARGUMENT SCHEMA (a `PerUser<>`/`PerSpace<>` declared input), (ii) the bound
+    // argument DATA snapshot (a runtime input link carrying a scope — the form
+    // lunch-poll's PerSpace inputs take), or (iii) any effect boundary's
+    // input/output aliases (a handler writing a scoped cell). Reuses the same
+    // `hasNonDefaultScope` + raw-argument snapshot the scoped-collection boundary
+    // gate uses, plus the argument schema (the scoped-collection gate's static arm
+    // — a schema-declared narrowing that may not yet show in the bound DATA).
+    // FAIL-CLOSED: any reachable non-default scope ⇒ fold NOTHING for this child
+    // (the segment outputs keep their own derived cells, byte-identical to today —
+    // the lunch-poll/PollOptionCard fallback is preserved wholesale).
+    const childResultDocIsMultiUserShared = (() => {
+      const effectBoundaries = part.boundaries.filter((b) =>
+        b.kind === "effect"
+      );
+      if (effectBoundaries.length === 0) return false;
+      if (hasNonDefaultScope(pattern.argumentSchema)) return true;
+      if (
+        hasNonDefaultScope(this.readRawArgumentSnapshot(resultCell, setupTx))
+      ) {
+        return true;
+      }
+      for (const b of effectBoundaries) {
+        const bNode = pattern.nodes?.[b.opId];
+        if (
+          hasNonDefaultScope(bNode?.inputs) ||
+          hasNonDefaultScope(bNode?.outputs)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    })();
+
+    // The inlined set: result-only segment-produced names, gated at the DOC LEVEL
+    // by the contention signal (if the child result doc is multi-user-shared, fold
+    // NOTHING — keep the lunch-poll fallback intact and the interactive-list win).
+    const inlinedNames = new Set<string>();
+    const inlineResultBinding = new Map<string, JSONValue>();
+    if (!childResultDocIsMultiUserShared) {
+      for (const [name, seg] of producerSegOfName) {
+        if (seg === undefined) continue;
+        if (boundaryOrCrossSegRefs.has(name)) continue; // clauses (c)+(d)
+        const projection = resultProjectionByName.get(name);
+        if (!projection) continue; // not result-referenced, or ineligible (null)
+        inlinedNames.add(name);
+        inlineResultBinding.set(name, {
+          $alias: {
+            cell: "result",
+            path: projection.path,
+            ...(projection.schema !== undefined
+              ? { schema: projection.schema }
+              : {}),
+          },
+        } as unknown as JSONValue);
+      }
+    }
+    if (Deno.env.get("RI_PART_DEBUG") === "1") {
+      if (inlinedNames.size > 0) {
+        console.error(
+          "RI_PART inlined-result-fields:",
+          [...inlinedNames].join(","),
+        );
+      } else if (childResultDocIsMultiUserShared) {
+        // The contention gate fired: a handler/effect child reachable through a
+        // non-default (PerUser/PerSpace/PerSession) scope keeps its result fields
+        // in SEPARATE docs (the lunch-poll/PollOptionCard fallback) — no fold.
+        console.error(
+          "RI_PART inline-skipped-multi-user-shared nodes=" +
+            (pattern.nodes?.length ?? 0),
+        );
+      }
+    }
+
     const argumentSchema = (pattern.argumentSchema ?? {}) as JSONSchema;
     const resultSchema = (pattern.resultSchema ?? {}) as JSONSchema;
 
@@ -4355,7 +4616,15 @@ export class Runner {
         if (!segOpIds.has(opId)) continue;
         if (prunedInternalNames.has(name)) continue;
         segOutputNames.push(name);
-        segOutputsBinding[name] = nodeOutputsByName.get(name)!;
+        // INLINE (INC-LC3): a result-only segment output is routed to its RESULT
+        // PATH (`{$alias:{cell:"result",path,…}}`) instead of its derived-cell
+        // alias, so `sendValueToBinding` writes the value INLINE into the result
+        // doc at that subpath (per-path `normalizeAndDiff` → sibling-preserving +
+        // per-path CFC labels). The derived doc for this name is dropped from the
+        // manifest below. Non-inlined names keep their original per-field alias
+        // (byte-identical to today).
+        segOutputsBinding[name] = inlineResultBinding.get(name) ??
+          nodeOutputsByName.get(name)!;
       }
       // CROSS-SEGMENT `opOut` outputs this segment PRODUCES: each synthetic
       // `$ri-op-<id>` cell whose op lives in this segment. Written by op id (the
@@ -4514,18 +4783,56 @@ export class Runner {
     // are DROPPED from the manifest: no node writes them and no surviving alias
     // reads them, so no doc need be minted (the per-child doc coalescing win). The
     // addressable output surface and every boundary input are byte-identical.
+    // INLINE (INC-LC3): an inlined field's derived cell is folded into the result
+    // doc — drop it from the manifest alongside the pruned intermediates. Its
+    // result-path write (segment output) + present inline result slot (below)
+    // replace the former derived-cell round-trip. The schema DEFAULT each inlined
+    // cell carried (used by `materializeDerivedInternalCells` to seed an undefined
+    // derived cell) is carried into the inline slot so the cold-start value matches
+    // legacy. Recover it from the manifest BEFORE filtering.
+    const inlineSchemaDefaultByName = new Map<string, JSONValue | undefined>();
+    for (const dic of pattern.derivedInternalCells ?? []) {
+      const name = outputInternalName({ $alias: dic });
+      if (name === null || !inlinedNames.has(name)) continue;
+      const schema = (dic as { schema?: JSONValue }).schema;
+      inlineSchemaDefaultByName.set(
+        name,
+        isRecord(schema)
+          ? (schema.default as JSONValue | undefined)
+          : undefined,
+      );
+    }
     const prunedPatternDerivedCells = (pattern.derivedInternalCells ?? [])
       .filter(
         (dic) => {
           const name = outputInternalName({ $alias: dic });
-          return name === null || !prunedInternalNames.has(name);
+          return name === null ||
+            (!prunedInternalNames.has(name) && !inlinedNames.has(name));
         },
       );
     const mergedDerivedCells = [
       ...prunedPatternDerivedCells,
       ...syntheticDerivedCells,
     ];
-    return {
+
+    // Rewrite the emitted RESULT tree so each inlined field is a PRESENT inline
+    // slot (the field's schema default, or `null` when it has none) instead of a
+    // `{partialCause}` redirect to the now-pruned derived cell. Present-at-setup
+    // keeps the slot in the projected object — `updateResultProjection`'s whole-
+    // value write never omits it, so a steady-state per-PATH segment write
+    // overwrites the value in place (siblings + per-path CFC labels preserved).
+    // On reload the slot re-projects to its default and the segment refills it
+    // (self-correcting cold start, bounded transient — DECISIONS §D-EMISSION). If
+    // NO inlined fields, the result tree passes through verbatim (byte-identical).
+    const emittedResult = inlinedNames.size > 0
+      ? this.rewriteResultTreeForInline(
+        pattern.result,
+        inlinedNames,
+        inlineSchemaDefaultByName,
+      )
+      : pattern.result;
+
+    const synthetic = {
       argumentSchema,
       resultSchema,
       ...(mergedDerivedCells.length > 0
@@ -4534,9 +4841,71 @@ export class Runner {
             mergedDerivedCells as Pattern["derivedInternalCells"],
         }
         : {}),
-      result: pattern.result,
+      result: emittedResult,
       nodes: [...segmentNodes, ...boundaryNodes],
     } satisfies Pattern;
+
+    // Record the inlined result-doc PATHS so `updateResultProjection` preserves a
+    // PERSISTED inline value at them on reload (see `inlinedResultPathsByPattern`).
+    if (inlinedNames.size > 0) {
+      const paths: (readonly (string | number)[])[] = [];
+      for (const name of inlinedNames) {
+        const projection = resultProjectionByName.get(name);
+        if (projection) paths.push(projection.path);
+      }
+      if (paths.length > 0) {
+        this.inlinedResultPathsByPattern.set(synthetic, paths);
+      }
+    }
+
+    return synthetic;
+  }
+
+  /**
+   * INLINE (INC-LC3): replace each inlined field's `{$alias:{partialCause:N}}`
+   * redirect (to a now-pruned derived internal cell) with a PRESENT literal slot
+   * carrying the field's schema default (or `null` when the field declares none),
+   * so the projected result object holds the slot at setup and the segment's
+   * result-PATH write overwrites it in place. PURE structural rewrite — a deep
+   * clone that only swaps the inlined aliases, leaving every other alias (boundary
+   * streams, non-inlined derived fields, argument pass-throughs, sub-path
+   * projections) byte-identical. Only a top-level (defer-0) `{partialCause}` whose
+   * name is in `inlinedNames` is rewritten; anything else is copied verbatim.
+   */
+  private rewriteResultTreeForInline(
+    result: JSONValue,
+    inlinedNames: ReadonlySet<string>,
+    schemaDefaultByName: ReadonlyMap<string, JSONValue | undefined>,
+  ): JSONValue {
+    const rewrite = (value: unknown): JSONValue => {
+      if (!value || typeof value !== "object") return value as JSONValue;
+      if (Array.isArray(value)) return value.map(rewrite);
+      const obj = value as Record<string, unknown>;
+      const alias = obj.$alias as Record<string, unknown> | undefined;
+      if (alias && typeof alias === "object") {
+        if (
+          "partialCause" in alias && (alias.defer ?? 0) === 0 &&
+          (((alias.path as unknown[] | undefined) ?? []).length === 0)
+        ) {
+          const name = partialCauseToInternalName(alias.partialCause);
+          if (name !== null && inlinedNames.has(name)) {
+            const def = schemaDefaultByName.get(name);
+            // The present inline slot: the field's schema default, or `null` when
+            // it has none (a present placeholder the segment overwrites on its
+            // first run — same cold-start surface as legacy's undefined derived
+            // cell, but addressable as a value rather than via a redirect link).
+            return def !== undefined ? def : null;
+          }
+        }
+        // Any other alias (deferred, sub-path, non-inlined, argument/result/stream)
+        // is preserved verbatim — do NOT descend into a resolved alias payload.
+        return value as JSONValue;
+      }
+      const out: Record<string, JSONValue> = {};
+      for (const [k, v] of Object.entries(obj)) out[k] = rewrite(v);
+      return out;
+    };
+    return rewrite(result);
   }
 
   /**
