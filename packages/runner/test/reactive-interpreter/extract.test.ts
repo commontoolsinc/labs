@@ -672,7 +672,7 @@ describe("str → interpolate: SERIALIZED / LOADED leaf (no live provenance)", (
   const serializedStrModule = (extra?: Record<string, unknown>) => ({
     type: "javascript",
     implementation:
-      "({strings, values}) => strings.reduce((result, str, i) => result + str + (i < values.length ? values[i] : \"\"), \"\")",
+      '({strings, values}) => strings.reduce((result, str, i) => result + str + (i < values.length ? values[i] : ""), "")',
     $builtin: "str",
     // A loaded str node carries an $implRef too — the recognizer must STILL lower
     // it (brand wins) and leave `impl` undefined, not resolve the leaf via SES.
@@ -721,7 +721,9 @@ describe("str → interpolate: SERIALIZED / LOADED leaf (no live provenance)", (
     }
     // The value refs are MIRRORED into op.inputs (so topo/partition/CFC surface
     // them with no extra clause).
-    expect(inputsOf(ip).filter((ref) => ref.kind === "argument").length).toBe(2);
+    expect(inputsOf(ip).filter((ref) => ref.kind === "argument").length).toBe(
+      2,
+    );
     // No `unrecognized` entry — a clean, eligible lowering.
     expect(r.coverage.unrecognizedAliases.length).toBe(0);
   });
