@@ -17,8 +17,10 @@ import {
   type ConvergenceResult,
   convergenceScan,
   describePiece,
+  diffEntity,
   discoverSpaceDbs,
   entityHistory,
+  entityTimeline,
   getValueAt,
   graphToDot,
   groupDiscoveredSpaces,
@@ -33,7 +35,9 @@ import {
   resolveSpacePath,
   type SpaceGraph,
   type SpaceRef,
+  spaceTimeline,
   subgraphAround,
+  summarize,
   summarizeSpace,
 } from "@commonfabric/state-inspector";
 
@@ -581,6 +585,105 @@ export const inspect = new Command()
           } else console.log(JSON.stringify(annotate(shown), null, 2));
         },
       );
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect diff */
+  .command(
+    "diff <space:string> <entity:string>",
+    "What changed in an entity between two seqs.",
+  )
+  .option("--from <n:number>", "From seq (default: entity's birth / seq 0).")
+  .option("--to <n:number>", "To seq (default: latest).")
+  .option("--path <path:string>", "Focus inside value, e.g. items/0/title.")
+  .option("--doc", "Diff the whole document, not just value.")
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action((options, space, entity) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const d = diffEntity(s, {
+        id: entity,
+        scope: options.scope,
+        branch: options.branch,
+        fromSeq: options.from,
+        toSeq: options.to,
+        path: splitPath(options.path),
+        doc: !!options.doc,
+      });
+      out(!!options.json, d, () => {
+        const range = `${d.fromSeq ?? "birth"} → ${d.toSeq ?? "latest"}`;
+        console.log(`diff ${d.id}  (${range})`);
+        if (!d.fromExists && d.toExists) console.log("  (created in range)");
+        if (d.fromExists && !d.toExists) console.log("  (deleted in range)");
+        if (d.changes.length === 0) {
+          console.log("  (no changes)");
+          return;
+        }
+        for (const c of d.changes) {
+          const at = c.path || "(root)";
+          if (c.kind === "changed") {
+            console.log(
+              `  ~ ${at}: ${summarize(c.before)} → ${summarize(c.after)}`,
+            );
+          } else if (c.kind === "added") {
+            console.log(`  + ${at}: ${summarize(c.after)}`);
+          } else {
+            console.log(`  - ${at}: ${summarize(c.before)}`);
+          }
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect timeline */
+  .command(
+    "timeline <space:string> [entity:string]",
+    "How a space grew (no entity), or how one entity evolved (with entity).",
+  )
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--limit <n:number>", "Max rows.", { default: 500 })
+  .action((options, space, entity) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      if (entity) {
+        const steps = entityTimeline(s, {
+          id: entity,
+          scope: options.scope,
+          branch: options.branch,
+          limit: options.limit,
+        });
+        out(!!options.json, steps, () => {
+          console.log(`timeline of ${entity}  (${steps.length} writes)`);
+          for (const st of steps) {
+            console.log(
+              `  seq=${st.seq}\t${st.op}\t${
+                st.changes ? `${st.changes} changes` : "—"
+              }\t${st.summary}\t${fmtSession(st.session)}\t${st.createdAt}`,
+            );
+          }
+        });
+      } else {
+        const entries = spaceTimeline(s, {
+          scope: options.scope,
+          branch: options.branch,
+          limit: options.limit,
+        });
+        out(!!options.json, entries, () => {
+          console.log(`space growth  (${entries.length} commits)`);
+          for (const e of entries) {
+            console.log(
+              `  #${e.commitSeq}\t+${e.created} new\t${e.touched} touched\t` +
+                `Σ${e.cumulativeEntities}\t${
+                  fmtSession(e.session)
+                }\t${e.createdAt}`,
+            );
+          }
+        });
+      }
     } finally {
       s.close();
     }
