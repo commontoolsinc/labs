@@ -970,3 +970,12 @@ GREEN: integration 147/0 engaged 145/147, RI unit + CFC oracle 42/0, flag-off
 25 is correctly UNCHANGED (those leaves are argument-fed/nested-pattern, ZERO
 producer-fed — 2(b) leaves them alone, fail-closed). PUSHED to
 `origin/claude/nervous-kilby-83b75b` (final-phase push).
+
+## ENGAGEMENT, CORRECT DENOMINATOR (2026-06-27) — interpretable-class ops only
+
+@berni redefinition: "engagement" = of the INTERPRETABLE-CLASS ops the interpreter is MEANT to absorb (inferred/explicit pure computed/lift/derive LEAVES, ifElse/when/unless CONTROL, pure ACCESS/CONSTRUCT — recursing collection elements + inlined patterns), what fraction interpret. Effects (fetchData/generateText/llm/navigateTo/sqlite/…), handlers, the collection map/filter/flatMap op itself, and launched/serialized patterns are INTENDED BOUNDARIES — excluded from the denominator (NOT gap). Measured via a throwaway RI_INTERP_OPS census (reverted after — unpolished, hot-path).
+
+- **Integration: 2168/2452 = 88.4%** interpretable-op engagement. By kind: leaf 93%, control 100%, construct 84%. Fallback split: adjacent-boundary-blocked 243 (≈all `launched_child` sub-patterns), **genuine-op-gap 41 (1.7%)**.
+- **Lunch-poll: 875/8175 = 10.7%** raw, BUT **genuine-op-gap = 0** and **REACHABLE engagement = 875/875 = 100%**. The 7300 (89%) fallback interpretable ops are ALL adjacent-boundary-blocked — PollOptionCard's pure region trapped behind its `fetchData`/`generateText` + handler-sink (the §4.8 F4 I/O write-back cycle the partition can't cut around without the net-negative conflict ratchet).
+
+VERDICT: the interpreter's COVERAGE of the reactive skeleton is essentially COMPLETE (genuine op-gap ≈0–1.7%; 100% of REACHABLE ops interpret). The only thing limiting raw engagement on I/O-heavy interactive apps is PARTITION GRANULARITY around the F4 I/O boundary — a single, hard, correctness-sensitive lever (the conflict ratchet), not a coverage hole. The campaign is done on coverage.
