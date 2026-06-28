@@ -601,7 +601,25 @@ function renderIdentities(){
   }
   host.append(el("div",{class:"muted",style:"margin-top:6px",text:"cross-space (home + profiles): cf inspect identity <DID>"}));
 }
+// --- conflicts (contested cells) ---
+function renderConflicts(){
+  const host=$("#cflist"); const cs=B.conflicts||[];
+  const mu=cs.filter(c=>c.multiUser).length;
+  $("#cfpanel>summary").textContent="Conflicts ("+cs.length+(mu?", "+mu+" ⚔":"")+")";
+  if(!cs.length){ host.append(el("div",{class:"muted",text:"(no contested cells)"})); return; }
+  for(const c of cs.slice(0,150)){
+    const d=byId.get(c.id);
+    const stale=(c.staleReads&&c.staleReads.length)?" · "+c.staleReads.length+" stale":"";
+    host.append(el("div",{class:"row",onclick:()=>select(c.id),style:"white-space:normal"},[
+      el("span",{text:(c.multiUser?"⚔ ":"· ")}),
+      el("span",{class:"jlink",text:d?d.label:shortId(c.id)}),
+      el("span",{class:"muted",text:"  "+c.principals+"u/"+c.sessions+"s · "+c.writes+"w"+(c.multiUser?" MULTI-USER":"")+stale}),
+    ]));
+  }
+  host.append(el("div",{class:"muted",style:"margin-top:6px",text:"⚔ = ≥2 identities (real contention); stale = lost-update risk"}));
+}
 renderIdentities();
+renderConflicts();
 renderTree();
 const firstPiece=B.details.find(d=>d.kind==="piece")||B.details[0];
 if(firstPiece) select(firstPiece.id);
@@ -657,6 +675,8 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
     <div class="navi">
       <details id="idpanel" class="sec" style="margin-bottom:8px"><summary>Identities</summary>
         <div class="body" id="idlist"></div></details>
+      <details id="cfpanel" class="sec" style="margin-bottom:8px"><summary>Conflicts</summary>
+        <div class="body" id="cflist"></div></details>
       <div class="modebar">
         <button id="mode-tree" class="active">Tree</button>
         <button id="mode-graph">Graph</button>
