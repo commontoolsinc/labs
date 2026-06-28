@@ -11,6 +11,7 @@ import {
   listScopes,
   parseScope,
   scopeOverlay,
+  spaceParticipants,
   valueAsIdentity,
 } from "../scopes.ts";
 
@@ -110,6 +111,18 @@ Deno.test("scope awareness: enumerate, compose, diverge", async (t) => {
         const userOnly = valueAsIdentity(space, { id: "of:C", identity: DID });
         assert(userOnly.exists);
         assertEquals(userOnly.resolvedKind, "user");
+      });
+
+      await t.step("spaceParticipants lists the space's identities", () => {
+        const ps = spaceParticipants(space);
+        assertEquals(ps.length, 1);
+        const p = ps[0];
+        assertEquals(p.did, DID);
+        assertEquals(p.commits, 5); // all five commits use zUser's session
+        assertEquals(p.userEntities, 2); // B, C in user scope
+        assertEquals(p.sessionEntities, 1); // B in session scope
+        // the seed space DID isn't zUser, so it's not the owner here
+        assertEquals(p.isOwner, false);
       });
 
       await t.step("scopeOverlay shows per-scope divergence", () => {

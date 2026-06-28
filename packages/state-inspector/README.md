@@ -152,6 +152,7 @@ deno task cf inspect group --did z6MkeZZv        # expand one user's world fully
 deno task cf inspect identity did:key:z6MkeZZv…  # one identity: its spaces + scopes it owns
 
 # the per-identity (multiplayer) dimension — scopes within a space
+deno task cf inspect users    z6Mkqa41           # identities that touched this space (browse them)
 deno task cf inspect scopes   z6Mkqa41           # space / per-user / per-session scopes here
 deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell's value across EVERY scope (divergence)
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # read AS an identity

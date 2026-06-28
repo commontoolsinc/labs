@@ -175,6 +175,79 @@ function encodeScope(scope: string): string {
   return scope.replace(/did:key:/g, "did%3Akey%3A");
 }
 
+export interface Participant {
+  /** The identity (user) DID. */
+  did: string;
+  /** True when this DID owns the space (space DID == did → it's their home). */
+  isOwner: boolean;
+  /** Commits whose session principal is this DID. */
+  commits: number;
+  /** Distinct sessions (browser tabs/devices) this DID acted from. */
+  sessions: number;
+  /** Entities this DID has in a `user:<DID>` scope here. */
+  userEntities: number;
+  /** Entities this DID has in `session:<DID>:*` scopes here. */
+  sessionEntities: number;
+}
+
+/**
+ * The identities (users) that touched a space: everyone who committed (by
+ * session principal) plus everyone with per-user/session scoped state. The
+ * "who is in this space" view — each `did` is browsable via
+ * {@link describeIdentity} (its home + profiles across the discovered DBs).
+ */
+export function spaceParticipants(
+  space: SpaceDb,
+  opts: { branch?: string } = {},
+): Participant[] {
+  const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
+  const acc = new Map<string, Participant>();
+  const get = (did: string): Participant => {
+    let p = acc.get(did);
+    if (!p) {
+      p = {
+        did,
+        isOwner: did === ownDid,
+        commits: 0,
+        sessions: 0,
+        userEntities: 0,
+        sessionEntities: 0,
+      };
+      acc.set(did, p);
+    }
+    return p;
+  };
+
+  // commits + distinct sessions by principal
+  for (
+    const r of space.db
+      .prepare(
+        `SELECT session_id, count(*) n FROM "commit" GROUP BY session_id`,
+      )
+      .all<{ session_id: string; n: number }>()
+  ) {
+    // A commit `session_id` has the same shape as a session scope_key.
+    const did = r.session_id ? parseScope(r.session_id).principal : undefined;
+    if (!did) continue;
+    const p = get(did);
+    p.commits += r.n;
+    p.sessions += 1;
+  }
+
+  // per-user / per-session scoped entities by principal
+  for (const sc of listScopes(space, opts)) {
+    if (sc.kind === "user" && sc.principal) {
+      get(sc.principal).userEntities += sc.entities;
+    } else if (sc.kind === "session" && sc.principal) {
+      get(sc.principal).sessionEntities += sc.entities;
+    }
+  }
+
+  return [...acc.values()].sort((a, b) =>
+    (b.isOwner ? 1 : 0) - (a.isOwner ? 1 : 0) || b.commits - a.commits
+  );
+}
+
 export interface ScopeVariant {
   scope: string;
   kind: ScopeKind;

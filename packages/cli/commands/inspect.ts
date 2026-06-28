@@ -40,6 +40,7 @@ import {
   type Scope,
   scopeOverlay,
   type SpaceGraph,
+  spaceParticipants,
   type SpaceRef,
   spaceTimeline,
   subgraphAround,
@@ -365,6 +366,42 @@ export const inspect = new Command()
             "     `inspect overlay <space> <id>` shows a cell across all scopes.",
           );
         }
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect users */
+  .command(
+    "users <space:string>",
+    "Identities that touched this space (committers + per-user/session scopes).",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action((options, space) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const ps = spaceParticipants(s, { branch: options.branch });
+      out(!!options.json, ps, () => {
+        if (ps.length === 0) {
+          console.log("(no identifiable participants — bare/empty sessions)");
+          return;
+        }
+        console.log(`${ps.length} identit${ps.length === 1 ? "y" : "ies"}:`);
+        for (const p of ps) {
+          console.log(
+            `  ${p.isOwner ? "★" : "·"} ${shortDid(p.did)}` +
+              `\tcommits=${p.commits} sessions=${p.sessions}` +
+              (p.userEntities ? `  user-cells=${p.userEntities}` : "") +
+              (p.sessionEntities
+                ? `  session-cells=${p.sessionEntities}`
+                : "") +
+              (p.isOwner ? "  (owner — this is their home)" : ""),
+          );
+        }
+        console.log(
+          "\ntip: `inspect identity <DID>` opens a user's whole world " +
+            "(home + profiles + the spaces they act in).",
+        );
       });
     } finally {
       s.close();

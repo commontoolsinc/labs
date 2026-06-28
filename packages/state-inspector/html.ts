@@ -18,9 +18,11 @@ import { spaceTimeline, type SpaceTimelineEntry } from "./timetravel.ts";
 import { buildAllDetails, type EntityDetail } from "./detail.ts";
 import {
   listScopes,
+  type Participant,
   type Scope,
   type ScopeOverlay,
   scopeOverlay,
+  spaceParticipants,
 } from "./scopes.ts";
 
 export interface InspectorBundle {
@@ -36,6 +38,8 @@ export interface InspectorBundle {
   scopes: Scope[];
   /** Per-entity scope overlays — only for cells with non-space/multi-scope state. */
   overlays: ScopeOverlay[];
+  /** Identities that touched this space (committers + per-user/session owners). */
+  participants: Participant[];
 }
 
 /** Assemble everything the explorer needs from one space DB. */
@@ -76,6 +80,7 @@ export function buildInspectorBundle(
     timeline: spaceTimeline(space, { branch, scope }),
     scopes: listScopes(space, { branch }),
     overlays,
+    participants: spaceParticipants(space, { branch }),
   };
 }
 
@@ -524,6 +529,26 @@ liveInput.onchange=()=>{ LIVE=liveInput.value.trim(); localStorage.setItem("si-l
   if(cur) renderDetail(cur); flash(LIVE?"live links on":"live links off"); };
 $("#copy-space").onclick=()=>{ navigator.clipboard?.writeText(B.space); flash("copied space DID"); };
 
+// --- identities (users of this space) ---
+function renderIdentities(){
+  const host=$("#idlist"); const ps=B.participants||[];
+  $("#idpanel>summary").textContent="Identities ("+ps.length+")";
+  if(!ps.length){ host.append(el("div",{class:"muted",text:"(no identifiable users — bare sessions)"})); return; }
+  for(const p of ps){
+    const cells=(B.overlays||[]).filter(o=>o.variants.some(v=>v.principal===p.did));
+    host.append(el("div",{style:"margin:5px 0"},[
+      el("div",{},[
+        el("span",{text:(p.isOwner?"★ ":"· ")+shortDid(p.did)}), copyBtn(p.did,"DID"),
+        el("span",{class:"muted",text:" commits="+p.commits+" sessions="+p.sessions+(p.userEntities?" user-cells="+p.userEntities:"")+(p.isOwner?" (owner home)":"")}),
+      ]),
+      ...(cells.length?[el("div",{style:"padding-left:14px"},
+        cells.slice(0,25).map(o=>{ const d=byId.get(o.id);
+          return el("div",{class:"jlink",style:"font-size:12px",text:"• "+(d?d.label:shortId(o.id)),onclick:()=>select(o.id)}); }))]:[]),
+    ]));
+  }
+  host.append(el("div",{class:"muted",style:"margin-top:6px",text:"cross-space (home + profiles): cf inspect identity <DID>"}));
+}
+renderIdentities();
 renderTree();
 const firstPiece=B.details.find(d=>d.kind==="piece")||B.details[0];
 if(firstPiece) select(firstPiece.id);
@@ -571,6 +596,8 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
 <div id="explore" class="tabwrap active">
   <div class="explore">
     <div class="navi">
+      <details id="idpanel" class="sec" style="margin-bottom:8px"><summary>Identities</summary>
+        <div class="body" id="idlist"></div></details>
       <div class="modebar">
         <button id="mode-tree" class="active">Tree</button>
         <button id="mode-graph">Graph</button>
