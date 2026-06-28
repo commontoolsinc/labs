@@ -649,3 +649,131 @@ describe("F1: boundary (effect) ops carry input ValueRefs", () => {
     expect(effect!.inputs.some((ref) => ref.kind === "argument")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// SERIALIZED / LOADED str leaf → native `interpolate` op (the production-
+// dominant win: a loaded pattern's str leaf has NO live `cf:builtin/str`
+// provenance — `module.implementation` is the source STRING — but the
+// serialization-surviving `$builtin:"str"` brand still identifies it, so it
+// lowers WITHOUT an `$implRef`/SES round-trip. These hand-built RawPatterns
+// model exactly the JSON-parsed module shape a loaded pattern presents to
+// `extractRog` (verified empirically: a serialized str node carries
+// `{"type":"javascript","$builtin":"str","$implRef":{...}}` — brand AND an
+// $implRef the leaf path would otherwise resolve via SES). 08-expression-
+// interpretation §2/§5.
+// ---------------------------------------------------------------------------
+describe("str → interpolate: SERIALIZED / LOADED leaf (no live provenance)", () => {
+  // The serialized str module: `implementation` is the framework body's SOURCE
+  // STRING (provenance is gone post-serialization), the brand rides through, and
+  // — as the real wire form shows — an `$implRef` is also present. The recognizer
+  // must lower it to `interpolate` and the op must carry NO `impl` (so
+  // `resolveLeafImpls` never touches it = the SES round-trip the load path used
+  // to pay).
+  const serializedStrModule = (extra?: Record<string, unknown>) => ({
+    type: "javascript",
+    implementation:
+      "({strings, values}) => strings.reduce((result, str, i) => result + str + (i < values.length ? values[i] : \"\"), \"\")",
+    $builtin: "str",
+    // A loaded str node carries an $implRef too — the recognizer must STILL lower
+    // it (brand wins) and leave `impl` undefined, not resolve the leaf via SES.
+    $implRef: { identity: "cf:module/str-hash", symbol: "" },
+    resultSchema: { type: "string" } as JSONSchema,
+    ...extra,
+  });
+
+  it("lowers a LOADED static-template str leaf to `interpolate` (no leaf, no impl)", () => {
+    const pattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: serializedStrModule(),
+          inputs: {
+            strings: ["secret=", " count=", ""],
+            values: [
+              { $alias: { cell: "argument", path: ["secret"] } },
+              { $alias: { cell: "argument", path: ["n"] } },
+            ],
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+    };
+    // deno-lint-ignore no-explicit-any
+    const r = extractRog(pattern as any);
+    const interpolate = r.rog.ops.filter((o) => o.kind === "interpolate");
+    expect(interpolate.length).toBe(1);
+    const ip = interpolate[0];
+    // No leaf, no impl → `resolveLeafImpls` never resolves it (no SES).
+    expect(ip.impl).toBeUndefined();
+    expect(r.rog.ops.some((o) => o.kind === "leaf")).toBe(false);
+    expect(ip.detail.kind).toBe("interpolate");
+    if (ip.detail.kind === "interpolate") {
+      expect(ip.detail.strings).toEqual(["secret=", " count=", ""]);
+      expect(ip.detail.values.length).toBe(2);
+      // The two `${...}` refs resolve to the argument fields, IN ORDER.
+      expect(ip.detail.values[0]).toEqual({
+        kind: "argument",
+        path: ["secret"],
+      });
+      expect(ip.detail.values[1]).toEqual({ kind: "argument", path: ["n"] });
+    }
+    // The value refs are MIRRORED into op.inputs (so topo/partition/CFC surface
+    // them with no extra clause).
+    expect(inputsOf(ip).filter((ref) => ref.kind === "argument").length).toBe(2);
+    // No `unrecognized` entry — a clean, eligible lowering.
+    expect(r.coverage.unrecognizedAliases.length).toBe(0);
+  });
+
+  it("FAIL-CLOSED: an UNBRANDED str-shaped foreign leaf stays a `leaf` (not lowered)", () => {
+    // Byte-identical body + the exact `{strings,values}` input, but NO brand and
+    // NO live provenance → it is NOT str; recognizing it would let an arbitrary
+    // foreign function impersonate str. It MUST stay a leaf.
+    const pattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: serializedStrModule({ $builtin: undefined }),
+          inputs: {
+            strings: ["x=", ""],
+            values: [{ $alias: { cell: "argument", path: ["x"] } }],
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+    };
+    // deno-lint-ignore no-explicit-any
+    const r = extractRog(pattern as any);
+    // Not lowered: no interpolate op; the foreign leaf is preserved as a leaf.
+    expect(r.rog.ops.some((o) => o.kind === "interpolate")).toBe(false);
+    expect(r.rog.ops.some((o) => o.kind === "leaf")).toBe(true);
+  });
+
+  it("FAIL-CLOSED: a DYNAMIC `strings` (non-literal element) stays a `leaf`", () => {
+    // The universal transformer shape is a fully-static `strings` literal array.
+    // A `strings` whose element is itself a ref (a dynamically-built template) is
+    // out of the recognized subset → fall back to the leaf path unchanged.
+    const pattern = {
+      argumentSchema: { type: "object" } as JSONSchema,
+      resultSchema: { type: "object" } as JSONSchema,
+      result: { $alias: { partialCause: "out", path: [] } },
+      nodes: [
+        {
+          module: serializedStrModule(),
+          inputs: {
+            strings: ["a", { $alias: { cell: "argument", path: ["seg"] } }],
+            values: [{ $alias: { cell: "argument", path: ["x"] } }],
+          },
+          outputs: { $alias: { partialCause: "out", path: [] } },
+        },
+      ],
+    };
+    // deno-lint-ignore no-explicit-any
+    const r = extractRog(pattern as any);
+    expect(r.rog.ops.some((o) => o.kind === "interpolate")).toBe(false);
+    expect(r.rog.ops.some((o) => o.kind === "leaf")).toBe(true);
+  });
+});
