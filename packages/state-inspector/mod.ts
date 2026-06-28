@@ -16,5 +16,6 @@ export * from "./grouping.ts";
 export * from "./graph.ts";
 export * from "./timetravel.ts";
 export * from "./scopes.ts";
+export * from "./identity.ts";
 export * from "./detail.ts";
 export * from "./html.ts";

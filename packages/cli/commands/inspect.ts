@@ -17,6 +17,7 @@ import {
   convergence,
   type ConvergenceResult,
   convergenceScan,
+  describeIdentity,
   describePiece,
   diffEntity,
   discoverSpaceDbs,
@@ -238,6 +239,51 @@ export const inspect = new Command()
             `home=${g.homePresent ? "present" : "absent"}  ` +
             `profiles=${c.profile}  main=${c.main}` +
             (c.absent ? `  (+${c.absent} absent)` : ""),
+        );
+      }
+    });
+  })
+  /* inspect identity */
+  .command(
+    "identity <did:string>",
+    "One identity's whole world: its spaces + the scopes it owns in each.",
+  )
+  .option("--dir <dir:string>", "Extra directory to search for *.sqlite files.")
+  .action((options, did) => {
+    const discovered = discoverSpaceDbs(
+      options.dir ? { dirs: [options.dir] } : {},
+    );
+    const w = describeIdentity(discovered, did);
+    out(!!options.json, w, () => {
+      console.log(
+        `● identity ${shortDid(did)}` +
+          (w.homePresent ? "" : "  (home absent/empty locally)"),
+      );
+      console.log(
+        `  ${w.totals.presentSpaces}/${w.totals.spaces} spaces present · ` +
+          `${w.totals.spacesWithScopedState} with per-user/session state · ` +
+          `${w.totals.scopedEntities} scoped entities`,
+      );
+      for (const s of w.spaces) {
+        const head = `  ${s.role.padEnd(7)} ${shortDid(s.did)}` +
+          (s.present
+            ? `  entities=${s.entities ?? 0}`
+            : "  (absent — referenced, no local DB)");
+        console.log(head);
+        for (const sc of s.ownedScopes) {
+          console.log(
+            `      ${sc.kind === "session" ? "session" : "user"}${
+              sc.kind === "session"
+                ? ` /${(sc.sessionId ?? "").slice(0, 8)}`
+                : ""
+            }  entities=${sc.entities} revs=${sc.revisions}`,
+          );
+        }
+      }
+      if (w.totals.scopedEntities > 0) {
+        console.log(
+          "\ntip: `inspect value-at <space> <id> --as " + shortDid(did) +
+            "…` reads a cell as this identity.",
         );
       }
     });
