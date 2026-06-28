@@ -1216,6 +1216,30 @@ Summary table; the full per-mechanism walkthrough with file references is in
     unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted via
     `NEW_PERF_BASELINE`.
 
+    *Where the +12–16% wall actually goes (CPU profile, 2026-06-28).* Confirmed
+    at the function level (CDP V8 profiler inside each cf-test worker, clean
+    trees) — it is the **inherent flat per-node tax of finer scheduling
+    granularity**, not a hot function. v2 schedules ~73 more discrete reactive
+    nodes (87 `scheduler/run` cycles, 43 native commits vs main's ~0 — main folds
+    those computeds inline inside the apex pull), and **each extra node pays a full
+    per-commit pipeline**: value hashing (`op_node_hash_update`, the single biggest
+    frame, ~18–20% of the delta), deep-freeze, prepared-digest canonicalization,
+    read-set compaction. Two components: **+466–604ms active CPU** (~2.5× main's
+    compute = the sum of ~87 per-node commit cycles) and a *larger* **idle** chunk
+    (workers are ~65% idle on *both* trees, blocked on cross-runtime settle/sync;
+    v2's finer commits induce extra sync round-trips — the multi-user-specific
+    part, absent single-runtime, consistent with single-runtime being
+    neutral-to-faster). Every leaf primitive is equally efficient on both trees; no
+    non-leaf frame exceeds ~6% of the delta (the 27% hashing leaf is a *symptom* of
+    commit volume, not a target). **Lever:** only *coarsening* (fewer discrete
+    nodes/commits — fold per-row computeds) recovers the bulk, attacking both the
+    active-CPU tax and the idle round-trips — but it trades away v2's fine-grained
+    incrementality (a single-row edit re-runs one node vs main re-evaluating the
+    whole apex closure), so it is a tradeoff, not a free win. Runtime
+    micro-optimization (deep-freeze frozen-cache memo ~+60ms, canonical-path
+    interning ~+46ms) has a hard ceiling of ~150ms (~25% of active CPU, ~10% of
+    wall) and touches none of the idle.
+
     *Levers ruled out — do not re-try without new evidence.* The surplus is
     cross-runtime write volume with **no writer node to gate against** (apex
     read-set consults show `writers=0` for ~half its re-runs). Built and measured,
