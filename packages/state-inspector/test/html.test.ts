@@ -118,6 +118,12 @@ function seed(path: string) {
     JSON.stringify({ value: { link: link("of:mod"), specifier: "./dep.tsx" } }),
     6,
   );
+  // a per-user-scoped cell — the multiplayer dimension the explorer must show.
+  commit.run(7, 7);
+  db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES ('of:pref', 'user:did%3Akey%3AzUser', 7, 0, 'set', ?, 7)`,
+  ).run(JSON.stringify({ value: { theme: "dark" } }));
   db.close();
 }
 
@@ -159,6 +165,16 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
         const imp = byId("of:imp");
         assertEquals(imp.label, "import ./dep.tsx");
         assertEquals(imp.role, "module import");
+      });
+
+      await t.step("bundle surfaces per-identity scopes + overlays", () => {
+        assert(
+          bundle.scopes.some((s) => s.kind === "user"),
+          "user scope enumerated",
+        );
+        const ov = bundle.overlays.find((o) => o.id === "of:pref");
+        assert(ov, "per-user cell has a scope overlay");
+        assertEquals(ov!.variants[0].kind, "user");
       });
 
       await t.step("CFC labels are parsed", () => {

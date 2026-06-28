@@ -16,6 +16,12 @@ import { type SpaceSummary, summarizeSpace } from "./queries.ts";
 import { buildSpaceGraph, type SpaceGraph } from "./graph.ts";
 import { spaceTimeline, type SpaceTimelineEntry } from "./timetravel.ts";
 import { buildAllDetails, type EntityDetail } from "./detail.ts";
+import {
+  listScopes,
+  type Scope,
+  type ScopeOverlay,
+  scopeOverlay,
+} from "./scopes.ts";
 
 export interface InspectorBundle {
   space: string;
@@ -26,6 +32,10 @@ export interface InspectorBundle {
   details: EntityDetail[];
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
+  /** Per-identity scopes present (space / user:<DID> / session:<DID>:*). */
+  scopes: Scope[];
+  /** Per-entity scope overlays — only for cells with non-space/multi-scope state. */
+  overlays: ScopeOverlay[];
 }
 
 /** Assemble everything the explorer needs from one space DB. */
@@ -41,6 +51,21 @@ export function buildInspectorBundle(
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
   const did = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
+
+  // Entities that carry per-user/session state (in a non-space scope, or in
+  // more than one scope) get a full scope overlay so the explorer can show the
+  // per-identity divergence the space-scope view hides.
+  const overlayIds = space.db
+    .prepare(
+      `SELECT id FROM revision WHERE branch = ?
+       GROUP BY id
+       HAVING count(DISTINCT scope_key) > 1
+           OR sum(CASE WHEN scope_key != 'space' THEN 1 ELSE 0 END) > 0`,
+    )
+    .all<{ id: string }>(branch)
+    .map((r) => r.id);
+  const overlays = overlayIds.map((id) => scopeOverlay(space, id, { branch }));
+
   return {
     space: did,
     generatedAt: opts.generatedAt ?? "",
@@ -49,6 +74,8 @@ export function buildInspectorBundle(
     details: buildAllDetails(space, { branch, scope }),
     graph: buildSpaceGraph(space, { branch, scope }),
     timeline: spaceTimeline(space, { branch, scope }),
+    scopes: listScopes(space, { branch }),
+    overlays,
   };
 }
 
@@ -133,6 +160,7 @@ svg { max-width:100%; border:1px solid var(--line); border-radius:8px; backgroun
 .flash.on { opacity:1; }
 .jlink { color:var(--accent); cursor:pointer; text-decoration:underline; }
 .jstream { color:var(--stream); }
+.scopevar { border-left:2px solid var(--accent); padding-left:8px; margin:6px 0; }
 `;
 
 const APP = String.raw`
@@ -141,6 +169,18 @@ const KC = { piece:"var(--piece)", module:"var(--module)", stream:"var(--stream)
   schema:"var(--schema)", "owned-cell":"var(--owned-cell)", "free-cell":"var(--free-cell)", unknown:"var(--unknown)" };
 const EC = { pattern:"#2563eb", argument:"#16a34a", owns:"#6b7280", link:"#9ca3af" };
 const byId = new Map(B.details.map(d => [d.id, d]));
+const overlayById = new Map((B.overlays||[]).map(o => [o.id, o]));
+// Per-user/session-only cells aren't in the space-scope details; synthesize
+// lightweight, selectable entries so they're visible + their overlay shows.
+for (const o of (B.overlays||[])) {
+  if (byId.has(o.id)) continue;
+  const v = o.variants[0] || {};
+  byId.set(o.id, { id:o.id, kind:"free-cell", label:"⚑ "+(v.summary||"scoped cell"),
+    role:(v.kind||"")+" cell", regime:"n/a", owned:false, paths:["value"],
+    valueShape:"", value:v.value, valuePreview:v.summary, schemaKeys:null,
+    revisions:v.revisions||0, headSeq:null, firstSeq:null, versions:[],
+    lineage:{}, outLinks:[], synthetic:true });
+}
 const $ = (s,r=document) => r.querySelector(s);
 const $$ = (s,r=document) => [...r.querySelectorAll(s)];
 function el(t, props={}, kids=[]) {
@@ -154,6 +194,7 @@ function el(t, props={}, kids=[]) {
   for (const c of [].concat(kids)) if (c!=null && c!=="") n.append(c);
   return n;
 }
+const shortDid = d => { d=(d||"").replace(/^did:key:/,""); return d.length>14?d.slice(0,8)+"…"+d.slice(-4):d; };
 const shortId = id => { const b = id.replace(/^of:/,"").replace(/^cid:/,"cid:");
   return b.length>22 ? b.slice(0,12)+"…"+b.slice(-6) : b; };
 function flash(msg){ const f=$("#flash"); f.textContent=msg; f.classList.add("on");
@@ -272,6 +313,26 @@ function renderDetail(id){
   // value
   host.append(section("Value  ("+d.valueShape+")", d.kind!=="module", [valueDom(d.value)]));
 
+  // scopes (per-identity overlay) — what each identity sees for this cell
+  const ov = overlayById.get(id);
+  if (ov && ov.variants.length) {
+    const body=[];
+    body.push(el("div",{class:"muted",text:
+      ov.overridden ? (ov.divergent ? ov.variants.length+" scopes · DIVERGENT — identities see different values"
+        : ov.variants.length+" scopes · identical") : "single scope"}));
+    for (const v of ov.variants) {
+      const who = v.kind==="space" ? "space (shared)"
+        : v.kind==="user" ? "user "+shortDid(v.principal||"?")
+        : v.kind==="session" ? "session "+shortDid(v.principal||"?")+"/"+(v.sessionId||"").slice(0,8)
+        : v.scope;
+      body.push(el("div",{class:"scopevar"},[
+        el("div",{class:"k",style:"color:var(--accent)",text:who+"  ·  "+v.revisions+" rev"}),
+        valueDom(v.value),
+      ]));
+    }
+    host.append(section("Scopes — view as identity"+(ov.divergent?" ⚑":""), true, body));
+  }
+
   // schema
   if(d.schema!==undefined){
     host.append(section("Schema"+(d.schemaKeys?"  {"+d.schemaKeys.join(", ")+"}":""), false,
@@ -322,10 +383,14 @@ function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^
 
 // ---- tree view --------------------------------------------------------
 function treeRow(d, childInfo){
-  const r = el("div",{class:"row","data-id":d.id, onclick:()=>select(d.id)},[
+  const ov = overlayById.get(d.id);
+  const mark = ov ? (ov.divergent ? " ⚑" : " ◐") : "";
+  const r = el("div",{class:"row","data-id":d.id, onclick:()=>select(d.id),
+    title: ov ? (ov.divergent?"per-identity divergence":"per-identity scope") : ""},[
     el("span",{class:"tw",text:childInfo?"▸":"·"}),
     el("span",{class:"dot",style:"background:"+(KC[d.kind]||"#999")}),
     el("span",{text:" "+d.label}),
+    mark ? el("span",{style:"color:var(--stream)",text:mark}) : "",
     childInfo ? el("span",{class:"muted",text:" "+childInfo}) : "",
   ]);
   return r;
@@ -463,6 +528,20 @@ if(firstPiece) select(firstPiece.id);
 export function renderInspectorHtml(bundle: InspectorBundle): string {
   const s = bundle.summary;
   const opsLine = Object.entries(s.ops).map(([k, v]) => `${k}=${v}`).join(" ");
+  const identities = bundle.scopes.filter((x) => x.kind !== "space");
+  const idLine = identities.length
+    ? `${identities.length} identity scope(s) · ${bundle.overlays.length} per-user/session cell(s)` +
+      ` · ${bundle.overlays.filter((o) => o.divergent).length} divergent ⚑`
+    : "single-scope (no per-user/session state)";
+  // Distinct other spaces this space links to (cross-space surface).
+  const linkedSpaces = new Set(
+    bundle.graph.edges.filter((e) => e.external && e.to).map((e) =>
+      bundle.graph.nodes.find((n) => n.id === e.to)?.space
+    ).filter(Boolean),
+  );
+  const xLine = linkedSpaces.size
+    ? ` · links to ${linkedSpaces.size} other space(s)`
+    : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -477,6 +556,7 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
   <span class="stats">${s.entities} entities · ${s.commits} commits · ${s.sessions} sessions · ops ${opsLine}${
     bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""
   }</span>
+  <span class="stats" style="color:var(--stream)">${idLine}${xLine}</span>
   <span class="live">app URL <input id="live-input" placeholder="https://host (for live links)" size="22"></span>
 </header>
 <nav>
