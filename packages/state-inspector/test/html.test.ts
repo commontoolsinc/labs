@@ -195,6 +195,9 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
         const ov = bundle.overlays.find((o) => o.id === "of:pref");
         assert(ov, "per-user cell has a scope overlay");
         assertEquals(ov!.variants[0].kind, "user");
+        // conflicts surface is present (single-session seed → none contested)
+        assert(Array.isArray(bundle.conflicts));
+        assert(Array.isArray(bundle.participants));
       });
 
       await t.step("CFC labels are parsed", () => {

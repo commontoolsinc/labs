@@ -44,6 +44,8 @@ export interface ContendedEntity {
   writers: Writer[];
   /** Sessions alternate (A→B→A) — concurrent back-and-forth, not a handoff. */
   interleaved: boolean;
+  /** Lost-update reads (attached by the explorer bundle for multi-user cells). */
+  staleReads?: StaleRead[];
 }
 
 /** Distinct writer identities (principals) across a writer list. */

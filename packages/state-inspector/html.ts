@@ -24,6 +24,11 @@ import {
   scopeOverlay,
   spaceParticipants,
 } from "./scopes.ts";
+import {
+  contendedEntities,
+  type ContendedEntity,
+  entityConflicts,
+} from "./conflicts.ts";
 
 export interface InspectorBundle {
   space: string;
@@ -40,6 +45,8 @@ export interface InspectorBundle {
   overlays: ScopeOverlay[];
   /** Identities that touched this space (committers + per-user/session owners). */
   participants: Participant[];
+  /** Contested entities (≥2 writer sessions); multi-user ones carry stale reads. */
+  conflicts: ContendedEntity[];
 }
 
 /** Assemble everything the explorer needs from one space DB. */
@@ -81,7 +88,25 @@ export function buildInspectorBundle(
     scopes: listScopes(space, { branch }),
     overlays,
     participants: spaceParticipants(space, { branch }),
+    conflicts: buildConflicts(space, branch, scope),
   };
+}
+
+/** Contested entities; attach stale-read analysis to the multi-user ones. */
+function buildConflicts(
+  space: SpaceDb,
+  branch: string,
+  scope: string,
+): ContendedEntity[] {
+  const contended = contendedEntities(space, { branch, scope, limit: 300 });
+  let analyzed = 0;
+  for (const c of contended) {
+    if (c.multiUser && analyzed < 60) {
+      analyzed++;
+      c.staleReads = entityConflicts(space, c.id, { branch, scope }).staleReads;
+    }
+  }
+  return contended;
 }
 
 /** Embed JSON safely inside an HTML <script> block. */
@@ -175,6 +200,7 @@ const KC = { piece:"var(--piece)", module:"var(--module)", stream:"var(--stream)
 const EC = { pattern:"#2563eb", argument:"#16a34a", owns:"#6b7280", link:"#9ca3af" };
 const byId = new Map(B.details.map(d => [d.id, d]));
 const overlayById = new Map((B.overlays||[]).map(o => [o.id, o]));
+const conflictById = new Map((B.conflicts||[]).map(c => [c.id, c]));
 // Per-user/session-only cells aren't in the space-scope details; synthesize
 // lightweight, selectable entries so they're visible + their overlay shows.
 for (const o of (B.overlays||[])) {
@@ -340,6 +366,32 @@ function renderDetail(id){
     host.append(section("Scopes — view as identity"+(ov.divergent?" ⚑":""), true, body));
   }
 
+  // contention / conflicts — who fought over this cell
+  const cf = conflictById.get(id);
+  if (cf){
+    const body=[];
+    body.push(el("div",{class:"muted",text:
+      cf.writes+" writes by "+cf.principals+" identit"+(cf.principals===1?"y":"ies")+" / "+cf.sessions+" sessions"
+      +(cf.multiUser?" · MULTI-USER":" · single-user (multi-session)")+(cf.interleaved?" · interleaved":"")}));
+    for(const w of cf.writers){
+      body.push(el("div",{class:"scopevar",style:"border-color:var(--stream)"},[
+        el("span",{class:"k",text:"seq "+w.seq+"  "+w.op+"  "}),
+        el("span",{class: w.principal&&byId.get(w.principal)?"":"muted",text:fmtSession(w.session)}),
+        el("span",{class:"muted",text:"  "+w.createdAt}),
+      ]));
+    }
+    if(cf.staleReads&&cf.staleReads.length){
+      body.push(el("div",{style:"margin-top:6px;color:var(--stream)",text:"⚠ stale reads (lost-update risk):"}));
+      for(const sr of cf.staleReads){
+        body.push(el("div",{class:"muted",style:"font-size:12px",text:
+          "commit #"+sr.readerCommitSeq+" by "+fmtSession(sr.readerSession)+" read @"+sr.readAtSeq
+          +" but missed write @"+sr.missedWriteSeq+" by "+fmtSession(sr.missedWriteSession)
+          +(sr.readerAlsoWrote?" — then wrote":"")}));
+      }
+    }
+    host.append(section("Contention"+(cf.multiUser?" ⚔ MULTI-USER":"")+(cf.staleReads&&cf.staleReads.length?" · stale reads":""), cf.multiUser, body));
+  }
+
   // schema (a stream's payload schema is resolved from its owner piece)
   if(d.schema!==undefined){
     const title=(d.streamPayload?"Stream payload schema":"Schema")
@@ -394,7 +446,8 @@ function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^
 // ---- tree view --------------------------------------------------------
 function treeRow(d, childInfo){
   const ov = overlayById.get(d.id);
-  const mark = ov ? (ov.divergent ? " ⚑" : " ◐") : "";
+  const cf = conflictById.get(d.id);
+  const mark = (ov ? (ov.divergent ? " ⚑" : " ◐") : "") + (cf && cf.multiUser ? " ⚔" : "");
   const r = el("div",{class:"row","data-id":d.id, onclick:()=>select(d.id),
     title: ov ? (ov.divergent?"per-identity divergence":"per-identity scope") : ""},[
     el("span",{class:"tw",text:childInfo?"▸":"·"}),
@@ -572,6 +625,12 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
   const xLine = linkedSpaces.size
     ? ` · links to ${linkedSpaces.size} other space(s)`
     : "";
+  const multiUser = bundle.conflicts.filter((c) => c.multiUser).length;
+  const cfLine = bundle.conflicts.length
+    ? ` · ${bundle.conflicts.length} contested${
+      multiUser ? `, ${multiUser} multi-user ⚔` : ""
+    }`
+    : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -586,7 +645,7 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
   <span class="stats">${s.entities} entities · ${s.commits} commits · ${s.sessions} sessions · ops ${opsLine}${
     bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""
   }</span>
-  <span class="stats" style="color:var(--stream)">${idLine}${xLine}</span>
+  <span class="stats" style="color:var(--stream)">${idLine}${xLine}${cfLine}</span>
   <span class="live">app URL <input id="live-input" placeholder="https://host (for live links)" size="22"></span>
 </header>
 <nav>

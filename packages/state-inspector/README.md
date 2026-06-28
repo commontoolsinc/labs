@@ -21,8 +21,8 @@ DB and a set of modern `fvj1:` DBs).
   `profiles[]` cross-space links, `commit.session_id` principal, cross-space
   links). Compact by default; `--did <prefix>` expands one user.
 - **`graph`** — the entity graph. Nodes (pieces/modules/streams/schemas/cells)
-  + edges (`pattern` / `argument` / `owns` / `link`). `--root <entity> --depth`
-  drills into one piece's neighborhood; `--dot` emits Graphviz.
+  - edges (`pattern` / `argument` / `owns` / `link`). `--root <entity> --depth`
+    drills into one piece's neighborhood; `--dot` emits Graphviz.
 - **`diff` / `timeline`** — time travel. `diff` shows what changed in an entity
   between two seqs; `timeline` shows how a space grew (or how one entity
   evolved). The engine already reconstructs at any seq.
@@ -30,8 +30,8 @@ DB and a set of modern `fvj1:` DBs).
   **tree** from pieces down, and a re-rootable **graph** from any node) feeding
   one detail pane that shows every salient field for the selected entity: value
   (links clickable), schema, **CFC** information-flow labels, version history,
-  resolved lineage, outgoing links, and module source. Context-aware labels
-  (a stream named by its owner key → `⊙ createProfile`; `{link, specifier}` →
+  resolved lineage, outgoing links, and module source. Context-aware labels (a
+  stream named by its owner key → `⊙ createProfile`; `{link, specifier}` →
   `import ./foo.tsx`), click-to-copy ids, and deep links into the live shell
   (`--app-url`).
 
@@ -156,6 +156,10 @@ deno task cf inspect users    z6Mkqa41           # identities that touched this 
 deno task cf inspect scopes   z6Mkqa41           # space / per-user / per-session scopes here
 deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell's value across EVERY scope (divergence)
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # read AS an identity
+
+# conflicts & async — contested cells + lost-update detection
+deno task cf inspect conflicts z6Mkqa41                  # cells written by ≥2 sessions (multi-user flagged)
+deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + stale-read (lost-update) analysis
 
 # single space (DID-prefix resolves via discovery)
 deno task cf inspect summary  z6Mkqa41
