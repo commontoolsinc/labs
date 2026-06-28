@@ -1216,6 +1216,32 @@ Summary table; the full per-mechanism walkthrough with file references is in
     unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted via
     `NEW_PERF_BASELINE`.
 
+    *Corrected mechanism — single-runtime control (2026-06-28; SUPERSEDES the
+    "per-node hash/freeze + idle sync" wording below).* The decisive control: the
+    regression **vanishes single-runtime** (v2 ≈ main, +1–3%, even though v2 still
+    runs *more* nodes/commits there). So it is **not** raw per-node commit CPU
+    (cheap in isolation) and **not** blocking on sync round-trips — commits are
+    fire-and-forget (`run/commit` ends before awaiting the commit promise,
+    `run.ts:94-98`; `synced()` round-trip counts are identical v2 vs main, driven
+    by settle/step count, not commit count). It is the **multi-runtime
+    amplification of the committed-node *count* × an expensive per-commit cost**:
+    each discrete committed per-row map/render node is serialized into a
+    cross-runtime push that the *peer* worker pulls and re-processes, inflating
+    *both* runtimes' node/commit counts to 2.2× (165 vs 74); and each such commit
+    is a VNode/render subtree paying **`prepareCfc` CFC-label work + value
+    canonicalization** under `enforce-explicit` (~2.78ms vs ~0.74ms/commit), not a
+    cheap value-hash. So the body-eval-CPU profile below over-weighted the
+    commit-hash and mis-read the idle as blocking — it is genuinely
+    multi-runtime-only. *Lever (revised):* collapse the committed-node count —
+    coalesce per-row map/render computeds into the parent/apex transaction (the
+    §4.8 VNode-doc consolidation direction), which cuts *both* the per-commit
+    CFC/canonicalize CPU *and* the cross-runtime write fan-out; and skip re-paying
+    `prepareCfc`/canonicalize on unchanged VNode subtrees. NOT sync-layer
+    throttling (round-trips already batched, one `synced()` per settle). *Magnitude
+    caveat:* the 2.2× count is deterministic, but the wall delta is noise-prone
+    (compile/boot/settle variance) — the reliable signal is the node/commit count
+    and the per-commit CFC/canonicalize cost, not the headline ms.
+
     *Where the +12–16% wall actually goes (CPU profile, 2026-06-28).* Confirmed
     at the function level (CDP V8 profiler inside each cf-test worker, clean
     trees) — it is the **inherent flat per-node tax of finer scheduling
