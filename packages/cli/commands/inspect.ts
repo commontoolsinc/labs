@@ -14,6 +14,7 @@ import {
   buildCrossSpaceLinkIndex,
   buildInspectorBundle,
   buildSpaceGraph,
+  contendedEntities,
   convergence,
   type ConvergenceResult,
   convergenceScan,
@@ -21,6 +22,7 @@ import {
   describePiece,
   diffEntity,
   discoverSpaceDbs,
+  entityConflicts,
   entityHistory,
   entityTimeline,
   getValueAt,
@@ -454,6 +456,92 @@ export const inspect = new Command()
             `${r.writes}\twrites\t${r.sessions} sessions\t${r.id}\t(${r.scope})`,
           );
         }
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect conflicts */
+  .command(
+    "conflicts <space:string> [entity:string]",
+    "Contested entities (≥2 writer sessions); with an entity: stale-read analysis.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--limit <n:number>", "Max contested entities.", { default: 100 })
+  .action((options, space, entity) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      if (entity) {
+        const c = entityConflicts(s, entity, {
+          branch: options.branch,
+          scope: options.scope,
+        });
+        out(!!options.json, c, () => {
+          console.log(
+            `${c.id}\n${c.writers.length} writes by ${c.writerPrincipals} ` +
+              `identit${
+                c.writerPrincipals === 1 ? "y" : "ies"
+              } / ${c.writerSessions} sessions` +
+              (c.multiUser
+                ? "  · MULTI-USER"
+                : "  · single-user (multi-session)") +
+              (c.interleaved ? "  · INTERLEAVED" : ""),
+          );
+          for (const w of c.writers) {
+            console.log(
+              `  seq=${w.seq}\t${w.op}\t${
+                fmtSession(w.session)
+              }\t${w.createdAt}`,
+            );
+          }
+          if (c.staleReads.length) {
+            console.log(`\nstale reads (read an old version, missed a write):`);
+            for (const sr of c.staleReads) {
+              console.log(
+                `  commit #${sr.readerCommitSeq} by ${
+                  fmtSession(sr.readerSession)
+                } ` +
+                  `read @seq ${sr.readAtSeq} but missed write @seq ${sr.missedWriteSeq} ` +
+                  `by ${fmtSession(sr.missedWriteSession)}` +
+                  (sr.readerAlsoWrote
+                    ? "  ⚠ then wrote (lost-update risk)"
+                    : ""),
+              );
+            }
+          } else {
+            console.log("\n(no stale reads detected)");
+          }
+        });
+        return;
+      }
+      const rows = contendedEntities(s, {
+        branch: options.branch,
+        scope: options.scope,
+        limit: options.limit,
+      });
+      out(!!options.json, rows, () => {
+        if (rows.length === 0) {
+          console.log(
+            "(no contested entities — no cell written by ≥2 sessions)",
+          );
+          return;
+        }
+        const mu = rows.filter((r) => r.multiUser).length;
+        console.log(
+          `${rows.length} contested entit${rows.length === 1 ? "y" : "ies"} ` +
+            `(written by ≥2 sessions)  ·  ${mu} MULTI-USER (≥2 identities):`,
+        );
+        for (const r of rows) {
+          console.log(
+            `  ${r.multiUser ? "★" : r.interleaved ? "⇄" : "·"} ${r.id}\t` +
+              `${r.principals} users / ${r.sessions} sessions\t${r.writes} writes` +
+              (r.multiUser ? "  MULTI-USER" : ""),
+          );
+        }
+        console.log(
+          "\ntip: `inspect conflicts <space> <entity>` for the writer timeline + stale reads.",
+        );
       });
     } finally {
       s.close();
