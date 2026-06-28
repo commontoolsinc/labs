@@ -99,6 +99,7 @@ import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import {
   argumentPathNeedsCellContext,
+  collectInternalAliasNames,
   type ExtractResult,
   extractRog,
   extractRogBaseDefer,
@@ -1152,6 +1153,18 @@ export class Runner {
   };
 
   /**
+   * When > 0, `buildInterpreterPattern` dispatch verdicts are NOT recorded into
+   * `interpreterCensus`. The SETUP-time dispatch (`applySetupState`, used only to
+   * derive the pruned `derivedInternalCells` manifest) runs in addition to the
+   * START-time dispatch on the SAME pattern object; both reach the same verdict
+   * (the probe memo makes the second a no-op for leaf execution), so counting the
+   * setup pass would DOUBLE every `interpreted_ok` / `fallback_by_reason` bump and
+   * break the per-run census oracles (prod-wire differential, footprint). The
+   * START-time pass remains the single authoritative census source. Reentrant-safe
+   * (a counter, not a boolean) — a nested setup never under-restores the flag. */
+  private interpreterCensusSuppressionDepth = 0;
+
+  /**
    * PROBE MEMO ACROSS INSTANTIATIONS (D-PROBE-MEMOIZE). The eligibility dry-run
    * executes user leaf bodies once; the closure-local memo (in
    * `buildInterpreterPattern`) reuses that for the FIRST real run of THAT
@@ -1548,24 +1561,27 @@ export class Runner {
     samePattern: boolean,
     argument: T,
     resultCell: Cell<R>,
+    /** True when the pattern is a LAUNCHED CHILD (handler `this.run` receipt /
+     * navigateTo target / deferred action-result). Threaded to
+     * `buildInterpreterPattern` so the setup-time manifest prune honors the same
+     * narrow `launched_child` wrapper gate the start-time dispatch does. */
+    launchedChild: boolean,
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     let argumentLink = getMetaLink(resultCell, "argument");
     const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
-    const internalManifest = this.materializeDerivedInternalCells(
-      tx,
-      pattern,
-      resultCell,
-      previousInternal,
-    );
-    resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
     let nextArgument = argument;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
     // I don't include the schema here, since I don't want cfc enforcement yet
+    // NOTE: the argument is bound BEFORE the internal manifest is materialized
+    // so the manifest can be derived from the INTERPRETED pattern (below), whose
+    // partition has the bound argument available for its scope probe. The manifest
+    // materialization reads no argument state, so the reorder is observationally
+    // inert for the legacy path (the cells/projection are minted the same way).
     if (argumentLink === undefined) {
       let newArgumentCell = getMetaCell(
         resultCell,
@@ -1596,6 +1612,49 @@ export class Runner {
         pattern.argumentSchema,
       );
     }
+
+    // INTERMEDIATE-CELL DOC PRUNE (per-child doc coalescing). Materialize the
+    // internal manifest from the INTERPRETED pattern when the interpreter engages:
+    // its partition drops the purely-segment-internal intermediate cells (a deep
+    // `a→b→c→d` chain feeding only one addressable output) from
+    // `derivedInternalCells`, so `materializeDerivedInternalCells` never MINTS a
+    // doc for them (it sets the `result` meta on every descriptor's cell, which is
+    // a doc write). Without this, setup would create those docs from the RAW
+    // pattern before the interpreter re-materialize runs (the re-materialize is
+    // idempotent and cannot un-mint an already-created cell). The interpreted
+    // pattern preserves `result`/`argumentSchema`/`resultSchema` verbatim
+    // (D-EMISSION-SCOPE), so the result projection + argument binding below are
+    // byte-identical; only the pruned intermediates are absent from the manifest.
+    // PURE: `buildInterpreterPattern` never writes to `tx`; on `NotInterpretedHere`
+    // (or off-flag) we fall back to the RAW pattern's manifest — zero change.
+    let manifestPattern = pattern;
+    if (this.runtime.experimental.experimentalInterpreter) {
+      // Census-silent: the START-time dispatch (in `startCore`) is the single
+      // authoritative census source. This setup pass reaches the same verdict on
+      // the same pattern object (the probe memo makes leaf execution a no-op the
+      // second time), so counting it would double every census bump.
+      this.interpreterCensusSuppressionDepth++;
+      try {
+        manifestPattern = this.buildInterpreterPattern(
+          pattern,
+          resultCell,
+          launchedChild,
+          tx,
+        );
+      } catch (e) {
+        if (!(e instanceof NotInterpretedHere)) throw e;
+        manifestPattern = pattern; // legacy fallback — raw manifest, unchanged
+      } finally {
+        this.interpreterCensusSuppressionDepth--;
+      }
+    }
+    const internalManifest = this.materializeDerivedInternalCells(
+      tx,
+      manifestPattern,
+      resultCell,
+      previousInternal,
+    );
+    resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
     // Record the content-addressed {identity, symbol} reference — the ONLY
     // pattern pointer — when the pattern's entry identity is known (every
@@ -1628,6 +1687,10 @@ export class Runner {
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    /** Forwarded to `applySetupState` → `buildInterpreterPattern` so the setup-
+     * time manifest prune applies the same `launched_child` wrapper gate as the
+     * start-time dispatch. Defaults false (a top-level / build-time-nested run). */
+    launchedChild = false,
   ): SetupResult<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -1699,6 +1762,7 @@ export class Runner {
       samePattern,
       argument,
       resultCell,
+      launchedChild,
     );
 
     const key = this.getDocKey(resultCell);
@@ -2340,6 +2404,7 @@ export class Runner {
       patternOrModule,
       argument,
       resultCell,
+      options.launchedChild === true,
     );
 
     if (needsStart) {
@@ -2693,7 +2758,9 @@ export class Runner {
     };
     const RI_DISPATCH_DEBUG = Deno.env.get("RI_DISPATCH_DEBUG") === "1";
     const bumpAndThrow = (reason: InterpreterFallbackReason): never => {
-      this.interpreterCensus.fallback_by_reason[reason]++;
+      if (this.interpreterCensusSuppressionDepth === 0) {
+        this.interpreterCensus.fallback_by_reason[reason]++;
+      }
       if (RI_DISPATCH_DEBUG) {
         console.error(`RI_DISPATCH fallback ${reason} [${riLabel()}]`);
       }
@@ -2803,7 +2870,9 @@ export class Runner {
       setupTx,
     );
     if (collectionPattern) {
-      this.interpreterCensus.interpreted_ok++;
+      if (this.interpreterCensusSuppressionDepth === 0) {
+        this.interpreterCensus.interpreted_ok++;
+      }
       if (RI_DISPATCH_DEBUG) {
         console.error(`RI_DISPATCH ok collection [${riLabel()}]`);
       }
@@ -3083,7 +3152,9 @@ export class Runner {
         producerFedContextLeaves,
       );
       if (partitioned) {
-        this.interpreterCensus.interpreted_ok++;
+        if (this.interpreterCensusSuppressionDepth === 0) {
+          this.interpreterCensus.interpreted_ok++;
+        }
         if (RI_DISPATCH_DEBUG) {
           console.error(`RI_DISPATCH ok partition [${riLabel()}]`);
         }
@@ -3561,7 +3632,9 @@ export class Runner {
     };
 
     // Probe succeeded: this pattern WILL be instantiated through the interpreter.
-    this.interpreterCensus.interpreted_ok++;
+    if (this.interpreterCensusSuppressionDepth === 0) {
+      this.interpreterCensus.interpreted_ok++;
+    }
     if (RI_DISPATCH_DEBUG) {
       console.error(`RI_DISPATCH ok single-node [${riLabel()}]`);
     }
@@ -3997,6 +4070,81 @@ export class Runner {
       nodeOutputsByName.set(outName, node.outputs as JSONValue);
     }
 
+    // INTERMEDIATE-CELL DOC PRUNE (per-child doc coalescing). A `derivedInternal`
+    // cell that a SEGMENT both PRODUCES and fully CONSUMES — a deep intra-segment
+    // `a→b→c→d` chain whose intermediates feed only ONE addressable output — needs
+    // NO doc: the segment computes it inside `evalRog` and never round-trips it
+    // through a cell. Legacy minted one doc per such intermediate (it ran each as
+    // its own node); the interpreter coalesces the compute into a segment, so the
+    // intermediate docs are pure waste. We DROP them from the emitted manifest AND
+    // suppress the segment's write of them — but ONLY when NOTHING surviving
+    // references the cell (see the three reference classes below). A name that
+    // fails ANY of those stays a materialized doc (byte-identical to before). This
+    // NEVER changes the addressable output surface or any boundary's observable
+    // input/output, so CFC per-path labels and the launcher contract are unaffected
+    // (a pruned cell carries no result-tree projection and no label sink). Gated
+    // behind the partition path (the child must interpret first). FAIL-CLOSED: only
+    // a SEGMENT-produced name with zero surviving references is dropped.
+    //
+    // PRODUCER SEGMENT of each declared output name (the segment whose ops include
+    // the producing op). A name with no segment producer is produced by a boundary
+    // (or is producer-less) — never prunable here (only segment-produced names are).
+    const segOfOpEarly = new Map<OpId, number>();
+    part.segments.forEach((s, i) => {
+      for (const id of s.opIds) segOfOpEarly.set(id, i);
+    });
+    const producerSegOfName = new Map<string, number>();
+    for (const [name, opId] of outputNameToOpId) {
+      const seg = segOfOpEarly.get(opId);
+      if (seg !== undefined) producerSegOfName.set(name, seg);
+    }
+
+    const referencedInternalNames = new Set<string>();
+    // (1) result-tree references — the addressable output fields + any pass-through
+    //     internal alias the result projects. These MUST keep their docs (the
+    //     result projection resolves `pattern.result` against the manifest).
+    collectInternalAliasNames(pattern.result, referencedInternalNames);
+    // (2) EVERY BOUNDARY node's full input/output aliases — a handler / effect /
+    //     collection / nested-pattern boundary is kept VERBATIM, so it reads (and
+    //     may write) its internal cells exactly as legacy does; every name it
+    //     touches must keep its doc. Scan inputs AND outputs (a boundary that WRITES
+    //     a cell a segment produced is a fan-out target that must round-trip).
+    for (const b of part.boundaries) {
+      const bNode = pattern.nodes?.[b.opId];
+      collectInternalAliasNames(bNode?.inputs, referencedInternalNames);
+      collectInternalAliasNames(bNode?.outputs, referencedInternalNames);
+    }
+    // (3) CROSS-SEGMENT `internal` reads — a name read by a segment OTHER than its
+    //     producer is the inter-segment dataflow channel; it must round-trip through
+    //     a cell. A name read by the SAME segment that produces it is an intra-
+    //     segment `opOut` (the `a→b→c` chain), computed inside `evalRog`, needing no
+    //     doc. (Producer-less reads have no `producerSegOfName` entry → referenced.)
+    for (let i = 0; i < part.segments.length; i++) {
+      for (const ref of part.segments[i].inputs) {
+        if (ref.kind !== "internal") continue;
+        const prodSeg = producerSegOfName.get(ref.name);
+        if (prodSeg === undefined || prodSeg !== i) {
+          referencedInternalNames.add(ref.name);
+        }
+      }
+    }
+    // A name is PRUNABLE iff it is produced by a SEGMENT op (in `producerSegOfName`)
+    // AND nothing above references it. Such a cell is computed and consumed wholly
+    // inside ONE segment (the chain intermediates feeding only that segment's own
+    // downstream ops) → no doc needed; its sole appearance is that segment's OUTPUT
+    // alias, dropped below. FAIL-CLOSED: a name produced by a boundary, or read by
+    // any boundary / cross-segment / the result tree, keeps its doc (byte-identical).
+    const prunedInternalNames = new Set<string>();
+    for (const [name] of producerSegOfName) {
+      if (!referencedInternalNames.has(name)) prunedInternalNames.add(name);
+    }
+    if (Deno.env.get("RI_PART_DEBUG") === "1" && prunedInternalNames.size > 0) {
+      console.error(
+        "RI_PART pruned-intermediate-docs:",
+        [...prunedInternalNames].join(","),
+      );
+    }
+
     const argumentSchema = (pattern.argumentSchema ?? {}) as JSONSchema;
     const resultSchema = (pattern.resultSchema ?? {}) as JSONSchema;
 
@@ -4195,10 +4343,17 @@ export class Runner {
       // This segment's OUTPUT names = the declared output internal cells whose
       // producing op lives in this segment. Each is routed to its original
       // per-field output alias via `sendValueToBinding` (CFC labels preserved).
+      // SKIP a PRUNED intermediate (produced and consumed wholly inside this
+      // segment, referenced by nothing surviving): its value is computed inside
+      // `evalRog` and needs no cell write — the doc is pruned from the manifest
+      // below, so writing it would target a non-existent cell. The downstream op
+      // that reads it is in the SAME segment (else the name would be referenced
+      // cross-segment and not pruned), so its opOut resolves intra-segment.
       const segOutputNames: string[] = [];
       const segOutputsBinding: Record<string, JSONValue> = {};
       for (const [name, opId] of outputNameToOpId) {
         if (!segOpIds.has(opId)) continue;
+        if (prunedInternalNames.has(name)) continue;
         segOutputNames.push(name);
         segOutputsBinding[name] = nodeOutputsByName.get(name)!;
       }
@@ -4349,14 +4504,25 @@ export class Runner {
     }
 
     // (e) Assemble the synthetic mixed Pattern. The result tree +
-    // derivedInternalCells are preserved verbatim so projection/materialization
-    // is identical to legacy; only the COMPUTE nodes are replaced by segments,
-    // while boundaries pass through unchanged. The synthetic `$ri-op-<id>`
-    // cross-segment cells are APPENDED to the manifest (they carry NO result-tree
-    // projection, so the output is identical to legacy — they exist only to route
-    // a value between two segments).
+    // derivedInternalCells are preserved (minus the pruned intermediates) so
+    // projection/materialization is identical to legacy for every ADDRESSABLE
+    // output; only the COMPUTE nodes are replaced by segments, while boundaries
+    // pass through unchanged. The synthetic `$ri-op-<id>` cross-segment cells are
+    // APPENDED to the manifest (they carry NO result-tree projection, so the
+    // output is identical to legacy — they exist only to route a value between two
+    // segments). PRUNED segment-internal intermediates (see `prunedInternalNames`)
+    // are DROPPED from the manifest: no node writes them and no surviving alias
+    // reads them, so no doc need be minted (the per-child doc coalescing win). The
+    // addressable output surface and every boundary input are byte-identical.
+    const prunedPatternDerivedCells = (pattern.derivedInternalCells ?? [])
+      .filter(
+        (dic) => {
+          const name = outputInternalName({ $alias: dic });
+          return name === null || !prunedInternalNames.has(name);
+        },
+      );
     const mergedDerivedCells = [
-      ...(pattern.derivedInternalCells ?? []),
+      ...prunedPatternDerivedCells,
       ...syntheticDerivedCells,
     ];
     return {
@@ -5906,6 +6072,10 @@ export class Runner {
       resultPattern,
       undefined,
       resultCell,
+      // Launched child (deferred navigateTo / handler result pattern): match the
+      // `launchedChild: true` flag the deferred start below uses, so the setup-
+      // time manifest prune applies the same narrow `launched_child` wrapper gate.
+      true,
     );
     // The receipt mark must ride the transaction that creates the result
     // cell's head — setupInternal just wrote it into the handler tx. Marking

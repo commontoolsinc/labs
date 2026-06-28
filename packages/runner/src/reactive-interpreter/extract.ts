@@ -614,6 +614,47 @@ export function outputInternalName(outputs: unknown): string | null {
   return partialCauseToInternalName(alias.partialCause);
 }
 
+/** Deep-scan an arbitrary value tree (a result tree, a node `inputs`/`outputs`
+ * binding) and collect every internal-cell NAME it references through a
+ * `$alias` whose `partialCause` names a derived internal cell. The names are
+ * keyed identically to `outputInternalName` / `partialCauseToInternalName`, so
+ * they line up with `internalToOp` and the `derivedInternalCells` manifest.
+ *
+ * Used by the partition emitter to decide which `derivedInternalCells` are
+ * ADDRESSABLE (referenced by the result tree or a boundary/handler input) and
+ * therefore must be materialized as docs, vs purely SEGMENT-INTERNAL
+ * intermediates that no surviving alias references (a deep `a→b→c→d` chain
+ * feeding only one output) — those can be dropped from the emitted manifest
+ * because the segment computes them inside `evalRog` and never needs a cell.
+ *
+ * PURE structural read: walks records/arrays, stops at a recognized `$alias`
+ * payload (records the name; does not descend into the resolved alias). An
+ * `argument`-cell alias carries no internal name (skipped). Defer level is NOT
+ * checked here — a referenced internal name keeps its doc regardless of the
+ * nesting level it is read through (a deferred alias still consumes the cell). */
+export function collectInternalAliasNames(
+  value: unknown,
+  out: Set<string>,
+): void {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const el of value) collectInternalAliasNames(el, out);
+    return;
+  }
+  const obj = value as Record<string, unknown>;
+  const alias = obj.$alias as Record<string, unknown> | undefined;
+  if (alias && typeof alias === "object") {
+    if (alias.cell === "argument") return; // argument ref, no internal name
+    if ("partialCause" in alias) {
+      const name = partialCauseToInternalName(alias.partialCause);
+      if (name !== null) out.add(name);
+    }
+    // Do not descend into a resolved alias payload.
+    return;
+  }
+  for (const v of Object.values(obj)) collectInternalAliasNames(v, out);
+}
+
 /** True iff a node's `outputs` is a canonical alias that targets the ARGUMENT
  * cell (`{$alias:{cell:"argument",path:[...]}}`) — a write-BACK into the
  * argument the result aliases. (A normal output aliases a `partialCause`
