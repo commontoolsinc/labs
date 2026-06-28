@@ -206,7 +206,9 @@ function kindChip(kind){ return el("span",{class:"kind "+kind,style:"background:
 // ---- live shell link --------------------------------------------------
 let LIVE = localStorage.getItem("si-live") || B.liveBase || "";
 function liveUrl(id){ if(!LIVE) return null;
-  const base = LIVE.replace(/\/+$/,""); return base+"/"+B.space+"/"+id; }
+  // The shell navigates by the bare id form (fid1:…); the stored "of:" prefix
+  // makes it parse the segment as raw base64 and throw. Strip it.
+  const base = LIVE.replace(/\/+$/,""); return base+"/"+B.space+"/"+id.replace(/^of:/,""); }
 function liveAnchor(id){ const u = liveUrl(id); return u
   ? el("a",{href:u,target:"_blank",rel:"noopener",text:"open in app ↗",title:u})
   : el("span",{class:"muted",text:"(set app URL ↗ to enable live links)"}); }
