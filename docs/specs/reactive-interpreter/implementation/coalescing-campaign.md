@@ -1082,3 +1082,29 @@ The CORRECTION's FEASIBLE verdict is **built and gated**. The fold is in `tryBui
 - `counter-child-intermediate-chain-scaled` (deep a→b→c→d → one `display`): docs/child **10 OFF → 5 ON** (OFF 18/48/88; ON 13/28/48) — the terminal `display` str now inlines too.
 
 **CORRECTNESS gates (all GREEN):** flag-off runner **702/0**; flag-ON runner **702/0** (the `reload-rehydration` null-vs-5 break FIXED, no new reds); integration flag-OFF **147/0** + flag-ON **147/0**; RI unit + CFC oracle + spike **44/0** (incl. the `nested-prod-wire` footprint oracle + the OQ-4 per-path CFC oracle); both scaled benches output-equivalent ON==OFF with the **sibling-field non-invalidation + addressability** gate green (a `value`-only change leaves `summary` byte-identical); lunch-poll 5×5 output-equivalent, conflicts ON<OFF, rejected 0 (no ratchet); new `child-result-inline.test.ts` differential oracle proves the fold (space-scoped child) + the contention gate (PerUser child skips the fold, still interprets + output-equivalent); deno check/lint/fmt clean. Output is byte-equivalent: the inline changes the DOC layout, never the addressable output value or path.
+
+## INC-LC3 FINAL MEASURE + GATE + PUSH (2026-06-28, branch HEAD `1fee91e36`, fresh INDEPENDENT re-verify — clean working tree)
+
+Re-ran every gate and bench from a clean tree on the shipped inline commit; all green, output-equivalent, no conflict ratchet. The inline is now LIVE in the integration footprint (the earlier `2777` ON figure predated the source change actually feeding the aggregate).
+
+**Build hygiene:** `deno check` + `deno lint` + `deno fmt --check` on `runner.ts`, `built-in.ts`, `child-result-inline.test.ts` — all EXIT 0 (no re-commit needed, tree already clean/formatted).
+
+**PRIMARY METRIC — per-child docs (slope across N=1,4,8, `RI_FOOTPRINT_DUMP`, reproduced fresh):**
+- `counter-child-pattern-map-scaled`: docs/child **11 OFF → 6 ON (−45%)** (OFF 19/52/96 → marginal 11.0; ON 14/32/56 → marginal 6.0). interpreted_ok scales 2/5/9, fallback_total=1 (array-wrapper launched_child).
+- `counter-child-intermediate-chain-scaled`: docs/child **10 OFF → 5 ON (−50%)** (OFF 18/48/88 → marginal 10.0; ON 13/28/48 → marginal 5.0).
+- Both benches PASS in both arms, so output-equivalence + the embedded **sibling-field non-invalidation + addressability** gate (step 2: a `value`→2 change leaves `summary`, `identity`, `step` byte-identical and path-resolvable) is GREEN under the interpreter.
+
+**INTEGRATION FOOTPRINT aggregate (147 scenarios, headless, fresh, summing `RI_FOOTPRINT` docsCreated/nodes; reproduced twice ON, identical):**
+- docs **OFF 2931 → ON 1932 = −999 (−34.1%)** (CORRECTS the stale `2777` — the inline now feeds the aggregate).
+- scheduler nodes **OFF 2398 → ON 1608 = −790 (−32.9%)**.
+- ON interpreted_ok 160 / fallback_total 18.
+
+**CORRECTNESS — all four guards confirmed independently:**
+- **Output equivalence:** lunch-poll 5×5 vote tallies byte-identical OFF vs ON (`equivalent:true`, perOption + per-vote strings identical); both scaled benches + the inline differential oracle pass.
+- **Per-field reactivity (sibling non-invalidation):** scaled-bench step-2 + `child-result-inline.test.ts` ("str resolves + folds result-only fields, output equal to legacy, sibling not re-derived") — a `value` change re-derives `label`, leaves `summary` byte-identical.
+- **Per-path CFC (OQ-4):** `spike-cfc-oracle.test.ts` green WITH TEETH — "read-isolated coordinator keeps POINTWISE labels (the OQ-4 fix)" + "oracle has teeth: a sibling-reading element op is caught" both pass; per-path label via `schemaAtPath` survives the inline.
+- **NO conflict ratchet (contention gate):** lunch-poll 5×5 conflicts **OFF 510 → ON 440** (reverts 510→440, **rejected 0/0**, preempted 0/0) — net-POSITIVE, never net-negative. The PollOptionCard shared-write shape falls back (`inline-skipped-multi-user-shared`); the `RI_F4_IO_COALESCE` +177% ratchet did NOT recur. census ON interpreted_ok=75/135, scoped=0/argument_writeback=0 (the shared handler/effect paths fall back as designed).
+
+**Suite gates (fresh):** flag-off runner **702/0** (2m50s); flag-ON runner **702/0** (2m48s, no new reds); integration flag-OFF **147/0** + flag-ON **147/0**; RI unit dir + `spike-cfc-oracle` + `spike-map-interpreted` = **45/0** (the inline test added one to the prior 44; includes `child-result-inline`, `nested-prod-wire` footprint oracle, OQ-4 pointwise CFC oracle).
+
+**INNER-DOC FRONTIER status — CLOSED for single-user interactive lists.** With the str-resolution fix + inline emission, the pattern-map-shaped child (the canonical interactive-list row) folds all 4 result-only fields (`safeIdentity`, `normalizedValue`, `label`, `summary`); the residual 6 docs/child are the irreducible RESULT doc + the handler-read `normalizedStep` + the boundary/dataflow channels + the handler stream + final-UI — i.e. ideal-final-UI + state + effect. The chain-shaped child reaches 5 (its terminal `display` str now inlines). **For single-user interactive-list rows the inner-doc frontier is now CLOSED** — the previously-un-inlinable addressed display fields are folded, per-field reactivity / per-path CFC / addressability intact, output byte-equivalent. **For MULTI-USER shared-write shapes the frontier stays deliberately OPEN by design** — the contention gate fails closed (folds nothing) on any reachable non-default scope, preserving the lunch-poll fallback so co-location never ratchets conflicts. The `str`-as-interpretable-leaf prerequisite (Part A provenance stamp) is the unlock that made the addressed-field class foldable at all.
