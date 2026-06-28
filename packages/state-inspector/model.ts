@@ -109,7 +109,7 @@ function basename(p: string): string {
 }
 
 /** A value shaped like a module: `{ code, identity, … }`. */
-function isModuleValue(
+export function isModuleValue(
   v: unknown,
 ): v is { code: string; identity: string; filename?: string; kind?: string } {
   return isObj(v) && typeof v.code === "string" &&

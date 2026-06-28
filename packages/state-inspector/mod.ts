@@ -13,3 +13,4 @@ export * from "./queries.ts";
 export * from "./multispace.ts";
 export * from "./discover.ts";
 export * from "./grouping.ts";
+export * from "./graph.ts";

@@ -12,6 +12,7 @@ import { Table } from "@cliffy/table";
 import {
   annotate,
   buildCrossSpaceLinkIndex,
+  buildSpaceGraph,
   convergence,
   type ConvergenceResult,
   convergenceScan,
@@ -19,6 +20,7 @@ import {
   discoverSpaceDbs,
   entityHistory,
   getValueAt,
+  graphToDot,
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
@@ -29,7 +31,9 @@ import {
   openSpaces,
   quickStats,
   resolveSpacePath,
+  type SpaceGraph,
   type SpaceRef,
+  subgraphAround,
   summarizeSpace,
 } from "@commonfabric/state-inspector";
 
@@ -414,6 +418,95 @@ export const inspect = new Command()
         if (piece.pattern?.code) {
           console.log(
             `\n--- ${piece.pattern.filename} ---\n${piece.pattern.code}`,
+          );
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect graph */
+  .command(
+    "graph <space:string>",
+    "Entity graph: nodes (pieces/cells/streams/modules) + edges (pattern/argument/owns/link).",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--root <entity:string>", "Restrict to one entity's neighborhood.")
+  .option("--depth <n:number>", "Hops around --root.", { default: 2 })
+  .option("--no-links", "Omit data-link edges (keep structural edges only).")
+  .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).")
+  .option("--limit <n:number>", "Max entities to reconstruct.", {
+    default: 5000,
+  })
+  .action((options, space) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      let g: SpaceGraph = buildSpaceGraph(s, {
+        branch: options.branch,
+        scope: options.scope,
+        limit: options.limit,
+        includeLinks: options.links !== false,
+      });
+      if (options.root) g = subgraphAround(g, options.root, options.depth);
+      if (options.dot) {
+        console.log(graphToDot(g));
+        return;
+      }
+      out(!!options.json, g, () => {
+        console.log(`space: ${g.space}`);
+        console.log(
+          `nodes: ${g.nodes.length}  {${
+            Object.entries(g.stats.nodesByKind)
+              .map(([k, n]) => `${k}=${n}`).join(" ")
+          }}`,
+        );
+        console.log(
+          `edges: ${g.edges.length}  {${
+            Object.entries(g.stats.edgesByKind)
+              .filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`).join(" ")
+          }}` + (g.stats.externalEdges
+            ? `  (${g.stats.externalEdges} cross-space)`
+            : ""),
+        );
+        // Adjacency, grouped by source, pieces first (most informative).
+        const labelOf = new Map(g.nodes.map((n) => [n.id, n]));
+        const bySource = new Map<string, typeof g.edges>();
+        for (const e of g.edges) {
+          (bySource.get(e.from) ?? bySource.set(e.from, []).get(e.from)!).push(
+            e,
+          );
+        }
+        const order = [...bySource.keys()].sort((a, b) => {
+          const ka = labelOf.get(a)?.kind === "piece" ? 0 : 1;
+          const kb = labelOf.get(b)?.kind === "piece" ? 0 : 1;
+          return ka - kb;
+        });
+        const arrow = (k: string) =>
+          k === "pattern"
+            ? "⟶pattern"
+            : k === "argument"
+            ? "⟶arg"
+            : k === "owns"
+            ? "⟶owns"
+            : "·link";
+        for (const src of order.slice(0, options.root ? 9999 : 40)) {
+          const n = labelOf.get(src)!;
+          console.log(`\n${n.kind} ${shortDid(src)}  ${n.label}`);
+          for (const e of bySource.get(src)!) {
+            const t = labelOf.get(e.to);
+            console.log(
+              `  ${arrow(e.kind).padEnd(9)} ${
+                t ? `${t.kind} ${t.label}` : "?"
+              }${e.external ? ` @${shortDid(e.to)} [cross-space]` : ""}${
+                e.label ? `  (${e.label})` : ""
+              }`,
+            );
+          }
+        }
+        if (!options.root && order.length > 40) {
+          console.log(
+            `\n… ${order.length - 40} more sources (use --root or --json)`,
           );
         }
       });
