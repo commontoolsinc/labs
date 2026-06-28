@@ -969,7 +969,12 @@ function computeProducerFedContextLeaves(
         : undefined;
       const producerPure = producerOp !== undefined &&
         (producerOp.kind === "leaf" || producerOp.kind === "access" ||
-          producerOp.kind === "construct" || producerOp.kind === "control");
+          producerOp.kind === "construct" || producerOp.kind === "control" ||
+          // A native `interpolate` op produces a plain STRING (the str result) —
+          // a pure scalar a downstream context leaf may read, identical to a
+          // `leaf`-produced value. Include it so an asCell field fed by a `str`
+          // result is still producer-fed-eligible (not demoted to legacy).
+          producerOp.kind === "interpolate");
       if (
         producerName === undefined || producerOpId === undefined ||
         !producerPure
@@ -3272,6 +3277,12 @@ export class Runner {
       "access",
       "construct",
       "control",
+      // Native string interpolation (the lowered `str` builtin, 08-expression-
+      // interpretation §2). Pure value computation the evaluator runs directly
+      // (no leaf impl / SES). MUST be eligible or every str-bearing pattern
+      // falls back with `ineligible_opkind` — green-via-fallback, not native
+      // interpretation (the proxy-metric trap).
+      "interpolate",
       "pattern",
     ]);
     for (const op of extracted.rog.ops) {
@@ -3378,7 +3389,11 @@ export class Runner {
       // Fall back so legacy's synchronous static materialization is preserved.
       const hasComputeOp = extracted.rog.ops.some((op) =>
         op.kind === "leaf" || op.kind === "control" ||
-        op.kind === "collection" || op.kind === "pattern"
+        op.kind === "collection" || op.kind === "pattern" ||
+        // A native `interpolate` op IS a compute op (it derives a string from the
+        // argument), so a pure-`str` pattern is NOT a static-construct-over-
+        // argument reshape — it must interpret, not fall back.
+        op.kind === "interpolate"
       );
       if (!hasComputeOp) bumpAndThrow("ineligible_opkind");
     }

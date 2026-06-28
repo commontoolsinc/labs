@@ -1,6 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { createNodeFactory, lift } from "./module.ts";
+import { createNodeFactory } from "./module.ts";
 import type {
   JSONSchema,
   NodeFactory,
@@ -420,7 +420,29 @@ export function str(
   // body exactly as today.
   recordVerifiedProvenance(interpolatedString, { identity: "cf:builtin/str" });
 
-  return lift(interpolatedString)({ strings, values });
+  // SERIALIZATION-SURVIVING str BRAND ($builtin: "str"). The reactive interpreter
+  // lowers a recognized `str\`...\`` leaf to a NATIVE `interpolate` op (no SES
+  // round-trip; 08-expression-interpretation §2). In the IN-BUILDER frame the
+  // recognizer keys off the live `cf:builtin/str` provenance above. But once the
+  // pattern is SERIALIZED, `module.implementation` is the source STRING (the
+  // symbol-less provenance emits no `$implRef`), so provenance is gone and a
+  // LOADED str leaf could not be recognized — the production win (loaded
+  // patterns) would be lost. `$builtin` is a plain MODULE field that rides
+  // `moduleToJSON`'s `...rest` spread through serialization, so a loaded str leaf
+  // still lowers. We build the factory via `createNodeFactory` directly (exactly
+  // what `lift(interpolatedString)` does for the no-schema case) so the brand is
+  // set on the node `module` object — `lift` exposes no module-field passthrough.
+  // The recognizer requires the brand OR live provenance, so an unbranded foreign
+  // function impersonating str is never lowered (security + correctness).
+  const strFactory = createNodeFactory<
+    { strings: TemplateStringsArray; values: unknown[] },
+    string
+  >({
+    type: "javascript",
+    implementation: interpolatedString,
+    $builtin: "str",
+  });
+  return strFactory({ strings, values }) as OpaqueRef<string>;
 }
 
 /**

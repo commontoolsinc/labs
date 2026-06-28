@@ -218,6 +218,18 @@ declare module "@commonfabric/api" {
     materializerWriteInputPaths?: readonly (readonly string[])[];
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
+    /**
+     * SERIALIZATION-SURVIVING BUILTIN BRAND. A pure framework builtin whose body
+     * the reactive interpreter recognizes and lowers to a NATIVE op (e.g. `str` →
+     * the `interpolate` op, 08-expression-interpretation §2) stamps a stable
+     * string here. Unlike the live-function `getVerifiedProvenance` marker (gone
+     * once `implementation` is the serialized source STRING), this brand is a
+     * plain module field that rides `moduleToJSON`'s `...rest` spread through
+     * serialization — so a LOADED pattern's str leaf still lowers. The recognizer
+     * accepts the brand OR live provenance; an unbranded foreign function
+     * impersonating the builtin is never lowered.
+     */
+    $builtin?: string;
   }
 }
 

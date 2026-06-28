@@ -32,6 +32,7 @@ import type {
 } from "./rog.ts";
 import type { LeafImpl } from "./interpret.ts";
 import { isLegacyAlias } from "../link-types.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 
 // The in-memory Pattern shape we read (a structural subset; see builder/types).
 interface RawModule {
@@ -61,6 +62,15 @@ interface RawModule {
    * references. Interpreting it as a pure leaf evaluates the handler body and
    * silently DROPS the stream — so it must NOT classify as `leaf`. */
   wrapper?: "handler";
+  /** SERIALIZATION-SURVIVING BUILTIN BRAND. A pure framework builtin whose body
+   * the interpreter recognizes and lowers to a NATIVE op stamps a stable string
+   * here (e.g. `"str"`). Unlike the live-function `getVerifiedProvenance` marker
+   * (which is gone once `implementation` is the serialized source STRING), this
+   * brand is a plain module field that rides `moduleToJSON`'s `...rest` spread
+   * through serialization — so a LOADED pattern's str leaf still lowers (the
+   * production win). The recognizer accepts the brand OR live provenance; an
+   * unbranded foreign function impersonating str is rejected (never lowered). */
+  $builtin?: string;
 }
 interface RawNode {
   module?: RawModule | RawPattern;
@@ -200,6 +210,75 @@ function classifyModule(
   // Fail closed to the HANDLER sink (the F4 gate applies — we cannot prove the
   // unknown module's output is a consumable dataflow value).
   return { kind: "effect", effectSink: "handler" };
+}
+
+/**
+ * Recognize a `str\`...${x}...\`` interpolation leaf so it can lower to the
+ * NATIVE `interpolate` op (08-expression-interpretation §2) instead of running
+ * the `str` SES leaf-over-construct. Returns the STATIC `strings` segments iff
+ * the node is an UNAMBIGUOUS static-template `str` leaf; otherwise `null` → the
+ * caller keeps the leaf path UNCHANGED (never mis-lower).
+ *
+ * The recognizer is an explicit ALLOW-LIST (fail-closed, design E-2). ALL must
+ * hold:
+ *   (a) `classifyModule` already returned `leaf` (a pure `type:"javascript"`
+ *       module, no `wrapper`/`isEffect` — the caller passes only leaf nodes).
+ *   (b) the str MARKER is present: live `getVerifiedProvenance(impl).identity ===
+ *       "cf:builtin/str"` (the in-builder case — `implementation` is the live
+ *       framework closure) OR `module.$builtin === "str"` (the LOADED case —
+ *       `implementation` is the serialized source string, provenance misses, but
+ *       the serialization-surviving brand still identifies str). An unbranded
+ *       foreign function with byte-identical source is NOT recognized.
+ *   (c) `node.inputs` is a plain object with EXACTLY keys `strings` and `values`.
+ *   (d) `inputs.strings` is a FULLY STATIC array of string literals (every
+ *       element a string — no `$alias`, no nested ref). This is the universal
+ *       transformer-emitted `str\`...\`` shape; a dynamically-built strings array
+ *       is out of scope → fall back.
+ *   (e) `inputs.values` is an array.
+ *
+ * Any miss → `null` → leaf path (byte-identical to today). The VALUE refs are
+ * NOT built here; the caller reconstructs each `inputs.values` element through
+ * the SAME `buildStructuredRef` the leaf input-construct would have used, so the
+ * reachable labeled doc set (hence the CFC confidentiality join) is identical —
+ * the per-path-label oracle stays green (design §4).
+ */
+function recognizeStrLeaf(
+  module: RawModule | RawPattern | undefined,
+  inputs: unknown,
+): { strings: string[] } | null {
+  if (!module || typeof module !== "object") return null;
+  const m = module as RawModule;
+  if (m.type !== "javascript") return null;
+  // Defense in depth: the caller only invokes this for `leaf`-classified nodes,
+  // but re-check the effect markers so a future caller cannot mis-lower a
+  // handler/effect javascript module.
+  if (m.wrapper === "handler" || m.isEffect === true) return null;
+
+  // (b) str marker: live provenance OR serialization-surviving brand.
+  const liveProvenanceIsStr = typeof m.implementation === "function" &&
+    getVerifiedProvenance(m.implementation)?.identity === "cf:builtin/str";
+  const brandIsStr = m.$builtin === "str";
+  if (!liveProvenanceIsStr && !brandIsStr) return null;
+
+  // (c) exactly { strings, values }.
+  if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) {
+    return null;
+  }
+  const obj = inputs as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length !== 2 || !("strings" in obj) || !("values" in obj)) {
+    return null;
+  }
+
+  // (d) strings is a fully static array of string literals.
+  const strings = obj.strings;
+  if (!Array.isArray(strings)) return null;
+  if (!strings.every((s) => typeof s === "string")) return null;
+
+  // (e) values is an array.
+  if (!Array.isArray(obj.values)) return null;
+
+  return { strings: strings as string[] };
 }
 
 /** Map a `partialCause` (the opaque derived-internal-cell identity, an arbitrary
@@ -816,8 +895,50 @@ export function extractRog(
       const node = nodes[i];
       nodeCount++;
       const c = classifyModule(node.module);
-      bump(c.kind);
       classified++; // every node classifies (leaf is the sound default)
+
+      // STR → NATIVE INTERPOLATE LOWERING (08-expression-interpretation §2).
+      // A recognized static-template `str\`...\`` leaf lowers to a native
+      // `interpolate` op: the static `strings` ride INLINE and each `${...}`
+      // value is pulled into `op.inputs` via the SAME `buildStructuredRef` the
+      // leaf input-construct would use — so the reachable labeled-doc set (and
+      // hence the CFC confidentiality join, design §4) is identical — but the
+      // `{strings, values}` object/array constructs are NOT synthesized (the
+      // serialized-boundary shrink: no `$implRef`/SES, since `resolveLeafImpls`
+      // skips non-leaf ops). FAIL CLOSED: if building any value ref RECORDS an
+      // `unrecognized` entry, abandon the lowering and fall through to the
+      // leaf+construct path (which records the SAME entry → legacy), never
+      // emitting a partial interpolate. Decided BEFORE `bump(c.kind)` so the
+      // kind census counts each node once (interpolate, not leaf).
+      let interpolateLowering:
+        | { strings: string[]; values: ValueRef[] }
+        | null = null;
+      if (c.kind === "leaf") {
+        const strMatch = recognizeStrLeaf(node.module, node.inputs);
+        if (strMatch) {
+          const valuesArr = (node.inputs as { values?: unknown[] }).values ??
+            [];
+          const before = unrecognized.size;
+          const valueRefs = valuesArr.map((el) =>
+            buildStructuredRef(
+              el,
+              unrecognized,
+              ops,
+              nextSynthId,
+              bump,
+              expectedDefer,
+            )
+          );
+          if (unrecognized.size === before) {
+            interpolateLowering = {
+              strings: strMatch.strings,
+              values: valueRefs,
+            };
+          }
+        }
+      }
+
+      bump(interpolateLowering ? "interpolate" : c.kind);
 
       // Wire this node's output alias → its op id into THIS Rog's LOCAL map, so
       // `internal` ValueRefs (result/input refs to derived cells) resolve within
@@ -863,7 +984,13 @@ export function extractRog(
       // CFC read-through (§4.5) need. The interpreter never evaluates an effect
       // op (it throws `NotInterpretedHere`), so these refs only ADD edges to the
       // ROG; they change no eligible-pattern evaluation.
-      const inputs = c.kind === "leaf"
+      //
+      // A recognized `interpolate` leaf carries its `${...}` value refs as the
+      // flat `inputs` (already built above) — NOT the structured `{strings,
+      // values}` object construct — so `inputRefs` is skipped for it.
+      const inputs = interpolateLowering
+        ? interpolateLowering.values
+        : c.kind === "leaf"
         ? inputRefs(
           node.inputs,
           unrecognized,
@@ -877,13 +1004,29 @@ export function extractRog(
         : [];
       const op: Op = {
         id: i,
-        kind: c.kind,
-        impl: c.impl,
+        kind: interpolateLowering ? "interpolate" : c.kind,
+        // A native interpolate op runs no leaf impl (no `$implRef`/SES); leave
+        // `impl` undefined so `resolveLeafImpls` never resolves it.
+        impl: interpolateLowering ? undefined : c.impl,
         inputs,
         // deno-lint-ignore no-explicit-any
         outSchema: (node.module as any)?.resultSchema ?? true as any,
-        detail: { kind: "leaf" } as Op["detail"],
+        detail: interpolateLowering
+          ? {
+            kind: "interpolate",
+            strings: interpolateLowering.strings,
+            values: interpolateLowering.values,
+          }
+          : { kind: "leaf" } as Op["detail"],
       };
+
+      if (interpolateLowering) {
+        // The op is fully built (kind/inputs/detail set above); the kind census
+        // was bumped to `interpolate` at the top of the loop. Push and move on —
+        // none of the collection/control/pattern/effect detail branches apply.
+        ops.push(op);
+        continue;
+      }
 
       if (c.kind === "collection") {
         // The op's element pattern is the `op` input (inline Pattern in memory,

@@ -51,6 +51,7 @@ export type OpKind =
   | "control"
   | "access"
   | "construct"
+  | "interpolate"
   | "effect";
 
 export type CollectionOp = "map" | "filter" | "flatMap";
@@ -100,6 +101,21 @@ export type KindDetail =
   | { kind: "control"; op: ControlOp; pred: ValueRef; branches: ValueRef[] }
   | { kind: "access"; path: PathStep[] }
   | { kind: "construct"; template: ConstructTemplate }
+  /**
+   * Native string interpolation — the lowered `str\`...${x}...\`` builtin (the
+   * first concrete `expr`-family op, design 08-expression-interpretation §2).
+   * Replaces the `str` SES leaf-over-construct: the evaluator concatenates the
+   * static `strings` segments with the resolved `values` BYTE-FOR-BYTE per the
+   * framework `interpolatedString` body (built-in.ts). `strings` is carried
+   * INLINE (a fully static literal array — the universal transformer-emitted
+   * template shape); `values` are the `${...}` ValueRefs, MIRRORED here AND in
+   * `op.inputs` (so `inputsOf`/`topoOrder`/partition surface them with no extra
+   * code). An op is emitted only for a recognized static-template `str` leaf;
+   * any other str shape falls back to the leaf path (extract.ts
+   * `recognizeStrLeaf`). Never a `leaf`, so `resolveLeafImpls` skips it — no
+   * `$implRef`/SES round-trip (the serialized-boundary shrink + the perf win).
+   */
+  | { kind: "interpolate"; strings: string[]; values: ValueRef[] }
   | { kind: "effect"; sink: EffectSink; link?: string };
 
 /** Object/array assembly from sub-results (the object-property / array-element
@@ -144,16 +160,19 @@ export const INTERPRETED_KINDS: ReadonlySet<OpKind> = new Set([
   "control",
   "access",
   "construct",
+  "interpolate",
   "effect",
 ]);
 
 /** ValueRefs an op reads, for ordering / read-set derivation.
  *
  * `op.inputs` is the flat input list: leaf ops carry their single structured
- * input there, and EFFECT (boundary) ops carry the flat list of value-producer
- * alias leaves the boundary reads (extraction's `effectInputRefs`, event streams
- * excluded) — the `boundary←producer` edges the partitioner (§4.2) and the CFC
- * read-through (§4.5) consume. The structural op kinds carry their meaningful
+ * input there, INTERPOLATE ops carry their `${...}` value refs there (so the
+ * partition/topo/CFC machinery surfaces them with no extra clause), and EFFECT
+ * (boundary) ops carry the flat list of value-producer alias leaves the boundary
+ * reads (extraction's `effectInputRefs`, event streams excluded) — the
+ * `boundary←producer` edges the partitioner (§4.2) and the CFC read-through
+ * (§4.5) consume. The structural op kinds carry their meaningful
  * refs in `detail` instead, so we union those in: collection.listInput,
  * pattern.argument, control.pred + branches. (construct refs live in the
  * template; topoOrder reads them directly, so they are intentionally not

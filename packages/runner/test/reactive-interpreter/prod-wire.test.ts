@@ -358,6 +358,50 @@ const cases: OracleCase[] = [
     },
     args: [{ x: 21, show: true }, { x: 7, show: false }],
   },
+  {
+    // STR → NATIVE INTERPOLATE (08-expression-interpretation §2). A
+    // `str\`...${x}...\`` site lowers to a native `interpolate` op the evaluator
+    // computes directly — NO str SES leaf is resolved/invoked. The differential
+    // oracle pins byte-equivalence: flag-off (str leaf) == flag-on (native op),
+    // AND interpreted_ok bumps (genuine native interpretation, not a fallback).
+    // Multiple sites + a no-ref template + a numeric coercion exercise the fold.
+    name: "str interpolation → native interpolate op",
+    argumentSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, count: num },
+      required: ["name", "count"],
+    },
+    resultSchema: {
+      type: "object",
+      properties: {
+        greeting: { type: "string" },
+        tally: { type: "string" },
+        plain: { type: "string" },
+      },
+    },
+    build: (cf) =>
+      cf.pattern(
+        ({ name, count }: { name: string; count: number }) => ({
+          greeting: cf.str`Hello ${name}!`,
+          tally: cf.str`${name} has ${count} items`,
+          plain: cf.str`no refs here`,
+        }),
+        {
+          type: "object",
+          properties: { name: { type: "string" }, count: num },
+          required: ["name", "count"],
+        },
+        {
+          type: "object",
+          properties: {
+            greeting: { type: "string" },
+            tally: { type: "string" },
+            plain: { type: "string" },
+          },
+        },
+      ),
+    args: [{ name: "Ada", count: 3 }, { name: "Bo", count: 0 }],
+  },
 ];
 
 describe("prod-wire: reactive-interpreter dispatch (flag OFF default)", () => {

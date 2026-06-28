@@ -312,6 +312,32 @@ export function evalRog(
         if (input === undefined) return undefined;
         return impl(input);
       }
+      case "interpolate": {
+        // NATIVE string interpolation — the lowered `str\`...${x}...\`` builtin
+        // (08-expression-interpretation §2). BYTE-FOR-BYTE the framework
+        // `interpolatedString` body (built-in.ts):
+        //   strings.reduce((r, s, i) => r + s + (i < values.length ? values[i] : ""), "")
+        // Seed `""`; for each index over `strings`, append `strings[i]` then —
+        // only when an i-th value exists — append the resolved value via the `+`
+        // operator (JS string coercion: undefined→"undefined", null→"null",
+        // object→String(obj)/toString, number→default). The trailing strings
+        // segment (strings.length === values.length + 1) appends with no value.
+        // We resolve `op.inputs` (== detail.values, the `${...}` refs in order).
+        //
+        // CRITICAL: NO undefined-run-gate here (unlike the leaf case). The str
+        // body itself does the `+ value` coercion, so a value ref resolving to
+        // `undefined` MUST append the literal "undefined" — matching `result +
+        // str + undefined`. The leaf gate is a leaf-only legacy-parity device;
+        // applying it here would diverge from str semantics (`str\`${undefined}\``
+        // → "undefined", not "").
+        const { strings } = op.detail;
+        const n = op.inputs.length;
+        let result = "";
+        for (let i = 0; i < strings.length; i++) {
+          result = result + strings[i] + (i < n ? resolve(op.inputs[i]) : "");
+        }
+        return result;
+      }
       case "access":
         return navigate(resolve(op.inputs[0]), op.detail.path);
       case "construct": {
