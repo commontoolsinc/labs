@@ -263,6 +263,7 @@ function renderDetail(id){
   if(L.pattern){ lin.push(el("div",{},[el("span",{class:"k muted",text:"pattern  "}),
     linkChip(L.pattern), el("span",{class:"muted",text:" "+(L.pattern.filename||"")+(L.pattern.symbol?" · "+L.pattern.symbol:"")+(L.pattern.codeLines?" · "+L.pattern.codeLines+" lines":"")})])); }
   if(L.argument){ lin.push(el("div",{},[el("span",{class:"k muted",text:"input    "}), linkChip(L.argument)])); }
+  if(L.result){ lin.push(el("div",{},[el("span",{class:"k muted",text:"result   "}), linkChip(L.result)])); }
   if(L.owner){ lin.push(el("div",{},[el("span",{class:"k muted",text:"owner    "}), linkChip(L.owner)])); }
   if(L.internal&&L.internal.length){ const wrap=el("div",{},[el("span",{class:"k muted",text:"owns ("+L.internal.length+")  "})]);
     L.internal.forEach(r=>wrap.append(linkChip(r))); lin.push(wrap); }

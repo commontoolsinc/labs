@@ -98,6 +98,8 @@ export interface EntityDetail {
     argument?: LinkRef;
     internal?: LinkRef[];
     owner?: LinkRef;
+    /** Legacy regime: the result cell a process cell produces (`resultRef`). */
+    result?: LinkRef;
   };
   /** Outgoing data links found in the value, resolved to target labels. */
   outLinks: LinkRef[];
@@ -116,6 +118,27 @@ function importSpecifier(v: unknown): string | undefined {
     Object.keys(v).length === 2
   ) return v.specifier;
   return undefined;
+}
+
+/** The `resultRef` target of a legacy process cell (`{ $TYPE, resultRef, … }`). */
+function legacyResultId(v: unknown): string | undefined {
+  if (isObj(v) && "$TYPE" in v && "resultRef" in v) {
+    return parseSigilLink(v.resultRef)?.id;
+  }
+  return undefined;
+}
+
+/**
+ * A legacy process cell's human name lives on its RESULT cell's `$NAME` (the
+ * process cell itself only carries `$TYPE`/refs). Resolve it through the docs.
+ */
+function legacyName(
+  v: unknown,
+  docs: Map<string, EntityDocument>,
+): string | undefined {
+  const rid = legacyResultId(v);
+  const rv = rid ? docs.get(rid)?.value : undefined;
+  return isObj(rv) && typeof rv.$NAME === "string" ? rv.$NAME : undefined;
 }
 
 /** Render a CFC atom (string sigil, or an object atom) to a short string. */
@@ -210,16 +233,19 @@ function detailFromDoc(
   const named = ctx.nameOf.get(id);
 
   // --- context-aware label + role ----------------------------------------
-  let label = c.label;
+  // Label comes from the shared index (it already folds in import/context/legacy
+  // refinements); role is computed here.
+  let label = ctx.labelOf.get(id)?.label ?? c.label;
   let role: string = c.kind;
   if (spec) {
     label = `import ${spec}`;
     role = "module import";
   } else if (named) {
-    label = c.kind === "stream" ? `⊙ ${named.key}` : named.key;
     role = c.kind === "stream"
       ? `stream · ${named.key}`
       : `cell · ${named.key}`;
+  } else if (c.kind === "piece" && c.regime === "legacy") {
+    role = "piece (legacy process)";
   } else {
     role = roleFor(c.kind, c.owned);
   }
@@ -230,6 +256,16 @@ function detailFromDoc(
     lineage.argument = refTo(c.lineage.argument, ctx);
   }
   if (c.lineage.owner) lineage.owner = refTo(c.lineage.owner, ctx);
+  // Legacy: surface the result cell + the owned-cell manifest from the value.
+  if (c.kind === "piece" && c.regime === "legacy" && isObj(value)) {
+    const rid = legacyResultId(value);
+    if (rid) lineage.result = refTo(rid, ctx);
+    const internalIds = linksWithPaths(value.internal)
+      .map((l) => l.link.id).filter((x): x is string => !!x);
+    if (internalIds.length) {
+      lineage.internal = internalIds.map((cid) => refTo(cid, ctx)!);
+    }
+  }
   if (c.lineage.internal?.length) {
     lineage.internal = c.lineage.internal.map((cid) => refTo(cid, ctx)!);
   }
@@ -372,7 +408,10 @@ export function buildAllDetails(
   const nameOf = new Map<string, { owner: string; key: string }>();
   for (const [id, doc] of docs) {
     const c = classifyDocument(doc);
-    if (c.kind === "piece" && isObj(doc.value)) {
+    // Only MODERN piece result values carry semantic names as keys (createProfile,
+    // profiles, …). A legacy PROCESS cell's top-level keys are control-plane
+    // ($TYPE/resultRef/internal/argument) — naming children by those is noise.
+    if (c.kind === "piece" && c.regime === "modern" && isObj(doc.value)) {
       for (const [key, val] of Object.entries(doc.value)) {
         const tid = parseSigilLink(val)?.id;
         if (tid && !nameOf.has(tid)) nameOf.set(tid, { owner: id, key });
@@ -386,6 +425,9 @@ export function buildAllDetails(
     let label = c.label;
     if (spec) label = `import ${spec}`;
     else if (named) label = c.kind === "stream" ? `⊙ ${named.key}` : named.key;
+    else if (c.kind === "piece" && c.regime === "legacy") {
+      label = legacyName(doc.value, docs) ?? label;
+    }
     labelOf.set(id, { kind: c.kind, label });
   }
 

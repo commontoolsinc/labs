@@ -48,11 +48,34 @@ export interface SpaceDb {
 /** Open a space DB read-only. Safe against stale (and, best-effort, live) files. */
 export function openSpace(path: string): SpaceDb {
   const db = new Database(path, { readonly: true });
+  shimScopeKey(db);
   return {
     db,
     path,
     close: () => db.close(),
   };
+}
+
+/**
+ * Older space DBs predate the per-scope `scope_key` column on `revision` (added
+ * with PerUser/PerSession scopes). Every scope-aware query in this package
+ * filters `scope_key = 'space'`, so on those DBs we shim the column with a TEMP
+ * VIEW that shadows the table and supplies a constant `'space'` scope. Temp
+ * objects are writable even on a READONLY main DB and take name-resolution
+ * precedence over the real table, so all existing queries work unchanged.
+ */
+function shimScopeKey(db: Database): void {
+  const hasCol = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('revision') WHERE name = 'scope_key'",
+    )
+    .get<{ 1: number }>();
+  if (hasCol) return;
+  db.exec(
+    `CREATE TEMP VIEW revision AS
+       SELECT branch, id, 'space' AS scope_key, seq, op_index, op, data, commit_seq
+       FROM main.revision`,
+  );
 }
 
 export function tableNames(db: Database): string[] {
