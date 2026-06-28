@@ -192,9 +192,14 @@ On-disk signals (each verifiable offline):
 
 ## Part 5 — Roadmap (sequenced; comprehension-first)
 
-1. **Model unification (foundation).** Whole-document read + path-set
-   classification + lineage resolution (ownership tree, `patternIdentity`,
-   `argument`). This corrects `entities`/`value-at` and unblocks everything else.
+1. **Model unification (foundation).** ✅ **DONE** — `model.ts`: whole-document
+   read + path-set classification (piece / module / stream / schema / owned-cell
+   / free-cell, modern + legacy regimes) + lineage resolution (`argument` →
+   input, `patternIdentity` → module by `value.identity`, `result` → owner,
+   `internal` → owned cells). `entities` rewired onto it (now finds all 7 pieces,
+   not 4); new `cf inspect piece <id>` shows a piece's pattern source, input,
+   result/schema keys, and owned cells. Verified end-to-end on the real notes
+   space.
 2. **Space grouping.** Discover + group the implicated spaces for a user/session;
    `cf inspect spaces` shows a grouped tree (home → profiles → main; placeholders
    marked), recovered via §3.2 signals.

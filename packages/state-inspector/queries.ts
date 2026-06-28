@@ -4,8 +4,7 @@
 
 import type { CommitRow, SpaceDb } from "./db.ts";
 import { hasSchedulerTables } from "./db.ts";
-import { countLinks, decodeStored, summarize } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { decodeStored } from "./decode.ts";
 
 export interface SpaceSummary {
   path: string;
@@ -24,9 +23,12 @@ export interface SpaceSummary {
 
 export function summarizeSpace(space: SpaceDb): SpaceSummary {
   const db = space.db;
-  const one = <T extends object>(sql: string): T => db.prepare(sql).get<T>() as T;
+  const one = <T extends object>(sql: string): T =>
+    db.prepare(sql).get<T>() as T;
 
-  const commitAgg = one<{ n: number; lo: number | null; hi: number | null; s: number }>(
+  const commitAgg = one<
+    { n: number; lo: number | null; hi: number | null; s: number }
+  >(
     `SELECT count(*) n, min(seq) lo, max(seq) hi, count(DISTINCT session_id) s FROM "commit"`,
   );
   const revAgg = one<{ n: number; e: number }>(
@@ -60,7 +62,9 @@ export function summarizeSpace(space: SpaceDb): SpaceSummary {
     hasSchedulerTables: hasSched,
     schedulerObservations,
     commits: commitAgg.n,
-    commitSeqRange: commitAgg.lo === null ? null : [commitAgg.lo, commitAgg.hi!],
+    commitSeqRange: commitAgg.lo === null
+      ? null
+      : [commitAgg.lo, commitAgg.hi!],
     sessions: commitAgg.s,
     revisions: revAgg.n,
     entities: revAgg.e,
@@ -203,86 +207,5 @@ export function hotEntities(
     }));
 }
 
-export type EntityKind = "module" | "instance" | "stream" | "value" | "empty";
-
-export interface EntityInfo {
-  id: string;
-  scope: string;
-  kind: EntityKind;
-  /** Human label: module filename, instance $NAME, or a value summary. */
-  name: string;
-  revisions: number;
-  links: number;
-}
-
-function classifyValue(value: unknown): { kind: EntityKind; name: string } {
-  if (value === undefined) return { kind: "empty", name: "(absent)" };
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const o = value as Record<string, unknown>;
-    // Module/program entity: carries source + filename.
-    if (typeof o.code === "string" && typeof o.filename === "string") {
-      const file = (o.filename as string).split("/").pop() ?? o.filename;
-      return { kind: "module", name: `module:${file}` };
-    }
-    // Pattern instance: has a resolved $NAME, or instance markers.
-    const named = typeof o.$NAME === "string" ? (o.$NAME as string) : undefined;
-    if (named || "$TYPE" in o || "resultRef" in o || "argument" in o) {
-      return { kind: "instance", name: named ?? "(instance)" };
-    }
-    if ((o as { $stream?: unknown }).$stream === true) {
-      return { kind: "stream", name: "(stream)" };
-    }
-  }
-  return { kind: "value", name: summarize(value) };
-}
-
-/**
- * List the entities in a space with a derived kind + label — the "what is in
- * this space?" view. Reconstructs each entity's head document (cheap for typical
- * spaces; bounded by `limit`). Sorted modules → instances → streams → values.
- */
-export function listEntities(
-  space: SpaceDb,
-  opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityInfo[] {
-  const branch = opts.branch ?? "";
-  const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 2000;
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
-
-  const order: Record<EntityKind, number> = {
-    module: 0,
-    instance: 1,
-    stream: 2,
-    value: 3,
-    empty: 4,
-  };
-  return rows
-    .map((r): EntityInfo => {
-      let value: unknown;
-      let name = "(undecodable)";
-      let kind: EntityKind = "value";
-      try {
-        const doc = reconstructDocument(space, { id: r.id, branch, scope });
-        value = doc?.value;
-        ({ kind, name } = classifyValue(value));
-      } catch (e) {
-        name = `(error: ${(e as Error).message.slice(0, 40)})`;
-      }
-      return {
-        id: r.id,
-        scope,
-        kind,
-        name,
-        revisions: r.revisions,
-        links: countLinks(value),
-      };
-    })
-    .sort((a, b) => order[a.kind] - order[b.kind] || b.revisions - a.revisions);
-}
+// Entity classification / listing moved to model.ts (`listEntityModels`),
+// which reads the WHOLE entity document instead of value-shape alone.

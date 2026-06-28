@@ -12,15 +12,16 @@ import { Table } from "@cliffy/table";
 import {
   annotate,
   buildCrossSpaceLinkIndex,
-  type ConvergenceResult,
   convergence,
+  type ConvergenceResult,
   convergenceScan,
+  describePiece,
   discoverSpaceDbs,
   entityHistory,
   getValueAt,
   hotEntities,
   listCommits,
-  listEntities,
+  listEntityModels,
   listSqliteFiles,
   openSpace,
   openSpaces,
@@ -134,7 +135,10 @@ export const inspect = new Command()
     });
   })
   /* inspect summary */
-  .command("summary <space:string>", "Space overview: commits, sessions, hot ops.")
+  .command(
+    "summary <space:string>",
+    "Space overview: commits, sessions, hot ops.",
+  )
   .action((options, space) => {
     const s = openSpace(resolveSpacePath(space));
     try {
@@ -150,10 +154,15 @@ export const inspect = new Command()
         console.log(`sessions: ${sum.sessions}`);
         console.log(`entities: ${sum.entities}  revisions: ${sum.revisions}`);
         console.log(
-          `ops: ${Object.entries(sum.ops).map(([k, v]) => `${k}=${v}`).join(" ")}`,
+          `ops: ${
+            Object.entries(sum.ops).map(([k, v]) => `${k}=${v}`).join(" ")
+          }`,
         );
         console.log(
-          `branches: ${sum.branches.map((b) => `${b.name || "(default)"}@${b.head_seq}`).join(" ")}`,
+          `branches: ${
+            sum.branches.map((b) => `${b.name || "(default)"}@${b.head_seq}`)
+              .join(" ")
+          }`,
         );
         console.log(
           `scheduler: ${
@@ -170,17 +179,25 @@ export const inspect = new Command()
     }
   })
   /* inspect commits */
-  .command("commits <space:string>", "Recent commits (who committed, ops, reads).")
+  .command(
+    "commits <space:string>",
+    "Recent commits (who committed, ops, reads).",
+  )
   .option("--session <prefix:string>", "Filter by session id prefix.")
   .option("--limit <n:number>", "Max rows.", { default: 50 })
   .action((options, space) => {
     const s = openSpace(resolveSpacePath(space));
     try {
-      const rows = listCommits(s, { session: options.session, limit: options.limit });
+      const rows = listCommits(s, {
+        session: options.session,
+        limit: options.limit,
+      });
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
-            `#${r.seq}\t${fmtSession(r.session)}\tlocal=${r.localSeq}\tops=${r.ops}\treads=${r.reads}\t${r.createdAt}`,
+            `#${r.seq}\t${
+              fmtSession(r.session)
+            }\tlocal=${r.localSeq}\tops=${r.ops}\treads=${r.reads}\t${r.createdAt}`,
           );
         }
       });
@@ -189,16 +206,24 @@ export const inspect = new Command()
     }
   })
   /* inspect hot */
-  .command("hot <space:string>", "Entities ranked by write count (contention proxy).")
+  .command(
+    "hot <space:string>",
+    "Entities ranked by write count (contention proxy).",
+  )
   .option("--limit <n:number>", "Max rows.", { default: 20 })
   .option("--branch <branch:string>", "Branch (default: '').")
   .action((options, space) => {
     const s = openSpace(resolveSpacePath(space));
     try {
-      const rows = hotEntities(s, { limit: options.limit, branch: options.branch });
+      const rows = hotEntities(s, {
+        limit: options.limit,
+        branch: options.branch,
+      });
       out(!!options.json, rows, () => {
         for (const r of rows) {
-          console.log(`${r.writes}\twrites\t${r.sessions} sessions\t${r.id}\t(${r.scope})`);
+          console.log(
+            `${r.writes}\twrites\t${r.sessions} sessions\t${r.id}\t(${r.scope})`,
+          );
         }
       });
     } finally {
@@ -206,28 +231,46 @@ export const inspect = new Command()
     }
   })
   /* inspect entities */
-  .command("entities <space:string>", "What's in the space: entities by kind + name.")
-  .option("--kind <kind:string>", "Filter: module | instance | stream | value | empty.")
+  .command(
+    "entities <space:string>",
+    "What's in the space: entities by kind, with lineage.",
+  )
+  .option(
+    "--kind <kind:string>",
+    "Filter: piece | module | stream | schema | owned-cell | free-cell | unknown.",
+  )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .option("--limit <n:number>", "Max entities to reconstruct.", { default: 2000 })
+  .option("--limit <n:number>", "Max entities to reconstruct.", {
+    default: 5000,
+  })
   .action((options, space) => {
     const s = openSpace(resolveSpacePath(space));
     try {
-      let rows = listEntities(s, { limit: options.limit, branch: options.branch });
+      let rows = listEntityModels(s, {
+        limit: options.limit,
+        branch: options.branch,
+      });
       if (options.kind) rows = rows.filter((r) => r.kind === options.kind);
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
           console.log("(no entities)");
           return;
         }
+        // A compact comprehension legend, then the table.
+        const counts = new Map<string, number>();
+        for (const r of rows) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1);
+        console.log(
+          [...counts.entries()].map(([k, n]) => `${k}=${n}`).join("  "),
+        );
         console.log(
           Table.from([
-            ["KIND", "NAME", "REVS", "LINKS", "ID"],
+            ["KIND", "LABEL", "OWN", "REVS", "LINKS", "ID"],
             ...rows.map((r) => [
               r.kind,
-              r.name.length > 40 ? `${r.name.slice(0, 39)}…` : r.name,
-              String(r.revisions),
-              String(r.links),
+              r.label.length > 34 ? `${r.label.slice(0, 33)}…` : r.label,
+              r.owned ? "↳" : "",
+              String(r.revisions ?? 0),
+              String(r.links ?? 0),
               r.id,
             ]),
           ]).toString(),
@@ -237,8 +280,70 @@ export const inspect = new Command()
       s.close();
     }
   })
+  /* inspect piece */
+  .command(
+    "piece <space:string> <entity:string>",
+    "A piece's pattern, input, result, and owned cells.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Scope key (default: space).")
+  .option("--code", "Include the full pattern TS source.")
+  .action((options, space, entity) => {
+    const s = openSpace(resolveSpacePath(space));
+    try {
+      const piece = describePiece(s, entity, {
+        branch: options.branch,
+        scope: options.scope,
+        includeCode: !!options.code,
+      });
+      out(!!options.json, piece, () => {
+        if ("error" in piece) {
+          console.log(`(${piece.error})`);
+          return;
+        }
+        console.log(`piece:   ${piece.name}  [${piece.regime}]`);
+        console.log(`id:      ${piece.id}`);
+        if (piece.pattern) {
+          const p = piece.pattern;
+          console.log(
+            `pattern: ${p.filename ?? "(unresolved)"}` +
+              (p.symbol ? ` · ${p.symbol}` : "") +
+              (p.codeLines ? ` · ${p.codeLines} lines` : "") +
+              (p.id ? `  ${p.id}` : ""),
+          );
+        }
+        if (piece.input) {
+          console.log(`input:   ${piece.input.summary}  ${piece.input.id}`);
+        }
+        console.log(`result:  {${piece.resultKeys.join(", ")}}`);
+        if (piece.schemaKeys.length) {
+          console.log(`schema:  {${piece.schemaKeys.join(", ")}}`);
+        }
+        if (piece.ownedCells.length) {
+          console.log(`owned cells (${piece.ownedCells.length}):`);
+          for (const c of piece.ownedCells) {
+            console.log(
+              `  ${c.kind.padEnd(10)} ${
+                c.summary.length > 40 ? `${c.summary.slice(0, 39)}…` : c.summary
+              }\t${c.id}`,
+            );
+          }
+        }
+        if (piece.pattern?.code) {
+          console.log(
+            `\n--- ${piece.pattern.filename} ---\n${piece.pattern.code}`,
+          );
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
   /* inspect history */
-  .command("history <space:string> <entity:string>", "Every write that touched an entity.")
+  .command(
+    "history <space:string> <entity:string>",
+    "Every write that touched an entity.",
+  )
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max rows.", { default: 200 })
@@ -254,7 +359,9 @@ export const inspect = new Command()
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
-            `seq=${r.seq}\tcommit=${r.commitSeq}\t${r.op}\t${fmtSession(r.session)}\tlocal=${r.localSeq}\t${r.createdAt}`,
+            `seq=${r.seq}\tcommit=${r.commitSeq}\t${r.op}\t${
+              fmtSession(r.session)
+            }\tlocal=${r.localSeq}\t${r.createdAt}`,
           );
         }
       });
@@ -267,7 +374,10 @@ export const inspect = new Command()
     "value-at <space:string> <entity:string>",
     "Reconstructed value of an entity at a seq.",
   )
-  .option("--seq <n:number>", "Reconstruct as of this commit seq (default: latest).")
+  .option(
+    "--seq <n:number>",
+    "Reconstruct as of this commit seq (default: latest).",
+  )
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
@@ -277,21 +387,34 @@ export const inspect = new Command()
     try {
       const res = getValueAt(
         s,
-        { id: entity, scope: options.scope, branch: options.branch, atSeq: options.seq },
+        {
+          id: entity,
+          scope: options.scope,
+          branch: options.branch,
+          atSeq: options.seq,
+        },
         splitPath(options.path),
       );
       const shown = options.doc ? res.document : res.value;
-      out(!!options.json, { exists: res.exists, value: annotate(shown) }, () => {
-        if (!res.exists) console.log("(absent at this seq)");
-        else if (shown === undefined) console.log("(entity present, but nothing at that path)");
-        else console.log(JSON.stringify(annotate(shown), null, 2));
-      });
+      out(
+        !!options.json,
+        { exists: res.exists, value: annotate(shown) },
+        () => {
+          if (!res.exists) console.log("(absent at this seq)");
+          else if (shown === undefined) {
+            console.log("(entity present, but nothing at that path)");
+          } else console.log(JSON.stringify(annotate(shown), null, 2));
+        },
+      );
     } finally {
       s.close();
     }
   })
   /* inspect converge */
-  .command("converge <entity:string>", "Compare an entity's value across spaces.")
+  .command(
+    "converge <entity:string>",
+    "Compare an entity's value across spaces.",
+  )
   .option("--all", "Use all discovered spaces.")
   .option("--spaces <list:string>", "Comma-separated DIDs/prefixes/paths.")
   .option("--dir <dir:string>", "Directory of *.sqlite files.")
@@ -307,23 +430,37 @@ export const inspect = new Command()
       });
       const r = convergence(
         refs,
-        { id: entity, scope: options.scope, branch: options.branch, path: splitPath(options.path) },
+        {
+          id: entity,
+          scope: options.scope,
+          branch: options.branch,
+          path: splitPath(options.path),
+        },
         index,
       );
       out(!!options.json, r, () => {
         console.log(
           `verdict: ${r.verdict.toUpperCase()}` +
-            (r.relationship && r.relationship !== "n/a" ? `  [${r.relationship}]` : ""),
+            (r.relationship && r.relationship !== "n/a"
+              ? `  [${r.relationship}]`
+              : ""),
         );
-        console.log(`entity:  ${r.id}` + (r.path.length ? `  path=/${r.path.join("/")}` : ""));
+        console.log(
+          `entity:  ${r.id}` +
+            (r.path.length ? `  path=/${r.path.join("/")}` : ""),
+        );
         for (const v of r.views) {
           if (!v.present) {
             console.log(`  ${v.label}\tABSENT`);
             continue;
           }
-          const cluster = r.clusters.findIndex((c) => c.valueKey === v.valueKey) + 1;
+          const cluster = r.clusters.findIndex((c) =>
+            c.valueKey === v.valueKey
+          ) + 1;
           console.log(
-            `  ${v.label}\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${v.lastSession ? fmtSession(v.lastSession) : "?"}\tcluster#${cluster}`,
+            `  ${v.label}\thead=${v.headSeq}\trevs=${v.revisions}\tlast=${
+              v.lastSession ? fmtSession(v.lastSession) : "?"
+            }\tcluster#${cluster}`,
           );
         }
         console.log(`note: ${r.caveat}`);
@@ -342,7 +479,10 @@ export const inspect = new Command()
   .action((options) => {
     const refs = resolveMultiSpaces(options);
     try {
-      const result = convergenceScan(refs, { limit: options.limit, branch: options.branch });
+      const result = convergenceScan(refs, {
+        limit: options.limit,
+        branch: options.branch,
+      });
       out(!!options.json, result, () => {
         console.log(
           `shared entities (in >=2 spaces): ${result.sharedEntities}  examined: ${result.examined}`,
@@ -356,7 +496,9 @@ export const inspect = new Command()
           const present = f.views.filter((v) => v.present).length;
           const missing = f.views.length - present;
           console.log(
-            `  ${f.verdict.toUpperCase()}\t${relTag(f)}\t${f.id}\tpresent=${present}` +
+            `  ${f.verdict.toUpperCase()}\t${
+              relTag(f)
+            }\t${f.id}\tpresent=${present}` +
               (missing ? `\tmissing=${missing}` : "") +
               `\tclusters=${f.clusters.length}`,
           );
