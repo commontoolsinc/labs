@@ -40,7 +40,7 @@ Each PR's base is the branch below it, so each diff shows only its own delta.
 | 3 | `state-inspector-replica-classification` | [#4377](https://github.com/commontoolsinc/labs/pull/4377) | #4376 | M2.5: replica-vs-instance classification | MERGEABLE vs base |
 | 4 | `state-inspector-cf-inspect` | [#4386](https://github.com/commontoolsinc/labs/pull/4386) | #4377 | M3: `cf inspect` + local-DB discovery (usable) | MERGEABLE vs base |
 | 5 | `state-inspector-dogfood` | [#4393](https://github.com/commontoolsinc/labs/pull/4393) | #4386 | dogfood fixes: fvj1 commit decode, `entities`, scheduler/session legibility | MERGEABLE vs base |
-| 6 | `state-inspector-model-unification` | (no PR yet) | #4393 | design doc only so far; **next-phase code lands here** | — |
+| 6 | `state-inspector-model-unification` | [#4395](https://github.com/commontoolsinc/labs/pull/4395) | #4393 | **Phase 1 model unification** (`model.ts`): whole-document read + path-set classification + lineage; `cf inspect piece`; design + handoff docs | MERGEABLE vs base |
 
 All draft. `mergeable` for 2–5 is relative to their *parent branch*; once the base
 rebases onto live main, re-check.
@@ -79,21 +79,35 @@ model unification, so what merges is fluent, not guessing. Alternatively, if the
 team wants `cf inspect` sooner, M1–M3 (#4375–#4386) are independently correct and
 useful; #4393's `entities` is just incomplete, not wrong.
 
-## Next phase: model unification (Phase 1) — start here post-compaction
+## Phase 1: model unification — ✅ DONE (PR #4395, commit `f5046a900`)
 
-Goal: make the tool fluent in the real entity model instead of reading only
-`doc.value`. Per `2026-06-28-state-inspector-model-unification.md`:
+`model.ts` now loads an entity's **whole `is` document** and classifies by
+path-set into **piece / module / stream / schema / owned-cell / free-cell**
+(modern `patternIdentity` + legacy `$TYPE`/`resultRef` regimes), and resolves
+**lineage** — piece→input (`argument`), piece→pattern (`patternIdentity` →
+module entity, matched by `value.identity`), owned-cell→owner (`result`),
+piece→manifest (`internal`). `cf inspect entities` rewired onto
+`listEntityModels` (finds all 7 pieces, not 4); new `describePiece` /
+`cf inspect piece <id>` shows pattern source + input + result/schema + owned
+cells. Verified on the real notes space; tests + fmt/lint/check green.
 
-- New `model.ts`: load an entity's **whole `is` document** (all top-level paths,
-  not just `value`); classify by path-set into **piece / owned-cell / free-cell /
-  stream / module / schema** (handle modern `patternIdentity` AND legacy
-  `$TYPE`/`resultRef` regimes); resolve **lineage** — piece→input (`argument`),
-  piece→pattern (`patternIdentity` → module `code`/`filename`), owned-cell→owner
-  (`result`), piece→manifest (`internal`).
-- Rewire `entities`/`value-at` onto it; add `cf inspect piece <id>` (shows a piece
-  with input, result, owned cells, and pattern source).
-- Then: space grouping → `graph` command → time travel (`diff`/`timeline`) →
-  HTML visual surface. (Time-travel engine already exists via `atSeq`.)
+## Next phase (Phase 2+) — start here
+
+Per `2026-06-28-state-inspector-model-unification.md` roadmap, in order:
+- **Space grouping** — discover + group a user's implicated spaces (home →
+  profiles → main; placeholders marked) via the §3.2 on-disk signals; grouped
+  tree in `cf inspect spaces`.
+- **`graph` command** — emit the real entity graph from the unified model
+  (nodes = pieces/cells/streams/modules; edges = ownership + `patternIdentity` +
+  `argument` + data links).
+- **Time travel** — `diff <entity> --from <a> --to <b>` + a `timeline`. The
+  engine already reconstructs at any seq (`atSeq`); this is surface work.
+- **Visual surface** — self-contained HTML over the existing `--json`.
+
+Open: `value-at` could annotate the entity kind/lineage too (left as-is for now —
+`--doc` already shows the meta paths). Legacy-regime piece classification is
+best-effort (the notes space is fully modern); verify against the 571 MB legacy
+DB when convenient.
 
 ## Resume gotchas
 
