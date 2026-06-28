@@ -335,9 +335,12 @@ function renderDetail(id){
     host.append(section("Scopes — view as identity"+(ov.divergent?" ⚑":""), true, body));
   }
 
-  // schema
+  // schema (a stream's payload schema is resolved from its owner piece)
   if(d.schema!==undefined){
-    host.append(section("Schema"+(d.schemaKeys?"  {"+d.schemaKeys.join(", ")+"}":""), false,
+    const title=(d.streamPayload?"Stream payload schema":"Schema")
+      +(d.schemaKeys&&d.schemaKeys.length?"  {"+d.schemaKeys.join(", ")+"}":"")
+      +(d.schemaSource?"  ·  "+d.schemaSource:"");
+    host.append(section(title, d.streamPayload||d.kind!=="module",
       [el("pre",{text:JSON.stringify(d.schema,null,2)})]));
   }
   // ifc (schema-as-value)

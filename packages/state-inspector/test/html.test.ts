@@ -90,7 +90,20 @@ function seed(path: string) {
         { partialCause: "q", link: link("of:stream") },
       ],
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
-      schema: { type: "object", properties: {}, $defs: {} },
+      schema: {
+        type: "object",
+        properties: {
+          // the `addNote` stream's payload schema lives here on the owner piece
+          addNote: { $ref: "#/$defs/AddNoteEvent", asCell: ["stream"] },
+        },
+        $defs: {
+          AddNoteEvent: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+          },
+        },
+      },
     }),
     2,
   );
@@ -161,6 +174,13 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
         assertEquals(stream.kind, "stream");
         assertEquals(stream.contextName, "addNote");
         assertEquals(stream.label, "⊙ addNote");
+        // its payload schema is resolved from the owner piece's schema.
+        assert(stream.streamPayload, "stream payload schema resolved");
+        assert(
+          stream.schemaKeys?.includes("properties"),
+          "payload shape present",
+        );
+        assertStringIncludes(stream.schemaSource ?? "", "addNote");
         // A `{ link, specifier }` cell is a module import.
         const imp = byId("of:imp");
         assertEquals(imp.label, "import ./dep.tsx");

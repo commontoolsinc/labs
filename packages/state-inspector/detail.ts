@@ -78,9 +78,14 @@ export interface EntityDetail {
   /** The annotated value (links/streams normalized; depth-bounded). */
   value: unknown;
   valuePreview: string;
-  /** The result JSONSchema (annotated), if the entity carries one. */
+  /** The result JSONSchema (annotated), if the entity carries one. Streams and
+   * named owned cells get their DECLARED schema resolved from the owner piece. */
   schema?: unknown;
   schemaKeys?: string[];
+  /** Where `schema` came from when it isn't the entity's own (e.g. owner piece). */
+  schemaSource?: string;
+  /** True when the declared schema is a stream payload (`asCell:["stream"]`). */
+  streamPayload?: boolean;
   /** IFC labels from a schema-as-value entity, if present. */
   ifc?: unknown;
   /** Parsed CFC labels from the `cfc` meta path, if present. */
@@ -175,6 +180,35 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
     });
   }
   return out;
+}
+
+/**
+ * A stream / owned cell carries no schema of its own — its DECLARED schema (a
+ * stream's event payload, a cell's value type) lives on the OWNER piece's
+ * `schema.properties[<key>]` where `<key>` is the name that points at it. Resolve
+ * that property, following a `$ref` into the owner's `$defs`.
+ */
+function declaredSchemaFor(
+  ownerDoc: EntityDocument | undefined,
+  key: string,
+): { schema: unknown; keys?: string[]; isStream: boolean } | undefined {
+  const osch = ownerDoc?.schema;
+  if (!isObj(osch) || !isObj(osch.properties)) return undefined;
+  const prop = osch.properties[key];
+  if (!isObj(prop)) return undefined;
+  let resolved: Record<string, unknown> = prop;
+  const ref = typeof prop.$ref === "string" ? prop.$ref : undefined;
+  if (ref?.startsWith("#/$defs/") && isObj(osch.$defs)) {
+    const def = osch.$defs[ref.slice("#/$defs/".length)];
+    if (isObj(def)) resolved = def;
+  }
+  const isStream = Array.isArray(prop.asCell) &&
+    (prop.asCell as unknown[]).includes("stream");
+  return {
+    schema: annotate(resolved),
+    keys: Object.keys(resolved),
+    isStream,
+  };
 }
 
 /** Collect every sigil link in a value, with its JSON path. */
@@ -306,8 +340,21 @@ function detailFromDoc(
   if (isModuleValue(value)) code = value.code;
 
   // --- schema / ifc / cfc ------------------------------------------------
-  const schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
-  const schemaKeys = isObj(doc.schema) ? Object.keys(doc.schema) : undefined;
+  let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
+  let schemaKeys = isObj(doc.schema) ? Object.keys(doc.schema) : undefined;
+  let schemaSource: string | undefined;
+  let streamPayload: boolean | undefined;
+  // A stream / named owned cell has no own schema — resolve the DECLARED one
+  // from the owner piece that names it.
+  if (schema === undefined && named) {
+    const decl = declaredSchemaFor(ctx.docs.get(named.owner), named.key);
+    if (decl) {
+      schema = decl.schema;
+      schemaKeys = decl.keys;
+      streamPayload = decl.isStream;
+      schemaSource = `declared in owner · ${named.key}`;
+    }
+  }
   const ifc = isObj(value) && "ifc" in value ? annotate(value.ifc) : undefined;
   const cfc = parseCfc(doc.cfc);
 
@@ -325,6 +372,8 @@ function detailFromDoc(
     valuePreview: summarize(value),
     schema,
     schemaKeys,
+    schemaSource,
+    streamPayload,
     ifc,
     cfc,
     revisions: versions.length,
