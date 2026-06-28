@@ -1240,6 +1240,35 @@ Summary table; the full per-mechanism walkthrough with file references is in
     interning ~+46ms) has a hard ceiling of ~150ms (~25% of active CPU, ~10% of
     wall) and touches none of the idle.
 
+    *Root cause of the extra nodes (commit `1263d95e9`, "scheduler-v2 4.2: delete
+    dependency collection").* The builder graph and node-subscription path are
+    byte-identical on both trees (verified — `computed`/`lift`/`map` lower to the
+    same `type:"javascript"` nodes and both trees `scheduler.subscribe()` all ~29
+    sites; #3911 per-internal-cell storage is present in *both*, so storage is not
+    the differentiator). The divergence is **dependency discovery**. main learned
+    an action's reads by running a `populateDependencies` callback inside a
+    **throwaway transaction it then aborted** (`scheduler/dependency-collection.ts`);
+    when that resolution's `.get()` hit a nested per-row computed (a CFC label,
+    `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
+    tx — value produced, but no commit, no separate `run()`, no counted run** — so
+    those sites report literal 0 in `actionStats` while still computing. v2 deleted
+    that whole run-to-observe path in favour of the transformer's *declared* reads
+    annotation + pure P3 demand-gating. With no collect pass there is no
+    inline-fold: when the live apex render propagates `liveRefs` up to the
+    computeds it reads, each becomes live → demanded → **run in its own transaction
+    and committed to its own internal/result cell** (#3911). So main's ~29
+    inline-folded computeds become ~73 discrete committed runs in v2 — each paying
+    the per-commit pipeline above. This is **deliberate and load-bearing**: the
+    separate committed node *is* the per-row memo (the CHECK-skippable population
+    probed 0 — v2 re-runs nothing main keeps clean, so it is real incrementality,
+    not waste), and it carries per-node CFC label provenance (`addCfcTriggerReads`
+    on the node's own tx) and per-node D8 rehydration state that main's inline-fold
+    does not produce discretely. Coarsening it back inline — the only lever for the
+    +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
+    provenance, and rehydration. So the 2.2× is the genuine price of v2 making
+    every reactive value a persisted, independently-incremental, CFC-labelled,
+    rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
+
     *Levers ruled out — do not re-try without new evidence.* The surplus is
     cross-runtime write volume with **no writer node to gate against** (apex
     read-set consults show `writers=0` for ~half its re-runs). Built and measured,
