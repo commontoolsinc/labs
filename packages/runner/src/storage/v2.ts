@@ -133,6 +133,11 @@ const logger = getLogger("storage.v2", {
   enabled: true,
   level: "error",
 });
+const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
+  enabled: false,
+  level: "info",
+  logCountEvery: 0,
+});
 
 function withCommitTiming<T>(
   keys: string[],
@@ -269,6 +274,12 @@ type DocumentRecord = {
   confirmed: ConfirmedVersion;
   pending: PendingVersion[];
   materialized?: PendingMaterializationCache;
+};
+
+type PendingPatchLogContext = {
+  space: MemorySpace;
+  id: URI;
+  scope?: CellScope;
 };
 
 type ConfirmedCommitRead = {
@@ -421,6 +432,7 @@ const compactChangedPaths = (paths: readonly string[][]): string[][] => {
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
+  logContext: PendingPatchLogContext,
 ): EntityDocument | undefined => {
   switch (pending.op) {
     case "delete":
@@ -436,6 +448,19 @@ const applyPendingVersion = (
       ) {
         if (hasValueAtPath(pending.value, path)) {
           const setPath = pendingSetPathForBase(next, pending.value, path);
+          if (!isSamePath(setPath, path)) {
+            pendingPatchLogger.info("pending-branch-replace", () => [
+              "pending patch visibility replaced data at an existing branch that blocked the nested write",
+              {
+                space: logContext.space,
+                id: logContext.id,
+                scope: normalizeCellScope(logContext.scope),
+                localSeq: pending.localSeq,
+                path,
+                replacementPath: setPath,
+              },
+            ]);
+          }
           next = cloneWithValueAtPath(
             next,
             setPath,
@@ -469,6 +494,7 @@ const ensurePendingMaterializationCache = (
 
 const materializedVersionThroughPending = (
   record: DocumentRecord,
+  logContext: PendingPatchLogContext,
   pendingCount = record.pending.length,
 ): MaterializedVersion => {
   if (pendingCount <= 0) {
@@ -484,7 +510,7 @@ const materializedVersionThroughPending = (
     const pending = record.pending[nextIndex]!;
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending),
+      value: applyPendingVersion(base.value, pending, logContext),
       transactionValue: UNCACHED_TRANSACTION_VALUE,
     });
   }
@@ -2550,6 +2576,7 @@ class SpaceReplica implements ISpaceReplica {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
+            { space: this.#space, id, scope },
             lastPendingIndex + 1,
           );
           const cache = ensurePendingMaterializationCache(record);
@@ -2564,7 +2591,11 @@ class SpaceReplica implements ISpaceReplica {
         } else {
           promoted = confirmedVersion(
             applied.seq,
-            applyPendingVersion(record.confirmed.value, pending),
+            applyPendingVersion(record.confirmed.value, pending, {
+              space: this.#space,
+              id,
+              scope,
+            }),
           );
         }
       }
@@ -2613,7 +2644,11 @@ class SpaceReplica implements ISpaceReplica {
     }
     return {
       record,
-      version: materializedVersionThroughPending(record),
+      version: materializedVersionThroughPending(record, {
+        space: this.#space,
+        id,
+        scope,
+      }),
     };
   }
 
