@@ -435,7 +435,8 @@ const baseWithMutableReplaySpine = (
   return root;
 };
 
-const cloneWithPendingReplayValueAtPath = (
+/** @internal Exported for testing only. */
+export const cloneWithPendingReplayValueAtPath = (
   base: FabricValue,
   path: readonly string[],
   value: FabricValue,
