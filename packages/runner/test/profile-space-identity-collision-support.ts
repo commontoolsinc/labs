@@ -1,4 +1,3 @@
-import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
@@ -17,8 +16,8 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // space links + the per-event id), making it per-user AND per-profile unique
 // while the display name flows only to `initialName`.
 
-const userA = await Identity.fromPassphrase("ct1650-user-a");
-const userB = await Identity.fromPassphrase("ct1650-user-b");
+export const userA = await Identity.fromPassphrase("ct1650-user-a");
+export const userB = await Identity.fromPassphrase("ct1650-user-b");
 
 const sysDir = fromFileUrl(new URL("../../patterns/system/", import.meta.url));
 const read = (n: string) => Deno.readTextFileSync(sysDir + n);
@@ -47,7 +46,7 @@ const PROGRAM: RuntimeProgram = {
 };
 
 const RESULT_CAUSE = "ct1650 profile space identity";
-const PROFILE_NAME = "Ada Lovelace";
+export const PROFILE_NAME = "Ada Lovelace";
 
 const profileLinkListSchema = {
   type: "array",
@@ -57,7 +56,7 @@ const profileLinkListSchema = {
 
 // Run profile-create as `signer`, fire createProfile with `name`, return the
 // space DID of the freshly-created profile (its own inSpace space).
-async function createProfileSpace(
+export async function createProfileSpace(
   signer: Identity,
   name: string,
 ): Promise<string> {
@@ -107,29 +106,3 @@ async function createProfileSpace(
     await manager.close();
   }
 }
-
-describe("CT-1650 profile space identity (per-user, name-independent)", () => {
-  let spaceA: string;
-  let spaceB: string;
-  let spaceA2: string;
-
-  beforeEach(async () => {
-    spaceA = await createProfileSpace(userA, PROFILE_NAME);
-    spaceB = await createProfileSpace(userB, PROFILE_NAME);
-    // Same user, a SECOND profile with the same name — must not collide either.
-    spaceA2 = await createProfileSpace(userA, PROFILE_NAME);
-  });
-
-  it("two users with the same profile name get distinct spaces", () => {
-    expect(spaceA).not.toBe(spaceB);
-  });
-
-  it("one user's two same-named profiles get distinct spaces", () => {
-    expect(spaceA).not.toBe(spaceA2);
-  });
-
-  it("derived spaces are real DID spaces", () => {
-    expect(spaceA.startsWith("did:key:")).toBe(true);
-    expect(spaceB.startsWith("did:key:")).toBe(true);
-  });
-});
