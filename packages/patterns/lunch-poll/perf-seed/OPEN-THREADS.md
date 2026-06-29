@@ -75,8 +75,10 @@ input on filter/flatMap **+** `tx.recordCfcStructureContainer` so prepare re-der
 a pass after the root write). map opts out (stays clean). **Verified:** over-taint removed (index-drop →
 `structure=[]`), membership preserved (isPositive/empty/shape-only), **full runner suite 717 files /
 3533 steps, 0 failed.** Residual = design blessing for seefeld (Q1–Q5 in handoff: clearing semantics,
-churn, order/offset). #4391's container change is separately label-neutral. **Landing decision open:**
-new PR off main vs. fold into #4391.
+churn, order/offset). **#4391 is part of the complete fix:** verified (grow test) that its container
+probe-scoping closes the container/own-output deref path — Stage 2's input fix alone re-leaks the kept
+element's content on a re-reconcile reading a non-empty prior container. Complete fix = **#4391 (container
+reads) + Stage 2 (input read + structure re-stamp)**. **Recommendation: fold Stage 2 into #4391.**
 
 ### 4. Resume during-batch self-heal → **CT-1802** (resolved; deferred guard)
 The "write-after-sync" worry (republish reads a transient `undefined` → persists a shrink) is

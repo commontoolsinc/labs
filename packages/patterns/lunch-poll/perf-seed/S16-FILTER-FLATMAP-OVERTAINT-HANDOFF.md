@@ -189,26 +189,34 @@ every reconcile, decoupled from value writes.** Implementation:
   re-stamp, and does J capture the comparator's reads? (Matters for sort-like; out of
   scope for filter/flatMap.)
 
-## #4391 — recommendation (updated: dependency VERIFIED)
-The Stage-2 fix was VERIFIED on top of #4391, then re-tested with #4391's container
-probe-scoping **un-done**: Stage 2 alone passes the full cfc suite (61 files / 312
-steps, 0 failed) AND the over-taint guard (index-drop → `structure=[]`). **So #4391's
-container-read commit (`7d3366272`) is NOT load-bearing for the fix** — Stage 2 is
-self-sufficient. (A hypothesis that the container presence read — itself an
-`asCell`-array deref — would re-leak without #4391 was tested and did NOT reproduce;
-it stays clean. Whether some other reconcile timing could leak via that read is
-unverified — probe-scoping it is reasonable, cheap defense-in-depth, structurally
-consistent with map, but not required.)
+## #4391 — recommendation (dependency VERIFIED — it IS part of the complete fix)
+There are **two** coordinator deref paths that over-taint the result `structure`:
+1. the **input-list read** — Stage 2 fixes (identity-only materialization);
+2. the **container / own-output read** — `resultWithLog.get()` (`priorSlots`) on the
+   `asCell` presence schema, which **#4391 (`7d3366272`) probe-scopes**.
 
-Net: Stage 2 (`S16-stage2-complete.patch`) is the complete fix on its own. #4391's
-container probe-scoping is optional defense-in-depth (keep or drop). The two
-genuinely-good #4391 commits (`trackUntilSettled` doc-nit `07b1b7793`;
-resume-republish unit-mock fix `b8b26ca80`) are unrelated and should land regardless.
+**Verified they are complementary (the decisive grow test):** index-keep-first
+predicate (never reads element content) over `[el0, el1]`, settle (`structure=[]`),
+then GROW the list to `[el0, el1, el2]` so the re-reconcile reads the *non-empty*
+durable container `[el0]` via `priorSlots`:
+- **with #4391**: `structure=[]` ✓
+- **without #4391** (Stage-2 input fix only): `structure=["alice-secret"]` — the
+  container read re-leaked the KEPT element's content.
 
-**Landing options:** (a) fold Stage 2 into #4391 — #4391 becomes the complete fix and
-its container change earns its keep as defense-in-depth; (b) fresh branch off main with
-Stage 2 alone (note: the saved patch is #4391-relative — it includes #4391's
-probeScoped context, so it needs regenerating against main for an off-main branch).
+So **#4391's container probe-scoping is load-bearing** for the COMPLETE fix — it was
+"label-neutral" only because the input read was leaking everything anyway; once Stage 2
+fixes the input read, #4391 becomes the last guard on the container-read path. (My
+earlier "not load-bearing" note was from an incomplete test — index-drop reads an
+*empty* prior container, so it never exercised `priorSlots`-deref. The grow scenario
+forces the non-empty prior read. Lesson: test the re-reconcile / non-empty-prior path.)
+
+**Net:** the complete over-taint fix = **#4391 (container reads) + Stage 2 (input read
++ structure re-stamp)**. All three #4391 commits keep independent value:
+`7d3366272` (container probe-scoping — now load-bearing), `07b1b7793` (trackUntilSettled
+doc-nit), `b8b26ca80` (resume-republish unit-mock fix). **Recommendation: fold Stage 2
+into #4391** and reframe #4391 from "label-neutral container probe-scoping" to "the
+complete S16 filter/flatMap over-taint fix." (Off-main alternative would have to
+re-include #4391's container probe-scoping anyway, so folding is cleaner.)
 
 ## CT-1801 / SC-8 — recommendation
 Hold the CFC specs PR. The canonical spec **is** at
