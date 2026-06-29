@@ -47,6 +47,7 @@ import type { Vote, VoteColor } from "../lunch-poll/main.tsx";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME, CFC_BROWSER_PROFILE_COUNT } = env;
 const PROPAGATION_TIMEOUT = 60_000;
+const OPTION_CARD_READY_TIMEOUT = 180_000;
 const PROFILE_COUNT = Math.max(5, CFC_BROWSER_PROFILE_COUNT);
 const OPTIONS = Array.from(
   { length: 10 },
@@ -271,7 +272,7 @@ const waitForOptionIdForTitle = async (
         return false;
       }
     },
-    { timeout: PROPAGATION_TIMEOUT, delay: 250 },
+    { timeout: OPTION_CARD_READY_TIMEOUT, delay: 250 },
   );
   if (!optionId) {
     throw new Error(`Option card id not ready for title: ${title}`, {
