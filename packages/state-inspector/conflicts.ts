@@ -57,6 +57,10 @@ export interface ContendedEntity {
   interleaved: boolean;
   /** Lost-update reads (attached by the explorer bundle for multi-user cells). */
   staleReads?: StaleRead[];
+  /** True once stale-read analysis ran for this cell. `false`/absent on a
+   * multi-user cell means analysis was SKIPPED (a cap), not that it's clean —
+   * the UI must distinguish "no anomaly" from "not analyzed". */
+  staleReadsAnalyzed?: boolean;
 }
 
 /** Distinct writer identities (principals) across a writer list. */

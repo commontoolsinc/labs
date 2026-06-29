@@ -200,8 +200,11 @@ export function convergence(
           // converged. Treat it as absent for the verdict.
           view.present = false;
         } else {
+          // Cluster on the RAW value (depth-complete, fabric-aware). Annotate is
+          // for DISPLAY only — hashing it would falsely converge values that
+          // differ below the annotate depth cap or only by BigInt vs its tag.
           view.value = annotate(res.value);
-          view.valueKey = canonical(view.value);
+          view.valueKey = canonical(res.value);
         }
       } catch (e) {
         view.error = (e as Error).message;

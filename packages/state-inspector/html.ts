@@ -98,20 +98,31 @@ function buildConflicts(
   branch: string,
   scope: string,
 ): ContendedEntity[] {
+  const STALE_READ_ANALYSIS_CAP = 60;
   const contended = contendedEntities(space, { branch, scope, limit: 300 });
   let analyzed = 0;
   for (const c of contended) {
-    if (c.multiUser && analyzed < 60) {
+    if (c.multiUser && analyzed < STALE_READ_ANALYSIS_CAP) {
       analyzed++;
       c.staleReads = entityConflicts(space, c.id, { branch, scope }).staleReads;
+      c.staleReadsAnalyzed = true;
     }
+    // Beyond the cap, leave staleReadsAnalyzed falsy so the UI shows "not
+    // analyzed" rather than rendering an unanalyzed multi-user cell as clean.
   }
   return contended;
 }
 
 /** Embed JSON safely inside an HTML <script> block. */
 function safeJson(data: unknown): string {
-  return JSON.stringify(data).replace(/</g, "\\u003c");
+  // Escape `<` (blocks `</script>` breakout) and the U+2028/U+2029 line
+  // terminators, which are legal in JSON strings but break a `<script>` body.
+  return JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(
+      /[\u2028\u2029]/g,
+      (c) => (c === "\u2028" ? "\\u2028" : "\\u2029"),
+    );
 }
 
 /**
@@ -403,8 +414,12 @@ function renderDetail(id){
           +" but missed "+(sr.missedWriteOp||"write")+" @"+sr.missedWriteSeq+" by "+fmtSession(sr.missedWriteSession)
           +(sr.readerAlsoWrote?" — then wrote":"")}));
       }
+    } else if(cf.multiUser && !cf.staleReadsAnalyzed){
+      // Distinguish "analysis skipped (cap)" from "analyzed → clean".
+      body.push(el("div",{class:"muted",style:"margin-top:6px;font-size:12px",text:"stale-read analysis skipped (per-bundle cap) — run 'cf inspect conflicts <space> "+shortId(cf.id)+"' for this cell"}));
     }
-    host.append(section("Contention"+(cf.multiUser?" ⚔ MULTI-USER":"")+(cf.staleReads&&cf.staleReads.length?" · ⚠ anomaly":""), cf.multiUser, body));
+    const cfTag = (cf.staleReads&&cf.staleReads.length)?" · ⚠ anomaly":((cf.multiUser&&!cf.staleReadsAnalyzed)?" · ? not analyzed":"");
+    host.append(section("Contention"+(cf.multiUser?" ⚔ MULTI-USER":"")+cfTag, cf.multiUser, body));
   }
 
   // schema (a stream's payload schema is resolved from its owner piece)

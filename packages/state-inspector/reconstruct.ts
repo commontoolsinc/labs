@@ -74,11 +74,11 @@ interface RevRow {
 const MAX_SEQ = Number.MAX_SAFE_INTEGER;
 const MAX_OP = Number.MAX_SAFE_INTEGER;
 
-/** Does this DB carry the `branch` table? (legacy/partial DBs don't.) */
-function hasBranchTable(space: SpaceDb): boolean {
+/** Does this DB carry a given table? (legacy/partial DBs lack branch/snapshot.) */
+function hasTable(space: SpaceDb, name: string): boolean {
   return !!space.db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='branch'")
-    .get<{ 1: number }>();
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?")
+    .get<{ 1: number }>(name);
 }
 
 /**
@@ -110,7 +110,7 @@ function resolveBranchRow(
     .get<RevRow>(branch, id, scope, atSeq, atSeq, atOpIndex);
   if (row) return { row, branch };
 
-  if (!hasBranchTable(space)) return undefined;
+  if (!hasTable(space, "branch")) return undefined;
   const b = space.db
     .prepare("SELECT parent_branch, fork_seq FROM branch WHERE name = ?")
     .get<{ parent_branch: string | null; fork_seq: number | null }>(branch);
@@ -118,9 +118,10 @@ function resolveBranchRow(
   if (!b || b.parent_branch === null || b.parent_branch === undefined) {
     return undefined;
   }
-  // Inherit at min(seq, fork_seq); the op-index ceiling is a same-seq refinement
-  // that only applies on the originating branch, so the parent is read whole-seq.
-  const inheritedSeq = Math.min(atSeq, b.fork_seq ?? atSeq);
+  // Inherit at min(seq, fork_seq), with `?? 0` matching the engine's fallback
+  // exactly (engine.ts) — a malformed null fork_seq must not leak the parent's
+  // post-fork head into the child.
+  const inheritedSeq = Math.min(atSeq, b.fork_seq ?? 0);
   return resolveBranchRow(
     space,
     b.parent_branch,
@@ -134,12 +135,13 @@ function resolveBranchRow(
 
 /**
  * Reconstruct a patched document WITHIN a single branch, replicating the
- * engine's `reconstructPatchedDocument`: find the latest base (`set` OR
- * `delete`) at/before `(rowSeq, rowOpIndex)` on this branch — a `set` decodes to
- * its document, a `delete` (or no base at all) starts from an empty `{}` — then
- * apply that branch's `patch` rows strictly after the base up to the cut. No
- * cross-branch composition: a child-local patch with no child base starts from
- * `{}`, exactly as the runtime reads it (NOT the inherited parent value).
+ * engine's `reconstructPatchedDocument`: pick a base — the latest `snapshot`
+ * (if present and at/after the latest `set`/`delete`) else the latest
+ * `set`/`delete` at/before `(rowSeq, rowOpIndex)` — then apply that branch's
+ * `patch` rows strictly after the base up to the cut. A `set`/snapshot decodes
+ * to its document; a `delete` (or no base) starts from `{}`. No cross-branch
+ * composition: a child-local patch with no child base starts from `{}`, exactly
+ * as the runtime reads it (NOT the inherited parent value).
  */
 function reconstructWithinBranch(
   space: SpaceDb,
@@ -162,8 +164,27 @@ function reconstructWithinBranch(
     (base && base.op === "set" && base.data
       ? (decodeStored(base.data) as FabricValue)
       : {}) as FabricValue;
-  const baseSeq = base ? base.seq : 0;
-  const baseOpIndex = base ? base.op_index : -1;
+  let baseSeq = base ? base.seq : 0;
+  let baseOpIndex = base ? base.op_index : -1;
+
+  // Prefer a snapshot base when it's at/after the set/delete base — the engine
+  // does this for speed AND it future-proofs against any revision compaction
+  // behind a snapshot. The snapshot is keyed by seq only and represents the full
+  // materialized document at that seq, so patches strictly AFTER its seq apply.
+  if (hasTable(space, "snapshot")) {
+    const snap = space.db
+      .prepare(
+        `SELECT seq, value FROM snapshot
+         WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get<{ seq: number; value: string }>(branch, id, scope, rowSeq);
+    if (snap && snap.seq >= baseSeq) {
+      doc = decodeStored(snap.value) as FabricValue;
+      baseSeq = snap.seq;
+      baseOpIndex = MAX_OP; // patches with seq > snapshot.seq only
+    }
+  }
 
   const patches = space.db
     .prepare(

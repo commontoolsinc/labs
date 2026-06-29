@@ -26,7 +26,7 @@ import type { SpaceDb } from "./db.ts";
 import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { annotate, summarize } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { type EntityDocument, reconstructDocument } from "./reconstruct.ts";
 
 export type ScopeKind = "space" | "user" | "session" | "other";
 
@@ -177,12 +177,17 @@ export function valueAsIdentity(
   for (let i = 0; i < chain.length; i++) {
     const scope = chain[i];
     if (!scopeHasEntity(space, opts.id, scope, branch, opts.atSeq)) continue;
-    const doc = reconstructDocument(space, {
-      id: opts.id,
-      scope,
-      branch,
-      atSeq: opts.atSeq,
-    });
+    let doc: EntityDocument | undefined;
+    try {
+      doc = reconstructDocument(space, {
+        id: opts.id,
+        scope,
+        branch,
+        atSeq: opts.atSeq,
+      });
+    } catch {
+      continue; // a corrupt row in this scope — fall through to a more general one
+    }
     const overrides = chain
       .slice(i + 1)
       .some((s) => scopeHasEntity(space, opts.id, s, branch, opts.atSeq));
@@ -309,24 +314,45 @@ export function scopeOverlay(
        WHERE branch = ? AND id = ? GROUP BY scope_key`,
     )
     .all<{ scope_key: string; revs: number }>(branch, id);
-  const variants: ScopeVariant[] = rows.map((r) => {
-    const doc = reconstructDocument(space, { id, scope: r.scope_key, branch });
+  // Content-key each variant from the RAW reconstructed value (hashStringOf is
+  // already fabric-aware and depth-complete). Hashing the *annotated* value
+  // would falsely converge — depth-8 truncation collapses values that differ
+  // only deep, and BigInt-lowering collapses `10n` with the literal
+  // `{$bigint:"10"}`. The divergence verdict must compare what's actually stored.
+  const keyed = rows.map((r) => {
     const s = parseScope(r.scope_key);
-    return {
+    let value: unknown;
+    let summary: string;
+    let key: string;
+    try {
+      const doc = reconstructDocument(space, {
+        id,
+        scope: r.scope_key,
+        branch,
+      });
+      value = doc === undefined ? undefined : annotate(doc.value);
+      summary = doc === undefined ? "(absent)" : summarize(doc.value);
+      // raw value drives the divergence key; "absent" is its own class.
+      key = doc === undefined ? " absent" : hashStringOf(doc.value);
+    } catch (e) {
+      value = undefined;
+      summary = `«decode-error: ${(e as Error).message}»`;
+      key = ` error:${(e as Error).message}`;
+    }
+    const variant: ScopeVariant = {
       scope: r.scope_key,
       kind: s.kind,
       principal: s.principal,
       sessionId: s.sessionId,
-      value: doc === undefined ? undefined : annotate(doc.value),
-      summary: doc === undefined ? "(absent)" : summarize(doc.value),
+      value,
+      summary,
       revisions: r.revs,
     };
-  }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+    return { variant, key };
+  }).sort((a, b) => KIND_ORDER[a.variant.kind] - KIND_ORDER[b.variant.kind]);
 
-  // Content-key each variant with the data-model's canonical hash (not
-  // key-order-sensitive JSON.stringify, which both mis-flags same-value/
-  // different-key-order as divergent and throws on BigInt/Fabric leaves).
-  const keys = new Set(variants.map((v) => hashStringOf(v.value)));
+  const variants = keyed.map((k) => k.variant);
+  const keys = new Set(keyed.map((k) => k.key));
   return {
     id,
     variants,

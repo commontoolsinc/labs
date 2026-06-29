@@ -11,10 +11,17 @@
 // stable shapes instead of exploding into nested objects.
 
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { applyPatch } from "@commonfabric/memory/v2/patch";
+import type { PatchOp } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/api";
 
 import type { SpaceDb } from "./db.ts";
-import { annotate, summarize } from "./decode.ts";
+import { annotate, decodeStored, summarize } from "./decode.ts";
 import { getAtPath, reconstructDocument } from "./reconstruct.ts";
+
+/** Annotate depth for value COMPARISON — deep enough that the depth cap never
+ * hides a real diff (well past diffValues' own recursion bound). */
+const COMPARE_DEPTH = 32;
 
 export type ChangeKind = "added" | "removed" | "changed";
 
@@ -115,22 +122,24 @@ export function diffEntity(
   const path = opts.path ?? [];
   // `from` defaults to birth (seq 0 = empty baseline), NOT latest — omitting
   // atSeq would reconstruct the head, making a no-`--from` diff always empty.
-  const before = reconstructDocument(space, {
-    id,
-    scope,
-    branch,
-    atSeq: opts.fromSeq ?? 0,
-  });
-  const after = reconstructDocument(space, {
-    id,
-    scope,
-    branch,
-    atSeq: opts.toSeq,
-  });
+  // A decode failure on a corrupt row shouldn't crash the whole diff — treat an
+  // un-reconstructable side as absent (the diff then reports add/remove).
+  const safeReconstruct = (atSeq: number | undefined) => {
+    try {
+      return reconstructDocument(space, { id, scope, branch, atSeq });
+    } catch {
+      return undefined;
+    }
+  };
+  const before = safeReconstruct(opts.fromSeq ?? 0);
+  const after = safeReconstruct(opts.toSeq);
+  // Annotate DEEPLY for diffing: the default depth-8 cap would collapse two
+  // values that differ only deeper into a single `"…"`, silently dropping a real
+  // change. COMPARE_DEPTH is well past diffValues' own recursion bound.
   const pick = (doc: typeof before) => {
     if (doc === undefined) return undefined;
-    if (opts.doc) return annotate(doc);
-    return annotate(getAtPath(doc.value, path));
+    if (opts.doc) return annotate(doc, COMPARE_DEPTH);
+    return annotate(getAtPath(doc.value, path), COMPARE_DEPTH);
   };
   return {
     id,
@@ -175,7 +184,7 @@ export function entityTimeline(
   const limit = opts.limit ?? 500;
   const rows = space.db
     .prepare(
-      `SELECT r.seq, r.op_index, r.op, r.commit_seq,
+      `SELECT r.seq, r.op_index, r.op, r.data, r.commit_seq,
               c.session_id, c.created_at
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
        WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
@@ -185,25 +194,37 @@ export function entityTimeline(
       seq: number;
       op_index: number;
       op: string;
+      data: string | null;
       commit_seq: number;
       session_id: string;
       created_at: string;
     }>(branch, opts.id, scope, limit);
 
+  // Replay this branch's rows INCREMENTALLY — apply one op per step against a
+  // running document — instead of re-reconstructing from scratch at every seq
+  // (which is O(writes²) and won't return on a hot entity). The op semantics
+  // mirror reconstructWithinBranch: set=decode, patch=applyPatch(doc ?? {}),
+  // delete=tombstone (a later patch then starts from {}, as the engine does).
   const steps: TimelineStep[] = [];
+  let doc: FabricValue | undefined = undefined;
   let prevValue: unknown = undefined;
   for (const r of rows) {
-    const doc = reconstructDocument(space, {
-      id: opts.id,
-      scope,
-      branch,
-      atSeq: r.seq,
-      // Reconstruct the state right after THIS op, not the whole seq — a
-      // multi-op commit that writes the entity twice must summarize each step.
-      atOpIndex: r.op_index,
-    });
-    const exists = doc !== undefined;
-    const value = exists ? annotate(doc!.value) : undefined;
+    let decodeErr: string | undefined;
+    try {
+      if (r.op === "set") {
+        doc = r.data ? (decodeStored(r.data) as FabricValue) : undefined;
+      } else if (r.op === "patch") {
+        const ops = r.data ? (decodeStored(r.data) as PatchOp[]) : [];
+        doc = applyPatch((doc ?? {}) as FabricValue, ops);
+      } else if (r.op === "delete") {
+        doc = undefined;
+      }
+    } catch (e) {
+      decodeErr = (e as Error).message; // one bad row doesn't abort the timeline
+    }
+    const exists = doc !== undefined && !decodeErr;
+    const docValue = exists ? (doc as { value?: unknown }).value : undefined;
+    const value = exists ? annotate(docValue, COMPARE_DEPTH) : undefined;
     const changes = diffValues(prevValue, value).length;
     steps.push({
       seq: r.seq,
@@ -212,7 +233,11 @@ export function entityTimeline(
       commitSeq: r.commit_seq,
       session: r.session_id,
       createdAt: r.created_at,
-      summary: exists ? summarize(doc!.value) : "(deleted)",
+      summary: decodeErr
+        ? `«decode-error: ${decodeErr}»`
+        : exists
+        ? summarize(docValue)
+        : "(deleted)",
       exists,
       changes,
     });
