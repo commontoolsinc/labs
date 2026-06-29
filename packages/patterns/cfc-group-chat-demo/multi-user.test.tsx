@@ -22,8 +22,6 @@ import {
 import {
   messagesValue,
   profilesValue,
-  type SharedMessagesCell,
-  type SharedProfilesCell,
   TRUSTED_GROUP_CHAT_ADMIN_SURFACE,
   TRUSTED_GROUP_CHAT_PROFILE_SURFACE,
   TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
