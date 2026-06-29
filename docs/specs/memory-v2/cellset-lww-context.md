@@ -189,18 +189,129 @@ typed name. None of the landed work addresses the scalar `$value` own-write race
 
 ---
 
-## 5. Open questions for Robin (ubik2) — flagged in the PR body
+## 5. Open questions for Robin (ubik2) — investigated 2026-06-29
 
-1. **Patch-replay edge.** A nested scalar `$value` set emits a *patch* op.
-   Precondition-free, a patch whose ancestor path was concurrently removed (a
-   whole-doc delete racing a `$value` set — rare, and **not** the PerUser
-   own-write race this fixes) would throw at **read-materialization** rather than
-   be rejected at commit. Should we keep a structural (entity/parent-present)
-   precondition even when dropping the value-equality one?
-2. **Trigger choice.** Value-type heuristic (scalar → blind) vs an explicit
-   signal — and whether the blind-leaf-write belongs expressed in #4220's newer
-   "mergeable op / `excludeReadFromConflict`" vocabulary (conceptually adjacent;
-   functionally distinct today). Possible unification opportunity.
+Both questions from the PR body were dug into directly (engine-level repros +
+load-bearing reads). The original framing, then what we found.
+
+### 5.1 Q1 — Patch-replay edge: **verified real, bounded, with a tested mitigation**
+
+> *Original:* a nested scalar `$value` set emits a *patch* op; precondition-free,
+> a patch whose ancestor path was concurrently removed (a whole-doc delete racing
+> a `$value` set — rare, **not** the PerUser own-write race) would throw at
+> read-materialization rather than be rejected at commit. Keep a structural
+> (entity/parent-present) precondition even when dropping the value-equality one?
+
+**Reproduced at the engine level** (crafted set→delete→blind-patch commits via
+`applyCommit`, mirroring `packages/memory/test/v2-commit-preconditions.test.ts`):
+
+- **The edge is real.** A precondition-free nested-scalar `replace` patch whose
+  doc was concurrently whole-doc-deleted throws **`Error: missing path
+  /value/profileDraft`**. `reconstructPatchedDocument`
+  ([engine.ts:4147](../../../packages/memory/v2/engine.ts)) reads the delete as
+  its base (`SELECT_LATEST_BASE` is `op IN ('set','delete')`), so the doc is
+  `emptyEntityDocument() = {}`, and `replaceAtPath` → `thawSpine`
+  ([patch.ts:107](../../../packages/memory/v2/patch.ts)) can't descend.
+- **Why the fix exposes it.** Same scenario *pre-fix* (compare-and-set) is caught
+  cleanly as `ConflictError: stale confirmed read … conflicted with seq 2` — the
+  concurrent delete fires **TIER-1 (set/delete), which is path-blind**, and the
+  value-equality precondition we drop was the *only* carrier of that catch. The
+  engine has **no `entity-present` precondition** at all — only
+  `origin-committed` / `receipt-exists` / `entity-absent`
+  ([engine.ts:3446](../../../packages/memory/v2/engine.ts)).
+- **Blast radius is bounded.** The throw fires inside commit-time
+  `materializeSnapshots` (calls `readStateForScopeKey` unconditionally), which is
+  inside `engine.database.transaction(applyCommitTransaction).immediate(...)`
+  ([engine.ts:1542](../../../packages/memory/v2/engine.ts)) → **the commit rolls
+  back**; the doc is **not** durably poisoned (observed `read = null` after). The
+  harm is a *raw `Error` instead of a `ConflictError`* — ungraceful failure, not
+  corruption or silent loss. (A blind **`add`** of a fresh key instead silently
+  *resurrects* the doc — manifestation is op-shape-dependent.)
+- **End-to-end reachability** is rarer than the own-write race: it needs a real
+  flow that whole-doc-deletes a draft doc concurrent with a scalar set. The
+  *engine* mechanism is verified; an end-to-end pattern repro was not built.
+
+**Mitigation (prototype — uncommitted on the working tree; see §5.3).** Instead
+of dropping every blind read, `buildReads` **downgrades** each to a single
+`nonRecursive` existence read at the **entity root**
+([v2.ts:2165](../../../packages/runner/src/storage/v2.ts)). TIER-1 is path-blind
+→ a concurrent whole-doc delete/replace still yields a clean `ConflictError`;
+TIER-2 `nonRecursive` overlap fires only at-or-above the read path
+(`patchOverlapsNonRecursiveRead`, [engine.ts:3914](../../../packages/memory/v2/engine.ts)),
+and the dropped leaf value read sits strictly **below** the root, so the same-leaf
+own-write race stays conflict-free. Verified:
+
+- engine probes — structural-read + delete → `ConflictError` (graceful); structural
+  read + same-leaf race → no conflict;
+- `cellset-lww` **3/3** (own-write race preserved through the real stack);
+- conflict/commit/runtime-processor/precondition regression **34 tests / 63 steps**;
+- the downgrade is **live, not a no-op** — observed 314× on the real blind-set
+  path (gated `CSPROBE_STRUCT` instrumentation, since removed);
+- type-check clean.
+
+**Tradeoff (observed).** The mitigation re-introduces a *narrow* conflict class:
+a scalar `$value` set now conflicts with a concurrent **whole-doc set or delete
+of the same entity**. Behavior becomes **uniform** — both whole-doc races yield a
+clean `ConflictError` (which conflict-recovery already handles) instead of the
+current split (silent apply-on-top for a whole-doc set; raw throw for a delete).
+The same-leaf own-write race is untouched. Whether that uniformity is worth the
+extra conflicts is **Robin's call**.
+
+**Pre-land gaps for the mitigation:** (a) no single end-to-end delete-race test
+(harness has no whole-doc-delete primitive — established by composition: observed
+emission + proven engine semantics); (b) broad pattern-integration suites (68 +
+147) not run — the proportionate gate, since a scalar UI write now pins entity-root
+existence for every pattern; (c) client-side `validated` left unchanged
+(engine-authoritative); (d) root `[]` vs immediate-parent granularity is a design
+choice.
+
+### 5.2 Q2 — Trigger shape / #4220 unification: distinct today; Q1 points at the seam
+
+> *Original:* value-type heuristic (scalar → blind) vs an explicit signal — and
+> whether the blind-leaf-write belongs expressed in #4220's "mergeable op /
+> `excludeReadFromConflict`" vocabulary. Possible unification.
+
+The three drop-from-conflict filters now sit as siblings in one `buildReads` loop
+([v2.ts:2157](../../../packages/runner/src/storage/v2.ts)), at **three different
+granularities**:
+
+| Filter | Owner | Granularity | Keeps |
+|---|---|---|---|
+| `isReadIgnoredForCommit` | #4245 (ours) | **tx-wide**, unconditional | (now) a structural root read |
+| `isReadExcludedFromConflict && nonRecursive` | #4220 | **per-read**, nonRecursive-gated | recursive value reads |
+| mergeable-op block | #4220 | **per-op/entity** | recursive read *at* the op path |
+
+Neither #4220 marker can absorb ours as-is: `excludeReadFromConflict` is
+`nonRecursive`-gated but our write-target read is **recursive** (by-value,
+[data-updating.ts:666](../../../packages/runner/src/data-updating.ts)) — confirmed
+by code *and* empirically (with #4220 present, disabling our fix still fails the
+race); `mergeableOpRead` *deliberately keeps* the recursive read at the op path
+(so conditional mergeable writes still conflict) — exactly the read we must drop —
+and a mergeable op is apply-on-top *merge*, not LWW *overwrite*. The reason they
+differ: #4220's markers serve txs that **mix** droppable machinery reads with kept
+handler reads (so they're per-read); `handleCellSet`'s tx is **single-purpose**,
+which is what justifies the tx-wide approach.
+
+**Synthesis — Q1 and Q2 share one lever: granularity.** The tx-wide "drop
+everything" is precisely what *creates* the Q1 edge (it discards the structural
+delete-catcher with the value-equality precondition). The §5.1 mitigation — drop
+the leaf value read, **keep a structural parent/root read** — closes Q1 *and*
+moves the trigger toward #4220's **per-read** vocabulary, partially answering the
+unification question. The two questions are not independent.
+
+### 5.3 Status (2026-06-29)
+
+The §5.1 mitigation is **committed on `fix/cellset-blind-leaf-write` and pushed**
+to PR [#4245](https://github.com/commontoolsinc/labs/pull/4245) so Robin can
+review the final form — it is **not merged**; the tradeoff above is his call. It
+**supersedes the "drop-all" framing** still used narratively in §§2/4 and the §7
+table: blind `$value` reads are now **downgraded to a structural entity-root
+existence read**, not dropped, so the write is *structural-precondition-only*
+rather than fully *precondition-free*. The original drop-all form is recoverable
+from history (the `fix(runtime-client): precondition-free…` commit) if the
+tradeoff is rejected.
+
+---
 
 This supersedes the **recovery**-based approaches (#4196 per-key commit queue,
 #4126 reapply-latest) by removing the conflict at the source (**prevention**).
@@ -243,7 +354,7 @@ the mechanism) is preserved on `origin/scratch/cellset-conflict-probe`.
 | `packages/runtime-client/backends/runtime-processor.ts` | `handleCellSet` trigger: scalar check + mark/unmark around `set()` |
 | `packages/runner/src/storage/reactivity-log.ts` | `markUiInputBlindWriteTx` / `unmark` / `is` + `ignoreReadForCommit` marker |
 | `packages/runner/src/storage/v2-transaction.ts` | `read()` tags reads + skips `doc.validated` when blind |
-| `packages/runner/src/storage/v2.ts` | `buildReads` drops `ignoreReadForCommit` reads from `reads.confirmed` |
+| `packages/runner/src/storage/v2.ts` | `buildReads` handling of `ignoreReadForCommit` reads — **now downgrades** each to a `nonRecursive` entity-root existence read (was: dropped). See §5.1 |
 | `packages/runner/src/index.ts` | exports the marker fns |
 | `packages/patterns/integration/cellset-lww.test.ts` | regression test (3 steps) |
 | `packages/patterns/integration/multi-runtime-{worker,harness}.ts` | `set` harness command (UI-input write path) |
