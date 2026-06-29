@@ -26,6 +26,7 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // ---------------------------------------------------------------------------
 // Shared-server helper: two managers with DIFFERENT signers over ONE in-process
@@ -63,6 +64,7 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 const signer = await Identity.fromPassphrase("cell-cache test");

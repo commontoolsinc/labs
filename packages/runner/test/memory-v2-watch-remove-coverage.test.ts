@@ -21,6 +21,8 @@ import {
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
   SingleSessionFactory,
+  TEST_HELLO_SESSION_OPEN,
+  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
@@ -30,6 +32,7 @@ const HELLO_OK = {
   type: "hello.ok",
   protocol: "memory",
   flags: getMemoryProtocolFlags(),
+  sessionOpen: TEST_HELLO_SESSION_OPEN,
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -67,6 +70,8 @@ const getObjectValue = (
 class WatchAddRemoveTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   constructor(private readonly removedId: URI) {}
 
@@ -82,6 +87,7 @@ class WatchAddRemoveTransport implements MemoryV2Client.Transport {
     const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
+      invocation?: { aud?: unknown; challenge?: unknown };
       watches?: Array<{
         query?: { roots?: Array<{ id: string }> };
       }>;
@@ -89,15 +95,30 @@ class WatchAddRemoveTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond(HELLO_OK);
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          "watch-remove-coverage-hello",
+        );
+        this.#respond({
+          ...HELLO_OK,
+          sessionOpen: this.#sessionOpen,
+        });
         return Promise.resolve();
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `watch-remove-coverage-open-${++this.#sessionOpenCount}`,
+        );
         this.#respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: "session:watch-remove-coverage",
             serverSeq: 0,
+            sessionOpen: this.#sessionOpen,
           },
         });
         return Promise.resolve();

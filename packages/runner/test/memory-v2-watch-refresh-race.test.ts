@@ -15,6 +15,8 @@ import {
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
   SingleSessionFactory,
+  TEST_HELLO_SESSION_OPEN,
+  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
@@ -24,6 +26,7 @@ const HELLO_OK = {
   type: "hello.ok",
   protocol: "memory",
   flags: getMemoryProtocolFlags(),
+  sessionOpen: TEST_HELLO_SESSION_OPEN,
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -40,6 +43,8 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   watchSetCount = 0;
   watchAddCount = 0;
   rootCounts: number[] = [];
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -53,6 +58,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
     const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
+      invocation?: { aud?: unknown; challenge?: unknown };
       watches?: Array<{
         query?: { roots?: Array<{ id: string }> };
       }>;
@@ -60,15 +66,30 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond(HELLO_OK);
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          "watch-refresh-batch-hello",
+        );
+        this.#respond({
+          ...HELLO_OK,
+          sessionOpen: this.#sessionOpen,
+        });
         return Promise.resolve();
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `watch-refresh-batch-open-${++this.#sessionOpenCount}`,
+        );
         this.#respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: "session:watch-refresh-batch",
             serverSeq: 0,
+            sessionOpen: this.#sessionOpen,
           },
         });
         return Promise.resolve();
@@ -134,6 +155,8 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
   >();
   watchAddCount = 0;
   rootCounts: number[] = [];
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -147,6 +170,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
     const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
+      invocation?: { aud?: unknown; challenge?: unknown };
       watches?: Array<{
         query?: { roots?: Array<{ id: string }> };
       }>;
@@ -154,15 +178,30 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond(HELLO_OK);
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          "delayed-watch-add-hello",
+        );
+        this.#respond({
+          ...HELLO_OK,
+          sessionOpen: this.#sessionOpen,
+        });
         return Promise.resolve();
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `delayed-watch-add-open-${++this.#sessionOpenCount}`,
+        );
         this.#respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: "session:delayed-watch-add",
             serverSeq: 0,
+            sessionOpen: this.#sessionOpen,
           },
         });
         return Promise.resolve();
@@ -233,6 +272,8 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   readonly #sessionId = "session:incremental-effect";
   readonly #space = space;
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   constructor(
     private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
@@ -250,6 +291,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
     const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
+      invocation?: { aud?: unknown; challenge?: unknown };
       watches?: Array<{
         query?: { roots?: Array<{ id: string }> };
       }>;
@@ -257,15 +299,30 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond(HELLO_OK);
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          "incremental-effect-hello",
+        );
+        this.#respond({
+          ...HELLO_OK,
+          sessionOpen: this.#sessionOpen,
+        });
         return Promise.resolve();
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `incremental-effect-open-${++this.#sessionOpenCount}`,
+        );
         this.#respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: this.#sessionId,
             serverSeq: 0,
+            sessionOpen: this.#sessionOpen,
           },
         });
         return Promise.resolve();

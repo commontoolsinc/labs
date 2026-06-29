@@ -12,6 +12,10 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 // Resume owned-cell pre-sync for a pattern with a static nested sub-pattern node.
 //
@@ -44,10 +48,11 @@ class LoopbackSessionFactory implements SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: plainLoopback(this.getServer()),
     });
-    const session = await client.mount(spaceId, {}, () => ({
-      invocation: {},
-      authorization: { principal: sgnr?.did() },
-    }));
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(sgnr),
+    );
     return { client, session };
   }
 }
@@ -128,6 +133,7 @@ describe("resume owned-cell pre-sync", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = LoopbackStorageManager.make(signer, server);
     sm2 = LoopbackStorageManager.make(signer, server);
@@ -293,6 +299,7 @@ describe("resume owned-cell walk cycle-detection key", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     keySm = LoopbackStorageManager.make(signer, keyServer);
     rt = new Runtime({

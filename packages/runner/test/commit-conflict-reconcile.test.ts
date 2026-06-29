@@ -19,6 +19,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("read-repair-strand");
 const space = signer.did();
@@ -51,6 +52,7 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 describe("read-repair: stale read after cross-replica conflict", () => {

@@ -32,6 +32,7 @@ import { type StorageNotification } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("effect-conflict-recovery");
 const space = signer.did();
@@ -61,6 +62,7 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 const waitFor = async (

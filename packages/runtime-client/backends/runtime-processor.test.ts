@@ -27,6 +27,7 @@ import { parseLink } from "../../runner/src/link-utils.ts";
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
 );
+const testSessionOpenAudience = "did:key:z6Mk-runtime-processor-test-audience";
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
   constructor(private readonly server: MemoryV2Server.Server) {}
@@ -35,7 +36,19 @@ class SharedV2SessionFactory implements V2Storage.SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.server),
     });
-    const session = await client.mount(space);
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {
+          principal: cfcSigner.did(),
+        },
+      }),
+    );
     return { client, session };
   }
 }
@@ -47,7 +60,16 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
 }
 
 const createRuntime = () => {
-  const server = new MemoryV2Server.Server();
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: {
+      audience: testSessionOpenAudience,
+    },
+  });
   const storageManager = new SharedV2StorageManager({
     as: cfcSigner,
     memoryHost: new URL("memory://"),

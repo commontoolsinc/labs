@@ -12,6 +12,10 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 // Container-defer guard for the list builtins (filter / flatMap / map).
 //
@@ -116,10 +120,11 @@ class DroppingSessionFactory implements SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: droppingLoopback(this.getServer(), this.active, this.onRemove),
     });
-    const session = await client.mount(spaceId, {}, () => ({
-      invocation: {},
-      authorization: { principal: sgnr?.did() },
-    }));
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(sgnr),
+    );
     return { client, session };
   }
 }
@@ -224,6 +229,7 @@ describe("list builtin resume container defer", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = DroppingStorageManager.make(signer, server, () => false);
     sm2 = DroppingStorageManager.make(

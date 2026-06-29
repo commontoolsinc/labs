@@ -35,6 +35,10 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -70,7 +74,7 @@ class SharedV2SessionFactory implements V2Storage.SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.server),
     });
-    const session = await client.mount(space);
+    const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     return { client, session };
   }
 }
@@ -1929,7 +1933,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("does not conflict when another transaction already wrote the same schema document", async () => {
-    const server = new MemoryV2Server.Server();
+    const server = new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
     const storageManagerA = new SharedV2StorageManager({
       as: signer,
       memoryHost: new URL("memory://"),
@@ -3963,7 +3967,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("syncs cfc schema documents into separate v2 runtime caches", async () => {
-    const server = new MemoryV2Server.Server();
+    const server = new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
     const createStorageManager = () =>
       new SharedV2StorageManager({
         as: signer,
@@ -4043,6 +4047,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
   it("syncs cfc schema documents for scoped v2 documents", async () => {
     const server = new MemoryV2Server.Server({
+      ...TEST_MEMORY_SERVER_AUTH,
       authorizeSessionOpen: () => signer.did(),
     });
     const createStorageManager = () =>
