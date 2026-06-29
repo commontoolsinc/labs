@@ -134,8 +134,8 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
-  enabled: false,
-  level: "info",
+  enabled: true,
+  level: "warn",
   logCountEvery: 0,
 });
 
@@ -449,7 +449,7 @@ const applyPendingVersion = (
         if (hasValueAtPath(pending.value, path)) {
           const setPath = pendingSetPathForBase(next, pending.value, path);
           if (!isSamePath(setPath, path)) {
-            pendingPatchLogger.info("pending-branch-replace", () => [
+            pendingPatchLogger.warn("pending-branch-replace", () => [
               "pending patch visibility replaced data at an existing branch that blocked the nested write",
               {
                 space: logContext.space,
