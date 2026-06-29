@@ -183,5 +183,68 @@ Deno.test("conflicts: engine-faithful checks do NOT over-report", async (t) => {
     }
   });
 
+  await t.step(
+    "an unqualified read resolves to the COMMIT's branch, not the inspected one",
+    () => {
+      const p = `${dir}/branch.sqlite`;
+      {
+        const db = new Database(p, { create: true });
+        db.exec(SCHEMA);
+        const ins = (
+          seq: number,
+          branch: string,
+          session: string,
+          reads: number[],
+        ) =>
+          db.prepare(
+            `INSERT INTO "commit" (seq, branch, session_id, local_seq, original, resolution)
+           VALUES (?, ?, ?, ?, ?, '{"seq":0}')`,
+          ).run(
+            seq,
+            branch,
+            session,
+            seq,
+            JSON.stringify({
+              operations: [{ op: "set" }],
+              reads: {
+                confirmed: reads.map((s) => ({ id: X, path: [], seq: s })),
+                pending: [],
+              },
+            }),
+          );
+        const rev = (seq: number, branch: string, op: string) =>
+          db.prepare(
+            `INSERT INTO revision (id, branch, scope_key, seq, op_index, op, data, commit_seq)
+           VALUES (?, ?, 'space', ?, 0, ?, ?, ?)`,
+          ).run(
+            X,
+            branch,
+            seq,
+            op,
+            op === "set" ? JSON.stringify({ value: { v: seq } }) : null,
+            seq,
+          );
+        // default branch: Alice creates X@1; Bob reads X@1 on default and commits @4.
+        ins(1, "", SA, []);
+        rev(1, "", "set");
+        // a `feature` branch writes X@2 — must NOT count against Bob's default read.
+        ins(2, "feature", SA, []);
+        rev(2, "feature", "set");
+        ins(4, "", SB, [1]);
+        rev(4, "", "set");
+        db.close();
+      }
+      const space = openSpace(p);
+      try {
+        // Inspecting `feature`: Bob's read was on default, so the feature write is
+        // not a conflict for it. The old `rd.branch ?? inspectedBranch` bug flagged it.
+        const c = entityConflicts(space, X, { branch: "feature" });
+        assertEquals(c.staleReads.length, 0);
+      } finally {
+        space.close();
+      }
+    },
+  );
+
   await Deno.remove(dir, { recursive: true });
 });

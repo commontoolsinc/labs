@@ -71,67 +71,132 @@ interface RevRow {
   data: string | null;
 }
 
-interface BranchLineageEntry {
-  branch: string;
-  /** Highest seq this branch contributes to the child's visible history. */
-  maxSeq: number;
+const MAX_SEQ = Number.MAX_SAFE_INTEGER;
+const MAX_OP = Number.MAX_SAFE_INTEGER;
+
+/** Does this DB carry the `branch` table? (legacy/partial DBs don't.) */
+function hasBranchTable(space: SpaceDb): boolean {
+  return !!space.db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='branch'")
+    .get<{ 1: number }>();
 }
 
 /**
- * The branch lineage a reader on `branch` sees at `atSeq`, mirroring the
- * engine's `readRowForBranch` recursion (`engine.ts`): the branch contributes
- * its own revisions up to `atSeq`, then inherits its parent's revisions capped
- * at `min(atSeq, fork_seq)`, recursively up to the root. On DBs without a
- * `branch` table (legacy/partial), there is no inheritance — a single branch.
+ * Resolve the single revision row visible for `id` at `(atSeq, atOpIndex)` on
+ * `branch`, replicating the engine's `readRowForBranch` (`engine.ts`): take the
+ * latest local row at/before the cut; if the branch has NONE, inherit the
+ * parent's row at `min(cut, fork_seq)`, recursively to the root. Inheritance
+ * resolves WHICH branch owns the visible row — it does NOT merge logs.
  */
-function branchLineage(
+function resolveBranchRow(
   space: SpaceDb,
   branch: string,
+  scope: string,
+  id: string,
   atSeq: number,
-): BranchLineageEntry[] {
-  const chain: BranchLineageEntry[] = [{ branch, maxSeq: atSeq }];
-  if (
-    !space.db.prepare(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='branch'",
-    ).get<{ 1: number }>()
-  ) {
-    return chain;
+  atOpIndex: number,
+  seen: Set<string> = new Set(),
+): { row: RevRow; branch: string } | undefined {
+  if (seen.has(branch)) return undefined;
+  seen.add(branch);
+
+  const row = space.db
+    .prepare(
+      `SELECT seq, op_index, op, data FROM revision
+       WHERE branch = ? AND id = ? AND scope_key = ?
+         AND (seq < ? OR (seq = ? AND op_index <= ?))
+       ORDER BY seq DESC, op_index DESC LIMIT 1`,
+    )
+    .get<RevRow>(branch, id, scope, atSeq, atSeq, atOpIndex);
+  if (row) return { row, branch };
+
+  if (!hasBranchTable(space)) return undefined;
+  const b = space.db
+    .prepare("SELECT parent_branch, fork_seq FROM branch WHERE name = ?")
+    .get<{ parent_branch: string | null; fork_seq: number | null }>(branch);
+  // The default branch is named "" (falsy) — test for null/undefined, not truthiness.
+  if (!b || b.parent_branch === null || b.parent_branch === undefined) {
+    return undefined;
   }
-  const stmt = space.db.prepare(
-    "SELECT parent_branch, fork_seq FROM branch WHERE name = ?",
+  // Inherit at min(seq, fork_seq); the op-index ceiling is a same-seq refinement
+  // that only applies on the originating branch, so the parent is read whole-seq.
+  const inheritedSeq = Math.min(atSeq, b.fork_seq ?? atSeq);
+  return resolveBranchRow(
+    space,
+    b.parent_branch,
+    scope,
+    id,
+    inheritedSeq,
+    MAX_OP,
+    seen,
   );
-  const seen = new Set<string>([branch]);
-  let cursor = branch;
-  let ceiling = atSeq;
-  // Walk parent pointers; the seq ceiling only ever tightens (min with fork_seq).
-  for (;;) {
-    const row = stmt.get<
-      { parent_branch: string | null; fork_seq: number | null }
-    >(
-      cursor,
-    );
-    // The default branch is named "" (falsy) — test for null/undefined, never
-    // truthiness, or inheritance from the default branch is silently dropped.
-    const parent = row?.parent_branch;
-    if (parent === null || parent === undefined || seen.has(parent)) break;
-    ceiling = Math.min(ceiling, row?.fork_seq ?? ceiling);
-    chain.push({ branch: parent, maxSeq: ceiling });
-    seen.add(parent);
-    cursor = parent;
-  }
-  return chain;
 }
 
 /**
- * Replay the revision log to reconstruct an entity document at a (branch, seq).
- *
- * Replays the FULL effective log rather than the engine's snapshot/base-finding
- * optimization: revisions are append-only (never pruned — `compactSnapshots`
- * prunes only snapshots), so a from-scratch replay is identical to the engine's
- * result while staying robust on partial/legacy DBs that lack a snapshot table.
- * Branch inheritance is honored via {@link branchLineage}, so a child branch
- * that holds only patches still reconstructs on its inherited parent base —
- * matching `read()`/`reconstructPatchedDocument` in `packages/memory/v2`.
+ * Reconstruct a patched document WITHIN a single branch, replicating the
+ * engine's `reconstructPatchedDocument`: find the latest base (`set` OR
+ * `delete`) at/before `(rowSeq, rowOpIndex)` on this branch — a `set` decodes to
+ * its document, a `delete` (or no base at all) starts from an empty `{}` — then
+ * apply that branch's `patch` rows strictly after the base up to the cut. No
+ * cross-branch composition: a child-local patch with no child base starts from
+ * `{}`, exactly as the runtime reads it (NOT the inherited parent value).
+ */
+function reconstructWithinBranch(
+  space: SpaceDb,
+  branch: string,
+  scope: string,
+  id: string,
+  rowSeq: number,
+  rowOpIndex: number,
+): FabricValue {
+  const base = space.db
+    .prepare(
+      `SELECT seq, op_index, op, data FROM revision
+       WHERE branch = ? AND id = ? AND scope_key = ? AND op IN ('set','delete')
+         AND (seq < ? OR (seq = ? AND op_index <= ?))
+       ORDER BY seq DESC, op_index DESC LIMIT 1`,
+    )
+    .get<RevRow>(branch, id, scope, rowSeq, rowSeq, rowOpIndex);
+
+  let doc: FabricValue =
+    (base && base.op === "set" && base.data
+      ? (decodeStored(base.data) as FabricValue)
+      : {}) as FabricValue;
+  const baseSeq = base ? base.seq : 0;
+  const baseOpIndex = base ? base.op_index : -1;
+
+  const patches = space.db
+    .prepare(
+      `SELECT seq, op_index, op, data FROM revision
+       WHERE branch = ? AND id = ? AND scope_key = ? AND op = 'patch'
+         AND (seq > ? OR (seq = ? AND op_index > ?))
+         AND (seq < ? OR (seq = ? AND op_index <= ?))
+       ORDER BY seq ASC, op_index ASC`,
+    )
+    .all<RevRow>(
+      branch,
+      id,
+      scope,
+      baseSeq,
+      baseSeq,
+      baseOpIndex,
+      rowSeq,
+      rowSeq,
+      rowOpIndex,
+    );
+  for (const p of patches) {
+    const ops = p.data ? (decodeStored(p.data) as PatchOp[]) : [];
+    doc = applyPatch(doc, ops);
+  }
+  return doc;
+}
+
+/**
+ * Reconstruct an entity document at a (branch, seq) by replicating the engine's
+ * read path (`read()` → `readRowForBranch` → `reconstructPatchedDocument` in
+ * `packages/memory/v2`), proven identical by `reconstruct-parity.test.ts` which
+ * drives the real engine. Branch inheritance resolves the visible ROW (not a
+ * merged log); patched reconstruction stays within the resolved branch.
  */
 export function reconstructDocument(
   space: SpaceDb,
@@ -139,42 +204,35 @@ export function reconstructDocument(
 ): EntityDocument | undefined {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const atSeq = opts.atSeq ?? Number.MAX_SAFE_INTEGER;
+  const atSeq = opts.atSeq ?? MAX_SEQ;
+  const atOpIndex = opts.atOpIndex ?? MAX_OP;
 
-  const stmt = space.db.prepare(
-    `SELECT seq, op_index, op, data FROM revision
-     WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
-     ORDER BY seq ASC, op_index ASC`,
+  const resolved = resolveBranchRow(
+    space,
+    branch,
+    scope,
+    opts.id,
+    atSeq,
+    atOpIndex,
   );
-  const rows: RevRow[] = [];
-  for (const entry of branchLineage(space, branch, atSeq)) {
-    rows.push(...stmt.all<RevRow>(entry.branch, opts.id, scope, entry.maxSeq));
-  }
-  // Lineage entries may overlap in seq space only across different branches;
-  // a global (seq, op_index) sort restores the total order the reader sees.
-  rows.sort((a, b) => a.seq - b.seq || a.op_index - b.op_index);
+  if (!resolved) return undefined;
 
-  // Optional op-precise cut within the final seq (for per-write timelines).
-  const cutOpIndex = opts.atOpIndex;
-  const replay = cutOpIndex === undefined
-    ? rows
-    : rows.filter((r) => r.seq < atSeq || r.op_index <= cutOpIndex);
-
-  let doc: FabricValue | undefined = undefined;
-  for (const row of replay) {
-    if (row.op === "set") {
-      doc = row.data ? (decodeStored(row.data) as FabricValue) : undefined;
-    } else if (row.op === "patch") {
-      // A leading patch with no base applies onto an empty document `{}`, as the
-      // engine does (`emptyEntityDocument()` in reconstructPatchedDocument) —
-      // never skip it, or a patch-first entity reconstructs as absent.
-      const ops = row.data ? (decodeStored(row.data) as PatchOp[]) : [];
-      doc = applyPatch((doc ?? {}) as FabricValue, ops);
-    } else if (row.op === "delete") {
-      doc = undefined;
-    }
+  const { row, branch: rb } = resolved;
+  if (row.op === "set") {
+    return (row.data ? decodeStored(row.data) : undefined) as
+      | EntityDocument
+      | undefined;
   }
-  return doc as EntityDocument | undefined;
+  if (row.op === "delete") return undefined;
+  // patch: reconstruct within the branch that owns the resolved row.
+  return reconstructWithinBranch(
+    space,
+    rb,
+    scope,
+    opts.id,
+    row.seq,
+    row.op_index,
+  ) as EntityDocument;
 }
 
 export interface ValueAtResult {

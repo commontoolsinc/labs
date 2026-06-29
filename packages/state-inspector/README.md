@@ -154,12 +154,12 @@ deno task cf inspect identity did:key:z6MkeZZv…  # one identity: its spaces + 
 # the per-identity (multiplayer) dimension — scopes within a space
 deno task cf inspect users    z6Mkqa41           # identities that touched this space (browse them)
 deno task cf inspect scopes   z6Mkqa41           # space / per-user / per-session scopes here
-deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell's value across EVERY scope (divergence)
-deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # read AS an identity
+deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell's value across EVERY scope (divergence) — GROUND TRUTH
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # ≈ APPROX identity view (most-specific stored scope, not the runtime read; use overlay for truth)
 
-# conflicts & async — contested cells + lost-update detection
+# conflicts & async — contested cells + anomalous-stale-read detection
 deno task cf inspect conflicts z6Mkqa41                  # cells written by ≥2 sessions (multi-user flagged)
-deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + stale-read (lost-update) analysis
+deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + ANOMALOUS stale-read analysis (engine rejects these pre-commit)
 
 # single space (DID-prefix resolves via discovery)
 deno task cf inspect summary  z6Mkqa41

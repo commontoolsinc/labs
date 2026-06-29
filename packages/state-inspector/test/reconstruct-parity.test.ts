@@ -128,6 +128,66 @@ Deno.test("reconstruct parity with memory-v2 engine", async (t) => {
       assertParity(path, "entity:childonly", "", null);
     });
 
+    // A child-local PATCH on an inherited entity: the engine reconstructs it
+    // within `feature` only (base = {} since feature has no own set), NOT onto
+    // the inherited parent value. This is the case the prior log-merge got wrong.
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 99,
+        reads: { confirmed: [], pending: [] },
+        branch: "feature",
+        operations: [{
+          op: "patch",
+          id: "entity:patchonchild",
+          patches: [{ op: "add", path: "/value", value: { child: 2 } }],
+        }],
+      },
+    });
+    // The same id, set on the PARENT before the fork would-be base — prove the
+    // child patch does NOT inherit it.
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 100,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:inheritedbase",
+          value: doc({ parent: 1 }),
+        }],
+      },
+    });
+    createBranch(engine, "feat2", { parentBranch: "" });
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 101,
+        reads: { confirmed: [], pending: [] },
+        branch: "feat2",
+        operations: [{
+          op: "patch",
+          id: "entity:inheritedbase",
+          patches: [{ op: "add", path: "/value/child", value: 2 }],
+        }],
+      },
+    });
+
+    await t.step(
+      "child-local patch reconstructs within the child (not inherited base)",
+      () => {
+        const e = read(engine, { id: "entity:inheritedbase", branch: "feat2" });
+        assertParity(path, "entity:inheritedbase", "feat2", e);
+        // parent unaffected
+        assertParity(
+          path,
+          "entity:inheritedbase",
+          "",
+          read(engine, { id: "entity:inheritedbase" }),
+        );
+      },
+    );
+
     // seq 4: override shared on `feature`.
     applyCommit(engine, {
       sessionId: "session:p:s",

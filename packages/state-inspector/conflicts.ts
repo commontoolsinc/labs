@@ -148,6 +148,8 @@ export interface StaleRead {
   readAtSeq: number;
   /** The read's declared path within the entity (`[]` = whole document). */
   readPath: string[];
+  /** The branch the read resolved against (`read.branch ?? readerCommit.branch`). */
+  readBranch: string;
   /** The resolved scope_key the read targeted (engine `resolveScopeKey`). */
   readScopeKey: string;
   /** A conflicting write the engine's own check would have rejected. */
@@ -248,13 +250,16 @@ export function entityConflicts(
   );
 
   // Candidate reader commits: those whose stored ClientCommit mentions this id.
-  // (Pre-filter by LIKE to avoid decoding every commit in the space.)
+  // (Pre-filter by LIKE to avoid decoding every commit in the space.) The
+  // commit's own `branch` is the default for any read that omits one.
   const candidates = space.db
     .prepare(
-      `SELECT seq, session_id, original FROM "commit"
+      `SELECT seq, branch, session_id, original FROM "commit"
        WHERE original LIKE '%' || ? || '%' ORDER BY seq ASC`,
     )
-    .all<{ seq: number; session_id: string; original: string }>(id);
+    .all<
+      { seq: number; branch: string; session_id: string; original: string }
+    >(id);
 
   const staleReads: StaleRead[] = [];
   for (const c of candidates) {
@@ -272,6 +277,11 @@ export function entityConflicts(
     const readerScope = parseScope(c.session_id);
     for (const rd of reads) {
       const readPath = rd.path ?? [];
+      // An unqualified read defaults to the READER COMMIT'S branch, not the
+      // branch being inspected — exactly as the engine's validateConfirmedReads
+      // does (`read.branch ?? commitBranch`). Using the inspected branch would
+      // flag cross-branch reads as false anomalies.
+      const readBranch = rd.branch ?? c.branch;
       let readScopeKey: string;
       try {
         readScopeKey = resolveScopeKey(rd.scope, {
@@ -282,7 +292,7 @@ export function entityConflicts(
         continue; // a user/session read with no principal context — skip
       }
       const conflict = writesStmt
-        .all<WriteRow>(rd.branch ?? branch, id, readScopeKey, rd.seq)
+        .all<WriteRow>(readBranch, id, readScopeKey, rd.seq)
         .find((w) =>
           w.commit_seq < c.seq && w.session_id !== c.session_id &&
           writeConflictsRead(w, readPath, rd.nonRecursive ?? false)
@@ -293,6 +303,7 @@ export function entityConflicts(
           readerSession: c.session_id,
           readAtSeq: rd.seq,
           readPath,
+          readBranch,
           readScopeKey,
           missedWriteSeq: conflict.seq,
           missedWriteSession: conflict.session_id,

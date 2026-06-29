@@ -13,6 +13,8 @@
 // links are `/quote`-escaped literals, so a context-less decode is inert.
 
 import { valueFromJson } from "@commonfabric/data-model/codec-json";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 /** Decode a stored payload string, routing the `fvj1:` codec envelope. */
 export function decodeStored(data: string): unknown {
@@ -33,7 +35,19 @@ function isPlainObject(v: Json): v is Record<string, Json> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** A sigil link: `{ "/": { "link@N": {...} } }`. */
+function payloadToLink(payload: Record<string, Json>): DecodedLink {
+  return {
+    id: typeof payload.id === "string" ? payload.id : undefined,
+    space: typeof payload.space === "string" ? payload.space : undefined,
+    path: Array.isArray(payload.path)
+      ? (payload.path as readonly string[])
+      : undefined,
+    scope: typeof payload.scope === "string" ? payload.scope : undefined,
+    hasSchema: payload.schema !== undefined,
+  };
+}
+
+/** A sigil link: `{ "/": { "link@N": {...} } }` (legacy at-rest form). */
 export function parseSigilLink(v: Json): DecodedLink | null {
   if (!isPlainObject(v)) return null;
   const keys = Object.keys(v);
@@ -44,15 +58,25 @@ export function parseSigilLink(v: Json): DecodedLink | null {
   if (!linkKey) return null;
   const payload = inner[linkKey];
   if (!isPlainObject(payload)) return null;
-  return {
-    id: typeof payload.id === "string" ? payload.id : undefined,
-    space: typeof payload.space === "string" ? payload.space : undefined,
-    path: Array.isArray(payload.path)
-      ? (payload.path as readonly string[])
-      : undefined,
-    scope: typeof payload.scope === "string" ? payload.scope : undefined,
-    hasSchema: payload.schema !== undefined,
-  };
+  return payloadToLink(payload);
+}
+
+/**
+ * A link in EITHER at-rest form: the legacy `{ "/": { "link@N": … } }` sigil, or
+ * a modern `FabricLink` instance (which `valueFromJson` can restore from an
+ * `fvj1` envelope). Detected by class — `cell-rep`'s `isLinkRef` is gated on a
+ * global modern-mode flag the inspector doesn't set, so we check `FabricLink`
+ * directly and read its `.payload`. Without this, a modern link is an opaque
+ * instance with no enumerable keys and vanishes from links/lineage/graph.
+ */
+export function decodedLinkOf(v: Json): DecodedLink | null {
+  const sigil = parseSigilLink(v);
+  if (sigil) return sigil;
+  if (v instanceof FabricLink) {
+    const payload = v.payload as Record<string, Json>;
+    return payloadToLink(payload);
+  }
+  return null;
 }
 
 /** An entity reference: `{ "/": "of:…" | "fid1:…" }`. */
@@ -97,7 +121,7 @@ export function summarizeLink(link: DecodedLink): string {
 export function annotate(v: Json, maxDepth = 8): Json {
   if (maxDepth < 0) return "…";
 
-  const link = parseSigilLink(v);
+  const link = decodedLinkOf(v);
   if (link) {
     return {
       $link: {
@@ -113,6 +137,13 @@ export function annotate(v: Json, maxDepth = 8): Json {
   const ref = parseEntityRef(v);
   if (ref !== null) return { $ref: ref };
 
+  // Lower non-JSON-safe Fabric leaves to a stable, printable form so the bundle
+  // (and every JSON.stringify export path that consumes it — HTML, CLI --json)
+  // can't throw on a BigInt or render a Fabric instance as an opaque `{}`.
+  if (typeof v === "bigint") return { $bigint: v.toString() };
+  if (typeof v === "symbol") return String(v);
+  if (typeof v === "function") return "[function]";
+
   if (Array.isArray(v)) return v.map((x) => annotate(x, maxDepth - 1));
   if (isPlainObject(v)) {
     const out: Record<string, Json> = {};
@@ -121,31 +152,38 @@ export function annotate(v: Json, maxDepth = 8): Json {
     }
     return out;
   }
+  // A non-plain object (a Fabric instance — bytes/regexp/epoch/hash/…) has no
+  // enumerable own keys; render its canonical debug string instead of `{}`.
+  if (typeof v === "object" && v !== null) {
+    return { $fabric: toCompactDebugString(v) };
+  }
   return v;
 }
 
 /** Compact one-line summary of any value, for table cells. */
 export function summarize(v: Json): string {
-  const link = parseSigilLink(v);
+  const link = decodedLinkOf(v);
   if (link) return summarizeLink(link);
   if (isStream(v)) return "⊙ stream";
   const ref = parseEntityRef(v);
   if (ref !== null) return `#${shortId(ref) ?? ref}`;
   if (v === null) return "null";
+  if (typeof v === "bigint") return `${v}n`;
   if (Array.isArray(v)) return `[${v.length}]`;
   if (isPlainObject(v)) return `{${Object.keys(v).join(", ")}}`;
+  if (typeof v === "object") return toCompactDebugString(v);
   if (typeof v === "string") {
     return v.length > 40 ? `"${v.slice(0, 37)}…"` : `"${v}"`;
   }
   return String(v);
 }
 
-/** Collect every sigil link reachable in a value (does not descend into links). */
+/** Collect every link reachable in a value (does not descend into links). */
 export function collectLinks(v: Json, maxDepth = 12): DecodedLink[] {
   const out: DecodedLink[] = [];
   const walk = (x: Json, depth: number) => {
     if (depth < 0) return;
-    const link = parseSigilLink(x);
+    const link = decodedLinkOf(x);
     if (link) {
       out.push(link);
       return;
@@ -164,7 +202,7 @@ export function collectLinks(v: Json, maxDepth = 12): DecodedLink[] {
 /** Count links reachable in a value (a cheap fan-out proxy). */
 export function countLinks(v: Json, maxDepth = 8): number {
   if (maxDepth < 0) return 0;
-  if (parseSigilLink(v)) return 1;
+  if (decodedLinkOf(v)) return 1;
   if (isStream(v) || parseEntityRef(v) !== null) return 0;
   if (Array.isArray(v)) {
     return v.reduce<number>((n, x) => n + countLinks(x, maxDepth - 1), 0);

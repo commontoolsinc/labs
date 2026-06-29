@@ -834,7 +834,8 @@ export const inspect = new Command()
   .option("--scope <scope:string>", "Raw scope key (default: space).")
   .option(
     "--as <did:string>",
-    "Read AS this identity (overlay session⊕user⊕space).",
+    "APPROXIMATE this identity's view: the most-specific stored scope that holds " +
+      "the id (session⊕user⊕space). Not the runtime read — use `overlay` for ground truth.",
   )
   .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
@@ -857,7 +858,8 @@ export const inspect = new Command()
             return;
           }
           console.log(
-            `resolved from: ${r.resolvedKind}` +
+            `≈ approx. from scope: ${r.resolvedKind} ` +
+              `(most-specific stored; NOT a runtime read — see \`overlay\`)` +
               (r.overrides ? "  (overrides a more-general scope)" : ""),
           );
           console.log(JSON.stringify(r.value, null, 2));

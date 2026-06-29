@@ -1,0 +1,55 @@
+// Decode safety: modern `FabricLink` instances are recognized as links (not
+// dropped as opaque objects), and non-JSON-safe Fabric leaves (BigInt, Fabric
+// instances) survive `annotate` → `JSON.stringify` without throwing or becoming
+// `{}`. Both are the at-rest shapes a real `fvj1` DB can produce.
+
+import { assert, assertEquals } from "@std/assert";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import {
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+
+import { annotate, collectLinks, decodedLinkOf } from "../decode.ts";
+import { decodeStored } from "../decode.ts";
+
+Deno.test("decode: modern FabricLink is recognized as a link", () => {
+  const link = new FabricLink({ id: "of:target", path: [] });
+  const decoded = decodedLinkOf(link);
+  assert(decoded, "FabricLink should be recognized");
+  assertEquals(decoded!.id, "of:target");
+
+  // and reachable via collectLinks when nested in a plain structure
+  const links = collectLinks({ a: { b: link } });
+  assertEquals(links.length, 1);
+  assertEquals(links[0].id, "of:target");
+});
+
+Deno.test("decode: a modern fvj1-encoded link round-trips to a recognized link", () => {
+  // Encode WITH modern cell rep on (as a modern server would), decode with the
+  // inspector's default config — the value-at-rest must still read as a link.
+  setModernCellRepConfig(true);
+  let encoded: string;
+  try {
+    encoded = jsonFromValue({ value: { ref: new FabricLink({ id: "of:x" }) } });
+  } finally {
+    resetModernCellRepConfig();
+  }
+  const decoded = decodeStored(encoded) as { value: { ref: unknown } };
+  const links = collectLinks(decoded);
+  assert(links.some((l) => l.id === "of:x"), "modern link must be found");
+  // and it must not throw when lowered for export
+  JSON.stringify(annotate(decoded));
+});
+
+Deno.test("decode: BigInt and Fabric instances are JSON-safe after annotate", () => {
+  const annotated = annotate({ big: 10n, nested: [1n, "ok"] }) as {
+    big: { $bigint: string };
+    nested: Array<unknown>;
+  };
+  assertEquals(annotated.big, { $bigint: "10" });
+  // the whole thing must JSON.stringify without throwing (the HTML/CLI export path)
+  const json = JSON.stringify(annotated);
+  assert(json.includes('"$bigint"'), "bigint lowered to a tagged record");
+});
