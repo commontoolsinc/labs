@@ -1310,6 +1310,42 @@ export class WorkerReconciler {
     return TEXT_INTEGRITY_PROP_SINKS.get(state.tagName)?.has(key) ?? false;
   }
 
+  /**
+   * Whether re-asserting a re-supplied static primitive prop can skip its
+   * worker→main set-prop op. Shared by the inline static-prop path
+   * (updatePropsInPlace) and the Cell<Props> primitive path so the two cannot
+   * drift apart (CT-1798 / CT-1803).
+   *
+   * A skip is sound only when a repeated set-prop would be a true no-op on the
+   * main thread: setPropDefault value-guards the DOM write, but the op and the
+   * JSON.stringify it carries are not free. It is taken only for an unchanged
+   * primitive whose prior state was itself a static primitive, and never when:
+   *   - the value is an object/array — reference equality is unreliable;
+   *   - the prop is a text-integrity sink — its transform has policy-dependent
+   *     side effects and must re-run;
+   *   - the prop's live DOM value can drift independently of the VDOM
+   *     (DOM_LIVE_PROPS) — there the repeated op repairs drift via
+   *     setPropDefault's compare against the *live* value, which the worker
+   *     cannot observe.
+   * Assumes the default value-guarded setProp; a custom setProp with observable
+   * same-value behavior would not be re-invoked on a skip.
+   */
+  private canSkipUnchangedStaticProp(
+    state: NodeState,
+    key: string,
+    value: unknown,
+    existingState: PropState | undefined,
+  ): boolean {
+    const isPrimitiveValue = value === null ||
+      (typeof value !== "object" && typeof value !== "function");
+    return isPrimitiveValue &&
+      existingState !== undefined &&
+      existingState.cell === undefined &&
+      existingState.currentValue === value &&
+      !this.isTextIntegrityProp(state, key) &&
+      !DOM_LIVE_PROPS.has(key);
+  }
+
   private transformPropValueForState(
     state: NodeState,
     key: string,
@@ -1603,34 +1639,13 @@ export class WorkerReconciler {
           cancel,
         });
       } else {
-        // Static prop. Skip the worker→main set-prop op when re-asserting the
-        // same authored value would be a true no-op on the main thread: DOM
-        // writes are already value-guarded in setPropDefault, but the op and
-        // the JSON.stringify it carries are not. This matters because #4366
-        // made updateChildrenInPlace always reconcile reused inline-VNode
-        // children, so this path now fires on every parent recompute even when
-        // captured prop values are identical (CT-1798). Mirrors the Cell<Props>
-        // primitive-prop guard below.
-        //
-        // The skip is sound ONLY when a repeated set-prop is genuinely
-        // redundant, so it is NOT taken when:
-        //   - the value is an object/array — reference equality is unreliable;
-        //   - the prop is a text-integrity sink — its transform has
-        //     policy-dependent side effects and must re-run;
-        //   - the prop's live DOM value can drift independently of the VDOM
-        //     (DOM_LIVE_PROPS) — there the repeated op repairs drift via
-        //     setPropDefault's compare against the *live* value, which the
-        //     worker cannot observe.
-        // This assumes the default value-guarded setProp; a custom setProp with
-        // observable same-value behavior would not be re-invoked on a skip.
-        const isPrimitiveValue = value === null ||
-          (typeof value !== "object" && typeof value !== "function");
-        if (
-          isPrimitiveValue && existingState && !existingState.cell &&
-          existingState.currentValue === value &&
-          !this.isTextIntegrityProp(state, key) &&
-          !DOM_LIVE_PROPS.has(key)
-        ) {
+        // Static prop. Skip the redundant worker→main set-prop op for an
+        // unchanged primitive value (see canSkipUnchangedStaticProp). #4366 made
+        // updateChildrenInPlace always reconcile reused inline-VNode children,
+        // so this path now fires on every parent recompute even when captured
+        // values are identical; damping it removes the op + JSON.stringify
+        // churn (CT-1798).
+        if (this.canSkipUnchangedStaticProp(state, key, value, existingState)) {
           continue;
         }
         if (existingState) {
@@ -2039,13 +2054,16 @@ export class WorkerReconciler {
             existingState.cancel();
           }
 
-          // Skip only when a previous primitive value is unchanged. Object/cell
-          // prop states do not track currentValue, so they must still emit a
-          // set-prop when transitioning to a primitive such as undefined.
+          // Skip a redundant op for an unchanged primitive, using the same
+          // predicate as the inline static-prop path so both honor the same
+          // DOM-live / text-integrity exclusions (CT-1803). Object/cell prop
+          // states have cell !== undefined or no currentValue, so transitions
+          // (e.g. to undefined) still emit.
           if (
-            existingState && !existingState.cell &&
-            existingState.currentValue === value
-          ) continue;
+            this.canSkipUnchangedStaticProp(state, key, value, existingState)
+          ) {
+            continue;
+          }
 
           const propValue = this.transformPropValueForState(
             state,
