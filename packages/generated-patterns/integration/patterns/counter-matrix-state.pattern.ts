@@ -125,8 +125,8 @@ const setCellValue = handler(
       return;
     }
 
-    const rowCell = context.matrix.key(row) as Cell<number[]>;
-    const cell = rowCell.key(column) as Cell<number>;
+    const rowCell: Cell<number[]> = context.matrix.key(row);
+    const cell: Cell<number> = rowCell.key(column);
     cell.set(value);
   },
 );
@@ -151,7 +151,7 @@ const setRowValues = handler(
     }
 
     const existingRow = matrixValue[rowIndex];
-    const rowCell = context.matrix.key(rowIndex) as Cell<number[]>;
+    const rowCell: Cell<number[]> = context.matrix.key(rowIndex);
     const targetLength = Array.isArray(existingRow) ? existingRow.length : 0;
     if (targetLength === 0) {
       return;
@@ -203,8 +203,8 @@ const setColumnValues = handler(
         return;
       }
 
-      const rowCell = context.matrix.key(rowIndex) as Cell<number[]>;
-      const cell = rowCell.key(columnIndex) as Cell<number>;
+      const rowCell: Cell<number[]> = context.matrix.key(rowIndex);
+      const cell: Cell<number> = rowCell.key(columnIndex);
       const candidate = valuesArray && valuesArray[rowIndex];
       if (typeof candidate === "number" && Number.isFinite(candidate)) {
         cell.set(candidate);

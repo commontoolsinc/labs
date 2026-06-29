@@ -185,8 +185,8 @@ const appendToGroup = handler(
       return;
     }
 
-    const groupCell = context.groups.key(index) as Cell<SubtotalGroupSeed>;
-    const valuesCell = groupCell.key("values") as Cell<number[]>;
+    const groupCell: Cell<SubtotalGroupSeed> = context.groups.key(index);
+    const valuesCell: Cell<number[] | undefined> = groupCell.key("values");
     const current = sanitizeValues(valuesCell.get());
     const amount = sanitizeNumber(event.value);
     valuesCell.set([...current, amount]);

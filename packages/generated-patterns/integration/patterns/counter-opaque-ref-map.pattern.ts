@@ -39,7 +39,7 @@ const rewriteHistoryEntry = handler(
     if (!Array.isArray(values)) return;
     if (targetIndex < 0 || targetIndex >= values.length) return;
 
-    const entryCell = context.history.key(targetIndex) as Cell<number>;
+    const entryCell: Cell<number> = context.history.key(targetIndex);
     entryCell.set(event.value);
   },
 );

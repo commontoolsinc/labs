@@ -1734,7 +1734,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, type Writable } from "commonfabric";',
-        "const value = {} as Writable<number>;",
+        "declare const value: Writable<number>;",
         "const doubled = lift((v) => v.get() * 2)(value);",
       ].join("\n");
 
@@ -1762,7 +1762,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, type Writable } from "commonfabric";',
-        "const value = {} as Writable<number>;",
+        "declare const value: Writable<number>;",
         "const copy = lift((v) => v.get())(value);",
       ].join("\n");
 
@@ -1895,7 +1895,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, equals, type Writable } from "commonfabric";',
-        "const state = {} as (Writable<number> | undefined);",
+        "declare const state: Writable<number> | undefined;",
         "const same = lift((state) => equals(state, state))(state);",
       ].join("\n");
 
@@ -1922,7 +1922,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         'import { lift, type Writable } from "commonfabric";',
-        "const input = {} as Writable<{ foo: string; bar: string }>;",
+        "declare const input: Writable<{ foo: string; bar: string }>;",
         "const d = lift((v: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = v.key("foo").get();',
         "  Object.keys(v.get());",

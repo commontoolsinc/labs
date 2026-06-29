@@ -38,7 +38,7 @@ const incrementItem = handler(
   ) => {
     const index = event?.index ?? 0;
     const amount = typeof event?.amount === "number" ? event.amount : 1;
-    const target = context.items.key(index) as Cell<Item>;
+    const target: Cell<Item> = context.items.key(index);
     const countCell = target.key("count");
     const current = countCell.get() ?? 0;
     countCell.set(current + amount);
