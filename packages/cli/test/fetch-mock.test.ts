@@ -136,13 +136,15 @@ describe("makeMockFetch", () => {
   });
 
   it("reads entries late-bound on each call", async () => {
-    let entries: { urlIncludes: string; body?: string }[] | undefined;
+    // `const` holder mutated by property (not a reassigned `let`) so the closure
+    // sees the later value without tripping deno-lint's prefer-const.
+    const holder: { entries?: { urlIncludes: string; body?: string }[] } = {};
     const fetch = makeMockFetch(
-      () => entries,
+      () => holder.entries,
       (() => Promise.resolve(new Response("real"))) as typeof globalThis.fetch,
     );
     expect(await (await fetch("https://x.test/late")).text()).toBe("real");
-    entries = [{ urlIncludes: "/late", body: "now-mocked" }];
+    holder.entries = [{ urlIncludes: "/late", body: "now-mocked" }];
     expect(await (await fetch("https://x.test/late")).text()).toBe(
       "now-mocked",
     );
