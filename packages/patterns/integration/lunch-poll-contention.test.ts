@@ -413,10 +413,16 @@ const allPagesMatch = async (
   expectedVotes: readonly Vote[],
   expectedSwatches: readonly VoteSwatchSnapshot[],
 ): Promise<boolean> => {
-  const [votesByPage, swatchesByPage] = await Promise.all([
-    Promise.all(pages.map(readVotes)),
-    Promise.all(pages.map(voteSwatches)),
-  ]);
+  let votesByPage: Vote[][];
+  let swatchesByPage: VoteSwatchSnapshot[][];
+  try {
+    [votesByPage, swatchesByPage] = await Promise.all([
+      Promise.all(pages.map(readVotes)),
+      Promise.all(pages.map(voteSwatches)),
+    ]);
+  } catch {
+    return false;
+  }
   return votesByPage.every((votes) =>
     JSON.stringify(normalizeVotes(votes)) ===
       JSON.stringify(normalizeVotes(expectedVotes))
@@ -702,6 +708,15 @@ describe(
         }
 
         const checkedPages = [...voterPages, observerPage];
+        await timer.run(
+          "all checked browsers agree on stored votes and displayed swatches",
+          () =>
+            waitFor(
+              () =>
+                allPagesMatch(checkedPages, expectedVotes, expectedSwatches),
+              { timeout: PROPAGATION_TIMEOUT, delay: 500 },
+            ),
+        );
 
         const [votesByPage, swatchesByPage] = await Promise.all([
           Promise.all(checkedPages.map(readVotes)),
