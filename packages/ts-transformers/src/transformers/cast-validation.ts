@@ -8,7 +8,13 @@
  */
 import ts from "typescript";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
-import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import {
+  getImportTypeModuleName,
+  HelpersOnlyTransformer,
+  isCommonFabricDeclaration,
+  isCommonFabricModuleName,
+  TransformationContext,
+} from "../core/mod.ts";
 
 /**
  * Cell-like types that should trigger an error when cast to.
@@ -289,20 +295,18 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     typeNode: ts.ImportTypeNode,
   ): string | undefined {
     const qualifier = typeNode.qualifier;
-    if (!qualifier || !this.importTypeReferencesFramework(typeNode)) {
+    const moduleName = getImportTypeModuleName(typeNode);
+    if (
+      !qualifier ||
+      !moduleName ||
+      !isCommonFabricModuleName(moduleName)
+    ) {
       return undefined;
     }
     const typeName = ts.isIdentifier(qualifier)
       ? qualifier.text
       : qualifier.right.text;
     return this.isWrapperTypeName(typeName) ? typeName : undefined;
-  }
-
-  private importTypeReferencesFramework(typeNode: ts.ImportTypeNode): boolean {
-    const argument = typeNode.argument;
-    return ts.isLiteralTypeNode(argument) &&
-      ts.isStringLiteral(argument.literal) &&
-      this.isFrameworkModuleName(argument.literal.text);
   }
 
   private resolveWrapperTypeName(
@@ -336,7 +340,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     const symbolName = symbol.getName();
     if (
       this.isWrapperTypeName(symbolName) &&
-      this.hasFrameworkDeclaration(symbol)
+      this.hasCommonFabricDeclaration(symbol)
     ) {
       return symbolName;
     }
@@ -395,43 +399,9 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
       CELL_LIKE_TYPE_NAMES.has(typeName);
   }
 
-  private hasFrameworkDeclaration(symbol: ts.Symbol): boolean {
+  private hasCommonFabricDeclaration(symbol: ts.Symbol): boolean {
     return (symbol.declarations ?? []).some((declaration) =>
-      this.isFrameworkDeclaration(declaration)
+      isCommonFabricDeclaration(declaration)
     );
-  }
-
-  private isFrameworkDeclaration(declaration: ts.Declaration): boolean {
-    const sourceFileName = declaration.getSourceFile().fileName.replaceAll(
-      "\\",
-      "/",
-    );
-    if (
-      sourceFileName === "commonfabric.d.ts" ||
-      sourceFileName.endsWith("/commonfabric.d.ts") ||
-      sourceFileName.endsWith("/packages/api/index.ts") ||
-      sourceFileName.includes("/packages/runner/src/")
-    ) {
-      return true;
-    }
-
-    let current: ts.Node | undefined = declaration;
-    while (current) {
-      if (
-        ts.isModuleDeclaration(current) &&
-        ts.isStringLiteral(current.name) &&
-        this.isFrameworkModuleName(current.name.text)
-      ) {
-        return true;
-      }
-      current = current.parent;
-    }
-
-    return false;
-  }
-
-  private isFrameworkModuleName(moduleName: string): boolean {
-    return moduleName === "commonfabric" ||
-      moduleName.startsWith("@commonfabric/");
   }
 }
