@@ -10,7 +10,7 @@ import {
 } from "../lib/piece.ts";
 import { SlugResolutionError } from "@commonfabric/piece";
 import {
-  appRouteUrl,
+  normalizeApiUrl,
   parseLink,
   parsePieceOptions,
   parseSpaceOptions,
@@ -24,46 +24,31 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
-  it("builds app route URLs without duplicate slashes", () => {
-    expect(appRouteUrl(
+  it("normalizes API URLs for app route hints", () => {
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/",
-      "team-lunch",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/team-lunch/fid1:abc");
-    expect(appRouteUrl(
+    )).toBe("https://rapids.saga-castor.ts.net");
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/base/",
-      "/team-lunch/",
-      "/fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/base/team-lunch/fid1:abc");
-    expect(appRouteUrl(
+    )).toBe("https://rapids.saga-castor.ts.net/base");
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/base",
-      "team-lunch",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/base/team-lunch/fid1:abc");
-    expect(appRouteUrl(
+    )).toBe("https://rapids.saga-castor.ts.net/base");
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/?debug=true#top",
-      "team-lunch",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/team-lunch/fid1:abc");
-    expect(appRouteUrl(
-      "https://rapids.saga-castor.ts.net/",
-      "did:key:z6MkTest",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/did:key:z6MkTest/fid1:abc");
-    expect(appRouteUrl(
-      "https://rapids.saga-castor.ts.net/base/",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/base/fid1:abc");
-    expect(appRouteUrl(
+    )).toBe("https://rapids.saga-castor.ts.net");
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net//base",
-      "team-lunch",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/base/team-lunch/fid1:abc");
-    expect(appRouteUrl(
+    )).toBe("https://rapids.saga-castor.ts.net/base");
+    expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net//",
-      "team-lunch",
-      "fid1:abc",
-    )).toBe("https://rapids.saga-castor.ts.net/team-lunch/fid1:abc");
+    )).toBe("https://rapids.saga-castor.ts.net");
+    expect(normalizeApiUrl(
+      "https://user:pass@rapids.saga-castor.ts.net/",
+    )).toBe("https://user:pass@rapids.saga-castor.ts.net");
+    expect(normalizeApiUrl(
+      "https://user:pass@rapids.saga-castor.ts.net/base/",
+    )).toBe("https://user:pass@rapids.saga-castor.ts.net/base");
   });
 
   it("force-closes loadManager storage before disposing failed runtime", async () => {
@@ -134,6 +119,15 @@ describe("cli piece parsing", () => {
       space: SPACE,
       identity: ID,
     })).toMatchObject(expected);
+    const trailingApiUrl = parseSpaceOptions({
+      apiUrl: `${API_URL}/`,
+      space: SPACE,
+      identity: ID,
+    });
+    expect(trailingApiUrl).toMatchObject(expected);
+    expect(`${trailingApiUrl.apiUrl}/${trailingApiUrl.space}/${PIECE}`).toBe(
+      FULL_URL,
+    );
     expect(parseSpaceOptions({
       url: FULL_URL,
       identity: ID,
