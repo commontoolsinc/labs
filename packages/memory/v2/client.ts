@@ -15,6 +15,8 @@ import {
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
   type SessionEffectMessage,
+  type SessionOpenAuthMetadata,
+  type SessionOpenChallenge,
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SessionSync,
@@ -53,9 +55,15 @@ export interface SessionOpenAuth {
   authorization: unknown;
 }
 
+export interface SessionOpenAuthContext {
+  challenge: SessionOpenChallenge;
+  audience: string;
+}
+
 export type SessionOpenAuthFactory = (
   space: string,
   session: MountOptions,
+  context: SessionOpenAuthContext,
 ) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
 
 export interface WatchMutationResult {
@@ -99,11 +107,14 @@ export class Client {
   #spaces = new Set<SpaceSession>();
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
+  #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
   #reconnecting: Promise<void> | null = null;
   #connected = false;
   #closed = false;
 
-  private constructor(private readonly transport: Transport) {
+  private constructor(
+    private readonly transport: Transport,
+  ) {
     this.transport.setReceiver((payload) => this.onMessage(payload));
     this.transport.setCloseReceiver?.((error) => this.onClose(error));
   }
@@ -129,7 +140,11 @@ export class Client {
     options: MountOptions = {},
     openAuthFactory?: SessionOpenAuthFactory,
   ): Promise<SpaceSession> {
-    const auth = await openAuthFactory?.(space, options);
+    const auth = await openAuthFactory?.(
+      space,
+      options,
+      this.sessionOpenAuthContext(),
+    );
     const result = await this.openSession(space, options, auth);
     const session = new SpaceSession(
       this,
@@ -175,17 +190,34 @@ export class Client {
     session: MountOptions,
     auth?: SessionOpenAuth,
   ): Promise<SessionOpenResult> {
-    return await this.request<SessionOpenResult>({
+    const result = await this.request<SessionOpenResult>({
       type: "session.open",
       requestId: this.nextRequestId(),
       space,
       session,
       ...(auth ? auth : {}),
     });
+    this.updateSessionOpenAuthContext(result.sessionOpen);
+    return result;
   }
 
   isConnected(): boolean {
     return this.#connected;
+  }
+
+  sessionOpenAuthContext(): SessionOpenAuthContext {
+    if (this.#sessionOpenAuthContext === null) {
+      const error = new Error(
+        "memory server did not provide session.open authentication metadata",
+      );
+      error.name = "ProtocolError";
+      throw error;
+    }
+    return this.#sessionOpenAuthContext;
+  }
+
+  private updateSessionOpenAuthContext(sessionOpen: unknown): void {
+    this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(sessionOpen);
   }
 
   async restoreConnection(): Promise<void> {
@@ -240,6 +272,9 @@ export class Client {
           this.#helloPending.reject(error);
           return;
         }
+        this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
+          helloOk.sessionOpen,
+        );
         this.#helloPending.resolve();
         return;
       }
@@ -918,7 +953,11 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
     };
-    const auth = await this.openAuthFactory?.(this.space, session);
+    const auth = await this.openAuthFactory?.(
+      this.space,
+      session,
+      this.client.sessionOpenAuthContext(),
+    );
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
@@ -1285,9 +1324,81 @@ const isConnectionError = (error: unknown): boolean =>
     error.message.includes("transport closed") ||
     error.message.includes("disconnect"));
 
+const protocolError = (message: string): Error => {
+  const error = new Error(message);
+  error.name = "ProtocolError";
+  return error;
+};
+
+const requireSessionOpenAuthMetadata = (
+  value: unknown,
+): SessionOpenAuthMetadata => {
+  if (value === undefined) {
+    throw protocolError(
+      "memory server did not provide session.open authentication metadata",
+    );
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw protocolError(
+      "memory server sent malformed session.open authentication metadata",
+    );
+  }
+
+  const sessionOpen = value as {
+    audience?: unknown;
+    challenge?: unknown;
+  };
+  if (sessionOpen.challenge === undefined) {
+    throw protocolError(
+      "memory server did not provide a session.open challenge",
+    );
+  }
+  if (sessionOpen.audience === undefined) {
+    throw protocolError(
+      "memory server did not provide a session.open audience",
+    );
+  }
+  if (typeof sessionOpen.audience !== "string") {
+    throw protocolError(
+      "memory server sent malformed session.open authentication metadata",
+    );
+  }
+  if (
+    typeof sessionOpen.challenge !== "object" ||
+    sessionOpen.challenge === null ||
+    Array.isArray(sessionOpen.challenge)
+  ) {
+    throw protocolError(
+      "memory server sent malformed session.open authentication metadata",
+    );
+  }
+  const challenge = sessionOpen.challenge as {
+    value?: unknown;
+    expiresAt?: unknown;
+  };
+  if (
+    typeof challenge.value !== "string" ||
+    typeof challenge.expiresAt !== "number"
+  ) {
+    throw protocolError(
+      "memory server sent malformed session.open authentication metadata",
+    );
+  }
+  return {
+    audience: sessionOpen.audience,
+    challenge: {
+      value: challenge.value,
+      expiresAt: challenge.expiresAt,
+    },
+  };
+};
+
 const parseHelloOk = (
   message: unknown,
-): { flags: MemoryProtocolFlags } | null => {
+): {
+  flags: MemoryProtocolFlags;
+  sessionOpen?: unknown;
+} | null => {
   if (typeof message !== "object" || message === null) {
     return null;
   }
@@ -1295,6 +1406,7 @@ const parseHelloOk = (
     type?: unknown;
     protocol?: unknown;
     flags?: unknown;
+    sessionOpen?: unknown;
   };
   if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
     return null;
@@ -1303,7 +1415,7 @@ const parseHelloOk = (
   if (parsed === null) {
     return null;
   }
-  return { flags: parsed };
+  return { flags: parsed, sessionOpen: obj.sessionOpen };
 };
 
 const isSessionEffect = (

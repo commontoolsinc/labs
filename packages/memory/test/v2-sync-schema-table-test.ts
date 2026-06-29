@@ -11,10 +11,12 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
+  type HelloOkMessage,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
+  type SessionOpenAuthMetadata,
   type SessionOpenResult,
   type SessionSync,
   type WatchAddResult,
@@ -27,6 +29,7 @@ import {
   expandSessionSyncSchemas,
   type SchemaTableSessionSync,
 } from "../v2/sync-schema-table.ts";
+import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
 
@@ -111,6 +114,18 @@ const assertResponse = <Result>(
   assertEquals(message.type, "response");
   return message as ResponseMessage<Result>;
 };
+
+const expectHelloOk = (messages: ServerMessage[]): SessionOpenAuthMetadata => {
+  const hello = shiftMessage(messages) as HelloOkMessage;
+  assertEquals(hello.type, "hello.ok");
+  assertExists(hello.sessionOpen);
+  return hello.sessionOpen;
+};
+
+const authInvocation = (sessionOpen: SessionOpenAuthMetadata) => ({
+  aud: sessionOpen.audience,
+  challenge: sessionOpen.challenge.value,
+});
 
 Deno.test("sync schema table experiment captures repeated schema savings", () => {
   const sync = repeatedSchemaSync();
@@ -508,6 +523,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
     mode: "v2" | "legacy" | "off",
   ) => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL(
         `memory://sync-schema-table-negotiation-${mode}`,
       ),
@@ -528,13 +544,14 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
         protocol: MEMORY_PROTOCOL,
         flags: clientFlags,
       }));
-      shiftMessage(messages);
+      const sessionOpen = expectHelloOk(messages);
 
       await connection.receive(encodeMemoryBoundary({
         type: "session.open",
         requestId: "open",
         space,
         session: {},
+        invocation: authInvocation(sessionOpen),
       }));
       const opened = assertResponse<SessionOpenResult>(
         shiftMessage(messages),
