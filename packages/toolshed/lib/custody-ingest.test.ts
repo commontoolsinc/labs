@@ -4,7 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { custodyIngest, type VouchedChannel } from "./custody-ingest.ts";
+import {
+  custodyIngest,
+  durableSet,
+  type VouchedChannel,
+} from "./custody-ingest.ts";
 
 const channel: VouchedChannel = {
   channel: "did:key:test-channel",
@@ -84,6 +88,18 @@ describe("custodyIngest", () => {
     const marks = ingestMarks(id);
     expect(marks.length).toBe(1);
     expect(markType(marks[0])).toBe(CFC_ATOM_TYPE.ExternalIngest);
+  });
+
+  it("durableSet writes durably WITHOUT a provenance mark (non-ingest path)", async () => {
+    const cell = runtime.getCell<{ tokens: null }>(space, "cleared-auth");
+    const id = cell.getAsNormalizedFullLink().id;
+
+    await durableSet(cell, { tokens: null });
+
+    // The value is durably written, but it carries no ExternalIngest mark —
+    // clearing/operator writes are not ingest.
+    expect(cell.get()).toEqual({ tokens: null });
+    expect(ingestMarks(id).length).toBe(0);
   });
 
   it("binds the mark digest to the appended element, and re-mint replaces", async () => {
