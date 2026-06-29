@@ -1,7 +1,12 @@
 export type Default<T> = T;
+export type BuiltInLLMMessage = {
+  role: string;
+  content: Array<Record<string, unknown>>;
+};
 export declare const CELL_LIKE: unique symbol;
 export type CellLike<T = unknown> = T;
 export type JSXElement = unknown;
+export type JSONSchema = boolean | Record<string, unknown>;
 export type RenderNode = unknown;
 export type Stream<T = unknown> = unknown;
 

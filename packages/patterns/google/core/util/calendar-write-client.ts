@@ -253,7 +253,7 @@ function debugLog(debugMode: boolean, ...args: unknown[]) {
 
 async function retryDelay(retryCount: number): Promise<void> {
   const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
-  await new Promise((resolve) => setTimeout(resolve, delay));
+  await waitIfTimersAreAvailable(delay);
 }
 
 // ============================================================================
@@ -322,12 +322,22 @@ function formatDateTime(
 
   return {
     dateTime: date.toISOString(),
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
 }
 
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return waitIfTimersAreAvailable(ms);
+}
+
+type TimeoutFunction = (callback: () => void, ms: number) => unknown;
+
+function waitIfTimersAreAvailable(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  const timer = (globalThis as { setTimeout?: TimeoutFunction }).setTimeout;
+  if (typeof timer !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    timer(resolve, ms);
+  });
 }
 
 async function refreshAuth(

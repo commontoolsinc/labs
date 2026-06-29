@@ -99,6 +99,55 @@ function mockFetch(responders: FetchResponder[]): {
   };
 }
 
+function mockConsoleLog(): { calls: unknown[][]; restore(): void } {
+  const originalLog = console.log;
+  const calls: unknown[][] = [];
+  console.log = (...args: unknown[]) => {
+    calls.push(args);
+  };
+
+  return {
+    calls,
+    restore: () => {
+      console.log = originalLog;
+    },
+  };
+}
+
+function mockMissingSesGlobals(): { restore(): void } {
+  const intlDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Intl");
+  const timeoutDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "setTimeout",
+  );
+
+  Object.defineProperty(globalThis, "Intl", {
+    configurable: true,
+    value: undefined,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, "setTimeout", {
+    configurable: true,
+    value: undefined,
+    writable: true,
+  });
+
+  return {
+    restore: () => {
+      if (intlDescriptor) {
+        Object.defineProperty(globalThis, "Intl", intlDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "Intl");
+      }
+      if (timeoutDescriptor) {
+        Object.defineProperty(globalThis, "setTimeout", timeoutDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "setTimeout");
+      }
+    },
+  };
+}
+
 Deno.test("CalendarWriteClient constructor creates calendar events", async () => {
   const fetchMock = mockFetch([
     () =>
@@ -108,10 +157,11 @@ Deno.test("CalendarWriteClient constructor creates calendar events", async () =>
         htmlLink: "https://calendar.example/event-1",
       }),
   ]);
+  const consoleMock = mockConsoleLog();
 
   try {
     const { cell } = authCell(testAuth());
-    const client = new CalendarWriteClient(cell, { debugMode: false });
+    const client = new CalendarWriteClient(cell, { debugMode: true });
     const result = await client.createEvent({
       calendarId: "primary",
       summary: "Team Meeting",
@@ -125,6 +175,9 @@ Deno.test("CalendarWriteClient constructor creates calendar events", async () =>
     });
 
     assertEquals(result.id, "event-1");
+    assertEquals(consoleMock.calls.length, 2);
+    assertEquals(consoleMock.calls[0][0], "[CalendarWriteClient]");
+    assertEquals(consoleMock.calls[1].at(-1), "event-1");
     assertEquals(fetchMock.requests.length, 1);
     assertEquals(
       fetchMock.requests[0].url,
@@ -139,11 +192,9 @@ Deno.test("CalendarWriteClient constructor creates calendar events", async () =>
       summary: "Team Meeting",
       start: {
         dateTime: "2026-01-15T10:00:00.000Z",
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
       end: {
         dateTime: "2026-01-15T11:00:00.000Z",
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
       description: "Discuss roadmap",
       location: "Room 1",
@@ -151,6 +202,7 @@ Deno.test("CalendarWriteClient constructor creates calendar events", async () =>
       recurrence: ["RRULE:FREQ=WEEKLY;COUNT=2"],
     });
   } finally {
+    consoleMock.restore();
     fetchMock.restore();
   }
 });
@@ -191,9 +243,12 @@ Deno.test("createCalendarWriteClient updates, deletes, and RSVPs", async () => {
       "event-2",
       {
         summary: "Updated Meeting",
+        description: "Updated agenda",
+        location: "Room 2",
         start: "2026-02-01T09:00:00.000Z",
         end: "2026-02-01T10:00:00.000Z",
         attendees: ["ada@example.com"],
+        isAllDay: true,
       },
       "none",
     );
@@ -214,13 +269,13 @@ Deno.test("createCalendarWriteClient updates, deletes, and RSVPs", async () => {
     );
     assertEquals(requestBody(fetchMock.requests[0]), {
       summary: "Updated Meeting",
+      description: "Updated agenda",
+      location: "Room 2",
       start: {
-        dateTime: "2026-02-01T09:00:00.000Z",
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        date: "2026-02-01",
       },
       end: {
-        dateTime: "2026-02-01T10:00:00.000Z",
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        date: "2026-02-01",
       },
       attendees: [{ email: "ada@example.com" }],
     });
@@ -294,6 +349,441 @@ Deno.test("CalendarWriteClient refreshes and retries expired auth", async () => 
     setTestPatternEnvironment({
       apiUrl: new URL("https://commonfabric.test/"),
     });
+  }
+});
+
+Deno.test("CalendarWriteClient tolerates SES globals without Intl or timers", async () => {
+  setTestPatternEnvironment({
+    apiUrl: new URL("https://toolshed.example/app/"),
+  });
+
+  const sesGlobals = mockMissingSesGlobals();
+  const fetchMock = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () =>
+      response({
+        tokenInfo: {
+          token: "ses-token",
+          tokenType: "Bearer",
+          scope: ["https://www.googleapis.com/auth/calendar.events"],
+          expiresIn: 3600,
+          expiresAt: 6,
+          refreshToken: "ses-refresh-token",
+        },
+      }),
+    () =>
+      response({
+        id: "event-ses",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/event-ses",
+      }),
+    () =>
+      response({
+        id: "batch-1",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/batch-1",
+      }),
+    () =>
+      response({
+        id: "batch-2",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/batch-2",
+      }),
+  ]);
+
+  try {
+    const client = new CalendarWriteClient(authCell(testAuth()).cell);
+    const created = await client.createEvent({
+      calendarId: "primary",
+      summary: "SES Meeting",
+      start: "2026-03-02T09:00:00.000Z",
+      end: "2026-03-02T10:00:00.000Z",
+    });
+    const batch = await client.createBatchEvents({
+      calendarId: "primary",
+      batchDelayMs: 25,
+      batchSize: 1,
+      events: [
+        {
+          clientId: "a",
+          summary: "First SES Batch",
+          start: "2026-03-03T09:00:00.000Z",
+          end: "2026-03-03T10:00:00.000Z",
+        },
+        {
+          clientId: "b",
+          summary: "Second SES Batch",
+          start: "2026-03-04T09:00:00.000Z",
+          end: "2026-03-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    assertEquals(created.id, "event-ses");
+    assertEquals(batch.succeeded, 2);
+    assertEquals(requestBody(fetchMock.requests[2]), {
+      summary: "SES Meeting",
+      start: { dateTime: "2026-03-02T09:00:00.000Z" },
+      end: { dateTime: "2026-03-02T10:00:00.000Z" },
+    });
+    assertEquals(fetchMock.requests.length, 5);
+  } finally {
+    fetchMock.restore();
+    sesGlobals.restore();
+    setTestPatternEnvironment({
+      apiUrl: new URL("https://commonfabric.test/"),
+    });
+  }
+});
+
+Deno.test("CalendarWriteClient surfaces create and refresh failures", async () => {
+  await assertRejects(
+    () =>
+      new CalendarWriteClient(authCell(testAuth({ token: "" })).cell)
+        .createEvent({
+          calendarId: "primary",
+          summary: "No Token",
+          start: "2026-03-01T09:00:00.000Z",
+          end: "2026-03-01T10:00:00.000Z",
+        }),
+    Error,
+    "No authorization token",
+  );
+
+  const exhaustedFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell).createEvent({
+          calendarId: "primary",
+          summary: "Exhausted",
+          start: "2026-03-01T09:00:00.000Z",
+          end: "2026-03-01T10:00:00.000Z",
+        }, 2),
+      Error,
+      "Authentication failed after 3 attempts",
+    );
+  } finally {
+    exhaustedFetch.restore();
+  }
+
+  const missingRefreshFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(
+          authCell(testAuth({ refreshToken: "" })).cell,
+        ).createEvent({
+          calendarId: "primary",
+          summary: "Missing Refresh",
+          start: "2026-03-01T09:00:00.000Z",
+          end: "2026-03-01T10:00:00.000Z",
+        }),
+      Error,
+      "No refresh token available",
+    );
+  } finally {
+    missingRefreshFetch.restore();
+  }
+
+  const refreshFailureFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () => response({ error: "revoked" }, 400, "Bad Request"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell).createEvent({
+          calendarId: "primary",
+          summary: "Refresh Failed",
+          start: "2026-03-01T09:00:00.000Z",
+          end: "2026-03-01T10:00:00.000Z",
+        }),
+      Error,
+      "Token refresh failed",
+    );
+  } finally {
+    refreshFailureFetch.restore();
+  }
+
+  const invalidRefreshFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () => response({ ok: true }),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell).createEvent({
+          calendarId: "primary",
+          summary: "Invalid Refresh",
+          start: "2026-03-01T09:00:00.000Z",
+          end: "2026-03-01T10:00:00.000Z",
+        }),
+      Error,
+      "Invalid refresh response",
+    );
+  } finally {
+    invalidRefreshFetch.restore();
+  }
+});
+
+Deno.test("CalendarWriteClient covers update retry and error paths", async () => {
+  await assertRejects(
+    () =>
+      new CalendarWriteClient(authCell(testAuth({ token: "" })).cell)
+        .updateEvent("primary", "event-8", { summary: "No Token" }),
+    Error,
+    "No authorization token",
+  );
+
+  const retryFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () =>
+      response({
+        tokenInfo: {
+          token: "retry-token",
+          tokenType: "Bearer",
+          scope: ["https://www.googleapis.com/auth/calendar.events"],
+          expiresIn: 3600,
+          expiresAt: 3,
+          refreshToken: "retry-refresh-token",
+        },
+      }),
+    () =>
+      response({
+        id: "event-8",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/event-8",
+      }),
+  ]);
+  try {
+    const auth = authCell(testAuth());
+    const client = new CalendarWriteClient(auth.cell);
+    const updated = await client.updateEvent("primary", "event-8", {
+      summary: "Retry Update",
+    });
+
+    assertEquals(updated.id, "event-8");
+    assertEquals(retryFetch.requests[2].init?.headers, {
+      Authorization: "Bearer retry-token",
+      "Content-Type": "application/json",
+    });
+  } finally {
+    retryFetch.restore();
+  }
+
+  const exhaustedFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .updateEvent(
+            "primary",
+            "event-8",
+            { summary: "Still Expired" },
+            "all",
+            2,
+          ),
+      Error,
+      "Authentication failed after 3 attempts",
+    );
+  } finally {
+    exhaustedFetch.restore();
+  }
+
+  const errorFetch = mockFetch([
+    () =>
+      response(
+        { error: { message: "calendar not found" } },
+        404,
+        "Not Found",
+      ),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .updateEvent("missing", "event-8", { summary: "Nope" }),
+      Error,
+      "Calendar API error: 404 calendar not found",
+    );
+  } finally {
+    errorFetch.restore();
+  }
+});
+
+Deno.test("CalendarWriteClient covers delete retry and error paths", async () => {
+  const retryFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () =>
+      response({
+        tokenInfo: {
+          token: "delete-token",
+          tokenType: "Bearer",
+          scope: ["https://www.googleapis.com/auth/calendar.events"],
+          expiresIn: 3600,
+          expiresAt: 4,
+          refreshToken: "delete-refresh-token",
+        },
+      }),
+    () => emptyResponse(),
+  ]);
+  try {
+    const client = new CalendarWriteClient(authCell(testAuth()).cell);
+    await client.deleteEvent("primary", "event-9");
+
+    assertEquals(retryFetch.requests[2].init?.headers, {
+      Authorization: "Bearer delete-token",
+    });
+  } finally {
+    retryFetch.restore();
+  }
+
+  const exhaustedFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .deleteEvent("primary", "event-9", "all", 2),
+      Error,
+      "Authentication failed after 3 attempts",
+    );
+  } finally {
+    exhaustedFetch.restore();
+  }
+
+  const errorFetch = mockFetch([
+    () => response({ error: { message: "locked" } }, 409, "Conflict"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .deleteEvent("primary", "event-9"),
+      Error,
+      "Calendar API error: 409 locked",
+    );
+  } finally {
+    errorFetch.restore();
+  }
+});
+
+Deno.test("CalendarWriteClient covers RSVP retry and error paths", async () => {
+  await assertRejects(
+    () =>
+      new CalendarWriteClient(authCell(testAuth({ token: "" })).cell)
+        .rsvpToEvent("primary", "event-10", "accepted"),
+    Error,
+    "No authorization token",
+  );
+
+  await assertRejects(
+    () =>
+      new CalendarWriteClient(
+        authCell(testAuth({ user: { email: "", name: "", picture: "" } }))
+          .cell,
+      ).rsvpToEvent("primary", "event-10", "accepted"),
+    Error,
+    "No user email available",
+  );
+
+  const retryFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+    () =>
+      response({
+        tokenInfo: {
+          token: "rsvp-token",
+          tokenType: "Bearer",
+          scope: ["https://www.googleapis.com/auth/calendar.events"],
+          expiresIn: 3600,
+          expiresAt: 5,
+          refreshToken: "rsvp-refresh-token",
+        },
+      }),
+    () =>
+      response({
+        id: "event-10",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/event-10",
+        attendees: [{ email: "ada@example.com" }],
+      }),
+    () =>
+      response({
+        id: "event-10",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/event-10",
+      }),
+  ]);
+  try {
+    const client = new CalendarWriteClient(authCell(testAuth()).cell);
+    const rsvp = await client.rsvpToEvent("primary", "event-10", "accepted");
+
+    assertEquals(rsvp.id, "event-10");
+    assertEquals(retryFetch.requests[2].init?.headers, {
+      Authorization: "Bearer rsvp-token",
+    });
+  } finally {
+    retryFetch.restore();
+  }
+
+  const exhaustedFetch = mockFetch([
+    () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .rsvpToEvent("primary", "event-10", "accepted", 2),
+      Error,
+      "Authentication failed after 3 attempts",
+    );
+  } finally {
+    exhaustedFetch.restore();
+  }
+
+  const getErrorFetch = mockFetch([
+    () => response({ error: { message: "gone" } }, 410, "Gone"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .rsvpToEvent("primary", "event-10", "accepted"),
+      Error,
+      "Failed to fetch event: 410 gone",
+    );
+  } finally {
+    getErrorFetch.restore();
+  }
+
+  const patchErrorFetch = mockFetch([
+    () =>
+      response({
+        id: "event-10",
+        status: "confirmed",
+        htmlLink: "https://calendar.example/event-10",
+        attendees: [{ email: "ada@example.com" }],
+      }),
+    () => response({ error: { message: "cannot RSVP" } }, 403, "Forbidden"),
+  ]);
+  try {
+    await assertRejects(
+      () =>
+        new CalendarWriteClient(authCell(testAuth()).cell)
+          .rsvpToEvent("primary", "event-10", "accepted"),
+      Error,
+      "Calendar API error: 403 cannot RSVP",
+    );
+  } finally {
+    patchErrorFetch.restore();
   }
 });
 
