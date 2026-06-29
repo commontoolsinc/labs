@@ -805,6 +805,41 @@ describe("link-utils", () => {
       });
     });
 
+    it("keeps required entries for boolean property schemas", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          payload: true,
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["payload", "submit"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          payload: true,
+          submit: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["payload"],
+      });
+    });
+
     it("should keep required entries for preserved stream properties", () => {
       const schema = {
         type: "object",
