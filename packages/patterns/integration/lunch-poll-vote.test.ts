@@ -49,18 +49,77 @@ const optionCard = (title: string) => `[data-option-title="${title}"]`;
 const voteButton = (title: string, color: "green" | "yellow" | "red") =>
   `${optionCard(title)} cf-button[data-vote="${color}"]`;
 
-// The voter names that currently have a vote swatch in the "All options"
-// summary, descending through shadow roots. Each swatch carries a
-// `data-vote-swatch-name` hook with the voter's name. On a given browser this
-// includes every voter whose vote that browser can see — so checking the host's
-// swatches names the votes that crossed from the guest's browser.
-const voteSwatchVoters = (page: Page): Promise<string[]> =>
+type VoteSwatchType = "green" | "yellow" | "red";
+
+interface VoteSwatchSnapshot {
+  name: string;
+  optionId: string;
+  optionTitle: string;
+  voteType: VoteSwatchType;
+}
+
+const optionIdForTitle = (page: Page, title: string): Promise<string> =>
+  page.evaluate((expectedTitle) => {
+    const walk = (root: Document | ShadowRoot): string | undefined => {
+      for (const el of root.querySelectorAll("[data-option-title]")) {
+        if (el.getAttribute("data-option-title") === expectedTitle) {
+          const id = el.getAttribute("data-option-id");
+          if (!id) {
+            throw new Error(
+              `Option card missing data-option-id: ${expectedTitle}`,
+            );
+          }
+          return id;
+        }
+      }
+      for (const el of root.querySelectorAll("*")) {
+        const sr = (el as HTMLElement).shadowRoot;
+        if (sr) {
+          const id = walk(sr);
+          if (id) return id;
+        }
+      }
+    };
+
+    const id = walk(document);
+    if (!id) throw new Error(`Option card not found: ${expectedTitle}`);
+    return id;
+  }, { args: [title] });
+
+// The "All options" swatches visible in a browser, grouped by their row's option
+// id. This checks the exact displayed vote membership, not only global voter
+// presence somewhere in the page.
+const voteSwatches = (page: Page): Promise<VoteSwatchSnapshot[]> =>
   page.evaluate(() => {
-    const names = new Set<string>();
+    const isVoteSwatchType = (value: string | null): value is
+      | "green"
+      | "yellow"
+      | "red" => value === "green" || value === "yellow" || value === "red";
+    const snapshots: Array<{
+      name: string;
+      optionId: string;
+      optionTitle: string;
+      voteType: "green" | "yellow" | "red";
+    }> = [];
     const walk = (root: Document | ShadowRoot) => {
       for (const el of root.querySelectorAll("[data-vote-swatch-name]")) {
         const name = el.getAttribute("data-vote-swatch-name");
-        if (name) names.add(name);
+        const optionId = el.getAttribute("data-vote-swatch-option-id") ??
+          el.getAttribute("data-all-option-id") ??
+          el.closest("[data-all-option-id]")?.getAttribute(
+            "data-all-option-id",
+          );
+        const optionTitle = el.getAttribute("data-all-option-title") ??
+          el.closest("[data-all-option-title]")?.getAttribute(
+            "data-all-option-title",
+          );
+        const voteType = el.getAttribute("data-vote-swatch-type");
+        if (!name || !optionId || !optionTitle || !isVoteSwatchType(voteType)) {
+          throw new Error(
+            `Invalid vote swatch metadata: ${el.outerHTML}`,
+          );
+        }
+        snapshots.push({ name, optionId, optionTitle, voteType });
       }
       for (const el of root.querySelectorAll("*")) {
         const sr = (el as HTMLElement).shadowRoot;
@@ -68,8 +127,38 @@ const voteSwatchVoters = (page: Page): Promise<string[]> =>
       }
     };
     walk(document);
-    return [...names];
+    return snapshots;
   });
+
+const swatchesMatch = (
+  actual: readonly VoteSwatchSnapshot[],
+  expected: readonly VoteSwatchSnapshot[],
+): boolean => {
+  const normalize = (rows: readonly VoteSwatchSnapshot[]) =>
+    rows.map((row) =>
+      JSON.stringify({
+        optionId: row.optionId,
+        optionTitle: row.optionTitle,
+        name: row.name,
+        voteType: row.voteType,
+      })
+    ).sort();
+  return JSON.stringify(normalize(actual)) ===
+    JSON.stringify(normalize(expected));
+};
+
+const bothPagesShowSwatches = async (
+  hostPage: Page,
+  guestPage: Page,
+  expected: readonly VoteSwatchSnapshot[],
+): Promise<boolean> => {
+  const [hostSwatches, guestSwatches] = await Promise.all([
+    voteSwatches(hostPage),
+    voteSwatches(guestPage),
+  ]);
+  return swatchesMatch(hostSwatches, expected) &&
+    swatchesMatch(guestSwatches, expected);
+};
 
 describe("lunch poll: two users vote on a shared option", () => {
   const hostShell = new ShellIntegration();
@@ -105,6 +194,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     const piece = await cc.create(program, { start: true });
+    await cc.manager().runtime.patternManager.flushCompileCacheWrites();
     pieceId = piece.id;
     const resultCell = cc.manager().getResult(piece.getCell());
     // Keep the piece running without materializing the whole UI tree in this
@@ -114,6 +204,7 @@ describe("lunch poll: two users vote on a shared option", () => {
 
   afterAll(async () => {
     resultSinkCancel?.();
+    if (pieceId) await cc?.remove(pieceId);
     await cc?.dispose();
   });
 
@@ -188,6 +279,7 @@ describe("lunch poll: two users vote on a shared option", () => {
             }),
           ]),
       );
+      const optionAId = await optionIdForTitle(hostPage, OPTION_A);
 
       // Both users vote green on the SAME option CONCURRENTLY: both clicks are
       // dispatched before either browser settles, so the second voter is not
@@ -217,20 +309,31 @@ describe("lunch poll: two users vote on a shared option", () => {
       );
 
       // Both voters' swatches are visible on BOTH browsers: the host sees the
-      // guest's vote and vice versa. This is the cross-browser visibility the
-      // count alone does not name — it identifies WHO voted, sourced from the
+      // guest's vote and vice versa, attached to the correct All options row.
+      // This is the cross-browser visibility the count alone does not name — it
+      // identifies WHO voted, FOR WHICH option, and WHICH color, sourced from the
       // resolved tally so a remote voter's keyed entity is rendered.
       await timer.run(
-        "both voters' swatches visible on both browsers",
+        "both voters' option A swatches visible on both browsers",
         () =>
-          waitFor(async () => {
-            const [hostVoters, guestVoters] = await Promise.all([
-              voteSwatchVoters(hostPage),
-              voteSwatchVoters(guestPage),
-            ]);
-            return hostVoters.includes(HOST) && hostVoters.includes(GUEST) &&
-              guestVoters.includes(HOST) && guestVoters.includes(GUEST);
-          }, { timeout: PROPAGATION_TIMEOUT, delay: 500 }),
+          waitFor(
+            () =>
+              bothPagesShowSwatches(hostPage, guestPage, [
+                {
+                  optionId: optionAId,
+                  optionTitle: OPTION_A,
+                  name: HOST,
+                  voteType: "green",
+                },
+                {
+                  optionId: optionAId,
+                  optionTitle: OPTION_A,
+                  name: GUEST,
+                  voteType: "green",
+                },
+              ]),
+            { timeout: PROPAGATION_TIMEOUT, delay: 500 },
+          ),
       );
 
       // A second option tallies independently: host adds it, guest vetoes it,
@@ -245,6 +348,7 @@ describe("lunch poll: two users vote on a shared option", () => {
           timeout: PROPAGATION_TIMEOUT,
         }),
       ]);
+      const optionBId = await optionIdForTitle(hostPage, OPTION_B);
       await clickCfButton(guestPage, voteButton(OPTION_B, "red"));
       // The third vote (red on option B) lands on both browsers — the count
       // reaches "3 votes" — while option A's tally is unchanged at "2 love it".
@@ -264,6 +368,34 @@ describe("lunch poll: two users vote on a shared option", () => {
               timeout: PROPAGATION_TIMEOUT,
             }),
           ]),
+      );
+      await timer.run(
+        "all option swatches match displayed vote rows",
+        () =>
+          waitFor(
+            () =>
+              bothPagesShowSwatches(hostPage, guestPage, [
+                {
+                  optionId: optionAId,
+                  optionTitle: OPTION_A,
+                  name: HOST,
+                  voteType: "green",
+                },
+                {
+                  optionId: optionAId,
+                  optionTitle: OPTION_A,
+                  name: GUEST,
+                  voteType: "green",
+                },
+                {
+                  optionId: optionBId,
+                  optionTitle: OPTION_B,
+                  name: GUEST,
+                  voteType: "red",
+                },
+              ]),
+            { timeout: PROPAGATION_TIMEOUT, delay: 500 },
+          ),
       );
     } finally {
       logStepTimings("lunch-poll vote", timer);

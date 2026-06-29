@@ -117,6 +117,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       [NAME]: optionTitle,
       [UI]: (
         <div
+          data-option-id={oid}
           data-option-title={optionTitle}
           style={{
             marginBottom: "10px",
