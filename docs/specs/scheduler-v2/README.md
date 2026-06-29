@@ -1237,10 +1237,13 @@ Summary table; the full per-mechanism walkthrough with file references is in
     §4.8 VNode-doc consolidation direction), which cuts *both* the per-commit
     CFC/canonicalize CPU *and* the cross-runtime write fan-out; and skip re-paying
     `prepareCfc`/canonicalize on unchanged VNode subtrees. NOT sync-layer
-    throttling (round-trips already batched, one `synced()` per settle). *Magnitude
-    caveat:* the 2.2× count is deterministic, but the wall delta is noise-prone
-    (compile/boot/settle variance) — the reliable signal is the node/commit count
-    and the per-commit CFC/canonicalize cost, not the headline ms.
+    throttling (round-trips already batched, one `synced()` per settle).
+    *Magnitude (confirmed stable, 2026-06-29):* 7 alternating warm runs give v2
+    internal **5630ms** vs main **4854ms = +776ms / +16.0%** (wall +12.2%), with
+    the v2 and main ranges **fully non-overlapping** (v2 min 5551 > main max
+    5036) — deterministic every run, not noise. (An earlier `run-phase`-timer
+    sample read as noisy because it was boot/compile-contaminated; the cf-test
+    reported `(Xms)` is the stable signal.)
 
     *Where the +12–16% wall actually goes (CPU profile, 2026-06-28).* Confirmed
     at the function level (CDP V8 profiler inside each cf-test worker, clean
