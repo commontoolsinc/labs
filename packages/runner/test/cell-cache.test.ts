@@ -14,9 +14,9 @@ import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 
 import {
   buildSourceDocs,
-  COMPILE_CACHE_RUNTIME_VERSION,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
+  getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadSourceClosure,
   loadVerifiedSourceClosure,
@@ -66,6 +66,11 @@ const newSharedServer = () =>
   });
 
 const signer = await Identity.fromPassphrase("cell-cache test");
+const resolvedRuntimeVersion = await getCompileCacheRuntimeVersion();
+if (resolvedRuntimeVersion === undefined) {
+  throw new Error("compile-cache runtime version unavailable in Deno test");
+}
+const runtimeVersion = resolvedRuntimeVersion;
 
 // Step 4.3.1–4.3.3 — content-addressed cache document model. The cache operates
 // in identity space on the engine's `CacheableModule[]`; these tests synthesize
@@ -649,7 +654,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
     const replicationOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      runtimeVersion,
     };
     const wtx = runtime.edit();
     writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);
@@ -767,7 +772,7 @@ const e2eSignerB = await Identity.fromPassphrase("cell-cache-e2e user B");
 describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
   // The shared compile-cache space — owned by signerA (its DID is the address).
   const sharedSpace = e2eSignerA.did();
-  const RTVER = COMPILE_CACHE_RUNTIME_VERSION;
+  const RTVER = runtimeVersion;
 
   // Minimal two-file program for the e2e compile cycle.
   const E2E_PROGRAM: RuntimeProgram = {

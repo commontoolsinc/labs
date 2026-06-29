@@ -6,18 +6,22 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { exists } from "@std/fs";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
 import {
   BuildConfig,
+  type BuildSignalApi,
+  installBuildSignalCleanup,
   prepareWorkspace,
   revertWorkspace,
+  runBuildWithSignalCleanup,
 } from "./build-binaries.ts";
 import {
+  computeCompilerVersion,
   renderVersionModule,
-  SENTINEL_VERSION,
   VERSION_NAMESPACE,
 } from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
+import { SOURCE_COMPILE_CACHE_RUNTIME_VERSION } from "../packages/runner/src/compilation-cache/compile-cache-version.ts";
 
 const FAKE_MANIFEST = `{
   // Frontend-only types, stripped for the shipped binary and restored on revert.
@@ -26,7 +30,52 @@ const FAKE_MANIFEST = `{
 }
 `;
 
-const SENTINEL_MODULE = renderVersionModule(SENTINEL_VERSION);
+const SOURCE_VERSION_MODULE = renderVersionModule(
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+);
+const buildBinariesScript = fromFileUrl(
+  new URL("./build-binaries.ts", import.meta.url),
+);
+
+type BuildSignal = Parameters<BuildSignalApi["addSignalListener"]>[0];
+type BuildSignalHandler = Parameters<BuildSignalApi["addSignalListener"]>[1];
+
+class FakeExit extends Error {
+  constructor(readonly code: number) {
+    super(`exit ${code}`);
+  }
+}
+
+function makeFakeSignalApi(): {
+  api: BuildSignalApi;
+  listeners: Map<BuildSignal, BuildSignalHandler>;
+  removed: [BuildSignal, BuildSignalHandler][];
+  exitCodes: number[];
+} {
+  const listeners = new Map<BuildSignal, BuildSignalHandler>();
+  const removed: [BuildSignal, BuildSignalHandler][] = [];
+  const exitCodes: number[] = [];
+  return {
+    listeners,
+    removed,
+    exitCodes,
+    api: {
+      addSignalListener(signal, handler) {
+        listeners.set(signal, handler);
+      },
+      removeSignalListener(signal, handler) {
+        removed.push([signal, handler]);
+        if (listeners.get(signal) === handler) {
+          listeners.delete(signal);
+        }
+      },
+      exit(code) {
+        exitCodes.push(code);
+        throw new FakeExit(code);
+      },
+    },
+  };
+}
 
 async function writeFile(filePath: string, contents: string): Promise<void> {
   await Deno.mkdir(filePath.slice(0, filePath.lastIndexOf("/")), {
@@ -35,10 +84,14 @@ async function writeFile(filePath: string, contents: string): Promise<void> {
   await Deno.writeTextFile(filePath, contents);
 }
 
+async function renderComputedVersionModule(root: string): Promise<string> {
+  return renderVersionModule(await computeCompilerVersion(root));
+}
+
 /**
  * Build a minimal tree holding the files `build-binaries` reads and writes: a
  * manifest with a frontend-only `compilerOptions.types`, a lockfile, the
- * fingerprint input packages, the committed version module, and the toolshed
+ * fingerprint input paths, the committed version module, and the toolshed
  * directory for the COMPILED build marker.
  */
 async function makeFakeRepo(): Promise<string> {
@@ -54,8 +107,20 @@ async function makeFakeRepo(): Promise<string> {
     );
   }
   await writeFile(
+    `${root}/packages/runner/src/harness/pretransform.ts`,
+    "export const pretransform = 1;",
+  );
+  await writeFile(
+    `${root}/packages/runner/src/sandbox/module-record-verifier.ts`,
+    "export const verifier = 1;",
+  );
+  await writeFile(
+    `${root}/packages/static/assets/types/es2023.d.ts`,
+    "declare const es2023: unique symbol;",
+  );
+  await writeFile(
     `${root}/packages/runner/src/compilation-cache/compile-cache-version.ts`,
-    SENTINEL_MODULE,
+    SOURCE_VERSION_MODULE,
   );
   await Deno.mkdir(`${root}/packages/toolshed`, { recursive: true });
   return root;
@@ -162,11 +227,11 @@ Deno.test("manifest() returns an independent parsed copy each call", async () =>
   }
 });
 
-Deno.test("BuildConfig captures the committed version module and its path", async () => {
+Deno.test("BuildConfig captures the checked-in version module and its path", async () => {
   const root = await makeFakeRepo();
   try {
     const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
-    assertEquals(config.compileCacheVersionOriginal(), SENTINEL_MODULE);
+    assertEquals(config.compileCacheVersionOriginal(), SOURCE_VERSION_MODULE);
     assertEquals(
       config.compileCacheVersionPath(),
       join(
@@ -183,22 +248,21 @@ Deno.test("BuildConfig captures the committed version module and its path", asyn
   }
 });
 
-Deno.test("prepareWorkspace bakes the fingerprint; revertWorkspace restores the sentinel", async () => {
+Deno.test("prepareWorkspace writes the fingerprint; revertWorkspace restores the source version", async () => {
   const root = await makeFakeRepo();
   const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
   const versionPath = config.compileCacheVersionPath();
   const compiledPath = join(root, "packages", "toolshed", "COMPILED");
+  const sourceModule = await Deno.readTextFile(versionPath);
+  const computedModule = await renderComputedVersionModule(root);
   try {
     await prepareWorkspace(config);
 
-    // The version module now holds a baked fingerprint, not the sentinel.
+    // The version module holds the compiler-input fingerprint baked into binaries.
     const stamped = await Deno.readTextFile(versionPath);
-    assertNotEquals(stamped, SENTINEL_MODULE);
+    assertEquals(stamped, computedModule);
+    assertNotEquals(stamped, sourceModule);
     assertStringIncludes(stamped, `${VERSION_NAMESPACE}/`);
-    assert(
-      !stamped.includes(SENTINEL_VERSION),
-      "the baked module must not keep the from-source sentinel",
-    );
 
     // The frontend-only compiler option is stripped; the build marker is written.
     const prepared = JSON.parse(await Deno.readTextFile(`${root}/deno.jsonc`));
@@ -208,7 +272,7 @@ Deno.test("prepareWorkspace bakes the fingerprint; revertWorkspace restores the 
     await revertWorkspace(config);
 
     // The version module, manifest bytes, and build marker are restored.
-    assertEquals(await Deno.readTextFile(versionPath), SENTINEL_MODULE);
+    assertEquals(await Deno.readTextFile(versionPath), sourceModule);
     assertEquals(await Deno.readTextFile(`${root}/deno.jsonc`), FAKE_MANIFEST);
     assert(!(await exists(compiledPath)), "COMPILED marker should be removed");
   } finally {
@@ -222,10 +286,114 @@ Deno.test("prepareWorkspace refuses to build without a lockfile", async () => {
     await Deno.remove(`${root}/deno.lock`);
     const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
     await assertRejects(() => prepareWorkspace(config), Error, "deno.lock");
-    // The early bail-out leaves the committed version module untouched.
+    // The error path leaves the source version module untouched.
     assertEquals(
       await Deno.readTextFile(config.compileCacheVersionPath()),
-      SENTINEL_MODULE,
+      config.compileCacheVersionOriginal(),
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("signal cleanup restores workspace and exits once", async () => {
+  const root = await makeFakeRepo();
+  const fakeSignals = makeFakeSignalApi();
+  try {
+    const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
+    const versionPath = config.compileCacheVersionPath();
+    const compiledPath = join(root, "packages", "toolshed", "COMPILED");
+    await prepareWorkspace(config);
+    assertNotEquals(
+      await Deno.readTextFile(versionPath),
+      SOURCE_VERSION_MODULE,
+    );
+    assert(await exists(compiledPath), "COMPILED marker should exist");
+
+    const cleanup = installBuildSignalCleanup(config, fakeSignals.api);
+    assert(fakeSignals.listeners.has("SIGINT"));
+    assert(fakeSignals.listeners.has("SIGTERM"));
+
+    let thrown: unknown;
+    try {
+      await fakeSignals.listeners.get("SIGTERM")!();
+    } catch (error) {
+      thrown = error;
+    }
+    assert(thrown instanceof FakeExit);
+    assertEquals(thrown.code, 143);
+    assertEquals(fakeSignals.exitCodes, [143]);
+    assertEquals(await Deno.readTextFile(versionPath), SOURCE_VERSION_MODULE);
+    assertEquals(await Deno.readTextFile(`${root}/deno.jsonc`), FAKE_MANIFEST);
+    assert(!(await exists(compiledPath)), "COMPILED marker should be removed");
+
+    await fakeSignals.listeners.get("SIGTERM")!();
+    assertEquals(fakeSignals.exitCodes, [143]);
+
+    cleanup();
+    assertEquals(fakeSignals.listeners.size, 0);
+    assertEquals(
+      fakeSignals.removed.map(([signal]) => signal).sort(),
+      ["SIGINT", "SIGTERM"],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("runBuildWithSignalCleanup removes listeners after build", async () => {
+  const root = await makeFakeRepo();
+  const fakeSignals = makeFakeSignalApi();
+  try {
+    const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
+    const seenConfigs: BuildConfig[] = [];
+    await runBuildWithSignalCleanup(config, {
+      signalApi: fakeSignals.api,
+      build: (received) => {
+        seenConfigs.push(received);
+        return Promise.resolve();
+      },
+    });
+
+    assertEquals(seenConfigs, [config]);
+    assertEquals(fakeSignals.listeners.size, 0);
+    assertEquals(
+      fakeSignals.removed.map(([signal]) => signal).sort(),
+      ["SIGINT", "SIGTERM"],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main build path reverts workspace when command spawn fails", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
+    const output = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "--deny-run",
+        buildBinariesScript,
+        "--cli-only",
+      ],
+      cwd: root,
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+
+    assertEquals(output.success, false);
+    assertEquals(
+      await Deno.readTextFile(config.compileCacheVersionPath()),
+      SOURCE_VERSION_MODULE,
+    );
+    assertEquals(await Deno.readTextFile(`${root}/deno.jsonc`), FAKE_MANIFEST);
+    assert(
+      !(await exists(config.toolshedEnvPath())),
+      "COMPILED marker should be removed",
     );
   } finally {
     await Deno.remove(root, { recursive: true });

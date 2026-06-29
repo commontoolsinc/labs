@@ -7,11 +7,16 @@ import {
   COMPILE_FINGERPRINT_INPUTS,
   computeCompilerFingerprint,
   computeCompilerVersion,
+  computeCurrentCompilerVersion,
   renderVersionModule,
-  SENTINEL_VERSION,
   VERSION_NAMESPACE,
 } from "../src/compilation-cache/compiler-fingerprint.deno.ts";
-import { COMPILE_CACHE_RUNTIME_VERSION } from "../src/compilation-cache/cell-cache.ts";
+import {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  getCompileCacheRuntimeVersion,
+  resolveBakedCompileCacheRuntimeVersionForTesting,
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+} from "../src/compilation-cache/cell-cache.ts";
 
 const versionModulePath = fromFileUrl(
   new URL("../src/compilation-cache/compile-cache-version.ts", import.meta.url),
@@ -20,6 +25,13 @@ const versionModulePath = fromFileUrl(
 const denoWorkflowPath = fromFileUrl(
   new URL("../../../.github/workflows/deno.yml", import.meta.url),
 );
+
+const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
+
+type CellCacheModule = typeof import("../src/compilation-cache/cell-cache.ts");
+type CompileCacheVersionGlobal = typeof globalThis & {
+  __cfCompileCacheRuntimeVersion?: string;
+};
 
 /** Write a temp tree and return its root; caller removes it. */
 async function makeTree(
@@ -32,6 +44,15 @@ async function makeTree(
     await Deno.writeTextFile(abs, contents);
   }
   return root;
+}
+
+async function importFreshCellCacheModule(): Promise<CellCacheModule> {
+  const moduleUrl = new URL(
+    "../src/compilation-cache/cell-cache.ts",
+    import.meta.url,
+  );
+  moduleUrl.searchParams.set("testRun", crypto.randomUUID());
+  return await import(moduleUrl.href);
 }
 
 describe("computeCompilerFingerprint", () => {
@@ -112,25 +133,116 @@ describe("computeCompilerFingerprint", () => {
 });
 
 describe("compile-cache version axis", () => {
-  it("from-source const is the stable sentinel under the namespace", () => {
-    expect(COMPILE_CACHE_RUNTIME_VERSION).toBe(SENTINEL_VERSION);
+  it("committed const stays on the stable source marker", () => {
+    expect(COMPILE_CACHE_RUNTIME_VERSION).toBe(
+      SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+    );
     expect(COMPILE_CACHE_RUNTIME_VERSION).toBe(`${VERSION_NAMESPACE}/source`);
   });
 
-  it("committed version module matches the rendered sentinel (build/fmt drift guard)", async () => {
+  it("from-source runtime version resolves to the real compiler-input fingerprint", async () => {
+    const version = await computeCompilerVersion(
+      repoRoot,
+      COMPILE_FINGERPRINT_INPUTS,
+    );
+    expect(await getCompileCacheRuntimeVersion()).toBe(version);
+    expect(await computeCurrentCompilerVersion()).toBe(version);
+    expect(version.startsWith(`${VERSION_NAMESPACE}/`)).toBe(true);
+    expect(version).not.toBe(SOURCE_COMPILE_CACHE_RUNTIME_VERSION);
+  });
+
+  it("skips the compiled cache when source fingerprint files cannot be read", async () => {
+    const originalStat = Deno.stat;
+    const freshCellCache = await importFreshCellCacheModule();
+    try {
+      Deno.stat = (() =>
+        Promise.reject(
+          new Deno.errors.PermissionDenied("blocked"),
+        )) as typeof Deno.stat;
+      expect(await freshCellCache.getCompileCacheRuntimeVersion()).toBe(
+        undefined,
+      );
+    } finally {
+      Deno.stat = originalStat;
+    }
+  });
+
+  it("rethrows unexpected source fingerprint failures", async () => {
+    const originalStat = Deno.stat;
+    const freshCellCache = await importFreshCellCacheModule();
+    try {
+      Deno.stat = (() =>
+        Promise.reject(
+          new Error("unexpected fingerprint failure"),
+        )) as typeof Deno.stat;
+      await expect(freshCellCache.getCompileCacheRuntimeVersion())
+        .rejects.toThrow("unexpected fingerprint failure");
+    } finally {
+      Deno.stat = originalStat;
+    }
+  });
+
+  it("skips the compiled cache when the Deno file API is absent", async () => {
+    const originalStat = Deno.stat;
+    const freshCellCache = await importFreshCellCacheModule();
+    try {
+      Deno.stat = undefined as unknown as typeof Deno.stat;
+      expect(await freshCellCache.getCompileCacheRuntimeVersion()).toBe(
+        undefined,
+      );
+    } finally {
+      Deno.stat = originalStat;
+    }
+  });
+
+  it("uses a build-defined version when the Deno file API is absent", async () => {
+    const originalStat = Deno.stat;
+    const global = globalThis as CompileCacheVersionGlobal;
+    const previousDefinedVersion = global.__cfCompileCacheRuntimeVersion;
+    const freshCellCache = await importFreshCellCacheModule();
+    const definedVersion = `${VERSION_NAMESPACE}/defined-test`;
+    try {
+      Deno.stat = undefined as unknown as typeof Deno.stat;
+      global.__cfCompileCacheRuntimeVersion = definedVersion;
+      expect(await freshCellCache.getCompileCacheRuntimeVersion()).toBe(
+        definedVersion,
+      );
+    } finally {
+      Deno.stat = originalStat;
+      if (previousDefinedVersion === undefined) {
+        delete global.__cfCompileCacheRuntimeVersion;
+      } else {
+        global.__cfCompileCacheRuntimeVersion = previousDefinedVersion;
+      }
+    }
+  });
+
+  it("uses a baked binary version directly", async () => {
+    const bakedVersion = `${VERSION_NAMESPACE}/baked-test`;
+    expect(
+      await resolveBakedCompileCacheRuntimeVersionForTesting(bakedVersion),
+    ).toBe(bakedVersion);
+  });
+
+  it("committed version module matches the rendered source marker", async () => {
     const onDisk = await Deno.readTextFile(versionModulePath);
-    expect(onDisk).toBe(renderVersionModule(SENTINEL_VERSION));
+    expect(onDisk).toBe(
+      renderVersionModule(SOURCE_COMPILE_CACHE_RUNTIME_VERSION),
+    );
   });
 
   it("fingerprints the compiler-input packages that shape emitted bytes", () => {
     // `api` carries the pattern-facing types the schema-generator lowers into
-    // baked schemas, so it must be fingerprinted alongside the pipeline.
+    // baked schemas, so it is fingerprinted alongside the pipeline.
     for (
       const input of [
         "packages/ts-transformers",
         "packages/js-compiler",
+        "packages/runner/src/harness",
+        "packages/runner/src/sandbox",
         "packages/schema-generator",
         "packages/api",
+        "packages/static/assets/types",
         "deno.jsonc",
         "deno.lock",
       ]
@@ -141,9 +253,8 @@ describe("compile-cache version axis", () => {
 
   it("CI compile-cache key mirrors the fingerprint input set", async () => {
     // The workflow carries a literal copy of the input globs (GitHub Actions
-    // cannot import the TS list). Both the `key` and `restore-keys` lines must
-    // hash exactly the args `ciHashFilesArgs()` renders, so editing the input
-    // set without updating the workflow (or vice versa) fails here.
+    // cannot import the TS list). Both the `key` and `restore-keys` lines hash
+    // exactly the args `ciHashFilesArgs()` renders.
     const workflow = await Deno.readTextFile(denoWorkflowPath);
     const expected = `hashFiles(${ciHashFilesArgs()})`;
     const occurrences = workflow.split(expected).length - 1;
@@ -154,15 +265,5 @@ describe("compile-cache version axis", () => {
     expect(ciHashFilesArgs(["packages/api", "deno.lock"])).toBe(
       "'packages/api/**', 'deno.lock'",
     );
-  });
-
-  it("a baked version over the real inputs differs from the sentinel", async () => {
-    const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
-    const version = await computeCompilerVersion(
-      repoRoot,
-      COMPILE_FINGERPRINT_INPUTS,
-    );
-    expect(version.startsWith(`${VERSION_NAMESPACE}/`)).toBe(true);
-    expect(version).not.toBe(SENTINEL_VERSION);
   });
 });

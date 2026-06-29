@@ -10,11 +10,16 @@ import type {
   RuntimeProgram,
 } from "../src/harness/types.ts";
 import {
-  COMPILE_CACHE_RUNTIME_VERSION,
+  getCompileCacheRuntimeVersion,
   loadCompiledClosure,
 } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("module byte cache test");
+const resolvedRuntimeVersion = await getCompileCacheRuntimeVersion();
+if (resolvedRuntimeVersion === undefined) {
+  throw new Error("compile-cache runtime version unavailable in Deno test");
+}
+const runtimeVersion = resolvedRuntimeVersion;
 
 // Minimal in-memory cache implementing the injection interface — enough to
 // exercise the runtime's consult/populate behavior. The real implementation
@@ -137,7 +142,7 @@ describe("ModuleByteCache cross-runtime reuse", () => {
         rtB,
         spaceB,
         entryIdentity,
-        { runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION },
+        { runtimeVersion },
         readTx,
       );
       readTx.abort?.();

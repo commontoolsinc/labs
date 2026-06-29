@@ -420,6 +420,57 @@ export async function revertWorkspace(config: BuildConfig): Promise<void> {
   }
 }
 
+export interface BuildSignalApi {
+  addSignalListener(
+    signal: "SIGINT" | "SIGTERM",
+    handler: () => void,
+  ): void;
+  removeSignalListener(
+    signal: "SIGINT" | "SIGTERM",
+    handler: () => void,
+  ): void;
+  exit(code: number): void;
+}
+
+export function installBuildSignalCleanup(
+  config: BuildConfig,
+  signalApi: BuildSignalApi = Deno,
+): () => void {
+  let exiting = false;
+  const onSignal = (exitCode: number) => async () => {
+    if (exiting) return;
+    exiting = true;
+    try {
+      await revertWorkspace(config);
+    } finally {
+      signalApi.exit(exitCode);
+    }
+  };
+  const onSigint = onSignal(130);
+  const onSigterm = onSignal(143);
+  signalApi.addSignalListener("SIGINT", onSigint);
+  signalApi.addSignalListener("SIGTERM", onSigterm);
+  return () => {
+    signalApi.removeSignalListener("SIGINT", onSigint);
+    signalApi.removeSignalListener("SIGTERM", onSigterm);
+  };
+}
+
+export async function runBuildWithSignalCleanup(
+  config: BuildConfig,
+  options: {
+    build?: (config: BuildConfig) => Promise<void>;
+    signalApi?: BuildSignalApi;
+  } = {},
+): Promise<void> {
+  const cleanup = installBuildSignalCleanup(config, options.signalApi);
+  try {
+    await (options.build ?? build)(config);
+  } finally {
+    cleanup();
+  }
+}
+
 // Only run the build when invoked directly (`deno task build-binaries`), not
 // when imported by tests, which exercise BuildConfig / prepareWorkspace /
 // revertWorkspace against a temporary tree.
@@ -437,9 +488,5 @@ if (import.meta.main) {
     cliOnly: Deno.args.includes("--cli-only"),
   });
 
-  Deno.addSignalListener("SIGINT", async () => {
-    await revertWorkspace(config);
-  });
-
-  await build(config);
+  await runBuildWithSignalCleanup(config);
 }
