@@ -130,6 +130,22 @@ function hasTiming(job: Job): boolean {
   return Number.isFinite(st) && Number.isFinite(en) && en > st;
 }
 
+const JOBS_PER_PAGE = 100;
+async function fetchJobs(path: string): Promise<Job[]> {
+  const jobs: Job[] = [];
+  for (let page = 1;; page++) {
+    const sep = path.includes("?") ? "&" : "?";
+    const body = await gh([
+      "api",
+      `${path}${sep}per_page=${JOBS_PER_PAGE}&page=${page}`,
+    ]);
+    const pageJobs = (JSON.parse(body).jobs ?? []) as Job[];
+    jobs.push(...pageJobs);
+    if (pageJobs.length < JOBS_PER_PAGE) break;
+  }
+  return jobs;
+}
+
 // ---------------------------------------------------------------------------
 // Statistics
 // ---------------------------------------------------------------------------
@@ -229,21 +245,15 @@ console.error(
 
 const jobsPerRun = await pool(completed, CONCURRENCY, async (run, i) => {
   if ((i + 1) % 10 === 0) console.error(`  ${i + 1}/${completed.length}`);
-  const attemptOneBody = await gh([
-    "api",
-    `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs?per_page=100`,
-  ]);
-  let jobs = (JSON.parse(attemptOneBody).jobs ?? []) as Job[];
+  let jobs = await fetchJobs(
+    `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs`,
+  );
   if ((run.attempt ?? 1) > 1) {
-    const latestBody = await gh([
-      "api",
-      `/repos/${REPO}/actions/runs/${run.databaseId}/jobs?per_page=100`,
-    ]);
+    const latestJobs = await fetchJobs(
+      `/repos/${REPO}/actions/runs/${run.databaseId}/jobs`,
+    );
     const latestByName = new Map(
-      ((JSON.parse(latestBody).jobs ?? []) as Job[]).map((job) => [
-        job.name,
-        job,
-      ]),
+      latestJobs.map((job) => [job.name, job]),
     );
     jobs = jobs.map((job) => {
       const latest = latestByName.get(job.name);
