@@ -803,6 +803,7 @@ jobs:
       - package-integration-test
       - cli-integration-test
       - pattern-integration-test
+      - pattern-lunch-poll-contention-test
       - pattern-reload-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
@@ -869,6 +870,7 @@ jobs:
         "check",
         "runner-test",
         "pattern-integration-test",
+        "pattern-lunch-poll-contention-test",
         "pattern-reload-integration-test",
         "pattern-unit-test",
         "package-integration-test",

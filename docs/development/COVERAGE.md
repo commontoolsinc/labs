@@ -15,7 +15,7 @@ directly, so Deno's built-in V8 coverage can record which of their lines ran. A
 CI job turns this on by setting the `DENO_COVERAGE_DIR` environment variable.
 After the tests finish, `tasks/write-coverage-lcov.ts` converts the raw V8
 profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
-artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
+artifact. Most test jobs set `DENO_COVERAGE_DIR`, including the pattern
 integration jobs.
 
 ### Authored pattern code is measured by transformer instrumentation
@@ -111,19 +111,20 @@ gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>
 | --- | --- | --- |
 | `pattern-unit-test` | yes | yes (`cf test` with `CF_PATTERN_COVERAGE_DIR`) |
 | `pattern-integration-test` | yes | no |
+| `pattern-lunch-poll-contention-test` | yes | no |
 | `pattern-reload-integration-test` | yes | no |
 
 The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
-`cf test` in-process. The two integration jobs run browser-driven `deno test`
-files against a running Toolshed server.
+`cf test` in-process. The integration jobs run browser-driven `deno test` files
+against a running Toolshed server.
 
-## Why the two integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
+## Why the integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
 
-Adding `CF_PATTERN_COVERAGE_DIR` to `pattern-integration-test` or
-`pattern-reload-integration-test` was considered and deliberately not done, for
-four reasons.
+Adding `CF_PATTERN_COVERAGE_DIR` to `pattern-integration-test`,
+`pattern-lunch-poll-contention-test`, or `pattern-reload-integration-test` was
+considered and deliberately not done, for four reasons.
 
-1. It would do nothing as written. Both jobs run their tests with `deno test`,
+1. It would do nothing as written. These jobs run their tests with `deno test`,
    not `cf test`, and `CF_PATTERN_COVERAGE_DIR` is read only by `cf test`. The
    variable would sit in the job's environment unread, which is worse than
    absent because it suggests coverage is being collected when none is.
