@@ -60,13 +60,13 @@ export const setup = pattern(() => ({
 }));
 
 const profileNames = (chat: GroupChatDemoOutput): string[] =>
-  profilesValue(chat.profiles as SharedProfilesCell)
+  profilesValue(chat.profiles)
     .map((profile) => profile.get()?.name ?? "")
     .filter((name) => name.length > 0)
     .toSorted();
 
 const messageBodies = (chat: GroupChatDemoOutput): string[] =>
-  messagesValue(chat.messages as SharedMessagesCell).map((m) => m.body);
+  messagesValue(chat.messages).map((m) => m.body);
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const chat = setup.chat;
@@ -135,9 +135,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   // PerUser draft: Alice's typing must never show up in Bob's runtime.
-  const assert_draft_empty = computed(() =>
-    ((chat.profileDraft as Writable<string | Default<"">>).get() ?? "") === ""
-  );
+  const profileDraft: Writable<string | Default<"">> = chat.profileDraft;
+  const assert_draft_empty = computed(() => (profileDraft.get() ?? "") === "");
   const assert_unnamed = computed(() =>
     chat.currentProfileName === "Name not set"
   );

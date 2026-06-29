@@ -2341,9 +2341,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
         recommendation: "share" | "share_with_edits" | "do_not_share";
       };
 
-      const pendingWritable = pendingSubmissions as Writable<
-        PendingSubmission[]
-      >;
+      const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((
         s: PendingSubmission | null,
       ): s is PendingSubmission => s != null);
@@ -2363,18 +2361,24 @@ Be conservative: when in doubt, recommend "do_not_share".`,
 
       // Update the submission with screening results using .key().key().set()
       const itemCell = pendingWritable.key(idx);
-      (itemCell.key("sanitizedQuery") as Writable<string>).set(
+      const sanitizedQueryCell: Writable<string> = itemCell.key(
+        "sanitizedQuery",
+      );
+      const piiWarningsCell: Writable<string[]> = itemCell.key("piiWarnings");
+      const generalizabilityIssuesCell: Writable<string[]> = itemCell.key(
+        "generalizabilityIssues",
+      );
+      const recommendationCell: Writable<
+        "share" | "share_with_edits" | "do_not_share" | "pending"
+      > = itemCell.key("recommendation");
+      sanitizedQueryCell.set(
         screeningData.sanitizedQuery || submission.originalQuery,
       );
-      (itemCell.key("piiWarnings") as Writable<string[]>).set(
-        screeningData.piiFound || [],
-      );
-      (itemCell.key("generalizabilityIssues") as Writable<string[]>).set(
+      piiWarningsCell.set(screeningData.piiFound || []);
+      generalizabilityIssuesCell.set(
         screeningData.generalizabilityIssues || [],
       );
-      (itemCell.key("recommendation") as Writable<
-        "share" | "share_with_edits" | "do_not_share" | "pending"
-      >).set(screeningData.recommendation);
+      recommendationCell.set(screeningData.recommendation);
     });
 
     // Note: approvePendingSubmissionHandler, rejectPendingSubmissionHandler, updateSanitizedQueryHandler
@@ -2568,18 +2572,19 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                             value={submission.sanitizedQuery}
                             onChange={(e: any) => {
                               const newValue = e.target.value;
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
                               const subs = pendingWritable.get() || [];
                               const idx = subs.findIndex((
                                 s: PendingSubmission,
                               ) => s.localQueryId === submission.localQueryId);
                               if (idx >= 0) {
-                                (pendingWritable.key(idx).key(
-                                  "sanitizedQuery",
-                                ) as Writable<string>).set(newValue);
+                                const sanitizedQueryCell: Writable<string> =
+                                  pendingWritable.key(idx).key(
+                                    "sanitizedQuery",
+                                  );
+                                sanitizedQueryCell.set(newValue);
                               }
                             }}
                             style={{
@@ -2604,13 +2609,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                           <cf-button
                             onClick={() => {
                               // Reject
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
-                              const localWritable = localQueries as Writable<
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
+                              const localWritable: Writable<
                                 LocalQuery[]
-                              >;
+                              > = localQueries;
                               const subs = pendingWritable.get() || [];
                               pendingWritable.set(
                                 subs.filter((s: PendingSubmission) =>
@@ -2623,11 +2627,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 q: LocalQuery,
                               ) => q.id === submission.localQueryId);
                               if (idx >= 0) {
-                                (localWritable.key(idx).key(
-                                  "shareStatus",
-                                ) as Writable<
+                                const shareStatusCell: Writable<
                                   "private" | "pending_review" | "submitted"
-                                >).set("private");
+                                > = localWritable.key(idx).key(
+                                  "shareStatus",
+                                );
+                                shareStatusCell.set("private");
                               }
                             }}
                             variant="ghost"
@@ -2639,18 +2644,19 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                           <cf-button
                             onClick={() => {
                               // Approve
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
                               const subs = pendingWritable.get() || [];
                               const idx = subs.findIndex((
                                 s: PendingSubmission,
                               ) => s.localQueryId === submission.localQueryId);
                               if (idx >= 0) {
-                                (pendingWritable.key(idx).key(
-                                  "userApproved",
-                                ) as Writable<boolean>).set(true);
+                                const userApprovedCell: Writable<boolean> =
+                                  pendingWritable.key(idx).key(
+                                    "userApproved",
+                                  );
+                                userApprovedCell.set(true);
                               }
                             }}
                             variant={submission.userApproved
@@ -2699,13 +2705,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 );
                                 const submitHandler = registry?.result
                                   ?.submitQuery;
-                                const pendingWritable =
-                                  pendingSubmissions as Writable<
-                                    PendingSubmission[]
-                                  >;
-                                const localWritable = localQueries as Writable<
+                                const pendingWritable: Writable<
+                                  PendingSubmission[]
+                                > = pendingSubmissions;
+                                const localWritable: Writable<
                                   LocalQuery[]
-                                >;
+                                > = localQueries;
 
                                 // Submit each approved query
                                 approved.forEach(
@@ -2727,10 +2732,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         submission.localQueryId
                                     );
                                     if (idx >= 0) {
-                                      (pendingWritable.key(idx).key(
+                                      const submittedAtCell: Writable<
+                                        number | undefined
+                                      > = pendingWritable.key(idx).key(
                                         "submittedAt",
-                                      ) as Writable<number | undefined>)
-                                        .set(safeDateNow());
+                                      );
+                                      submittedAtCell.set(safeDateNow());
                                     }
 
                                     // Update local query status to submitted
@@ -2740,13 +2747,14 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                       q: LocalQuery,
                                     ) => q.id === submission.localQueryId);
                                     if (qIdx >= 0) {
-                                      (localWritable.key(qIdx).key(
-                                        "shareStatus",
-                                      ) as Writable<
+                                      const shareStatusCell: Writable<
                                         | "private"
                                         | "pending_review"
                                         | "submitted"
-                                      >).set("submitted");
+                                      > = localWritable.key(qIdx).key(
+                                        "shareStatus",
+                                      );
+                                      shareStatusCell.set("submitted");
                                     }
                                   },
                                 );

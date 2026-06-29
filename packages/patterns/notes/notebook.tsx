@@ -333,7 +333,8 @@ const addSelectedToNotebook = handler<
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
   const targetNotebookCell = notebooks.key(nbIndex);
-  const targetNotebookNotes = targetNotebookCell.key("notes");
+  const targetNotebookNotes: Writable<NotePiece[] | undefined> =
+    targetNotebookCell.key("notes");
 
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const notesToAdd: NotePiece[] = [];
@@ -341,9 +342,7 @@ const addSelectedToNotebook = handler<
     const note = notesList[idx];
     if (note) notesToAdd.push(note);
   }
-  (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
-    ...notesToAdd,
-  );
+  targetNotebookNotes.push(...notesToAdd);
 
   selectedNoteIndices.set([]);
   selectedAddNotebook.set("");

@@ -170,7 +170,7 @@ const handlers: Record<
     await target.pull();
     let cell = target;
     for (const segment of (path ?? []) as (string | number)[]) {
-      cell = cell.key(segment as never) as Cell<any>;
+      cell = cell.key(segment as never);
     }
     return sanitizeForTransfer(cell.get());
   },
@@ -185,7 +185,7 @@ const handlers: Record<
     await target.pull();
     let cell = target;
     for (const segment of (path ?? []) as (string | number)[]) {
-      cell = cell.key(segment as never) as Cell<any>;
+      cell = cell.key(segment as never);
     }
     const resolved = cell.resolveAsCell();
     const link = resolved.getAsNormalizedFullLink();
