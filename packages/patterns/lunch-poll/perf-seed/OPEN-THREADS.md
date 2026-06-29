@@ -14,14 +14,14 @@ This doc is the **map**. The deep-dives live next to it in `perf-seed/`:
 - ✅ Original write-storm / cell-identity divergence **fixed & merged** (#4360 + supporting).
 - ✅ Resume / list-settling / flicker cluster **resolved & merged**: #4366 (VDOM settling) + **#4367 (read-mostly resume, MERGED 06-27)**.
 - ✅ cf-fragment trust-boundary gap **fixed** (CT-1796, Done).
-- 🔵 **Next session:** the **S16 filter/flatMap over-taint** — our follow-up #4391 turned out label-neutral; the real over-taint is upstream (input-list read). See the new handoff doc.
+- 🔵 **S16 filter/flatMap over-taint (VERIFIED 06-29):** the input-list read over-taints the result `structure` label, but the "obvious" fix (mirror map) is a **security regression** — it's the sole carrier of the legitimate membership taint, and the precise carrier (predicate results) is elided by skip-if-unchanged timing. Reframed as a structure-stamp-discipline design question for seefeld (CT-1801). See the handoff doc.
 - 🟡 Two architectural levers **held for seefeld**: the **scopes question** (CT-1799) and the **CFC structure-only-read rule** (CT-1801).
 
 ## Ticket / PR index (quick reference)
 | Ref | What | Status |
 | --- | --- | --- |
 | #4360 / #4361 / #4366 / #4367 | storm fix / memwrite trace / VDOM settling / read-mostly resume | all **merged** |
-| **#4391** | our S16 probe-scope follow-up (filter/flatMap container reads) | **OPEN, CI green, but label-neutral — see thread 3** |
+| **#4391** | our S16 probe-scope follow-up (filter/flatMap container reads) | **OPEN, CI green, but label-neutral; drop the "over-taint fix" framing — see thread 3** |
 | #4346 (Ben) / #4349 (Wilk) | localize vote writes / runtime convergence | OPEN (4349 likely close) |
 | **CT-1799** | scopes architecture (every-client write-back) → seefeld | Triage, held |
 | **CT-1801** | CFC structure-only-read rule (spec gap) → seefeld | Triage, held |
@@ -65,13 +65,17 @@ implements it via `linkResolutionProbe`) and filter/flatMap (which didn't) drift
 `08-09` spec edit. **Thread 3 is its implementation half.**
 
 ### 3. S16 filter/flatMap over-taint (implementation) → **[`S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md`](./S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md)**
-**[NEXT-SESSION FOCUS]**
-We shipped **#4391** to add map's container-read probe-scoping to filter/flatMap — but verification
-showed it's **label-neutral** (a no-op observably). The *real* over-taint is **upstream**: filter/flatMap
-read their **input list** with a plain content read that dereferences the elements (map avoids this with
-identity-only materialization, `map.ts:163-188`). Next steps + the fails-without/passes-with
-**ignore-element test** + dead ends are all in the handoff doc. Decide what #4391 becomes (drop the
-container change / fold into the complete fix / keep as honest defensive consistency).
+**[VERIFIED 2026-06-29 — prior "port map's idiom" plan was WRONG]**
+The input-list read DOES over-taint the result `structure` label (verified observable: an index-only
+predicate still taints it with dropped elements' content). **BUT** porting map's identity-only
+materialization is a **security regression** — that same read is the sole carrier of the legitimate
+§8.5.6.1 membership taint, and removing it makes the team's own `cfc-flow-pointwise` filter tests go
+red. Traced root cause: the correct carrier (predicate-result reads) is precise but arrives on reconcile
+pass 2, when `skip-if-unchanged` elides the container write → its `structure` stamp never fires; the leak
+was masking a **label-stamp-timing** bug. A precise fix needs map-style input read **plus** re-stamping
+`structure` when J changes without a value change — structure-stamp discipline, **seefeld's domain**
+(CT-1801 reframed). #4391's container change is separately label-neutral. Full trace + the
+fails-without/passes-with shape (with the essential `isPositive` control) are in the handoff doc.
 
 ### 4. Resume during-batch self-heal → **CT-1802** (resolved; deferred guard)
 The "write-after-sync" worry (republish reads a transient `undefined` → persists a shrink) is

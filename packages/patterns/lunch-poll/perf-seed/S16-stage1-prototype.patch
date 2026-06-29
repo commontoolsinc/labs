@@ -1,0 +1,71 @@
+diff --git a/packages/runner/src/builtins/filter.ts b/packages/runner/src/builtins/filter.ts
+index c18f89b2c..422eceeec 100644
+--- a/packages/runner/src/builtins/filter.ts
++++ b/packages/runner/src/builtins/filter.ts
+@@ -39,6 +39,8 @@ import {
+ import { resolveOpPattern } from "./op-pattern-ref.ts";
+ import { createResumeRepublisher } from "./resume-republish.ts";
+ import { linkResolutionProbe } from "../storage/reactivity-log.ts";
++import { resolveLink } from "../link-resolution.ts";
++import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+ import { getLogger } from "@commonfabric/utils/logger";
+ 
+ const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
+@@ -153,8 +155,24 @@ export function filter(
+ 
+   return (tx: IExtendedStorageTransaction) => {
+     const elementAwaitSync = resumeBatchAwaitSync;
+-    const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
+-      .withTx(tx).get();
++    // [SCRATCH FIX] identity-only input materialization (mirrors map.ts)
++    const op = inputsCell.asSchema(FILTER_INPUT_SCHEMA).withTx(tx).key("op")
++      .get();
++    const sourceListCell = inputsCell.key("list");
++    const listCell = sourceListCell.withTx(tx).resolveAsCell();
++    const rawList = listCell.withTx(tx).getRaw() as unknown;
++    const listBase = listCell.getAsNormalizedFullLink();
++    const list: Cell<any>[] | undefined = rawList === undefined
++      ? undefined
++      : !Array.isArray(rawList)
++      ? rawList as unknown as Cell<any>[]
++      : rawList.map((slot, i) => {
++        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
++          ? parseLink(slot, listBase)
++          : { ...listBase, path: [...listBase.path, String(i)] };
++        const resolved = resolveLink(runtime, tx, slotLink, "value");
++        return runtime.getCellFromLink(resolved, undefined, tx);
++      });
+ 
+     const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
+     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+diff --git a/packages/runner/src/cfc/prepare.ts b/packages/runner/src/cfc/prepare.ts
+index fc7b63503..d4f3d2a47 100644
+--- a/packages/runner/src/cfc/prepare.ts
++++ b/packages/runner/src/cfc/prepare.ts
+@@ -3488,6 +3488,26 @@ export const prepareBoundaryCommit = (
+         }
+         derivedStampPaths.push(path);
+       }
++      // (2) Membership re-stamp (S16 filter/flatMap): a pure-link SLOT link
++      // write means the parent container's membership/order changed THIS tx, so
++      // the container's structure label must carry this tx's J — the selection
++      // criteria (predicate-result reads) that decided membership. Otherwise the
++      // container root is stamped only on its first (empty) write, before the
++      // per-element predicates are ready, so incremental membership taint never
++      // lands (the slot diffs are link-covered writes, skipped above). Per-element
++      // VALUE updates don't rewrite the slot link (only the result cell), so
++      // map's pointwise no-smear is preserved.
++      const structureSeen = new Set(structureStampPaths.map((p) => pathKey(p)));
++      for (const input of linkWriteInputs) {
++        const slot = canonicalizeLogicalPath(input.target.path);
++        if (slot.length === 0) continue;
++        if (!/^\d+$/.test(String(slot[slot.length - 1]))) continue;
++        const container = slot.slice(0, -1);
++        const ck = pathKey(container);
++        if (structureSeen.has(ck)) continue;
++        structureSeen.add(ck);
++        structureStampPaths.push(container);
++      }
+       for (const path of derivedStampPaths) {
+         // Deeper stamped paths are redundant with a stamped ancestor; only
+         // collapse against paths that actually receive a covering entry.
