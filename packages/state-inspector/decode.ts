@@ -139,7 +139,10 @@ export function annotate(v: Json, maxDepth = 8): Json {
 
   // Lower non-JSON-safe Fabric leaves to a stable, printable form so the bundle
   // (and every JSON.stringify export path that consumes it — HTML, CLI --json)
-  // can't throw on a BigInt or render a Fabric instance as an opaque `{}`.
+  // can't throw on a BigInt, render a Fabric instance as an opaque `{}`, or
+  // SILENTLY DROP a stored `undefined` (which JSON.stringify omits — losing the
+  // present-undefined vs absent-key distinction the data model preserves).
+  if (v === undefined) return { $undefined: true };
   if (typeof v === "bigint") return { $bigint: v.toString() };
   if (typeof v === "symbol") return String(v);
   if (typeof v === "function") return "[function]";

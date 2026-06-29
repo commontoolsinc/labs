@@ -53,3 +53,14 @@ Deno.test("decode: BigInt and Fabric instances are JSON-safe after annotate", ()
   const json = JSON.stringify(annotated);
   assert(json.includes('"$bigint"'), "bigint lowered to a tagged record");
 });
+
+Deno.test("decode: a present `undefined` is not silently dropped on export", () => {
+  // JSON.stringify omits an `undefined` field; the sentinel preserves the
+  // present-undefined vs absent-key distinction the data model keeps.
+  const annotated = annotate({ a: undefined, b: 1 }) as Record<string, unknown>;
+  assertEquals(annotated.a, { $undefined: true });
+  assert(
+    "a" in JSON.parse(JSON.stringify(annotated)),
+    "the undefined field survives JSON round-trip",
+  );
+});

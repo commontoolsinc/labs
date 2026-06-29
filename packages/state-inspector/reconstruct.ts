@@ -33,12 +33,6 @@ export interface EntityAddress {
 export interface ReconstructOptions extends EntityAddress {
   /** Replay revisions with seq <= atSeq. Defaults to latest. */
   atSeq?: number;
-  /**
-   * When set, cut the replay precisely AT (atSeq, atOpIndex): include rows with
-   * `seq < atSeq`, or `seq === atSeq && op_index <= atOpIndex`. Lets a timeline
-   * reconstruct the state immediately after one op of a multi-op commit.
-   */
-  atOpIndex?: number;
 }
 
 export type EntityDocument =
@@ -72,7 +66,6 @@ interface RevRow {
 }
 
 const MAX_SEQ = Number.MAX_SAFE_INTEGER;
-const MAX_OP = Number.MAX_SAFE_INTEGER;
 
 /** Does this DB carry a given table? (legacy/partial DBs lack branch/snapshot.) */
 function hasTable(space: SpaceDb, name: string): boolean {
@@ -82,11 +75,11 @@ function hasTable(space: SpaceDb, name: string): boolean {
 }
 
 /**
- * Resolve the single revision row visible for `id` at `(atSeq, atOpIndex)` on
- * `branch`, replicating the engine's `readRowForBranch` (`engine.ts`): take the
- * latest local row at/before the cut; if the branch has NONE, inherit the
- * parent's row at `min(cut, fork_seq)`, recursively to the root. Inheritance
- * resolves WHICH branch owns the visible row — it does NOT merge logs.
+ * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
+ * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest
+ * local row at/before `atSeq`; if the branch has NONE, inherit the parent's row
+ * at `min(atSeq, fork_seq)`, recursively to the root. Inheritance resolves WHICH
+ * branch owns the visible row — it does NOT merge logs.
  */
 function resolveBranchRow(
   space: SpaceDb,
@@ -94,7 +87,6 @@ function resolveBranchRow(
   scope: string,
   id: string,
   atSeq: number,
-  atOpIndex: number,
   seen: Set<string> = new Set(),
 ): { row: RevRow; branch: string } | undefined {
   if (seen.has(branch)) return undefined;
@@ -103,11 +95,10 @@ function resolveBranchRow(
   const row = space.db
     .prepare(
       `SELECT seq, op_index, op, data FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ?
-         AND (seq < ? OR (seq = ? AND op_index <= ?))
+       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
        ORDER BY seq DESC, op_index DESC LIMIT 1`,
     )
-    .get<RevRow>(branch, id, scope, atSeq, atSeq, atOpIndex);
+    .get<RevRow>(branch, id, scope, atSeq);
   if (row) return { row, branch };
 
   if (!hasTable(space, "branch")) return undefined;
@@ -128,7 +119,6 @@ function resolveBranchRow(
     scope,
     id,
     inheritedSeq,
-    MAX_OP,
     seen,
   );
 }
@@ -182,7 +172,7 @@ function reconstructWithinBranch(
     if (snap && snap.seq >= baseSeq) {
       doc = decodeStored(snap.value) as FabricValue;
       baseSeq = snap.seq;
-      baseOpIndex = MAX_OP; // patches with seq > snapshot.seq only
+      baseOpIndex = MAX_SEQ; // patches with seq > snapshot.seq only
     }
   }
 
@@ -226,16 +216,8 @@ export function reconstructDocument(
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
   const atSeq = opts.atSeq ?? MAX_SEQ;
-  const atOpIndex = opts.atOpIndex ?? MAX_OP;
 
-  const resolved = resolveBranchRow(
-    space,
-    branch,
-    scope,
-    opts.id,
-    atSeq,
-    atOpIndex,
-  );
+  const resolved = resolveBranchRow(space, branch, scope, opts.id, atSeq);
   if (!resolved) return undefined;
 
   const { row, branch: rb } = resolved;

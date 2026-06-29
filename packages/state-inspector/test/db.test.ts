@@ -24,6 +24,11 @@ CREATE TABLE revision (
   op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
   PRIMARY KEY (branch, id, seq, op_index)
 );
+-- a legacy snapshot table that ALSO predates scope_key
+CREATE TABLE snapshot (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL, seq INTEGER NOT NULL,
+  value JSON NOT NULL, PRIMARY KEY (branch, id, seq)
+);
 `;
 
 function seed(path: string) {
@@ -37,6 +42,19 @@ function seed(path: string) {
     `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
      VALUES ('of:a', 1, 0, 'set', ?, 1)`,
   ).run(JSON.stringify({ value: { count: 7 } }));
+  // a snapshot at seq 1 + a patch after it — exercises the snapshot-base read on
+  // a pre-scope_key DB (the snapshot table is shimmed like revision).
+  db.prepare(
+    `INSERT INTO snapshot (id, seq, value) VALUES ('of:b', 1, ?)`,
+  ).run(JSON.stringify({ value: { n: 1 } }));
+  db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (2, 'session:did:key:zX:u', 2, '{}', '{}')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES ('of:b', 2, 0, 'patch', ?, 2)`,
+  ).run(JSON.stringify([{ op: "replace", path: "/value/n", value: 2 }]));
   db.close();
 }
 
@@ -53,14 +71,19 @@ Deno.test("scope_key shim: a DB without scope_key still inspects", async () => {
           "SELECT scope_key, count(*) n FROM revision GROUP BY scope_key",
         )
         .all<{ scope_key: string; n: number }>();
-      assertEquals(has, [{ scope_key: "space", n: 1 }]);
+      assertEquals(has, [{ scope_key: "space", n: 2 }]); // of:a set + of:b patch
 
       const doc = reconstructDocument(space, { id: "of:a" });
       assertEquals((doc?.value as { count: number }).count, 7);
 
+      // Snapshot-base reconstruction works on a pre-scope_key DB (snapshot table
+      // is shimmed too) — base = snapshot {n:1}, then the patch → {n:2}.
+      const snapDoc = reconstructDocument(space, { id: "of:b" });
+      assertEquals((snapDoc?.value as { n: number }).n, 2);
+
       const models = listEntityModels(space);
-      assertEquals(models.length, 1);
-      assertEquals(models[0].id, "of:a");
+      assertEquals(models.length, 2); // of:a, of:b
+      assertEquals(models.map((m) => m.id).sort(), ["of:a", "of:b"]);
     } finally {
       space.close();
     }
