@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   assignPatternIntegrationShards,
+  INDEPENDENT_PATTERN_INTEGRATION_FILES,
   listPatternIntegrationTests,
   selectPatternIntegrationFiles,
 } from "./select-pattern-integration-files.ts";
@@ -79,6 +80,7 @@ Deno.test("every non-all file is assigned to exactly one shard", () => {
   const files = [
     "all.test.ts",
     "parking-coordinator-admin-view.test.ts",
+    "lunch-poll-contention.test.ts",
     "cfc-spec-gallery.test.ts",
     "default-app.test.ts",
     "cfc-group-chat-demo.test.ts",
@@ -94,12 +96,48 @@ Deno.test("every non-all file is assigned to exactly one shard", () => {
     }
   }
   for (const file of files) {
-    if (file === "all.test.ts") continue;
+    if (
+      file === "all.test.ts" ||
+      INDEPENDENT_PATTERN_INTEGRATION_FILES.includes(
+        file as typeof INDEPENDENT_PATTERN_INTEGRATION_FILES[number],
+      )
+    ) {
+      continue;
+    }
     assertEquals(
       counts.get(`./integration/${file}`),
       1,
       `${file} should appear on exactly one shard`,
     );
+  }
+  for (const file of INDEPENDENT_PATTERN_INTEGRATION_FILES) {
+    assertEquals(
+      counts.has(`./integration/${file}`),
+      false,
+      `${file} should be excluded from normal shards`,
+    );
+  }
+});
+
+Deno.test("independent pattern integration files are not selected by shards", () => {
+  const files = [
+    "all.test.ts",
+    "counter.test.ts",
+    ...INDEPENDENT_PATTERN_INTEGRATION_FILES,
+  ];
+
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    const selected = selectPatternIntegrationFiles(files, {
+      index,
+      total: TOTAL_SHARDS,
+    });
+    for (const file of INDEPENDENT_PATTERN_INTEGRATION_FILES) {
+      assertEquals(
+        selected.includes(`./integration/${file}`),
+        false,
+        `${file} should not run in shard ${index}`,
+      );
+    }
   }
 });
 
@@ -137,6 +175,16 @@ Deno.test("every real integration file is covered exactly once across shards", a
         shards,
         [1, 2, 3, 4],
         `${name} should run in every shard`,
+      );
+    } else if (
+      INDEPENDENT_PATTERN_INTEGRATION_FILES.includes(
+        name as typeof INDEPENDENT_PATTERN_INTEGRATION_FILES[number],
+      )
+    ) {
+      assertEquals(
+        shards.length,
+        0,
+        `${name} should run in its dedicated workflow job, not normal shards`,
       );
     } else {
       assertEquals(
