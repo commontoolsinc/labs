@@ -73,6 +73,22 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
   new Map([
     ["cf-chat-message", new Set(["name", "content"])],
   ]);
+// Props whose live DOM value can drift from the authored VDOM value
+// independently of any worker-side change — user input (`value`), or
+// browser / custom-element state (`checked`, `selected`, `selectedIndex`,
+// `indeterminate`, `open`). On the main thread, setPropDefault re-asserts the
+// authored value by comparing against the *live* property, so for these props a
+// repeated set-prop is a drift-repair, not pure churn. The worker-side value
+// guard (updatePropsInPlace) only knows the last *authored* value and cannot
+// see live drift, so it must never skip these — they always re-emit.
+const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
+  "value",
+  "checked",
+  "selected",
+  "selectedIndex",
+  "indeterminate",
+  "open",
+]);
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
@@ -1584,24 +1600,33 @@ export class WorkerReconciler {
           cancel,
         });
       } else {
-        // Static prop. Skip the worker→main set-prop op when an unchanged
-        // primitive value would be a no-op on the main thread anyway: DOM
+        // Static prop. Skip the worker→main set-prop op when re-asserting the
+        // same authored value would be a true no-op on the main thread: DOM
         // writes are already value-guarded in setPropDefault, but the op and
         // the JSON.stringify it carries are not. This matters because #4366
         // made updateChildrenInPlace always reconcile reused inline-VNode
         // children, so this path now fires on every parent recompute even when
         // captured prop values are identical (CT-1798). Mirrors the Cell<Props>
-        // primitive-prop guard below. Restricted to primitive values (the same
-        // scope as that guard): object/array props compare by reference, which
-        // is unreliable here, so they always re-emit. Text-integrity props are
-        // never skipped either: their transform has policy-dependent side
-        // effects and must re-run.
+        // primitive-prop guard below.
+        //
+        // The skip is sound ONLY when a repeated set-prop is genuinely
+        // redundant, so it is NOT taken when:
+        //   - the value is an object/array — reference equality is unreliable;
+        //   - the prop is a text-integrity sink — its transform has
+        //     policy-dependent side effects and must re-run;
+        //   - the prop's live DOM value can drift independently of the VDOM
+        //     (DOM_LIVE_PROPS) — there the repeated op repairs drift via
+        //     setPropDefault's compare against the *live* value, which the
+        //     worker cannot observe.
+        // This assumes the default value-guarded setProp; a custom setProp with
+        // observable same-value behavior would not be re-invoked on a skip.
         const isPrimitiveValue = value === null ||
           (typeof value !== "object" && typeof value !== "function");
         if (
           isPrimitiveValue && existingState && !existingState.cell &&
           existingState.currentValue === value &&
-          !this.isTextIntegrityProp(state, key)
+          !this.isTextIntegrityProp(state, key) &&
+          !DOM_LIVE_PROPS.has(key)
         ) {
           continue;
         }
