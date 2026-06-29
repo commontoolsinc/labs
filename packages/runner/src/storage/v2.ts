@@ -1,4 +1,5 @@
 import {
+  CloneForMutationError,
   cloneIfNecessary,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
@@ -39,7 +40,12 @@ import {
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isObject,
+  isPlainContainer,
+  isRecord,
+} from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -372,6 +378,86 @@ const compactChangedPaths = (paths: readonly string[][]): string[][] => {
   return retained;
 };
 
+type PendingReplayContainer = Record<string, FabricValue> | FabricValue[];
+
+const isPendingReplayContainer = (
+  value: unknown,
+): value is PendingReplayContainer => isPlainContainer(value);
+
+const emptyReplayContainerForNextKey = (
+  nextKey: string,
+): PendingReplayContainer =>
+  isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
+
+const childAtReplayKey = (
+  container: PendingReplayContainer,
+  key: string,
+): FabricValue => {
+  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
+    return undefined;
+  }
+  return (container as Record<string, FabricValue>)[key];
+};
+
+const setChildAtReplayKey = (
+  container: PendingReplayContainer,
+  key: string,
+  value: FabricValue,
+): void => {
+  (container as Record<string, FabricValue>)[key] = value;
+};
+
+const baseWithMutableReplaySpine = (
+  base: FabricValue,
+  path: readonly string[],
+): FabricValue => {
+  // Pending patches are replayed against the latest confirmed value after
+  // earlier optimistic materializations may have been dropped. If the surviving
+  // patch was built through that dropped parent, the confirmed value can be a
+  // stale non-container at the same path. Rebuild only the mutable spine needed
+  // for this replay; normal cloneWithValueAtPath/cloneForMutation remain strict.
+  const root = isPendingReplayContainer(base)
+    ? cloneIfNecessary(base, { frozen: false, deep: false })
+    : emptyReplayContainerForNextKey(path[0] ?? "");
+  let current = root as PendingReplayContainer;
+
+  for (let index = 0; index < path.length - 1; index++) {
+    const key = path[index]!;
+    const nextKey = path[index + 1]!;
+    const existing = childAtReplayKey(current, key);
+    const next = isPendingReplayContainer(existing)
+      ? cloneIfNecessary(existing, { frozen: false, deep: false })
+      : emptyReplayContainerForNextKey(nextKey);
+    setChildAtReplayKey(current, key, next);
+    current = next;
+  }
+
+  return root;
+};
+
+const cloneWithPendingReplayValueAtPath = (
+  base: FabricValue,
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue => {
+  try {
+    return cloneWithValueAtPath(base, path, value);
+  } catch (error) {
+    if (
+      !(error instanceof CloneForMutationError) ||
+      (error.kind !== "non-container-descent" &&
+        error.kind !== "non-mutable-leaf")
+    ) {
+      throw error;
+    }
+    return cloneWithValueAtPath(
+      baseWithMutableReplaySpine(base, path),
+      path,
+      value,
+    );
+  }
+};
+
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
@@ -389,7 +475,7 @@ const applyPendingVersion = (
         )
       ) {
         if (hasValueAtPath(pending.value, path)) {
-          next = cloneWithValueAtPath(
+          next = cloneWithPendingReplayValueAtPath(
             next,
             path,
             readValueAtPath(pending.value, path),

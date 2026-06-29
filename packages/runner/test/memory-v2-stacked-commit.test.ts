@@ -68,7 +68,7 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
-type RootValue = Record<string, FabricValue> | undefined;
+type RootValue = FabricValue | undefined;
 type DocState = {
   seq: number;
   value: RootValue;
@@ -2009,6 +2009,141 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
     });
 
     await assertResultOk(right);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropping parent materialization does not crash surviving child patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { left: 1, right: 2 });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { right: 2 });
+
+    await assertResultOk(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropped parent replay rebuilds object-backed primitive roots", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, new FabricEpochNsec(1n));
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { left: 1, right: 2 });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { right: 2 });
+
+    await assertConflict(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropped parent replay rebuilds numeric array spines", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { items: ["a"] },
+      }],
+      { items: ["a"] },
+    );
+
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/items/0/name",
+        value: "b",
+      }],
+      { items: [{ name: "b" }] },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { items: [{ name: "b" }] });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { items: [{ name: "b" }] });
+
+    await assertConflict(child);
   } finally {
     await harness.close();
   }
