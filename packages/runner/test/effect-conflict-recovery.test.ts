@@ -28,7 +28,10 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
-import { type StorageNotification } from "../src/storage/interface.ts";
+import type {
+  IStorageNotification,
+  StorageNotification,
+} from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
@@ -52,6 +55,22 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   private sharedServer!: MemoryV2Server.Server;
   protected override server(): MemoryV2Server.Server {
     return this.sharedServer;
+  }
+
+  // When set, forward storage notifications to subscribers with their `changes`
+  // emptied, so they raise no reader-dirty — a deterministic stand-in for a
+  // "dataless catch-up" (a conflict whose catch-up carries no diff). Off by
+  // default: a transparent passthrough that leaves the other tests unaffected.
+  suppressReaderDirty = false;
+  override subscribe(subscription: IStorageNotification): void {
+    super.subscribe({
+      next: (n: StorageNotification) =>
+        this.suppressReaderDirty && "changes" in n
+          ? subscription.next(
+            { ...n, changes: [] } as unknown as StorageNotification,
+          )
+          : subscription.next(n),
+    });
   }
 }
 
@@ -205,5 +224,92 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
 
   it("recovers a debounced effect (the conditionallyScheduledEffects path)", async () => {
     await exerciseEffectConflict("debounced", { debounce: 50 });
+  });
+
+  // Deterministic regression for the #4210/#4343 strand: a reactive action whose
+  // commit conflicts must re-evaluate even when the conflict's catch-up delivers
+  // NO reader-dirty (the "already-delivered write" case). The real strand is a
+  // timing window that doesn't reproduce deterministically — on a normal conflict
+  // the read-repair force-notifies, so reader-dirty fires and the action
+  // self-recovers even without a re-queue. `suppressReaderDirty` stands in for the
+  // dataless catch-up: the real ConflictError still flows via the commit promise
+  // and the repaired value still lands in confirmed storage, so recovery is left
+  // ONLY to the re-queue. Passes with #4343's re-queue; strands (fails) with a
+  // no-requeue handler (the #4210 / #4349-ordinary behavior).
+  it("recovers only via the re-queue when the catch-up is dataless", async () => {
+    const srcKey = "strand-src";
+    const resKey = "strand-res";
+
+    // A seeds source=1, result=0.
+    const srcA = rtA.getCell<number>(space, srcKey, undefined);
+    const resA = rtA.getCell<number>(space, resKey, undefined);
+    {
+      const tx = rtA.edit();
+      srcA.withTx(tx).set(1);
+      resA.withTx(tx).set(0);
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit();
+      expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
+      await storageA.synced();
+    }
+
+    // B converges to source=1.
+    const srcB = rtB.getCell<number>(space, srcKey, undefined);
+    const resB = rtB.getCell<number>(space, resKey, undefined);
+    await srcB.sync();
+    await resB.sync();
+    await srcB.pull();
+    await resB.pull();
+    expect(srcB.get(), "B converged to source=1").toBe(1);
+
+    // A advances source to 2; B is left stale at 1.
+    {
+      const tx = rtA.edit();
+      srcA.withTx(tx).set(2);
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit();
+      expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
+      await storageA.synced();
+    }
+    expect(srcB.get(), "B provably stale (still 1)").toBe(1);
+
+    // From here the scheduler sees no reader-dirty: the catch-up is dataless, so
+    // recovery can come ONLY from the re-queue.
+    storageB.suppressReaderDirty = true;
+
+    const seen: number[] = [];
+    let runs = 0;
+    const effect: Action = (actionTx) => {
+      runs++;
+      const value = srcB.withTx(actionTx).get();
+      seen.push(value);
+      resB.withTx(actionTx).send(value * 10);
+    };
+    rtB.scheduler.subscribe(effect, {
+      reads: [toMemorySpaceAddress(srcB.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(resB.getAsNormalizedFullLink())],
+    }, { isEffect: true });
+
+    await rtB.idle();
+    expect(seen[0], "first run read the stale value").toBe(1);
+
+    // On a no-requeue handler the action is stranded here (no reader-dirty, no
+    // re-queue); with #4343's re-queue it re-runs against the caught-up state.
+    const recovered = await waitFor(() => runs >= 2 && resB.get() === 20);
+    await rtB.idle();
+
+    expect(
+      conflicts.length,
+      "the commit hit a real ConflictError",
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      recovered,
+      "action re-ran via the re-queue despite the dataless catch-up",
+    ).toBe(true);
+    expect(runs, "action re-ran (not stranded)").toBeGreaterThanOrEqual(2);
+    expect(resB.get(), "recovered, committed value reflects fresh state").toBe(
+      20,
+    );
   });
 });
