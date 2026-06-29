@@ -368,14 +368,19 @@ const changedPathsForPendingPatch = (
     }
   });
 
-const firstPresentNonTraversablePrefix = (
+// Finds the first existing prefix in `base` that blocks a pending nested write.
+// cloneWithValueAtPath can create missing containers when applying the selected
+// write path.
+const firstExistingPrefixThatBlocksPendingPath = (
   base: EntityDocument | undefined,
   path: readonly string[],
 ): string[] | undefined => {
   for (let length = 1; length < path.length; length += 1) {
     const prefix = path.slice(0, length);
     if (!hasValueAtPath(base, prefix)) {
-      continue;
+      // Once a prefix is missing, by definition everything else in the path
+      // can be written, so nothing is blocking it.
+      return undefined;
     }
     const value = readValueAtPath(base, prefix);
     const nextSegment = path[length]!;
@@ -394,7 +399,7 @@ const pendingSetPathForBase = (
   pendingValue: EntityDocument,
   path: readonly string[],
 ): readonly string[] => {
-  const prefix = firstPresentNonTraversablePrefix(base, path);
+  const prefix = firstExistingPrefixThatBlocksPendingPath(base, path);
   if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
     return path;
   }
