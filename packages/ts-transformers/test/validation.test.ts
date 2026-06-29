@@ -211,6 +211,98 @@ Deno.test("Cast Validation", async (t) => {
     assertEquals(errors[0]!.type, "cast-validation:cell-cast");
   });
 
+  await t.step(
+    "errors on wrappers from framework module declarations",
+    async () => {
+      const source = `
+        import { Cell } from "@commonfabric/local-test";
+
+        const data: any = { value: 42 };
+        const cell = data as Cell<number>;
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "local-commonfabric.d.ts": `
+            declare module "@commonfabric/local-test" {
+              export interface Cell<T> {
+                get(): T;
+              }
+            }
+          `,
+        },
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+    },
+  );
+
+  await t.step("errors on qualified framework import types", async () => {
+    const source = `
+      declare module "@commonfabric/local-test" {
+        export namespace wrappers {
+          export interface Cell<T> {
+            get(): T;
+          }
+        }
+      }
+
+      const data: any = { value: 42 };
+      const cell = data as import("@commonfabric/local-test").wrappers.Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("allows import types from non-framework modules", async () => {
+    const source = `
+      declare module "not-commonfabric" {
+        export interface Cell<T> {
+          get(): T;
+        }
+      }
+
+      const data: any = { value: 42 };
+      const cell = data as import("not-commonfabric").Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step(
+    "allows imports from non-framework module declarations",
+    async () => {
+      const source = `
+      import { Cell } from "not-commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as Cell<number>;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "not-commonfabric.d.ts": `
+          declare module "not-commonfabric" {
+            export interface Cell<T> {
+              get(): T;
+            }
+          }
+        `,
+        },
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "Should not produce any errors");
+    },
+  );
+
   await t.step("allows unrelated local types named 'Cell'", async () => {
     const source = `
       type Cell<T> = { value: T };
