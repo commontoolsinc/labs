@@ -30,6 +30,7 @@ import { pattern } from "./pattern.ts";
 import { action, byRef, computed, handler, lift } from "./module.ts";
 import {
   compileAndRun,
+  exprLift,
   fetchData,
   fetchProgram,
   generateObject,
@@ -134,6 +135,14 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
+  // Branded operator-expression lift (08-expression-interpretation §2/§3). Trust
+  // the produced factory exactly as `lift` does — the transformer emits
+  // `__cfHelpers.exprLift(brand, impl)(operands)`, so the factory it returns must
+  // be a trusted builder artifact before it is applied.
+  const trustedExprLift = ((...args: any[]) =>
+    trustValue(
+      (exprLift as (...args: any[]) => unknown)(...args),
+    )) as typeof exprLift;
   const trustedPatternTool = ((...args: any[]) =>
     trustValue(
       (patternTool as (...args: any[]) => unknown)(...args),
@@ -162,6 +171,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Module creation
     lift: trustedLift,
+    exprLift: trustedExprLift,
     handler: trustedHandler,
     action,
     computed: trustedComputed,

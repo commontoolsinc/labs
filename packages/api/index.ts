@@ -2045,6 +2045,21 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
+/**
+ * Branded operator-expression lift (08-expression-interpretation §2/§3). Builds
+ * the same `type:"javascript"` lift module `lift` would, but stamps a
+ * `$builtin: "expr:<op>"` brand so the reactive interpreter lowers the
+ * arithmetic/comparison/unary lift to a NATIVE `expr` op (no SES round-trip)
+ * while legacy runs the identical body. Emitted by the transformer as
+ * `__cfHelpers.exprLift(brand, impl)(positionalOperands)`; not authored directly.
+ */
+export interface ExprLiftFunction {
+  <T, R>(
+    brand: string,
+    implementation: (input: T) => R,
+  ): ModuleFactory<StripCell<T>, R>;
+}
+
 // Helper type to make non-Cell and non-Stream properties readonly in handler state.
 // Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
 // methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers

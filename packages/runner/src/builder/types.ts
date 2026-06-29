@@ -20,6 +20,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  ExprLiftFunction,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -321,6 +322,7 @@ export interface BuilderFunctionsAndConstants {
 
   // Module creation
   lift: LiftFunction;
+  exprLift: ExprLiftFunction;
   handler: HandlerFunction;
   action: ActionFunction;
   computed: ComputedFunction;

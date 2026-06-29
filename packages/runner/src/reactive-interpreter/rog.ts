@@ -52,11 +52,94 @@ export type OpKind =
   | "access"
   | "construct"
   | "interpolate"
+  | "expr"
   | "effect";
 
 export type CollectionOp = "map" | "filter" | "flatMap";
 export type ControlOp = "ifElse" | "when" | "unless";
 export type EffectSink = "render" | "pull" | "handler" | "io";
+
+/**
+ * The CLOSED set of JS operators the native `expr` op evaluates (design
+ * 08-expression-interpretation §2/§3; the fail-closed allow-list E-2). This is
+ * exactly the set whose JS semantics the evaluator reproduces byte-for-byte and
+ * the differential oracle verifies — anything not here stays a `leaf` fallback.
+ *
+ * BINARY are all EAGER (both operands resolved) — arithmetic/comparison have no
+ * short-circuit in JS. The bitwise/shift ops carry JS's int32/uint32 coercion;
+ * `+` carries number/string coercion; `**` is exponentiation.
+ *
+ * UNARY are prefix-disambiguated from the binary `-`/`+` by the `u` prefix
+ * (`u-`/`u+`/`u~`/`u!`). `typeof` is DELIBERATELY EXCLUDED from v1 (review E-3):
+ * it clashes with the evaluator's `undefined`-on-unresolved convention.
+ *
+ * `&&`/`||`/`?:` are NOT here — logical/ternary remain `control` ops (the
+ * builtin `when`/`unless`/`ifElse` lowering), which already interpret natively
+ * with the exact operand-return + short-circuit semantics (interpret.ts
+ * `control` case). Adding redundant `expr` kinds for them would only duplicate
+ * machinery (resolves OQ-E3: keep `control`).
+ */
+export type ExprBinOp =
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "**"
+  | "&"
+  | "|"
+  | "^"
+  | "<<"
+  | ">>"
+  | ">>>"
+  | "<"
+  | ">"
+  | "<="
+  | ">="
+  | "=="
+  | "==="
+  | "!="
+  | "!==";
+export type ExprUnOp = "u-" | "u+" | "u~" | "u!";
+export type ExprOp = ExprBinOp | ExprUnOp;
+
+/** The runtime-readable allow-list (mirrors the `ExprOp` union, since a `Set`
+ * cannot be derived from a type). The recognizer (extract.ts) and the evaluator
+ * (interpret.ts) both consult this — a brand whose `op` is NOT in this set falls
+ * back to the leaf path (fail-closed). */
+export const EXPR_BIN_OPS: ReadonlySet<ExprBinOp> = new Set<ExprBinOp>([
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "**",
+  "&",
+  "|",
+  "^",
+  "<<",
+  ">>",
+  ">>>",
+  "<",
+  ">",
+  "<=",
+  ">=",
+  "==",
+  "===",
+  "!=",
+  "!==",
+]);
+export const EXPR_UN_OPS: ReadonlySet<ExprUnOp> = new Set<ExprUnOp>([
+  "u-",
+  "u+",
+  "u~",
+  "u!",
+]);
+
+/** Is `op` a member of the closed `ExprOp` allow-list? */
+export function isExprOp(op: string): op is ExprOp {
+  return EXPR_BIN_OPS.has(op as ExprBinOp) || EXPR_UN_OPS.has(op as ExprUnOp);
+}
 
 /** An inlined, in-memory nested pattern: the sub-pattern's own ROG plus the
  * local wiring needed to evaluate it in isolation against a resolved argument.
@@ -116,6 +199,25 @@ export type KindDetail =
    * `$implRef`/SES round-trip (the serialized-boundary shrink + the perf win).
    */
   | { kind: "interpolate"; strings: string[]; values: ValueRef[] }
+  /**
+   * Native JS OPERATOR expression — the lowered arithmetic / comparison / unary
+   * operator the transformer auto-wraps (design 08-expression-interpretation
+   * §2/§3). Replaces the opaque lift leaf the transformer emits for `a + b`,
+   * `x === y`, `!flag`, `-n`, etc.: the evaluator applies the operator to its
+   * resolved operands with EXACT JS semantics (interpret.ts `expr` case) — no
+   * `$implRef`/SES round-trip (the serialized-boundary shrink + perf win).
+   *
+   * `op` is one of the closed `ExprOp` allow-list. The operand refs are carried
+   * POSITIONALLY in `inputs` (binary = `[left, right]`, unary = `[operand]`) AND
+   * MIRRORED into `op`'s own `inputs` field (so `inputsOf`/`topoOrder`/partition/
+   * CFC surface them with no extra clause — exactly the interpolate pattern).
+   *
+   * An op is emitted ONLY for a recognized branded (`$builtin: "expr:<op>"`) lift
+   * leaf whose operator is in the allow-list AND whose operand refs reconstruct
+   * cleanly; any other shape falls back to the leaf path (extract.ts
+   * `recognizeExprLeaf`). Never a `leaf`, so `resolveLeafImpls` skips it.
+   */
+  | { kind: "expr"; op: ExprOp; inputs: ValueRef[] }
   | { kind: "effect"; sink: EffectSink; link?: string };
 
 /** Object/array assembly from sub-results (the object-property / array-element
@@ -161,14 +263,16 @@ export const INTERPRETED_KINDS: ReadonlySet<OpKind> = new Set([
   "access",
   "construct",
   "interpolate",
+  "expr",
   "effect",
 ]);
 
 /** ValueRefs an op reads, for ordering / read-set derivation.
  *
  * `op.inputs` is the flat input list: leaf ops carry their single structured
- * input there, INTERPOLATE ops carry their `${...}` value refs there (so the
- * partition/topo/CFC machinery surfaces them with no extra clause), and EFFECT
+ * input there, INTERPOLATE ops carry their `${...}` value refs there, EXPR ops
+ * carry their positional operand refs there (so the partition/topo/CFC machinery
+ * surfaces them with no extra clause), and EFFECT
  * (boundary) ops carry the flat list of value-producer alias leaves the boundary
  * reads (extraction's `effectInputRefs`, event streams excluded) — the
  * `boundary←producer` edges the partitioner (§4.2) and the CFC read-through

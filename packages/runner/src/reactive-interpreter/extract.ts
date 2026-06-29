@@ -22,6 +22,7 @@ import type {
   CollectionOp,
   ControlOp,
   EffectSink,
+  ExprOp,
   ImplRef,
   Op,
   OpId,
@@ -30,6 +31,7 @@ import type {
   Rog,
   ValueRef,
 } from "./rog.ts";
+import { isExprOp } from "./rog.ts";
 import type { LeafImpl } from "./interpret.ts";
 import { isLegacyAlias } from "../link-types.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
@@ -279,6 +281,68 @@ function recognizeStrLeaf(
   if (!Array.isArray(obj.values)) return null;
 
   return { strings: strings as string[] };
+}
+
+/**
+ * Recognize a branded OPERATOR-expression leaf so it can lower to the NATIVE
+ * `expr` op (08-expression-interpretation §2/§3) instead of running the opaque
+ * arithmetic/comparison/unary lift body through SES. Returns `{ op }` (the
+ * `ExprOp`) iff the node is an UNAMBIGUOUS branded expr leaf; otherwise `null` →
+ * the caller keeps the leaf path UNCHANGED (never mis-lower).
+ *
+ * Fail-closed ALLOW-LIST (design E-2), all must hold:
+ *   (a) `classifyModule` already returned `leaf` (the caller passes only leaf
+ *       nodes — a pure `type:"javascript"` module, no `wrapper`/`isEffect`).
+ *   (b) the expr BRAND is present: `module.$builtin` is a string of the form
+ *       `"expr:<op>"`. The brand is set by the BUILDER `exprLift` helper the
+ *       transformer emits (built-in.ts), rides `moduleToJSON`'s `...rest` spread
+ *       through serialization (so a LOADED pattern still lowers — the production
+ *       win), and cannot be forged by a `__cf_data` look-alike (only the trusted
+ *       builder mints it). An unbranded foreign function is NEVER recognized.
+ *   (c) the parsed `<op>` is in the closed `ExprOp` allow-list (`isExprOp`) — a
+ *       brand carrying an unknown/unsupported operator (a future op a newer
+ *       transformer emits, or a corrupted brand) → `null` → leaf fallback.
+ *   (d) `node.inputs` is an ARRAY of the POSITIONAL operands — binary = 2
+ *       elements `[left, right]`, unary = 1 element `[operand]`. The arity must
+ *       match the operator class (binary vs unary). The transformer emits this
+ *       positional array for branded expr nodes specifically (NOT the `{a,b}`
+ *       object the generic lift uses) so the recognizer reads operands by INDEX
+ *       with no param-name → operand-position ambiguity.
+ *
+ * Any miss → `null` → leaf path (byte-identical to today). The operand VALUE
+ * refs are NOT built here; the caller reconstructs each `inputs[i]` through the
+ * SAME `buildStructuredRef` the leaf input-construct would have used, so the
+ * reachable labeled-doc set (hence the CFC confidentiality join) is identical —
+ * the per-path-label oracle stays green (design §4).
+ */
+function recognizeExprLeaf(
+  module: RawModule | RawPattern | undefined,
+  inputs: unknown,
+): { op: ExprOp } | null {
+  if (!module || typeof module !== "object") return null;
+  const m = module as RawModule;
+  if (m.type !== "javascript") return null;
+  // Defense in depth: the caller only invokes this for `leaf`-classified nodes,
+  // but re-check the effect markers so a future caller cannot mis-lower a
+  // handler/effect javascript module.
+  if (m.wrapper === "handler" || m.isEffect === true) return null;
+
+  // (b) expr brand: `$builtin === "expr:<op>"`.
+  const brand = m.$builtin;
+  if (typeof brand !== "string" || !brand.startsWith("expr:")) return null;
+  const opToken = brand.slice("expr:".length);
+
+  // (c) the operator is in the closed allow-list.
+  if (!isExprOp(opToken)) return null;
+  const op = opToken as ExprOp;
+
+  // (d) inputs is a positional operand array of the correct arity for the op.
+  if (!Array.isArray(inputs)) return null;
+  const isUnary = op.startsWith("u");
+  const expectedArity = isUnary ? 1 : 2;
+  if (inputs.length !== expectedArity) return null;
+
+  return { op };
 }
 
 /** Map a `partialCause` (the opaque derived-internal-cell identity, an arbitrary
@@ -938,7 +1002,52 @@ export function extractRog(
         }
       }
 
-      bump(interpolateLowering ? "interpolate" : c.kind);
+      // OPERATOR → NATIVE EXPR LOWERING (08-expression-interpretation §2/§3).
+      // A recognized branded (`$builtin: "expr:<op>"`) arithmetic/comparison/
+      // unary leaf lowers to a native `expr` op: the operator rides in
+      // `detail.op` and each POSITIONAL operand (`node.inputs[i]`, an array the
+      // transformer emits for branded expr nodes) is pulled into `op.inputs` via
+      // the SAME `buildStructuredRef` the leaf input-construct would use — so the
+      // reachable labeled-doc set (hence the CFC confidentiality join, design §4)
+      // is identical — but the opaque arithmetic lift body is NEVER resolved/run
+      // (the serialized-boundary shrink: no `$implRef`/SES, since
+      // `resolveLeafImpls` skips non-leaf ops). FAIL CLOSED: if building any
+      // operand ref RECORDS an `unrecognized` entry, abandon the lowering and
+      // fall through to the leaf+construct path (which records the SAME entry →
+      // legacy), never emitting a partial expr. Mutually exclusive with the str
+      // lowering above (a node is str-branded OR expr-branded, never both).
+      // Decided BEFORE `bump(c.kind)` so the kind census counts each node once
+      // (expr, not leaf).
+      let exprLowering:
+        | { op: ExprOp; operands: ValueRef[] }
+        | null = null;
+      if (c.kind === "leaf" && !interpolateLowering) {
+        const exprMatch = recognizeExprLeaf(node.module, node.inputs);
+        if (exprMatch) {
+          const operandsArr = node.inputs as unknown[];
+          const before = unrecognized.size;
+          const operandRefs = operandsArr.map((el) =>
+            buildStructuredRef(
+              el,
+              unrecognized,
+              ops,
+              nextSynthId,
+              bump,
+              expectedDefer,
+            )
+          );
+          if (unrecognized.size === before) {
+            exprLowering = { op: exprMatch.op, operands: operandRefs };
+          }
+        }
+      }
+
+      const loweredKind = interpolateLowering
+        ? "interpolate"
+        : exprLowering
+        ? "expr"
+        : c.kind;
+      bump(loweredKind);
 
       // Wire this node's output alias → its op id into THIS Rog's LOCAL map, so
       // `internal` ValueRefs (result/input refs to derived cells) resolve within
@@ -987,9 +1096,13 @@ export function extractRog(
       //
       // A recognized `interpolate` leaf carries its `${...}` value refs as the
       // flat `inputs` (already built above) — NOT the structured `{strings,
-      // values}` object construct — so `inputRefs` is skipped for it.
+      // values}` object construct — so `inputRefs` is skipped for it. Likewise a
+      // recognized `expr` leaf carries its POSITIONAL operand refs as the flat
+      // `inputs` (already built above), not the leaf input-construct.
       const inputs = interpolateLowering
         ? interpolateLowering.values
+        : exprLowering
+        ? exprLowering.operands
         : c.kind === "leaf"
         ? inputRefs(
           node.inputs,
@@ -1004,10 +1117,10 @@ export function extractRog(
         : [];
       const op: Op = {
         id: i,
-        kind: interpolateLowering ? "interpolate" : c.kind,
-        // A native interpolate op runs no leaf impl (no `$implRef`/SES); leave
-        // `impl` undefined so `resolveLeafImpls` never resolves it.
-        impl: interpolateLowering ? undefined : c.impl,
+        kind: loweredKind,
+        // A native interpolate/expr op runs no leaf impl (no `$implRef`/SES);
+        // leave `impl` undefined so `resolveLeafImpls` never resolves it.
+        impl: (interpolateLowering || exprLowering) ? undefined : c.impl,
         inputs,
         // deno-lint-ignore no-explicit-any
         outSchema: (node.module as any)?.resultSchema ?? true as any,
@@ -1017,13 +1130,20 @@ export function extractRog(
             strings: interpolateLowering.strings,
             values: interpolateLowering.values,
           }
+          : exprLowering
+          ? {
+            kind: "expr",
+            op: exprLowering.op,
+            inputs: exprLowering.operands,
+          }
           : { kind: "leaf" } as Op["detail"],
       };
 
-      if (interpolateLowering) {
+      if (interpolateLowering || exprLowering) {
         // The op is fully built (kind/inputs/detail set above); the kind census
-        // was bumped to `interpolate` at the top of the loop. Push and move on —
-        // none of the collection/control/pattern/effect detail branches apply.
+        // was bumped to `interpolate`/`expr` at the top of the loop. Push and
+        // move on — none of the collection/control/pattern/effect detail branches
+        // apply.
         ops.push(op);
         continue;
       }

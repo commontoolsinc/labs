@@ -974,7 +974,12 @@ function computeProducerFedContextLeaves(
           // a pure scalar a downstream context leaf may read, identical to a
           // `leaf`-produced value. Include it so an asCell field fed by a `str`
           // result is still producer-fed-eligible (not demoted to legacy).
-          producerOp.kind === "interpolate");
+          producerOp.kind === "interpolate" ||
+          // A native `expr` op produces a plain scalar (number/boolean/string) —
+          // a pure value a downstream context leaf may read, identical to a
+          // `leaf`-produced value. Include it so an asCell field fed by an
+          // operator result is still producer-fed-eligible (not demoted).
+          producerOp.kind === "expr");
       if (
         producerName === undefined || producerOpId === undefined ||
         !producerPure
@@ -3283,6 +3288,12 @@ export class Runner {
       // falls back with `ineligible_opkind` — green-via-fallback, not native
       // interpretation (the proxy-metric trap).
       "interpolate",
+      // Native JS operator expression (the lowered arithmetic/comparison/unary
+      // lift, 08-expression-interpretation §2/§3). Pure value computation the
+      // evaluator runs directly (no leaf impl / SES). MUST be eligible or every
+      // operator-bearing pattern falls back `ineligible_opkind` — green-via-
+      // fallback, not native interpretation (the proxy-metric trap).
+      "expr",
       "pattern",
     ]);
     for (const op of extracted.rog.ops) {
@@ -3393,7 +3404,11 @@ export class Runner {
         // A native `interpolate` op IS a compute op (it derives a string from the
         // argument), so a pure-`str` pattern is NOT a static-construct-over-
         // argument reshape — it must interpret, not fall back.
-        op.kind === "interpolate"
+        op.kind === "interpolate" ||
+        // A native `expr` op IS a compute op (it derives a value from the
+        // argument via a JS operator), so an operator-only pattern (e.g. a result
+        // of `a + b`) must interpret, not fall back as a static reshape.
+        op.kind === "expr"
       );
       if (!hasComputeOp) bumpAndThrow("ineligible_opkind");
     }

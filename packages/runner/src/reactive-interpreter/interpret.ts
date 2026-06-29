@@ -16,7 +16,7 @@
  * Status: W1a. Verified by interpret.test.ts on hand-built ROGs.
  */
 
-import type { Op, OpId, PathStep, Rog, ValueRef } from "./rog.ts";
+import type { ExprOp, Op, OpId, PathStep, Rog, ValueRef } from "./rog.ts";
 
 /** A leaf implementation: receives its (single, structured) input, returns its
  * output. In W1b this is backed by the sandboxed lift; here it is injected. */
@@ -135,6 +135,78 @@ export function navigate(value: unknown, path: readonly PathStep[]): unknown {
     cur = (cur as Record<string, unknown>)[step];
   }
   return cur;
+}
+
+/**
+ * Apply a native `expr` operator to its RESOLVED operands with EXACT JS
+ * semantics (08-expression-interpretation §4 — the entire correctness surface).
+ * Binary ops read `operands[0]`/`operands[1]`; unary read `operands[0]`. Each
+ * arm is the LITERAL JS operator so coercion (number/string `+`, `==` vs `===`,
+ * relational, int32/uint32 bitwise/shift, `**`) is JS's own, byte-for-byte the
+ * lift body it replaces. `deno-lint` `no-explicit-any` is required: JS operators
+ * are defined over `any`, and the operand types are exactly whatever the
+ * argument carried (the legacy lift body had the same untyped operands).
+ */
+// deno-lint-ignore no-explicit-any
+function applyExprOp(op: ExprOp, operands: unknown[]): any {
+  // deno-lint-ignore no-explicit-any
+  const a = operands[0] as any;
+  // deno-lint-ignore no-explicit-any
+  const b = operands[1] as any;
+  switch (op) {
+    // --- binary arithmetic (number/string coercion is JS's own) -------------
+    case "+":
+      return a + b;
+    case "-":
+      return a - b;
+    case "*":
+      return a * b;
+    case "/":
+      return a / b;
+    case "%":
+      return a % b;
+    case "**":
+      return a ** b;
+    // --- binary bitwise / shift (int32/uint32 coercion is JS's own) ----------
+    case "&":
+      return a & b;
+    case "|":
+      return a | b;
+    case "^":
+      return a ^ b;
+    case "<<":
+      return a << b;
+    case ">>":
+      return a >> b;
+    case ">>>":
+      return a >>> b;
+    // --- binary relational + equality (coercion is JS's own) ----------------
+    case "<":
+      return a < b;
+    case ">":
+      return a > b;
+    case "<=":
+      return a <= b;
+    case ">=":
+      return a >= b;
+    case "==":
+      return a == b;
+    case "===":
+      return a === b;
+    case "!=":
+      return a != b;
+    case "!==":
+      return a !== b;
+    // --- unary (prefix-disambiguated by the `u` prefix) ---------------------
+    case "u-":
+      return -a;
+    case "u+":
+      return +a;
+    case "u~":
+      return ~a;
+    case "u!":
+      return !a;
+  }
 }
 
 /**
@@ -337,6 +409,28 @@ export function evalRog(
           result = result + strings[i] + (i < n ? resolve(op.inputs[i]) : "");
         }
         return result;
+      }
+      case "expr": {
+        // NATIVE JS OPERATOR expression — the lowered arithmetic/comparison/
+        // unary operator the transformer auto-wraps (08-expression-interpretation
+        // §2/§3). Apply the operator to its resolved operands with EXACT JS
+        // semantics. Operands ride POSITIONALLY in `op.inputs` (== detail.inputs):
+        // binary = [left, right], unary = [operand].
+        //
+        // BINARY are EAGER — both operands are resolved (arithmetic/comparison
+        // have no short-circuit in JS), so the read-set is the static operand set,
+        // byte-identical to the legacy lift body which destructures both `{a,b}`
+        // before computing. (Short-circuit — E-4 — applies only to `&&`/`||`/`?:`,
+        // which stay `control` ops; their existing case already short-circuits to
+        // match the legacy `when`/`unless`/`ifElse` builtins.)
+        //
+        // CRITICAL: NO undefined-run-gate here (unlike the leaf case). The
+        // operator body itself coerces `undefined` (`undefined + 1` → NaN,
+        // `!undefined` → true), matching the legacy lift body which runs
+        // unconditionally on the resolved `{a,b}`/`{a}` construct. The leaf gate is
+        // a leaf-only legacy-parity device; applying it here would diverge (e.g.
+        // `-x` with x undefined → NaN, not undefined).
+        return applyExprOp(op.detail.op, op.inputs.map(resolve));
       }
       case "access":
         return navigate(resolve(op.inputs[0]), op.detail.path);

@@ -446,6 +446,52 @@ export function str(
 }
 
 /**
+ * Build a BRANDED lift module for a recognized JS-OPERATOR expression (the
+ * arithmetic/comparison/unary subset the transformer auto-wraps;
+ * 08-expression-interpretation §2/§3). The transformer emits
+ *
+ *   __cfHelpers.exprLift("expr:+", ([a, b]) => a + b)([leftRef, rightRef])
+ *
+ * for a recognized binary operator (positional `[left, right]` operands), and
+ *
+ *   __cfHelpers.exprLift("expr:u!", ([a]) => !a)([operandRef])
+ *
+ * for a recognized unary operator. The returned factory is the EXACT same
+ * `type:"javascript"` lift module `lift(impl)` would build — same runnable body,
+ * same positional-array input — but carries `$builtin: "<brand>"` so:
+ *
+ *   - UNDER FLAG-OFF, legacy runs the identical arrow over the identical resolved
+ *     operand array, BYTE-FOR-BYTE the value the un-branded lift would compute
+ *     (the brand is a plain extra module field legacy never inspects); and
+ *   - UNDER FLAG-ON, the reactive interpreter recognizes the brand
+ *     (`recognizeExprLeaf`, extract.ts) and lowers to a native `expr` op that
+ *     evaluates the operator directly — no `$implRef`/SES round-trip.
+ *
+ * The brand rides `moduleToJSON`'s `...rest` spread through serialization (so a
+ * LOADED pattern's operator leaf still lowers — the production win) and, like the
+ * `str` brand, cannot be forged by a `__cf_data` look-alike (only the trusted
+ * builder calls `createNodeFactory`). We route through `createNodeFactory`
+ * directly (exactly as `str` does) because `lift()` exposes no module-field
+ * passthrough for `$builtin`. The recognizer fails closed on any brand whose op
+ * is not in the closed allow-list, so a corrupted/foreign brand is never lowered.
+ *
+ * NOTE: the operand-positional arrow body is what the transformer emits for
+ * branded expr nodes specifically. A non-recognized operator never reaches here
+ * (the transformer emits an ordinary un-branded `lift`), so this helper only ever
+ * sees the supported subset; the runtime allow-list is the authoritative gate.
+ */
+export function exprLift<I = unknown[], R = unknown>(
+  brand: string,
+  implementation: (input: I) => R,
+): NodeFactory<I, R> {
+  return createNodeFactory<I, R>({
+    type: "javascript",
+    implementation: implementation as (input: unknown) => unknown,
+    $builtin: brand,
+  }) as NodeFactory<I, R>;
+}
+
+/**
  * Create a cell with a given schema and name.
  *
  * @param schema - Optional, The schema of the cell.
