@@ -1,4 +1,5 @@
 {
+  // This directory is explicitly excluded from coverage checking.
   "tasks": {
     "test": "echo 'No tests defined.'"
   }
