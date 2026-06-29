@@ -2,129 +2,129 @@
 
 _Living index of this investigation's open threads. **Transient working notes** —
 intentionally NOT on `main`; tracked in git on the `gideon/lunch-poll-perf-load`
-branch so it survives branch cleanup. **Last updated: 2026-06-26.**_
+branch so it survives branch cleanup. **Last updated: 2026-06-29.**_
 
 This doc is the **map**. The deep-dives live next to it in `perf-seed/`:
 - [`IDENTITY-DIVERGENCE-HANDOFF.md`](./IDENTITY-DIVERGENCE-HANDOFF.md) — the storm root cause (cell-identity divergence)
 - [`MULTI-USER-CONTENTION-HANDOFF.md`](./MULTI-USER-CONTENTION-HANDOFF.md) — multi-user contention findings (premise superseded; instrumentation history)
 - [`SLOW-LOAD-FINDINGS.md`](./SLOW-LOAD-FINDINGS.md) — single-client slow load (resolved)
+- [`S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md`](./S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md) — **next-session focus**: the CFC over-taint in filter/flatMap (out of the #4367 review)
 
 ## TL;DR status
-- ✅ The original write-storm / cell-identity divergence is **fixed & merged** (#4360 + supporting).
-- 🟢 The resume / list-settling / flicker cluster is **active and converging** on a "read-mostly resume" direction (#4366 merged; #4367 in flight).
-- 🟡 The **scopes question** (deepest architectural lever) and the **strand general-mechanism** remain open; both need seefeld and are at risk of being lost.
+- ✅ Original write-storm / cell-identity divergence **fixed & merged** (#4360 + supporting).
+- ✅ Resume / list-settling / flicker cluster **resolved & merged**: #4366 (VDOM settling) + **#4367 (read-mostly resume, MERGED 06-27)**.
+- ✅ cf-fragment trust-boundary gap **fixed** (CT-1796, Done).
+- 🔵 **Next session:** the **S16 filter/flatMap over-taint** — our follow-up #4391 turned out label-neutral; the real over-taint is upstream (input-list read). See the new handoff doc.
+- 🟡 Two architectural levers **held for seefeld**: the **scopes question** (CT-1799) and the **CFC structure-only-read rule** (CT-1801).
+
+## Ticket / PR index (quick reference)
+| Ref | What | Status |
+| --- | --- | --- |
+| #4360 / #4361 / #4366 / #4367 | storm fix / memwrite trace / VDOM settling / read-mostly resume | all **merged** |
+| **#4391** | our S16 probe-scope follow-up (filter/flatMap container reads) | **OPEN, CI green, but label-neutral — see thread 3** |
+| #4346 (Ben) / #4349 (Wilk) | localize vote writes / runtime convergence | OPEN (4349 likely close) |
+| **CT-1799** | scopes architecture (every-client write-back) → seefeld | Triage, held |
+| **CT-1801** | CFC structure-only-read rule (spec gap) → seefeld | Triage, held |
+| **CT-1802** | resume during-batch self-heal test seam | Triage (resolved; deferred guard) |
+| CT-1798 | #4366 static-prop churn | In Review (Gideon's PR) |
+| CT-1803 | Cell<Props> primitive-prop guard (from CT-1798 review) | Triage |
+| CT-1795 | lunch-poll empty-box Join needs two clicks | Triage |
+| CT-1796 | cf-fragment nested authorship trust-boundary | **Done** |
 
 ---
 
 ## ✅ Resolved
-- **Write-storm / fresh-vs-resume cell-identity divergence** — **#4360** (merged 06-25):
+- **Write-storm / fresh-vs-resume cell-identity divergence** — **#4360** (06-25):
   `awaitSync` lifted out-of-band + canonical schema interning. ~27.8k → ~2.1k writes.
-  Supporting merges: **#4292** (intern schemas in sync frames), **#4220** (conflict-granularity /
-  distinct-key over-conflict), **#4353** (`onlyIfDifferent` skip). Single-client slow-load resolved
-  earlier (#4326/#4325 + runtime perf). See IDENTITY-DIVERGENCE-HANDOFF.md.
+  Supporting: #4292, #4220, #4353. Single-client slow-load earlier (#4326/#4325). See IDENTITY-DIVERGENCE-HANDOFF.md.
+- **VDOM list-child settling** — **#4366** (06-26): our three review points all landed (beforeId → degrade-to-append; over-reset → derive-from-descendants; cubic-P1 → literal reuse requires `cell===undefined`).
+- **Read-mostly resume** — **#4367** (Hixie, MERGED 06-27): pre-sync owned cells + the list-builtin preserve guard. We confirmed it kills the live `35→0→refill` flicker (baseline flickers, fix doesn't). Full re-review delivered; the during-batch self-heal question resolved (CT-1802).
+- **cf-fragment trust-boundary gap** — **CT-1796** (Done): nested `cf-cfc-authorship` boundaries didn't compose; inner boundary laundered trust. Gideon took this in a separate context.
+- **memwrite trace** — **#4361** (merged 06-26).
 
 ---
 
-## 🟡 Open threads
+## 🔵 / 🟡 Open threads
 
-### 1. Scopes question — conditional-result scope (user vs space)
-**[ARCHITECTURAL · owner: seefeld · untracked]**
-`ifElse`/`when`/computed result cells inherit the **scope of their condition**
-(`if-else.ts` sets the result-cell scope to the condition's resolved scope). A condition over
-*shared* (PerSpace) state → a **`space`-scoped (shared)** result that *every* connected client
-re-computes and writes back to the **one** shared slot. #4360 made that case *safe* (ids converge →
-repeated writes go value-equal → terminate), but the architectural question is untouched:
-**should shared-condition `ifElse`/computed results be written to shared storage by every client at
-all, vs computed-once / per-client-local?** Independent lever — resolving it would also kill the
-storm class. Needs seefeld's call (runtime scope semantics). Detail: IDENTITY §PENDING, MULTI-USER §9.
+### 1. Scopes question — conditional-result scope (user vs space) → **CT-1799**
+**[ARCHITECTURAL · owner: seefeld · held for Gideon to route]**
+`ifElse`/`when`/computed result cells inherit the **scope of their condition** (`if-else.ts:33`). A
+condition over *shared* (PerSpace) state → a `space`-scoped (shared) result that *every* client
+recomputes and writes back to the **one** shared slot. #4360 made it *safe* (ids converge → value-equal
+→ terminate); the architectural question is untouched: **should a render-only conditional over shared
+state produce a shared written-back cell at all** (vs computed-once / per-client-local)? The spec
+(`docs/specs/scoped-cell-instances.md`) justifies write-back as **narrow→wide bridging**, which doesn't
+apply to wide→wide pure-functional derivations. Full problem statement + design table in CT-1799.
+Lowering data point: lunch-poll `main.tsx` = 25 `ifElse` + 27 `lift` static → ~196 `raw:if` runtime.
 
-### 2. Resume / list-settling / flicker
-**[ACTIVE · cross-team]**
-Vote-flicker-on-reload root cause = **resume init-order** (`send([])` clobbering the synced list) +
-the **conflict-rollback window** (an optimistic compute writes a value, the newer durable doc arrives
-and rolls it back, leaving a transient `undefined` while the confirmed value re-derives). *Not* the storm.
-- **#4365** (Wilk, runner preserve) — CLOSED (superseded).
-- **#4366** (HTML VDOM list settling) — MERGED 06-26; our three review points all landed in the merge
-  (beforeId-strand → degrade-to-append; over-reset → derive-from-descendants; cubic-P1 → literal reuse
-  requires `cell===undefined`). Trust-boundary review (`wgnb7wvd5`, done 06-26): clear lifecycle is
-  **sound** (self-healing, fail-closed) and the dangerous direction is **mostly closed** — EXCEPT one
-  real follow-up:
-  - **cf-fragment derive-coverage gap** *[FOLLOW-UP · trust boundary · code already merged]:*
-    `hasTextIntegrityBlockForBoundary` recurses `state.children`, but `renderArrayAsFragment` leaves the
-    `cf-fragment`'s children Map **empty**, so an integrity block nested inside an array/fragment under a
-    `cf-cfc-authorship` boundary is invisible to the recursion → a refresh can derive `"ok"` over
-    live-blocked content (false "verified author" badge — the dangerous direction). Found independently
-    by 3 of 5 attack angles; verified real (severity split concern↔blocking). **Reachability is the open
-    question** — needs blocked content rendered *inside an array/fragment* under a boundary (plausible
-    for multi-segment messages; not confirmed under read-only). Fix is contained: populate the
-    fragment's children Map so the walk sees them. *Pending decisions:* (a) confirm reachability against
-    real authorship surfaces; (b) Wilk heads-up + Linear ticket; (c) the spun-off "nested
-    cf-cfc-authorship test" chip should encode this fragment case.
-- **#4367** (Hixie, read-mostly resume) — OPEN, in flight. Converged direction: **pull each level's
-  durable doc *before* the optimistic compute** (extend the owned-cell pre-sync to the dynamic
-  per-element child cells *and* the input list), so no level ever reads a transient `undefined`.
-  Standing offer: cross-check his branch against the live lunch-poll repro when it lands.
-- **Meta-question (open, strategic):** is read-mostly resume patching a fundamentally racy resume
-  architecture? When do the per-builtin pulls get promoted to a single runtime invariant? *Tell:* if
-  you're adding the same pull at every builtin/level, lift it into the runtime.
+### 2. CFC structure-only-read rule (spec gap) → **CT-1801**
+**[SPEC · owner: seefeld · held]**
+The CFC spec implies (S16 D1/D2/D4) but never **states** the rule that a coordinator reading its own
+result container journals shape + link-identities, NOT element contents. That's why map (which
+implements it via `linkResolutionProbe`) and filter/flatMap (which didn't) drifted. CT-1801 proposes the
+`08-09` spec edit. **Thread 3 is its implementation half.**
 
-### 3. Reactive-conflict "strand" (#4210/#4343 family)
+### 3. S16 filter/flatMap over-taint (implementation) → **[`S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md`](./S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md)**
+**[NEXT-SESSION FOCUS]**
+We shipped **#4391** to add map's container-read probe-scoping to filter/flatMap — but verification
+showed it's **label-neutral** (a no-op observably). The *real* over-taint is **upstream**: filter/flatMap
+read their **input list** with a plain content read that dereferences the elements (map avoids this with
+identity-only materialization, `map.ts:163-188`). Next steps + the fails-without/passes-with
+**ignore-element test** + dead ends are all in the handoff doc. Decide what #4391 becomes (drop the
+container change / fold into the complete fix / keep as honest defensive consistency).
+
+### 4. Resume during-batch self-heal → **CT-1802** (resolved; deferred guard)
+The "write-after-sync" worry (republish reads a transient `undefined` → persists a shrink) is
+**self-healed**: every per-element read is a commit precondition (`buildReads` in `storage/v2.ts`), so a
+durable arrival's `confirmed.seq` bump conflicts the republish commit → `editWithRetry` re-runs against
+settled state. Confirmed structurally AND empirically (the dangerous write can't be provoked in-process
+— the convergence is value-equal). A faithful white-box guard needs a `sync()`-resolved-but-absent
+storage seam → CT-1802.
+
+### 5. Reactive-conflict "strand" (#4210/#4343 family)
 **[PARTIALLY OPEN]**
-Reactive computes stranded by commit-conflict retries under real async load. **#4210 + #4343 + #4220**
-merged. But the resume conflict-rollback (thread 2) is the *same mechanism* — so resume work *is*
-strand work; the general "conflict-revert under async load" question persists, partially addressed by
-read-mostly resume. No deterministic in-process repro (needs a white-box storage seam — re-confirmed
-this session). See memory note `reactive-conflict-strand-repro`.
-- **CI data point (06-26):** `cfc-group-chat-demo.test.ts:116` ("authorship verification reject
-  imported claims") timed out (30s `waitForCondition`) waiting for `admin-user-toggle` to reflect an
-  admin-role change — on a clean rebase of #4361 (toolshed-only) onto `main@ac73a4e8`, so **not** caused
-  by the PR (#4366 passed this same test pre-merge). A reactive update failing to converge under CI
-  async load is the strand signature. Concrete target for the (still-never-done) flake-rate check, and
-  worth a glance at its recent-main flake history before ruling out any #4366-authorship interaction.
+Reactive computes stranded by commit-conflict retries under real async load. #4210 + #4343 + #4220
+merged; the resume conflict-rollback (now resolved via #4367 + thread 4) was the same mechanism. The
+general "conflict-revert under async load" question persists. **No deterministic in-process repro** —
+needs a white-box storage seam (re-confirmed twice). See memory `reactive-conflict-strand-repro` and
+CT-1802. CI data point (06-26): `cfc-group-chat-demo.test.ts:116` strand-signature timeout; flake-rate
+check still never done.
 
-### 4. Open PRs / loose ends
-- **#4361** (ours — gated per-connection memwrite trace) — fixed (now derives `vhash` from the
-  canonical Fabric value-hash), **awaiting merge**.
-- **#4346** (Ben — "Localize lunch poll vote writes" / per-user vote rows) — OPEN; the pattern-level
-  complement to the storm fix. Status check needed.
-- **#4349** (Wilk — "lunch poll runtime convergence") — OPEN; the early mitigation
-  (retry-narrowing + UI-reconciler), almost certainly superseded by #4360/#4366/#4367 → likely should close.
+### 6. lunch-poll empty-box Join needs two clicks → **CT-1795**
+**[pattern bug · Gideon · Triage]**
+Clicking **Join** with the name box empty does nothing on the first click. A handler-only-read
+wish-backed computed (`profileName = computed(() => profileNameWish.result ?? "")`) isn't pulled before
+the first handler invocation. Pattern-level lunch-poll bug; detail in CT-1795.
 
-### 5. Tooling / smaller follow-ups
-**[mostly untracked]**
-- **otel follow-up** — promote the gated memwrite console trace to structured OpenTelemetry signals:
-  low-cardinality **metrics** (writes by scope/op) + high-cardinality detail on **sampled span events**.
-  Cardinality design is the bulk. Not started.
-- **Flaky `notebook reload` CI test** — "reloads every rapidly created notebook note" (timed out on a
-  `waitFor`, cleared on re-run). Hypothesised same strand/compute-retry. Cheap first step (flake-rate
-  on `main`'s recent CI) **never done**; now also worth checking whether #4366/#4367 help it.
-- **Deployed demo** — cf-pr-wt `:8100` tailnet demo of #4360, still live (kept). Tear down via
-  `scripts/share-pattern-via-tailscale.sh --down`, or redeploy from a branch with #4361 for real metrics.
+### 7. Open PRs / loose ends
+- **#4391** (ours) — see thread 3; CI green, decision pending.
+- **#4346** (Ben — per-user vote rows) — OPEN; pattern-level complement to the storm fix.
+- **#4349** (Wilk — runtime convergence) — OPEN; superseded by #4360/#4366/#4367 → likely should close.
 
-### 6. Comms
-- **Loop seefeld in** — on #4360 (his interning subsystem, merged) and especially the **scopes
-  question (#1)**, which needs his architectural call. He was on vacation.
+### 8. Tooling / smaller follow-ups (mostly untracked)
+- **otel follow-up** — promote the gated memwrite console trace (now merged, #4361) to structured OTel
+  metrics + sampled span events. Cardinality design is the bulk. Not started.
+- **Flaky `notebook reload` CI test** — hypothesised same strand. Flake-rate check never done.
+- **Deployed demo** — cf-pr-wt `:8100` tailnet demo of #4360, still live (kept).
+
+### 9. Comms
+- **Loop seefeld in** on CT-1799 (scopes) and CT-1801 (CFC read-rule) — both held for Gideon to route.
 
 ---
 
 ## Cross-team note
 Wilk's, Hixie's, and our agents independently converged on **read-mostly resume / pull-before-compute**
-as the principled fix for the resume-flicker family. Shared insight: the "not-loaded vs settled
-`undefined`" question is **fractal** (input list, per-element children, nested lists) and
-**unclassifiable at read time** (the conflict-rollback window — a loaded doc can read `undefined`
-mid-rollback), so the fix is to **pull durable docs before computing** rather than classify reads.
+as the principled fix for the resume-flicker family. The "not-loaded vs settled `undefined`" question is
+**fractal** and **unclassifiable at read time**, so the fix is to **pull durable docs before computing**
+rather than classify reads. That direction shipped in #4367.
 
-## At risk of being lost (no tracker but this doc)
-The scopes question (#1), the strand general-mechanism (#3), the **cf-fragment trust-boundary gap (#2)**,
-the otel + flaky-notebook follow-ups (#5), and the read-mostly-resume meta-question (#2) live only in
-handoff docs on `gideon/*` branches. Before deleting those branches, capture these in Linear. (The
-cf-fragment gap is the highest-priority orphan — it's a real, already-merged trust-boundary gap.)
-
----
-
-## Parked artifacts / branches
-- `gideon/lunch-poll-perf-load` (this branch) — the investigation's git home: handoff docs + perf-seed
-  seeder + the two-browser repro harness + this map.
-- `gideon/list-resume-childsync` — parked offering (our `child.sync()`-based preserve; superseded by
-  the read-mostly direction in #4367; kept for reference, deletable).
-- `gideon/memwrite-trace` (#4361) — open PR, awaiting merge.
+## Parked artifacts / branches / worktrees
+- `gideon/lunch-poll-perf-load` (this branch, worktree `labs-perfseed`) — the investigation's git home:
+  handoff docs + perf-seed seeder + the two-browser repro harness + this map. **Push after editing.**
+- `gideon/4367-followups` (worktree `labs-4367-fu`) — **#4391** (S16 follow-up). Base was the throwaway
+  mirror `gideon/4367-base` (delete once #4391 retargets/lands).
+- `labs-4367` / `labs-main` worktrees — the eyeball instances for the #4367 flicker test (`:8200`/`:8300`
+  localhost). Tear down: `for f in /tmp/cf-4367.pids /tmp/cf-main.pids; do while read p; do kill "$p" 2>/dev/null; done < "$f"; done`.
+- `gideon/list-resume-childsync` — parked offering (superseded by #4367; deletable).
+- `gideon/memwrite-trace` (#4361) — merged; worktree `labs-4361` deletable.
+- perf-seed seeder: `./seed.sh` (10 opts / 35 votes / 4 users) — local lunch-poll for repro/eyeball.
