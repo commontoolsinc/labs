@@ -2427,7 +2427,9 @@ export type WishState<T> = {
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export interface WishFunction {
-  <T = unknown>(target: FactoryInput<WishParams>): OpaqueRef<WishState<T>>;
+  <T = unknown>(
+    target: FactoryInput<WishParams>,
+  ): OpaqueRef<WishState<T> & UIRenderable>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
