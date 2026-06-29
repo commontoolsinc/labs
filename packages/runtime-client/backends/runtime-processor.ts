@@ -693,8 +693,10 @@ export class RuntimeProcessor {
     const value = mapCellRefsToSigilLinks(request.value);
     // A scalar `$value`/`$checked` overwrite (string/number/boolean) is a
     // last-write-wins leaf write: mark the tx so the set's reads carry no
-    // concurrency precondition, removing the own-write-race "stale confirmed
-    // read" conflict (and the rolled-back, silently-dropped edit it caused).
+    // value-equality precondition on the leaf (only a structural entity-root
+    // existence read survives, to catch a concurrent whole-doc delete), removing
+    // the own-write-race "stale confirmed read" conflict (and the rolled-back,
+    // silently-dropped edit it caused).
     // Structured (array/object) values are excluded — they are often
     // read-modify-write (CellHandle.push, multi-select, list edits) and must
     // keep compare-and-set to avoid lost updates. The mark is cleared before

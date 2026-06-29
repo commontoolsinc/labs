@@ -2236,11 +2236,45 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is
-      // not a concurrency precondition — exclude it from confirmed/pending so a
-      // scalar `$value` set cannot lose the own-write race on its own
-      // write-target read. (Done before compaction; in a blind tx all reads are
-      // tagged, so confirmed/pending are simply empty.)
+      // not a VALUE-EQUALITY concurrency precondition: a scalar `$value` set must
+      // not lose the own-write race on its own write-target read. But dropping the
+      // read entirely also drops the only thing that catches a concurrent
+      // WHOLE-DOC delete/replace — the TIER-1 (set/delete) conflict check rides any
+      // confirmed read on the entity — which would leave a precondition-free patch
+      // to throw "missing path" at read-materialization (a stale nested patch
+      // replayed onto a deleted/empty base). So instead of dropping, DOWNGRADE to a
+      // structural existence precondition: a nonRecursive read at the entity ROOT.
+      // TIER-1 is path-blind, so a concurrent whole-doc delete still yields a clean
+      // ConflictError instead of a raw throw; TIER-2 nonRecursive overlap only fires
+      // at-or-above the read path, and the dropped leaf value read sits strictly
+      // BELOW the root, so the same-leaf own-write race stays conflict-free.
+      // Per-entity duplicates collapse in compactCommitReads.
       if (isReadIgnoredForCommit(read.meta)) {
+        const scope = normalizeCellScope(read.scope);
+        const record = this.#docs.get(docKey(read.id as URI, scope));
+        const pendingLocalSeq = record?.pending
+          .filter((version) => version.localSeq < localSeq)
+          .at(-1)?.localSeq;
+        const rootPath = toCommitReadPath([]);
+        if (pendingLocalSeq !== undefined) {
+          pending.push({
+            id: read.id as URI,
+            scope,
+            path: rootPath,
+            localSeq: pendingLocalSeq,
+            nonRecursive: true,
+          });
+        } else {
+          confirmed.push({
+            id: read.id as URI,
+            scope,
+            path: rootPath,
+            seq: typeof read.meta?.seq === "number"
+              ? read.meta.seq
+              : record?.confirmed.seq ?? 0,
+            nonRecursive: true,
+          });
+        }
         continue;
       }
 

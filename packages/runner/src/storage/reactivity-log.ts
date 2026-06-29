@@ -10,15 +10,20 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
-// A read tagged with this marker is still recorded for CFC/scheduling, but is
-// EXCLUDED from the commit's concurrency preconditions: buildReads omits it from
-// `reads.confirmed`, and read() does not mark its document `validated` (so the
-// client validate()/claim() pass skips it too). Set transaction-wide by the
-// UI-input blind-leaf-write mode (see markUiInputBlindWriteTx) so a scalar
-// `$value` overwrite is a precondition-free last-write-wins write — removing the
-// own-write-race "stale confirmed read" conflict. Orthogonal to scheduling:
-// reactivity/subscriptions are unaffected (only ignoreReadForScheduling gates
-// those).
+// A read tagged with this marker is still recorded for CFC/scheduling, but
+// carries NO value-equality concurrency precondition: read() does not mark its
+// document `validated` (so the client validate()/claim() pass skips it), and
+// buildReads DOWNGRADES it — rather than dropping the read outright, it replaces
+// it with a nonRecursive existence read at the entity ROOT. Set transaction-wide
+// by the UI-input blind-leaf-write mode (see markUiInputBlindWriteTx) so a scalar
+// `$value` overwrite is a last-write-wins write on its leaf value (removing the
+// own-write-race "stale confirmed read" conflict: a deep same-leaf patch sits
+// below the root read, so TIER-2 nonRecursive overlap does not fire) while still
+// failing fast on a concurrent WHOLE-DOC delete/replace (TIER-1 set/delete is
+// path-blind, so the structural read yields a clean ConflictError instead of a
+// raw "missing path" throw at patch read-materialization). Orthogonal to
+// scheduling: reactivity/subscriptions are unaffected (only ignoreReadForScheduling
+// gates those).
 const ignoreReadForCommitMarker: unique symbol = Symbol(
   "ignoreReadForCommitMarker",
 );
@@ -101,8 +106,10 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // the transaction around a scalar `$value` set (and unmarks before
 // prepareTxForCommit, so CFC boundary-commit read-then-writes keep their
 // preconditions); while marked, read() tags every read with `ignoreReadForCommit`
-// and skips `validated`, so the write carries no concurrency precondition
-// (last-write-wins, which is correct for raw scalar UI input). Read-modify-write
+// and skips `validated`, so the write carries no value-equality precondition on
+// its leaf (last-write-wins, which is correct for raw scalar UI input) — buildReads
+// downgrades the tagged reads to a single nonRecursive entity-root existence read,
+// which still catches a concurrent whole-doc delete/replace. Read-modify-write
 // and structured (array/object) writes are NOT marked and retain compare-and-set.
 // Both the wrapper and the inner storage transaction(s) are marked, since
 // read()/buildReads run on the inner one; the chain walk tolerates extra wrapper

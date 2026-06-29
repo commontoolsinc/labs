@@ -1326,9 +1326,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const current = currentDocument(doc);
     const readMeta = options?.meta ?? EMPTY_META;
     // In a UI-input blind-leaf-write tx (a scalar `$value` overwrite), every read
-    // is recorded for CFC/scheduling but excluded from commit preconditions: tag
-    // each activity with `ignoreReadForCommit` (so buildReads drops it from
-    // `reads.confirmed`) and skip marking the doc `validated` (so the client
+    // is recorded for CFC/scheduling but carries no value-equality commit
+    // precondition: tag each activity with `ignoreReadForCommit` (so buildReads
+    // downgrades it to a nonRecursive entity-root existence read instead of a
+    // leaf-value precondition) and skip marking the doc `validated` (so the client
     // validate()/claim() pass skips it too). The mode is scoped to the user
     // `set()` call only — CFC boundary-commit reads run after the tx is unmarked
     // and keep their preconditions.
