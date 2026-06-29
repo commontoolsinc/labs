@@ -5,7 +5,13 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
-import { discoverSpaceDbs, quickStats, resolveSpacePath } from "../discover.ts";
+import {
+  deriveSpaceDid,
+  discoverSpaceDbs,
+  quickStats,
+  resolveSpace,
+  resolveSpacePath,
+} from "../discover.ts";
 
 const SCHEMA = `
 CREATE TABLE "commit" (
@@ -95,6 +101,31 @@ Deno.test("discovery + resolution", async (t) => {
       assertEquals(stats?.commits, 3);
       assertEquals(stats?.entities, 3);
     });
+
+    await t.step(
+      "resolveSpace resolves a space NAME via the runtime derivation",
+      async () => {
+        // The runtime derives a named space's DID; we mirror it, so addressing a
+        // space by the name the shell shows finds the same DB.
+        const name = "state-inspector-test-space";
+        const did = await deriveSpaceDid(name);
+        assert(did.startsWith("did:key:z"), "derives a did:key DID");
+        makeSpace(`${engine}/${did}.sqlite`, 1);
+        const found = discoverSpaceDbs({
+          dirs: [`${dir}/cache/memory`],
+          cwd: dir,
+        });
+
+        const byName = await resolveSpace(name, found);
+        assert(
+          byName.endsWith(`${did}.sqlite`),
+          "a name resolves to its derived DID's DB",
+        );
+        // the same async entry point still honors DID-prefix and path matching
+        const byPrefix = await resolveSpace("zAlpha", found);
+        assert(byPrefix.endsWith(`${DID_1}.sqlite`));
+      },
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

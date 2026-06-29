@@ -16,8 +16,8 @@ Full command reference + flags: `packages/state-inspector/README.md`. This skill
 is the **map** — what the tool sees, what to trust, and which question each
 command answers. Run commands with `deno task cf inspect <cmd>`; every command
 takes `--json` for machine reading, and a `<space>` is a DID, a unique
-DID-prefix, or a path (local DBs auto-discovered — start with
-`cf inspect spaces`).
+DID-prefix, a space name (resolved the way the runtime derives it), or a path
+(local DBs auto-discovered — start with `cf inspect spaces`).
 
 ## The mental model the output assumes
 
