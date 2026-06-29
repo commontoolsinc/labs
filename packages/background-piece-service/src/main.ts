@@ -79,7 +79,7 @@ export async function startBackgroundPieceService(
 ): Promise<ServiceLike> {
   // Set up tracing before doing any work so spans (incl. runner-library spans)
   // are exported to the local OTel collector -> SigNoz. No-op unless OTEL_ENABLED.
-  initOpenTelemetry();
+  await initOpenTelemetry();
 
   const workerTimeoutMs = parseWorkerTimeout(args);
   const identity = await dependencies.getIdentity(

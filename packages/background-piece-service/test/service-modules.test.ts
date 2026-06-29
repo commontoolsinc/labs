@@ -1145,6 +1145,10 @@ describe("background piece service entry point", () => {
         IDENTITY: undefined,
         EXPERIMENTAL_MODERN_CELL_REP: true,
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
+        ENV: "test",
+        OTEL_ENABLED: false,
+        OTEL_SERVICE_NAME: "bg-piece-service",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
       },
       identity,
     );
@@ -1174,6 +1178,10 @@ describe("background piece service entry point", () => {
         IDENTITY: undefined,
         EXPERIMENTAL_MODERN_CELL_REP: true,
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
+        ENV: "test",
+        OTEL_ENABLED: false,
+        OTEL_SERVICE_NAME: "bg-piece-service",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
       },
       getIdentity: async () =>
         await Identity.generate({ implementation: "noble" }),
