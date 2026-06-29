@@ -1,9 +1,4 @@
-import type {
-  SessionDescriptor,
-  SessionOpenResult,
-  SessionToken,
-  WatchSpec,
-} from "../v2.ts";
+import type { SessionDescriptor, SessionToken, WatchSpec } from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -25,7 +20,12 @@ export type SessionState = {
   principal?: string;
 };
 
-type OpenSessionState = SessionOpenResult & {
+type OpenSessionState = {
+  sessionId: string;
+  sessionToken: SessionToken;
+  serverSeq: number;
+  caughtUpLocalSeq?: number;
+  resumed?: boolean;
   revokedConnectionId?: string;
 };
 

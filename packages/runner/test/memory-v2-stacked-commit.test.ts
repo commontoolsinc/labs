@@ -41,6 +41,9 @@ import type {
 import {
   NotificationRecorder,
   SingleSessionFactory,
+  TEST_HELLO_SESSION_OPEN,
+  testSessionOpenAuthFactory,
+  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
@@ -51,6 +54,7 @@ const helloOk = () => ({
   type: "hello.ok",
   protocol: "memory",
   flags: getMemoryProtocolFlags(),
+  sessionOpen: TEST_HELLO_SESSION_OPEN,
 } as const);
 const testReconstructionContext = new EmptyReconstructionContext(
   true,
@@ -323,6 +327,8 @@ class ScriptedServerModel {
 class ScriptedModelTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   constructor(readonly model: ScriptedServerModel) {}
 
@@ -342,21 +348,37 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
       type: string;
       requestId?: string;
       session?: { sessionId?: string };
+      invocation?: { aud?: unknown; challenge?: unknown };
       commit?: ClientCommit;
     };
 
     switch (message.type) {
       case "hello":
         this.model.connectionCount += 1;
-        this.respond(helloOk());
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `stacked-hello-${this.model.connectionCount}`,
+        );
+        this.respond({
+          ...helloOk(),
+          sessionOpen: this.#sessionOpen,
+        });
         break;
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `stacked-open-${++this.#sessionOpenCount}`,
+        );
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: message.session?.sessionId ?? this.model.sessionId,
             serverSeq: this.model.serverSeq,
+            sessionOpen: this.#sessionOpen,
           },
         });
         break;
@@ -1621,7 +1643,11 @@ Deno.test("memory v2 stacked commits: duplicate localSeq returns the same promis
   const transport = new ScriptedModelTransport(model);
   const client = await MemoryV2Client.connect({ transport });
   try {
-    const session = await client.mount(space);
+    const session = await client.mount(
+      space,
+      {},
+      testSessionOpenAuthFactory,
+    );
     model.setOutcome(1, { kind: "accept" });
     const commit: ClientCommit = {
       localSeq: 1,

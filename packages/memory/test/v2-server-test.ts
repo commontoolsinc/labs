@@ -3,13 +3,16 @@ import { FakeTime } from "@std/testing/time";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
+  decodeMemoryBoundary,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   type GraphQueryResult,
+  type HelloOkMessage,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
+  type SessionOpenAuthMetadata,
   type SessionSync,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
@@ -20,11 +23,7 @@ const HELLO = {
   protocol: MEMORY_PROTOCOL,
   flags: HELLO_FLAGS,
 } as const;
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: MEMORY_PROTOCOL,
-  flags: HELLO_FLAGS,
-} as const;
+const TEST_AUDIENCE = "did:key:z6Mk-memory-v2-server-test-audience";
 
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -35,6 +34,21 @@ const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   assertExists(message, "expected a server message");
   return message;
 };
+
+const assertHelloOk = (message: ServerMessage): HelloOkMessage => {
+  assertEquals(message.type, "hello.ok");
+  const hello = message as HelloOkMessage;
+  assertExists(hello.sessionOpen);
+  return hello;
+};
+
+const expectHelloOk = (messages: ServerMessage[]): SessionOpenAuthMetadata =>
+  assertHelloOk(shiftMessage(messages)).sessionOpen!;
+
+const authInvocation = (sessionOpen: SessionOpenAuthMetadata) => ({
+  aud: sessionOpen.audience,
+  challenge: sessionOpen.challenge.value,
+});
 
 const assertResponse = <Result>(
   message: ServerMessage,
@@ -54,7 +68,32 @@ const createServer = (store: string, refreshDelayMs = 0) =>
   new Server({
     store: new URL(store),
     subscriptionRefreshDelayMs: refreshDelayMs,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string"
+        ? principal
+        : "did:key:z6Mk-memory-v2-server-principal";
+    },
+    sessionOpenAuth: {
+      audience: TEST_AUDIENCE,
+    },
   });
+
+Deno.test("memory v2 server stateless respond does not issue hello.ok", async () => {
+  const server = createServer("memory://memory-v2-server-stateless-respond");
+  try {
+    const payload = await server.respond(encodeMemoryBoundary(HELLO));
+    assertExists(payload);
+    const response = assertResponse<unknown>(
+      decodeMemoryBoundary(payload) as ServerMessage,
+    );
+    assertEquals(response.requestId, "handshake");
+    assertEquals(response.error?.name, "ProtocolError");
+  } finally {
+    await server.close();
+  }
+});
 
 Deno.test("memory v2 server parser ignores transact invocation and authorization payloads", () => {
   assertEquals(
@@ -114,6 +153,273 @@ Deno.test("memory v2 session registry scopes session ids by space", () => {
   assertExists(second.sessionToken);
 });
 
+Deno.test("memory v2 server consumes a challenged session open", async () => {
+  const audience = "did:key:z6Mk-memory-v2-server-audience";
+  let now = 1_000_000;
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-challenge-reuse"),
+    authorizeSessionOpen: () => "did:key:z6Mk-memory-v2-server-principal",
+    sessionOpenAuth: {
+      audience,
+      challengeTtlSeconds: 60,
+      nowSeconds: () => now,
+    },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const hello = shiftMessage(messages) as HelloOkMessage;
+    assertEquals(hello.type, "hello.ok");
+    assertEquals(hello.sessionOpen?.audience, audience);
+    const challenge = hello.sessionOpen?.challenge;
+    assertExists(challenge);
+    assertEquals(challenge.expiresAt, now + 60);
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-memory-v2-server-challenge-space",
+      session: {},
+      invocation: {
+        aud: audience,
+        challenge: challenge.value,
+      },
+    }));
+    const opened = assertResponse<{
+      sessionId: string;
+      sessionOpen?: { challenge?: { value: string; expiresAt: number } };
+    }>(
+      shiftMessage(messages),
+    );
+    assertEquals(opened.requestId, "open-1");
+    assertExists(opened.ok?.sessionId);
+    const nextChallenge = opened.ok?.sessionOpen?.challenge;
+    assertExists(nextChallenge);
+    assertEquals(nextChallenge.expiresAt, now + 60);
+
+    now += 1;
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-2",
+      space: "did:key:z6Mk-memory-v2-server-challenge-space",
+      session: {},
+      invocation: {
+        aud: audience,
+        challenge: challenge.value,
+      },
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-2",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge mismatch",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server rejects an expired session open challenge", async () => {
+  const audience = "did:key:z6Mk-memory-v2-server-expired-audience";
+  let now = 1_000_000;
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-challenge-expired"),
+    authorizeSessionOpen: () => "did:key:z6Mk-memory-v2-server-principal",
+    sessionOpenAuth: {
+      audience,
+      challengeTtlSeconds: 60,
+      nowSeconds: () => now,
+    },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const hello = shiftMessage(messages) as HelloOkMessage;
+    assertEquals(hello.type, "hello.ok");
+    const challenge = hello.sessionOpen?.challenge;
+    assertExists(challenge);
+
+    now = challenge.expiresAt;
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-memory-v2-server-expired-space",
+      session: {},
+      invocation: {
+        aud: audience,
+        challenge: challenge.value,
+      },
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-1",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge expired",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server rejects invalid session open auth metadata", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-invalid-session-open-auth",
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    const cases = [
+      {
+        requestId: "missing-audience",
+        invocation: {
+          challenge: sessionOpen.challenge.value,
+        },
+        message: "memory session.open requires audience",
+      },
+      {
+        requestId: "wrong-audience",
+        invocation: {
+          aud: "did:key:z6Mk-memory-v2-server-wrong-audience",
+          challenge: sessionOpen.challenge.value,
+        },
+        message: "memory session.open audience mismatch",
+      },
+      {
+        requestId: "missing-challenge",
+        invocation: {
+          aud: sessionOpen.audience,
+        },
+        message: "memory session.open requires challenge",
+      },
+      {
+        requestId: "wrong-challenge",
+        invocation: {
+          aud: sessionOpen.audience,
+          challenge: "challenge:wrong",
+        },
+        message: "memory session.open challenge mismatch",
+      },
+    ];
+
+    for (const testCase of cases) {
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.open",
+        requestId: testCase.requestId,
+        space: "did:key:z6Mk-memory-v2-server-invalid-auth-space",
+        session: {},
+        invocation: testCase.invocation,
+      }));
+      assertEquals(shiftMessage(messages), {
+        type: "response",
+        requestId: testCase.requestId,
+        error: {
+          name: "AuthorizationError",
+          message: testCase.message,
+        },
+      });
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server rejects session open before issuing challenge", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-session-open-before-challenge",
+  );
+  const connection = server.connect(() => {});
+
+  try {
+    const response = await server.openSession({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-memory-v2-server-before-challenge-space",
+      session: {},
+      invocation: {
+        aud: TEST_AUDIENCE,
+        challenge: "challenge:missing",
+      },
+    }, connection);
+    assertEquals(response, {
+      type: "response",
+      requestId: "open-1",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge unavailable",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server consumes challenge before denied session open", async () => {
+  const audience = "did:key:z6Mk-memory-v2-server-denied-audience";
+  const space = "did:key:z6Mk-memory-v2-server-denied-space";
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-denied-consumes-challenge"),
+    authorizeSessionOpen: () => undefined,
+    sessionOpenAuth: {
+      audience,
+    },
+    acl: {
+      mode: "enforce",
+    },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-1",
+      error: {
+        name: "AuthorizationError",
+        message: `Principal <anonymous> lacks READ on space ${space}`,
+      },
+    });
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-2",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-2",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge already used",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server allows the same session id in different spaces", async () => {
   const server = createServer("memory://memory-v2-server-session-scope");
   const messages: ServerMessage[] = [];
@@ -121,29 +427,34 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(messages), HELLO_OK);
+    let sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-space-one",
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(sessionOpen),
     }));
     const openedOne = assertResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
+      sessionOpen: SessionOpenAuthMetadata;
     }>(shiftMessage(messages));
     assertEquals(openedOne.requestId, "open-1");
     assertEquals(openedOne.ok?.sessionId, "session:fixed");
     assertEquals(openedOne.ok?.serverSeq, 0);
     assertExists(openedOne.ok?.sessionToken);
+    assertExists(openedOne.ok?.sessionOpen);
+    sessionOpen = openedOne.ok.sessionOpen;
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-2",
       space: "did:key:z6Mk-space-two",
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(sessionOpen),
     }));
     const openedTwo = assertResponse<{
       sessionId: string;
@@ -236,6 +547,9 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
         ? (message.authorization as { principal: string }).principal
         : undefined;
     },
+    sessionOpenAuth: {
+      audience: TEST_AUDIENCE,
+    },
   });
   const firstMessages: ServerMessage[] = [];
   const secondMessages: ServerMessage[] = [];
@@ -248,13 +562,14 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
 
   try {
     await firstConnection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(firstMessages), HELLO_OK);
+    const firstSessionOpen = expectHelloOk(firstMessages);
 
     await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-space-one",
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(firstSessionOpen),
       authorization: { principal: "did:key:z6Mk-alice" },
     }));
     const opened = assertResponse<{
@@ -268,13 +583,14 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
     assertExists(opened.ok?.sessionToken);
 
     await secondConnection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+    const secondSessionOpen = expectHelloOk(secondMessages);
 
     await secondConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-2",
       space: "did:key:z6Mk-space-one",
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(secondSessionOpen),
       authorization: { principal: "did:key:z6Mk-bob" },
     }));
     assertEquals(shiftMessage(secondMessages), {
@@ -304,13 +620,14 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
 
   try {
     await firstConnection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(firstMessages), HELLO_OK);
+    const firstSessionOpen = expectHelloOk(firstMessages);
 
     await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(firstSessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(firstMessages),
@@ -318,7 +635,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
     const sessionId = opened.ok!.sessionId;
 
     await secondConnection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+    expectHelloOk(secondMessages);
 
     await secondConnection.receive(encodeMemoryBoundary({
       type: "graph.query",
@@ -427,24 +744,28 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
   try {
     await firstConnection.receive(encodeMemoryBoundary(HELLO));
     await secondConnection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(firstMessages), HELLO_OK);
-    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+    let firstSessionOpen = expectHelloOk(firstMessages);
+    const secondSessionOpen = expectHelloOk(secondMessages);
 
     await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: { sessionId: "session:fixed" },
+      invocation: authInvocation(firstSessionOpen),
     }));
     const openedFirst = assertResponse<{
       sessionId: string;
       sessionToken: string;
       serverSeq: number;
+      sessionOpen: SessionOpenAuthMetadata;
     }>(shiftMessage(firstMessages));
     const initialToken = openedFirst.ok?.sessionToken;
     assertEquals(openedFirst.ok?.sessionId, "session:fixed");
     assertEquals(openedFirst.ok?.serverSeq, 0);
     assertExists(initialToken);
+    assertExists(openedFirst.ok?.sessionOpen);
+    firstSessionOpen = openedFirst.ok.sessionOpen;
 
     await secondConnection.receive(encodeMemoryBoundary({
       type: "session.open",
@@ -454,6 +775,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
         sessionId: "session:fixed",
         sessionToken: initialToken,
       },
+      invocation: authInvocation(secondSessionOpen),
     }));
 
     assertEquals(shiftMessage(firstMessages), {
@@ -499,6 +821,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
         sessionId: "session:fixed",
         sessionToken: initialToken,
       },
+      invocation: authInvocation(firstSessionOpen),
     }));
     assertEquals(shiftMessage(firstMessages), {
       type: "response",
@@ -561,7 +884,7 @@ Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => 
       },
     }));
 
-    assertEquals(shiftMessage(messages), HELLO_OK);
+    expectHelloOk(messages);
   } finally {
     await server.close();
   }
@@ -574,13 +897,14 @@ Deno.test("memory v2 server rejects unsafe spaces before opening a store", async
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(messages), HELLO_OK);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-unsafe",
       space: "../../evil",
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     assertEquals(shiftMessage(messages), {
       type: "response",
@@ -603,13 +927,14 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(messages), HELLO_OK);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string; serverSeq: number }>(
       shiftMessage(messages),
@@ -697,13 +1022,14 @@ Deno.test("memory v2 server rejects legacy live graph.query subscriptions", asyn
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -753,14 +1079,15 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
     for (const client of [connection, writer]) {
       await client.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(messages);
-    shiftMessage(writerMessages);
+    const sessionOpen = expectHelloOk(messages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -771,6 +1098,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -884,14 +1212,15 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
     for (const client of [connection, writer]) {
       await client.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(messages);
-    shiftMessage(writerMessages);
+    const sessionOpen = expectHelloOk(messages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -902,6 +1231,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1001,13 +1331,14 @@ Deno.test("memory v2 server does not send watch effects after a connection close
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     sessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1054,14 +1385,15 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
     for (const client of [connection, writer]) {
       await client.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(messages);
-    shiftMessage(writerMessages);
+    const sessionOpen = expectHelloOk(messages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -1072,6 +1404,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1175,13 +1508,14 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1276,13 +1610,14 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1344,13 +1679,14 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1549,13 +1885,14 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    assertEquals(shiftMessage(messages), HELLO_OK);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1676,13 +2013,14 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -1786,14 +2124,15 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
     for (const connection of [writer, observer]) {
       await connection.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(writerMessages);
-    shiftMessage(observerMessages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
+    const observerSessionOpen = expectHelloOk(observerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -1804,6 +2143,7 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
       requestId: "observer-open",
       space,
       session: {},
+      invocation: authInvocation(observerSessionOpen),
     }));
     const observerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(observerMessages),
@@ -1884,13 +2224,14 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -2027,13 +2368,14 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -2124,13 +2466,14 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
-    shiftMessage(messages);
+    const sessionOpen = expectHelloOk(messages);
 
     await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -2293,14 +2636,15 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     for (const client of [connection, writer]) {
       await client.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(messages);
-    shiftMessage(writerMessages);
+    const sessionOpen = expectHelloOk(messages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -2311,6 +2655,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),
@@ -2507,14 +2852,15 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     for (const client of [connection, writer]) {
       await client.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(messages);
-    shiftMessage(writerMessages);
+    const sessionOpen = expectHelloOk(messages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerSessionId = assertResponse<{ sessionId: string }>(
       shiftMessage(writerMessages),
@@ -2525,6 +2871,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       requestId: "open-1",
       space,
       session: {},
+      invocation: authInvocation(sessionOpen),
     }));
     const opened = assertResponse<{ sessionId: string }>(
       shiftMessage(messages),

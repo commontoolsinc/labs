@@ -4,34 +4,26 @@
  * The memory server authenticates a client by verifying the signature on its
  * `session.open` invocation; the verified issuer becomes the session principal
  * that storage partitioning keys off. Toolshed's `/api/storage/memory` route
- * and the standalone test server both performed this verification with
- * byte-identical copies — this is the single source of truth they now share.
+ * and the standalone test server use this shared verifier.
  *
- * Federation §14 PR5 adds two anti-replay checks on top of the signature:
+ * The handshake adds three anti-replay checks on top of the signature:
  *
  *  - **expiry** (`exp`): a `session.open` is a live handshake, not a durable
  *    grant. When the invocation carries an `exp` (the client now stamps one),
  *    reject it once expired (with a clock-skew grace). Bounds how long a
  *    captured open can be replayed.
  *
- *  - **audience** (`aud`): when the invocation is bound to an audience AND this
- *    server is configured with its own `audience` identity, require they match
- *    — so an open signed for host A cannot be replayed to host B. This is the
- *    cross-host replay fix that lets the site table's host hints become
- *    trustable. Both halves are opt-in (absent `aud` or unconfigured server →
- *    skip) so the check rolls out without a flag day. NOTE: the `Invocation`
- *    `aud` field is typed `DID`, so a *proper* audience is the server's own
- *    identity DID — which the memory server does not have today. Provisioning
- *    that identity (and letting the client discover it, e.g. via the site
- *    table) is the open architectural decision tracked in
- *    docs/development/federation-pr5-design.md; until it lands no client sets
- *    `aud` and this stays inert. The mechanism + tests are here so that
- *    decision is a wiring change, not a protocol change.
+ *  - **challenge** (`challenge`): the server advertises a fresh, connection
+ *    scoped challenge in `hello.ok`; the client signs that value into
+ *    `session.open`, and the server accepts it once.
+ *
+ *  - **audience** (`aud`): the invocation must carry this server's audience
+ *    identity. An open signed for host A cannot be replayed to host B.
  */
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { fromDID } from "../util.ts";
-import { MEMORY_PROTOCOL } from "../v2.ts";
+import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -41,24 +33,27 @@ export const authorizationError = (message: string): Error =>
 
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
-  right: { sessionId?: string; seenSeq?: number },
+  right: { sessionId?: string; seenSeq?: number; sessionToken?: string },
 ): boolean =>
   (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
     right.sessionId &&
   (typeof left.seenSeq === "number" ? left.seenSeq : undefined) ===
-    right.seenSeq;
+    right.seenSeq &&
+  (typeof left.sessionToken === "string" ? left.sessionToken : undefined) ===
+    right.sessionToken;
 
 export type SessionOpenMessage = {
   space: string;
-  session: { sessionId?: string; seenSeq?: number };
+  session: { sessionId?: string; seenSeq?: number; sessionToken?: string };
   invocation?: Record<string, unknown>;
   authorization?: unknown;
 };
 
 export type VerifySessionOpenOptions = {
-  /** This server's own audience identity (a DID). When set, an invocation that
-   * carries an `aud` must match it. Unset → audience is not enforced. */
-  audience?: string;
+  /** This server's own audience identity. */
+  audience: string;
+  /** The challenge issued to this connection. */
+  challenge: SessionOpenChallenge;
   /** Current unix time in seconds (defaults to now). Injectable for tests. */
   nowSeconds?: number;
   /** Grace window for `exp` to tolerate client/server clock skew. */
@@ -68,13 +63,12 @@ export type VerifySessionOpenOptions = {
 const DEFAULT_CLOCK_SKEW_SECONDS = 120;
 
 /**
- * Verify a `session.open` authorization. Returns the verified issuer DID (the
- * session principal) or throws an AuthorizationError. Behaviour matches the
- * prior inline copies exactly, plus the opt-in expiry/audience checks above.
+ * Verify a `session.open` authorization. Returns the verified issuer DID or
+ * throws an AuthorizationError.
  */
 export const verifySessionOpenAuthorization = async (
   message: SessionOpenMessage,
-  options: VerifySessionOpenOptions = {},
+  options: VerifySessionOpenOptions,
 ): Promise<string> => {
   const rawSignature = isRecord(message.authorization)
     ? message.authorization.signature
@@ -99,28 +93,34 @@ export const verifySessionOpenAuthorization = async (
     throw authorizationError("memory session.open authorization mismatch");
   }
 
-  // Audience binding: an open bound to a *different* audience must not be
-  // accepted here (replay across hosts). Opt-in on both sides.
-  if (
-    options.audience !== undefined &&
-    invocation.aud !== undefined &&
-    invocation.aud !== options.audience
-  ) {
-    throw authorizationError(
-      "memory session.open audience mismatch (replayed to the wrong host)",
-    );
+  if (typeof invocation.aud !== "string") {
+    throw authorizationError("memory session.open requires audience");
+  }
+  if (invocation.aud !== options.audience) {
+    throw authorizationError("memory session.open audience mismatch");
   }
 
-  // Expiry: a captured open must not be replayable forever.
-  if (invocation.exp !== undefined) {
-    if (typeof invocation.exp !== "number") {
-      throw authorizationError("memory session.open has a malformed exp");
-    }
-    const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
-    const skew = options.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS;
-    if (invocation.exp < now - skew) {
-      throw authorizationError("memory session.open authorization expired");
-    }
+  if (typeof invocation.challenge !== "string") {
+    throw authorizationError("memory session.open requires challenge");
+  }
+  if (invocation.challenge !== options.challenge.value) {
+    throw authorizationError("memory session.open challenge mismatch");
+  }
+  const challengeNow = options.nowSeconds ?? Math.floor(Date.now() / 1000);
+  if (options.challenge.expiresAt <= challengeNow) {
+    throw authorizationError("memory session.open challenge expired");
+  }
+
+  if (typeof invocation.iat !== "number" || !Number.isFinite(invocation.iat)) {
+    throw authorizationError("memory session.open requires iat");
+  }
+  if (typeof invocation.exp !== "number" || !Number.isFinite(invocation.exp)) {
+    throw authorizationError("memory session.open requires exp");
+  }
+  const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const skew = options.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS;
+  if (invocation.exp < now - skew) {
+    throw authorizationError("memory session.open authorization expired");
   }
 
   const issuer = await fromDID(invocation.iss);

@@ -18,6 +18,10 @@ import type {
 import {
   NotificationRecorder,
   SingleSessionFactory,
+  TEST_HELLO_SESSION_OPEN,
+  TEST_MEMORY_SERVER_AUTH,
+  testSessionOpenAuthFactory,
+  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
@@ -29,6 +33,7 @@ const HELLO_OK = {
   type: "hello.ok",
   protocol: "memory",
   flags: getMemoryProtocolFlags(),
+  sessionOpen: TEST_HELLO_SESSION_OPEN,
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
@@ -124,6 +129,8 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
 class RejectThenSucceedTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
+  #sessionOpen = TEST_HELLO_SESSION_OPEN;
+  #sessionOpenCount = 0;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -138,19 +145,35 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
+      invocation?: { aud?: unknown; challenge?: unknown };
     };
 
     switch (message.type) {
       case "hello":
-        this.#respond(HELLO_OK);
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          "reject-then-succeed-hello",
+        );
+        this.#respond({
+          ...HELLO_OK,
+          sessionOpen: this.#sessionOpen,
+        });
         return;
       case "session.open":
+        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
+        assertEquals(
+          message.invocation?.challenge,
+          this.#sessionOpen.challenge.value,
+        );
+        this.#sessionOpen = testSessionOpenAuthMetadata(
+          `reject-then-succeed-open-${++this.#sessionOpenCount}`,
+        );
         this.#respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             sessionId: "session:reject-then-succeed",
             serverSeq: 0,
+            sessionOpen: this.#sessionOpen,
           },
         });
         return;
@@ -266,6 +289,7 @@ const visibleIds = (
 
 Deno.test("memory v2 runner does not integrate its own replayed commit after reconnect", async () => {
   const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
     store: new URL(`memory://runner-v2-own-replay-${crypto.randomUUID()}`),
   });
   const transport = new SabotagedReconnectTransport(server, [1]);
@@ -278,7 +302,11 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
   const writerClient = await MemoryV2Client.connect({
     transport: MemoryV2Client.loopback(server),
   });
-  const writer = await writerClient.mount(space);
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
   const provider = storageManager.open(space) as TestProvider;
   const localUri = `of:memory-v2-local-${crypto.randomUUID()}` as URI;
   const remoteUri = `of:memory-v2-remote-${crypto.randomUUID()}` as URI;
@@ -351,6 +379,7 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
 
 Deno.test("memory v2 runner deduplicates replayed stacked commits while integrating remote updates", async () => {
   const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
     store: new URL(`memory://runner-v2-stacked-replay-${crypto.randomUUID()}`),
   });
   const transport = new SabotagedReconnectTransport(server, [1]);
@@ -363,7 +392,11 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
   const writerClient = await MemoryV2Client.connect({
     transport: MemoryV2Client.loopback(server),
   });
-  const writer = await writerClient.mount(space);
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
   const provider = storageManager.open(space) as TestProvider;
   const localUri = `of:memory-v2-stacked-local-${crypto.randomUUID()}` as URI;
   const remoteUri = `of:memory-v2-stacked-remote-${crypto.randomUUID()}` as URI;
@@ -438,6 +471,7 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
 
 Deno.test("memory v2 runner restores watched graph state after reconnect and keeps retarget updates flowing", async () => {
   const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
     store: new URL(`memory://runner-v2-watch-reconnect-${crypto.randomUUID()}`),
   });
   const transport = new SabotagedReconnectTransport(server);
@@ -450,7 +484,11 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
   const writerClient = await MemoryV2Client.connect({
     transport: MemoryV2Client.loopback(server),
   });
-  const writer = await writerClient.mount(space);
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
   const provider = storageManager.open(space) as TestProvider;
   const fixture = createGraphFixture(space);
 
@@ -612,7 +650,11 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     remoteClient = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(candidate.server()),
     });
-    const remoteSession = await remoteClient.mount(space);
+    const remoteSession = await remoteClient.mount(
+      space,
+      {},
+      testSessionOpenAuthFactory,
+    );
     let remoteLocalSeq = 1;
 
     await provider.sync(uri);

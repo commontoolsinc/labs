@@ -11,6 +11,10 @@ import {
 } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 // Resume preservation guard for the list builtins (filter/flatMap).
 //
@@ -87,10 +91,11 @@ class DelayingSessionFactory implements SessionFactory {
         this.onDelay,
       ),
     });
-    const session = await client.mount(spaceId, {}, () => ({
-      invocation: {},
-      authorization: { principal: sgnr?.did() },
-    }));
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(sgnr),
+    );
     return { client, session };
   }
 }
@@ -179,6 +184,7 @@ describe("list builtin resume preservation", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = DelayingStorageManager.make(signer, server, 0, FILTER_CHILD_DOC);
     sm2 = DelayingStorageManager.make(
@@ -388,6 +394,7 @@ describe("flatMap builtin resume preservation", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = DelayingStorageManager.make(signer, server, 0, FLATMAP_CHILD_DOC);
     sm2 = DelayingStorageManager.make(

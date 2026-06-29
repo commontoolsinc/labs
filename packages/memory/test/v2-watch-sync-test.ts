@@ -3,11 +3,14 @@ import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
+  type HelloOkMessage,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
+  type SessionOpenAuthMetadata,
 } from "../v2.ts";
+import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const HELLO = {
   type: "hello",
@@ -33,8 +36,21 @@ const assertEffect = (message: ServerMessage): SessionEffectMessage => {
   return message as SessionEffectMessage;
 };
 
+const expectHelloOk = (messages: ServerMessage[]): SessionOpenAuthMetadata => {
+  const hello = shiftMessage(messages) as HelloOkMessage;
+  assertEquals(hello.type, "hello.ok");
+  assertExists(hello.sessionOpen);
+  return hello.sessionOpen;
+};
+
+const authInvocation = (sessionOpen: SessionOpenAuthMetadata) => ({
+  aud: sessionOpen.audience,
+  challenge: sessionOpen.challenge.value,
+});
+
 Deno.test("memory v2 server replaces watch sets and emits session sync effects", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-watch-sync"),
     subscriptionRefreshDelayMs: 0,
   });
@@ -48,14 +64,15 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
     for (const connection of [writer, watcher]) {
       await connection.receive(encodeMemoryBoundary(HELLO));
     }
-    shiftMessage(writerMessages);
-    shiftMessage(watcherMessages);
+    const writerSessionOpen = expectHelloOk(writerMessages);
+    const watcherSessionOpen = expectHelloOk(watcherMessages);
 
     await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
       session: {},
+      invocation: authInvocation(writerSessionOpen),
     }));
     const writerOpen = assertResponse<{ sessionId: string; serverSeq: number }>(
       shiftMessage(writerMessages),
@@ -66,6 +83,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       requestId: "watcher-open",
       space,
       session: {},
+      invocation: authInvocation(watcherSessionOpen),
     }));
     const watcherOpen = assertResponse<{
       sessionId: string;

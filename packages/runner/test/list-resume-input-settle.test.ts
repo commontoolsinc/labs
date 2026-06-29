@@ -11,6 +11,10 @@ import {
 } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 // awaitInputThenSettle path in the list builtins (filter/flatMap/map).
 //
@@ -39,10 +43,11 @@ class F implements SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: loopback(this.gs()),
     });
-    const session = await client.mount(id, {}, () => ({
-      invocation: {},
-      authorization: { principal: s?.did() },
-    }));
+    const session = await client.mount(
+      id,
+      {},
+      testPrincipalSessionOpenAuthFactory(s),
+    );
     return { client, session };
   }
 }
@@ -107,6 +112,7 @@ describe("list builtin resume input-settle", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
   });
   afterEach(async () => {
