@@ -859,6 +859,67 @@ function printActionStatsTable(runtime: Runtime): void {
 }
 
 /**
+ * One declarative fetch mock for `fetchData`. A test opts in by exporting a
+ * module-scope `fetchMocks: FetchMockEntry[]`. The first entry whose
+ * `urlIncludes` is a substring of a request URL wins; `base64Body` takes
+ * precedence over `body` (for binary payloads like images). LLM calls
+ * (`generateText`/`generateObject`) mock separately via `@commonfabric/llm`.
+ */
+export interface FetchMockEntry {
+  urlIncludes: string;
+  status?: number;
+  contentType?: string;
+  body?: string;
+  base64Body?: string;
+}
+
+/** Read & validate a test's `fetchMocks` export from the compiled module namespace. */
+function readFetchMocks(main: unknown): FetchMockEntry[] | undefined {
+  const raw = (main as Record<string, unknown> | null | undefined)?.fetchMocks;
+  if (!Array.isArray(raw)) return undefined;
+  const entries = raw.filter((i): i is FetchMockEntry =>
+    !!i && typeof i === "object" &&
+    typeof (i as { urlIncludes?: unknown }).urlIncludes === "string"
+  );
+  return entries.length > 0 ? entries : undefined;
+}
+
+/** Resolve a request input to its URL string. */
+function fetchInputUrl(input: unknown): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  if (input instanceof Request) return input.url;
+  const url = (input as { url?: unknown } | null | undefined)?.url;
+  return typeof url === "string" ? url : "";
+}
+
+/** First mock entry matching the request URL, or undefined. */
+function matchFetchMock(
+  entries: FetchMockEntry[] | undefined,
+  input: unknown,
+): FetchMockEntry | undefined {
+  if (!entries) return undefined;
+  const url = fetchInputUrl(input);
+  return entries.find((e) => url.includes(e.urlIncludes));
+}
+
+/** Build a Response from a mock entry. */
+function makeMockResponse(entry: FetchMockEntry): Response {
+  const init: ResponseInit = {
+    status: entry.status ?? 200,
+    headers: { "content-type": entry.contentType ?? "application/json" },
+  };
+  if (typeof entry.base64Body === "string") {
+    const bytes = Uint8Array.from(
+      atob(entry.base64Body),
+      (c) => c.charCodeAt(0),
+    );
+    return new Response(bytes, init);
+  }
+  return new Response(entry.body ?? "", init);
+}
+
+/**
  * Run a single test pattern file.
  */
 export async function runTestPattern(
@@ -913,11 +974,29 @@ export async function runTestPattern(
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
 
+  // Fetch mocking: a test opts in by exporting a module-scope `fetchMocks` array.
+  // We can't read it until after compile, so the injected fetch closes over a
+  // late-populated `fetchMockEntries` and falls through to the real fetch until
+  // (and unless) the test declares mocks. Driving the in-flight fetchData to
+  // completion is the harness's existing job — a `{ settle: true }` step (or any
+  // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
+  const realFetch = globalThis.fetch.bind(globalThis);
+  let fetchMockEntries: FetchMockEntry[] | undefined;
+  const mockFetch: typeof globalThis.fetch = (input, init) => {
+    const entry = matchFetchMock(fetchMockEntries, input);
+    return entry
+      ? Promise.resolve(makeMockResponse(entry))
+      : realFetch(input as RequestInfo | URL, init);
+  };
+
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
     () =>
       new Runtime({
         storageManager,
+        // Inject a fetch that honors test-declared `fetchMocks` (scoped to this
+        // runtime; no process-global mutation).
+        fetch: mockFetch,
         // Match the production runtime default: enforce explicitly declared
         // `ifc` policies so pattern tests act as a regression net for CFC.
         // Patterns without CFC annotations are unaffected; tests that need a
@@ -991,6 +1070,12 @@ export async function runTestPattern(
         `Test pattern must export a pattern function as default`,
       );
     }
+
+    // Read the test's opt-in fetch mocks now (after compile, before the run):
+    // a fetchData with a non-empty URL fires during the initial settle, so the
+    // entries must be in place before `runtime.run(...)` below. `main` is the
+    // module namespace, so a named `fetchMocks` export is reachable.
+    fetchMockEntries = readFetchMocks(main);
 
     // Multi-user tests export a descriptor ({ setup?, participants }) as the
     // default export. They run in worker-isolated runtimes against a shared
