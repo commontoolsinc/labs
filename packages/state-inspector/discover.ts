@@ -153,6 +153,11 @@ export function resolveSpacePath(
  * if that finds nothing AND the token looks like a name (not a path, not already
  * `did:`-shaped) does it derive the name's DID via {@link deriveSpaceDid} and
  * match that. Async because the derivation uses the identity keypair.
+ *
+ * Precedence: a path / DID / DID-prefix match always WINS over name derivation,
+ * so a token that is a substring of a discovered DID resolves to that DB and is
+ * never treated as a name. Harmless in practice — space names (e.g.
+ * `2026-06-29-ben`) are never DID-shaped — and a name can never shadow a DID.
  */
 export async function resolveSpace(
   token: string,
