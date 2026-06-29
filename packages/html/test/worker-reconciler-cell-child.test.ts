@@ -245,10 +245,17 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         onOps: collector.onOps,
       });
 
+      const liveProps = {
+        id: "field",
+        value: "hello",
+        checked: true,
+        scrollTop: 0,
+        scrollLeft: 0,
+      };
       const childCell = new MockCell({
         type: "vnode",
         name: "input",
-        props: { id: "field", value: "hello", checked: true },
+        props: { ...liveProps },
         children: [],
       } as WorkerVNode);
       const rootCell = new MockCell({
@@ -263,12 +270,13 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       collector.clear();
 
       // Reuse the same input VNode with IDENTICAL props. The worker can't see
-      // live DOM drift (a user typing, browser-set checked), so value/checked
-      // must still re-emit to let setPropDefault repair it; inert id stays quiet.
+      // live DOM drift (user typing, browser-set checked, user scrolling), so
+      // the DOM-live props must still re-emit to let setPropDefault repair it;
+      // the inert id stays quiet.
       childCell.set({
         type: "vnode",
         name: "input",
-        props: { id: "field", value: "hello", checked: true },
+        props: { ...liveProps },
         children: [],
       } as WorkerVNode);
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -276,16 +284,13 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const keys = collector.getOpsOfType("set-prop")
         .filter((op) => "key" in op)
         .map((op) => (op as { key: string }).key);
-      assertEquals(
-        keys.includes("value"),
-        true,
-        "DOM-live `value` must re-emit so drift can be repaired",
-      );
-      assertEquals(
-        keys.includes("checked"),
-        true,
-        "DOM-live `checked` must re-emit so drift can be repaired",
-      );
+      for (const liveKey of ["value", "checked", "scrollTop", "scrollLeft"]) {
+        assertEquals(
+          keys.includes(liveKey),
+          true,
+          `DOM-live \`${liveKey}\` must re-emit so drift can be repaired`,
+        );
+      }
       assertEquals(
         keys.includes("id"),
         false,

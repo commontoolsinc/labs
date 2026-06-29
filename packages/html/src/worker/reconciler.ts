@@ -74,13 +74,14 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
     ["cf-chat-message", new Set(["name", "content"])],
   ]);
 // Props whose live DOM value can drift from the authored VDOM value
-// independently of any worker-side change — user input (`value`), or
-// browser / custom-element state (`checked`, `selected`, `selectedIndex`,
-// `indeterminate`, `open`). On the main thread, setPropDefault re-asserts the
-// authored value by comparing against the *live* property, so for these props a
-// repeated set-prop is a drift-repair, not pure churn. The worker-side value
-// guard (updatePropsInPlace) only knows the last *authored* value and cannot
-// see live drift, so it must never skip these — they always re-emit.
+// independently of any worker-side change — user input (`value`), scrolling
+// (`scrollTop`/`scrollLeft`), or browser / custom-element state (`checked`,
+// `selected`, `selectedIndex`, `indeterminate`, `open`). On the main thread,
+// setPropDefault re-asserts the authored value by comparing against the *live*
+// property, so for these props a repeated set-prop is a drift-repair, not pure
+// churn. The worker-side value guard (updatePropsInPlace) only knows the last
+// *authored* value and cannot see live drift, so it must never skip these —
+// they always re-emit.
 const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
   "value",
   "checked",
@@ -88,6 +89,8 @@ const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
   "selectedIndex",
   "indeterminate",
   "open",
+  "scrollTop",
+  "scrollLeft",
 ]);
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
