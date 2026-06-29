@@ -51,6 +51,20 @@ function hint(message: string, showQuietTip = true) {
   }
 }
 
+export function appRouteUrl(apiUrl: string, ...segments: string[]): string {
+  const parsedBase = new URL(apiUrl);
+  const routeBase = new URL(parsedBase);
+  const basePath = parsedBase.pathname.split("/").filter(Boolean).join("/");
+  routeBase.pathname = basePath ? `/${basePath}/` : "/";
+  routeBase.search = "";
+  routeBase.hash = "";
+  const path = segments
+    .map((segment) => segment.replace(/^\/+|\/+$/g, ""))
+    .filter((segment) => segment.length > 0)
+    .join("/");
+  return new URL(path ? `./${path}` : "./", routeBase).toString();
+}
+
 function summarizeForDisplay(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
@@ -256,7 +270,9 @@ export const piece = new Command()
     render(pieceId);
     const browserPieceRef = options.slug ?? pieceId;
     hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
+  → Open in browser: ${
+      appRouteUrl(spaceConfig.apiUrl, spaceConfig.space, browserPieceRef)
+    }
   → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
   → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
   → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
@@ -298,7 +314,9 @@ export const piece = new Command()
     );
     render(`Set slug ${slug} to ${sourceRef}`);
     hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${slug}`));
+  → Open in browser: ${
+      appRouteUrl(spaceConfig.apiUrl, spaceConfig.space, slug)
+    }`));
   })
   /* piece step */
   .command("step", "Run a single scheduling step: start → idle → synced → stop")
@@ -375,7 +393,9 @@ export const piece = new Command()
     });
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
-  → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
+  → Test in browser: ${
+      appRouteUrl(pieceConfig.apiUrl, pieceConfig.space, pieceConfig.piece)
+    }
   → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
   → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
   })
@@ -889,7 +909,9 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     const pieceId = await recreateSpaceRootPattern(spaceConfig);
     render(pieceId);
     hint(cliText(`NEXT STEPS:
-  → Open space in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Open space in browser: ${
+      appRouteUrl(spaceConfig.apiUrl, spaceConfig.space, pieceId)
+    }
   → Inspect state:         cf piece inspect --piece ${pieceId} ...`));
   })
   /* piece set-home */
