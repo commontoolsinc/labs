@@ -72,7 +72,7 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
-type RootValue = Record<string, FabricValue> | undefined;
+type RootValue = FabricValue;
 type DocState = {
   seq: number;
   value: RootValue;
@@ -2170,6 +2170,133 @@ Deno.test("memory v2 stacked commits: pending visibility preserves array move pa
       A: {
         items: ["c", "a", "b"],
       },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility can replace a null branch with an object patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      message: "synthetic null-base conflict",
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/choice/name",
+        value: "Sushi Place",
+      }],
+      {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    });
+
+    await assertConflict(patch, "synthetic null-base conflict");
+    expectVisible(harness, {
+      A: null,
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility can replace a scalar branch with an object patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      choice: 1,
+    });
+
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      message: "synthetic scalar-base conflict",
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/choice/name",
+        value: "Sushi Place",
+      }],
+      {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    });
+
+    await assertConflict(patch, "synthetic scalar-base conflict");
+    expectVisible(harness, {
+      A: {
+        choice: 1,
+      },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility can replace an array branch with an object patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, []);
+
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      message: "synthetic array-base conflict",
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/choice/name",
+        value: "Sushi Place",
+      }],
+      {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        choice: {
+          name: "Sushi Place",
+        },
+      },
+    });
+
+    await assertConflict(patch, "synthetic array-base conflict");
+    expectVisible(harness, {
+      A: [],
     });
   } finally {
     await harness.close();

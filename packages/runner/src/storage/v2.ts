@@ -39,7 +39,11 @@ import {
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isObject,
+  isPlainContainer,
+  isRecord,
+} from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -104,7 +108,11 @@ const isSamePath = (
 ): boolean =>
   a.length === b.length && a.every((segment, index) => b[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
+import {
+  hasValueAtPath,
+  isArrayIndexSegment,
+  readValueAtPath,
+} from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -360,6 +368,39 @@ const changedPathsForPendingPatch = (
     }
   });
 
+const firstPresentNonTraversablePrefix = (
+  base: EntityDocument | undefined,
+  path: readonly string[],
+): string[] | undefined => {
+  for (let length = 1; length < path.length; length += 1) {
+    const prefix = path.slice(0, length);
+    if (!hasValueAtPath(base, prefix)) {
+      continue;
+    }
+    const value = readValueAtPath(base, prefix);
+    const nextSegment = path[length]!;
+    if (
+      !isPlainContainer(value) ||
+      (Array.isArray(value) && !isArrayIndexSegment(nextSegment))
+    ) {
+      return prefix;
+    }
+  }
+  return undefined;
+};
+
+const pendingSetPathForBase = (
+  base: EntityDocument | undefined,
+  pendingValue: EntityDocument,
+  path: readonly string[],
+): readonly string[] => {
+  const prefix = firstPresentNonTraversablePrefix(base, path);
+  if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
+    return path;
+  }
+  return prefix;
+};
+
 const compactChangedPaths = (paths: readonly string[][]): string[][] => {
   const sorted = [...paths].sort((left, right) => left.length - right.length);
   const retained: string[][] = [];
@@ -389,10 +430,11 @@ const applyPendingVersion = (
         )
       ) {
         if (hasValueAtPath(pending.value, path)) {
+          const setPath = pendingSetPathForBase(next, pending.value, path);
           next = cloneWithValueAtPath(
             next,
-            path,
-            readValueAtPath(pending.value, path),
+            setPath,
+            readValueAtPath(pending.value, setPath),
           ) as EntityDocument;
           continue;
         }
