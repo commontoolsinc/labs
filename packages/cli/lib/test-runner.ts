@@ -62,6 +62,11 @@ import {
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
 import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import {
   type CDFPoint,
   getLogger,
   getLoggerCountsBreakdown,
@@ -859,67 +864,6 @@ function printActionStatsTable(runtime: Runtime): void {
 }
 
 /**
- * One declarative fetch mock for `fetchData`. A test opts in by exporting a
- * module-scope `fetchMocks: FetchMockEntry[]`. The first entry whose
- * `urlIncludes` is a substring of a request URL wins; `base64Body` takes
- * precedence over `body` (for binary payloads like images). LLM calls
- * (`generateText`/`generateObject`) mock separately via `@commonfabric/llm`.
- */
-export interface FetchMockEntry {
-  urlIncludes: string;
-  status?: number;
-  contentType?: string;
-  body?: string;
-  base64Body?: string;
-}
-
-/** Read & validate a test's `fetchMocks` export from the compiled module namespace. */
-function readFetchMocks(main: unknown): FetchMockEntry[] | undefined {
-  const raw = (main as Record<string, unknown> | null | undefined)?.fetchMocks;
-  if (!Array.isArray(raw)) return undefined;
-  const entries = raw.filter((i): i is FetchMockEntry =>
-    !!i && typeof i === "object" &&
-    typeof (i as { urlIncludes?: unknown }).urlIncludes === "string"
-  );
-  return entries.length > 0 ? entries : undefined;
-}
-
-/** Resolve a request input to its URL string. */
-function fetchInputUrl(input: unknown): string {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.href;
-  if (input instanceof Request) return input.url;
-  const url = (input as { url?: unknown } | null | undefined)?.url;
-  return typeof url === "string" ? url : "";
-}
-
-/** First mock entry matching the request URL, or undefined. */
-function matchFetchMock(
-  entries: FetchMockEntry[] | undefined,
-  input: unknown,
-): FetchMockEntry | undefined {
-  if (!entries) return undefined;
-  const url = fetchInputUrl(input);
-  return entries.find((e) => url.includes(e.urlIncludes));
-}
-
-/** Build a Response from a mock entry. */
-function makeMockResponse(entry: FetchMockEntry): Response {
-  const init: ResponseInit = {
-    status: entry.status ?? 200,
-    headers: { "content-type": entry.contentType ?? "application/json" },
-  };
-  if (typeof entry.base64Body === "string") {
-    const bytes = Uint8Array.from(
-      atob(entry.base64Body),
-      (c) => c.charCodeAt(0),
-    );
-    return new Response(bytes, init);
-  }
-  return new Response(entry.body ?? "", init);
-}
-
-/**
  * Run a single test pattern file.
  */
 export async function runTestPattern(
@@ -982,12 +926,7 @@ export async function runTestPattern(
   // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
   const realFetch = globalThis.fetch.bind(globalThis);
   let fetchMockEntries: FetchMockEntry[] | undefined;
-  const mockFetch: typeof globalThis.fetch = (input, init) => {
-    const entry = matchFetchMock(fetchMockEntries, input);
-    return entry
-      ? Promise.resolve(makeMockResponse(entry))
-      : realFetch(input as RequestInfo | URL, init);
-  };
+  const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
 
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
