@@ -259,23 +259,31 @@ const optionIdForTitle = (page: Page, title: string): Promise<string> =>
 const waitForOptionIdForTitle = async (
   page: Page,
   title: string,
+  pageLabel = "page",
 ): Promise<string> => {
   let optionId: string | undefined;
   let lastError: unknown;
-  await waitFor(
-    async () => {
-      try {
-        optionId = await optionIdForTitle(page, title);
-        return true;
-      } catch (error) {
-        lastError = error;
-        return false;
-      }
-    },
-    { timeout: OPTION_CARD_READY_TIMEOUT, delay: 250 },
-  );
+  try {
+    await waitFor(
+      async () => {
+        try {
+          optionId = await optionIdForTitle(page, title);
+          return true;
+        } catch (error) {
+          lastError = error;
+          return false;
+        }
+      },
+      { timeout: OPTION_CARD_READY_TIMEOUT, delay: 250 },
+    );
+  } catch (error) {
+    throw new Error(
+      `Option card id not ready on ${pageLabel} for title: ${title}`,
+      { cause: lastError ?? error },
+    );
+  }
   if (!optionId) {
-    throw new Error(`Option card id not ready for title: ${title}`, {
+    throw new Error(`Option card id not ready on ${pageLabel}: ${title}`, {
       cause: lastError,
     });
   }
@@ -451,20 +459,41 @@ describe(
           },
         );
 
+        await timer.run(
+          "joined state synced on all profiles",
+          () =>
+            Promise.all(
+              voterPages.map((page) =>
+                waitForRuntimeSynced(page, { timeout: PROPAGATION_TIMEOUT })
+              ),
+            ),
+        );
+
         for (const title of OPTIONS) {
           await fillCfInput(voterPages[0], "#lp-add-option-input", title);
           await clickCfButton(voterPages[0], "#lp-add-option-button");
         }
+        await timer.run(
+          "host option writes synced",
+          () =>
+            waitForRuntimeSynced(voterPages[0], {
+              timeout: OPTION_CARD_READY_TIMEOUT,
+            }),
+        );
         const optionIdsByPage = await timer.run(
           "all option cards ready on all profiles",
           () =>
             Promise.all(
-              voterPages.map(async (page) => {
+              voterPages.map(async (page, pageIndex) => {
                 const pageOptionIds = new Map<string, string>();
                 for (const title of OPTIONS) {
                   pageOptionIds.set(
                     title,
-                    await waitForOptionIdForTitle(page, title),
+                    await waitForOptionIdForTitle(
+                      page,
+                      title,
+                      userNames[pageIndex],
+                    ),
                   );
                 }
                 return pageOptionIds;
