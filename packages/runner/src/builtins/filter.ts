@@ -40,6 +40,8 @@ import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
 import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import { resolveLink } from "../link-resolution.ts";
+import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
@@ -165,8 +167,34 @@ export function filter(
 
   return (tx: IExtendedStorageTransaction) => {
     const elementAwaitSync = resumeBatchAwaitSync;
-    const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
-      .withTx(tx).get();
+    // Identity-only list materialization (mirrors map.ts:163-188): read `op`
+    // through the schema, but build element cells from the raw slot links
+    // WITHOUT dereferencing element content. The previous
+    // `asSchema(FILTER_INPUT_SCHEMA).get()` walked the array as asCell items,
+    // and arrays "dereference one more link" (traverse.ts) — an ordinary content
+    // read of every element doc, joining each element's whole-doc label into the
+    // coordinator's per-tx J and smearing MEMBER content onto the result
+    // container's STRUCTURE label even when membership does not depend on element
+    // content (spec §8.5.6.1, SC-8). Membership taint now rides the
+    // predicate-result reads below + the structure re-stamp (see
+    // recordCfcStructureContainer). resolveLink's probe reads are flow-excluded.
+    const op = inputsCell.asSchema(FILTER_INPUT_SCHEMA).withTx(tx).key("op")
+      .get();
+    const sourceListCell = inputsCell.key("list");
+    const listCell = sourceListCell.withTx(tx).resolveAsCell();
+    const rawList = listCell.withTx(tx).getRaw() as unknown;
+    const listBase = listCell.getAsNormalizedFullLink();
+    const list: Cell<any>[] | undefined = rawList === undefined
+      ? undefined
+      : !Array.isArray(rawList)
+      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
+      : rawList.map((slot, i) => {
+        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
+          ? parseLink(slot, listBase)
+          : { ...listBase, path: [...listBase.path, String(i)] };
+        const resolved = resolveLink(runtime, tx, slotLink, "value");
+        return runtime.getCellFromLink(resolved, undefined, tx);
+      });
 
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
@@ -208,6 +236,15 @@ export function filter(
     // every element's taint into the coordinator's per-tx join.
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
+    // (S16) Declare the result container so prepare re-derives its `structure`
+    // label (membership/order, §8.5.6.1) from this tx's J — the selection
+    // criteria the coordinator read (predicate results) — EVERY reconcile,
+    // decoupled from value writes. The membership taint settles on a later pass
+    // than the container's root value write, and incremental changes are
+    // slot/no-op writes that never re-stamp the root, so the taint would
+    // otherwise never land (the dual of the input-read over-taint this fix
+    // removes). Idempotent per reconcile; map deliberately does NOT declare.
+    tx.recordCfcStructureContainer(result.getAsNormalizedFullLink());
     // Container reads/writes run under the link-resolution-probe scope (S16):
     // the presence probe and set() diffing materialize prior slots for identity
     // comparison only — per-slot labels ride the link-write machinery, not these
