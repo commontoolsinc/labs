@@ -38,6 +38,13 @@ const envSchema = z.object({
   // Toolshed configuration
   API_URL: z.string().default("http://localhost:8000"),
 
+  // OpenTelemetry. When OTEL_ENABLED=true, spans are exported to the local OTel
+  // Collector at OTEL_EXPORTER_OTLP_ENDPOINT, which forwards them to SigNoz.
+  ENV: z.string().default("development"),
+  OTEL_ENABLED: z.coerce.boolean().default(false),
+  OTEL_SERVICE_NAME: z.string().default("bg-piece-service"),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
+
   // Experimental feature flags. See `ExperimentalOptions` in `runner`.
   // Note: We intentionally avoid `z.coerce.boolean()` here. Zod's coerce uses
   // `Boolean()`, which treats any non-empty string as truthy -- so setting an

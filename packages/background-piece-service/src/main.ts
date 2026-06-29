@@ -4,6 +4,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 import { env, type EnvVars } from "./env.ts";
+import { getTracer, initOpenTelemetry } from "./otel.ts";
 import type { Identity } from "@commonfabric/identity";
 
 // 10 minute timeout
@@ -76,6 +77,10 @@ export async function startBackgroundPieceService(
     log: console.log,
   },
 ): Promise<ServiceLike> {
+  // Set up tracing before doing any work so spans (incl. runner-library spans)
+  // are exported to the local OTel collector -> SigNoz. No-op unless OTEL_ENABLED.
+  initOpenTelemetry();
+
   const workerTimeoutMs = parseWorkerTimeout(args);
   const identity = await dependencies.getIdentity(
     dependencies.env.IDENTITY,
@@ -98,7 +103,16 @@ export async function startBackgroundPieceService(
     shutdown(service, dependencies.exit),
   );
 
-  await service.initialize();
+  await getTracer().startActiveSpan(
+    "bg-piece-service.startup",
+    async (span) => {
+      try {
+        await service.initialize();
+      } finally {
+        span.end();
+      }
+    },
+  );
   dependencies.log("Background Piece Service started successfully");
   dependencies.log("Press Ctrl+C to stop");
   return service;
