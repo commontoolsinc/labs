@@ -1,4 +1,4 @@
-import { Celestial } from "../packages/vendor-astral/bindings/celestial.ts";
+import { Celestial } from "../../../../packages/vendor-astral/bindings/celestial.ts";
 import { dirname } from "@std/path";
 import {
   markProfilerStarted,
