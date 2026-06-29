@@ -132,8 +132,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3, 4, 5]
+        total: [5]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
