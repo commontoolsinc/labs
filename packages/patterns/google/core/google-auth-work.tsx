@@ -16,6 +16,7 @@ import {
   pattern,
   TILE_UI,
   UI,
+  type VNode,
   type Writable,
 } from "commonfabric";
 import GoogleAuth, {
@@ -43,6 +44,7 @@ interface Input {
 
 /** Work Google account. #googleAuth #googleAuthWork */
 export interface Output {
+  [UI]: VNode;
   auth: Writable<Auth>;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */

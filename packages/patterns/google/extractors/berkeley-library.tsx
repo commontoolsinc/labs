@@ -28,6 +28,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   TILE_UI,
   toIndentedDebugString,
@@ -126,89 +127,89 @@ interface TrackedItem {
 // CONSTANTS
 // =============================================================================
 
-const LIBRARY_SENDER = "notices@library.berkeleypubliclibrary.org";
-
 // Gmail query - searches for library sender in from or body (to catch forwarded emails)
-const LIBRARY_GMAIL_QUERY = `from:${LIBRARY_SENDER} OR ${LIBRARY_SENDER}`;
+const LIBRARY_GMAIL_QUERY =
+  "from:notices@library.berkeleypubliclibrary.org OR notices@library.berkeleypubliclibrary.org";
 
-// Schema for LLM email analysis
-const EMAIL_ANALYSIS_SCHEMA = {
-  type: "object",
-  properties: {
-    emailType: {
-      type: "string",
-      enum: [
-        "due_reminder",
-        "hold_ready",
-        "checkout_confirmation",
-        "renewal_confirmation",
-        "overdue_notice",
-        "fine_notice",
-        "other",
-      ],
-      description:
-        "Type of library email: due_reminder for items coming due, hold_ready for available holds, checkout_confirmation for new checkouts, renewal_confirmation for renewals, overdue_notice for past-due items, fine_notice for fines",
-    },
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          title: {
-            type: "string",
-            description: "Title of the book or item",
-          },
-          author: {
-            type: "string",
-            description: "Author of the item (if available)",
-          },
-          dueDate: {
-            type: "string",
-            description: "Due date in ISO format YYYY-MM-DD (if available)",
-          },
-          status: {
-            type: "string",
-            enum: [
-              "checked_out",
-              "hold_ready",
-              "overdue",
-              "renewed",
-              "returned",
-            ],
-            description: "Current status of the item",
-          },
-          itemType: {
-            type: "string",
-            enum: ["book", "audiobook", "dvd", "magazine", "ebook", "other"],
-            description: "Type of library item",
-          },
-          renewalsRemaining: {
-            type: "number",
-            description: "Number of renewals remaining (if mentioned)",
-          },
-          fineAmount: {
-            type: "number",
-            description: "Fine amount in dollars (if applicable)",
-          },
-        },
-        required: ["title", "status"],
+function emailAnalysisSchema() {
+  return {
+    type: "object",
+    properties: {
+      emailType: {
+        type: "string",
+        enum: [
+          "due_reminder",
+          "hold_ready",
+          "checkout_confirmation",
+          "renewal_confirmation",
+          "overdue_notice",
+          "fine_notice",
+          "other",
+        ],
+        description:
+          "Type of library email: due_reminder for items coming due, hold_ready for available holds, checkout_confirmation for new checkouts, renewal_confirmation for renewals, overdue_notice for past-due items, fine_notice for fines",
       },
-      description: "List of library items mentioned in the email",
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Title of the book or item",
+            },
+            author: {
+              type: "string",
+              description: "Author of the item (if available)",
+            },
+            dueDate: {
+              type: "string",
+              description: "Due date in ISO format YYYY-MM-DD (if available)",
+            },
+            status: {
+              type: "string",
+              enum: [
+                "checked_out",
+                "hold_ready",
+                "overdue",
+                "renewed",
+                "returned",
+              ],
+              description: "Current status of the item",
+            },
+            itemType: {
+              type: "string",
+              enum: ["book", "audiobook", "dvd", "magazine", "ebook", "other"],
+              description: "Type of library item",
+            },
+            renewalsRemaining: {
+              type: "number",
+              description: "Number of renewals remaining (if mentioned)",
+            },
+            fineAmount: {
+              type: "number",
+              description: "Fine amount in dollars (if applicable)",
+            },
+          },
+          required: ["title", "status"],
+        },
+        description: "List of library items mentioned in the email",
+      },
+      accountHolder: {
+        type: "string",
+        description:
+          "Name of the library account holder if mentioned (useful for forwarded emails)",
+      },
+      summary: {
+        type: "string",
+        description: "Brief one-sentence summary of the email content",
+      },
     },
-    accountHolder: {
-      type: "string",
-      description:
-        "Name of the library account holder if mentioned (useful for forwarded emails)",
-    },
-    summary: {
-      type: "string",
-      description: "Brief one-sentence summary of the email content",
-    },
-  },
-  required: ["emailType", "items", "summary"],
-} as const satisfies JSONSchema;
+    required: ["emailType", "items", "summary"],
+  } as const satisfies JSONSchema;
+}
 
-type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
+type EmailAnalysisResult = Schema<ReturnType<typeof emailAnalysisSchema>>;
 
 const EXTRACTION_PROMPT_TEMPLATE =
   `Analyze this Berkeley Public Library email and extract information about library items (books, DVDs, etc.).
@@ -268,7 +269,7 @@ function calculateDaysUntilDue(dueDate: string | undefined): number {
   // Validate the parsed date is valid
   if (isNaN(due.getTime())) return 999;
 
-  const today = new Date();
+  const today = new Date(safeDateNow());
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
   return Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -345,6 +346,149 @@ function formatDate(dateStr: string | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+type LibraryDebugAnalysisItem = {
+  email: Email;
+  emailId: string;
+  emailDate: string;
+  analysis: {
+    pending?: boolean;
+    result?: EmailAnalysisResult;
+    error?: string | null;
+  };
+  pending: boolean;
+  error?: string | null;
+};
+
+function renderLibraryEmailDebugRow(email: Email) {
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        backgroundColor: "white",
+        borderRadius: "6px",
+        border: "1px solid #e5e7eb",
+        fontSize: "12px",
+      }}
+    >
+      <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+        {email.subject}
+      </div>
+      <div style={{ color: "#6b7280" }}>
+        Date: {formatDate(email.date)} ({email.date})
+      </div>
+      <div style={{ color: "#9ca3af", fontSize: "11px" }}>ID: {email.id}</div>
+    </div>
+  );
+}
+
+function renderLibraryAnalysisDebugRow(
+  analysisItem: LibraryDebugAnalysisItem,
+) {
+  const debugResult = analysisItem.analysis.result;
+
+  return (
+    <div
+      style={{
+        padding: "12px",
+        backgroundColor: "white",
+        borderRadius: "6px",
+        border: analysisItem.pending
+          ? "1px solid #fbbf24"
+          : analysisItem.error
+          ? "1px solid #ef4444"
+          : "1px solid #10b981",
+        fontSize: "12px",
+      }}
+    >
+      <div
+        style={{
+          fontWeight: "600",
+          marginBottom: "4px",
+          color: "#111827",
+        }}
+      >
+        {analysisItem.email.subject}
+      </div>
+
+      <div
+        style={{
+          display: analysisItem.pending ? "flex" : "none",
+          alignItems: "center",
+          gap: "4px",
+          color: "#f59e0b",
+          marginTop: "4px",
+        }}
+      >
+        <cf-loader size="sm" />
+        <span>Analyzing...</span>
+      </div>
+
+      <div
+        style={{
+          display: analysisItem.error ? "block" : "none",
+          color: "#dc2626",
+          marginTop: "4px",
+        }}
+      >
+        Error: {analysisItem.error ? String(analysisItem.error) : ""}
+      </div>
+
+      <div
+        style={{
+          display: !analysisItem.pending && !analysisItem.error && debugResult
+            ? "block"
+            : "none",
+        }}
+      >
+        <div
+          style={{
+            marginTop: "8px",
+            padding: "8px",
+            backgroundColor: "#f3f4f6",
+            borderRadius: "4px",
+          }}
+        >
+          <div style={{ color: "#374151" }}>
+            <strong>Email Type:</strong> {debugResult?.emailType || "N/A"}
+          </div>
+          <div style={{ color: "#374151", marginTop: "4px" }}>
+            <strong>Summary:</strong> {debugResult?.summary || "N/A"}
+          </div>
+          <div
+            style={{
+              color: "#374151",
+              marginTop: "4px",
+              display: debugResult?.accountHolder ? "block" : "none",
+            }}
+          >
+            <strong>Account Holder:</strong> {debugResult?.accountHolder || ""}
+          </div>
+          <div style={{ marginTop: "8px" }}>
+            <strong>Extracted Items:</strong> ({debugResult?.items?.length || 0}
+            )
+          </div>
+          <pre
+            style={{
+              marginTop: "8px",
+              padding: "8px",
+              backgroundColor: "#ffffff",
+              borderRadius: "4px",
+              fontSize: "10px",
+              overflow: "auto",
+              maxHeight: "200px",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            {toIndentedDebugString(
+              debugResult?.items || [],
+            )}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // =============================================================================
@@ -576,7 +720,7 @@ export default pattern<PatternInput, PatternOutput>(
       gmailQuery: LIBRARY_GMAIL_QUERY,
       extraction: {
         promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
-        schema: EMAIL_ANALYSIS_SCHEMA,
+        schema: emailAnalysisSchema(),
       },
       title: "Library Emails",
       resolveInlineImages: false,
@@ -591,6 +735,14 @@ export default pattern<PatternInput, PatternOutput>(
       pendingCount,
       completedCount,
     } = extractor;
+    const emailDebugRows = computed(() =>
+      (extractor.emails || []).map(renderLibraryEmailDebugRow)
+    );
+    const analysisDebugRows = computed(() =>
+      ((rawAnalyses || []) as LibraryDebugAnalysisItem[]).map(
+        renderLibraryAnalysisDebugRow,
+      )
+    );
 
     // ==========================================================================
     // DEDUPLICATION AND TRACKING
@@ -1622,30 +1774,7 @@ export default pattern<PatternInput, PatternOutput>(
                       Fetched Library Emails:
                     </h4>
                     <cf-vstack gap="2">
-                      {extractor.emails.map((email: Email) => (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            backgroundColor: "white",
-                            borderRadius: "6px",
-                            border: "1px solid #e5e7eb",
-                            fontSize: "12px",
-                          }}
-                        >
-                          <div
-                            style={{ fontWeight: "600", marginBottom: "4px" }}
-                          >
-                            {email.subject}
-                          </div>
-                          <div style={{ color: "#6b7280" }}>
-                            Date: {computed(() => formatDate(email.date))} (
-                            {email.date})
-                          </div>
-                          <div style={{ color: "#9ca3af", fontSize: "11px" }}>
-                            ID: {email.id}
-                          </div>
-                        </div>
-                      ))}
+                      {emailDebugRows}
                     </cf-vstack>
 
                     <h4
@@ -1660,143 +1789,7 @@ export default pattern<PatternInput, PatternOutput>(
                       LLM Analysis Results:
                     </h4>
                     <cf-vstack gap="2">
-                      {rawAnalyses.map((analysisItem) => {
-                        const debugResult = analysisItem.analysis?.result as
-                          | EmailAnalysisResult
-                          | undefined;
-                        return (
-                          <div
-                            style={{
-                              padding: "12px",
-                              backgroundColor: "white",
-                              borderRadius: "6px",
-                              border: computed(() =>
-                                analysisItem.pending
-                                  ? "1px solid #fbbf24"
-                                  : analysisItem.error
-                                  ? "1px solid #ef4444"
-                                  : "1px solid #10b981"
-                              ),
-                              fontSize: "12px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontWeight: "600",
-                                marginBottom: "4px",
-                                color: "#111827",
-                              }}
-                            >
-                              {analysisItem.email.subject}
-                            </div>
-
-                            <div
-                              style={{
-                                display: analysisItem.pending ? "flex" : "none",
-                                alignItems: "center",
-                                gap: "4px",
-                                color: "#f59e0b",
-                                marginTop: "4px",
-                              }}
-                            >
-                              <cf-loader size="sm" />
-                              <span>Analyzing...</span>
-                            </div>
-
-                            <div
-                              style={{
-                                display: analysisItem.error ? "block" : "none",
-                                color: "#dc2626",
-                                marginTop: "4px",
-                              }}
-                            >
-                              Error: {computed(() =>
-                                analysisItem.error
-                                  ? String(analysisItem.error)
-                                  : ""
-                              )}
-                            </div>
-
-                            <div
-                              style={{
-                                display: computed(() =>
-                                  !analysisItem.pending &&
-                                    !analysisItem.error &&
-                                    debugResult
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <div
-                                style={{
-                                  marginTop: "8px",
-                                  padding: "8px",
-                                  backgroundColor: "#f3f4f6",
-                                  borderRadius: "4px",
-                                }}
-                              >
-                                <div style={{ color: "#374151" }}>
-                                  <strong>Email Type:</strong> {computed(() =>
-                                    debugResult?.emailType ||
-                                    "N/A"
-                                  )}
-                                </div>
-                                <div
-                                  style={{ color: "#374151", marginTop: "4px" }}
-                                >
-                                  <strong>Summary:</strong> {computed(() =>
-                                    debugResult?.summary ||
-                                    "N/A"
-                                  )}
-                                </div>
-                                <div
-                                  style={{
-                                    color: "#374151",
-                                    marginTop: "4px",
-                                    display: computed(() =>
-                                      debugResult?.accountHolder
-                                        ? "block"
-                                        : "none"
-                                    ),
-                                  }}
-                                >
-                                  <strong>Account Holder:</strong>{" "}
-                                  {computed(() =>
-                                    debugResult?.accountHolder || ""
-                                  )}
-                                </div>
-                                <div style={{ marginTop: "8px" }}>
-                                  <strong>Extracted Items:</strong> (
-                                  {computed(() =>
-                                    debugResult?.items
-                                      ?.length || 0
-                                  )}
-                                  )
-                                </div>
-                                <pre
-                                  style={{
-                                    marginTop: "8px",
-                                    padding: "8px",
-                                    backgroundColor: "#ffffff",
-                                    borderRadius: "4px",
-                                    fontSize: "10px",
-                                    overflow: "auto",
-                                    maxHeight: "200px",
-                                    border: "1px solid #e5e7eb",
-                                  }}
-                                >
-                                {computed(() =>
-                                  toIndentedDebugString(
-                                    debugResult?.items || [],
-                                  )
-                                )}
-                                </pre>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {analysisDebugRows}
                     </cf-vstack>
                   </div>
                 </details>

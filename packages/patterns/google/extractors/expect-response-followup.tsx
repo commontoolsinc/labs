@@ -25,6 +25,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -177,7 +178,7 @@ function calculateDays(
   context: ThreadContext,
 ): number {
   const fromDate = new Date(fromDateStr);
-  const toDate = new Date();
+  const toDate = new Date(safeDateNow());
 
   if (context === "business") {
     return calculateBusinessDays(fromDate, toDate);
@@ -213,7 +214,7 @@ function formatDate(dateStr: string): string {
     return date.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
-      year: date.getFullYear() !== new Date().getFullYear()
+      year: date.getFullYear() !== new Date(safeDateNow()).getFullYear()
         ? "numeric"
         : undefined,
     });
@@ -455,7 +456,7 @@ const fetchLabels = handler<
 >(async (_event, { auth, expectResponseLabelId, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG });
+    const client = GmailSendClient(auth, { debugMode: DEBUG });
     const labels = await client.listLabels();
 
     // Find expect-response label (case-insensitive)
@@ -612,10 +613,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // GMAIL EXTRACTOR
   // ==========================================================================
 
+  const extractorAuth = auth === null ? undefined : auth;
   const extractor = GmailExtractor({
     gmailQuery: "label:expect-response",
     limit: 100,
-    overrideAuth: auth ?? undefined,
+    overrideAuth: extractorAuth,
   });
 
   const allEmails = extractor.emails;

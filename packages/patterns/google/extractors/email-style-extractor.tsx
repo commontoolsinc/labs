@@ -25,6 +25,7 @@ import {
   pattern,
   safeDateNow,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -144,6 +145,7 @@ const triggerReanalyze = handler<
 
 /** Personal email writing style extracted from sent emails. #emailStyle */
 export interface PatternOutput {
+  [UI]: VNode;
   style: EmailStyle | null;
   stylePrompt: string;
   emailsAnalyzed: number;
@@ -192,10 +194,11 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     // GMAIL EXTRACTOR (raw mode)
     // ========================================================================
 
+    const extractorAuth = auth === null ? undefined : auth;
     const extractor = GmailExtractor({
       gmailQuery,
       limit: 30,
-      overrideAuth: auth ?? undefined,
+      overrideAuth: extractorAuth,
     });
 
     const allEmails = extractor.emails;
@@ -246,7 +249,7 @@ Extract the writing style patterns from these emails.`;
 
       if (!isPending && result && result !== currentSavedStyle) {
         savedStyle.set(result as EmailStyle);
-        const now = new Date().toISOString();
+        const now = new Date(safeDateNow()).toISOString();
         lastAnalyzedAt.set(now);
         const emails = allEmails || [];
         emailsAnalyzedCount.set(Number(emails.length) || 0);

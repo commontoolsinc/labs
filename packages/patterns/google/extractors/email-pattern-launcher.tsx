@@ -45,19 +45,6 @@ import CalendarChangeDetectorPattern from "./calendar-change-detector.tsx";
 import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 
-const PATTERNS: any = {
-  "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
-  "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
-  "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
-  "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
-  "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
-  "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
-  "google/extractors/calendar-change-detector.tsx":
-    CalendarChangeDetectorPattern,
-  "google/extractors/email-notes.tsx": EmailNotesPattern,
-  "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
-};
-
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -130,6 +117,18 @@ export interface PatternOutput {
   emailCount: number;
   matchCount: number;
   [TILE_UI]: unknown;
+}
+
+type LaunchablePattern = (
+  input: { overrideAuth?: GoogleAuthCell },
+) => unknown;
+
+function hasPatternLauncher(value: unknown): value is {
+  for: (patternUri: string) => unknown;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { for?: unknown };
+  return typeof candidate.for === "function";
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -220,6 +219,19 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // LAUNCH MATCHED PATTERNS
   // ==========================================================================
 
+  const patterns: Record<string, LaunchablePattern> = {
+    "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
+    "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
+    "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
+    "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
+    "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
+    "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
+    "google/extractors/calendar-change-detector.tsx":
+      CalendarChangeDetectorPattern,
+    "google/extractors/email-notes.tsx": EmailNotesPattern,
+    "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
+  };
+
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
     /*
@@ -247,9 +259,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const compiled = {
       result: computed(() => {
         const patternUri = matchInfo.patternUri;
-        const pattern = PATTERNS[patternUri];
-        if (!pattern) return null;
-        return pattern({} as any).for(patternUri);
+        const childPattern = patterns[patternUri];
+        if (!childPattern) return null;
+        const child = childPattern({ overrideAuth });
+        return hasPatternLauncher(child) ? child.for(patternUri) : null;
       }),
     };
 

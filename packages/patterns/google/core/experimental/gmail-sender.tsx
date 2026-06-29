@@ -26,6 +26,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -116,7 +117,7 @@ const confirmAndSend = handler<
   result.set(null);
 
   try {
-    const client = new GmailSendClient(auth, { debugMode: true });
+    const client = GmailSendClient(auth, { debugMode: true });
     const email = draft.get();
 
     const response = await client.sendEmail({
@@ -133,7 +134,7 @@ const confirmAndSend = handler<
       success: true,
       messageId: response.id,
       threadId: response.threadId,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(safeDateNow()).toISOString(),
     });
 
     showConfirmation.set(false);
@@ -152,7 +153,7 @@ const confirmAndSend = handler<
     result.set({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(safeDateNow()).toISOString(),
     });
   } finally {
     sending.set(false);
@@ -179,7 +180,9 @@ export default pattern<Input, Output>(({ draft }) => {
   } = createGoogleAuth({
     requiredScopes: ["gmailSend"],
   });
-  const auth = availability.state === "ready" ? availability.auth : null;
+  const auth = hasAuth && availability.state === "ready"
+    ? availability.auth
+    : null;
 
   // UI state
   const showConfirmation = new Writable(false);

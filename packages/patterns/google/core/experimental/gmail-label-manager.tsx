@@ -29,7 +29,9 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -77,6 +79,7 @@ interface Input {
 
 /** Gmail label manager with confirmation. #gmailLabelManager */
 export interface Output {
+  [UI]: VNode;
   messageIds: string[];
   labelsToAdd: string[];
   labelsToRemove: string[];
@@ -99,7 +102,7 @@ const fetchLabels = handler<
 >(async (_, { auth, availableLabels, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: true });
+    const client = GmailSendClient(auth, { debugMode: true });
     const labels = await client.listLabels();
     // Sort: user labels first (alphabetically), then system labels
     labels.sort((a, b) => {
@@ -201,7 +204,7 @@ const confirmOperation = handler<
     result.set(null);
 
     try {
-      const client = new GmailSendClient(auth, { debugMode: true });
+      const client = GmailSendClient(auth, { debugMode: true });
 
       const params: ModifyLabelsParams = {
         addLabelIds: op.addLabelIds.length > 0 ? op.addLabelIds : undefined,
@@ -221,7 +224,7 @@ const confirmOperation = handler<
       result.set({
         success: true,
         messageCount: op.messageIds.length,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(safeDateNow()).toISOString(),
       });
 
       pendingOp.set(null);
@@ -234,7 +237,7 @@ const confirmOperation = handler<
         success: false,
         messageCount: op.messageIds.length,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(safeDateNow()).toISOString(),
       });
     } finally {
       processing.set(false);
@@ -254,7 +257,7 @@ const reportApplyAuthNotReady = handler<
     success: false,
     messageCount: op?.messageIds.length ?? 0,
     error: "Connect Google before applying label changes.",
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(safeDateNow()).toISOString(),
   });
 });
 
@@ -275,7 +278,9 @@ export default pattern<Input, Output>(
     const { availability, fullUI, isReady } = createGoogleAuth({
       requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
     });
-    const auth = availability.state === "ready" ? availability.auth : null;
+    const auth = isReady && availability.state === "ready"
+      ? availability.auth
+      : null;
     const hasAuth = isReady;
 
     // UI state

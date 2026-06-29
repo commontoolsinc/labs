@@ -516,24 +516,118 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_MAP).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:read"]}
+                  disabled={checkboxesDisabled}
                 >
-                  <cf-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </cf-checkbox>
-                </label>
-              ))}
+                  {SCOPE_MAP["data.records:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.records:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["webhook:manage"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["webhook:manage"]}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 

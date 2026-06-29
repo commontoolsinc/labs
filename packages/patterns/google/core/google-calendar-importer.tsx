@@ -8,6 +8,7 @@ import {
   patternTool,
   str,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -517,6 +518,7 @@ interface GoogleCalendarImporterInput {
 
 /** Google Calendar event importer. #calendarEvents */
 export interface Output {
+  [UI]: VNode;
   events: CalendarEvent[];
   calendars: Calendar[];
   /** Number of events imported */

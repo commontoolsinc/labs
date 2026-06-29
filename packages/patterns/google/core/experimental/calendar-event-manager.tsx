@@ -27,7 +27,9 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -114,6 +116,7 @@ interface Input {
 
 /** Google Calendar event manager for creating/editing/deleting events. #calendarManager */
 export interface Output {
+  [UI]: VNode;
   draft: EventDraft;
   existingEvent: ExistingEvent;
   result: OperationResult;
@@ -319,7 +322,7 @@ const confirmOperation = handler<
     result.set(null);
 
     try {
-      const client = new CalendarWriteClient(auth, { debugMode: true });
+      const client = CalendarWriteClient(auth, { debugMode: true });
       let eventId: string | undefined;
 
       switch (op.operation) {
@@ -377,7 +380,7 @@ const confirmOperation = handler<
         success: true,
         operation: op.operation,
         eventId,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(safeDateNow()).toISOString(),
       });
 
       pendingOp.set(null);
@@ -404,7 +407,7 @@ const confirmOperation = handler<
         success: false,
         operation: op.operation,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(safeDateNow()).toISOString(),
       });
       // Close confirmation modal on error
       pendingOp.set(null);
@@ -426,11 +429,13 @@ const dismissResult = handler<unknown, { result: Writable<OperationResult> }>(
 
 export default pattern<Input, Output>(({ draft, existingEvent }) => {
   // Auth via createGoogleAuth utility - handles discovery, validation, and UI
-  const { availability, fullUI } = createGoogleAuth({
+  const { availability, fullUI, isReady } = createGoogleAuth({
     requiredScopes: ["calendar", "calendarWrite"] as ScopeKey[],
   });
-  const auth = availability.state === "ready" ? availability.auth : null;
-  const hasAuth = availability.state === "ready";
+  const auth = isReady && availability.state === "ready"
+    ? availability.auth
+    : null;
+  const hasAuth = isReady;
 
   // UI state
   const pendingOp = new Writable<PendingOperation>(null);

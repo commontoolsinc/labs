@@ -22,12 +22,15 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  type PatternFactory,
+  safeDateNow,
   TILE_UI,
   toIndentedDebugString,
   UI,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
+import type { Email } from "../core/gmail-importer.tsx";
 import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
@@ -294,6 +297,42 @@ const EMAIL_ANALYSIS_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
+type ExtractorAnalysisItem = {
+  email: Email;
+  emailId: string;
+  emailDate: string;
+  analysis: {
+    pending?: boolean;
+    result?: EmailAnalysisResult;
+    error?: string | null;
+  };
+  pending: boolean;
+  error?: string | null;
+};
+type UnitedAnalysisItem = ExtractorAnalysisItem & {
+  emailSubject?: string;
+  result?: EmailAnalysisResult;
+};
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+const addUnitedResult = pattern<ExtractorAnalysisItem, UnitedAnalysisItem>(
+  (item) => ({
+    email: item.email,
+    emailId: item.emailId,
+    emailDate: item.emailDate,
+    analysis: item.analysis,
+    pending: item.pending,
+    error: item.error,
+    emailSubject: item.email.subject,
+    result: item.analysis.result as EmailAnalysisResult | undefined,
+  }),
+);
 
 // Prompt template for LLM extraction
 const EXTRACTION_PROMPT_TEMPLATE =
@@ -500,13 +539,12 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
   const { pendingCount, completedCount, rawAnalyses } = extractor;
 
   // Add emailSubject to each analysis item for debug view
-  const emailAnalyses = computed(() =>
-    rawAnalyses?.map((item) => ({
-      ...item,
-      emailSubject: item.email?.subject,
-      // Alias analysis.result as result for backward compatibility in flight aggregation
-      result: item.analysis?.result as EmailAnalysisResult | undefined,
-    })) || []
+  // Alias analysis.result as result for backward compatibility in flight aggregation
+  const emailAnalyses = (
+    rawAnalyses as ReactiveArray<ExtractorAnalysisItem>
+  ).mapWithPattern(
+    addUnitedResult,
+    {},
   );
 
   // ==========================================================================
@@ -517,7 +555,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     const flightMap: Record<string, TrackedFlight> = {};
 
     // Create reference dates for calculations
-    const now = new Date(); // Current time for hour-based calculations
+    const now = new Date(safeDateNow());
     const today = new Date(now);
     today.setHours(0, 0, 0, 0); // Midnight for day-based calculations
 

@@ -2,11 +2,11 @@ import {
   computed,
   Default,
   generateObject,
-  getPatternEnvironment,
   handler,
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -24,8 +24,6 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "../util/google-auth-manager.tsx";
-
-const _env = getPatternEnvironment();
 
 // Debug flag for development - disable in production
 const DEBUG_ORCHESTRATOR = false;
@@ -160,6 +158,7 @@ interface Input {
 
 /** Google Docs Comment Orchestrator. AI-powered comment responses. #googleDocsComments */
 export interface Output {
+  [UI]: VNode;
   docUrl: string;
   comments: GoogleComment[];
   openCommentCount: number;
@@ -169,138 +168,140 @@ export interface Output {
 // API Client
 // =============================================================================
 
-class GoogleDocsClient {
-  private token: string;
-  private delay = 0;
-  private delayIncrement = 1000;
+function createGoogleDocsClient(token: string) {
+  return new (class GoogleDocsClient {
+    private token: string;
+    private delay = 0;
+    private delayIncrement = 1000;
 
-  constructor(token: string) {
-    this.token = token;
-  }
-
-  private async request(
-    url: URL,
-    options?: RequestInit,
-    retries = 3,
-  ): Promise<Response> {
-    const token = this.token;
-    if (!token) throw new Error("No authorization token");
-
-    const opts = options ?? {};
-    opts.headers = new Headers(opts.headers);
-    opts.headers.set("Authorization", `Bearer ${token}`);
-
-    // Add delay if we've been rate limited
-    if (this.delay > 0) {
-      await new Promise((r) => setTimeout(r, this.delay));
+    constructor(token: string) {
+      this.token = token;
     }
 
-    const res = await fetch(url, opts);
-    const status = res.status;
+    private async request(
+      url: URL,
+      options?: RequestInit,
+      retries = 3,
+    ): Promise<Response> {
+      const token = this.token;
+      if (!token) throw new Error("No authorization token");
 
-    // Handle 401 (expired token) - tell user to refresh auth
-    if (status === 401) {
-      throw new Error(
-        "Token expired. Please re-authenticate in your Google Auth piece.",
-      );
-    }
+      const opts = options ?? {};
+      opts.headers = new Headers(opts.headers);
+      opts.headers.set("Authorization", `Bearer ${token}`);
 
-    // Handle 429 (rate limit) - exponential backoff
-    if (status === 429 && retries > 0) {
-      this.delay += this.delayIncrement;
-      if (DEBUG_ORCHESTRATOR) {
-        console.log(
-          `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
-        );
+      // Add delay if we've been rate limited
+      if (this.delay > 0) {
+        await new Promise((r) => setTimeout(r, this.delay));
       }
-      await new Promise((r) => setTimeout(r, this.delay));
-      return this.request(url, options, retries - 1);
-    }
 
-    // Reset delay on success
-    if (res.ok) {
-      this.delay = 0;
-    }
+      const res = await fetch(url, opts);
+      const status = res.status;
 
-    return res;
-  }
-
-  async listComments(fileId: string): Promise<GoogleComment[]> {
-    const url = new URL(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/comments`,
-    );
-    url.searchParams.set(
-      "fields",
-      "comments(id,author,content,htmlContent,createdTime,modifiedTime,resolved,quotedFileContent,anchor,replies)",
-    );
-    url.searchParams.set("pageSize", "100");
-
-    const res = await this.request(url);
-    if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 403) {
+      // Handle 401 (expired token) - tell user to refresh auth
+      if (status === 401) {
         throw new Error(
-          `Access denied (403). This could mean:\n` +
-            `• The document is not shared with your Google account\n` +
-            `• Your account doesn't have comment access (needs Commenter or Editor role)\n` +
-            `• The document has restricted sharing settings\n\n` +
-            `Make sure you're signed in with an account that has access to this document.`,
+          "Token expired. Please re-authenticate in your Google Auth piece.",
         );
       }
-      throw new Error(`Failed to list comments: ${res.status} - ${text}`);
+
+      // Handle 429 (rate limit) - exponential backoff
+      if (status === 429 && retries > 0) {
+        this.delay += this.delayIncrement;
+        if (DEBUG_ORCHESTRATOR) {
+          console.log(
+            `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, this.delay));
+        return this.request(url, options, retries - 1);
+      }
+
+      // Reset delay on success
+      if (res.ok) {
+        this.delay = 0;
+      }
+
+      return res;
     }
 
-    const json = await res.json();
-    return json.comments || [];
-  }
+    async listComments(fileId: string): Promise<GoogleComment[]> {
+      const url = new URL(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/comments`,
+      );
+      url.searchParams.set(
+        "fields",
+        "comments(id,author,content,htmlContent,createdTime,modifiedTime,resolved,quotedFileContent,anchor,replies)",
+      );
+      url.searchParams.set("pageSize", "100");
 
-  async createReply(
-    fileId: string,
-    commentId: string,
-    content: string,
-    resolve = false,
-  ): Promise<void> {
-    const url = new URL(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/comments/${commentId}/replies`,
-    );
-    url.searchParams.set("fields", "id,content,action");
+      const res = await this.request(url);
+      if (!res.ok) {
+        const text = await res.text();
+        if (res.status === 403) {
+          throw new Error(
+            `Access denied (403). This could mean:\n` +
+              `• The document is not shared with your Google account\n` +
+              `• Your account doesn't have comment access (needs Commenter or Editor role)\n` +
+              `• The document has restricted sharing settings\n\n` +
+              `Make sure you're signed in with an account that has access to this document.`,
+          );
+        }
+        throw new Error(`Failed to list comments: ${res.status} - ${text}`);
+      }
 
-    const body: { content: string; action?: string } = { content };
-    if (resolve) {
-      body.action = "resolve";
+      const json = await res.json();
+      return json.comments || [];
     }
 
-    const res = await this.request(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    async createReply(
+      fileId: string,
+      commentId: string,
+      content: string,
+      resolve = false,
+    ): Promise<void> {
+      const url = new URL(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/comments/${commentId}/replies`,
+      );
+      url.searchParams.set("fields", "id,content,action");
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to create reply: ${res.status} - ${text}`);
+      const body: { content: string; action?: string } = { content };
+      if (resolve) {
+        body.action = "resolve";
+      }
+
+      const res = await this.request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Failed to create reply: ${res.status} - ${text}`);
+      }
     }
-  }
 
-  async resolveComment(fileId: string, commentId: string): Promise<void> {
-    // Resolve by creating a reply with action="resolve"
-    await this.createReply(fileId, commentId, "Resolved", true);
-  }
-
-  async getDocContent(docId: string): Promise<string> {
-    const url = new URL(
-      `https://docs.googleapis.com/v1/documents/${docId}`,
-    );
-
-    const res = await this.request(url);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to get doc content: ${res.status} - ${text}`);
+    async resolveComment(fileId: string, commentId: string): Promise<void> {
+      // Resolve by creating a reply with action="resolve"
+      await this.createReply(fileId, commentId, "Resolved", true);
     }
 
-    const json = await res.json();
-    return extractDocText(json);
-  }
+    async getDocContent(docId: string): Promise<string> {
+      const url = new URL(
+        `https://docs.googleapis.com/v1/documents/${docId}`,
+      );
+
+      const res = await this.request(url);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Failed to get doc content: ${res.status} - ${text}`);
+      }
+
+      const json = await res.json();
+      return extractDocText(json);
+    }
+  })(token);
 }
 
 // Helper to extract plain text from Google Docs document JSON
@@ -433,7 +434,7 @@ const fetchComments = handler<
   lastError.set(null);
 
   try {
-    const client = new GoogleDocsClient(token);
+    const client = createGoogleDocsClient(token);
 
     // Fetch comments
     const allComments = await client.listComments(fileId);
@@ -584,11 +585,14 @@ export default pattern<Input, Output>(
       availability,
       authInfo,
       fullUI: authFullUI,
+      isReady: hasAuth,
       currentEmail: _currentEmail, // Prefixed with _ as not currently used in UI
     } = createGoogleAuth({
       requiredScopes: ["drive", "docs"] as ScopeKey[],
     });
-    const auth = availability.state === "ready" ? availability.auth : null;
+    const auth = hasAuth && availability.state === "ready"
+      ? availability.auth
+      : null;
 
     // Fetch button disabled when not authenticated or fetching
     // Prefixed with _ as not currently used - preserved for potential future UI binding

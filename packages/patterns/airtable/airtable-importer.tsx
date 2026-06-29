@@ -5,6 +5,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -36,6 +37,7 @@ interface Input {
 
 /** Import records from an Airtable base. #airtableImporter */
 export interface Output {
+  [UI]: VNode;
   records: readonly AirtableRecordData[];
   bases: readonly BaseInfo[];
   tables: readonly TableInfo[];

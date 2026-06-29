@@ -22,6 +22,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   TILE_UI,
   UI,
   Writable,
@@ -74,7 +75,7 @@ function cleanContent(content: string): string {
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date();
+    const now = new Date(safeDateNow());
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -162,7 +163,7 @@ const fetchLabels = handler<
 >(async (_event, { auth, taskCurrentLabelId, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_NOTES });
+    const client = GmailSendClient(auth, { debugMode: DEBUG_NOTES });
     const labels = await client.listLabels();
 
     // Find task-current label (case-insensitive)
@@ -229,10 +230,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
   // filter by label here and do client-side filtering for empty subjects
   // Pass the live auth cell when available so token refresh can persist.
+  const extractorAuth = auth === null ? undefined : auth;
   const extractor = GmailExtractor({
     gmailQuery: "label:task-current",
     limit: 100,
-    overrideAuth: auth ?? undefined,
+    overrideAuth: extractorAuth,
   });
 
   // Get emails from extractor

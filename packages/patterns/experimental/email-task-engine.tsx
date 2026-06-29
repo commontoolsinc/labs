@@ -25,6 +25,7 @@ import {
   NAME,
   pattern,
   schema,
+  safeDateNow,
   Stream,
   TILE_UI,
   UI,
@@ -100,7 +101,7 @@ type NotePiece = {
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date();
+    const now = new Date(safeDateNow());
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -146,7 +147,7 @@ const fetchLabels = handler<
 >(async (_event, { auth, taskCurrentLabelId, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_TASKS });
+    const client = GmailSendClient(auth, { debugMode: DEBUG_TASKS });
     const labels = await client.listLabels();
 
     // Find task-current label (case-insensitive)

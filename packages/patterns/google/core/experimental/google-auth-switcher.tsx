@@ -16,6 +16,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  type VNode,
   type Writable,
 } from "commonfabric";
 import GoogleAuth, { type GoogleAuthCell } from "../google-auth.tsx";
@@ -52,6 +53,7 @@ interface Input {
 
 /** Google account switcher for choosing personal/work accounts. #googleAuthSwitcher */
 export interface Output {
+  [UI]: VNode;
   auth: GoogleAuthCell;
 }
 
