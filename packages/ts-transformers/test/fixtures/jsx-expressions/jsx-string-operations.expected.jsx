@@ -18,41 +18,41 @@ interface State {
     message: string;
     count: number;
 }
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_2 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_3 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_4 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_5 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_6 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_7 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_7 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         firstName: string;
@@ -191,21 +191,21 @@ const __cfLift_13 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_14 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_14 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_15 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_15 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_16 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_16 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 const __cfLift_17 = __cfHelpers.lift<{
     state: {
         firstName: string;
@@ -231,11 +231,11 @@ const __cfLift_17 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_18 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_18 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 // FIXTURE: jsx-string-operations
 // Verifies: string concatenation, template literals, and string methods in JSX are wrapped in a lift-applied computation
 //   state.title + ": " + state.firstName → lift(...)({ title, firstName })

@@ -256,16 +256,16 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+const __cfLift_5 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
-const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
+const __cfLift_6 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -356,11 +356,11 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+const __cfLift_10 = __cfHelpers.exprLift("expr:>", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1);
 // FIXTURE: jsx-complex-mixed
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})

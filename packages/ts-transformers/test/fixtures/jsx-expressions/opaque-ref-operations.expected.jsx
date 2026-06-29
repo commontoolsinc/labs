@@ -25,11 +25,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_2 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 const __cfLift_3 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
 }, number>(({ count }) => count.get(), {
@@ -44,11 +44,11 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+const __cfLift_4 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 const __cfLift_5 = __cfHelpers.lift<{
     price: __cfHelpers.Cell<number>;
 }, number>(({ price }) => price.get(), {
@@ -63,11 +63,11 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+const __cfLift_6 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in a lift-applied computation with asCell schema
 //   {count}           → {count}  (bare ref, no transform)

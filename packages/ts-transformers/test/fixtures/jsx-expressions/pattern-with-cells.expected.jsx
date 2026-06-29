@@ -11,16 +11,16 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_2 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 // FIXTURE: pattern-with-cells
 // Verifies: pattern input property access is transformed to .key() and arithmetic to a lift-applied computation
 //   cell.value       → cell.key("value")

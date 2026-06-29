@@ -1003,6 +1003,13 @@ function callbackIndexesForBuilder(
       return args.length >= 3 ? [2] : [];
     case "derive":
       return args.length >= 4 ? [3] : args.length >= 2 ? [1] : [];
+    case "exprLift":
+      // Branded operator lift: `exprLift(brand, impl)` (callback at 1) or, after
+      // schema injection on the hoisted lift-applied form,
+      // `exprLift(brand, argumentSchema, resultSchema, impl)` (callback at 3).
+      // Position 0 is always the brand string — the implementation trails, the
+      // identical brand/schemas/trailing-callback shape `derive` has.
+      return args.length >= 4 ? [3] : args.length >= 2 ? [1] : [];
     default:
       return [];
   }

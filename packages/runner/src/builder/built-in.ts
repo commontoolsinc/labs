@@ -446,6 +446,17 @@ export function str(
 }
 
 /**
+ * A schema the type checker could not resolve — `{ type: "unknown" }`. Carried
+ * on a `type:"javascript"` module's `argumentSchema` it suppresses the runtime's
+ * deep-resolution of the input, so the branded operator lift must treat it as
+ * absent (see `exprLift`).
+ */
+function isUnknownSchema(schema: JSONSchema | undefined): boolean {
+  return typeof schema === "object" && schema !== null &&
+    (schema as { type?: unknown }).type === "unknown";
+}
+
+/**
  * Build a BRANDED lift module for a recognized JS-OPERATOR expression (the
  * arithmetic/comparison/unary subset the transformer auto-wraps;
  * 08-expression-interpretation §2/§3). The transformer emits
@@ -482,11 +493,45 @@ export function str(
  */
 export function exprLift<I = unknown[], R = unknown>(
   brand: string,
-  implementation: (input: I) => R,
+  argumentSchemaOrImplementation: JSONSchema | ((input: I) => R),
+  resultSchema?: JSONSchema,
+  implementation?: (input: I) => R,
 ): NodeFactory<I, R> {
+  // The transformer emits the inline `exprLift(brand, impl)` shape, but the
+  // schema-injection pass rewrites the hoisted lift-applied form to the
+  // lift-canonical `exprLift(brand, argumentSchema, resultSchema, impl)` (the
+  // implementation trailing) so the branded module carries the SAME
+  // `argumentSchema`/`resultSchema` the un-branded `lift(impl, arg, result)`
+  // would (review E-5). Accept BOTH shapes — the implementation is whichever
+  // argument is the function — and build the identical `type:"javascript"`
+  // module (schemas omitted when undefined) plus the `$builtin` brand.
+  const impl = (typeof argumentSchemaOrImplementation === "function"
+    ? argumentSchemaOrImplementation
+    : implementation) as (input: unknown) => unknown;
+  const rawArgumentSchema = typeof argumentSchemaOrImplementation === "function"
+    ? undefined
+    : argumentSchemaOrImplementation;
+  // The schema-injection pass cannot infer the synthetic operand arrow's types
+  // (its positional params are untyped), so it injects the degenerate
+  // `{ type: "unknown" }` for both schemas. An `unknown`-typed argumentSchema
+  // SUPPRESSES the runtime's deep-resolution of the operand input array — the
+  // operand cell refs reach the arrow unresolved and the lift errors out — so we
+  // drop a degenerate schema and let default deep-resolution run, exactly as the
+  // un-schema'd `str` builtin does. A concrete (non-`unknown`) schema, if the
+  // checker ever resolves one, is preserved.
+  const argumentSchema = isUnknownSchema(rawArgumentSchema)
+    ? undefined
+    : rawArgumentSchema;
+  const effectiveResultSchema = isUnknownSchema(resultSchema)
+    ? undefined
+    : resultSchema;
   return createNodeFactory<I, R>({
     type: "javascript",
-    implementation: implementation as (input: unknown) => unknown,
+    implementation: impl,
+    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
+    ...(effectiveResultSchema !== undefined
+      ? { resultSchema: effectiveResultSchema }
+      : {}),
     $builtin: brand,
   }) as NodeFactory<I, R>;
 }

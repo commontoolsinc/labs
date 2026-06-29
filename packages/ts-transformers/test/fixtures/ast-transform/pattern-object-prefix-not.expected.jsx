@@ -11,11 +11,11 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:u!", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:u!", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0);
 // FIXTURE: pattern-object-prefix-not
 // Verifies: top-level non-JSX unary boolean negation in an object property is
 //   lowered after closure normalization into a direct lift-applied computation.

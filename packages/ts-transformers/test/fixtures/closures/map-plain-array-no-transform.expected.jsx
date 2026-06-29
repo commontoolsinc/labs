@@ -14,11 +14,11 @@ const __cfAmdHooks = undefined;
 interface State {
     multiplier: number;
 }
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 // FIXTURE: map-plain-array-no-transform
 // Verifies: .map() on a plain (non-reactive) array is NOT transformed to mapWithPattern
 //   plainArray.map(fn) → plainArray.map(fn) (unchanged)

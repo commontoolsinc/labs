@@ -58,9 +58,11 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     // single-application shape as `lift`, so its applied form is classified
     // `lift-applied` (see resolveExpressionKind) and ALL the lift-applied
     // downstream dispatchers — result-cause `.for(...)` stamping, double-wrap
-    // suppression — treat it identically. It is NOT hoisted to a module-scope
-    // const (the brand+operands are inline), but that is a size optimization, not
-    // a correctness requirement.
+    // suppression, schema injection, and builder-call hoisting — treat it
+    // identically. The hoisting transformer DOES lift it to a module-scope const
+    // (`__cfLift_N = exprLift(brand, argumentSchema, resultSchema, cb)`, the
+    // dedup win), and because `exprLift` is a TRUSTED_BUILDERS member that const
+    // is NOT `__cf_data`-wrapped — exactly like a hoisted `lift`/`computed`.
     exportName: "exprLift",
     category: "builder",
     builderName: "exprLift",

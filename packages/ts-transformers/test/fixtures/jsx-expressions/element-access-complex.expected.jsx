@@ -157,11 +157,11 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_5 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         arr: number[];
@@ -575,16 +575,16 @@ const __cfLift_18 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_19 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+const __cfLift_19 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
-const __cfLift_20 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
+const __cfLift_20 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 const __cfLift_21 = __cfHelpers.lift<{
     state: {
         items: string[];
@@ -616,21 +616,21 @@ const __cfLift_21 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_22 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_22 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_23 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_23 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_24 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_24 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 // FIXTURE: element-access-complex
 // Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
 //   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })

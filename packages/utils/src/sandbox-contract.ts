@@ -9,6 +9,16 @@ export const TRUSTED_BUILDERS = Object.freeze(
     "action",
     "computed",
     "derive",
+    // Branded operator-expression lift (08-expression-interpretation). Exposed
+    // ONLY via the trusted builder factory (never `__cf_data`-forgeable) and
+    // structurally a `lift` — it wraps a pure synthetic operator arrow over its
+    // operands, carrying the SAME `type:"javascript"` module a `lift` would plus
+    // a `$builtin: "expr:<op>"` brand. It must be trusted-builder-recognized so
+    // (a) its hoisted module-scope const is NOT `__cf_data`-wrapped (the wrap
+    // freezes the returned NodeFactory and throws), and (b) the compiled-bundle
+    // verifier classifies the call as a builder (not data). The function body is
+    // verified identically to any `lift` body, so this widens nothing.
+    "exprLift",
     "handler",
     "lift",
     // Identity tag for multi-user test descriptors (`cf test`); its

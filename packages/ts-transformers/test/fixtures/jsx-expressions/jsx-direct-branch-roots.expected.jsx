@@ -11,11 +11,11 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:u!", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:u!", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;

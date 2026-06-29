@@ -108,11 +108,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:!==", {
+const __cfLift_3 = __cfHelpers.exprLift("expr:!==", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 !== __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 !== __cfExpr1);
 const __cfLift_4 = __cfHelpers.lift<{
     tagIndex: number;
     taskIndex: number;
@@ -130,11 +130,11 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:u!", {
+const __cfLift_5 = __cfHelpers.exprLift("expr:u!", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const tagIndex = __cf_pattern_input.key("index");

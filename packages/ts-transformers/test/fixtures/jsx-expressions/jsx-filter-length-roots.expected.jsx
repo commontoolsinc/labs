@@ -67,11 +67,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+const __cfLift_3 = __cfHelpers.exprLift("expr:>", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: number[];

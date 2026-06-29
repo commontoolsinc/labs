@@ -42,21 +42,21 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
-const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:-", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
+const __cfLift_2 = __cfHelpers.exprLift("expr:-", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 - __cfExpr1));
-const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 - __cfExpr1);
+const __cfLift_3 = __cfHelpers.exprLift("expr:*", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         value: number;

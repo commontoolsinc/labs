@@ -32,11 +32,11 @@ const handleClick = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+const __cfLift_1 = __cfHelpers.exprLift("expr:+", {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1);
 // FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while

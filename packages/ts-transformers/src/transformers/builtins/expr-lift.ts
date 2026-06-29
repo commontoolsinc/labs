@@ -93,6 +93,19 @@ export function createExprLiftCall(
   );
   context.markAsSyntheticComputeCallback?.(arrowFunction);
 
+  // Preserve the ORIGINAL operator expression's source position on the fully
+  // synthetic operand arrow so the CTS source-map pipeline tracks the lift
+  // implementation back to the AUTHORED callsite (e.g. `main.tsx:4`) rather than
+  // the compiled bundle offset. The un-branded lowering gets this for free —
+  // its arrow body is `replaceOpaqueRefsWithParams(expression)`, a transform OF
+  // the original node that keeps positions — but our positional `[a,b] => a<op>b`
+  // body is brand-new and carries none. Mirrors the lift transformer's preserve
+  // idiom (`setSourceMapRange` from the original node's range).
+  ts.setSourceMapRange(
+    arrowFunction,
+    ts.getSourceMapRange(expression) ?? expression,
+  );
+
   // Build the result type node from the ORIGINAL operator expression so the
   // emitted lift module carries the correct `resultSchema` (number for
   // arithmetic, boolean for comparison) exactly as the un-branded lift would.

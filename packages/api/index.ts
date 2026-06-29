@@ -2054,8 +2054,17 @@ export interface LiftFunction {
  * `__cfHelpers.exprLift(brand, impl)(positionalOperands)`; not authored directly.
  */
 export interface ExprLiftFunction {
+  // Inline shape emitted by the transformer: `exprLift(brand, impl)`.
   <T, R>(
     brand: string,
+    implementation: (input: T) => R,
+  ): ModuleFactory<StripCell<T>, R>;
+  // Lift-canonical shape after schema injection on the hoisted lift-applied
+  // form: `exprLift(brand, argumentSchema, resultSchema, impl)` (impl trailing).
+  <T, R>(
+    brand: string,
+    argumentSchema: JSONSchema,
+    resultSchema: JSONSchema,
     implementation: (input: T) => R,
   ): ModuleFactory<StripCell<T>, R>;
 }

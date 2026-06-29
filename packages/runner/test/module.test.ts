@@ -547,8 +547,14 @@ describe("module", () => {
       ].join("\n");
 
       const { main } = await compileMain(source);
+      // `value + 1` lowers to a branded `exprLift` (08-expression-interpretation):
+      // the implementation is the POSITIONAL operand arrow `[a, b] => a + b`, so the
+      // preview is `__cfExpr0 + __cfExpr1`, not the authored `value + 1`. The point
+      // of this test is the SOURCE LOCATION: `exprLift` stamps the synthetic arrow's
+      // source-map range from the original expression, so `.src` still tracks back
+      // to the authored callsite (main.tsx:4), not the compiled bundle offset.
       const jsxNode = expectTrackedNode(
-        findNodeByPreview(main?.default, "value + 1"),
+        findNodeByPreview(main?.default, "__cfExpr0 + __cfExpr1"),
       );
       expect(jsxNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
       expect(jsxNode.module.implementation.src).not.toContain("main.tsx:1:23");
