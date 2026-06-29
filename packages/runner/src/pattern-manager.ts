@@ -30,8 +30,8 @@ import type {
   IExtendedStorageTransaction,
 } from "./storage/interface.ts";
 import {
-  COMPILE_CACHE_RUNTIME_VERSION,
   compiledDocKey,
+  getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
@@ -308,11 +308,11 @@ export class PatternManager {
   }
 
   /**
-   * Copy the source + compiled closures reachable from `entryIdentity` out of
-   * `fromSpace` into `toSpace`, rebuilding the emitted-module shape the write
-   * functions expect. All-or-nothing: a partial compiled closure can never be
-   * served (the loaders require a full, integrity-valid hit), so an incomplete
-   * origin set throws instead of persisting an unservable copy.
+   * Copy the closures reachable from `entryIdentity` out of `fromSpace` into
+   * `toSpace`, rebuilding the emitted-module shape the write functions expect.
+   * All-or-nothing: a partial compiled closure can never be served (the loaders
+   * require a full, integrity-valid hit), so an incomplete origin set throws
+   * instead of persisting an unservable copy.
    */
   private async replicateClosures(
     entryIdentity: string,
@@ -332,9 +332,7 @@ export class PatternManager {
     // write-backs first. (Their own set, not flushCompileCacheWrites: this
     // replication promise is tracked there and would await itself.)
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    const cacheOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-    };
+    const runtimeVersion = await getCompileCacheRuntimeVersion();
     const readTx = this.runtime.edit();
     let sourceDocs;
     let compiledDocs;
@@ -350,13 +348,18 @@ export class PatternManager {
         entryIdentity,
         readTx,
       );
-      compiledDocs = await loadCompiledClosure(
-        this.runtime,
-        fromSpace,
-        entryIdentity,
-        cacheOpts,
-        readTx,
-      );
+      if (runtimeVersion === undefined) {
+        compiledDocs = undefined;
+      } else {
+        const cacheOpts = { runtimeVersion };
+        compiledDocs = await loadCompiledClosure(
+          this.runtime,
+          fromSpace,
+          entryIdentity,
+          cacheOpts,
+          readTx,
+        );
+      }
     } finally {
       readTx.abort?.("closure-replication read complete");
     }
@@ -366,8 +369,8 @@ export class PatternManager {
     const modules: CacheableModule[] = [];
     const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
-      const compiled = compiledDocs.get(identity);
-      if (!compiled) {
+      const compiled = compiledDocs?.get(identity);
+      if (runtimeVersion !== undefined && !compiled) {
         throw new Error(`compiled doc missing for ${identity}`);
       }
       const fabricImports = fabricImportRefsFromSource(doc);
@@ -378,8 +381,8 @@ export class PatternManager {
         identity,
         filename: doc.filename,
         source: doc.code,
-        js: compiled.code,
-        ...(compiled.sourceMap !== undefined
+        js: compiled?.code ?? "",
+        ...(compiled?.sourceMap !== undefined
           ? { sourceMap: compiled.sourceMap }
           : {}),
         // The write functions re-derive the entry's root links; keep only the
@@ -397,14 +400,16 @@ export class PatternManager {
     }
     const { error } = await this.runtime.editWithRetry((tx) => {
       writeSourceDocs(this.runtime, toSpace, modules, entryIdentity, tx);
-      writeCompiledDocs(
-        this.runtime,
-        toSpace,
-        modules,
-        entryIdentity,
-        cacheOpts,
-        tx,
-      );
+      if (runtimeVersion !== undefined) {
+        writeCompiledDocs(
+          this.runtime,
+          toSpace,
+          modules,
+          entryIdentity,
+          { runtimeVersion },
+          tx,
+        );
+      }
     });
     if (error) throw error;
 
@@ -482,9 +487,24 @@ export class PatternManager {
   ): Promise<Pattern> {
     const harness = this.runtime.harness;
     const { space } = cacheCtx;
-    const cacheOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-    };
+    const runtimeVersion = await getCompileCacheRuntimeVersion();
+    if (runtimeVersion === undefined) {
+      const { id, graph, mainSpecifier, entryIdentity, modules } = await harness
+        .compileToRecordGraph(
+          program,
+          { fabricImports: { space } },
+        );
+      await this.persistSourceCacheTracked(space, modules, entryIdentity);
+      cacheCtx.onEntryIdentity?.(entryIdentity);
+      const result = harness.evaluateRecordGraph(
+        id,
+        graph,
+        mainSpecifier,
+        program.files,
+      );
+      return this.patternFromEvaluation(result, program, entryIdentity);
+    }
+    const cacheOpts = { runtimeVersion };
 
     // Fast path — warm load BY IDENTITY: if the entry's content identity is
     // already known (stored from a prior compile), load the compiled closure
@@ -707,8 +727,8 @@ export class PatternManager {
    * resolution chain is: in-memory live module → integrity-valid compiled
    * closure → cold recompile from the verified `pattern:<identity>` source-doc
    * closure ({@link tryColdLoadByIdentity}, which survives a
-   * `COMPILE_CACHE_RUNTIME_VERSION` bump). No TypeScript program in hand, no meta
-   * cell — the source docs are the single durable source.
+   * runtime-version change). No TypeScript program in hand, no meta cell — the
+   * source docs are the single durable source.
    *
    * Returns the pattern, or `undefined` when the by-identity load is
    * unavailable (CFC not enforcing / closure absent or incomplete / invalid /
@@ -742,9 +762,11 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    const cacheOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
-    };
+    const runtimeVersion = await getCompileCacheRuntimeVersion();
+    if (runtimeVersion === undefined) {
+      return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
+    }
+    const cacheOpts = { runtimeVersion };
 
     const readTx = this.runtime.edit();
     let closure;
@@ -821,7 +843,7 @@ export class PatternManager {
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
-    cacheOpts: { runtimeVersion: string },
+    cacheOpts?: { runtimeVersion: string },
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
     const readTx = this.runtime.edit();
@@ -873,24 +895,26 @@ export class PatternManager {
         { sourceFiles },
       );
       const pattern = this.patternFromMain(result, symbol, entryIdentity);
-      const writeBack = this.writeBackCompileCache(
-        space,
-        compiled.modules,
-        entryIdentity,
-        cacheOpts,
-      ).catch((error) => {
-        logger.warn("load-pattern-by-identity-writeback-failed", () => [
-          `entry=${entryIdentity}`,
-          `symbol=${symbol}`,
-          String(error),
-        ]);
-      });
-      this.compileCacheWrites.add(writeBack);
-      this.pendingCacheWriteBacks.add(writeBack);
-      writeBack.finally(() => {
-        this.compileCacheWrites.delete(writeBack);
-        this.pendingCacheWriteBacks.delete(writeBack);
-      });
+      if (cacheOpts !== undefined) {
+        const writeBack = this.writeBackCompileCache(
+          space,
+          compiled.modules,
+          entryIdentity,
+          cacheOpts,
+        ).catch((error) => {
+          logger.warn("load-pattern-by-identity-writeback-failed", () => [
+            `entry=${entryIdentity}`,
+            `symbol=${symbol}`,
+            String(error),
+          ]);
+        });
+        this.compileCacheWrites.add(writeBack);
+        this.pendingCacheWriteBacks.add(writeBack);
+        writeBack.finally(() => {
+          this.compileCacheWrites.delete(writeBack);
+          this.pendingCacheWriteBacks.delete(writeBack);
+        });
+      }
       return pattern;
     } catch (error) {
       logger.warn("load-pattern-by-identity-source-miss", () => [
@@ -1131,6 +1155,42 @@ export class PatternManager {
     }
   }
 
+  private async persistSourceCacheTracked(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+  ): Promise<void> {
+    const writeBack = this.writeBackSourceCache(space, modules, entryIdentity);
+    this.compileCacheWrites.add(writeBack);
+    this.pendingCacheWriteBacks.add(writeBack);
+    try {
+      await writeBack;
+    } finally {
+      this.compileCacheWrites.delete(writeBack);
+      this.pendingCacheWriteBacks.delete(writeBack);
+    }
+  }
+
+  private async writeBackSourceCache(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+  ): Promise<void> {
+    const writebackStart = performance.now();
+    await this.syncSourceCacheWriteTargets(space, modules);
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
+    });
+    logger.time(writebackStart, "compile-cache", "source-writeback");
+    if (error) {
+      logger.error("source-cache-writeback-failed", () => [
+        `entry=${entryIdentity}`,
+        error.message,
+      ]);
+      throw throwableStorageError(error);
+    }
+  }
+
   /**
    * Write the source + compiled document sets for an emitted module set into
    * `space`, on its own transaction, independent of the caller's. Uses
@@ -1159,6 +1219,17 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
+  }
+
+  private async syncSourceCacheWriteTargets(
+    space: MemorySpace,
+    modules: readonly CacheableModule[],
+  ): Promise<void> {
+    await Promise.all(
+      modules.map((module) =>
+        this.runtime.getCell(space, sourceDocKey(module.identity)).sync()
+      ),
+    );
   }
 
   private async syncCompileCacheWriteTargets(

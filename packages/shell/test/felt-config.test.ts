@@ -50,5 +50,10 @@ describe("shell felt config", () => {
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
     });
+    const compileCacheVersion = config.esbuild?.define[
+      "globalThis.__cfCompileCacheRuntimeVersion"
+    ];
+    expect(compileCacheVersion?.startsWith("cf/esm-compile/")).toBe(true);
+    expect(compileCacheVersion).not.toBe("cf/esm-compile/source");
   });
 });

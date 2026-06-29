@@ -1,8 +1,10 @@
 import { type Config } from "@commonfabric/felt";
+import { computeCurrentCompilerVersion } from "../runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
+const COMPILE_CACHE_RUNTIME_VERSION = await computeCurrentCompilerVersion();
 
 const SHELL_PORT = parseInt(
   Deno.env.get("SHELL_PORT") || String(ports.shell),
@@ -47,6 +49,8 @@ const config: Config = {
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
+      "globalThis.__cfCompileCacheRuntimeVersion":
+        COMPILE_CACHE_RUNTIME_VERSION,
     },
     supported: {
       // Provide polyfills for `using` resource management
