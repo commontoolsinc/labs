@@ -557,8 +557,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       {when(
                         computed(() =>
                           Boolean(patternInfo.result) &&
-                          !Boolean(patternInfo.pending) &&
-                          !Boolean(patternInfo.error)
+                          !patternInfo.pending &&
+                          !patternInfo.error
                         ),
                         <div
                           style={{
