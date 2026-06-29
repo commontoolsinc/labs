@@ -5,20 +5,20 @@ import {
 } from "./select-runner-test-files.ts";
 import { parseShard } from "./shard-utils.ts";
 
-const TOTAL_SHARDS = 4;
+const TOTAL_SHARDS = 5;
 
 Deno.test("parseShard parses shard notation", () => {
-  assertEquals(parseShard("2/4"), { index: 2, total: 4 });
+  assertEquals(parseShard("2/5"), { index: 2, total: 5 });
 });
 
 Deno.test("parseShard rejects invalid shard notation", () => {
   try {
-    parseShard("5/4");
+    parseShard("6/5");
     throw new Error("expected parseShard to throw");
   } catch (error) {
     assertEquals(
       (error as Error).message,
-      "Shard index 5 exceeds total shard count 4",
+      "Shard index 6 exceeds total shard count 5",
     );
   }
 });
@@ -27,7 +27,7 @@ Deno.test("runner test round-robin keeps shard counts even", () => {
   const files = Array.from({ length: 30 }, (_, i) => ({
     name: `t${String(i).padStart(2, "0")}.test.ts`,
   }));
-  const counts = [1, 2, 3, 4].map((index) =>
+  const counts = [1, 2, 3, 4, 5].map((index) =>
     selectRunnerTestFiles(files, { index, total: TOTAL_SHARDS }).length
   );
   assertEquals(
