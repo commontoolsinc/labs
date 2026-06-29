@@ -1,9 +1,8 @@
 // Read-only access to a memory v2 space SQLite file.
 //
 // Everything here is offline and side-effect free: we open the durable store
-// the server already wrote and never mutate it. See the proposal in
-// docs/plans/2026-06-26-runtime-trace-inspector.md for why the durable store is
-// treated as the flight recorder.
+// the server already wrote and never mutate it — the durable store is the
+// flight recorder (see README.md).
 
 import { Database } from "@db/sqlite";
 

@@ -1,44 +1,23 @@
 # @commonfabric/state-inspector
 
-Offline autopsy of Common Fabric memory v2 space DBs. Prototype for the
-[Multiplayer State Inspector proposal](../../docs/plans/2026-06-26-runtime-trace-inspector.md).
+Offline autopsy of Common Fabric **memory v2** space DBs.
 
 The thesis: **the durable store the server already wrote is the flight
 recorder.** This package is the lens over it — open a space SQLite file
-read-only, reconstruct state-at-`(branch, seq)`, and answer who/what/when
-questions with no live runtime and no capture step.
+read-only, reconstruct state-at-`(branch, seq)`, and answer who/what/when/
+why-different questions with no live runtime and no capture step.
 
-## Status: usable (M1–M3 + model unification + comprehension surface)
+Wired into the `cf` CLI as **`cf inspect`** with local-DB auto-discovery (no
+absolute paths needed). Agents: see the `state-inspector` skill
+(`skills/state-inspector/SKILL.md`) for the debugging map — when to reach for
+each command and what to trust.
 
-Wired into the `cf` CLI as **`cf inspect`** with local-DB auto-discovery — no
-absolute paths needed. Tested end-to-end against real space DBs (a 571 MB legacy
-DB and a set of modern `fvj1:` DBs).
+## What it sees (the model you need to read the output)
 
-**Comprehension surface (Phase 2)** builds on the unified model:
-
-- **`group`** — a user's whole world. Discovers + groups local space DBs into
-  per-user worlds (home → profiles → main) from on-disk signals (home
-  `profiles[]` cross-space links, `commit.session_id` principal, cross-space
-  links). Compact by default; `--did <prefix>` expands one user.
-- **`graph`** — the entity graph. Nodes (pieces/modules/streams/schemas/cells)
-  - edges (`pattern` / `argument` / `owns` / `link`). `--root <entity> --depth`
-    drills into one piece's neighborhood; `--dot` emits Graphviz.
-- **`diff` / `timeline`** — time travel. `diff` shows what changed in an entity
-  between two seqs; `timeline` shows how a space grew (or how one entity
-  evolved). The engine already reconstructs at any seq.
-- **`html`** — a self-contained HTML **explorer**. Two ways to navigate (a
-  **tree** from pieces down, and a re-rootable **graph** from any node) feeding
-  one detail pane that shows every salient field for the selected entity: value
-  (links clickable), schema, **CFC** information-flow labels, version history,
-  resolved lineage, outgoing links, and module source. Context-aware labels (a
-  stream named by its owner key → `⊙ createProfile`; `{link, specifier}` →
-  `import ./foo.tsx`), click-to-copy ids, and deep links into the live shell
-  (`--app-url`).
-
-**Model unification** (`model.ts`) makes the tool _fluent_: instead of guessing
-from the shape of `doc.value`, it reads the **whole entity document** (`value`
+memory v2 stores each entity as a **document tree**, not a bare value: a `value`
 plus the meta paths `argument` / `result` / `patternIdentity` / `internal` /
-`schema` / `cfc`) and classifies by **which top-level paths exist**:
+`schema` / `cfc`. The tool classifies an entity by **which top-level paths
+exist** and resolves lineage from them:
 
 | Kind         | Signal                                                                   |
 | ------------ | ------------------------------------------------------------------------ |
@@ -49,154 +28,129 @@ plus the meta paths `argument` / `result` / `patternIdentity` / `internal` /
 | `owned-cell` | carries a `result` ownership back-link                                   |
 | `free-cell`  | a bare `value`, owned by no piece                                        |
 
-It also resolves **lineage**: a piece → its input (`argument`), its pattern
-(`patternIdentity` → the module entity, matched by `value.identity`), and its
-owned cells (`internal` manifest); an owned cell → its owner (`result`). This
-corrected `entities` (the old value-shape heuristic undercounted pieces — 4 of 7
-in the notes space; now all 7) and added `cf inspect piece <id>`.
+Lineage: a piece → its input (`argument`), its pattern (`patternIdentity` → the
+module entity), its owned cells (`internal`); an owned cell → its owner
+(`result`). This is why `entities` / `piece` / `graph` can speak in pieces and
+links rather than raw blobs.
 
-**M3 — usable surface**
+**`scope_key` partitions an entity by identity.** The same cell id can hold a
+shared `space` value AND a per-`user:<DID>` override AND a
+per-`session:<DID>:<sid>` override, stored side by side and genuinely different
+— this is where "looks different for me" multiplayer bugs live.
 
-- `cf inspect spaces` — discover local space DBs (walks up from cwd through
-  `cache/memory/…` and `packages/toolshed/cache/memory/…`, or honors
-  `MEMORY_DIR` / `DB_PATH` / `--dir`) and list them with quick stats.
-- All commands take a `<space>` as a **DID, DID-prefix, or path** (resolved via
-  discovery), so you go from `spaces` straight to drilling in.
+**Two at-rest value formats coexist, both handled:** modern `fvj1:`-prefixed
+codec-json (ids `of:fid1:…`) and legacy plain-JSON sigils (ids `of:baedrei…`).
+`decode.ts` routes by the `fvj1:` tag; links are recognized in both the legacy
+sigil form (`{ "/": { "link@1": {…} } }`) and the modern `FabricLink` form.
 
-Underlying milestones:
+## What is ground truth vs. a hint
 
-**M1 — single-space autopsy core**
+The tool is deliberate about this — quoting an approximation as truth is the
+failure mode it guards against:
 
-- **read-only DB access** (`db.ts`)
-- **value decoder** (`decode.ts`) — recognizes sigil links
-  `{ "/": { "link@1": {…} } }`, entity refs `{ "/": "of:…" }`, and streams
-  `{ "$stream": true }`; annotates a value into JSON-printable form.
-- **state reconstruction** (`reconstruct.ts`) — replays the append-only
-  `revision` log (`set` / `patch` / `delete`) to a target seq. **Patch
-  application reuses the server's `applyPatch`**
-  (`@commonfabric/memory/v2/patch`), not a re-implementation — see fidelity note
-  below.
-- **autopsy queries** (`queries.ts`) — `summary`, `commits`, `entityHistory`
-  (who wrote this), `hotEntities` (contention proxy).
+- **`overlay <space> <id>` is ground truth** for "who sees what differently":
+  the value in every scope, side by side, with divergence judged on the **raw**
+  stored value (depth-complete, fabric-aware).
+- **`value-at --as <DID>` is an APPROXIMATION** — the most-specific stored scope
+  holding the id. It can't know which declared scope a real read targets, nor
+  follow the base-scope link the runtime uses. Use `overlay` for truth.
+- **`conflicts` stale-reads are an ANOMALY detector, not lost-update history.**
+  The engine validates confirmed reads _before_ committing
+  (`validateConfirmedReads`), so a healthy store yields zero. A hit is an
+  invariant violation / corruption; "0 anomalies" means consistent, not "no
+  concurrency." The writer-timeline / `multiUser` contention view is the
+  normal-history side.
+- **`converge` is server-view only** — durable values compared; client cursor
+  lag and optimistic writes aren't visible.
+- **Same id across spaces is usually independent instances**, not replica drift
+  (content-addressed ids). The scan labels `cross-space-linked` (real replica →
+  drift bug) vs `no-cross-space-link` (likely instance).
 
-**M2 — cross-space convergence** (`multispace.ts`)
+## Fidelity — reconstruction is the engine's, not a fork
 
-- `convergence(spaces, {id, path})` — reconstruct an entity's value across N
-  space DBs, cluster equal values, and classify: `converged` / `diverged` /
-  `partial` (present in some, absent in others) / `absent`. Per-space evidence:
-  head seq, revision count, last writer, last write time. Resilient: a decode
-  error in one space is isolated, not fatal.
-- `convergenceScan(spaces)` — find entities present in ≥2 spaces and report
-  those that diverge.
+State-at-`(branch, seq)` reconstruction **replicates the engine's read path**
+(`read()` → `readRowForBranch` → `reconstructPatchedDocument` in
+`packages/memory/v2`): it resolves the visible row with branch inheritance,
+reconstructs within the resolved branch from the latest
+`set`/`delete`/`snapshot` base, and applies patches through the server's own
+`applyPatch` (`@commonfabric/memory/v2/patch`) — not a re-implementation, since
+that dialect has a custom `splice` op and specific add/missing-key semantics a
+hand-rolled applier gets wrong. `reconstruct-parity.test.ts` **drives the real
+engine** and asserts `reconstructDocument == engine.read()` across branch
+inheritance, child-local patches, tombstones, patch-first, and snapshots.
+Conflict and scope analysis likewise reuse the engine's exported
+`patchOverlapsRead` / `resolveScopeKey` rather than re-deriving them.
 
-**M2.5 — replica vs. instance classification** (`multispace.ts`)
-
-- `buildCrossSpaceLinkIndex(spaces)` — find every link whose `space` names a
-  _different_ space than the one holding it (only entities whose stored data
-  carries an explicit `"space":"did:key:` are reconstructed, so it stays cheap).
-- Each divergence is then labeled `cross-space-linked` (a real replica that
-  should converge → **drift bug**) vs `no-cross-space-link` (shared id with no
-  cross-space link → **likely independent same-pattern instance**, expected).
-  This stops the scan from crying wolf on every same-id divergence.
-
-**CLI** (`cli.ts`) — every command supports `--json` for agents: `summary`,
-`commits`, `hot`, `history`, `value-at`, `converge`, `converge-scan`.
-
-## Fidelity note (why reconstruction reuses the server applier)
-
-The server's JSON-Patch dialect (`packages/memory/v2/patch.ts`) is **not plain
-RFC 6902**: it has a custom `splice` op (`{index, remove, add}`), creates
-missing object keys on `add`, and is strict about missing array indices. A
-hand-rolled applier silently dropped `splice` and mis-handled `add`.
-Reconstruction therefore calls the real `applyPatch` (offline-safe: pure value
-ops, no live runtime/cell). The hermetic test guards `splice` + missing-key
-`add` against regressing to a fork.
-
-## Reality checks found while building (feed back into the plan)
-
-1. **Scheduler tables are usually absent.** The 571 MB production-shaped DB had
-   only the entity tables. `scheduler_observation` & friends exist only when
-   `persistentSchedulerState` was enabled. ⇒ The autopsy core that works _today_
-   is entity-history only; the scheduler graph is opt-in, so every query
-   degrades gracefully (`hasSchedulerTables`).
-2. **TWO at-rest value formats exist in the wild** — both handled:
-   - **modern**: an `fvj1:`-prefixed codec-json envelope (decoded via
-     `valueFromJson`; embedded links are `/quote`-escaped literals, so a
-     context-less decode is inert and never reconstructs a live cell). Entity
-     ids: `of:fid1:…`.
-   - **legacy**: plain JSON with inline sigil links. Entity ids: `of:baedrei…`.
-     `reconstruct.ts` routes by the `fvj1:` tag. (This corrects an earlier
-     assumption that no `@commonfabric/data-model` dependency was needed.)
-3. **Same-id divergence is usually NOT replica drift (now classified).** Many
-   entities share a content-addressed id across spaces because they're instances
-   of the same pattern (e.g. `home.tsx`), not cross-space replicas — so they
-   _legitimately_ diverge. M2.5 classifies each divergence via the cross-space
-   link index. **Real dev DBs frequently contain ZERO cross-space links**, in
-   which case every same-id divergence is correctly labeled
-   `no-cross-space-link` (likely independent instance). The classifier exists to
-   suppress false alarms now and to flag real drift the moment cross-space
-   replicas appear. (Verified: `converge-scan` over real `fvj1` DBs reports
-   `0 cross-space link edges` and labels all 14 findings as instances.)
+The store can't be opened through the live `Engine` (its constructor runs
+migrations that would mutate the durable file), so reconstruction is a
+parity-tested replica; extracting a shared read-only materializer in memory v2
+is the natural next step.
 
 ## Usage (`cf inspect`)
 
-Run from a repo with local space DBs (discovery walks up to find the cache), or
-point at any directory with `--dir` / `MEMORY_DIR`. `<space>` is a DID, a unique
-DID-prefix, or a path.
+Run from a repo with local space DBs (discovery walks up to the cache), or point
+at any directory with `--dir` / `MEMORY_DIR` / `DB_PATH`. `<space>` is a DID, a
+unique DID-prefix, or a path. Every command takes `--json` for agents.
 
 ```bash
-# discover what's inspectable
+# discover what's inspectable, then drill in
 deno task cf inspect spaces
 deno task cf inspect group                       # per-user worlds (home→profiles→main)
-deno task cf inspect group --did z6MkeZZv        # expand one user's world fully
 deno task cf inspect identity did:key:z6MkeZZv…  # one identity: its spaces + scopes it owns
 
 # the per-identity (multiplayer) dimension — scopes within a space
-deno task cf inspect users    z6Mkqa41           # identities that touched this space (browse them)
-deno task cf inspect scopes   z6Mkqa41           # space / per-user / per-session scopes here
-deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell's value across EVERY scope (divergence) — GROUND TRUTH
-deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # ≈ APPROX identity view (most-specific stored scope, not the runtime read; use overlay for truth)
+deno task cf inspect users    z6Mkqa41           # identities that touched this space
+deno task cf inspect scopes   z6Mkqa41           # space / per-user / per-session scopes
+deno task cf inspect overlay  z6Mkqa41 of:fid1:… # a cell across EVERY scope — GROUND TRUTH
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --as did:key:z6MkeZZv…   # ≈ APPROX identity view
 
 # conflicts & async — contested cells + anomalous-stale-read detection
 deno task cf inspect conflicts z6Mkqa41                  # cells written by ≥2 sessions (multi-user flagged)
-deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + ANOMALOUS stale-read analysis (engine rejects these pre-commit)
+deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + ANOMALY analysis
 
-# single space (DID-prefix resolves via discovery)
+# what's in a space
 deno task cf inspect summary  z6Mkqa41
-deno task cf inspect entities z6Mkqa41           # what's in here: pieces/modules/streams/cells
-deno task cf inspect entities z6Mkqa41 --kind piece
-deno task cf inspect piece    z6Mkqa41 of:fid1:… # a piece: pattern source, input, owned cells
-deno task cf inspect piece    z6Mkqa41 of:fid1:… --code   # + full pattern TS source
+deno task cf inspect entities z6Mkqa41 [--kind piece]
+deno task cf inspect piece    z6Mkqa41 of:fid1:… [--code]   # pattern source, input, owned cells
 deno task cf inspect hot      z6Mkqa41 --limit 10
-deno task cf inspect commits  z6Mkqa41 --limit 20
 deno task cf inspect history  z6Mkqa41 of:fid1:…
-deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count [--seq N]
 
 # the entity graph (relationships between pieces/cells/modules)
-deno task cf inspect graph    z6Mkqa41                       # whole-space stats + adjacency
-deno task cf inspect graph    z6Mkqa41 --root of:fid1:… --depth 2   # one piece's neighborhood
-deno task cf inspect graph    z6Mkqa41 --root of:fid1:… --dot | dot -Tsvg > piece.svg
+deno task cf inspect graph    z6Mkqa41 [--root of:fid1:… --depth 2] [--dot]
 
-# time travel (the engine reconstructs at any seq)
+# time travel
 deno task cf inspect diff     z6Mkqa41 of:fid1:… --from 7 --to 12
-deno task cf inspect timeline z6Mkqa41                       # how the space grew
-deno task cf inspect timeline z6Mkqa41 of:fid1:…             # how one entity evolved
+deno task cf inspect timeline z6Mkqa41 [of:fid1:…]          # how a space / one entity grew
 
-# a self-contained HTML explorer to open in a browser (tree + graph + detail)
-deno task cf inspect html     z6Mkqa41 --out /tmp/space.html
-deno task cf inspect html     z6Mkqa41 --app-url https://host --out /tmp/space.html  # + live links
+# a self-contained HTML explorer (tree + graph + detail) to open in a browser
+deno task cf inspect html     z6Mkqa41 --out /tmp/space.html [--app-url https://host]
 
 # cross-space convergence (--all discovered, or --spaces a,b, or --dir)
 deno task cf inspect converge      of:fid1:… --all --path value
 deno task cf inspect converge-scan --all --json
 ```
 
-Every command also accepts `--json` for agents. (A standalone `cli.ts` entry
-exists for use outside the `cf` CLI.)
+A standalone `cli.ts` entry exists for use outside the `cf` CLI.
 
-## Not yet built (next milestones)
+## Known characteristics
 
-- `ifc` / security-label decoding from stored schemas.
-- Snapshot-base optimization for reconstruction (currently replays from seq 0).
+- **Scheduler tables are usually absent** on disk (present only when
+  `persistentSchedulerState` was enabled). The entity-history surface always
+  works and every scheduler-dependent query degrades gracefully — absence is
+  normal, not a broken DB.
+- **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
+  marked rather than shown as clean. A count at a round cap may be truncated —
+  narrow with flags or a per-entity command.
+- **Reads DBs it didn't write**: a corrupt/partial row degrades that one entity,
+  not the whole command. If a value looks absent where you expect data, check
+  for a decode error before concluding the entity is empty.
+
+## Not yet built
+
+- `ifc` / security-label decoding from stored schemas (CFC labels are surfaced;
+  full ifc decode is partial).
 - Client-side correlation overlay (connectionId / eventId) for the per-session
-  view dimension of convergence.
+  dimension of convergence.
+- A shared read-only materializer in memory v2 so reconstruction calls the
+  engine directly instead of a parity-tested replica.
