@@ -1,0 +1,289 @@
+diff --git a/packages/runner/src/builtins/filter.ts b/packages/runner/src/builtins/filter.ts
+index c18f89b2c..ab39c9437 100644
+--- a/packages/runner/src/builtins/filter.ts
++++ b/packages/runner/src/builtins/filter.ts
+@@ -39,6 +39,8 @@ import {
+ import { resolveOpPattern } from "./op-pattern-ref.ts";
+ import { createResumeRepublisher } from "./resume-republish.ts";
+ import { linkResolutionProbe } from "../storage/reactivity-log.ts";
++import { resolveLink } from "../link-resolution.ts";
++import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+ import { getLogger } from "@commonfabric/utils/logger";
+ 
+ const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
+@@ -153,8 +155,34 @@ export function filter(
+ 
+   return (tx: IExtendedStorageTransaction) => {
+     const elementAwaitSync = resumeBatchAwaitSync;
+-    const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
+-      .withTx(tx).get();
++    // Identity-only list materialization (mirrors map.ts:163-188): read `op`
++    // through the schema, but build element cells from the raw slot links
++    // WITHOUT dereferencing element content. The previous
++    // `asSchema(FILTER_INPUT_SCHEMA).get()` walked the array as asCell items,
++    // and arrays "dereference one more link" (traverse.ts) — an ordinary content
++    // read of every element doc, joining each element's whole-doc label into the
++    // coordinator's per-tx J and smearing MEMBER content onto the result
++    // container's STRUCTURE label even when membership does not depend on element
++    // content (spec §8.5.6.1, SC-8). Membership taint now rides the
++    // predicate-result reads below + the structure re-stamp (see
++    // recordCfcStructureContainer). resolveLink's probe reads are flow-excluded.
++    const op = inputsCell.asSchema(FILTER_INPUT_SCHEMA).withTx(tx).key("op")
++      .get();
++    const sourceListCell = inputsCell.key("list");
++    const listCell = sourceListCell.withTx(tx).resolveAsCell();
++    const rawList = listCell.withTx(tx).getRaw() as unknown;
++    const listBase = listCell.getAsNormalizedFullLink();
++    const list: Cell<any>[] | undefined = rawList === undefined
++      ? undefined
++      : !Array.isArray(rawList)
++      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
++      : rawList.map((slot, i) => {
++        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
++          ? parseLink(slot, listBase)
++          : { ...listBase, path: [...listBase.path, String(i)] };
++        const resolved = resolveLink(runtime, tx, slotLink, "value");
++        return runtime.getCellFromLink(resolved, undefined, tx);
++      });
+ 
+     const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
+     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+@@ -196,6 +224,15 @@ export function filter(
+     // every element's taint into the coordinator's per-tx join.
+     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
+       .withTx(tx);
++    // (S16) Declare the result container so prepare re-derives its `structure`
++    // label (membership/order, §8.5.6.1) from this tx's J — the selection
++    // criteria the coordinator read (predicate results) — EVERY reconcile,
++    // decoupled from value writes. The membership taint settles on a later pass
++    // than the container's root value write, and incremental changes are
++    // slot/no-op writes that never re-stamp the root, so the taint would
++    // otherwise never land (the dual of the input-read over-taint this fix
++    // removes). Idempotent per reconcile; map deliberately does NOT declare.
++    tx.recordCfcStructureContainer(result.getAsNormalizedFullLink());
+     // Container reads/writes run under the link-resolution-probe scope (S16):
+     // the presence probe and set() diffing materialize prior slots for identity
+     // comparison only — per-slot labels ride the link-write machinery, not these
+diff --git a/packages/runner/src/builtins/flatmap.ts b/packages/runner/src/builtins/flatmap.ts
+index 680c1e11d..6180ed442 100644
+--- a/packages/runner/src/builtins/flatmap.ts
++++ b/packages/runner/src/builtins/flatmap.ts
+@@ -39,6 +39,8 @@ import {
+ import { resolveOpPattern } from "./op-pattern-ref.ts";
+ import { createResumeRepublisher } from "./resume-republish.ts";
+ import { linkResolutionProbe } from "../storage/reactivity-log.ts";
++import { resolveLink } from "../link-resolution.ts";
++import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+ import { getLogger } from "@commonfabric/utils/logger";
+ 
+ const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
+@@ -155,8 +157,33 @@ export function flatMap(
+ 
+   return (tx: IExtendedStorageTransaction) => {
+     const elementAwaitSync = resumeBatchAwaitSync;
+-    const { list, op } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
+-      .withTx(tx).get();
++    // Identity-only list materialization (mirrors map.ts:163-188): read `op`
++    // through the schema, but build element cells from the raw slot links
++    // WITHOUT dereferencing element content. The previous
++    // `asSchema(FLATMAP_INPUT_SCHEMA).get()` walked the array as asCell items,
++    // and arrays "dereference one more link" (traverse.ts) — an ordinary content
++    // read of every element doc, joining each element's whole-doc label into the
++    // coordinator's per-tx J and smearing MEMBER content onto the result
++    // container's STRUCTURE label even when membership does not depend on element
++    // content (spec §8.5.6.1, SC-8). Membership taint now rides the op-result
++    // reads below + the structure re-stamp (see recordCfcStructureContainer).
++    const op = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op")
++      .get();
++    const sourceListCell = inputsCell.key("list");
++    const listCell = sourceListCell.withTx(tx).resolveAsCell();
++    const rawList = listCell.withTx(tx).getRaw() as unknown;
++    const listBase = listCell.getAsNormalizedFullLink();
++    const list: Cell<any>[] | undefined = rawList === undefined
++      ? undefined
++      : !Array.isArray(rawList)
++      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
++      : rawList.map((slot, i) => {
++        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
++          ? parseLink(slot, listBase)
++          : { ...listBase, path: [...listBase.path, String(i)] };
++        const resolved = resolveLink(runtime, tx, slotLink, "value");
++        return runtime.getCellFromLink(resolved, undefined, tx);
++      });
+ 
+     const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
+     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+@@ -198,6 +225,11 @@ export function flatMap(
+     // every element's taint into the coordinator's per-tx join.
+     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
+       .withTx(tx);
++    // (S16) Declare the result container so prepare re-derives its `structure`
++    // label (membership/order/multiplicity, §8.5.6.1) from this tx's J — the
++    // selection criteria the coordinator read (op results) — EVERY reconcile,
++    // decoupled from value writes. See filter.ts / recordCfcStructureContainer.
++    tx.recordCfcStructureContainer(result.getAsNormalizedFullLink());
+     // Container reads/writes run under the link-resolution-probe scope (S16):
+     // the presence probe and set() diffing materialize prior slots for identity
+     // comparison only — per-slot labels ride the link-write machinery, not these
+diff --git a/packages/runner/src/cfc/prepare.ts b/packages/runner/src/cfc/prepare.ts
+index fc7b63503..7c7f004f5 100644
+--- a/packages/runner/src/cfc/prepare.ts
++++ b/packages/runner/src/cfc/prepare.ts
+@@ -3174,6 +3174,26 @@ export const prepareBoundaryCommit = (
+     );
+   }
+   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
++  // (S16) Result containers a list coordinator (filter/flatMap) declared this
++  // tx: re-derive their `structure` label from J every reconcile, decoupled
++  // from value writes. Membership taint (the predicate-result reads the
++  // coordinator consumed) settles on a later pass than the container's root
++  // value write, and incremental changes are slot/no-op writes that never
++  // re-stamp the root — so without this the taint never lands. Only when there
++  // IS taint (flowHasLabels): a transient empty-J reconcile must NOT clear a
++  // correct prior structure label (resume/loading), so we leave the container
++  // off the persist loop then (fail-safe: keep the existing label).
++  const structureContainerPaths = new Map<string, readonly string[]>();
++  if (flowPersist && flowHasLabels) {
++    for (const addr of tx.getCfcState().structureContainers) {
++      const containerKey = targetKey(addr);
++      structureContainerPaths.set(
++        containerKey,
++        canonicalizeLogicalPath(addr.path),
++      );
++      targetKeys.add(containerKey);
++    }
++  }
+   if (flowPersist && flowTargets !== undefined) {
+     // Flow targets enter the persist loop when there is taint to attach or
+     // stale per-value components (derived/link) to replace under a written
+@@ -3488,6 +3508,28 @@ export const prepareBoundaryCommit = (
+         }
+         derivedStampPaths.push(path);
+       }
++      // (S16) A declared list-coordinator container re-derives its `structure`
++      // from J this reconcile even with no value write: drop the carried-forward
++      // structure entry at the exact container path (preserving per-slot
++      // `link[i]` labels) and re-stamp it below with the current J.
++      const structureContainerPath = structureContainerPaths.get(key);
++      if (structureContainerPath !== undefined) {
++        const containerPathKey = pathKey(structureContainerPath);
++        for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
++          const candidateEntry = persistedLabelEntries[i];
++          if (
++            candidateEntry.origin === "structure" &&
++            pathKey(candidateEntry.path) === containerPathKey
++          ) {
++            persistedLabelEntries.splice(i, 1);
++          }
++        }
++        if (
++          !structureStampPaths.some((p) => pathKey(p) === containerPathKey)
++        ) {
++          structureStampPaths.push(structureContainerPath);
++        }
++      }
+       for (const path of derivedStampPaths) {
+         // Deeper stamped paths are redundant with a stamped ancestor; only
+         // collapse against paths that actually receive a covering entry.
+diff --git a/packages/runner/src/cfc/types.ts b/packages/runner/src/cfc/types.ts
+index 0fbcdf096..536fc1e37 100644
+--- a/packages/runner/src/cfc/types.ts
++++ b/packages/runner/src/cfc/types.ts
+@@ -325,6 +325,16 @@ export type CfcTxState = {
+   flowLabelsMode: CfcFlowLabelsMode;
+   prepare: CfcPrepareState;
+   dereferenceTraces: CfcDereferenceTrace[];
++  // Result containers a list coordinator (filter/flatMap) declares each
++  // reconcile: their `structure` label (membership/order, §8.5.6.1) must be
++  // re-derived from the per-tx join J — the selection criteria the coordinator
++  // read (predicate results) — EVERY reconcile, decoupled from value writes.
++  // The membership taint settles on a later pass than the container's root
++  // value write, and incremental changes are slot/no-op writes that never
++  // re-stamp the root, so without this the taint never lands (S16 over-taint
++  // fix, the dual of the input-read over-taint). map does NOT declare: it is
++  // length-preserving with no membership secret, so its container stays clean.
++  structureContainers: CfcAddress[];
+   // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
+   // reads): the decision to run *now* was influenced by their values, so
+   // they join the flow-label derivation even when the run never re-reads
+diff --git a/packages/runner/src/storage/extended-storage-transaction.ts b/packages/runner/src/storage/extended-storage-transaction.ts
+index 4d4919fe3..8a15d7f83 100644
+--- a/packages/runner/src/storage/extended-storage-transaction.ts
++++ b/packages/runner/src/storage/extended-storage-transaction.ts
+@@ -57,6 +57,7 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
+ import {
+   type AttemptedWrite,
+   canonicalizeLogicalPath,
++  type CfcAddress,
+   CFC_ENFORCING_STRICTNESS,
+   type CfcDereferenceTrace,
+   type CfcEnforcementMode,
+@@ -121,6 +122,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
+     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
+     prepare: { status: "unprepared" },
+     dereferenceTraces: [],
++    structureContainers: [],
+     triggerReads: [],
+     writePolicyInputs: [],
+     writePolicyInputIdentities: new Map(),
+@@ -445,6 +447,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
+     }
+   }
+ 
++  recordCfcStructureContainer(address: CfcAddress): void {
++    this.cfcState.structureContainers.push(deepFreeze(address));
++    if (this.cfcState.prepare.status === "prepared") {
++      this.invalidateCfc("structure-container-added");
++    }
++  }
++
+   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
+     this.cfcState.trustSnapshot = snapshot;
+     if (this.cfcState.prepare.status === "prepared") {
+@@ -921,6 +930,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
+     this.outboxIdempotencyKeys.clear();
+     this.cfcState.prepare = { status: "unprepared" };
+     this.cfcState.dereferenceTraces = [];
++    this.cfcState.structureContainers = [];
+     return this.tx.abort(reason);
+   }
+ 
+@@ -1196,6 +1206,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
+     this.wrapped.recordCfcDereferenceTrace(trace);
+   }
+ 
++  recordCfcStructureContainer(address: CfcAddress): void {
++    this.wrapped.recordCfcStructureContainer(address);
++  }
++
+   prepareCfc(): string {
+     return this.wrapped.prepareCfc();
+   }
+diff --git a/packages/runner/src/storage/interface.ts b/packages/runner/src/storage/interface.ts
+index e7c8fc11f..5163b7de7 100644
+--- a/packages/runner/src/storage/interface.ts
++++ b/packages/runner/src/storage/interface.ts
+@@ -39,6 +39,7 @@ import {
+ import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
+ import { Cell } from "../cell.ts";
+ import type {
++  CfcAddress,
+   CfcDereferenceTrace,
+   CfcEnforcementMode,
+   CfcFlowLabelsMode,
+@@ -906,6 +907,15 @@ export interface IExtendedStorageTransaction
+    */
+   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+ 
++  /**
++   * Declares a list-coordinator result container (filter/flatMap) whose
++   * `structure` label must be re-derived from this transaction's flow-join J
++   * (its selection criteria) — independent of whether the container value is
++   * written this tx. See `CfcTxState.structureContainers`. The address is
++   * `deepFreeze()`d on entry.
++   */
++  recordCfcStructureContainer(address: CfcAddress): void;
++
+   /**
+    * Runs CFC boundary verification for this transaction and records the
+    * prepared digest. Takes no caller-supplied input: the commit-time digest

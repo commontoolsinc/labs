@@ -30,18 +30,17 @@ this doc ("port map's identity-only input materialization to filter/flatMap") is
   and its `structure` stamp never fires** (verified: 0 structure stamps emitted
   with the fix; the unfixed code stamps `[alice,bob]` on pass 1 via the leak).
   **The leak was masking a label-stamp-timing bug.**
-- **A precise fix is feasible but is NOT "read links-only".** We BUILT a Stage-1
-  prototype (identity-only input + re-stamp container `structure` on slot writes):
-  it removes the over-taint AND keeps membership taint for survivors —
-  **322/323 CFC+list steps pass, map no-smear preserved, the 2 tests the naive fix
-  broke now pass.** The ONE failing test (`empty result … membership taint`) plus a
-  structural timing fragility share one root cause: the `structure` stamp only rides
-  a container *root value write*, which happens before predicates are ready. The
-  robust complete fix (**Stage 2**) re-derives `structure` from the coordinator's J
-  **every reconcile, decoupled from value writes** — a structure-stamp-discipline
-  change in `cfc/prepare.ts` (the hard part: replace `structure[]` while preserving
-  per-slot `link[i]` entries). That's **seefeld's call** (he said "let me think more
-  about it"; he's right). Full account + patch + Q1–Q5 below.
+- **A precise fix is feasible AND BUILT — Stage 2 is complete.** The robust fix:
+  (1) identity-only input read on filter/flatMap (removes the over-taint, breaks the
+  feedback loop so predicate results become precise); (2) a coordinator→prepare
+  signal (`tx.recordCfcStructureContainer`) so prepare **re-derives the container's
+  `structure` label from the per-tx J every reconcile, decoupled from value writes**
+  (membership taint settles a pass after the root write; this lands it robustly).
+  map opts out (no membership secret → stays clean). **Verified: over-taint REMOVED
+  (index-drop → `structure=[]`), membership PRESERVED (isPositive → `[alice,bob]`,
+  empty result, shape-only reader), and the FULL runner suite is green — 717 files /
+  3533 steps, 0 failed.** Patch: [`S16-stage2-complete.patch`](./S16-stage2-complete.patch).
+  Remaining is a design *blessing* for seefeld (Q1–Q5 below), not a blocker.
 - **map is genuinely different and correctly identity-only**: it is pointwise /
   length-preserving and has **no** membership taint, so it has nothing to lose by
   not reading elements. The map/filter asymmetry seefeld sensed is real.
@@ -140,40 +139,55 @@ changes are slot link writes (Stage 1 hooks these) or value no-ops (empty case �
 elided). The membership taint (predicate-result reads) is only available on a later
 pass, with no root write to ride.
 
-### Stage 2 — value-independent structure re-stamp (the robust complete fix; NOT built)
-The correct, timing-robust rule: **filter/flatMap re-derive their result container's
-`structure` label from the coordinator's J on every reconcile, decoupled from value
-writes.** Implementation shape:
-- Coordinator → prepare signal: a per-tx "structure container" set (e.g.
-  `tx.markCfcStructureContainer(resultLink)`; state on `CfcTxState`,
-  `extended-storage-transaction.ts`), called by filter/flatMap each reconcile.
-- prepare: add marked containers to `targetKeys` (so the per-doc loop processes them
-  even with no value write) and stamp `structure[]=J`.
-- **The hard, risk-bearing part** (why this is a discipline change, not a one-liner):
-  replacing the `structure[]` entry must **preserve the per-slot `link[i]` entries**.
-  The existing carry-forward clearing (`prepare.ts:3386-3394`) is *path-prefix-based*
-  — clearing under `[]` would wipe `link[0]` too. So Stage 2 needs new exact-path
-  "replace structure[] only" merge logic, integrated with carry-forward and
-  skip-if-unchanged (the labelMap novelty diff gives label-only skip for free *if*
-  the doc is processed).
+### Stage 2 — value-independent structure re-stamp (BUILT; complete; 717/3533 green)
+Patch: [`S16-stage2-complete.patch`](./S16-stage2-complete.patch) (6 files, +149/−4;
+supersedes the Stage-1 prototype — it does NOT use the slot-write hook). Rule:
+**filter/flatMap re-derive their result container's `structure` from the per-tx J
+every reconcile, decoupled from value writes.** Implementation:
+- **`cfc/types.ts`:** `CfcTxState.structureContainers: CfcAddress[]`.
+- **`storage/interface.ts` + `extended-storage-transaction.ts`:** new
+  `recordCfcStructureContainer(address)` (mirrors `recordCfcDereferenceTrace`:
+  deep-frozen, invalidates a prepared digest, reset on abort, delegated by the wrapper).
+- **`builtins/filter.ts` / `flatmap.ts`:** identity-only input materialization +
+  `tx.recordCfcStructureContainer(result.getAsNormalizedFullLink())` each reconcile.
+- **`cfc/prepare.ts`:** when `flowPersist && flowHasLabels`, add declared containers
+  to `targetKeys`; in the stamp block, **drop the carried-forward `structure` entry at
+  the exact container path (preserving per-slot `link[i]`) and re-stamp `structure[]=J`.**
+- **Two correctness choices baked in (flag for review):**
+  - **Fail-safe on transient empty J:** the re-stamp only runs when `flowHasLabels`
+    (J non-empty), so a resume/loading reconcile with not-yet-ready predicates does
+    NOT clear a correct prior `structure` label. Consequence: it is **grow/replace on
+    non-empty J only** — it won't actively *clear* a stale structure when the secret
+    truly goes away until a later non-empty-J recompute (S16 §6 "no retroactive
+    relabel; self-corrects" — same posture as `derived`).
+  - **Exact-path replace** for the structure entry (not the prefix-based carry-forward
+    clear, which would wipe `link[i]`).
 
-### Specific questions for seefeld
-- **Q1.** Adopt "structure = selection-criteria J, re-derived every reconcile" as the
-  rule for filter/flatMap? (vs. accept the current conservative over-taint as fail-safe
-  and revisit at egress time.)
-- **Q2. Churn:** Stage 2 makes every filter/flatMap reconcile do a labelMap diff for
-  the container even on value no-ops. Skip-if-unchanged means **no write when J is
-  stable** — acceptable, or do you want it gated (only when the predicate-read set
-  changed)?
-- **Q3. map:** map has no membership secret (length-preserving). Opt map out of the
-  structure re-stamp, or stamp it too (its J is ~empty under identity-only input, so
-  harmless)?
-- **Q4. Order/offset (§8.5.6.1):** a reorder with the same key-set changes order but
-  not membership. Should `structure` also re-stamp on reorder, and does J capture the
-  comparator's reads? (Out of scope for filter's keep/drop; matters for sort-like.)
-- **Q5.** Is the exact-path "replace structure[] preserving link[i]" merge the right
-  primitive, or should the structure component live in a separate map from per-slot
-  link labels entirely?
+### Verification
+- `cfc-flow-pointwise.test.ts`: all 4 (map no-smear; filter membership; shape-only
+  reader; **empty result**) green.
+- Over-taint removed (my guard): index-drop predicate → `structure=[]`; isPositive →
+  `structure=[alice,bob]`.
+- **Full runner suite: 717 files / 3533 steps, 0 failed.**
+
+### Residual questions for seefeld (design blessing, not blockers)
+- **Q1 (answered by impl, confirm):** "structure = selection-criteria J, re-derived
+  every reconcile" — adopted. OK as the model, or prefer accepting the conservative
+  over-taint as fail-safe? (The fix is opt-in per-builtin, so reversible.)
+- **Q2 (churn):** every filter/flatMap reconcile now does a labelMap diff for the
+  container even on value no-ops; skip-if-unchanged means **no write when J is stable**
+  (verified — no storage churn in the suite). Acceptable, or gate on "predicate-read
+  set changed"?
+- **Q3 (map):** opted OUT (map doesn't declare; stays clean). Confirm map should never
+  carry membership `structure` (it's length-preserving).
+- **Q4 (clearing semantics):** the fail-safe "only re-stamp on non-empty J" means a
+  structure label can stay stale-high after the secret leaves until the next
+  non-empty-J recompute. Is the `derived`-style "self-corrects on recompute" posture
+  right here, or do you want active clearing (with resume-flicker guards)?
+- **Q5 (order/offset, §8.5.6.1):** filter keep/drop is covered; a pure reorder
+  (same key-set) changes order but writes no slot links — does it need its own
+  re-stamp, and does J capture the comparator's reads? (Matters for sort-like; out of
+  scope for filter/flatMap.)
 
 ## #4391 — recommendation
 Drop the "S16 over-taint fix" framing. The container-read commit

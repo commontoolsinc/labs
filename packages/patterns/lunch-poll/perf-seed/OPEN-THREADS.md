@@ -65,17 +65,18 @@ implements it via `linkResolutionProbe`) and filter/flatMap (which didn't) drift
 `08-09` spec edit. **Thread 3 is its implementation half.**
 
 ### 3. S16 filter/flatMap over-taint (implementation) → **[`S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md`](./S16-FILTER-FLATMAP-OVERTAINT-HANDOFF.md)**
-**[VERIFIED 2026-06-29 — prior "port map's idiom" plan was WRONG]**
-The input-list read DOES over-taint the result `structure` label (verified observable: an index-only
-predicate still taints it with dropped elements' content). **BUT** porting map's identity-only
-materialization is a **security regression** — that same read is the sole carrier of the legitimate
-§8.5.6.1 membership taint, and removing it makes the team's own `cfc-flow-pointwise` filter tests go
-red. Traced root cause: the correct carrier (predicate-result reads) is precise but arrives on reconcile
-pass 2, when `skip-if-unchanged` elides the container write → its `structure` stamp never fires; the leak
-was masking a **label-stamp-timing** bug. A precise fix needs map-style input read **plus** re-stamping
-`structure` when J changes without a value change — structure-stamp discipline, **seefeld's domain**
-(CT-1801 reframed). #4391's container change is separately label-neutral. Full trace + the
-fails-without/passes-with shape (with the essential `isPositive` control) are in the handoff doc.
+**[FIX BUILT 2026-06-29 — complete, full suite green; awaiting seefeld's design blessing]**
+The input-list read over-taints the result `structure` label with member content (verified observable:
+an index-only predicate taints it with dropped elements). The naive "mirror map" fix is a **security
+regression** (that read is also the sole carrier of the legitimate §8.5.6.1 membership taint). The
+**complete fix** (built, [`S16-stage2-complete.patch`](./S16-stage2-complete.patch)): identity-only
+input on filter/flatMap **+** `tx.recordCfcStructureContainer` so prepare re-derives the container's
+`structure` from the per-tx J **every reconcile, decoupled from value writes** (membership taint settles
+a pass after the root write). map opts out (stays clean). **Verified:** over-taint removed (index-drop →
+`structure=[]`), membership preserved (isPositive/empty/shape-only), **full runner suite 717 files /
+3533 steps, 0 failed.** Residual = design blessing for seefeld (Q1–Q5 in handoff: clearing semantics,
+churn, order/offset). #4391's container change is separately label-neutral. **Landing decision open:**
+new PR off main vs. fold into #4391.
 
 ### 4. Resume during-batch self-heal → **CT-1802** (resolved; deferred guard)
 The "write-after-sync" worry (republish reads a transient `undefined` → persists a shrink) is
