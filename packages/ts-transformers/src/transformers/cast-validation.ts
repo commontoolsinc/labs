@@ -311,8 +311,8 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     seenSymbols: Set<ts.Symbol>,
   ): string | undefined {
     const symbol = context.checker.getSymbolAtLocation(typeName);
-    if (!symbol) return undefined;
-    return this.resolveWrapperSymbolName(symbol, context, seenSymbols);
+    return symbol &&
+      this.resolveWrapperSymbolName(symbol, context, seenSymbols);
   }
 
   private resolveWrapperSymbolName(
@@ -373,7 +373,6 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     seenSymbols: Set<ts.Symbol>,
   ): string | undefined {
     for (const clause of declaration.heritageClauses ?? []) {
-      if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
       for (const heritageType of clause.types) {
         const symbol = context.checker.getSymbolAtLocation(
           heritageType.expression,

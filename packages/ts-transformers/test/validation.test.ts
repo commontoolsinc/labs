@@ -303,6 +303,58 @@ Deno.test("Cast Validation", async (t) => {
     },
   );
 
+  await t.step("allows unresolved type references", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as MissingCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows unresolved qualified type references", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as MissingNamespace.MissingCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows recursive local type aliases", async () => {
+    const source = `
+      type LocalCell<T> = LocalCell<T>;
+
+      const data: any = { value: 42 };
+      const cell = data as LocalCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows interfaces extending unresolved types", async () => {
+    const source = `
+      interface LocalCell<T> extends MissingCell<T> {}
+
+      const data: any = { value: 42 };
+      const cell = data as LocalCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
   await t.step("allows unrelated local types named 'Cell'", async () => {
     const source = `
       type Cell<T> = { value: T };
