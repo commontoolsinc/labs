@@ -16,44 +16,26 @@ interface Problem {
     discount: number;
     tax: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    price: number;
-    discount: number;
-}, number>(({ price, discount }) => price - discount, {
-    type: "object",
-    properties: {
-        price: {
-            type: "number"
-        },
-        discount: {
-            type: "number"
-        }
-    },
-    required: ["price", "discount"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:-", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    price: number;
-    discount: number;
-    tax: number;
-}, number>(({ price, discount, tax }) => (price - discount) * (1 + tax), {
-    type: "object",
-    properties: {
-        price: {
-            type: "number"
-        },
-        discount: {
-            type: "number"
-        },
-        tax: {
-            type: "number"
-        }
-    },
-    required: ["price", "discount", "tax"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 - __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:-", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 - __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 // FIXTURE: complex-expressions
 // Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
 //   {price - discount}             → lift((...) => price - discount)({ price, discount })
@@ -65,15 +47,8 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
-          <p>Discount: {__cfLift_1({
-            price: price,
-            discount: discount
-        })}</p>
-          <p>With tax: {__cfLift_2({
-            price: price,
-            discount: discount,
-            tax: tax
-        })}</p>
+          <p>Discount: {__cfLift_1([price, discount])}</p>
+          <p>With tax: {__cfLift_4([(__cfLift_2([price, discount])), (__cfLift_3([1, tax]))])}</p>
         </div>),
     };
 }, {
@@ -125,5 +100,7 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
-    __cfLift_2
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4
 });

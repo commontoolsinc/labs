@@ -19,72 +19,22 @@ interface State {
     points: Point[];
     scale: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    x: number;
-    state: {
-        scale: number;
-    };
-}, number>(({ x, state }) => x * state.scale, {
-    type: "object",
-    properties: {
-        x: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                scale: {
-                    type: "number"
-                }
-            },
-            required: ["scale"]
-        }
-    },
-    required: ["x", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    y: number;
-    state: {
-        scale: number;
-    };
-}, number>(({ y, state }) => y * state.scale, {
-    type: "object",
-    properties: {
-        y: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                scale: {
-                    type: "number"
-                }
-            },
-            required: ["scale"]
-        }
-    },
-    required: ["y", "state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element", "x");
     const y = __cf_pattern_input.key("element", "y");
     const state = __cf_pattern_input.key("params", "state");
     return (<div>
-            Point: ({__cfLift_1({
-        x: x,
-        state: {
-            scale: state.key("scale")
-        }
-    })}, {__cfLift_2({
-        y: y,
-        state: {
-            scale: state.key("scale")
-        }
-    })})
+            Point: ({__cfLift_1([x, state.key("scale")])}, {__cfLift_2([y, state.key("scale")])})
           </div>);
 }, {
     type: "object",

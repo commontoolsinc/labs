@@ -25,19 +25,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    count: number;
-}, number>(({ count }) => count + 1, {
-    type: "object",
-    properties: {
-        count: {
-            type: "number"
-        }
-    },
-    required: ["count"]
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfLift_3 = __cfHelpers.lift<{
     cell: __cfHelpers.Writable<number>;
 }, number>(({ cell }) => cell.get(), {
@@ -100,7 +92,7 @@ export default pattern((__cf_pattern_input) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_2({ count: count }), 0).for(["__patternResult", "value"], true),
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_2([count, 1]), 0).for(["__patternResult", "value"], true),
         cellValue: ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {

@@ -22,76 +22,21 @@ interface State {
         discount: number;
     };
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    item: {
-        price: number;
-    };
-    state: {
-        checkout: {
-            discount: number;
-        };
-        upsell: {
-            discount: number;
-        };
-    };
-}, number>(({ item, state }) => item.price * state.checkout.discount * state.upsell.discount, {
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
-            },
-            required: ["price"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                checkout: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["discount"]
-                },
-                upsell: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["discount"]
-                }
-            },
-            required: ["checkout", "upsell"]
-        }
-    },
-    required: ["item", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
     return (<span>
-            {__cfLift_1({
-        item: {
-            price: item.key("price")
-        },
-        state: {
-            checkout: {
-                discount: state.key("checkout", "discount")
-            },
-            upsell: {
-                discount: state.key("upsell", "discount")
-            }
-        }
-    })}
+            {__cfLift_2([__cfLift_1([item.key("price"), state.key("checkout", "discount")]), state.key("upsell", "discount")])}
           </span>);
 }, {
     type: "object",
@@ -248,5 +193,6 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
+    __cfLift_2,
     __cfPattern_1
 });

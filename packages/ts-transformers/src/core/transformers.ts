@@ -81,6 +81,18 @@ export interface TransformationOptions {
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
+  /**
+   * Lower a recognized arithmetic / comparison / unary OPERATOR expression to a
+   * BRANDED `__cfHelpers.exprLift(...)` call (so the reactive interpreter can
+   * interpret it as a native `expr` op) instead of an opaque
+   * `__cfHelpers.lift(...)` leaf (08-expression-interpretation §2/§3). The brand
+   * is a no-op under flag-off (legacy runs the identical operator body), so this
+   * is byte-equivalent at runtime; only the supported operator subset is branded
+   * (the fail-closed `SUPPORTED_EXPR_*_OPERATORS` allow-list). Defaults to ON
+   * (`undefined` ⇒ enabled). Set `false` to suppress branding (e.g. to pin the
+   * pre-08 emitted shape in a golden).
+   */
+  readonly lowerExprOps?: boolean;
 }
 
 export type DiagnosticSeverity = "error" | "warning";

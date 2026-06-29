@@ -17,40 +17,15 @@ interface State {
     }>;
     discount: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    cost: number;
-    state: {
-        discount: number;
-    };
-}, number>(({ cost, state }) => cost * state.discount, {
-    type: "object",
-    properties: {
-        cost: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["discount"]
-        }
-    },
-    required: ["cost", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const cost = __cf_pattern_input.key("element", "price");
     const state = __cf_pattern_input.key("params", "state");
-    return (<span>{__cfLift_1({
-        cost: cost,
-        state: {
-            discount: state.key("discount")
-        }
-    })}</span>);
+    return (<span>{__cfLift_1([cost, state.key("discount")])}</span>);
 }, {
     type: "object",
     properties: {

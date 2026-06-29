@@ -8,6 +8,7 @@ import {
   findPendingComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
+import { createExprLiftCall } from "../../builtins/expr-lift.ts";
 import {
   classifyArrayMethodCall,
   isReactiveValueExpression,
@@ -15,7 +16,10 @@ import {
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
+import {
+  shouldLowerLogicalExpression,
+  SUPPORTED_EXPR_BINARY_OPERATORS,
+} from "../../../policy/mod.ts";
 
 function getTransparentReceiverWrappedExpression(
   node: ts.Node,
@@ -245,6 +249,38 @@ export const emitBinaryExpression: Emitter = ({
       pendingWrap,
       expression,
       "binary expression",
+      context,
+    );
+  }
+
+  // BRANDED EXPR-OP LOWERING (08-expression-interpretation §2/§3). For a
+  // recognized arithmetic/comparison operator (the fail-closed allow-list), emit
+  // a branded `exprLift` whose POSITIONAL operands are the rewritten left/right
+  // sub-expressions — so the reactive interpreter lowers it to a native `expr`
+  // op while legacy runs the identical operator body. Gated to:
+  //   - the supported operator subset (everything else → the un-branded lift);
+  //   - the simple `pendingWrap === expression` case (the synthetic-array
+  //     receiver wrap rewires a DIFFERENT node, and a wrap whose candidate is a
+  //     wider enclosing expression must keep the dataflow-capture wrapper so all
+  //     captures flow — only the operator expression itself is positionally
+  //     decomposable into left/right operands);
+  //   - `lowerExprOps !== false` (default ON).
+  // Any miss falls through to the existing un-branded wrapper UNCHANGED.
+  const exprBrand = SUPPORTED_EXPR_BINARY_OPERATORS.get(operator);
+  if (
+    exprBrand !== undefined &&
+    context.options.lowerExprOps !== false &&
+    !allowedSyntheticArrayReceiverWrap &&
+    pendingWrap === expression
+  ) {
+    const left = rewriteSubexpression(expression.left);
+    const right = rewriteSubexpression(expression.right);
+    return createExprLiftCall(
+      expression,
+      `expr:${exprBrand}`,
+      operator,
+      false,
+      [left, right],
       context,
     );
   }

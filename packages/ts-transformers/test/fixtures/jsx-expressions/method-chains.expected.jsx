@@ -128,10 +128,15 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
-    return x > state.key("threshold");
+    return __cfLift_5([x, state.key("threshold")]).for("__patternResult", true);
 }, {
     type: "object",
     properties: {
@@ -158,40 +163,15 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.lift<{
-    x: number;
-    state: {
-        factor: number;
-    };
-}, number>(({ x, state }) => x * state.factor, {
-    type: "object",
-    properties: {
-        x: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                factor: {
-                    type: "number"
-                }
-            },
-            required: ["factor"]
-        }
-    },
-    required: ["x", "state"]
+const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
-    return (<li>Value: {__cfLift_5({
-        x: x,
-        state: {
-            factor: state.key("factor")
-        }
-    })}</li>);
+    return (<li>Value: {__cfLift_6([x, state.key("factor")])}</li>);
 }, {
     type: "object",
     properties: {
@@ -236,7 +216,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.lift<{
+const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: number[];
         start: number;
@@ -268,7 +248,7 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_7 = __cfHelpers.lift<{
+const __cfLift_8 = __cfHelpers.lift<{
     state: {
         items: number[];
         start: number;
@@ -300,7 +280,7 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_8 = __cfHelpers.lift<{
+const __cfLift_9 = __cfHelpers.lift<{
     state: {
         names: string[];
         prefix: string;
@@ -328,7 +308,7 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_9 = __cfHelpers.lift<{
+const __cfLift_10 = __cfHelpers.lift<{
     state: {
         names: string[];
         searchTerm: string;
@@ -356,7 +336,7 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.lift<{
+const __cfLift_11 = __cfHelpers.lift<{
     name: string;
 }, string>(({ name }) => name.trim().toLowerCase().replace(" ", "-"), {
     type: "object",
@@ -371,7 +351,7 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const name = __cf_pattern_input.key("element");
-    return (<li>{__cfLift_10({ name: name })}</li>);
+    return (<li>{__cfLift_11({ name: name })}</li>);
 }, {
     type: "object",
     properties: {
@@ -401,7 +381,7 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_11 = __cfHelpers.lift<{
+const __cfLift_12 = __cfHelpers.lift<{
     state: {
         prices: number[];
         discount: number;
@@ -429,13 +409,11 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_12 = __cfHelpers.lift<{
+const __cfLift_13 = __cfHelpers.lift<{
     state: {
         items: number[];
-        factor: number;
     };
-}, number>(({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
-    state.factor, {
+}, number>(({ state }) => state.items.reduce((a, b) => a + b, 0), {
     type: "object",
     properties: {
         state: {
@@ -446,19 +424,26 @@ const __cfLift_12 = __cfHelpers.lift<{
                     items: {
                         type: "number"
                     }
-                },
-                factor: {
-                    type: "number"
                 }
             },
-            required: ["items", "factor"]
+            required: ["items"]
         }
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_13 = __cfHelpers.lift<{
+const __cfLift_14 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:/", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 / __cfExpr1));
+const __cfLift_15 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_16 = __cfHelpers.lift<{
     state: {
         prices: number[];
         discount: number;
@@ -486,7 +471,7 @@ const __cfLift_13 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_14 = __cfHelpers.lift<{
+const __cfLift_17 = __cfHelpers.lift<{
     state: {
         text: string;
         prefix: string;
@@ -511,7 +496,7 @@ const __cfLift_14 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_15 = __cfHelpers.lift<{
+const __cfLift_18 = __cfHelpers.lift<{
     state: {
         text: string;
         prefix: string;
@@ -537,7 +522,7 @@ const __cfLift_15 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_16 = __cfHelpers.lift<{
+const __cfLift_19 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
         minAge: number;
@@ -574,7 +559,7 @@ const __cfLift_16 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_17 = __cfHelpers.lift<{
+const __cfLift_20 = __cfHelpers.lift<{
     u: {
         name: string;
     };
@@ -595,7 +580,7 @@ const __cfLift_17 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_18 = __cfHelpers.lift<{
+const __cfLift_21 = __cfHelpers.lift<{
     u: {
         name: string;
     };
@@ -626,9 +611,9 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfLift_17({ u: {
+    } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfLift_20({ u: {
             name: u.key("name")
-        } }), __cfLift_18({ u: {
+        } }), __cfLift_21({ u: {
             name: u.key("name")
         } }))}</li>);
 }, {
@@ -672,7 +657,7 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_19 = __cfHelpers.lift<{
+const __cfLift_22 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
         minAge: number;
@@ -706,7 +691,7 @@ const __cfLift_19 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_20 = __cfHelpers.lift<{
+const __cfLift_23 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
     };
@@ -736,12 +721,11 @@ const __cfLift_20 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_21 = __cfHelpers.lift<{
+const __cfLift_24 = __cfHelpers.lift<{
     state: {
         text: string;
-        prefix: string;
     };
-}, number>(({ state }) => state.text.trim().length + state.prefix.trim().length, {
+}, number>(({ state }) => state.text.trim().length, {
     type: "object",
     properties: {
         state: {
@@ -749,19 +733,42 @@ const __cfLift_21 = __cfHelpers.lift<{
             properties: {
                 text: {
                     type: "string"
-                },
-                prefix: {
-                    type: "string"
                 }
             },
-            required: ["text", "prefix"]
+            required: ["text"]
         }
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_22 = __cfHelpers.lift<{
+const __cfLift_25 = __cfHelpers.lift<{
+    state: {
+        prefix: string;
+    };
+}, number>(({ state }) => state.prefix.trim().length, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_26 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_27 = __cfHelpers.lift<{
     state: {
         text: string;
         threshold: number;
@@ -786,7 +793,7 @@ const __cfLift_22 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_23 = __cfHelpers.lift<{
+const __cfLift_28 = __cfHelpers.lift<{
     state: {
         words: string[];
         separator: string;
@@ -859,20 +866,20 @@ export default pattern((state) => {
         {/* Filter then map */}
         <ul>
           {state.key("items").filterWithPattern(__cfPattern_1, {
-                state: {
-                    threshold: state.key("threshold")
-                }
-            }).mapWithPattern(__cfPattern_2, {
-                state: {
-                    factor: state.key("factor")
-                }
-            })}
+            state: {
+                threshold: state.key("threshold")
+            }
+        }).mapWithPattern(__cfPattern_2, {
+            state: {
+                factor: state.key("factor")
+            }
+        })}
         </ul>
 
         {/* Multiple filters */}
         <p>
           Double filter count:{" "}
-          {__cfLift_6({ state: {
+          {__cfLift_7({ state: {
                 items: state.key("items"),
                 start: state.key("start"),
                 end: state.key("end")
@@ -882,7 +889,7 @@ export default pattern((state) => {
         <h3>Methods with Reactive Arguments</h3>
         {/* Slice with reactive indices */}
         <p>
-          Sliced items: {__cfLift_7({ state: {
+          Sliced items: {__cfLift_8({ state: {
                 items: state.key("items"),
                 start: state.key("start"),
                 end: state.key("end")
@@ -892,7 +899,7 @@ export default pattern((state) => {
         {/* String methods with reactive args */}
         <p>
           Starts with:{" "}
-          {__cfLift_8({ state: {
+          {__cfLift_9({ state: {
                 names: state.key("names"),
                 prefix: state.key("prefix")
             } })}
@@ -900,7 +907,7 @@ export default pattern((state) => {
 
         {/* Array find with reactive predicate */}
         <p>
-          First match: {__cfLift_9({ state: {
+          First match: {__cfLift_10({ state: {
                 names: state.key("names"),
                 searchTerm: state.key("searchTerm")
             } })}
@@ -914,7 +921,7 @@ export default pattern((state) => {
 
         {/* Reduce with reactive accumulator */}
         <p>
-          Total with discount: {__cfLift_11({ state: {
+          Total with discount: {__cfLift_12({ state: {
                 prices: state.key("prices"),
                 discount: state.key("discount")
             } })}
@@ -923,16 +930,15 @@ export default pattern((state) => {
         {/* Method result used in computation */}
         <p>
           Average * factor:{" "}
-          {__cfLift_12({ state: {
-                items: state.key("items"),
-                factor: state.key("factor")
-            } })}
+          {__cfLift_15([(__cfLift_14([__cfLift_13({ state: {
+                        items: state.key("items")
+                    } }), state.key("items", "length")])), state.key("factor")])}
         </p>
 
         <h3>Methods on Computed Values</h3>
         {/* Method on binary expression result */}
         <p>
-          Formatted price: {__cfLift_13({ state: {
+          Formatted price: {__cfLift_16({ state: {
                 prices: state.key("prices"),
                 discount: state.key("discount")
             } })}
@@ -941,7 +947,7 @@ export default pattern((state) => {
         {/* Method on conditional result */}
         <p>
           Conditional trim:{" "}
-          {__cfLift_14({ state: {
+          {__cfLift_17({ state: {
                 text: state.key("text"),
                 prefix: state.key("prefix")
             } })}
@@ -950,7 +956,7 @@ export default pattern((state) => {
         {/* Method chain on computed value */}
         <p>
           Complex:{" "}
-          {__cfLift_15({ state: {
+          {__cfLift_18({ state: {
                 text: state.key("text"),
                 prefix: state.key("prefix")
             } })}
@@ -960,7 +966,7 @@ export default pattern((state) => {
         {/* Filter with multiple conditions */}
         <p>
           Active adults:{" "}
-          {__cfLift_16({ state: {
+          {__cfLift_19({ state: {
                 users: state.key("users"),
                 minAge: state.key("minAge")
             } })}
@@ -982,7 +988,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_19({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_22({ state: {
                 users: state.key("users"),
                 minAge: state.key("minAge")
             } }), "Yes", "No")}
@@ -995,17 +1001,18 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_20({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_23({ state: {
                 users: state.key("users")
             } }), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
         {/* Method result in arithmetic */}
         <p>
-          Length sum: {__cfLift_21({ state: {
-                text: state.key("text"),
-                prefix: state.key("prefix")
-            } })}
+          Length sum: {__cfLift_26([__cfLift_24({ state: {
+                    text: state.key("text")
+                } }), __cfLift_25({ state: {
+                    prefix: state.key("prefix")
+                } })])}
         </p>
 
         {/* Method result in comparison */}
@@ -1018,14 +1025,14 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_22({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_27({ state: {
                 text: state.key("text"),
                 threshold: state.key("threshold")
             } }), "Yes", "No")}
         </p>
 
         {/* Multiple method results combined */}
-        <p>Joined: {__cfLift_23({ state: {
+        <p>Joined: {__cfLift_28({ state: {
                 words: state.key("words"),
                 separator: state.key("separator")
             } })}</p>
@@ -1149,16 +1156,16 @@ __cfReg({
     __cfLift_2,
     __cfLift_3,
     __cfLift_4,
-    __cfPattern_1,
     __cfLift_5,
-    __cfPattern_2,
+    __cfPattern_1,
     __cfLift_6,
+    __cfPattern_2,
     __cfLift_7,
     __cfLift_8,
     __cfLift_9,
     __cfLift_10,
-    __cfPattern_3,
     __cfLift_11,
+    __cfPattern_3,
     __cfLift_12,
     __cfLift_13,
     __cfLift_14,
@@ -1166,10 +1173,15 @@ __cfReg({
     __cfLift_16,
     __cfLift_17,
     __cfLift_18,
-    __cfPattern_4,
     __cfLift_19,
     __cfLift_20,
     __cfLift_21,
+    __cfPattern_4,
     __cfLift_22,
-    __cfLift_23
+    __cfLift_23,
+    __cfLift_24,
+    __cfLift_25,
+    __cfLift_26,
+    __cfLift_27,
+    __cfLift_28
 });

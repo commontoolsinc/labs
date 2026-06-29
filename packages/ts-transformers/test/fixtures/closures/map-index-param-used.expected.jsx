@@ -19,42 +19,17 @@ interface State {
     items: Item[];
     offset: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    index: number;
-    state: {
-        offset: number;
-    };
-}, number>(({ index, state }) => index + state.offset, {
-    type: "object",
-    properties: {
-        index: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                offset: {
-                    type: "number"
-                }
-            },
-            required: ["offset"]
-        }
-    },
-    required: ["index", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");
     const state = __cf_pattern_input.key("params", "state");
     return (<div>
-            Item #{__cfLift_1({
-        index: index,
-        state: {
-            offset: state.key("offset")
-        }
-    })}: {item.key("name")}
+            Item #{__cfLift_1([index, state.key("offset")])}: {item.key("name")}
           </div>);
 }, {
     type: "object",

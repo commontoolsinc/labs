@@ -108,7 +108,12 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:!==", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 !== __cfExpr1));
+const __cfLift_4 = __cfHelpers.lift<{
     tagIndex: number;
     taskIndex: number;
 }, boolean>(({ tagIndex, taskIndex }) => tagIndex === taskIndex, {
@@ -125,6 +130,11 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:u!", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const tagIndex = __cf_pattern_input.key("index");
@@ -141,7 +151,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({
             tagIndex: tagIndex,
             taskIndex: taskIndex
         }), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
@@ -158,7 +168,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), !task.key("done")), tag, ""))}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfLift_5([task.key("done")])), tag, ""))}
                           </span>);
 }, {
     type: "object",
@@ -278,7 +288,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ task: {
                 note: task.key("note")
-            } }), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+            } }), __cfLift_3([task.key("note"), ""])), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -392,7 +402,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_4 = __cfHelpers.lift<{
+const __cfLift_6 = __cfHelpers.lift<{
     section: {
         tasks: {
             length: number;
@@ -498,7 +508,7 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
                     showCompleted: state.key("showCompleted")
                 }
             })}
-                  </div>, __cfLift_4({ section: {
+                  </div>, __cfLift_6({ section: {
                 tasks: {
                     length: section.key("tasks", "length")
                 },
@@ -773,8 +783,10 @@ __cfReg({
     __cfLift_1,
     __cfLift_2,
     __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
     __cfPattern_1,
     __cfPattern_2,
-    __cfLift_4,
+    __cfLift_6,
     __cfPattern_3
 });

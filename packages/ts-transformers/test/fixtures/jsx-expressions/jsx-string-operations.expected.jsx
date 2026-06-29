@@ -18,82 +18,42 @@ interface State {
     message: string;
     count: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        title: string;
-        firstName: string;
-        lastName: string;
-    };
-}, string>(({ state }) => state.title + ": " + state.firstName + " " + state.lastName, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                firstName: {
-                    type: "string"
-                },
-                lastName: {
-                    type: "string"
-                }
-            },
-            required: ["title", "firstName", "lastName"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    state: {
-        firstName: string;
-        lastName: string;
-    };
-}, string>(({ state }) => state.firstName + state.lastName, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                firstName: {
-                    type: "string"
-                },
-                lastName: {
-                    type: "string"
-                }
-            },
-            required: ["firstName", "lastName"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
-    state: {
-        firstName: string;
-    };
-}, string>(({ state }) => "Hello, " + state.firstName + "!", {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                firstName: {
-                    type: "string"
-                }
-            },
-            required: ["firstName"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_4 = __cfHelpers.lift<{
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_7 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_8 = __cfHelpers.lift<{
     state: {
         firstName: string;
     };
@@ -114,7 +74,7 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.lift<{
+const __cfLift_9 = __cfHelpers.lift<{
     state: {
         firstName: string;
         lastName: string;
@@ -139,7 +99,7 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.lift<{
+const __cfLift_10 = __cfHelpers.lift<{
     state: {
         title: string;
         firstName: string;
@@ -168,7 +128,7 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_7 = __cfHelpers.lift<{
+const __cfLift_11 = __cfHelpers.lift<{
     state: {
         firstName: string;
     };
@@ -189,7 +149,7 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_8 = __cfHelpers.lift<{
+const __cfLift_12 = __cfHelpers.lift<{
     state: {
         title: string;
     };
@@ -210,7 +170,7 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_9 = __cfHelpers.lift<{
+const __cfLift_13 = __cfHelpers.lift<{
     state: {
         message: string;
     };
@@ -231,32 +191,22 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.lift<{
-    state: {
-        firstName: string;
-        count: number;
-    };
-}, string>(({ state }) => state.firstName + " has " + state.count + " items", {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                firstName: {
-                    type: "string"
-                },
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["firstName", "count"]
-        }
-    },
-    required: ["state"]
+const __cfLift_14 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_11 = __cfHelpers.lift<{
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_15 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_16 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_17 = __cfHelpers.lift<{
     state: {
         firstName: string;
         count: number;
@@ -281,27 +231,11 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_12 = __cfHelpers.lift<{
-    state: {
-        count: number;
-    };
-}, string>(({ state }) => "Count: " + state.count, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["count"]
-        }
-    },
-    required: ["state"]
+const __cfLift_18 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 // FIXTURE: jsx-string-operations
 // Verifies: string concatenation, template literals, and string methods in JSX are wrapped in a lift-applied computation
 //   state.title + ": " + state.firstName → lift(...)({ title, firstName })
@@ -311,57 +245,43 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
-        <h1>{__cfLift_1({ state: {
-                title: state.key("title"),
-                firstName: state.key("firstName"),
-                lastName: state.key("lastName")
-            } })}</h1>
-        <p>{__cfLift_2({ state: {
-                firstName: state.key("firstName"),
-                lastName: state.key("lastName")
-            } })}</p>
-        <p>{__cfLift_3({ state: {
-                firstName: state.key("firstName")
-            } })}</p>
+        <h1>{__cfLift_4([__cfLift_3([__cfLift_2([__cfLift_1([state.key("title"), ": "]), state.key("firstName")]), " "]), state.key("lastName")])}</h1>
+        <p>{__cfLift_5([state.key("firstName"), state.key("lastName")])}</p>
+        <p>{__cfLift_7([__cfLift_6(["Hello, ", state.key("firstName")]), "!"])}</p>
 
         <h3>Template Literals</h3>
-        <p>{__cfLift_4({ state: {
+        <p>{__cfLift_8({ state: {
                 firstName: state.key("firstName")
             } })}</p>
-        <p>{__cfLift_5({ state: {
+        <p>{__cfLift_9({ state: {
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</p>
-        <p>{__cfLift_6({ state: {
+        <p>{__cfLift_10({ state: {
                 title: state.key("title"),
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</p>
 
         <h3>String Methods</h3>
-        <p>Uppercase: {__cfLift_7({ state: {
+        <p>Uppercase: {__cfLift_11({ state: {
                 firstName: state.key("firstName")
             } })}</p>
-        <p>Lowercase: {__cfLift_8({ state: {
+        <p>Lowercase: {__cfLift_12({ state: {
                 title: state.key("title")
             } })}</p>
         <p>Length: {state.key("message", "length")}</p>
-        <p>Substring: {__cfLift_9({ state: {
+        <p>Substring: {__cfLift_13({ state: {
                 message: state.key("message")
             } })}</p>
 
         <h3>Mixed String and Number</h3>
-        <p>{__cfLift_10({ state: {
+        <p>{__cfLift_16([__cfLift_15([__cfLift_14([state.key("firstName"), " has "]), state.key("count")]), " items"])}</p>
+        <p>{__cfLift_17({ state: {
                 firstName: state.key("firstName"),
                 count: state.key("count")
             } })}</p>
-        <p>{__cfLift_11({ state: {
-                firstName: state.key("firstName"),
-                count: state.key("count")
-            } })}</p>
-        <p>Count as string: {__cfLift_12({ state: {
-                count: state.key("count")
-            } })}</p>
+        <p>Count as string: {__cfLift_18(["Count: ", state.key("count")])}</p>
       </div>),
     };
 }, {
@@ -429,5 +349,11 @@ __cfReg({
     __cfLift_9,
     __cfLift_10,
     __cfLift_11,
-    __cfLift_12
+    __cfLift_12,
+    __cfLift_13,
+    __cfLift_14,
+    __cfLift_15,
+    __cfLift_16,
+    __cfLift_17,
+    __cfLift_18
 });

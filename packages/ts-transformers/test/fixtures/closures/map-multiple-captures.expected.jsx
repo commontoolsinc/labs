@@ -21,67 +21,37 @@ interface State {
     taxRate: number;
 }
 const shippingCost = 5.99;
-const __cfLift_1 = __cfHelpers.lift<{
-    item: {
-        price: number;
-        quantity: number;
-    };
-    state: {
-        discount: number;
-        taxRate: number;
-    };
-    multiplier: number;
-}, number>(({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost, {
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                },
-                quantity: {
-                    type: "number"
-                }
-            },
-            required: ["price", "quantity"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                },
-                taxRate: {
-                    type: "number"
-                }
-            },
-            required: ["discount", "taxRate"]
-        },
-        multiplier: {
-            type: "number"
-        }
-    },
-    required: ["item", "state", "multiplier"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
     const multiplier = __cf_pattern_input.params.multiplier;
     return (<span>
-            Total: {__cfLift_1({
-        item: {
-            price: item.key("price"),
-            quantity: item.key("quantity")
-        },
-        state: {
-            discount: state.key("discount"),
-            taxRate: state.key("taxRate")
-        },
-        multiplier: multiplier
-    })}
+            Total: {__cfLift_5([__cfLift_4([__cfLift_3([__cfLift_2([__cfLift_1([item.key("price"), item.key("quantity")]), state.key("discount")]), state.key("taxRate")]), multiplier]), shippingCost])}
           </span>);
 }, {
     type: "object",
@@ -236,5 +206,9 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
     __cfPattern_1
 });

@@ -162,7 +162,17 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_4 = __cfHelpers.lift<{
     charm: any;
 }, any>(({ charm }) => charm[__cfHelpers.NAME], {
     type: "object",
@@ -176,11 +186,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const index = __cf_pattern_input.key("index");
     return (<li>
                 <cf-button onClick={goToCharm({ charm })}>
-                  Go to Charm {index + 1}
+                  Go to Charm {__cfLift_2([index, 1])}
                 </cf-button>
-                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
+                <span>Charm {__cfLift_3([index, 1])}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ charm: charm }), "Unnamed")}</span>
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ charm: charm }), "Unnamed")}</span>
               </li>);
 }, {
     type: "object",
@@ -305,5 +315,7 @@ __cfReg({
     goToCharm,
     __cfLift_1,
     __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
     __cfPattern_1
 });

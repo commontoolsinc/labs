@@ -117,27 +117,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_1 = __cfHelpers.lift<{
-    msg: {
-        type: string;
-    };
-}, boolean>(({ msg }) => msg.type === "system", {
-    type: "object",
-    properties: {
-        msg: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string"
-                }
-            },
-            required: ["type"]
-        }
-    },
-    required: ["msg"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:===", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 === __cfExpr1));
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const msg = __cf_pattern_input.key("element");
     const selectedId = __cf_pattern_input.key("params", "selectedId");
@@ -153,9 +137,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
                 type: "object",
                 properties: {}
             }]
-    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ msg: {
-            type: msg.key("type")
-        } }), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
+    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1([msg.key("type"), "system"]), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open
               </button>).for("__patternResult", true);
 }, {

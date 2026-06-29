@@ -110,10 +110,17 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     });
     const main = output["/main.tsx"]!;
 
-    // After CT-1615 Phase 1 the pattern-owned synthesized derive lowers to
-    // lift-applied; after CT-1644 Phase 2 the lift call is hoisted to a
-    // module-scope const and the result reads as `doubled: __cfLift_N(input)`.
-    assertStringIncludes(main, "const __cfLift_1 = __cfHelpers.lift<");
+    // `state.count * 2` is a recognized arithmetic OPERATOR (08-expression-
+    // interpretation §2/§3), so it lowers to a BRANDED `exprLift` rather than a
+    // plain `lift`. Like a plain lift it is hoisted to a module-scope const and
+    // the applied result reads as `doubled: __cfLift_N([operands])`, but the
+    // hoisted factory carries the `expr:*` brand. The result-cause stamping
+    // (the real point of this test) is unchanged — the lift-applied dispatchers
+    // treat the branded form identically.
+    assertMatch(
+      main,
+      /const __cfLift_1 = .*__cfHelpers\.exprLift\("expr:\*"/,
+    );
     assertMatch(main, /doubled: __cfLift_\d+\(/);
     assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
     assertNotMatch(main, /state\.key\("count"\)\.for/);

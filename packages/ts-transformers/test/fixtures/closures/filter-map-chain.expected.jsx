@@ -51,51 +51,21 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_1 = __cfHelpers.lift<{
-    item: {
-        price: number;
-    };
-    state: {
-        taxRate: number;
-    };
-}, number>(({ item, state }) => item.price * (1 + state.taxRate), {
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
-            },
-            required: ["price"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                taxRate: {
-                    type: "number"
-                }
-            },
-            required: ["taxRate"]
-        }
-    },
-    required: ["item", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
     return (<div>
-              Total: {__cfLift_1({
-        item: {
-            price: item.key("price")
-        },
-        state: {
-            taxRate: state.key("taxRate")
-        }
-    })}
+              Total: {__cfLift_2([item.key("price"), (__cfLift_1([1, state.key("taxRate")]))])}
             </div>);
 }, {
     type: "object",
@@ -242,5 +212,6 @@ __cfHardenFn(h);
 __cfReg({
     __cfPattern_1,
     __cfLift_1,
+    __cfLift_2,
     __cfPattern_2
 });

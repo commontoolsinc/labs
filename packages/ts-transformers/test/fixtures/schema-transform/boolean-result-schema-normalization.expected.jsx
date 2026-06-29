@@ -11,27 +11,11 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        score: number;
-    };
-}, boolean>(({ state }) => state.score > 100, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                score: {
-                    type: "number"
-                }
-            },
-            required: ["score"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead
 // of expanding into literal `true` / `false` enums.
@@ -54,9 +38,7 @@ export default pattern((state: {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfLift_1({ state: {
-                score: state.key("score")
-            } })), "Premium", "Regular")}</div>,
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfLift_1([state.key("score"), 100])), "Premium", "Regular")}</div>,
     };
 }, {
     type: "object",

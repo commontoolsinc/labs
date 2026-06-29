@@ -11,35 +11,11 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        task: {
-            done: boolean;
-        };
-    };
-}, boolean>(({ state }) => !state.task.done, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                task: {
-                    type: "object",
-                    properties: {
-                        done: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["done"]
-                }
-            },
-            required: ["task"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:u!", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0]) => !__cfExpr0));
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;
@@ -83,11 +59,7 @@ export default pattern((state) => ({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfLift_1({ state: {
-            task: {
-                done: state.key("task", "done")
-            }
-        } })), "Visible", "")}</p>
+    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfLift_1([state.key("task", "done")])), "Visible", "")}</p>
       <p>{__cfHelpers.ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {

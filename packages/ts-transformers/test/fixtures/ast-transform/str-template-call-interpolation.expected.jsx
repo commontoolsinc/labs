@@ -39,27 +39,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    cell: {
-        value: number;
-    };
-}, number>(({ cell }) => cell.value + 1, {
-    type: "object",
-    properties: {
-        cell: {
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        }
-    },
-    required: ["cell"]
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 // FIXTURE: str-template-call-interpolation
 // Verifies: reactive lowering of expressions interpolated into a str`` tagged template.
 //   The str runtime lifts its interpolation over the values it receives, so any value
@@ -76,9 +60,7 @@ export default pattern((cell) => {
     return {
         [NAME]: str `bare ${cell.key("value")} call ${__cfLift_1({ cell: {
                 value: cell.key("value")
-            } })} math ${__cfLift_2({ cell: {
-                value: cell.key("value")
-            } })}`,
+            } })} math ${__cfLift_2([cell.key("value"), 1])}`,
         value: cell.key("value"),
     };
 }, {

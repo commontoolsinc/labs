@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     cell: {
         value: __cfHelpers.Cell<number>;
     };
-}, number>(({ cell }) => cell.value.get() * 2, {
+}, number>(({ cell }) => cell.value.get(), {
     type: "object",
     properties: {
         cell: {
@@ -49,15 +49,20 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 // FIXTURE: with-opaque-ref
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
 //   bare `cell.value.get() * 2` → auto-wraps, capturing cell.key("value") into lift(inputSchema, outputSchema, fn)
 export default pattern((cell) => {
-    const doubled = __cfLift_1({ cell: {
-            value: cell.key("value")
-        } }).for("doubled", true);
+    const doubled = __cfLift_2([__cfLift_1({ cell: {
+                value: cell.key("value")
+            } }).for(["doubled", 0], true), 2]).for("doubled", true);
     return {
         [UI]: (<div>
         <p>Value: {cell.key("value")}</p>
@@ -88,5 +93,6 @@ export default pattern((cell) => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
-    __cfLift_1
+    __cfLift_1,
+    __cfLift_2
 });

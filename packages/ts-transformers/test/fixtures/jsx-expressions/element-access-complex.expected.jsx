@@ -137,7 +137,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     state: {
         arr: number[];
     };
-}, number>(({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!, {
+}, number | undefined>(({ state }) => state.arr[state.arr.length - 1], {
     type: "object",
     properties: {
         state: {
@@ -155,9 +155,14 @@ const __cfLift_4 = __cfHelpers.lift<{
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
+    type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.lift<{
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_6 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
@@ -189,7 +194,7 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.lift<{
+const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: string[];
         row: number;
@@ -217,7 +222,7 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_7 = __cfHelpers.lift<{
+const __cfLift_8 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
@@ -245,7 +250,7 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_8 = __cfHelpers.lift<{
+const __cfLift_9 = __cfHelpers.lift<{
     state: {
         users: { name: string; scores: number[]; }[];
         selectedUser: number;
@@ -289,7 +294,7 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_9 = __cfHelpers.lift<{
+const __cfLift_10 = __cfHelpers.lift<{
     state: {
         items: string[];
         indices: number[];
@@ -320,7 +325,7 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.lift<{
+const __cfLift_11 = __cfHelpers.lift<{
     state: {
         arr: number[];
     };
@@ -344,7 +349,7 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_11 = __cfHelpers.lift<{
+const __cfLift_12 = __cfHelpers.lift<{
     state: {
         nested: {
             arrays: string[][];
@@ -383,7 +388,7 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_12 = __cfHelpers.lift<{
+const __cfLift_13 = __cfHelpers.lift<{
     state: {
         users: { name: string; scores: number[]; }[];
         selectedUser: number;
@@ -423,7 +428,7 @@ const __cfLift_12 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_13 = __cfHelpers.lift<{
+const __cfLift_14 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
@@ -451,7 +456,7 @@ const __cfLift_13 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_14 = __cfHelpers.lift<{
+const __cfLift_15 = __cfHelpers.lift<{
     state: {
         items: string[];
         b: number;
@@ -479,7 +484,7 @@ const __cfLift_14 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_15 = __cfHelpers.lift<{
+const __cfLift_16 = __cfHelpers.lift<{
     state: {
         matrix: number[][];
         row: number;
@@ -514,13 +519,12 @@ const __cfLift_15 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_16 = __cfHelpers.lift<{
+const __cfLift_17 = __cfHelpers.lift<{
     state: {
         arr: number[];
         a: number;
-        b: number;
     };
-}, number>(({ state }) => state.arr[state.a]! * state.arr[state.b]!, {
+}, number | undefined>(({ state }) => state.arr[state.a], {
     type: "object",
     properties: {
         state: {
@@ -534,24 +538,59 @@ const __cfLift_16 = __cfHelpers.lift<{
                 },
                 a: {
                     type: "number"
+                }
+            },
+            required: ["arr", "a"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_18 = __cfHelpers.lift<{
+    state: {
+        arr: number[];
+        b: number;
+    };
+}, number | undefined>(({ state }) => state.arr[state.b], {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                arr: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
                 },
                 b: {
                     type: "number"
                 }
             },
-            required: ["arr", "a", "b"]
+            required: ["arr", "b"]
         }
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
+    type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_17 = __cfHelpers.lift<{
+const __cfLift_19 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_20 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_21 = __cfHelpers.lift<{
     state: {
         items: string[];
         indices: number[];
     };
-}, string>(({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!, {
+}, string | undefined>(({ state }) => state.items[state.indices[0]!], {
     type: "object",
     properties: {
         state: {
@@ -575,32 +614,23 @@ const __cfLift_17 = __cfHelpers.lift<{
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
+    type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_18 = __cfHelpers.lift<{
-    state: {
-        arr: number[];
-    };
-}, number>(({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                arr: {
-                    type: "array",
-                    items: {
-                        type: "number"
-                    }
-                }
-            },
-            required: ["arr"]
-        }
-    },
-    required: ["state"]
+const __cfLift_22 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_23 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_24 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 // FIXTURE: element-access-complex
 // Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
 //   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })
@@ -637,26 +667,26 @@ export default pattern((state) => {
         </p>
 
         {/* Array used in computation and access */}
-        <p>Sum of ends: {__cfLift_4({ state: {
-                arr: state.key("arr")
-            } })}</p>
+        <p>Sum of ends: {__cfLift_5([state.key("arr", "0")!, __cfLift_4({ state: {
+                    arr: state.key("arr")
+                } })!])}</p>
 
         <h3>Computed Indices</h3>
         {/* Index from multiple state values */}
-        <p>Computed index: {__cfLift_5({ state: {
+        <p>Computed index: {__cfLift_6({ state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
                 b: state.key("b")
             } })}</p>
 
         {/* Index from computation involving array */}
-        <p>Modulo index: {__cfLift_6({ state: {
+        <p>Modulo index: {__cfLift_7({ state: {
                 items: state.key("items"),
                 row: state.key("row")
             } })}</p>
 
         {/* Complex index expression */}
-        <p>Complex: {__cfLift_7({ state: {
+        <p>Complex: {__cfLift_8({ state: {
                 arr: state.key("arr"),
                 a: state.key("a")
             } })}</p>
@@ -665,7 +695,7 @@ export default pattern((state) => {
         {/* Element access returning array, then accessing that */}
         <p>
           User score:{" "}
-          {__cfLift_8({ state: {
+          {__cfLift_9({ state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser"),
                 selectedScore: state.key("selectedScore")
@@ -673,19 +703,19 @@ export default pattern((state) => {
         </p>
 
         {/* Using one array element as index for another */}
-        <p>Indirect: {__cfLift_9({ state: {
+        <p>Indirect: {__cfLift_10({ state: {
                 items: state.key("items"),
                 indices: state.key("indices")
             } })}</p>
 
         {/* Array element used as index for same array */}
-        <p>Self reference: {__cfLift_10({ state: {
+        <p>Self reference: {__cfLift_11({ state: {
                 arr: state.key("arr")
             } })}</p>
 
         <h3>Mixed Property and Element Access</h3>
         {/* Property access followed by element access with computed index */}
-        <p>Mixed: {__cfLift_11({ state: {
+        <p>Mixed: {__cfLift_12({ state: {
                 nested: {
                     arrays: state.key("nested", "arrays"),
                     index: state.key("nested", "index")
@@ -693,7 +723,7 @@ export default pattern((state) => {
             } })}</p>
 
         {/* Element access followed by property access */}
-        <p>User name length: {__cfLift_12({ state: {
+        <p>User name length: {__cfLift_13({ state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser")
             } })}</p>
@@ -710,10 +740,10 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_13({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_14({ state: {
                 arr: state.key("arr"),
                 a: state.key("a")
-            } }), __cfLift_14({ state: {
+            } }), __cfLift_15({ state: {
                 items: state.key("items"),
                 b: state.key("b")
             } }), state.key("items", "0")!)}
@@ -729,7 +759,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["positive", "non-positive"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfLift_15({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_16({ state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
@@ -738,22 +768,22 @@ export default pattern((state) => {
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}
-        <p>Product: {__cfLift_16({ state: {
-                arr: state.key("arr"),
-                a: state.key("a"),
-                b: state.key("b")
-            } })}</p>
+        <p>Product: {__cfLift_19([__cfLift_17({ state: {
+                    arr: state.key("arr"),
+                    a: state.key("a")
+                } })!, __cfLift_18({ state: {
+                    arr: state.key("arr"),
+                    b: state.key("b")
+                } })!])}</p>
 
         {/* Element access with string concatenation */}
-        <p>Concat: {__cfLift_17({ state: {
-                items: state.key("items"),
-                indices: state.key("indices")
-            } })}</p>
+        <p>Concat: {__cfLift_22([__cfLift_20([state.key("items", "0")!, " - "]), __cfLift_21({ state: {
+                    items: state.key("items"),
+                    indices: state.key("indices")
+                } })!])}</p>
 
         {/* Multiple element accesses in single expression */}
-        <p>Sum: {__cfLift_18({ state: {
-                arr: state.key("arr")
-            } })}</p>
+        <p>Sum: {__cfLift_24([__cfLift_23([state.key("arr", "0")!, state.key("arr", "1")!]), state.key("arr", "2")!])}</p>
       </div>),
     };
 }, {
@@ -893,5 +923,11 @@ __cfReg({
     __cfLift_15,
     __cfLift_16,
     __cfLift_17,
-    __cfLift_18
+    __cfLift_18,
+    __cfLift_19,
+    __cfLift_20,
+    __cfLift_21,
+    __cfLift_22,
+    __cfLift_23,
+    __cfLift_24
 });

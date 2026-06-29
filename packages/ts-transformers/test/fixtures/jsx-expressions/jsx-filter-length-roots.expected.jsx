@@ -44,7 +44,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         items: number[];
         threshold: number;
     };
-}, boolean>(({ state }) => state.items.filter((x) => x > state.threshold).length > 0, {
+}, number>(({ state }) => state.items.filter((x) => x > state.threshold).length, {
     type: "object",
     properties: {
         state: {
@@ -65,9 +65,14 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
+    type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
+const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
@@ -108,10 +113,10 @@ export default pattern((state) => ({
             items: state.key("items"),
             threshold: state.key("threshold")
         } })}</p>
-      <p>{__cfLift_2({ state: {
-            items: state.key("items"),
-            threshold: state.key("threshold")
-        } })}</p>
+      <p>{__cfLift_3([__cfLift_2({ state: {
+                items: state.key("items"),
+                threshold: state.key("threshold")
+            } }), 0])}</p>
       <p>
         {__cfHelpers.ifElse({
         type: "boolean"
@@ -121,7 +126,7 @@ export default pattern((state) => ({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["Yes", "No"]
-    } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } }), "Yes", "No")}
@@ -177,5 +182,6 @@ __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
     __cfLift_2,
-    __cfLift_3
+    __cfLift_3,
+    __cfLift_4
 });

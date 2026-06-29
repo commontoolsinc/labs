@@ -187,48 +187,16 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_9 = __cfHelpers.lift<{
-    state: {
-        count: number;
-    };
-}, boolean>(({ state }) => state.count < 10, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["count"]
-        }
-    },
-    required: ["state"]
+const __cfLift_9 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:<", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.lift<{
-    state: {
-        score: number;
-    };
-}, boolean>(({ state }) => state.score > 100, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                score: {
-                    type: "number"
-                }
-            },
-            required: ["score"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 < __cfExpr1));
+const __cfLift_10 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -414,9 +382,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ state: {
                 count: state.key("count")
-            } }), __cfLift_9({ state: {
-                count: state.key("count")
-            } })), "In Range", "Out of Range")}
+            } }), __cfLift_9([state.key("count"), 10])), "In Range", "Out of Range")}
         </span>
         <span>
           {__cfHelpers.ifElse({
@@ -433,9 +399,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfLift_10({ state: {
-                score: state.key("score")
-            } })), "Premium Features", "Basic Features")}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfLift_10([state.key("score"), 100])), "Premium Features", "Basic Features")}
         </span>
 
         <h3>IfElse Component</h3>

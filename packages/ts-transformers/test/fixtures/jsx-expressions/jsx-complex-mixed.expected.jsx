@@ -256,48 +256,16 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.lift<{
-    state: {
-        discount: number;
-    };
-}, number>(({ state }) => state.discount * 100, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["discount"]
-        }
-    },
-    required: ["state"]
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.lift<{
-    state: {
-        taxRate: number;
-    };
-}, number>(({ state }) => state.taxRate * 100, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                taxRate: {
-                    type: "number"
-                }
-            },
-            required: ["taxRate"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -388,35 +356,11 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_10 = __cfHelpers.lift<{
-    state: {
-        filter: {
-            length: number;
-        };
-    };
-}, boolean>(({ state }) => state.filter.length > 0, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                filter: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
-                }
-            },
-            required: ["filter"]
-        }
-    },
-    required: ["state"]
+const __cfLift_10 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:>", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 > __cfExpr1));
 // FIXTURE: jsx-complex-mixed
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
@@ -454,12 +398,8 @@ export default pattern((state) => {
             } })}</p>
 
         <h3>Simple Operations</h3>
-        <p>Discount percent: {__cfLift_5({ state: {
-                discount: state.key("discount")
-            } })}%</p>
-        <p>Tax percent: {__cfLift_6({ state: {
-                taxRate: state.key("taxRate")
-            } })}%</p>
+        <p>Discount percent: {__cfLift_5([state.key("discount"), 100])}%</p>
+        <p>Tax percent: {__cfLift_6([state.key("taxRate"), 100])}%</p>
 
         <h3>Array Predicates</h3>
         <p>All active: {__cfHelpers.ifElse({
@@ -500,11 +440,7 @@ export default pattern((state) => {
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.key("items", "length")} data-has-filter={__cfLift_10({ state: {
-                filter: {
-                    length: state.key("filter", "length")
-                }
-            } })} data-discount={state.key("discount")}>
+        <div data-item-count={state.key("items", "length")} data-has-filter={__cfLift_10([state.key("filter", "length"), 0])} data-discount={state.key("discount")}>
           Object attributes
         </div>
       </div>),

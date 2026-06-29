@@ -1260,7 +1260,13 @@ function resolveExpressionKind(
     // as lift-applied — even if the chain happens to resolve through a
     // lift symbol via factory-following. (CT-1615 Berni review §2.2.)
     if (
-      builderKind.builderName === "lift" &&
+      (builderKind.builderName === "lift" ||
+        // The branded operator lift `__cfHelpers.exprLift(brand, cb)(operands)`
+        // is the same single-application shape; classify it lift-applied so the
+        // downstream dispatchers (result-cause `.for(...)`, double-wrap
+        // suppression) treat it identically to a plain lift (08-expression-
+        // interpretation §2/§3).
+        builderKind.builderName === "exprLift") &&
       ts.isCallExpression(target) &&
       !isMultiApplicationChain(target)
     ) {

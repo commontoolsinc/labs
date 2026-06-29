@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
-}, number>(({ count }) => count.get() + 1, {
+}, number>(({ count }) => count.get(), {
     type: "object",
     properties: {
         count: {
@@ -25,23 +25,33 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    count: __cfHelpers.Cell<number>;
-}, number>(({ count }) => count.get() * 2, {
-    type: "object",
-    properties: {
-        count: {
-            type: "number",
-            asCell: ["readonly"]
-        }
-    },
-    required: ["count"]
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfLift_3 = __cfHelpers.lift<{
+    count: __cfHelpers.Cell<number>;
+}, number>(({ count }) => count.get(), {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_5 = __cfHelpers.lift<{
     price: __cfHelpers.Cell<number>;
-}, number>(({ price }) => price.get() * 1.1, {
+}, number>(({ price }) => price.get(), {
     type: "object",
     properties: {
         price: {
@@ -53,6 +63,11 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in a lift-applied computation with asCell schema
 //   {count}           → {count}  (bare ref, no transform)
@@ -68,9 +83,9 @@ export default pattern((_state) => {
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        <p>Next: {__cfLift_1({ count: count })}</p>
-        <p>Double: {__cfLift_2({ count: count })}</p>
-        <p>Total: {__cfLift_3({ price: price })}</p>
+        <p>Next: {__cfLift_2([__cfLift_1({ count: count }), 1])}</p>
+        <p>Double: {__cfLift_4([__cfLift_3({ count: count }), 2])}</p>
+        <p>Total: {__cfLift_6([__cfLift_5({ price: price }), 1.1])}</p>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {
@@ -109,5 +124,8 @@ __cfHardenFn(h);
 __cfReg({
     __cfLift_1,
     __cfLift_2,
-    __cfLift_3
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6
 });

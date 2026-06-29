@@ -24,32 +24,14 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    file: {
-        type: string;
-    };
-}, boolean>(({ file }) => file.type === "folder", {
-    type: "object",
-    properties: {
-        file: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string"
-                }
-            },
-            required: ["type"]
-        }
-    },
-    required: ["file"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:===", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 === __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
-    const isFolder = __cfLift_1({ file: {
-            type: file.key("type")
-        } }).for("isFolder", true);
+    const isFolder = __cfLift_1([file.key("type"), "folder"]).for("isFolder", true);
     return isFolder;
 }, {
     type: "object",

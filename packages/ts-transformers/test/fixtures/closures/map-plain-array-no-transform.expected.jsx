@@ -14,31 +14,11 @@ const __cfAmdHooks = undefined;
 interface State {
     multiplier: number;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        multiplier: number;
-    };
-    n: number;
-}, number>(({ state, n }) => n * state.multiplier, {
-    type: "object",
-    properties: {
-        n: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                multiplier: {
-                    type: "number"
-                }
-            },
-            required: ["multiplier"]
-        }
-    },
-    required: ["n", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 // FIXTURE: map-plain-array-no-transform
 // Verifies: .map() on a plain (non-reactive) array is NOT transformed to mapWithPattern
 //   plainArray.map(fn) → plainArray.map(fn) (unchanged)
@@ -51,12 +31,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__cfLift_1({
-                state: {
-                    multiplier: state.multiplier
-                },
-                n: n
-            })}</span>))}
+        {plainArray.map((n) => (<span>{__cfLift_1([n, state.multiplier])}</span>))}
       </div>),
     };
 }, {

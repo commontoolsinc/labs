@@ -50,27 +50,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    file: {
-        contentType: string;
-    };
-}, boolean>(({ file }) => file.contentType !== "binary", {
-    type: "object",
-    properties: {
-        file: {
-            type: "object",
-            properties: {
-                contentType: {
-                    type: "string"
-                }
-            },
-            required: ["contentType"]
-        }
-    },
-    required: ["file"]
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:!==", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 !== __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     const isFolder = __cfLift_1({ file: {
@@ -82,9 +66,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfLift_2({ file: {
-            contentType: file.key("contentType")
-        } }).for(["isOpenable", 4], true)).for("isOpenable", true);
+    } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfLift_2([file.key("contentType"), "binary"]).for(["isOpenable", 4], true)).for("isOpenable", true);
     return <span>{__cfHelpers.ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {

@@ -17,40 +17,15 @@ interface State {
         multiplier: number;
     };
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    item: number;
-    settings: {
-        multiplier: number;
-    };
-}, number>(({ item, settings }) => item * settings.multiplier, {
-    type: "object",
-    properties: {
-        item: {
-            type: "number"
-        },
-        settings: {
-            type: "object",
-            properties: {
-                multiplier: {
-                    type: "number"
-                }
-            },
-            required: ["multiplier"]
-        }
-    },
-    required: ["item", "settings"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const settings = __cf_pattern_input.key("params", "settings");
-    return (<span>{__cfLift_1({
-        item: item,
-        settings: {
-            multiplier: settings.key("multiplier")
-        }
-    })}</span>);
+    return (<span>{__cfLift_1([item, settings.key("multiplier")])}</span>);
 }, {
     type: "object",
     properties: {

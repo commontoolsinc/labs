@@ -42,35 +42,11 @@ interface State {
     index: number;
     numbers: number[];
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        user: {
-            age: number;
-        };
-    };
-}, number>(({ state }) => state.user.age + 1, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        age: {
-                            type: "number"
-                        }
-                    },
-                    required: ["age"]
-                }
-            },
-            required: ["user"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         user: {
@@ -217,121 +193,26 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_7 = __cfHelpers.lift<{
-    state: {
-        config: {
-            theme: {
-                fontSize: number;
-            };
-        };
-    };
-}, string>(({ state }) => state.config.theme.fontSize + "px", {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        theme: {
-                            type: "object",
-                            properties: {
-                                fontSize: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["fontSize"]
-                        }
-                    },
-                    required: ["theme"]
-                }
-            },
-            required: ["config"]
-        }
-    },
-    required: ["state"]
+const __cfLift_7 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_8 = __cfHelpers.lift<{
-    state: {
-        user: {
-            name: string;
-            profile: {
-                location: string;
-            };
-        };
-    };
-}, string>(({ state }) => state.user.name + " from " + state.user.profile.location, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        profile: {
-                            type: "object",
-                            properties: {
-                                location: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["location"]
-                        }
-                    },
-                    required: ["name", "profile"]
-                }
-            },
-            required: ["user"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_8 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_9 = __cfHelpers.lift<{
-    state: {
-        config: {
-            theme: {
-                fontSize: number;
-            };
-        };
-    };
-}, number>(({ state }) => state.config.theme.fontSize + 2, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        theme: {
-                            type: "object",
-                            properties: {
-                                fontSize: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["fontSize"]
-                        }
-                    },
-                    required: ["theme"]
-                }
-            },
-            required: ["config"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_9 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_10 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 // FIXTURE: jsx-property-access
 // Verifies: nested property access chains in JSX are converted to .key() or wrapped in a lift-applied computation
 //   state.user.name                → state.key("user", "name")  (simple access, no lift)
@@ -372,11 +253,7 @@ export default pattern((state) => {
         </p>
 
         <h3>Property Access with Operations</h3>
-        <p>Age + 1: {__cfLift_1({ state: {
-                user: {
-                    age: state.key("user", "age")
-                }
-            } })}</p>
+        <p>Age + 1: {__cfLift_1([state.key("user", "age"), 1])}</p>
         <p>Name length: {state.key("user", "name", "length")}</p>
         <p>Uppercase name: {__cfLift_2({ state: {
                 user: {
@@ -419,13 +296,7 @@ export default pattern((state) => {
         <h3>Config Access with Styles</h3>
         <p style={{
             color: state.key("config", "theme", "primaryColor"),
-            fontSize: __cfLift_7({ state: {
-                    config: {
-                        theme: {
-                            fontSize: state.key("config", "theme", "fontSize")
-                        }
-                    }
-                } }),
+            fontSize: __cfLift_7([state.key("config", "theme", "fontSize"), "px"]),
         }}>
           Styled text
         </p>
@@ -445,21 +316,8 @@ export default pattern((state) => {
         </div>
 
         <h3>Complex Property Chains</h3>
-        <p>{__cfLift_8({ state: {
-                user: {
-                    name: state.key("user", "name"),
-                    profile: {
-                        location: state.key("user", "profile", "location")
-                    }
-                }
-            } })}</p>
-        <p>Font size + 2: {__cfLift_9({ state: {
-                config: {
-                    theme: {
-                        fontSize: state.key("config", "theme", "fontSize")
-                    }
-                }
-            } })}px</p>
+        <p>{__cfLift_9([__cfLift_8([state.key("user", "name"), " from "]), state.key("user", "profile", "location")])}</p>
+        <p>Font size + 2: {__cfLift_10([state.key("config", "theme", "fontSize"), 2])}px</p>
         <p>
           Has beta and dark mode:{" "}
           {__cfHelpers.ifElse({
@@ -622,5 +480,6 @@ __cfReg({
     __cfLift_6,
     __cfLift_7,
     __cfLift_8,
-    __cfLift_9
+    __cfLift_9,
+    __cfLift_10
 });

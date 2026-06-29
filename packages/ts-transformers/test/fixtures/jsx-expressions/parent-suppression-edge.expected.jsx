@@ -86,111 +86,37 @@ interface State {
         }>;
     };
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        user: {
-            name: string;
-            profile: {
-                location: string;
-                bio: string;
-            };
-        };
-    };
-}, string>(({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
-    state.user.profile.bio, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        profile: {
-                            type: "object",
-                            properties: {
-                                location: {
-                                    type: "string"
-                                },
-                                bio: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["location", "bio"]
-                        }
-                    },
-                    required: ["name", "profile"]
-                }
-            },
-            required: ["user"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    state: {
-        user: {
-            age: number;
-        };
-    };
-}, number>(({ state }) => state.user.age * 12, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        age: {
-                            type: "number"
-                        }
-                    },
-                    required: ["age"]
-                }
-            },
-            required: ["user"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
-    state: {
-        user: {
-            age: number;
-        };
-    };
-}, number>(({ state }) => state.user.age * 365, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        age: {
-                            type: "number"
-                        }
-                    },
-                    required: ["age"]
-                }
-            },
-            required: ["user"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_4 = __cfHelpers.lift<{
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_5 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_6 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
+const __cfLift_7 = __cfHelpers.lift<{
     state: {
         user: {
             name: string;
@@ -232,7 +158,7 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_5 = __cfHelpers.lift<{
+const __cfLift_8 = __cfHelpers.lift<{
     state: {
         user: {
             name: string;
@@ -261,62 +187,17 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_6 = __cfHelpers.lift<{
-    state: {
-        config: {
-            theme: {
-                spacing: {
-                    small: number;
-                    medium: number;
-                    large: number;
-                };
-            };
-        };
-    };
-}, number>(({ state }) => state.config.theme.spacing.small +
-    state.config.theme.spacing.medium +
-    state.config.theme.spacing.large, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        theme: {
-                            type: "object",
-                            properties: {
-                                spacing: {
-                                    type: "object",
-                                    properties: {
-                                        small: {
-                                            type: "number"
-                                        },
-                                        medium: {
-                                            type: "number"
-                                        },
-                                        large: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["small", "medium", "large"]
-                                }
-                            },
-                            required: ["spacing"]
-                        }
-                    },
-                    required: ["theme"]
-                }
-            },
-            required: ["config"]
-        }
-    },
-    required: ["state"]
+const __cfLift_9 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_7 = __cfHelpers.lift<{
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_10 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_11 = __cfHelpers.lift<{
     state: {
         user: {
             name: string;
@@ -345,7 +226,7 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_8 = __cfHelpers.lift<{
+const __cfLift_12 = __cfHelpers.lift<{
     state: {
         user: {
             email: string;
@@ -392,29 +273,13 @@ export default pattern((state) => {
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__cfLift_1({ state: {
-                user: {
-                    name: state.key("user", "name"),
-                    profile: {
-                        location: state.key("user", "profile", "location"),
-                        bio: state.key("user", "profile", "bio")
-                    }
-                }
-            } })}
+          {__cfLift_4([__cfLift_3([__cfLift_2([__cfLift_1([state.key("user", "name"), " from "]), state.key("user", "profile", "location")]), " - "]), state.key("user", "profile", "bio")])}
         </p>
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__cfLift_2({ state: {
-                user: {
-                    age: state.key("user", "age")
-                }
-            } })} months, or{" "}
-          {__cfLift_3({ state: {
-                user: {
-                    age: state.key("user", "age")
-                }
-            } })} days
+          Age calculation: {__cfLift_5([state.key("user", "age"), 12])} months, or{" "}
+          {__cfLift_6([state.key("user", "age"), 365])} days
         </p>
 
         <h3>Deeply Nested Property Chains</h3>
@@ -495,14 +360,14 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfLift_4({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfLift_7({ state: {
                 user: {
                     name: state.key("user", "name"),
                     settings: {
                         theme: state.key("user", "settings", "theme")
                     }
                 }
-            } }), __cfLift_5({ state: {
+            } }), __cfLift_8({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
@@ -511,17 +376,7 @@ export default pattern((state) => {
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__cfLift_6({ state: {
-                config: {
-                    theme: {
-                        spacing: {
-                            small: state.key("config", "theme", "spacing", "small"),
-                            medium: state.key("config", "theme", "spacing", "medium"),
-                            large: state.key("config", "theme", "spacing", "large")
-                        }
-                    }
-                }
-            } })} total
+          Spacing calc: {__cfLift_10([__cfLift_9([state.key("config", "theme", "spacing", "small"), state.key("config", "theme", "spacing", "medium")]), state.key("config", "theme", "spacing", "large")])} total
         </p>
 
         {/* Boolean expressions with multiple properties */}
@@ -547,12 +402,12 @@ export default pattern((state) => {
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__cfLift_7({ state: {
+          Formatted: {__cfLift_11({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
             } })} -{" "}
-          {__cfLift_8({ state: {
+          {__cfLift_12({ state: {
                 user: {
                     email: state.key("user", "email")
                 }
@@ -970,5 +825,9 @@ __cfReg({
     __cfLift_5,
     __cfLift_6,
     __cfLift_7,
-    __cfLift_8
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfLift_11,
+    __cfLift_12
 });

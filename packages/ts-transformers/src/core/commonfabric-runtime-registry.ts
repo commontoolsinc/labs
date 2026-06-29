@@ -53,6 +53,20 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: true,
   },
   {
+    // Branded operator-expression lift (08-expression-interpretation §2/§3).
+    // Structurally a lift: `__cfHelpers.exprLift(brand, cb)(operands)` is the same
+    // single-application shape as `lift`, so its applied form is classified
+    // `lift-applied` (see resolveExpressionKind) and ALL the lift-applied
+    // downstream dispatchers — result-cause `.for(...)` stamping, double-wrap
+    // suppression — treat it identically. It is NOT hoisted to a module-scope
+    // const (the brand+operands are inline), but that is a size optimization, not
+    // a correctness requirement.
+    exportName: "exprLift",
+    category: "builder",
+    builderName: "exprLift",
+    reactiveOrigin: true,
+  },
+  {
     exportName: "computed",
     category: "builder",
     builderName: "computed",

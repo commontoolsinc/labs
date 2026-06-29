@@ -130,19 +130,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
-    count: number;
-}, string>(({ count }) => count + " people", {
-    type: "object",
-    properties: {
-        count: {
-            type: "number"
-        }
-    },
-    required: ["count"]
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     return (<li>
@@ -234,7 +226,7 @@ export default pattern((__cf_pattern_input) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, showAdmin, <div>
-              <span>{__cfLift_3({ count: count })}</span>
+              <span>{__cfLift_3([count, " people"])}</span>
               <ul>
                 {adminData.mapWithPattern(__cfPattern_2, {})}
               </ul>

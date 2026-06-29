@@ -42,69 +42,21 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
-const __cfLift_1 = __cfHelpers.lift<{
-    state: {
-        value: number;
-    };
-}, number>(({ state }) => state.value + 1, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        }
-    },
-    required: ["state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:+", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_2 = __cfHelpers.lift<{
-    state: {
-        value: number;
-    };
-}, number>(({ state }) => state.value - 1, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 + __cfExpr1));
+const __cfLift_2 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:-", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const __cfLift_3 = __cfHelpers.lift<{
-    state: {
-        value: number;
-    };
-}, number>(({ state }) => state.value * 2, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        }
-    },
-    required: ["state"]
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 - __cfExpr1));
+const __cfLift_3 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -142,17 +94,11 @@ export default pattern((state) => {
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.key("value")}
           <br />
-          Next number: {__cfLift_1({ state: {
-                value: state.key("value")
-            } })}
+          Next number: {__cfLift_1([state.key("value"), 1])}
           <br />
-          Previous: {__cfLift_2({ state: {
-                value: state.key("value")
-            } })}
+          Previous: {__cfLift_2([state.key("value"), 1])}
           <br />
-          Doubled: {__cfLift_3({ state: {
-                value: state.key("value")
-            } })}
+          Doubled: {__cfLift_3([state.key("value"), 2])}
           <br />
           Status: {__cfHelpers.ifElse({
             type: "boolean"

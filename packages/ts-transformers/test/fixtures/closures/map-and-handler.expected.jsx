@@ -18,39 +18,11 @@ interface State {
     discount: number;
     selectedIndex: Cell<number>;
 }
-const __cfLift_1 = __cfHelpers.lift<{
-    item: {
-        price: number;
-    };
-    state: {
-        discount: number;
-    };
-}, number>(({ item, state }) => item.price * state.discount, {
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
-            },
-            required: ["price"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["discount"]
-        }
-    },
-    required: ["item", "state"]
+const __cfLift_1 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -75,14 +47,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const index = __cf_pattern_input.key("index");
     const state = __cf_pattern_input.key("params", "state");
     return (<div>
-            <span>{__cfLift_1({
-        item: {
-            price: item.key("price")
-        },
-        state: {
-            discount: state.key("discount")
-        }
-    })}</span>
+            <span>{__cfLift_1([item.key("price"), state.key("discount")])}</span>
             <button type="button" onClick={__cfHandler_1({
         state: {
             selectedIndex: state.key("selectedIndex")
@@ -188,9 +153,8 @@ const __cfLift_3 = __cfHelpers.lift<{
     state: {
         items: { price: number; }[];
         selectedIndex: __cfHelpers.Cell<number>;
-        discount: number;
     };
-}, number>(({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount, {
+}, number>(({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0, {
     type: "object",
     properties: {
         state: {
@@ -211,18 +175,20 @@ const __cfLift_3 = __cfHelpers.lift<{
                 selectedIndex: {
                     type: "number",
                     asCell: ["cell"]
-                },
-                discount: {
-                    type: "number"
                 }
             },
-            required: ["items", "selectedIndex", "discount"]
+            required: ["items", "selectedIndex"]
         }
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.__cf_data(__cfHelpers.exprLift("expr:*", {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, ([__cfExpr0, __cfExpr1]) => __cfExpr0 * __cfExpr1));
 // FIXTURE: map-and-handler
 // Verifies: .map() in JSX is transformed to .mapWithPattern() and inline handler inside map body is extracted
 //   state.items.map((item, index) => JSX) → state.key("items").mapWithPattern(pattern(...), { state: { discount, selectedIndex } })
@@ -242,11 +208,10 @@ export default pattern((state) => {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex")
             } })} x {state.key("discount")} ={" "}
-          {__cfLift_3({ state: {
-                items: state.key("items"),
-                selectedIndex: state.key("selectedIndex"),
-                discount: state.key("discount")
-            } })}
+          {__cfLift_4([(__cfLift_3({ state: {
+                    items: state.key("items"),
+                    selectedIndex: state.key("selectedIndex")
+                } })), state.key("discount")])}
         </div>
       </div>),
     };
@@ -312,5 +277,6 @@ __cfReg({
     __cfHandler_1,
     __cfPattern_1,
     __cfLift_2,
-    __cfLift_3
+    __cfLift_3,
+    __cfLift_4
 });
