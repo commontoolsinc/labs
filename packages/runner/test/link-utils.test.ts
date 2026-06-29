@@ -826,6 +826,87 @@ describe("link-utils", () => {
       expect(result).toEqual(schema);
     });
 
+    it("respects KeepAsCell modes for mixed cell wrappers", () => {
+      const schema = {
+        type: "object",
+        asCell: ["stream", "cell"],
+        properties: {
+          title: { type: "string" },
+          count: {
+            type: "number",
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string", asCell: ["opaque"] },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            asCell: ["cell", "stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count", "submit", "nestedStream"],
+      } as const satisfies JSONSchema;
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.None)).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          count: { type: "number" },
+          submit: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count"],
+      });
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream)).toEqual({
+        type: "object",
+        asCell: ["stream", "cell"],
+        properties: {
+          title: { type: "string" },
+          count: { type: "number" },
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count", "submit", "nestedStream"],
+      });
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.All)).toEqual(schema);
+    });
+
     it("should handle arrays of schemas", () => {
       const schema = {
         type: "object",
