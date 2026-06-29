@@ -39,6 +39,7 @@ import {
 import { traverseValue } from "./traverse-utils.ts";
 import {
   getStableInternalPathSegment,
+  KeepAsCell,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import { type LegacyAlias } from "../sigil-types.ts";
@@ -422,10 +423,7 @@ function factoryFromPattern<T, R>(
     }
 
     const sanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, {
-        keepStreams: true,
-        keepAsCell: true,
-      })
+      ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
       : undefined;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
@@ -486,11 +484,8 @@ function factoryFromPattern<T, R>(
   });
 
   const pattern: Pattern & toJSON = {
-    argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
-      keepStreams: true,
-      keepAsCell: true,
-    }),
-    resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
+    argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
+    resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,

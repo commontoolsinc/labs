@@ -1,6 +1,10 @@
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { isCell as isRuntimeCell, Runtime } from "@commonfabric/runner";
+import {
+  isCell as isRuntimeCell,
+  KeepAsCell,
+  Runtime,
+} from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { WorkerVNode } from "../src/worker/types.ts";
@@ -2004,18 +2008,18 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           props: {
             $value: message.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
             verifyTextIntegrity: true,
             requiredTextIntegrity: requiredIntegrity.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
           },
           children: [
             message.key("body").getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
           ],
         });
@@ -2123,7 +2127,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             verifyTextIntegrity: true,
             requiredTextIntegrity: requiredIntegrity.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
           },
           children: [{
@@ -2229,12 +2233,12 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           props: {
             $value: messages.key(1).getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
             verifyTextIntegrity: true,
             requiredTextIntegrity: requiredIntegrity.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
           },
           children: [{

@@ -37,6 +37,7 @@ import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
@@ -666,7 +667,7 @@ export class RuntimeProcessor {
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
       includeSchema: true,
-      keepAsCell: true,
+      keepAsCell: KeepAsCell.All,
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
     });
@@ -730,7 +731,7 @@ export class RuntimeProcessor {
       }
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
-        keepAsCell: true,
+        keepAsCell: KeepAsCell.All,
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       });

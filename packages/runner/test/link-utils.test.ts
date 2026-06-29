@@ -13,6 +13,7 @@ import {
   isLegacyAlias,
   isSigilLink,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedLink,
   parseLink,
   parseLinkOrThrow,
@@ -651,7 +652,7 @@ describe("link-utils", () => {
         path: [],
         space,
         schema,
-      }, { includeSchema: true, keepStreams: false });
+      }, { includeSchema: true, keepAsCell: KeepAsCell.None });
 
       expect(linkRefPayload(result).schema).toEqual({
         type: "object",
@@ -820,7 +821,7 @@ describe("link-utils", () => {
         required: ["setTitle"],
       } as const satisfies JSONSchema;
 
-      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+      const result = sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
       expect(result).toEqual(schema);
     });
@@ -1050,14 +1051,14 @@ describe("link-utils", () => {
       expect((result as any).b).not.toHaveProperty("asCell");
     });
 
-    it("should handle keepStreams option with circular schemas", () => {
+    it("should handle OnlyStream option with circular schemas", () => {
       const schema: any = {
         type: "object",
         asCell: ["stream"],
       };
       schema.self = schema;
 
-      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+      const result = sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
       // Expect the new version of asStream (where it's an entry in asCell)
       expect((result as any).asCell).toEqual(["stream"]);
@@ -1209,8 +1210,8 @@ describe("link-utils", () => {
       const resultDefault = sanitizeSchemaForLinks(schema);
       expect(resultDefault).not.toHaveProperty("asCell");
 
-      // With keepAsCell: true, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, { keepAsCell: true });
+      // With keepAsCell: All, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, KeepAsCell.All);
       expect((resultKept as any).asCell).toEqual(["opaque"]);
     });
   });
