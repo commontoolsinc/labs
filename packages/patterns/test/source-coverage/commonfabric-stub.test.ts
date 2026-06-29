@@ -75,18 +75,17 @@ export class Writable<T = unknown> {
   }
 
   key(key: PropertyKey): Writable<unknown> {
-    const parent = this;
     return new Proxy(new Writable(readKey(this.#value, key)), {
-      get(target, property, receiver) {
+      get: (target, property, receiver) => {
         if (property === "get") {
-          return () => readKey(parent.#value, key);
+          return () => readKey(this.#value, key);
         }
         if (property === "set") {
           return (value: unknown) => {
-            if (parent.#value == null) {
-              parent.#value = (typeof key === "number" ? [] : {}) as T;
+            if (this.#value == null) {
+              this.#value = (typeof key === "number" ? [] : {}) as T;
             }
-            writeKey(parent.#value, key, value);
+            writeKey(this.#value, key, value);
           };
         }
         return Reflect.get(target, property, receiver);

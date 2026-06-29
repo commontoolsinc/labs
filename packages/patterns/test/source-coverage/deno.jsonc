@@ -11,7 +11,7 @@
     ]
   },
   "imports": {
-    "commonfabric": "./commonfabric-stub.ts",
-    "@commonfabric/html/jsx-runtime": "./jsx-runtime-stub.ts"
+    "commonfabric": "./commonfabric-stub.test.ts",
+    "@commonfabric/html/jsx-runtime": "./jsx-runtime-stub.test.ts"
   }
 }

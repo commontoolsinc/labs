@@ -10,8 +10,9 @@ Deno.test("pattern source coverage harness exercises changed pattern modules", a
       "--no-check",
       "--config",
       sourceCoveragePath("deno.jsonc"),
-      sourceCoveragePath("pattern-source-coverage-child.ts"),
+      sourceCoveragePath("fixtures/pattern-source-coverage-child.js"),
     ],
+    env: { SOURCE_COVERAGE_CHILD: "1" },
     stdout: "piped",
     stderr: "piped",
   });
