@@ -4,8 +4,9 @@
 // store the server already wrote (no live runtime, no capture) and answers
 // who/what/when + cross-space convergence questions. Every command takes --json.
 //
-// Space DBs are auto-discovered (no need to pass absolute paths): pass a DID or
-// DID-prefix as <space>, or a file path. `cf inspect spaces` lists what's found.
+// Space DBs are auto-discovered (no need to pass absolute paths): pass a DID,
+// DID-prefix, a space NAME (resolved the same way the runtime derives it), or a
+// file path as <space>. `cf inspect spaces` lists what's found.
 
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
@@ -38,7 +39,7 @@ import {
   openSpaces,
   quickStats,
   renderInspectorHtml,
-  resolveSpacePath,
+  resolveSpace,
   type Scope,
   scopeOverlay,
   type SpaceGraph,
@@ -99,20 +100,22 @@ function fmtSession(s: string): string {
 }
 
 // Resolve --all / --spaces / --dir into open spaces; caller must close them.
-function resolveMultiSpaces(opts: {
+async function resolveMultiSpaces(opts: {
   all?: boolean;
   spaces?: string;
   dir?: string;
-}): SpaceRef[] {
+}): Promise<SpaceRef[]> {
   if (opts.dir) return openSpaces(listSqliteFiles(opts.dir));
   if (opts.all) return openSpaces(discoverSpaceDbs().map((s) => s.path));
   if (opts.spaces) {
     const discovered = discoverSpaceDbs();
-    const paths = opts.spaces
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map((t) => resolveSpacePath(t, discovered));
+    const paths = await Promise.all(
+      opts.spaces
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => resolveSpace(t, discovered)),
+    );
     return openSpaces(paths);
   }
   throw new Error("provide --all, --spaces <a,b,…>, or --dir <dir>");
@@ -296,8 +299,8 @@ export const inspect = new Command()
     "summary <space:string>",
     "Space overview: commits, sessions, hot ops.",
   )
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const sum = summarizeSpace(s);
       out(!!options.json, sum, () => {
@@ -341,8 +344,8 @@ export const inspect = new Command()
     "Per-identity scopes in a space: shared/space + per-user + per-session.",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const scopes = listScopes(s, { branch: options.branch });
       out(!!options.json, scopes, () => {
@@ -379,8 +382,8 @@ export const inspect = new Command()
     "Identities that touched this space (committers + per-user/session scopes).",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const ps = spaceParticipants(s, { branch: options.branch });
       out(!!options.json, ps, () => {
@@ -416,8 +419,8 @@ export const inspect = new Command()
   )
   .option("--session <prefix:string>", "Filter by session id prefix.")
   .option("--limit <n:number>", "Max rows.", { default: 50 })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const rows = listCommits(s, {
         session: options.session,
@@ -443,8 +446,8 @@ export const inspect = new Command()
   )
   .option("--limit <n:number>", "Max rows.", { default: 20 })
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const rows = hotEntities(s, {
         limit: options.limit,
@@ -469,8 +472,8 @@ export const inspect = new Command()
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--limit <n:number>", "Max contested entities.", { default: 100 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       if (entity) {
         const c = entityConflicts(s, entity, {
@@ -566,8 +569,8 @@ export const inspect = new Command()
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       let rows = listEntityModels(s, {
         limit: options.limit,
@@ -611,8 +614,8 @@ export const inspect = new Command()
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--code", "Include the full pattern TS source.")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const piece = describePiece(s, entity, {
         branch: options.branch,
@@ -676,8 +679,8 @@ export const inspect = new Command()
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       let g: SpaceGraph = buildSpaceGraph(s, {
         branch: options.branch,
@@ -768,8 +771,8 @@ export const inspect = new Command()
     "--app-url <url:string>",
     "Live shell base origin for deep links (e.g. https://host).",
   )
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const bundle = buildInspectorBundle(s, {
         branch: options.branch,
@@ -799,8 +802,8 @@ export const inspect = new Command()
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max rows.", { default: 200 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const rows = entityHistory(s, {
         id: entity,
@@ -840,8 +843,8 @@ export const inspect = new Command()
   .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--doc", "Show the whole document, not just value.")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       // --as composes the per-identity overlay; otherwise a single raw scope.
       if (options.as) {
@@ -897,8 +900,8 @@ export const inspect = new Command()
     "An entity's value across EVERY scope (per-user/session divergence).",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const o = scopeOverlay(s, entity, { branch: options.branch });
       out(!!options.json, o, () => {
@@ -942,8 +945,8 @@ export const inspect = new Command()
   .option("--doc", "Diff the whole document, not just value.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       const d = diffEntity(s, {
         id: entity,
@@ -988,8 +991,8 @@ export const inspect = new Command()
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max rows.", { default: 500 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = openSpace(await resolveSpace(space));
     try {
       if (entity) {
         const steps = entityTimeline(s, {
@@ -1041,8 +1044,8 @@ export const inspect = new Command()
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, entity) => {
-    const refs = resolveMultiSpaces(options);
+  .action(async (options, entity) => {
+    const refs = await resolveMultiSpaces(options);
     try {
       const index = buildCrossSpaceLinkIndex(refs, {
         scope: options.scope,
@@ -1096,8 +1099,8 @@ export const inspect = new Command()
   .option("--dir <dir:string>", "Directory of *.sqlite files.")
   .option("--limit <n:number>", "Max findings.", { default: 50 })
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options) => {
-    const refs = resolveMultiSpaces(options);
+  .action(async (options) => {
+    const refs = await resolveMultiSpaces(options);
     try {
       const result = convergenceScan(refs, {
         limit: options.limit,

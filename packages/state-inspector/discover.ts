@@ -6,7 +6,25 @@
 // engine-v3/<did>.sqlite`. The engine-v3 segment is sometimes doubled, so we
 // walk a bounded depth under each cache base rather than assume a fixed path.
 
+import { Identity } from "@commonfabric/identity";
+
 import { openSpace } from "./db.ts";
+
+// A named space's DID is reproducibly derived by the runtime from its name:
+// `Identity.fromPassphrase("common user").derive(<name>)` (see
+// `packages/identity/src/session.ts` `createSession`). The shell addresses a
+// space by name (`/<space-name>/…`); we mirror that derivation so
+// `cf inspect <name>` resolves the same DB the runtime would, without anyone
+// copying a DID around.
+const SPACE_ROOT_PASSPHRASE = "common user";
+let spaceRoot: Promise<Identity> | undefined;
+
+/** Derive the DID of a NAMED space, the same way the runtime does. */
+export async function deriveSpaceDid(name: string): Promise<string> {
+  spaceRoot ??= Identity.fromPassphrase(SPACE_ROOT_PASSPHRASE);
+  const space = await (await spaceRoot).derive(name);
+  return space.did();
+}
 
 export interface DiscoveredSpace {
   /** Space DID (DB file basename without `.sqlite`). */
@@ -127,6 +145,34 @@ export function resolveSpacePath(
   throw new Error(
     `"${token}" is ambiguous (${matches.length} matches); use a longer prefix or a path`,
   );
+}
+
+/**
+ * Resolve a space token to a DB path, accepting a space NAME in addition to a
+ * DID / DID-prefix / path. Tries the synchronous matcher first (path/DID); only
+ * if that finds nothing AND the token looks like a name (not a path, not already
+ * `did:`-shaped) does it derive the name's DID via {@link deriveSpaceDid} and
+ * match that. Async because the derivation uses the identity keypair.
+ */
+export async function resolveSpace(
+  token: string,
+  discovered?: DiscoveredSpace[],
+): Promise<string> {
+  const spaces = discovered ?? discoverSpaceDbs();
+  try {
+    return resolveSpacePath(token, spaces);
+  } catch (err) {
+    const looksLikeName = !token.includes("/") &&
+      !token.endsWith(".sqlite") && !token.startsWith("did:");
+    if (!looksLikeName) throw err;
+    const did = await deriveSpaceDid(token);
+    const match = spaces.find((s) => s.did === did);
+    if (match) return match.path;
+    throw new Error(
+      `no space matches "${token}" — as a name it derives to ${did}, ` +
+        `but no local DB for that DID was found (run: inspect spaces)`,
+    );
+  }
 }
 
 export interface SpaceQuickStats {
