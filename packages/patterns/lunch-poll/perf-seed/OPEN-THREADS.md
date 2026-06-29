@@ -21,7 +21,7 @@ This doc is the **map**. The deep-dives live next to it in `perf-seed/`:
 | Ref | What | Status |
 | --- | --- | --- |
 | #4360 / #4361 / #4366 / #4367 | storm fix / memwrite trace / VDOM settling / read-mostly resume | all **merged** |
-| **#4391** | our S16 probe-scope follow-up (filter/flatMap container reads) | **OPEN, CI green, but label-neutral; drop the "over-taint fix" framing — see thread 3** |
+| **#4391** | S16 filter/flatMap over-taint — complete fix (container reads + input read + structure re-stamp) | **OPEN; Stage-2 fold LANDED on branch `f34001b8c`, full suite green; PR description needs reframing + seefeld design blessing — thread 3** |
 | #4346 (Ben) / #4349 (Wilk) | localize vote writes / runtime convergence | OPEN (4349 likely close) |
 | **CT-1799** | scopes architecture (every-client write-back) → seefeld | Triage, held |
 | **CT-1801** | CFC structure-only-read rule (spec gap) → seefeld | Triage, held |
@@ -78,7 +78,9 @@ a pass after the root write). map opts out (stays clean). **Verified:** over-tai
 churn, order/offset). **#4391 is part of the complete fix:** verified (grow test) that its container
 probe-scoping closes the container/own-output deref path — Stage 2's input fix alone re-leaks the kept
 element's content on a re-reconcile reading a non-empty prior container. Complete fix = **#4391 (container
-reads) + Stage 2 (input read + structure re-stamp)**. **Recommendation: fold Stage 2 into #4391.**
+reads) + Stage 2 (input read + structure re-stamp)**. **Stage 2 FOLDED INTO #4391** (commit
+`f34001b8c` on `gideon/4367-followups`, full runner suite green 717/3533). Remaining: reframe the
+PR description (draft ready) + seefeld design blessing (Q1–Q5).
 
 ### 4. Resume during-batch self-heal → **CT-1802** (resolved; deferred guard)
 The "write-after-sync" worry (republish reads a transient `undefined` → persists a shrink) is

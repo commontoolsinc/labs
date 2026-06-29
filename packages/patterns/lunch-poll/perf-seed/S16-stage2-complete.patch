@@ -207,17 +207,17 @@ index 0fbcdf096..536fc1e37 100644
    // reads): the decision to run *now* was influenced by their values, so
    // they join the flow-label derivation even when the run never re-reads
 diff --git a/packages/runner/src/storage/extended-storage-transaction.ts b/packages/runner/src/storage/extended-storage-transaction.ts
-index 4d4919fe3..8a15d7f83 100644
+index 4d4919fe3..76785ab28 100644
 --- a/packages/runner/src/storage/extended-storage-transaction.ts
 +++ b/packages/runner/src/storage/extended-storage-transaction.ts
-@@ -57,6 +57,7 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
- import {
+@@ -58,6 +58,7 @@ import {
    type AttemptedWrite,
    canonicalizeLogicalPath,
-+  type CfcAddress,
    CFC_ENFORCING_STRICTNESS,
++  type CfcAddress,
    type CfcDereferenceTrace,
    type CfcEnforcementMode,
+   cfcEnforcementStrictness,
 @@ -121,6 +122,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
      flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
      prepare: { status: "unprepared" },
