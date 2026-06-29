@@ -87,6 +87,117 @@ const handshakeTransport = (
   };
 };
 
+const asyncHandshakeTransport = (helloOk: FabricValue): Transport => {
+  let receiver = (_payload: string) => {};
+  return {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+      };
+      if (message.type === "hello") {
+        queueMicrotask(() => receiver(encodeMemoryBoundary(helloOk)));
+      }
+      return Promise.resolve();
+    },
+    close() {
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+};
+
+Deno.test("memory v2 client rejects malformed async hello session.open metadata", async () => {
+  await assertRejects(
+    () =>
+      connect({
+        transport: asyncHandshakeTransport({
+          ...HELLO_OK,
+          sessionOpen: {
+            audience: TEST_SESSION_OPEN_AUDIENCE,
+          },
+        }),
+      }),
+    Error,
+    "challenge",
+  );
+});
+
+Deno.test("memory v2 client rejects malformed hello session.open metadata", async () => {
+  const cases: {
+    name: string;
+    helloOk: FabricValue;
+    message: string;
+  }[] = [
+    {
+      name: "missing metadata",
+      helloOk: {
+        type: "hello.ok",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      },
+      message: "authentication metadata",
+    },
+    {
+      name: "non-object metadata",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: "bad",
+      },
+      message: "malformed",
+    },
+    {
+      name: "non-string audience",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: 123,
+          challenge: sessionOpenChallenge,
+        },
+      },
+      message: "malformed",
+    },
+    {
+      name: "non-object challenge",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: TEST_SESSION_OPEN_AUDIENCE,
+          challenge: "bad",
+        },
+      },
+      message: "malformed",
+    },
+    {
+      name: "malformed challenge fields",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: TEST_SESSION_OPEN_AUDIENCE,
+          challenge: {
+            value: 123,
+            expiresAt: "soon",
+          },
+        },
+      },
+      message: "malformed",
+    },
+  ];
+
+  for (const testCase of cases) {
+    await assertRejects(
+      () =>
+        connect({
+          transport: handshakeTransport(testCase.helloOk),
+        }),
+      Error,
+      testCase.message,
+    );
+  }
+});
+
 Deno.test("memory v2 client rejects a missing session.open challenge", async () => {
   await assertRejects(
     () =>

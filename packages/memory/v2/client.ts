@@ -272,9 +272,16 @@ export class Client {
           this.#helloPending.reject(error);
           return;
         }
-        this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
-          helloOk.sessionOpen,
-        );
+        try {
+          this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
+            helloOk.sessionOpen,
+          );
+        } catch (error) {
+          this.#helloPending.reject(
+            error instanceof Error ? error : protocolError(String(error)),
+          );
+          return;
+        }
         this.#helloPending.resolve();
         return;
       }

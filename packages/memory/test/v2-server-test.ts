@@ -269,6 +269,157 @@ Deno.test("memory v2 server rejects an expired session open challenge", async ()
   }
 });
 
+Deno.test("memory v2 server rejects invalid session open auth metadata", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-invalid-session-open-auth",
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    const cases = [
+      {
+        requestId: "missing-audience",
+        invocation: {
+          challenge: sessionOpen.challenge.value,
+        },
+        message: "memory session.open requires audience",
+      },
+      {
+        requestId: "wrong-audience",
+        invocation: {
+          aud: "did:key:z6Mk-memory-v2-server-wrong-audience",
+          challenge: sessionOpen.challenge.value,
+        },
+        message: "memory session.open audience mismatch",
+      },
+      {
+        requestId: "missing-challenge",
+        invocation: {
+          aud: sessionOpen.audience,
+        },
+        message: "memory session.open requires challenge",
+      },
+      {
+        requestId: "wrong-challenge",
+        invocation: {
+          aud: sessionOpen.audience,
+          challenge: "challenge:wrong",
+        },
+        message: "memory session.open challenge mismatch",
+      },
+    ];
+
+    for (const testCase of cases) {
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.open",
+        requestId: testCase.requestId,
+        space: "did:key:z6Mk-memory-v2-server-invalid-auth-space",
+        session: {},
+        invocation: testCase.invocation,
+      }));
+      assertEquals(shiftMessage(messages), {
+        type: "response",
+        requestId: testCase.requestId,
+        error: {
+          name: "AuthorizationError",
+          message: testCase.message,
+        },
+      });
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server rejects session open before issuing challenge", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-session-open-before-challenge",
+  );
+  const connection = server.connect(() => {});
+
+  try {
+    const response = await server.openSession({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-memory-v2-server-before-challenge-space",
+      session: {},
+      invocation: {
+        aud: TEST_AUDIENCE,
+        challenge: "challenge:missing",
+      },
+    }, connection);
+    assertEquals(response, {
+      type: "response",
+      requestId: "open-1",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge unavailable",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server consumes challenge before denied session open", async () => {
+  const audience = "did:key:z6Mk-memory-v2-server-denied-audience";
+  const space = "did:key:z6Mk-memory-v2-server-denied-space";
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-denied-consumes-challenge"),
+    authorizeSessionOpen: () => undefined,
+    sessionOpenAuth: {
+      audience,
+    },
+    acl: {
+      mode: "enforce",
+    },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-1",
+      error: {
+        name: "AuthorizationError",
+        message: `Principal <anonymous> lacks READ on space ${space}`,
+      },
+    });
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-2",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-2",
+      error: {
+        name: "AuthorizationError",
+        message: "memory session.open challenge already used",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server allows the same session id in different spaces", async () => {
   const server = createServer("memory://memory-v2-server-session-scope");
   const messages: ServerMessage[] = [];
