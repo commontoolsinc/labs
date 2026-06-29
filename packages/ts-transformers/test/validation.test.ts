@@ -7,10 +7,6 @@ function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
 }
 
-function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
-  return diagnostics.filter((d) => d.severity === "warning");
-}
-
 function getEmptyArrayErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) =>
     d.type === "cell-factory:empty-array" && d.severity === "error"
@@ -95,7 +91,7 @@ Deno.test("Cast Validation", async (t) => {
     assertHasErrorType(errors, "cast-validation:forbidden-cast");
   });
 
-  await t.step("warns on 'as Cell<>'", async () => {
+  await t.step("errors on 'as Cell<>'", async () => {
     const source = `
       import { Cell } from "commonfabric";
 
@@ -105,12 +101,12 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
   });
 
-  await t.step("warns on 'as OpaqueCell<>'", async () => {
+  await t.step("errors on 'as OpaqueCell<>'", async () => {
     const source = `
       import { OpaqueCell } from "commonfabric";
 
@@ -120,12 +116,12 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
   });
 
-  await t.step("warns on 'as Writable<>'", async () => {
+  await t.step("errors on 'as Writable<>'", async () => {
     const source = `
       import { Writable } from "commonfabric";
 
@@ -135,9 +131,98 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on union casts containing 'Writable<>'", async () => {
+    const source = `
+      import { Writable } from "commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as (Writable<number> | undefined);
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on renamed imports of 'Cell<>'", async () => {
+    const source = `
+      import { Cell as C } from "commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as C<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on type aliases to 'Cell<>'", async () => {
+    const source = `
+      import { Cell } from "commonfabric";
+
+      type MyCell = Cell<number>;
+      const data: any = { value: 42 };
+      const cell = data as MyCell;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on import type casts to 'Cell<>'", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as import("commonfabric").Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on interfaces extending 'Cell<>'", async () => {
+    const source = `
+      import { Cell } from "commonfabric";
+
+      interface MyCell extends Cell<number> {}
+      const data: any = { value: 42 };
+      const cell = data as MyCell;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("allows unrelated local types named 'Cell'", async () => {
+    const source = `
+      type Cell<T> = { value: T };
+
+      const data: any = { value: 42 };
+      const cell = data as Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
   });
 
   await t.step("allows valid type assertions", async () => {
@@ -3562,7 +3647,7 @@ Deno.test("Standalone Function Validation", async (t) => {
     async () => {
       const source = `      import { computed, Cell } from "commonfabric";
 
-      const count = {} as Cell<number>;
+      declare const count: Cell<number>;
 
       const helper = () => {
         return computed(() => count.get() * 2);
@@ -3667,7 +3752,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       const source =
         `      import { pattern, patternTool, computed, Cell } from "commonfabric";
 
-      const multiplier = {} as Cell<number>;
+      declare const multiplier: Cell<number>;
 
       const tool = patternTool(pattern(({ query }: { query: string }) => {
         return computed(() => query.length * multiplier.get());
@@ -3691,7 +3776,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       const source =
         `      import { patternTool, computed, Cell } from "commonfabric";
 
-      const multiplier = {} as Cell<number>;
+      declare const multiplier: Cell<number>;
 
       const tool = patternTool(({ query }: { query: string }) => {
         return computed(() => query.length * multiplier.get());
@@ -3820,7 +3905,7 @@ Deno.test("Standalone Function Validation", async (t) => {
     async () => {
       const source = `      import { computed, Cell } from "commonfabric";
 
-      const count = {} as Cell<number>;
+      declare const count: Cell<number>;
 
       const outer = () => {
         // Nested function uses computed() — error should be on inner,
