@@ -26,7 +26,7 @@ you when to trust it and when to reach for something else:
 
 **It answers authoritatively** (the same bytes the engine reads): what is
 _stored_ for any entity at any `(branch, seq)`; who/what/when wrote it (per
-commit, wall-clock to the second); how a value got there
+commit, UTC wall-clock to the second); how a value got there
 (`history`/`diff`/`timeline`); whether identities _see different values_
 (`overlay`); whether the store is _internally consistent_ (anomalous stale
 reads); whether the same id agrees across spaces (`converge`); and the structure
