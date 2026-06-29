@@ -519,7 +519,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
 
                       {/* Loading State */}
-                      {patternInfo.pending && (
+                      {when(
+                        patternInfo.pending,
                         <div
                           style={{
                             display: "flex",
@@ -532,11 +533,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         >
                           <cf-loader size="sm" />
                           <span>Loading pattern...</span>
-                        </div>
+                        </div>,
                       )}
 
                       {/* Error State */}
-                      {patternInfo.error && (
+                      {when(
+                        patternInfo.error,
                         <div
                           style={{
                             display: "block",
@@ -547,15 +549,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             fontSize: "14px",
                           }}
                         >
-                          Error: {patternInfo.error}
-                        </div>
+                          Error: {toIndentedDebugString(patternInfo.error)}
+                        </div>,
                       )}
 
                       {/* Preview UI from launched pattern */}
-                      {computed(() =>
-                        patternInfo.result && !patternInfo.pending &&
-                        !patternInfo.error
-                      ) && (
+                      {when(
+                        computed(() =>
+                          Boolean(patternInfo.result) &&
+                          !Boolean(patternInfo.pending) &&
+                          !Boolean(patternInfo.error)
+                        ),
                         <div
                           style={{
                             display: "block",
@@ -570,7 +574,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             [TILE_UI] export, or the platform default). */
                           }
                           {uiVariant(patternInfo.result, "tile")}
-                        </div>
+                        </div>,
                       )}
                     </div>
                   ))}
