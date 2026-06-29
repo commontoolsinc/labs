@@ -260,19 +260,23 @@ const waitForOptionIdForTitle = async (
   title: string,
 ): Promise<string> => {
   let optionId: string | undefined;
+  let lastError: unknown;
   await waitFor(
     async () => {
       try {
         optionId = await optionIdForTitle(page, title);
         return true;
-      } catch (_error) {
+      } catch (error) {
+        lastError = error;
         return false;
       }
     },
     { timeout: PROPAGATION_TIMEOUT, delay: 250 },
   );
   if (!optionId) {
-    throw new Error(`Option card not found: ${title}`);
+    throw new Error(`Option card id not ready for title: ${title}`, {
+      cause: lastError,
+    });
   }
   return optionId;
 };
@@ -450,17 +454,20 @@ describe(
           await fillCfInput(voterPages[0], "#lp-add-option-input", title);
           await clickCfButton(voterPages[0], "#lp-add-option-button");
         }
-        await timer.run(
-          "all options visible on all profiles",
+        const optionIdsByPage = await timer.run(
+          "all option cards ready on all profiles",
           () =>
             Promise.all(
-              voterPages.flatMap((page) =>
-                OPTIONS.map((title) =>
-                  waitForText(page, "body", title, {
-                    timeout: PROPAGATION_TIMEOUT,
-                  })
-                )
-              ),
+              voterPages.map(async (page) => {
+                const pageOptionIds = new Map<string, string>();
+                for (const title of OPTIONS) {
+                  pageOptionIds.set(
+                    title,
+                    await waitForOptionIdForTitle(page, title),
+                  );
+                }
+                return pageOptionIds;
+              }),
             ),
         );
         await Promise.all(
@@ -469,13 +476,7 @@ describe(
           ),
         );
 
-        const optionIds = new Map<string, string>();
-        for (const title of OPTIONS) {
-          optionIds.set(
-            title,
-            await waitForOptionIdForTitle(voterPages[0], title),
-          );
-        }
+        const optionIds = optionIdsByPage[0];
 
         const expectedVotes: Vote[] = [];
         const expectedSwatches: VoteSwatchSnapshot[] = [];
