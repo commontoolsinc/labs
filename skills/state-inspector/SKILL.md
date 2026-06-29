@@ -19,6 +19,43 @@ takes `--json` for machine reading, and a `<space>` is a DID, a unique
 DID-prefix, or a path (local DBs auto-discovered — start with
 `cf inspect spaces`).
 
+## What it can — and can't — answer
+
+It reads ONE durable store, offline and read-only. That single boundary tells
+you when to trust it and when to reach for something else:
+
+**It answers authoritatively** (the same bytes the engine reads): what is
+_stored_ for any entity at any `(branch, seq)`; who/what/when wrote it (per
+commit, wall-clock to the second); how a value got there
+(`history`/`diff`/`timeline`); whether identities _see different values_
+(`overlay`); whether the store is _internally consistent_ (anomalous stale
+reads); whether the same id agrees across spaces (`converge`); and the structure
+of it all (`entities`/`piece`/`graph`).
+
+**It can't — and reaching for it here will mislead you:**
+
+- _Anything client-side_ — optimistic writes, cursor lag, what a browser is
+  actually rendering. "Converged" / "consistent" describes the durable store,
+  not what any client is showing.
+- _A live or production bug from a local snapshot_ — a clean local store does
+  not explain a prod-only misbehaviour; at most it says the local data is
+  healthy, so the cause is concurrency / scale / timing or client-side. To
+  inspect prod you need that space's actual `.sqlite` (no remote mode — copy the
+  file off the box).
+- _How long anything took_ — it has logical order (`seq`) plus
+  second-granularity commit times ("what happened and when"), never latencies or
+  durations.
+- _What was rejected_ — the engine rejects stale reads _before_ they persist, so
+  they are not here. Zero anomalies means consistent, not "no concurrency."
+- _The live reactive graph_ — scheduler dependency tables are usually absent on
+  disk; entity/commit history always works, the reactive graph is opt-in.
+- _Change anything_ — it is read-only; it explains, it never reproduces or
+  fixes.
+
+So **reach for it whenever you would otherwise guess at durable or multiplayer
+state from outside a live runtime**; reach for something else for live
+behaviour, client rendering, performance profiling, or reproducing a bug.
+
 ## The mental model the output assumes
 
 You will misread the tool without these — they are facts about how memory-v2
