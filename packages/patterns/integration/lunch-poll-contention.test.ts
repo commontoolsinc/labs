@@ -43,7 +43,7 @@ import {
   waitForRuntimeSynced,
   waitForText,
 } from "./cfc-browser-helpers.ts";
-import type { Vote, VoteColor } from "../lunch-poll/main.tsx";
+import type { Option, Vote, VoteColor } from "../lunch-poll/main.tsx";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME, CFC_BROWSER_PROFILE_COUNT } = env;
 const PROPAGATION_TIMEOUT = 60_000;
@@ -211,6 +211,51 @@ const toVote = (value: unknown): Vote => {
   };
 };
 
+const toOption = (value: unknown): Option => {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`Option is not an object: ${JSON.stringify(value)}`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.title !== "string" ||
+    typeof record.addedByName !== "string"
+  ) {
+    throw new Error(`Invalid option: ${JSON.stringify(value)}`);
+  }
+  return {
+    id: record.id,
+    title: record.title,
+    addedByName: record.addedByName,
+  };
+};
+
+const readOptions = async (page: Page): Promise<Option[]> => {
+  const options = await page.evaluate(async () => {
+    const cf = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        readCell?: (options?: { path?: string[] }) => Promise<unknown>;
+      };
+    }).commonfabric;
+    if (!cf?.readCell) throw new Error("commonfabric.readCell unavailable");
+    const value = await cf.readCell({ path: ["options"] });
+    if (!Array.isArray(value)) {
+      throw new Error(`options is not an array: ${JSON.stringify(value)}`);
+    }
+    return value;
+  });
+  return options.map(toOption);
+};
+
+const settlePatternView = async (page: Page): Promise<void> => {
+  await page.evaluate(async () => {
+    const cf = (globalThis as typeof globalThis & {
+      commonfabric?: { viewSettled?: () => Promise<void> };
+    }).commonfabric;
+    await cf?.viewSettled?.();
+  });
+};
+
 const readVotes = async (page: Page): Promise<Vote[]> => {
   const votes = await page.evaluate(async () => {
     const cf = (globalThis as typeof globalThis & {
@@ -256,6 +301,43 @@ const optionIdForTitle = (page: Page, title: string): Promise<string> =>
     return id;
   }, { args: [title] });
 
+const waitForOptionsOnPage = async (
+  page: Page,
+  titles: readonly string[],
+  pageLabel = "page",
+): Promise<Map<string, string>> => {
+  let optionsByTitle = new Map<string, string>();
+  let lastTitles: string[] = [];
+  let lastError: unknown;
+  try {
+    await waitFor(
+      async () => {
+        try {
+          const options = await readOptions(page);
+          lastTitles = options.map((option) => option.title);
+          optionsByTitle = new Map(
+            options.map((option) => [option.title, option.id]),
+          );
+          await settlePatternView(page);
+          return titles.every((title) => optionsByTitle.has(title));
+        } catch (error) {
+          lastError = error;
+          return false;
+        }
+      },
+      { timeout: OPTION_CARD_READY_TIMEOUT, delay: 250 },
+    );
+  } catch (error) {
+    throw new Error(
+      `Options not ready on ${pageLabel}; expected ${titles.join(", ")}; saw ${
+        lastTitles.join(", ")
+      }`,
+      { cause: lastError ?? error },
+    );
+  }
+  return optionsByTitle;
+};
+
 const waitForOptionIdForTitle = async (
   page: Page,
   title: string,
@@ -267,6 +349,8 @@ const waitForOptionIdForTitle = async (
     await waitFor(
       async () => {
         try {
+          await readOptions(page);
+          await settlePatternView(page);
           optionId = await optionIdForTitle(page, title);
           return true;
         } catch (error) {
@@ -470,8 +554,15 @@ describe(
         );
 
         for (const title of OPTIONS) {
-          await fillCfInput(voterPages[0], "#lp-add-option-input", title);
-          await clickCfButton(voterPages[0], "#lp-add-option-button");
+          await timer.run(`add ${title}`, async () => {
+            await fillCfInput(voterPages[0], "#lp-add-option-input", title);
+            await clickCfButton(voterPages[0], "#lp-add-option-button");
+            await waitForOptionIdForTitle(
+              voterPages[0],
+              title,
+              userNames[0],
+            );
+          });
         }
         await timer.run(
           "host option writes synced",
@@ -479,6 +570,15 @@ describe(
             waitForRuntimeSynced(voterPages[0], {
               timeout: OPTION_CARD_READY_TIMEOUT,
             }),
+        );
+        await timer.run(
+          "option data ready on all profiles",
+          () =>
+            Promise.all(
+              voterPages.map((page, pageIndex) =>
+                waitForOptionsOnPage(page, OPTIONS, userNames[pageIndex])
+              ),
+            ),
         );
         const optionIdsByPage = await timer.run(
           "all option cards ready on all profiles",
