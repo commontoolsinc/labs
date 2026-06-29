@@ -39,6 +39,7 @@ import {
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
+  CfcAddress,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -905,6 +906,15 @@ export interface IExtendedStorageTransaction
    * flows into the digest input is immutable.
    */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+
+  /**
+   * Declares a list-coordinator result container (filter/flatMap) whose
+   * `structure` label must be re-derived from this transaction's flow-join J
+   * (its selection criteria) — independent of whether the container value is
+   * written this tx. See `CfcTxState.structureContainers`. The address is
+   * `deepFreeze()`d on entry.
+   */
+  recordCfcStructureContainer(address: CfcAddress): void;
 
   /**
    * Runs CFC boundary verification for this transaction and records the
