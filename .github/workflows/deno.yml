@@ -1146,6 +1146,7 @@ jobs:
         "test",
         "check",
         "pattern-integration-test",
+        "pattern-lunch-poll-contention-test",
         "pattern-reload-integration-test",
         "pattern-unit-test",
         "package-integration-test",
