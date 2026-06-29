@@ -189,12 +189,26 @@ every reconcile, decoupled from value writes.** Implementation:
   re-stamp, and does J capture the comparator's reads? (Matters for sort-like; out of
   scope for filter/flatMap.)
 
-## #4391 — recommendation
-Drop the "S16 over-taint fix" framing. The container-read commit
-(`7d3366272`) is label-neutral; the input-read change is unsafe. Land the two
-genuinely-good commits (`trackUntilSettled` doc-nit `07b1b7793`; resume-republish
-unit-mock fix `b8b26ca80`); drop (or relabel as honest "label-neutral defensive
-consistency with map") the container-read commit. Do **not** add the input-read fix.
+## #4391 — recommendation (updated: dependency VERIFIED)
+The Stage-2 fix was VERIFIED on top of #4391, then re-tested with #4391's container
+probe-scoping **un-done**: Stage 2 alone passes the full cfc suite (61 files / 312
+steps, 0 failed) AND the over-taint guard (index-drop → `structure=[]`). **So #4391's
+container-read commit (`7d3366272`) is NOT load-bearing for the fix** — Stage 2 is
+self-sufficient. (A hypothesis that the container presence read — itself an
+`asCell`-array deref — would re-leak without #4391 was tested and did NOT reproduce;
+it stays clean. Whether some other reconcile timing could leak via that read is
+unverified — probe-scoping it is reasonable, cheap defense-in-depth, structurally
+consistent with map, but not required.)
+
+Net: Stage 2 (`S16-stage2-complete.patch`) is the complete fix on its own. #4391's
+container probe-scoping is optional defense-in-depth (keep or drop). The two
+genuinely-good #4391 commits (`trackUntilSettled` doc-nit `07b1b7793`;
+resume-republish unit-mock fix `b8b26ca80`) are unrelated and should land regardless.
+
+**Landing options:** (a) fold Stage 2 into #4391 — #4391 becomes the complete fix and
+its container change earns its keep as defense-in-depth; (b) fresh branch off main with
+Stage 2 alone (note: the saved patch is #4391-relative — it includes #4391's
+probeScoped context, so it needs regenerating against main for an off-main branch).
 
 ## CT-1801 / SC-8 — recommendation
 Hold the CFC specs PR. The canonical spec **is** at
