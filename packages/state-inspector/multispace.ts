@@ -26,6 +26,8 @@
 // `seq` is per-space and is NOT comparable across spaces; divergence is judged
 // by value equality, with per-space write metadata offered as evidence.
 
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, collectLinks } from "./decode.ts";
 import { getValueAt, reconstructDocument } from "./reconstruct.ts";
@@ -105,19 +107,15 @@ const CAVEAT =
   "optimistic writes, and render state are not visible here — 'converged' " +
   "means the stored values agree, not that every client is displaying them.";
 
-/** Stable, key-sorted JSON so clustering ignores object key order. */
+/**
+ * Canonical content key for cross-space clustering. Reuses the data-model's
+ * fabric-aware `hashStringOf` (key-order-insensitive, and correct for
+ * BigInt/Fabric instances) instead of a hand-rolled sorted `JSON.stringify`,
+ * which throws on BigInt and erases Fabric types — a value-model fork the
+ * convergence verdict must not depend on.
+ */
 function canonical(v: unknown): string {
-  const sort = (x: unknown): unknown => {
-    if (Array.isArray(x)) return x.map(sort);
-    if (x && typeof x === "object") {
-      const o = x as Record<string, unknown>;
-      const out: Record<string, unknown> = {};
-      for (const k of Object.keys(o).sort()) out[k] = sort(o[k]);
-      return out;
-    }
-    return x;
-  };
-  return JSON.stringify(sort(v)) ?? "undefined";
+  return v === undefined ? "undefined" : hashStringOf(v);
 }
 
 interface MetaRow {
@@ -196,8 +194,15 @@ export function convergence(
       // abort a whole scan; errored spaces cluster together by a distinct key.
       try {
         const res = getValueAt(space, { id: opts.id, scope, branch }, path);
-        view.value = annotate(res.value);
-        view.valueKey = canonical(view.value);
+        if (!res.exists) {
+          // Revisions exist but the entity is tombstoned (deleted) at head — it
+          // has no current value, so don't cluster it with live values as if it
+          // converged. Treat it as absent for the verdict.
+          view.present = false;
+        } else {
+          view.value = annotate(res.value);
+          view.valueKey = canonical(view.value);
+        }
       } catch (e) {
         view.error = (e as Error).message;
         view.valueKey = "«decode-error»";
@@ -297,10 +302,11 @@ export function classifyRelationship(
   if (result.verdict === "converged" || result.verdict === "absent") {
     return "n/a";
   }
+  // A cross-space link to (space, id) makes the relationship a replica link
+  // whether or not the TARGET space currently holds the entity — a missing or
+  // tombstoned replica is still cross-space-linked, not an independent instance.
   const linked = result.views.some(
-    (v) =>
-      v.present &&
-      index.targets.has(`${spaceDidFromLabel(v.label)} ${result.id}`),
+    (v) => index.targets.has(`${spaceDidFromLabel(v.label)} ${result.id}`),
   );
   return linked ? "cross-space-linked" : "no-cross-space-link";
 }

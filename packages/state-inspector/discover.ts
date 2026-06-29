@@ -44,7 +44,13 @@ export function candidateRoots(cwd: string = Deno.cwd()): string[] {
   const env = Deno.env.get("MEMORY_DIR");
   if (env) roots.push(env);
   const dbPath = Deno.env.get("DB_PATH");
-  if (dbPath) roots.push(dbPath.endsWith(".sqlite") ? dirname(dbPath) : dbPath);
+  if (dbPath) {
+    // A bare relative filename (`space.sqlite`) has an empty dirname — fall back
+    // to `.` so it still resolves to the current directory rather than dropping.
+    roots.push(
+      dbPath.endsWith(".sqlite") ? (dirname(dbPath) || ".") : dbPath,
+    );
+  }
   // Walk up from cwd; check both cache layouts at each level.
   let dir = cwd;
   for (let i = 0; i < 8; i++) {

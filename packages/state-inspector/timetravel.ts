@@ -10,6 +10,8 @@
 // Values are normalized with `annotate` first, so links/streams compare as
 // stable shapes instead of exploding into nested objects.
 
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
 import type { SpaceDb } from "./db.ts";
 import { annotate, summarize } from "./decode.ts";
 import { getAtPath, reconstructDocument } from "./reconstruct.ts";
@@ -28,18 +30,12 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// Canonical content key for leaf/subtree equality. Reuses the data-model's
+// fabric-aware hash (`hashStringOf`) rather than a hand-rolled sorted
+// `JSON.stringify`, which throws on BigInt and erases Fabric instances/symbols
+// — the exact value-model fork a debugger must not introduce.
 function canonical(v: unknown): string {
-  const sort = (x: unknown): unknown => {
-    if (Array.isArray(x)) return x.map(sort);
-    if (x && typeof x === "object") {
-      const o = x as Record<string, unknown>;
-      const out: Record<string, unknown> = {};
-      for (const k of Object.keys(o).sort()) out[k] = sort(o[k]);
-      return out;
-    }
-    return x;
-  };
-  return JSON.stringify(sort(v)) ?? "undefined";
+  return v === undefined ? "undefined" : hashStringOf(v);
 }
 
 /**
@@ -202,6 +198,9 @@ export function entityTimeline(
       scope,
       branch,
       atSeq: r.seq,
+      // Reconstruct the state right after THIS op, not the whole seq — a
+      // multi-op commit that writes the entity twice must summarize each step.
+      atOpIndex: r.op_index,
     });
     const exists = doc !== undefined;
     const value = exists ? annotate(doc!.value) : undefined;
@@ -258,12 +257,16 @@ export function spaceTimeline(
 
   const commits = space.db
     .prepare(
+      // `touched` counts DISTINCT entities (an entity written twice in one
+      // commit is one touch). Commits are filtered to the requested branch so a
+      // non-default-branch timeline isn't padded with unrelated `touched: 0`
+      // commits from other branches.
       `SELECT c.seq, c.created_at, c.session_id,
-              count(r.id) touched,
-              sum(CASE WHEN r.op_index = 0 THEN 1 ELSE 0 END) AS distinctish
+              count(DISTINCT r.id) touched
        FROM "commit" c
        LEFT JOIN revision r ON r.commit_seq = c.seq
          AND r.branch = ? AND r.scope_key = ?
+       WHERE c.branch = ?
        GROUP BY c.seq ORDER BY c.seq ASC LIMIT ?`,
     )
     .all<{
@@ -271,7 +274,7 @@ export function spaceTimeline(
       created_at: string;
       session_id: string;
       touched: number;
-    }>(branch, scope, limit);
+    }>(branch, scope, branch, limit);
 
   // created-per-commit: count entities whose firstCommit == this commit.
   const createdByCommit = new Map<number, number>();

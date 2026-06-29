@@ -1,0 +1,186 @@
+// Parity harness: the inspector must reconstruct a (branch, seq) document
+// IDENTICALLY to the real memory-v2 engine. Rather than assert against a
+// hand-seeded fixture (which only proves the analyzer against our own
+// assumptions), this drives the production engine to WRITE the DB, then opens it
+// read-only and compares `reconstructDocument()` to `engine.read()` across the
+// fidelity cases the reviews flagged: branch inheritance, child override, child
+// delete tombstone, and patch-first reconstruction.
+
+import { assertEquals } from "@std/assert";
+import { toFileUrl } from "@std/path";
+
+import {
+  applyCommit,
+  close,
+  createBranch,
+  open,
+  read,
+} from "@commonfabric/memory/v2/engine";
+import type { FabricValue } from "@commonfabric/api";
+
+import { openSpace } from "../db.ts";
+import { reconstructDocument } from "../reconstruct.ts";
+
+const doc = (value: FabricValue) => ({ value });
+
+function assertParity(
+  path: string,
+  id: string,
+  branch: string,
+  engineDoc: unknown,
+) {
+  const space = openSpace(path);
+  try {
+    const got = reconstructDocument(space, { id, branch }) ?? null;
+    assertEquals(
+      got,
+      engineDoc,
+      `reconstruct(${id}, branch=${
+        JSON.stringify(branch)
+      }) must match engine.read`,
+    );
+  } finally {
+    space.close();
+  }
+}
+
+Deno.test("reconstruct parity with memory-v2 engine", async (t) => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const engine = await open({ url: toFileUrl(path) });
+  try {
+    // seq 1: set entity:shared on the default branch.
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "entity:shared", value: doc({ v: 1 }) }],
+      },
+    });
+
+    // seq 2: a patch-first entity — its base revision is a patch, no prior set.
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:patchfirst",
+          patches: [{ op: "add", path: "/value", value: { n: 1 } }],
+        }],
+      },
+    });
+
+    // Fork `feature` from the default branch at the current head.
+    createBranch(engine, "feature", { parentBranch: "" });
+
+    // On `feature`: write a child-only entity, override shared, leave a third
+    // (entity:shared stays inherited until the override below).
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        branch: "feature",
+        operations: [{
+          op: "set",
+          id: "entity:childonly",
+          value: doc({ c: 1 }),
+        }],
+      },
+    });
+
+    await t.step("default-branch entity reconstructs identically", () => {
+      assertParity(
+        path,
+        "entity:shared",
+        "",
+        read(engine, { id: "entity:shared" }),
+      );
+    });
+
+    await t.step(
+      "patch-first entity reconstructs (engine applies onto {})",
+      () => {
+        const e = read(engine, { id: "entity:patchfirst" });
+        assertEquals(
+          e,
+          { value: { n: 1 } },
+          "engine sanity: patch-first → {value:{n:1}}",
+        );
+        assertParity(path, "entity:patchfirst", "", e);
+      },
+    );
+
+    await t.step("child branch INHERITS untouched parent entity", () => {
+      const e = read(engine, { id: "entity:shared", branch: "feature" });
+      assertEquals(
+        e,
+        { value: { v: 1 } },
+        "engine sanity: feature inherits shared",
+      );
+      assertParity(path, "entity:shared", "feature", e);
+    });
+
+    await t.step("child-only entity is absent on the parent", () => {
+      assertEquals(read(engine, { id: "entity:childonly" }), null);
+      assertParity(path, "entity:childonly", "", null);
+    });
+
+    // seq 4: override shared on `feature`.
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        branch: "feature",
+        operations: [{ op: "set", id: "entity:shared", value: doc({ v: 2 }) }],
+      },
+    });
+
+    await t.step("child override diverges from inherited parent", () => {
+      assertParity(
+        path,
+        "entity:shared",
+        "feature",
+        read(engine, { id: "entity:shared", branch: "feature" }),
+      );
+      assertParity(
+        path,
+        "entity:shared",
+        "",
+        read(engine, { id: "entity:shared" }),
+      );
+    });
+
+    // seq 5: delete shared on `feature` (tombstone over an inherited base).
+    applyCommit(engine, {
+      sessionId: "session:p:s",
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        branch: "feature",
+        operations: [{ op: "delete", id: "entity:shared" }],
+      },
+    });
+
+    await t.step("child delete tombstones the inherited entity", () => {
+      assertEquals(
+        read(engine, { id: "entity:shared", branch: "feature" }),
+        null,
+      );
+      assertParity(path, "entity:shared", "feature", null);
+      // parent still sees its own value
+      assertParity(
+        path,
+        "entity:shared",
+        "",
+        read(engine, { id: "entity:shared" }),
+      );
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

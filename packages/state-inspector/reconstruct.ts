@@ -33,6 +33,12 @@ export interface EntityAddress {
 export interface ReconstructOptions extends EntityAddress {
   /** Replay revisions with seq <= atSeq. Defaults to latest. */
   atSeq?: number;
+  /**
+   * When set, cut the replay precisely AT (atSeq, atOpIndex): include rows with
+   * `seq < atSeq`, or `seq === atSeq && op_index <= atOpIndex`. Lets a timeline
+   * reconstruct the state immediately after one op of a multi-op commit.
+   */
+  atOpIndex?: number;
 }
 
 export type EntityDocument =
@@ -65,7 +71,68 @@ interface RevRow {
   data: string | null;
 }
 
-/** Replay the revision log to reconstruct an entity document at a seq. */
+interface BranchLineageEntry {
+  branch: string;
+  /** Highest seq this branch contributes to the child's visible history. */
+  maxSeq: number;
+}
+
+/**
+ * The branch lineage a reader on `branch` sees at `atSeq`, mirroring the
+ * engine's `readRowForBranch` recursion (`engine.ts`): the branch contributes
+ * its own revisions up to `atSeq`, then inherits its parent's revisions capped
+ * at `min(atSeq, fork_seq)`, recursively up to the root. On DBs without a
+ * `branch` table (legacy/partial), there is no inheritance — a single branch.
+ */
+function branchLineage(
+  space: SpaceDb,
+  branch: string,
+  atSeq: number,
+): BranchLineageEntry[] {
+  const chain: BranchLineageEntry[] = [{ branch, maxSeq: atSeq }];
+  if (
+    !space.db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='branch'",
+    ).get<{ 1: number }>()
+  ) {
+    return chain;
+  }
+  const stmt = space.db.prepare(
+    "SELECT parent_branch, fork_seq FROM branch WHERE name = ?",
+  );
+  const seen = new Set<string>([branch]);
+  let cursor = branch;
+  let ceiling = atSeq;
+  // Walk parent pointers; the seq ceiling only ever tightens (min with fork_seq).
+  for (;;) {
+    const row = stmt.get<
+      { parent_branch: string | null; fork_seq: number | null }
+    >(
+      cursor,
+    );
+    // The default branch is named "" (falsy) — test for null/undefined, never
+    // truthiness, or inheritance from the default branch is silently dropped.
+    const parent = row?.parent_branch;
+    if (parent === null || parent === undefined || seen.has(parent)) break;
+    ceiling = Math.min(ceiling, row?.fork_seq ?? ceiling);
+    chain.push({ branch: parent, maxSeq: ceiling });
+    seen.add(parent);
+    cursor = parent;
+  }
+  return chain;
+}
+
+/**
+ * Replay the revision log to reconstruct an entity document at a (branch, seq).
+ *
+ * Replays the FULL effective log rather than the engine's snapshot/base-finding
+ * optimization: revisions are append-only (never pruned — `compactSnapshots`
+ * prunes only snapshots), so a from-scratch replay is identical to the engine's
+ * result while staying robust on partial/legacy DBs that lack a snapshot table.
+ * Branch inheritance is honored via {@link branchLineage}, so a child branch
+ * that holds only patches still reconstructs on its inherited parent base —
+ * matching `read()`/`reconstructPatchedDocument` in `packages/memory/v2`.
+ */
 export function reconstructDocument(
   space: SpaceDb,
   opts: ReconstructOptions,
@@ -74,24 +141,35 @@ export function reconstructDocument(
   const scope = opts.scope ?? "space";
   const atSeq = opts.atSeq ?? Number.MAX_SAFE_INTEGER;
 
-  const rows = space.db
-    .prepare(
-      `SELECT seq, op_index, op, data FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
-       ORDER BY seq ASC, op_index ASC`,
-    )
-    .all<RevRow>(branch, opts.id, scope, atSeq);
+  const stmt = space.db.prepare(
+    `SELECT seq, op_index, op, data FROM revision
+     WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?
+     ORDER BY seq ASC, op_index ASC`,
+  );
+  const rows: RevRow[] = [];
+  for (const entry of branchLineage(space, branch, atSeq)) {
+    rows.push(...stmt.all<RevRow>(entry.branch, opts.id, scope, entry.maxSeq));
+  }
+  // Lineage entries may overlap in seq space only across different branches;
+  // a global (seq, op_index) sort restores the total order the reader sees.
+  rows.sort((a, b) => a.seq - b.seq || a.op_index - b.op_index);
+
+  // Optional op-precise cut within the final seq (for per-write timelines).
+  const cutOpIndex = opts.atOpIndex;
+  const replay = cutOpIndex === undefined
+    ? rows
+    : rows.filter((r) => r.seq < atSeq || r.op_index <= cutOpIndex);
 
   let doc: FabricValue | undefined = undefined;
-  for (const row of rows) {
+  for (const row of replay) {
     if (row.op === "set") {
       doc = row.data ? (decodeStored(row.data) as FabricValue) : undefined;
     } else if (row.op === "patch") {
-      // A patch with no prior document is anomalous (the server always lays a
-      // set first); skip rather than feed `undefined` to the applier.
-      if (doc === undefined) continue;
+      // A leading patch with no base applies onto an empty document `{}`, as the
+      // engine does (`emptyEntityDocument()` in reconstructPatchedDocument) —
+      // never skip it, or a patch-first entity reconstructs as absent.
       const ops = row.data ? (decodeStored(row.data) as PatchOp[]) : [];
-      doc = applyPatch(doc, ops);
+      doc = applyPatch((doc ?? {}) as FabricValue, ops);
     } else if (row.op === "delete") {
       doc = undefined;
     }

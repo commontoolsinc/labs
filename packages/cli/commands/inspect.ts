@@ -496,21 +496,27 @@ export const inspect = new Command()
             );
           }
           if (c.staleReads.length) {
-            console.log(`\nstale reads (read an old version, missed a write):`);
+            console.log(
+              `\n⚠ ANOMALOUS stale reads — the engine validates confirmed ` +
+                `reads before committing, so a healthy store has none. Each ` +
+                `here is a committed read the engine's own check would reject:`,
+            );
             for (const sr of c.staleReads) {
               console.log(
                 `  commit #${sr.readerCommitSeq} by ${
                   fmtSession(sr.readerSession)
                 } ` +
-                  `read @seq ${sr.readAtSeq} but missed write @seq ${sr.missedWriteSeq} ` +
-                  `by ${fmtSession(sr.missedWriteSession)}` +
+                  `read @seq ${sr.readAtSeq} but missed ${sr.missedWriteOp} ` +
+                  `@seq ${sr.missedWriteSeq} by ${
+                    fmtSession(sr.missedWriteSession)
+                  }` +
                   (sr.readerAlsoWrote
                     ? "  ⚠ then wrote (lost-update risk)"
                     : ""),
               );
             }
           } else {
-            console.log("\n(no stale reads detected)");
+            console.log("\n(no anomalous stale reads — store is consistent)");
           }
         });
         return;
@@ -726,12 +732,17 @@ export const inspect = new Command()
           console.log(`\n${n.kind} ${shortDid(src)}  ${n.label}`);
           for (const e of bySource.get(src)!) {
             const t = labelOf.get(e.to);
+            // External targets carry the real id in `entityId` and the target
+            // space in `space`; print the space DID (not the qualified node key).
+            const desc = t
+              ? (e.external
+                ? `${shortDid(t.entityId)} (external)`
+                : `${t.kind} ${t.label}`)
+              : "?";
             console.log(
-              `  ${arrow(e.kind).padEnd(9)} ${
-                t ? `${t.kind} ${t.label}` : "?"
-              }${e.external ? ` @${shortDid(e.to)} [cross-space]` : ""}${
-                e.label ? `  (${e.label})` : ""
-              }`,
+              `  ${arrow(e.kind).padEnd(9)} ${desc}${
+                e.external ? ` @${shortDid(t?.space ?? "")} [cross-space]` : ""
+              }${e.label ? `  (${e.label})` : ""}`,
             );
           }
         }

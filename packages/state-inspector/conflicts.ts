@@ -2,21 +2,32 @@
 //
 // The durable store records enough to reconstruct who fought over what:
 //   - `revision` — every write, joinable to `commit.session_id` (the writer).
-//   - `commit.original.reads.confirmed[]` — `{ id, path, scope, seq }`: what each
-//     commit READ and at which seq. So a commit declares "I read X@N".
+//   - `commit.original.reads.confirmed[]` — `ConfirmedRead { id, scope?, branch?,
+//     path, seq, nonRecursive? }`: what each commit READ and at which seq.
 //
 // Two grounded views:
 //   1. CONTENTION (write-write): entities written by ≥2 distinct sessions, with
 //      the interleaved writer timeline — the back-and-forth of concurrent edits.
-//   2. STALE READS (read-write / lost-update): a commit that wrote X having read
-//      X@N, when a DIFFERENT session wrote X at W with N < W < the writer's commit
-//      — i.e. it never saw W's write. The retroactive "conflict loser" signal.
+//   2. ANOMALOUS STALE READS (read-write): a committed confirmed read that the
+//      engine's OWN conflict check would have rejected. We replay that exact
+//      check here — resolving each read's declared scope via the engine's
+//      `resolveScopeKey` and testing patch overlap with the engine's exported
+//      `patchOverlapsRead` — so a hit is genuinely anomalous, not a benign
+//      cross-scope or disjoint-path interleaving the runtime tolerates.
 //
-// HONESTY: the server serializes the durable log, so what's here is the COMMITTED
-// order. Rejected/retried client commits aren't persisted; we infer contention
-// and stale reads from the successful log, not from rejection records.
+// HONESTY: the server VALIDATES every confirmed read before inserting a commit
+// (`validateConfirmedReads` → `findConflictSeq` in `packages/memory/v2`), so a
+// healthy store should yield ZERO stale reads here. A hit therefore flags an
+// invariant violation / corruption, NOT normal "lost update" history. Rejected
+// client commits aren't persisted; we never see them.
 
 import type { SpaceDb } from "./db.ts";
+import {
+  patchOverlapsNonRecursiveRead,
+  patchOverlapsRead,
+  resolveScopeKey,
+} from "@commonfabric/memory/v2/engine";
+import type { CellScope, PatchOp } from "@commonfabric/memory/v2";
 import { decodeStored } from "./decode.ts";
 import { parseScope } from "./scopes.ts";
 
@@ -135,9 +146,16 @@ export interface StaleRead {
   readerSession: string;
   /** The seq the reader saw the entity at. */
   readAtSeq: number;
-  /** A write by a DIFFERENT session the reader never saw (readAtSeq < seq < readerCommitSeq). */
+  /** The read's declared path within the entity (`[]` = whole document). */
+  readPath: string[];
+  /** The resolved scope_key the read targeted (engine `resolveScopeKey`). */
+  readScopeKey: string;
+  /** A conflicting write the engine's own check would have rejected. */
   missedWriteSeq: number;
   missedWriteSession: string;
+  /** The op of the conflicting write (`set`/`delete` always conflict; `patch`
+   * only when its paths overlap the read — `patchOverlapsRead`). */
+  missedWriteOp: string;
   /** True when the reader ALSO wrote the entity (a real lost-update risk). */
   readerAlsoWrote: boolean;
 }
@@ -154,17 +172,35 @@ export interface EntityConflicts {
   staleReads: StaleRead[];
 }
 
-interface ReadRef {
+interface ConfirmedReadRef {
   id: string;
   seq: number;
+  scope?: CellScope;
+  branch?: string;
+  path?: string[];
+  nonRecursive?: boolean;
+}
+
+interface WriteRow {
+  seq: number;
+  commit_seq: number;
+  op: string;
+  data: string | null;
+  session_id: string;
 }
 
 /**
- * Deep per-entity conflict analysis: the writer timeline plus stale-read /
- * lost-update detection. For each commit that READ this entity at seq N, if a
- * DIFFERENT session wrote it at W (N < W < the reader's own commit seq), the
- * reader never saw W — a concurrent-write it missed. Flagged stronger when the
- * reader also wrote the entity (write-write lost update).
+ * Deep per-entity conflict analysis: the writer timeline (in `opts.scope`) plus
+ * ANOMALOUS stale-read detection that replays the engine's own conflict check.
+ *
+ * For each committed confirmed read of this entity at seq N, we resolve the
+ * read's declared scope to a scope_key the same way the engine does
+ * (`resolveScopeKey` against the reader's principal/session), then look for a
+ * write to that (id, scope_key) by a DIFFERENT session with N < W < the reader's
+ * commit seq — applying the engine's granularity: `set`/`delete` always
+ * conflict, a `patch` only when `patchOverlapsRead` (or the nonRecursive
+ * variant) says its paths overlap the read. Because the engine validates exactly
+ * this before persisting, any hit is anomalous (see file header), not routine.
  */
 export function entityConflicts(
   space: SpaceDb,
@@ -198,8 +234,18 @@ export function entityConflicts(
     }));
 
   // Commits that wrote this entity (to flag reader-also-wrote).
-  const wroteByCommit = new Map<number, string>();
-  for (const w of writers) wroteByCommit.set(w.commitSeq, w.session);
+  const wroteByCommit = new Set<number>();
+  for (const w of writers) wroteByCommit.add(w.commitSeq);
+
+  // Writes to (id) in a given resolved scope_key, after a seq, by a non-reader
+  // session — the candidate conflicts for one read. Decodes patch data so the
+  // engine's path-overlap test can run.
+  const writesStmt = space.db.prepare(
+    `SELECT r.seq, r.commit_seq, r.op, r.data, c.session_id
+     FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq > ?
+     ORDER BY r.seq ASC, r.op_index ASC`,
+  );
 
   // Candidate reader commits: those whose stored ClientCommit mentions this id.
   // (Pre-filter by LIKE to avoid decoding every commit in the space.)
@@ -212,33 +258,47 @@ export function entityConflicts(
 
   const staleReads: StaleRead[] = [];
   for (const c of candidates) {
-    let reads: ReadRef[] = [];
+    let reads: ConfirmedReadRef[] = [];
     try {
       const o = decodeStored(c.original) as {
-        reads?: { confirmed?: ReadRef[] };
+        reads?: { confirmed?: ConfirmedReadRef[] };
       };
       reads = (o.reads?.confirmed ?? []).filter((r) => r.id === id);
     } catch {
       continue;
     }
+    // The reader's identity context, for scope resolution (same as the engine's
+    // `scopeContext` = the writer principal/session of the commit).
+    const readerScope = parseScope(c.session_id);
     for (const rd of reads) {
-      // A write to this entity by ANOTHER session, after what the reader saw but
-      // before the reader committed → the reader missed it.
-      for (const w of writers) {
-        if (
-          w.seq > rd.seq && w.commitSeq < c.seq &&
-          w.session !== c.session_id
-        ) {
-          staleReads.push({
-            readerCommitSeq: c.seq,
-            readerSession: c.session_id,
-            readAtSeq: rd.seq,
-            missedWriteSeq: w.seq,
-            missedWriteSession: w.session,
-            readerAlsoWrote: wroteByCommit.has(c.seq),
-          });
-          break; // one missed write per read is enough to flag it
-        }
+      const readPath = rd.path ?? [];
+      let readScopeKey: string;
+      try {
+        readScopeKey = resolveScopeKey(rd.scope, {
+          principal: readerScope.principal,
+          sessionId: readerScope.sessionId,
+        });
+      } catch {
+        continue; // a user/session read with no principal context — skip
+      }
+      const conflict = writesStmt
+        .all<WriteRow>(rd.branch ?? branch, id, readScopeKey, rd.seq)
+        .find((w) =>
+          w.commit_seq < c.seq && w.session_id !== c.session_id &&
+          writeConflictsRead(w, readPath, rd.nonRecursive ?? false)
+        );
+      if (conflict) {
+        staleReads.push({
+          readerCommitSeq: c.seq,
+          readerSession: c.session_id,
+          readAtSeq: rd.seq,
+          readPath,
+          readScopeKey,
+          missedWriteSeq: conflict.seq,
+          missedWriteSession: conflict.session_id,
+          missedWriteOp: conflict.op,
+          readerAlsoWrote: wroteByCommit.has(c.seq),
+        });
       }
     }
   }
@@ -253,4 +313,30 @@ export function entityConflicts(
     interleaved: sessionSwitches(writers) >= 2,
     staleReads,
   };
+}
+
+/**
+ * Does a write conflict with a read at `readPath`, by the engine's rule? A
+ * `set`/`delete` replaces/removes the whole document the read observed, so it
+ * always conflicts (path-blind, as `findConflictSeq` does). A `patch` conflicts
+ * only when its touched paths overlap the read — reusing the engine's exported
+ * `patchOverlapsRead` / `patchOverlapsNonRecursiveRead` so the granularity is
+ * identical, never re-derived.
+ */
+function writeConflictsRead(
+  w: WriteRow,
+  readPath: string[],
+  nonRecursive: boolean,
+): boolean {
+  if (w.op === "set" || w.op === "delete") return true;
+  if (w.op !== "patch") return false;
+  let patches: PatchOp[];
+  try {
+    patches = (w.data ? decodeStored(w.data) : []) as PatchOp[];
+  } catch {
+    return true; // undecodable patch — conservatively treat as conflicting
+  }
+  return nonRecursive
+    ? patchOverlapsNonRecursiveRead(patches, readPath)
+    : patchOverlapsRead(patches, readPath);
 }

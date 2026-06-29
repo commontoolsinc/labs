@@ -114,6 +114,21 @@ function safeJson(data: unknown): string {
   return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
+/**
+ * Escape a string for safe interpolation into the document SHELL (title/header).
+ * The bundle JSON is rendered through {@link safeJson} and all values render via
+ * `textContent` in the app, but the static chrome interpolates DB/path-derived
+ * strings (the space DID, op names) directly — escape them so a hostile DB or
+ * file path can't inject markup into the generated standalone HTML.
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 const STYLE = `
 :root {
   --bg:#fff; --fg:#1f2937; --muted:#6b7280; --line:#e5e7eb; --card:#f9fafb;
@@ -226,7 +241,7 @@ function el(t, props={}, kids=[]) {
   return n;
 }
 const shortDid = d => { d=(d||"").replace(/^did:key:/,""); return d.length>14?d.slice(0,8)+"…"+d.slice(-4):d; };
-const shortId = id => { const b = id.replace(/^of:/,"").replace(/^cid:/,"cid:");
+const shortId = id => { const b = id.replace(/^of:/,"");
   return b.length>22 ? b.slice(0,12)+"…"+b.slice(-6) : b; };
 function flash(msg){ const f=$("#flash"); f.textContent=msg; f.classList.add("on");
   setTimeout(()=>f.classList.remove("on"),900); }
@@ -381,15 +396,15 @@ function renderDetail(id){
       ]));
     }
     if(cf.staleReads&&cf.staleReads.length){
-      body.push(el("div",{style:"margin-top:6px;color:var(--stream)",text:"⚠ stale reads (lost-update risk):"}));
+      body.push(el("div",{style:"margin-top:6px;color:var(--stream)",text:"⚠ ANOMALOUS stale reads — the engine rejects these before commit; a hit means an invariant violation, not normal history:"}));
       for(const sr of cf.staleReads){
         body.push(el("div",{class:"muted",style:"font-size:12px",text:
           "commit #"+sr.readerCommitSeq+" by "+fmtSession(sr.readerSession)+" read @"+sr.readAtSeq
-          +" but missed write @"+sr.missedWriteSeq+" by "+fmtSession(sr.missedWriteSession)
+          +" but missed "+(sr.missedWriteOp||"write")+" @"+sr.missedWriteSeq+" by "+fmtSession(sr.missedWriteSession)
           +(sr.readerAlsoWrote?" — then wrote":"")}));
       }
     }
-    host.append(section("Contention"+(cf.multiUser?" ⚔ MULTI-USER":"")+(cf.staleReads&&cf.staleReads.length?" · stale reads":""), cf.multiUser, body));
+    host.append(section("Contention"+(cf.multiUser?" ⚔ MULTI-USER":"")+(cf.staleReads&&cf.staleReads.length?" · ⚠ anomaly":""), cf.multiUser, body));
   }
 
   // schema (a stream's payload schema is resolved from its owner piece)
@@ -652,17 +667,17 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>state-inspector · ${bundle.space}</title>
+<title>state-inspector · ${escapeHtml(bundle.space)}</title>
 <style>${STYLE}</style></head>
 <body>
 <header>
   <h1>state-inspector</h1>
   <span class="stats">${
-    bundle.space.slice(0, 24)
+    escapeHtml(bundle.space.slice(0, 24))
   }… <button class="copy" id="copy-space">copy DID</button></span>
-  <span class="stats">${s.entities} entities · ${s.commits} commits · ${s.sessions} sessions · ops ${opsLine}${
-    bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""
-  }</span>
+  <span class="stats">${s.entities} entities · ${s.commits} commits · ${s.sessions} sessions · ops ${
+    escapeHtml(opsLine)
+  }${bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""}</span>
   <span class="stats" style="color:var(--stream)">${idLine}${xLine}${cfLine}</span>
   <span class="live">app URL <input id="live-input" placeholder="https://host (for live links)" size="22"></span>
 </header>

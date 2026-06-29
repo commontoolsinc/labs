@@ -232,6 +232,33 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
         assertEquals(parsed.space, bundle.space);
         assertEquals(parsed.details.length, bundle.details.length);
       });
+
+      await t.step(
+        "hostile DB-derived strings can't inject into the shell",
+        () => {
+          // A malicious space DID / op name must not break out into live markup in
+          // the standalone HTML (the chrome interpolates DB/path-derived strings).
+          const evil = "</title><script>alert(1)</script>";
+          const hostile = {
+            ...bundle,
+            space: evil,
+            summary: {
+              ...bundle.summary,
+              ops: { "<img src=x onerror=alert(2)>": 1 },
+            },
+          };
+          const html = renderInspectorHtml(hostile);
+          assert(
+            !html.includes("<script>alert(1)"),
+            "space DID must be HTML-escaped in the shell",
+          );
+          assert(
+            !html.includes("<img src=x onerror"),
+            "op names must be HTML-escaped in the shell",
+          );
+          assertStringIncludes(html, "&lt;img src=x onerror");
+        },
+      );
     } finally {
       space.close();
     }

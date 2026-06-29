@@ -29,7 +29,11 @@ import {
 export type EdgeKind = "pattern" | "argument" | "owns" | "link";
 
 export interface GraphNode {
+  /** Unique node key. For external stubs this is space-qualified (`<space>/<id>`)
+   * so a cross-space target can't collide with a local entity of the same id. */
   id: string;
+  /** The bare entity id (for display / navigation); equals `id` for local nodes. */
+  entityId: string;
   kind: EntityKind;
   label: string;
   /** False for a synthesized stub (a cross-space link target not in this space). */
@@ -119,21 +123,33 @@ export function buildSpaceGraph(
   // Pass 2: nodes + edges.
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
-  const ensureStub = (id: string, space?: string) => {
-    if (!nodes.has(id)) {
-      nodes.set(id, {
-        id,
+  // External targets are keyed by `<space>/<id>` so they never collide with a
+  // local entity of the same id (which would silently re-point the edge at the
+  // local node and lose the target space). Returns the node key for the edge.
+  const ensureStub = (entityId: string, space?: string): string => {
+    const key = space ? `${space}/${entityId}` : entityId;
+    if (!nodes.has(key)) {
+      nodes.set(key, {
+        id: key,
+        entityId,
         kind: "unknown",
         label: space ? "(external)" : "(absent)",
         present: false,
         space,
       });
     }
+    return key;
   };
 
   for (const [id, doc] of docs) {
     const m = modelFromDocument(doc, { id, scope, moduleIndex });
-    nodes.set(id, { id, kind: m.kind, label: m.label, present: true });
+    nodes.set(id, {
+      id,
+      entityId: id,
+      kind: m.kind,
+      label: m.label,
+      present: true,
+    });
   }
 
   for (const [id, doc] of docs) {
@@ -168,11 +184,10 @@ export function buildSpaceGraph(
         if (!l.id) continue;
         const external = !!l.space && l.space !== own &&
           l.space !== `did:key:${own}`;
-        if (external) ensureStub(l.id, l.space);
-        else ensureStub(l.id);
+        const to = ensureStub(l.id, external ? l.space : undefined);
         edges.push({
           from: id,
-          to: l.id,
+          to,
           kind: "link",
           label: shortPath(l.path),
           ...(external ? { external: true } : {}),

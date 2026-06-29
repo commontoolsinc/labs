@@ -9,12 +9,22 @@
 //
 // The same cell id can hold a `space` value AND a per-user override, and they
 // differ (verified: `space` a link/default; `user` the concrete per-user state,
-// e.g. a per-user VDOM). The runtime resolves what an identity sees as
-// MOST-SPECIFIC-WINS: session:X:sid ⊕ user:X ⊕ space. "View as identity X"
-// overlays X's scopes on top of the shared space — surfacing exactly the
-// per-user divergence ("looks different for me") that multiplayer bugs live in.
+// e.g. a per-user VDOM).
+//
+// IMPORTANT — what the runtime actually does vs. what this view approximates.
+// The runtime reads ONE declared scope_key at a time (via the engine's
+// `resolveScopeKey`), and a narrowed write stores a LINK at the base-scope slot
+// pointing at the narrow instance; readers reach the narrow value by FOLLOWING
+// that link (see `packages/runner/src/data-updating.ts` / `scope.ts`). There is
+// no read-time "fall back from session→user→space". So `valueAsIdentity` below
+// is an APPROXIMATION — "the most-specific scope that holds this id" — not the
+// runtime's resolution. {@link scopeOverlay} (every scope side-by-side) is the
+// honest, runtime-true divergence view; prefer it. Scope-key construction reuses
+// the engine's exported `resolveScopeKey` so encoding never drifts.
 
 import type { SpaceDb } from "./db.ts";
+import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { annotate, summarize } from "./decode.ts";
 import { reconstructDocument } from "./reconstruct.ts";
 
@@ -38,7 +48,10 @@ export function parseScope(raw: string): Scope {
   if (decoded === "space") {
     return { raw, kind: "space", entities: 0, revisions: 0 };
   }
-  let m = decoded.match(/^session:(did:key:[^:]+):(.+)$/);
+  // The platform `DID` type is `did:<method>:<id>` — not only `did:key:`. Match
+  // any method so a `did:web:` / `did:plc:` writer is still attributed to a
+  // principal (else it falls through to `other` and is miscounted as no-user).
+  let m = decoded.match(/^session:(did:[a-z0-9]+:[^:]+):(.+)$/);
   if (m) {
     return {
       raw,
@@ -49,7 +62,7 @@ export function parseScope(raw: string): Scope {
       revisions: 0,
     };
   }
-  m = decoded.match(/^user:(did:key:[^:]+)$/);
+  m = decoded.match(/^user:(did:[a-z0-9]+:[^:]+)$/);
   if (m) {
     return { raw, kind: "user", principal: m[1], entities: 0, revisions: 0 };
   }
@@ -87,50 +100,67 @@ export function listScopes(
 }
 
 /**
- * The scope precedence chain for an identity — most specific first. With a
+ * The most-specific-first chain of stored scope_keys for an identity. With a
  * sessionId: `[session:X:sid, user:X, space]`; without: `[user:X, space]`.
+ * Encoding goes through the engine's `resolveScopeKey`, so the keys are exactly
+ * what the runtime writes (no hand-rolled %-encoding to drift).
  */
 export function resolveScopeChain(
   identity: string,
   sessionId?: string,
 ): string[] {
   const chain: string[] = [];
-  if (sessionId) chain.push(`session:${identity}:${sessionId}`);
-  chain.push(`user:${identity}`);
-  chain.push("space");
+  if (sessionId) {
+    chain.push(
+      resolveScopeKey("session", { principal: identity, sessionId }),
+    );
+  }
+  chain.push(resolveScopeKey("user", { principal: identity }));
+  chain.push(resolveScopeKey("space", {}));
   return chain;
 }
 
 export interface IdentityValue {
   exists: boolean;
-  /** The scope the value resolved from (the most specific that had the id). */
+  /** The scope the value resolved from (the most specific that held the id). */
   resolvedScope?: string;
   resolvedKind?: ScopeKind;
   value?: unknown;
   /** True if a more-general scope ALSO holds this id (i.e. this is an override). */
   overrides?: boolean;
+  /** Honest reminder this is an approximation, not the runtime read path. */
+  approximation: true;
 }
 
-/** Does this scope hold any row for `id`? (raw scope_key match.) */
+/**
+ * Does this scope hold a row for `id` visible at `atSeq`? Bounded by `atSeq`, so
+ * a scope whose only row is in the FUTURE (after atSeq) is not treated as
+ * present — otherwise a time-travel read picks a future override and reports the
+ * entity absent instead of falling through to the value visible at that seq.
+ */
 function scopeHasEntity(
   space: SpaceDb,
   id: string,
   scope: string,
   branch: string,
+  atSeq?: number,
 ): boolean {
   const row = space.db
     .prepare(
       `SELECT 1 AS one FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ? LIMIT 1`,
+       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ? LIMIT 1`,
     )
-    .get<{ one: number }>(branch, id, scope);
+    .get<{ one: number }>(branch, id, scope, atSeq ?? Number.MAX_SAFE_INTEGER);
   return !!row;
 }
 
 /**
- * Read an entity's value AS an identity sees it — walking the precedence chain
- * (session ⊕ user ⊕ space) and returning the value from the most specific scope
- * that holds the id, plus whether a more-general scope also holds it (override).
+ * APPROXIMATE an identity's view of an entity by returning the value from the
+ * most-specific scope that holds the id (session ⊕ user ⊕ space). This is NOT
+ * the runtime's read resolution (see the file header) — it cannot, from an id
+ * alone, know which declared scope a real read would target, nor follow the
+ * base-scope link the runtime uses. Use {@link scopeOverlay} for the ground
+ * truth. The `approximation` flag is here so callers can't forget that.
  */
 export function valueAsIdentity(
   space: SpaceDb,
@@ -143,12 +173,10 @@ export function valueAsIdentity(
   },
 ): IdentityValue {
   const branch = opts.branch ?? "";
-  const chain = resolveScopeChain(opts.identity, opts.sessionId)
-    // The raw stored scope_key is %-encoded for user/session; match that form.
-    .map((s) => (s === "space" ? s : encodeScope(s)));
+  const chain = resolveScopeChain(opts.identity, opts.sessionId);
   for (let i = 0; i < chain.length; i++) {
     const scope = chain[i];
-    if (!scopeHasEntity(space, opts.id, scope, branch)) continue;
+    if (!scopeHasEntity(space, opts.id, scope, branch, opts.atSeq)) continue;
     const doc = reconstructDocument(space, {
       id: opts.id,
       scope,
@@ -157,22 +185,17 @@ export function valueAsIdentity(
     });
     const overrides = chain
       .slice(i + 1)
-      .some((s) => scopeHasEntity(space, opts.id, s, branch));
+      .some((s) => scopeHasEntity(space, opts.id, s, branch, opts.atSeq));
     return {
       exists: doc !== undefined,
       resolvedScope: scope,
       resolvedKind: parseScope(scope).kind,
       value: doc === undefined ? undefined : annotate(doc.value),
       overrides,
+      approximation: true,
     };
   }
-  return { exists: false };
-}
-
-/** Stored scope_keys %-encode the `did:key:` colons; match that on the way in. */
-function encodeScope(scope: string): string {
-  // session:did:key:<DID>:<uuid>  /  user:did:key:<DID>
-  return scope.replace(/did:key:/g, "did%3Akey%3A");
+  return { exists: false, approximation: true };
 }
 
 export interface Participant {
@@ -218,13 +241,16 @@ export function spaceParticipants(
     return p;
   };
 
-  // commits + distinct sessions by principal
+  // commits + distinct sessions by principal — branch-filtered to match the
+  // scoped-entity counts below (which come from listScopes, also branch-scoped).
+  const branch = opts.branch ?? "";
   for (
     const r of space.db
       .prepare(
-        `SELECT session_id, count(*) n FROM "commit" GROUP BY session_id`,
+        `SELECT session_id, count(*) n FROM "commit"
+         WHERE branch = ? GROUP BY session_id`,
       )
-      .all<{ session_id: string; n: number }>()
+      .all<{ session_id: string; n: number }>(branch)
   ) {
     // A commit `session_id` has the same shape as a session scope_key.
     const did = r.session_id ? parseScope(r.session_id).principal : undefined;
@@ -297,7 +323,10 @@ export function scopeOverlay(
     };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 
-  const keys = new Set(variants.map((v) => JSON.stringify(v.value)));
+  // Content-key each variant with the data-model's canonical hash (not
+  // key-order-sensitive JSON.stringify, which both mis-flags same-value/
+  // different-key-order as divergent and throws on BigInt/Fabric leaves).
+  const keys = new Set(variants.map((v) => hashStringOf(v.value)));
   return {
     id,
     variants,

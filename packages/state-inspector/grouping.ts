@@ -302,6 +302,12 @@ export function groupDiscoveredSpaces(
     if (homeAnalyzed?.sig.isHome) {
       for (const pd of homeAnalyzed.sig.profileDids) members.add(pd);
     }
+    // Spaces the home references via cross-space links but that aren't in
+    // profiles[] — shown as related nodes (present:false if absent locally),
+    // not silently omitted.
+    if (homeAnalyzed) {
+      for (const cd of homeAnalyzed.sig.crossSpaceDids) members.add(cd);
+    }
     // A group of just an absent principal with nothing attached is noise.
     const presentMembers = [...members].filter((d) => byDid.has(d));
     if (presentMembers.length === 0) continue;

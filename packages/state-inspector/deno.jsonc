@@ -6,8 +6,8 @@
   },
   "tasks": {
     "check": "deno check .",
-    "inspect": "deno run --allow-read --allow-ffi --allow-env ./cli.ts",
-    "just-test": "deno test --allow-read --allow-write --allow-ffi --allow-env",
+    "inspect": "deno run --allow-read --allow-ffi --allow-env --allow-net ./cli.ts",
+    "just-test": "deno test --allow-read --allow-write --allow-ffi --allow-env --allow-net",
     "test": {
       "description": "Type check & run tests",
       "dependencies": ["check", "just-test"]

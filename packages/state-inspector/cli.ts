@@ -37,6 +37,9 @@ interface Args {
   flags: Record<string, string | boolean>;
 }
 
+/** Flags that never take a value — so `--json <db>` doesn't eat the db arg. */
+const BOOLEAN_FLAGS = new Set(["json", "doc"]);
+
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
   const flags: Record<string, string | boolean> = {};
@@ -45,7 +48,11 @@ function parseArgs(argv: string[]): Args {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      // Boolean flags are always boolean — a following positional (e.g. the db
+      // path after `--json`) must NOT be consumed as the flag's value.
+      if (
+        !BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith("--")
+      ) {
         flags[key] = next;
         i++;
       } else {
@@ -209,7 +216,7 @@ function runMultiSpace(
   }
 }
 
-function main(argv: string[]): number {
+export function main(argv: string[]): number {
   const { positional, flags } = parseArgs(argv);
   const [cmd, ...rest] = positional;
   const json = flags.json === true;
