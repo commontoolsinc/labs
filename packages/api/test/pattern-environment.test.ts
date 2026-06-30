@@ -10,11 +10,16 @@ function restoreLocation(descriptor: PropertyDescriptor | undefined): void {
 }
 
 Deno.test("getPatternEnvironment uses the current global location origin", () => {
-  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+  const originalLocation = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "location",
+  );
   try {
     Object.defineProperty(globalThis, "location", {
       configurable: true,
-      value: { href: "https://tools.example.test/space/path?query=1#note" } as Location,
+      value: {
+        href: "https://tools.example.test/space/path?query=1#note",
+      } as Location,
     });
 
     const environment = getPatternEnvironment();
@@ -26,7 +31,10 @@ Deno.test("getPatternEnvironment uses the current global location origin", () =>
 });
 
 Deno.test("getPatternEnvironment uses localhost when no global location exists", () => {
-  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+  const originalLocation = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "location",
+  );
   try {
     Object.defineProperty(globalThis, "location", {
       configurable: true,
