@@ -1249,7 +1249,7 @@ describe("asCell with schema", () => {
     const frame1 = pushFrame({
       generatedIdCounter: 0,
       cause: "context 1",
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     });
     testCell.set(initialDataCopy);
     popFrame(frame1);
@@ -1274,7 +1274,7 @@ describe("asCell with schema", () => {
     const frame2 = pushFrame({
       generatedIdCounter: 0,
       cause: "context 2",
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     });
     testCell.set(returnedData);
     popFrame(frame2);

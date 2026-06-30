@@ -34,7 +34,7 @@ export function isPatternFactoryCalleeExpression(
   }
 }
 
-export function returnsOpaqueRefResult(
+export function returnsReactiveResult(
   expression: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
@@ -90,7 +90,7 @@ export function isStructuralReactiveFactoryExpression(
         return false;
       }
 
-      if (returnsOpaqueRefResult(target, checker)) {
+      if (returnsReactiveResult(target, checker)) {
         return true;
       }
 

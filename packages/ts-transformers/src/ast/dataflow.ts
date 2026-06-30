@@ -50,7 +50,7 @@ export type RewriteHint =
   | undefined;
 
 export interface DataFlowAnalysis {
-  containsOpaqueRef: boolean;
+  containsReactive: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
   graph: DataFlowGraph;
@@ -66,14 +66,14 @@ interface AnalyzerContext {
 }
 
 interface InternalAnalysis {
-  containsOpaqueRef: boolean;
+  containsReactive: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
   rewriteHint?: RewriteHint;
 }
 
 const emptyAnalysis = (): InternalAnalysis => ({
-  containsOpaqueRef: false,
+  containsReactive: false,
   requiresRewrite: false,
   dataFlows: [],
   rewriteHint: undefined,
@@ -85,12 +85,12 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   const dataFlows: ts.Expression[] = [];
   for (const analysis of analyses) {
     if (!analysis) continue;
-    contains ||= analysis.containsOpaqueRef;
+    contains ||= analysis.containsReactive;
     requires ||= analysis.requiresRewrite;
     dataFlows.push(...analysis.dataFlows);
   }
   return {
-    containsOpaqueRef: contains,
+    containsReactive: contains,
     requiresRewrite: requires,
     dataFlows,
     rewriteHint: undefined,
@@ -574,7 +574,7 @@ export function createDataFlowAnalyzer(
     // Default: CallExpressions require rewrite if they contain opaque refs
     return {
       ...merged,
-      requiresRewrite: merged.containsOpaqueRef || merged.requiresRewrite,
+      requiresRewrite: merged.containsReactive || merged.requiresRewrite,
       rewriteHint,
     };
   };
@@ -752,7 +752,7 @@ export function createDataFlowAnalyzer(
 
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -767,9 +767,9 @@ export function createDataFlowAnalyzer(
         (type && isBrandedCellType(type, checker)) ||
         isReactiveValueExpression(expression, checker)
       ) {
-        recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
+        recordDataFlow(expression, scope, null, true); // Explicit: direct Reactive
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -777,12 +777,12 @@ export function createDataFlowAnalyzer(
       if (isArrayMethodElementBindingReference(expression)) {
         // The synthesized `element` binding of an array-method pattern
         // callback is implicitly opaque, even though its TS type is the plain
-        // user element type. Treat it the same as a direct OpaqueRef so
+        // user element type. Treat it the same as a direct Reactive so
         // `element.foo`-style reads are recorded as reactive dependencies and
         // can drive fine-grained subscriptions in downstream lowering.
         recordDataFlow(expression, scope, null, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -790,7 +790,7 @@ export function createDataFlowAnalyzer(
       if (symbolDeclaresCommonFabricDefault(symbol, checker)) {
         recordDataFlow(expression, scope, null, true); // Explicit: Common Fabric default
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -806,7 +806,7 @@ export function createDataFlowAnalyzer(
             context,
           );
           if (
-            initializerAnalysis.containsOpaqueRef ||
+            initializerAnalysis.containsReactive ||
             initializerAnalysis.requiresRewrite ||
             initializerAnalysis.dataFlows.length > 0
           ) {
@@ -815,7 +815,7 @@ export function createDataFlowAnalyzer(
             }
             recordDataFlow(expression, scope, null, true);
             return {
-              containsOpaqueRef: initializerAnalysis.containsOpaqueRef ||
+              containsReactive: initializerAnalysis.containsReactive ||
                 initializerAnalysis.requiresRewrite ||
                 initializerAnalysis.dataFlows.length > 0,
               requiresRewrite: initializerAnalysis.requiresRewrite,
@@ -828,7 +828,7 @@ export function createDataFlowAnalyzer(
       }
 
       // Check if this identifier is a parameter to a builder or array-map call (like pattern)
-      // These parameters become implicitly opaque even though their type isn't OpaqueRef
+      // These parameters become implicitly opaque even though their type isn't Reactive
       return emptyAnalysis();
     }
 
@@ -854,7 +854,7 @@ export function createDataFlowAnalyzer(
               context,
             );
             if (
-              propertyAnalysis.containsOpaqueRef ||
+              propertyAnalysis.containsReactive ||
               propertyAnalysis.requiresRewrite ||
               propertyAnalysis.dataFlows.length > 0
             ) {
@@ -862,7 +862,7 @@ export function createDataFlowAnalyzer(
                 context.expressionToNodeId.get(expression.expression) ?? null;
               recordDataFlow(expression, scope, parentId, true);
               return {
-                containsOpaqueRef: true,
+                containsReactive: true,
                 requiresRewrite: false,
                 dataFlows: [expression],
               };
@@ -878,26 +878,26 @@ export function createDataFlowAnalyzer(
         }
         const parentId =
           context.expressionToNodeId.get(expression.expression) ?? null;
-        recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
+        recordDataFlow(expression, scope, parentId, true); // Explicit: Reactive property
 
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
         if (target.requiresRewrite && target.dataFlows.length > 0) {
           return {
-            containsOpaqueRef: true,
+            containsReactive: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: target.dataFlows,
           };
         } else {
           return {
-            containsOpaqueRef: true,
+            containsReactive: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: [expression],
           };
         }
       }
       // For array-method element bindings, the property access result type is
-      // the plain field type (e.g. `string`), not OpaqueRef. But the read is
+      // the plain field type (e.g. `string`), not Reactive. But the read is
       // still a reactive fine-grained dependency: the runtime can subscribe to
       // `element.key("foo")` specifically. Record the property access (not
       // just the root identifier) as the dataflow so downstream lift-applied
@@ -905,7 +905,7 @@ export function createDataFlowAnalyzer(
       //   { element: { foo: element.key("foo") } }
       // instead of the broader { element: element } whole-binding capture.
       if (
-        target.containsOpaqueRef &&
+        target.containsReactive &&
         leftmostIdentifierIsArrayMethodElementBinding(expression)
       ) {
         if (originatesFromIgnored(expression.expression)) {
@@ -915,7 +915,7 @@ export function createDataFlowAnalyzer(
           context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: target.requiresRewrite,
           dataFlows: [expression],
         };
@@ -929,7 +929,7 @@ export function createDataFlowAnalyzer(
           context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true); // Explicit: Common Fabric property
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
@@ -951,7 +951,7 @@ export function createDataFlowAnalyzer(
           // This is a computed expression - use the dependencies from the target
           recordDataFlow(expression, scope, parentId, false);
           return {
-            containsOpaqueRef: true,
+            containsReactive: true,
             requiresRewrite: true,
             dataFlows: target.dataFlows.length > 0
               ? target.dataFlows
@@ -959,11 +959,11 @@ export function createDataFlowAnalyzer(
           };
         }
 
-        // This is a direct property access on an OpaqueRef (like state.pieces.length)
+        // This is a direct property access on a Reactive (like state.pieces.length)
         // It should be its own explicit dependency
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -977,7 +977,7 @@ export function createDataFlowAnalyzer(
           context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -996,7 +996,7 @@ export function createDataFlowAnalyzer(
                 context.expressionToNodeId.get(expression.expression) ?? null;
               recordDataFlow(expression, scope, parentId, true);
               return {
-                containsOpaqueRef: true,
+                containsReactive: true,
                 requiresRewrite: true,
                 dataFlows: [expression],
               };
@@ -1006,18 +1006,18 @@ export function createDataFlowAnalyzer(
             // Skip __cfHelpers.* property accesses - these are helper functions
             if (root.text === "__cfHelpers") {
               return {
-                containsOpaqueRef: target.containsOpaqueRef,
+                containsReactive: target.containsReactive,
                 requiresRewrite: target.requiresRewrite ||
-                  target.containsOpaqueRef,
+                  target.containsReactive,
                 dataFlows: target.dataFlows,
               };
             }
             // Skip method calls like element.trim()
             if (isMethodCall(expression)) {
               return {
-                containsOpaqueRef: target.containsOpaqueRef,
+                containsReactive: target.containsReactive,
                 requiresRewrite: target.requiresRewrite ||
-                  target.containsOpaqueRef,
+                  target.containsReactive,
                 dataFlows: target.dataFlows,
               };
             }
@@ -1026,7 +1026,7 @@ export function createDataFlowAnalyzer(
               context.expressionToNodeId.get(expression.expression) ?? null;
             recordDataFlow(expression, scope, parentId, true);
             return {
-              containsOpaqueRef: true,
+              containsReactive: true,
               requiresRewrite: true,
               dataFlows: [expression],
             };
@@ -1035,8 +1035,8 @@ export function createDataFlowAnalyzer(
       }
 
       return {
-        containsOpaqueRef: target.containsOpaqueRef,
-        requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
+        containsReactive: target.containsReactive,
+        requiresRewrite: target.requiresRewrite || target.containsReactive,
         dataFlows: target.dataFlows,
       };
     }
@@ -1068,14 +1068,14 @@ export function createDataFlowAnalyzer(
         // Element access on implicit opaque ref - this is likely an explicit dependency
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
       }
       return {
-        containsOpaqueRef: target.containsOpaqueRef ||
-          argument.containsOpaqueRef,
+        containsReactive: target.containsReactive ||
+          argument.containsReactive,
         requiresRewrite: true,
         dataFlows: [...target.dataFlows, ...argument.dataFlows],
       };
@@ -1102,9 +1102,9 @@ export function createDataFlowAnalyzer(
       const whenTrue = analyzeExpression(expression.whenTrue, scope, context);
       const whenFalse = analyzeExpression(expression.whenFalse, scope, context);
       return {
-        containsOpaqueRef: condition.containsOpaqueRef ||
-          whenTrue.containsOpaqueRef ||
-          whenFalse.containsOpaqueRef,
+        containsReactive: condition.containsReactive ||
+          whenTrue.containsReactive ||
+          whenFalse.containsReactive,
         requiresRewrite: true,
         dataFlows: [
           ...condition.dataFlows,
@@ -1120,7 +1120,7 @@ export function createDataFlowAnalyzer(
       const merged = mergeAnalyses(left, right);
       return {
         ...merged,
-        requiresRewrite: left.containsOpaqueRef || right.containsOpaqueRef,
+        requiresRewrite: left.containsReactive || right.containsReactive,
       };
     }
 
@@ -1130,8 +1130,8 @@ export function createDataFlowAnalyzer(
     ) {
       const operand = analyzeExpression(expression.operand, scope, context);
       return {
-        containsOpaqueRef: operand.containsOpaqueRef,
-        requiresRewrite: operand.containsOpaqueRef,
+        containsReactive: operand.containsReactive,
+        requiresRewrite: operand.containsReactive,
         dataFlows: operand.dataFlows,
       };
     }
@@ -1143,7 +1143,7 @@ export function createDataFlowAnalyzer(
       const merged = mergeAnalyses(...parts);
       return {
         ...merged,
-        requiresRewrite: parts.some((part) => part.containsOpaqueRef),
+        requiresRewrite: parts.some((part) => part.containsReactive),
       };
     }
 
@@ -1165,7 +1165,7 @@ export function createDataFlowAnalyzer(
           : null;
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsOpaqueRef: true,
+          containsReactive: true,
           requiresRewrite: false,
           dataFlows: [expression],
           rewriteHint: undefined,

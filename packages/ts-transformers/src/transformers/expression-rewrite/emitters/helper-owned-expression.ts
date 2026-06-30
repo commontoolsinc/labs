@@ -85,7 +85,7 @@ export function rewriteHelperOwnedExpression(
     rewriteChildren,
   } = params;
 
-  // JSX containers can rewrite their dynamic slots locally via OpaqueRefJSX.
+  // JSX containers can rewrite their dynamic slots locally via ReactiveJSX.
   // Wrapping the whole helper-owned branch here would force later passes to
   // disagree about nested collection lowering.
   if (isJsxLocalRewriteContainer(expression)) {

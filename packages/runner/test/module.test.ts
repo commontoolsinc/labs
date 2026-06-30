@@ -5,12 +5,12 @@ import { Identity } from "@commonfabric/identity";
 import {
   type Frame,
   isModule,
-  isOpaqueRef,
   isPattern,
+  isReactive,
   type JSONSchema,
   type Module,
-  type OpaqueRef as _OpaqueRef,
   type Pattern,
+  type Reactive as _Reactive,
   type Stream,
 } from "../src/builder/types.ts";
 import {
@@ -20,7 +20,7 @@ import {
   parseStackFrame,
   resolveSourceLocationFromStack,
 } from "../src/builder/module.ts";
-import { opaqueRef } from "../src/builder/opaque-ref.ts";
+import { reactive } from "../src/builder/opaque-ref.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -57,7 +57,7 @@ describe("module", () => {
     frame = pushFrame({
       space,
       generatedIdCounter: 0,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
       runtime,
     });
   });
@@ -76,8 +76,8 @@ describe("module", () => {
 
     it("creates a opaque ref when called", () => {
       const add = lift<{ a: number; b: number }, number>(({ a, b }) => a + b);
-      const result = add({ a: opaqueRef(1), b: opaqueRef(2) });
-      expect(isOpaqueRef(result)).toBe(true);
+      const result = add({ a: reactive(1), b: reactive(2) });
+      expect(isReactive(result)).toBe(true);
     });
 
     it("supports JSON Schema validation", () => {
@@ -159,8 +159,8 @@ describe("module", () => {
         },
         { proxy: true },
       );
-      const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueRef(stream)).toBe(true);
+      const stream = clickHandler({ x: reactive(10), y: reactive(20) });
+      expect(isReactive(stream)).toBe(true);
       const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
@@ -333,10 +333,10 @@ describe("module", () => {
         },
       );
 
-      const elements = opaqueRef({ button1: true, button2: false });
+      const elements = reactive({ button1: true, button2: false });
       const result = toggleHandler({ elements } as any);
 
-      expect(isOpaqueRef(result)).toBe(true);
+      expect(isReactive(result)).toBe(true);
       const { nodes } = result.export();
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
@@ -352,8 +352,8 @@ describe("module", () => {
         },
         { proxy: true },
       );
-      const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueRef(stream)).toBe(true);
+      const stream = clickHandler.with({ x: reactive(10), y: reactive(20) });
+      expect(isReactive(stream)).toBe(true);
       const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
@@ -489,7 +489,7 @@ describe("module", () => {
 
     it("attaches source location through lift", () => {
       const fn = (x: number) => x * 2;
-      lift(fn)(opaqueRef(5));
+      lift(fn)(reactive(5));
 
       // lift should track the original function's source location
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);

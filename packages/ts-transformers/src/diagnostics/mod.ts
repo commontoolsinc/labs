@@ -1,6 +1,6 @@
 export {
   CompositeDiagnosticTransformer,
   type DiagnosticMessageTransformer,
-  OpaqueRefErrorTransformer,
-  type OpaqueRefErrorTransformerOptions,
+  ReactiveErrorTransformer,
+  type ReactiveErrorTransformerOptions,
 } from "./error-message-transformer.ts";

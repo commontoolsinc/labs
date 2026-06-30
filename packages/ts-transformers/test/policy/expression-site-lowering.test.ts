@@ -785,7 +785,7 @@ Deno.test(
     const analyze = (_expression: ts.Expression) => {
       analyzeCalls++;
       return {
-        containsOpaqueRef: false,
+        containsReactive: false,
         requiresRewrite: false,
         dataFlows: [],
         graph: {

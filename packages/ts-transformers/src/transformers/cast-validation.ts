@@ -3,7 +3,7 @@
  *
  * Validates type assertions (casts) and reports diagnostics for problematic patterns:
  * - `as unknown as X` (double-cast): ERROR - bypasses type safety
- * - `as OpaqueRef<...>`: ERROR - framework handles OpaqueRef wrapping automatically
+ * - `as Reactive<...>`: ERROR - framework handles Reactive wrapping automatically
  * - `as Cell<...>` and other cell-like types: ERROR - prefer proper type annotations
  */
 import ts from "typescript";

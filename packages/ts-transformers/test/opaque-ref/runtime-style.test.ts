@@ -7,7 +7,7 @@ import { transformSource, validateSource } from "../utils.ts";
 const staticCache = new StaticCacheFS();
 const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 
-describe("OpaqueRef transformer (runtime-style API)", () => {
+describe("Reactive transformer (runtime-style API)", () => {
   const types = { "commonfabric.d.ts": commonfabric };
 
   describe("error mode", () => {
@@ -25,7 +25,7 @@ export default pattern<{ count: number }>((state) => {
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(
         diagnostics.some((d) =>
-          d.message.includes("OpaqueRef computation should use computed()")
+          d.message.includes("Reactive computation should use computed()")
         ),
       ).toBe(true);
     });

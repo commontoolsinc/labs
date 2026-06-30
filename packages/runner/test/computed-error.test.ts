@@ -19,7 +19,7 @@ Deno.test("computed throws error", async () => {
   const frame = pushFrame({
     space,
     generatedIdCounter: 0,
-    opaqueRefs: new Set(),
+    reactives: new Set(),
     runtime,
   });
 

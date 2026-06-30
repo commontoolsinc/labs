@@ -245,7 +245,7 @@ export function typeToTypeNode(
 
 /**
  * Extract the first type argument from a TypeReference or type alias
- * Used to unwrap generic types like OpaqueRef<T> to get T
+ * Used to unwrap generic types like Reactive<T> to get T
  */
 export function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
   if ("aliasTypeArguments" in type && type.aliasTypeArguments) {
@@ -303,8 +303,8 @@ export function isCollectionType(
 }
 
 /**
- * Unwrap OpaqueRef-like types to get the underlying type
- * Handles unions, intersections, and nested OpaqueRef types
+ * Unwrap Reactive-like types to get the underlying type
+ * Handles unions, intersections, and nested Reactive types
  * @param seen - Set to track visited types and prevent infinite recursion
  */
 export function unwrapOpaqueLikeType(
@@ -327,13 +327,13 @@ export function unwrapOpaqueLikeType(
   }
 
   if (type.isIntersection()) {
-    // For OpaqueRef<T> = OpaqueCell<T> & OpaqueRefInner<T>, we want to extract T
+    // For Reactive<T> = OpaqueCell<T> & ReactiveInner<T>, we want to extract T
     // Look for an OpaqueCell<T> part and extract its type argument
     for (const part of type.types) {
       if (isBrandedCellType(part, checker)) {
         const inner = getTypeReferenceArgument(part);
         if (inner) {
-          // Recursively unwrap in case T itself contains OpaqueRef types
+          // Recursively unwrap in case T itself contains Reactive types
           return unwrapOpaqueLikeType(inner, checker, seen) ?? inner;
         }
       }
@@ -382,7 +382,7 @@ export function unwrapCellLikeType(
 
 /**
  * Convert a TypeScript type to a TypeNode for schema generation
- * Note: Does NOT unwrap Cell/OpaqueRef types - the schema generator handles those
+ * Note: Does NOT unwrap Cell/Reactive types - the schema generator handles those
  */
 export function typeToSchemaTypeNode(
   type: ts.Type | undefined,
@@ -392,7 +392,7 @@ export function typeToSchemaTypeNode(
   if (!type) {
     return undefined;
   }
-  // Don't unwrap Cell/OpaqueRef types - let the schema generator handle them
+  // Don't unwrap Cell/Reactive types - let the schema generator handle them
   const result = typeToTypeNode(type, checker, location);
   return result;
 }
@@ -806,9 +806,9 @@ function findReferenceTypeInIntersection(
 }
 
 /**
- * Helper to find OpaqueRef type within a union type
+ * Helper to find Reactive type within a union type
  */
-function findOpaqueRefInUnion(
+function findReactiveInUnion(
   unionType: ts.UnionType,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
@@ -924,12 +924,12 @@ function extractElementFromArrayType(
 }
 
 /**
- * Infer the element type from an array-like expression (e.g., OpaqueRef<T[]> or Array<T>).
+ * Infer the element type from an array-like expression (e.g., Reactive<T[]> or Array<T>).
  * Unwraps one level of array wrapping to get the element type.
  *
  * Handles:
- * - OpaqueRef<T[]> → T[] → T (intersection type case)
- * - FactoryInput<T[]> → OpaqueRef<T[]> → T[] → T (union type case)
+ * - Reactive<T[]> → T[] → T (intersection type case)
+ * - FactoryInput<T[]> → Reactive<T[]> → T[] → T (union type case)
  * - Plain Array<T> → T
  *
  * @param arrayExpr - Expression representing an array or array-like type
@@ -952,10 +952,10 @@ export function inferArrayElementType(
     getTypeAtLocationWithFallback(arrayExpr, checker, typeRegistry) ??
       checker.getTypeAtLocation(arrayExpr);
 
-  // Try to unwrap OpaqueRef<T[]> → T[] → T
+  // Try to unwrap Reactive<T[]> → T[] → T
   let actualType = arrayType;
 
-  // Handle intersections (OpaqueRef case)
+  // Handle intersections (Reactive case)
   if (arrayType.flags & ts.TypeFlags.Intersection) {
     const refType = findReferenceTypeInIntersection(
       arrayType as ts.IntersectionType,
@@ -967,7 +967,7 @@ export function inferArrayElementType(
 
   // Handle unions (FactoryInput<T[]> case)
   if (arrayType.flags & ts.TypeFlags.Union) {
-    const opaqueType = findOpaqueRefInUnion(
+    const opaqueType = findReactiveInUnion(
       arrayType as ts.UnionType,
       checker,
     );
@@ -979,7 +979,7 @@ export function inferArrayElementType(
   // Extract type arguments from the reference type
   let typeArgs: readonly ts.Type[] | undefined;
 
-  // First check if actualType is an intersection (OpaqueRef case)
+  // First check if actualType is an intersection (Reactive case)
   if (actualType.flags & ts.TypeFlags.Intersection) {
     const intersectionType = actualType as ts.IntersectionType;
     // Look for the Reference type member within the intersection
@@ -1138,7 +1138,7 @@ export function hasArrayTypeArgument(
     );
   }
 
-  // Handle object types with type references (e.g., OpaqueRef<T[]>)
+  // Handle object types with type references (e.g., Reactive<T[]>)
   if (type.flags & ts.TypeFlags.Object) {
     const objectType = type as ts.ObjectType;
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {

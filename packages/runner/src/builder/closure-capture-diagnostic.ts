@@ -3,7 +3,7 @@ import type { CellScope } from "./types.ts";
 /**
  * Both pattern construction paths that detect a reactive cell being captured
  * from an outer frame raise the SAME conceptual violation: a callback (a map /
- * filter / flatMap / computed body) closed over a `Cell`/`OpaqueRef` that
+ * filter / flatMap / computed body) closed over a `Cell`/`Reactive` that
  * belongs to a different frame, instead of receiving it as an explicit
  * reactive input.
  *

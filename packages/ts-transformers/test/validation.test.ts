@@ -61,11 +61,11 @@ const casted = {} as Cell<number>;
 Deno.test("Cast Validation", async (t) => {
   await t.step("errors on double cast 'as unknown as'", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
       interface Item { name: string; }
       const data = { name: "test" };
-      const ref = data as unknown as OpaqueRef<Item>;
+      const ref = data as unknown as Reactive<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -75,13 +75,13 @@ Deno.test("Cast Validation", async (t) => {
     assertHasErrorType(errors, "cast-validation:double-unknown");
   });
 
-  await t.step("errors on 'as OpaqueRef<>'", async () => {
+  await t.step("errors on 'as Reactive<>'", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
       interface Item { name: string; }
       const data: any = { name: "test" };
-      const ref = data as OpaqueRef<Item>;
+      const ref = data as Reactive<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -530,7 +530,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       assertEquals(
         errors.length,
         0,
-        "Optional chaining inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+        "Optional chaining inside JSX should be allowed (ReactiveJSXTransformer handles it)",
       );
     },
   );
@@ -1896,9 +1896,9 @@ Deno.test("Computed local reactive alias validation", async (t) => {
 Deno.test("Diagnostic output format", async (t) => {
   await t.step("includes source location information", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
-      const data = {} as unknown as OpaqueRef<any>;
+      const data = {} as unknown as Reactive<any>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -2042,11 +2042,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback inside JSX", async () => {
-    const source = `      import { pattern, h, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, h, Reactive } from "commonfabric";
 
       interface Item { name: string; }
 
-      export default pattern<{ items: OpaqueRef<Item[]> }>(({ items }) => {
+      export default pattern<{ items: Reactive<Item[]> }>(({ items }) => {
         return <div>{items.map(item => <span>{item.name}</span>)}</div>;
       });
     `;
@@ -2093,12 +2093,12 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback outside JSX in pattern body", async () => {
-    const source = `      import { pattern, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, Reactive } from "commonfabric";
 
       interface Item { name: string; }
 
       const listItems = pattern<
-        { items: OpaqueRef<Item[]> },
+        { items: Reactive<Item[]> },
         { result: Array<{ label: string }> }
       >(({ items }) => {
         const result = items.map((item) => ({
@@ -2504,11 +2504,11 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
 
   await t.step("allows a JSX array-method render callback", async () => {
     const { diagnostics } = await validateSource(
-      `      import { pattern, h, OpaqueRef } from "commonfabric";
+      `      import { pattern, h, Reactive } from "commonfabric";
 
       interface Item { name: string; }
 
-      export default pattern<{ items: OpaqueRef<Item[]> }>(({ items }) => {
+      export default pattern<{ items: Reactive<Item[]> }>(({ items }) => {
         return <div>{items.map((item) => <span>{item.name}</span>)}</div>;
       });
     `,
@@ -3072,7 +3072,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 });
 
-Deno.test("OpaqueRef .get() Validation", async (t) => {
+Deno.test("Reactive .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on computed result",
     async () => {

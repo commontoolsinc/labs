@@ -267,7 +267,7 @@ describe("Cell", () => {
   it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
     const frame: Frame = {
       generatedIdCounter: 0,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     };
     const interests = ["coding", "reading"];
     const value = {
@@ -292,7 +292,7 @@ describe("Cell", () => {
   it("preserves identity when input is already deep-frozen", () => {
     const frame: Frame = {
       generatedIdCounter: 0,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     };
     // Deep-freeze before passing in. An already-frozen
     // plain Object/Array is a valid `FabricValue` and shallow fabric
@@ -317,7 +317,7 @@ describe("Cell", () => {
   it("adds generated IDs to objects in arrays regardless of clone depth", () => {
     const frame: Frame = {
       generatedIdCounter: 0,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     };
     const stable = { nested: true };
     const value = {

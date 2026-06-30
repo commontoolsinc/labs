@@ -1754,7 +1754,7 @@ export const ExtractorModule = pattern<
 
     // Build OCR calls for all selected photos using .map() on computed Cell
     // Each photo gets its own generateText call (framework caches per-item)
-    // .map() on OpaqueRef works reactively - returns another OpaqueRef<Array>
+    // .map() on Reactive works reactively - returns another Reactive<Array>
     const ocrCalls = photoSources.map((photo: ExtractableSource) => {
       // Build prompt for this photo
       const prompt = computed(() => {

@@ -1,5 +1,5 @@
 /**
- * Regression test for OpaqueRef intersection type handling.
+ * Regression test for Reactive intersection type handling.
  *
  * This is a minimal reproduction of the type error from
  * community-patterns/patterns/jkomoros/components/search-select-prototype.tsx
@@ -10,7 +10,7 @@
  *   Types of property 'group' are incompatible.
  *
  * The fix adds `[NonNullable<T>] extends [AnyBrandedCell<any>]` check to
- * OpaqueRefInner to handle nullable intersection types correctly without
+ * ReactiveInner to handle nullable intersection types correctly without
  * causing distribution over union types (which would lose null/undefined).
  *
  * NOTE: This is a type-level test. The assertions at runtime are trivial;
@@ -18,7 +18,7 @@
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { OpaqueCell, OpaqueRef } from "@commonfabric/api";
+import type { OpaqueCell, Reactive } from "@commonfabric/api";
 
 interface NormalizedItem {
   value: string;
@@ -26,11 +26,11 @@ interface NormalizedItem {
   group?: string;
 }
 
-describe("OpaqueRef intersection type handling", () => {
+describe("Reactive intersection type handling", () => {
   it("should not double-wrap properties that are already intersection types", () => {
     // This reproduces the pattern from search-select-prototype.tsx:
     //
-    // 1. props.items comes from pattern props (already OpaqueRef wrapped)
+    // 1. props.items comes from pattern props (already Reactive wrapped)
     // 2. normalizedItems = computed(() => items.map(item => ({
     //      value: item.value,     // OpaqueCell<string> & string
     //      label: item.label,     // OpaqueCell<string> & string
@@ -38,23 +38,23 @@ describe("OpaqueRef intersection type handling", () => {
     //    })))
     //    The mapped result has properties that ARE ALREADY INTERSECTION TYPES
     //
-    // 3. computed() wraps this with OpaqueRef<MappedItem[]>
+    // 3. computed() wraps this with Reactive<MappedItem[]>
     //
     // 4. itemLookup iterates normalizedItems, assigning items to Record<string, NormalizedItem>
     //
-    // THE BUG: When OpaqueRef processes MappedItem, it wraps the already-wrapped
+    // THE BUG: When Reactive processes MappedItem, it wraps the already-wrapped
     // properties AGAIN, creating nested OpaqueCell types that aren't assignable.
 
-    // Simulate what map() produces when iterating OpaqueRef-wrapped items:
-    // Properties are already intersection types from the source OpaqueRef
+    // Simulate what map() produces when iterating Reactive-wrapped items:
+    // Properties are already intersection types from the source Reactive
     type MappedItem = {
       value: OpaqueCell<string> & string;
       label: OpaqueCell<string | undefined> & string;
       group?: (OpaqueCell<string | undefined> & string) | undefined;
     };
 
-    // computed() wraps the result with OpaqueRef
-    type NormalizedItems = OpaqueRef<MappedItem[]>;
+    // computed() wraps the result with Reactive
+    type NormalizedItems = Reactive<MappedItem[]>;
 
     // When we iterate, we get elements of this type
     type NormalizedElement = NormalizedItems extends Array<infer U> ? U : never;
@@ -80,14 +80,14 @@ describe("OpaqueRef intersection type handling", () => {
   });
 
   it("should allow string methods on intersection type properties", () => {
-    // Same setup: properties are already intersection types from OpaqueRef
+    // Same setup: properties are already intersection types from Reactive
     type MappedItem = {
       value: OpaqueCell<string> & string;
       label: OpaqueCell<string | undefined> & string;
       group?: (OpaqueCell<string | undefined> & string) | undefined;
     };
 
-    type NormalizedItems = OpaqueRef<MappedItem[]>;
+    type NormalizedItems = Reactive<MappedItem[]>;
     type NormalizedElement = NormalizedItems extends Array<infer U> ? U : never;
 
     // THE CRITICAL TYPE TEST: This function signature compiles only if

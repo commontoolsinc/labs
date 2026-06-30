@@ -54,7 +54,7 @@ const scopeForWrapperName = (
 // structural inner `T` and differ only in read/write capability. The transformer
 // narrows one to another (e.g. `Cell<T>` → `ReadonlyCell<T>`) to reflect usage,
 // so a node-vs-type brand mismatch among these is a capability narrowing, not a
-// structural change. `Stream`/`SqliteDb`/`OpaqueRef` are excluded: they carry a
+// structural change. `Stream`/`SqliteDb`/`Reactive` are excluded: they carry a
 // distinct structural contract, not a read/write variant of a plain cell.
 //
 // Derived as an exhaustive map over `CellWrapperKind` so that adding a new kind
@@ -73,7 +73,7 @@ const CELL_CAPABILITY_KIND_MAP: Readonly<Record<CellWrapperKind, boolean>> = {
   OpaqueCell: true,
   Stream: false,
   SqliteDb: false,
-  OpaqueRef: false,
+  Reactive: false,
 };
 const isCellCapabilityKind = (kind: WrapperKind): boolean =>
   CELL_CAPABILITY_KIND_MAP[kind];
@@ -105,7 +105,7 @@ const applyScopeToAsCellEntry = (
 };
 
 /**
- * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
+ * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, Reactive<T>, Default<T,V>)
  *
  * TypeScript handles alias resolution automatically and we don't need to
  * manually traverse alias chains.
@@ -160,7 +160,7 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Check if union contains wrapper types via node inspection
     // This must come before the blanket union rejection to handle
-    // cases like OpaqueRef<T> | undefined without expanding conditionals
+    // cases like Reactive<T> | undefined without expanding conditionals
     if (this.isWrapperUnion(type, context)) {
       return true; // Take ownership of wrapper unions
     }
@@ -169,7 +169,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return false;
     }
 
-    // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
+    // Check if this is a wrapper type (Cell/Stream/Reactive) via type structure
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
     return wrapperInfo !== undefined;
   }
@@ -214,7 +214,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Handle wrapper unions first (before FactoryInput<T> union check)
-    // This catches cases like OpaqueRef<T> | undefined and processes them
+    // This catches cases like Reactive<T> | undefined and processes them
     // via node inspection to avoid conditional type expansion
     if (
       (type.flags & ts.TypeFlags.Union) !== 0 &&
@@ -341,7 +341,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // If we detected a wrapper syntactically but the current type is wrapped in
-    // additional layers (e.g., FactoryInput<OpaqueRef<...>>), recursively unwrap using
+    // additional layers (e.g., FactoryInput<Reactive<...>>), recursively unwrap using
     // brand information until we reach the underlying wrapper.
     const wrapperKinds: WrapperKind[] = [
       "OpaqueCell",
@@ -843,7 +843,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     const wrapperInfo = getCellWrapperInfo(type, checker);
     if (
       !wrapperInfo ||
-      (wrapperInfo.kind !== "OpaqueRef" && wrapperInfo.kind !== "OpaqueCell")
+      (wrapperInfo.kind !== "Reactive" && wrapperInfo.kind !== "OpaqueCell")
     ) {
       return undefined;
     }
@@ -2081,8 +2081,8 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   /**
-   * Format a union type that contains wrapper types (Cell/OpaqueRef/Stream).
-   * Handles cases like: OpaqueRef<T> | undefined, Cell<T> | null, etc.
+   * Format a union type that contains wrapper types (Cell/Reactive/Stream).
+   * Handles cases like: Reactive<T> | undefined, Cell<T> | null, etc.
    * Uses nodes when available to preserve named type hoisting.
    */
   private formatWrapperUnion(
@@ -2164,7 +2164,7 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Uses type-based detection which handles complex cases like intersection types
    * and conditional type expansions.
    * Returns true ONLY for unions where ALL non-null/undefined members are wrapper types.
-   * Examples that return true: OpaqueRef<T> | undefined, Cell<T> | null, Stream<T> | null | undefined
+   * Examples that return true: Reactive<T> | undefined, Cell<T> | null, Stream<T> | null | undefined
    * Examples that return false: string | Cell | null (mixed union, should use UnionFormatter)
    */
   private isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {

@@ -179,7 +179,7 @@ function rewriteChildExpressions(
       }
 
       const analysis = analyze(child);
-      if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      if (analysis.containsReactive && analysis.requiresRewrite) {
         // Skip wrapping if inside a safe callback wrapper (computed/lift/action/etc.)
         // This prevents double-wrapping expressions already in a reactive context
         if (isInsideKnownSafeCallbackWrapper(child, context)) {
@@ -249,7 +249,7 @@ export function rewriteExpression(
       }
 
       const analysis = params.analyze(node);
-      if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      if (analysis.containsReactive && analysis.requiresRewrite) {
         return rewriteExpression({
           expression: node,
           analysis,

@@ -992,7 +992,7 @@ function rewriteTrackedOpaquePatternBody(
 /**
  * Recursively process lift-applied callback bodies (the lowered form of
  * computed() callbacks) to rewrite property accesses on
- * locally-declared OpaqueRef variables (e.g., const foo = computed(...);
+ * locally-declared Reactive variables (e.g., const foo = computed(...);
  * foo.bar → foo.key("bar")).
  *
  * rewriteTrackedOpaquePatternBody stops at function boundaries, so

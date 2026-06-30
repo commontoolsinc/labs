@@ -3,7 +3,7 @@ import ts from "typescript";
 import { classifyArrayMethodAccess } from "../../ast/mod.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import { isFallbackOperator } from "../../utils/reactive-keys.ts";
-import { isSimpleOpaqueRefAccess } from "../opaque-ref/opaque-ref.ts";
+import { isSimpleReactiveAccess } from "../opaque-ref/opaque-ref.ts";
 
 export function isFallbackMapReceiverExpression(
   expression: ts.BinaryExpression,
@@ -40,5 +40,5 @@ export function shouldDeferFallbackMapReceiverRewrite(
     return false;
   }
 
-  return isSimpleOpaqueRefAccess(unwrapExpression(expression.left), checker);
+  return isSimpleReactiveAccess(unwrapExpression(expression.left), checker);
 }

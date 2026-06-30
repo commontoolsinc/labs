@@ -522,7 +522,7 @@ export async function transformFiles(
           "1. Update the input fixture to use valid Common Fabric patterns",
         );
         errors.push(
-          "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
+          "   (e.g., use Cell<T> for mutable state, Reactive<T> for references)",
         );
         errors.push(
           "2. Run with SKIP_INPUT_CHECK=1 to skip validation temporarily",
