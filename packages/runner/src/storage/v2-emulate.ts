@@ -3,6 +3,8 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 
+const emulatedMemoryAudience = "did:key:z6Mk-runner-emulated-memory";
+
 class EmulatedSessionFactory implements SessionFactory {
   constructor(private readonly getServer: () => MemoryV2Server.Server) {}
 
@@ -10,12 +12,19 @@ class EmulatedSessionFactory implements SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.getServer()),
     });
-    const session = await client.mount(space, {}, () => ({
-      invocation: {},
-      authorization: {
-        principal: signer?.did(),
-      },
-    }));
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {
+          principal: signer?.did(),
+        },
+      }),
+    );
     return { client, session };
   }
 }
@@ -40,6 +49,9 @@ export class EmulatedStorageManager extends StorageManager {
             const principal = (message.authorization as { principal?: unknown })
               ?.principal;
             return typeof principal === "string" ? principal : undefined;
+          },
+          sessionOpenAuth: {
+            audience: emulatedMemoryAudience,
           },
         }),
     );

@@ -7,6 +7,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // A storage manager with its OWN per-space client replicas, loopback-connected
 // to a SHARED in-process memory server (mirrors cross-space-value-read.test.ts).
@@ -40,6 +41,7 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 const signer = await Identity.fromPassphrase("array-push-mergeable");

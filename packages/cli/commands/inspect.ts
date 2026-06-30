@@ -4,8 +4,9 @@
 // store the server already wrote (no live runtime, no capture) and answers
 // who/what/when + cross-space convergence questions. Every command takes --json.
 //
-// Space DBs are auto-discovered (no need to pass absolute paths): pass a DID or
-// DID-prefix as <space>, or a file path. `cf inspect spaces` lists what's found.
+// Space DBs are auto-discovered (no need to pass absolute paths): pass a DID,
+// DID-prefix, a space NAME (resolved the same way the runtime derives it), or a
+// file path as <space>. `cf inspect spaces` lists what's found.
 
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
@@ -44,7 +45,7 @@ import {
   type RemoteSpace,
   renderInspectorHtml,
   type RequestSigner,
-  resolveSpacePath,
+  resolveSpace,
   type Scope,
   scopeOverlay,
   type SpaceGraph,
@@ -177,7 +178,8 @@ async function openByToken(
   options: RemoteOpts,
 ): Promise<ReturnType<typeof openSpace>> {
   const base = remoteBaseUrl(options);
-  if (!base) return openSpace(resolveSpacePath(token));
+  // Local path: resolveSpace handles DID / prefix / path / space-name (#4398).
+  if (!base) return openSpace(await resolveSpace(token));
   const sign = await remoteSigner(options);
   const did = await resolveRemoteDid(token, base, sign);
   return openSpace(await fetchSpaceDb(did, base, { sign }));
@@ -214,11 +216,13 @@ async function resolveMultiSpaces(opts: {
   if (opts.all) return openSpaces(discoverSpaceDbs().map((s) => s.path));
   if (opts.spaces) {
     const discovered = discoverSpaceDbs();
-    const paths = opts.spaces
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map((t) => resolveSpacePath(t, discovered));
+    const paths = await Promise.all(
+      opts.spaces
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => resolveSpace(t, discovered)),
+    );
     return openSpaces(paths);
   }
   throw new Error("provide --all, --spaces <a,b,…>, or --dir <dir>");

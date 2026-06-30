@@ -11,6 +11,10 @@ import {
 import type { Signer } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 // Convergence guard for the list-builtin resume preservation.
 //
@@ -32,10 +36,11 @@ class F implements SessionFactory {
   constructor(private gs: () => MemoryV2Server.Server) {}
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({ transport: lb(this.gs()) });
-    const session = await client.mount(spaceId, {}, () => ({
-      invocation: {},
-      authorization: { principal: sgnr?.did() },
-    }));
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(sgnr),
+    );
     return { client, session };
   }
 }
@@ -58,6 +63,7 @@ function runtime() {
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
   const sm = SM.make(signer, server);
   const rt = new Runtime({

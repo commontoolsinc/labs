@@ -23,9 +23,12 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   GenerateObjectParamsSchema,
+  GenerateObjectResultSchema,
   GenerateTextParamsSchema,
+  GenerateTextResultSchema,
   LLMContentSchema,
   LLMMessageSchema,
+  LLMResultSchema,
 } from "../src/builtins/llm-schemas.ts";
 
 const signer = await Identity.fromPassphrase("schema-alignment-test");
@@ -351,6 +354,53 @@ describe("LLM schema alignment", () => {
       expect(prompt.length).toBe(2);
       expect(prompt[0].type).toBe("image");
       expect(prompt[1].type).toBe("text");
+    });
+  });
+
+  describe("result schemas", () => {
+    it("materializes llm string errors", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        {
+          pending: false,
+          error: "model unavailable",
+        },
+        LLMResultSchema,
+      );
+
+      expect(value.error).toBe("model unavailable");
+    });
+
+    it("materializes generateText string errors", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        {
+          pending: false,
+          error: "rate limited",
+        },
+        GenerateTextResultSchema,
+      );
+
+      expect(value.error).toBe("rate limited");
+    });
+
+    it("materializes generateObject string errors", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        {
+          pending: false,
+          error: "invalid structured output",
+        },
+        GenerateObjectResultSchema,
+      );
+
+      expect(value.error).toBe("invalid structured output");
     });
   });
 

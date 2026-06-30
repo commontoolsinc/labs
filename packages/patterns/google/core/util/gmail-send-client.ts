@@ -33,13 +33,31 @@
  * });
  * ```
  */
-import { getPatternEnvironment, Writable } from "commonfabric";
+import {
+  type Default,
+  getPatternEnvironment,
+  type Writable,
+} from "commonfabric";
 
-const env = getPatternEnvironment();
+type Secret<T> = T;
 
-// Re-export the Auth type for convenience
-export type { Auth } from "../google-auth.tsx";
-import type { Auth } from "../google-auth.tsx";
+// Re-export the auth shape for convenience without pulling in the TSX auth UI
+// graph when this utility is tested as plain Deno code.
+export type Auth = {
+  token: Secret<string> | Default<"">;
+  tokenType: string | Default<"">;
+  scope: string[] | Default<[]>;
+  expiresIn: number | Default<0>;
+  expiresAt: number | Default<0>;
+  refreshToken: Secret<string> | Default<"">;
+  user:
+    | {
+      email: string;
+      name: string;
+      picture: string;
+    }
+    | Default<{ email: ""; name: ""; picture: "" }>;
+};
 
 // ============================================================================
 // TYPES
@@ -229,17 +247,40 @@ function encodeHeaderValue(value: string): string {
  * Accepts either a Writable<Auth> cell (for full token refresh support)
  * or an AuthCell wrapper (for read-only contexts).
  */
-export class GmailSendClient {
-  private auth: AuthCell;
-  private debugMode: boolean;
+export interface GmailSendClient {
+  sendEmail(
+    params: SendEmailParams,
+    retryCount?: number,
+  ): Promise<SendEmailResult>;
+  modifyLabels(
+    messageId: string,
+    params: ModifyLabelsParams,
+    retryCount?: number,
+  ): Promise<ModifyLabelsResult>;
+  batchModifyLabels(
+    messageIds: string[],
+    params: ModifyLabelsParams,
+    retryCount?: number,
+  ): Promise<void>;
+  listLabels(retryCount?: number): Promise<GmailLabel[]>;
+}
 
-  constructor(
+type GmailSendClientFactory = {
+  new (
     auth: AuthCell | Writable<Auth>,
-    { debugMode = false }: GmailSendClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.debugMode = debugMode;
-  }
+    config?: GmailSendClientConfig,
+  ): GmailSendClient;
+  (
+    auth: AuthCell | Writable<Auth>,
+    config?: GmailSendClientConfig,
+  ): GmailSendClient;
+};
+
+export const GmailSendClient = (function (
+  auth: AuthCell | Writable<Auth>,
+  { debugMode = false }: GmailSendClientConfig = {},
+): GmailSendClient {
+  const authCell: AuthCell = auth;
 
   /**
    * Send an email via Gmail API.
@@ -251,16 +292,16 @@ export class GmailSendClient {
    * @returns The sent message metadata (id, threadId, labelIds)
    * @throws Error if sending fails or auth is invalid
    */
-  async sendEmail(
+  async function sendEmail(
     params: SendEmailParams,
     retryCount = 0,
   ): Promise<SendEmailResult> {
-    const token = this.auth.get()?.token;
+    const token = authCell.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Preparing email:", {
+    debugLog(debugMode, "Preparing email:", {
       to: params.to,
       subject: params.subject,
       bodyLength: params.body.length,
@@ -303,7 +344,7 @@ export class GmailSendClient {
       requestBody.threadId = params.replyToThreadId;
     }
 
-    debugLog(this.debugMode, "Sending email...");
+    debugLog(debugMode, "Sending email...");
 
     // Send the email
     const res = await fetch(
@@ -321,7 +362,7 @@ export class GmailSendClient {
     // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -333,20 +374,20 @@ export class GmailSendClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth();
       await retryDelay(retryCount);
-      return this.sendEmail(params, retryCount + 1);
+      return sendEmail(params, retryCount + 1);
     }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       const errorMessage = error.error?.message || res.statusText;
-      debugLog(this.debugMode, "Send failed:", res.status, errorMessage);
+      debugLog(debugMode, "Send failed:", res.status, errorMessage);
       throw new Error(`Gmail API error: ${res.status} ${errorMessage}`);
     }
 
     const result = await res.json();
-    debugLog(this.debugMode, "Email sent successfully:", result.id);
+    debugLog(debugMode, "Email sent successfully:", result.id);
 
     return {
       id: result.id,
@@ -363,17 +404,17 @@ export class GmailSendClient {
    * @returns The modified message metadata
    * @throws Error if modification fails or auth is invalid
    */
-  async modifyLabels(
+  async function modifyLabels(
     messageId: string,
     params: ModifyLabelsParams,
     retryCount = 0,
   ): Promise<ModifyLabelsResult> {
-    const token = this.auth.get()?.token;
+    const token = authCell.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Modifying labels on message:", messageId, params);
+    debugLog(debugMode, "Modifying labels on message:", messageId, params);
 
     const res = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${
@@ -395,7 +436,7 @@ export class GmailSendClient {
     // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -407,20 +448,20 @@ export class GmailSendClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth();
       await retryDelay(retryCount);
-      return this.modifyLabels(messageId, params, retryCount + 1);
+      return modifyLabels(messageId, params, retryCount + 1);
     }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       const errorMessage = error.error?.message || res.statusText;
-      debugLog(this.debugMode, "Modify failed:", res.status, errorMessage);
+      debugLog(debugMode, "Modify failed:", res.status, errorMessage);
       throw new Error(`Gmail API error: ${res.status} ${errorMessage}`);
     }
 
     const result = await res.json();
-    debugLog(this.debugMode, "Labels modified successfully:", result.id);
+    debugLog(debugMode, "Labels modified successfully:", result.id);
 
     return {
       id: result.id,
@@ -436,18 +477,18 @@ export class GmailSendClient {
    * @param params - Labels to add and/or remove
    * @throws Error if modification fails or auth is invalid
    */
-  async batchModifyLabels(
+  async function batchModifyLabels(
     messageIds: string[],
     params: ModifyLabelsParams,
     retryCount = 0,
   ): Promise<void> {
-    const token = this.auth.get()?.token;
+    const token = authCell.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
     if (messageIds.length === 0) {
-      debugLog(this.debugMode, "No messages to modify");
+      debugLog(debugMode, "No messages to modify");
       return;
     }
 
@@ -456,7 +497,7 @@ export class GmailSendClient {
     }
 
     debugLog(
-      this.debugMode,
+      debugMode,
       `Batch modifying labels on ${messageIds.length} messages:`,
       params,
     );
@@ -480,7 +521,7 @@ export class GmailSendClient {
     // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -492,16 +533,16 @@ export class GmailSendClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth();
       await retryDelay(retryCount);
-      return this.batchModifyLabels(messageIds, params, retryCount + 1);
+      return batchModifyLabels(messageIds, params, retryCount + 1);
     }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       const errorMessage = error.error?.message || res.statusText;
       debugLog(
-        this.debugMode,
+        debugMode,
         "Batch modify failed:",
         res.status,
         errorMessage,
@@ -510,7 +551,7 @@ export class GmailSendClient {
     }
 
     debugLog(
-      this.debugMode,
+      debugMode,
       `Batch label modification successful for ${messageIds.length} messages`,
     );
   }
@@ -521,13 +562,13 @@ export class GmailSendClient {
    * @returns Array of available labels
    * @throws Error if listing fails or auth is invalid
    */
-  async listLabels(retryCount = 0): Promise<GmailLabel[]> {
-    const token = this.auth.get()?.token;
+  async function listLabels(retryCount = 0): Promise<GmailLabel[]> {
+    const token = authCell.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
     }
 
-    debugLog(this.debugMode, "Listing labels...");
+    debugLog(debugMode, "Listing labels...");
 
     const res = await fetch(
       "https://gmail.googleapis.com/gmail/v1/users/me/labels",
@@ -541,7 +582,7 @@ export class GmailSendClient {
     // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
       debugLog(
-        this.debugMode,
+        debugMode,
         `Token expired (attempt ${retryCount + 1}/${
           MAX_RETRY_ATTEMPTS + 1
         }), attempting refresh...`,
@@ -553,15 +594,15 @@ export class GmailSendClient {
           } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      await this.refreshAuth();
+      await refreshAuth();
       await retryDelay(retryCount);
-      return this.listLabels(retryCount + 1);
+      return listLabels(retryCount + 1);
     }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
       const errorMessage = error.error?.message || res.statusText;
-      debugLog(this.debugMode, "List labels failed:", res.status, errorMessage);
+      debugLog(debugMode, "List labels failed:", res.status, errorMessage);
       throw new Error(`Gmail API error: ${res.status} ${errorMessage}`);
     }
 
@@ -583,7 +624,7 @@ export class GmailSendClient {
       }),
     );
 
-    debugLog(this.debugMode, `Found ${labels.length} labels`);
+    debugLog(debugMode, `Found ${labels.length} labels`);
     return labels;
   }
 
@@ -591,13 +632,14 @@ export class GmailSendClient {
    * Refresh the OAuth token using the refresh token.
    * Updates the auth cell with new token data.
    */
-  private async refreshAuth(): Promise<void> {
-    const refreshToken = this.auth.get()?.refreshToken;
+  async function refreshAuth(): Promise<void> {
+    const refreshToken = authCell.get()?.refreshToken;
     if (!refreshToken) {
       throw new Error("No refresh token available. Please re-authenticate.");
     }
 
-    debugLog(this.debugMode, "Refreshing auth token...");
+    debugLog(debugMode, "Refreshing auth token...");
+    const env = getPatternEnvironment();
 
     const res = await fetch(
       new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
@@ -619,12 +661,19 @@ export class GmailSendClient {
 
     // Update auth cell with new token data
     // Keep existing user info since refresh doesn't return it
-    const currentAuth = this.auth.get();
-    this.auth.update({
+    const currentAuth = authCell.get();
+    authCell.update({
       ...json.tokenInfo,
       user: currentAuth?.user,
     });
 
-    debugLog(this.debugMode, "Auth token refreshed successfully");
+    debugLog(debugMode, "Auth token refreshed successfully");
   }
-}
+
+  return {
+    sendEmail,
+    modifyLabels,
+    batchModifyLabels,
+    listLabels,
+  };
+}) as GmailSendClientFactory;

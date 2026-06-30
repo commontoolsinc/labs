@@ -22,6 +22,7 @@ import type {
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import type { SessionSync } from "@commonfabric/memory/v2";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
 const space = signer.did();
@@ -162,7 +163,11 @@ describe("Memory v2 storage notifications", () => {
     remoteClient = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(candidate.server()),
     });
-    remoteSession = await remoteClient.mount(space);
+    remoteSession = await remoteClient.mount(
+      space,
+      {},
+      testSessionOpenAuthFactory,
+    );
     remoteLocalSeq = 1;
   });
 

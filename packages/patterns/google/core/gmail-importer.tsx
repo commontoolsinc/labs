@@ -130,7 +130,7 @@ export interface Output {
   /** Auth UI component for managing Google OAuth connection */
   authUI: VNode;
   /** Handler to trigger email fetch from external patterns */
-  bgUpdater: Stream<unknown>;
+  bgUpdater: Stream<void>;
   /** Whether auth is ready (has valid token) */
   isReady: boolean;
   // /** Search emails by query string (searches subject, from, snippet) */
@@ -162,7 +162,7 @@ const _updateLimit = handler<
 // consistent token refresh behavior across all Gmail patterns.
 
 const googleUpdater = handler<
-  unknown,
+  void,
   {
     emails: SyncableWritable<Array<Writable<Email>>>;
     auth: SyncableWritable<Auth>;
@@ -1178,7 +1178,7 @@ export default pattern<
       }
       hasAutoFetched.set(true);
       // Trigger the fetch handler
-      googleUpdaterStream.send({});
+      googleUpdaterStream.send();
     }
   });
 

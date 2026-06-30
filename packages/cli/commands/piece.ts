@@ -51,6 +51,17 @@ function hint(message: string, showQuietTip = true) {
   }
 }
 
+export function normalizeApiUrl(apiUrl: string): string {
+  const parsed = new URL(apiUrl);
+  const normalized = new URL(parsed);
+  const basePath = parsed.pathname.split("/").filter(Boolean).join("/");
+  normalized.pathname = basePath ? `/${basePath}` : "/";
+  normalized.search = "";
+  normalized.hash = "";
+  const href = normalized.toString();
+  return basePath ? href : href.slice(0, -1);
+}
+
 function summarizeForDisplay(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
@@ -1068,7 +1079,7 @@ export function parseSpaceOptions(
     if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
   }
 
-  output.apiUrl = input.apiUrl;
+  output.apiUrl = normalizeApiUrl(input.apiUrl);
   output.space = input.space;
 
   if (!input.identity) {

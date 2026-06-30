@@ -11,17 +11,348 @@ import {
   type SessionSync,
   toDocumentPath,
 } from "../v2.ts";
-import { connect, loopback, type Transport, WatchView } from "../v2/client.ts";
+import {
+  connect,
+  loopback,
+  type SessionOpenAuthContext,
+  type Transport,
+  WatchView,
+} from "../v2/client.ts";
+import {
+  TEST_SESSION_OPEN_AUDIENCE,
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
+
+const sessionOpenChallenge = {
+  value: "challenge:memory-v2-client",
+  expiresAt: 1_000_000,
+} as const;
 
 const HELLO_OK = {
   type: "hello.ok",
   protocol: MEMORY_PROTOCOL,
   flags: getMemoryProtocolFlags(),
+  sessionOpen: {
+    audience: TEST_SESSION_OPEN_AUDIENCE,
+    challenge: sessionOpenChallenge,
+  },
 } as const;
+
+const sessionOpenFor = (id: string) => ({
+  audience: TEST_SESSION_OPEN_AUDIENCE,
+  challenge: {
+    value: `challenge:memory-v2-client:${id}`,
+    expiresAt: 1_000_000,
+  },
+});
+
+const handshakeTransport = (
+  helloOk: FabricValue,
+  sessionOpen: unknown = undefined,
+): Transport => {
+  let receiver = (_payload: string) => {};
+  return {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary(helloOk));
+        return Promise.resolve();
+      }
+      if (message.type === "session.open") {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:handshake-context",
+            sessionToken: "token:handshake-context",
+            serverSeq: 0,
+            sessionOpen: sessionOpen ?? sessionOpenFor(message.requestId!),
+          },
+        }));
+      }
+      return Promise.resolve();
+    },
+    close() {
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+};
+
+const asyncHandshakeTransport = (helloOk: FabricValue): Transport => {
+  let receiver = (_payload: string) => {};
+  return {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+      };
+      if (message.type === "hello") {
+        queueMicrotask(() => receiver(encodeMemoryBoundary(helloOk)));
+      }
+      return Promise.resolve();
+    },
+    close() {
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+};
+
+Deno.test("memory v2 client rejects malformed async hello session.open metadata", async () => {
+  await assertRejects(
+    () =>
+      connect({
+        transport: asyncHandshakeTransport({
+          ...HELLO_OK,
+          sessionOpen: {
+            audience: TEST_SESSION_OPEN_AUDIENCE,
+          },
+        }),
+      }),
+    Error,
+    "challenge",
+  );
+});
+
+Deno.test("memory v2 client rejects malformed hello session.open metadata", async () => {
+  const cases: {
+    name: string;
+    helloOk: FabricValue;
+    message: string;
+  }[] = [
+    {
+      name: "missing metadata",
+      helloOk: {
+        type: "hello.ok",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      },
+      message: "authentication metadata",
+    },
+    {
+      name: "non-object metadata",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: "bad",
+      },
+      message: "malformed",
+    },
+    {
+      name: "non-string audience",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: 123,
+          challenge: sessionOpenChallenge,
+        },
+      },
+      message: "malformed",
+    },
+    {
+      name: "non-object challenge",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: TEST_SESSION_OPEN_AUDIENCE,
+          challenge: "bad",
+        },
+      },
+      message: "malformed",
+    },
+    {
+      name: "malformed challenge fields",
+      helloOk: {
+        ...HELLO_OK,
+        sessionOpen: {
+          audience: TEST_SESSION_OPEN_AUDIENCE,
+          challenge: {
+            value: 123,
+            expiresAt: "soon",
+          },
+        },
+      },
+      message: "malformed",
+    },
+  ];
+
+  for (const testCase of cases) {
+    await assertRejects(
+      () =>
+        connect({
+          transport: handshakeTransport(testCase.helloOk),
+        }),
+      Error,
+      testCase.message,
+    );
+  }
+});
+
+Deno.test("memory v2 client rejects a missing session.open challenge", async () => {
+  await assertRejects(
+    () =>
+      connect({
+        transport: handshakeTransport({
+          ...HELLO_OK,
+          sessionOpen: {
+            audience: "did:key:z6Mk-memory-v2-client-audience",
+          },
+        }),
+      }),
+    Error,
+    "challenge",
+  );
+});
+
+Deno.test("memory v2 client rejects a missing session.open audience", async () => {
+  await assertRejects(
+    () =>
+      connect({
+        transport: handshakeTransport({
+          ...HELLO_OK,
+          sessionOpen: {
+            challenge: sessionOpenChallenge,
+          },
+        }),
+      }),
+    Error,
+    "audience",
+  );
+});
+
+Deno.test("memory v2 client rejects a missing rotated session.open challenge", async () => {
+  const client = await connect({
+    transport: handshakeTransport(HELLO_OK, {
+      audience: TEST_SESSION_OPEN_AUDIENCE,
+    }),
+  });
+  try {
+    await assertRejects(
+      () =>
+        client.mount(
+          "did:key:z6Mk-memory-v2-client-missing-rotated-challenge",
+          {},
+          testSessionOpenAuthFactory,
+        ),
+      Error,
+      "challenge",
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client rejects a missing rotated session.open audience", async () => {
+  const client = await connect({
+    transport: handshakeTransport(HELLO_OK, {
+      challenge: sessionOpenChallenge,
+    }),
+  });
+  try {
+    await assertRejects(
+      () =>
+        client.mount(
+          "did:key:z6Mk-memory-v2-client-missing-rotated-audience",
+          {},
+          testSessionOpenAuthFactory,
+        ),
+      Error,
+      "audience",
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client passes session.open handshake context to the auth factory", async () => {
+  const sessionOpen = {
+    audience: "did:key:z6Mk-memory-v2-client-audience",
+    challenge: sessionOpenChallenge,
+  };
+  const client = await connect({
+    transport: handshakeTransport({
+      ...HELLO_OK,
+      sessionOpen,
+    }),
+  });
+  try {
+    let captured: unknown;
+    await client.mount(
+      "did:key:z6Mk-memory-v2-client-handshake-context",
+      {},
+      (_space, _session, context) => {
+        captured = context;
+        return undefined;
+      },
+    );
+    assertEquals(captured, sessionOpen);
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client rotates session.open challenges between protected mounts", async () => {
+  const audience = "did:key:z6Mk-memory-v2-client-rotate-audience";
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-rotate-challenges"),
+    authorizeSessionOpen: () => "did:key:z6Mk-memory-v2-client-principal",
+    sessionOpenAuth: {
+      audience,
+    },
+  });
+  const client = await connect({
+    transport: loopback(server),
+  });
+  const challenges: string[] = [];
+  try {
+    const authFactory = (
+      _space: string,
+      _session: unknown,
+      context: SessionOpenAuthContext,
+    ) => {
+      challenges.push(context.challenge.value);
+      return {
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {},
+      };
+    };
+    const first = await client.mount(
+      "did:key:z6Mk-memory-v2-client-rotate-one",
+      {},
+      authFactory,
+    );
+    const second = await client.mount(
+      "did:key:z6Mk-memory-v2-client-rotate-two",
+      {},
+      authFactory,
+    );
+
+    assertEquals(first.serverSeq, 0);
+    assertEquals(second.serverSeq, 0);
+    assertEquals(challenges.length, 2);
+    assertEquals(challenges[0] === challenges[1], false);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
 
 Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-graph-expansion"),
   });
   const writerClient = await connect({
@@ -32,9 +363,13 @@ Deno.test("memory v2 client watch sets expand to previously hidden graph nodes",
   });
   const writer = await writerClient.mount(
     "did:key:z6Mk-memory-v2-client-graph",
+    {},
+    testSessionOpenAuthFactory,
   );
   const observer = await observerClient.mount(
     "did:key:z6Mk-memory-v2-client-graph",
+    {},
+    testSessionOpenAuthFactory,
   );
   const fixture = createGraphFixture(writer.space);
 
@@ -95,6 +430,7 @@ Deno.test("memory v2 client watch sets expand to previously hidden graph nodes",
 
 Deno.test("memory v2 client can bootstrap watches with watchAdd", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-watch-add-bootstrap"),
   });
   const writerClient = await connect({
@@ -105,9 +441,13 @@ Deno.test("memory v2 client can bootstrap watches with watchAdd", async () => {
   });
   const writer = await writerClient.mount(
     "did:key:z6Mk-memory-v2-client-watch-add-bootstrap",
+    {},
+    testSessionOpenAuthFactory,
   );
   const observer = await observerClient.mount(
     "did:key:z6Mk-memory-v2-client-watch-add-bootstrap",
+    {},
+    testSessionOpenAuthFactory,
   );
 
   try {
@@ -164,6 +504,7 @@ Deno.test("memory v2 client can bootstrap watches with watchAdd", async () => {
 
 Deno.test("memory v2 client watch views expose incremental sync effects", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-watch-sync-effects"),
   });
   const writerClient = await connect({
@@ -174,9 +515,13 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
   });
   const writer = await writerClient.mount(
     "did:key:z6Mk-memory-v2-client-watch-sync-effects",
+    {},
+    testSessionOpenAuthFactory,
   );
   const observer = await observerClient.mount(
     "did:key:z6Mk-memory-v2-client-watch-sync-effects",
+    {},
+    testSessionOpenAuthFactory,
   );
 
   try {
@@ -250,6 +595,7 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
 
 Deno.test("memory v2 client conflict errors expose readiness after caught-up sync", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-conflict-ready-to-retry"),
     subscriptionRefreshDelayMs: 20,
   });
@@ -258,6 +604,8 @@ Deno.test("memory v2 client conflict errors expose readiness after caught-up syn
   });
   const session = await client.mount(
     "did:key:z6Mk-memory-v2-client-conflict-ready-to-retry",
+    {},
+    testSessionOpenAuthFactory,
   );
 
   try {
@@ -858,6 +1206,7 @@ class ScriptedReconnectTransport implements Transport {
           ok: {
             sessionId: "session:scripted",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -946,6 +1295,7 @@ class DelayedTransactTransport implements Transport {
             sessionId: "session:delayed-transact",
             sessionToken: "token:delayed-transact",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1033,6 +1383,7 @@ class ConflictReadyTransport implements Transport {
             sessionId: this.#sessionId,
             sessionToken: "token:conflict-ready",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1114,6 +1465,7 @@ class ConflictReadySessionChangingTransport implements Transport {
             sessionId,
             sessionToken: `token:${sessionId}`,
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1172,6 +1524,7 @@ class ConflictReadyFreshSameSessionTransport implements Transport {
             sessionId: "session:fresh-same-session",
             sessionToken: "token:fresh-same-session",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1233,6 +1586,7 @@ class AckCountingTransport implements Transport {
           ok: {
             sessionId: "session:ack-count",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1309,6 +1663,7 @@ class HangingAckTransport implements Transport {
           ok: {
             sessionId: "session:hanging-ack",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -1395,6 +1750,7 @@ class ControlledReconnectTransport implements Transport {
           ok: {
             sessionId: "session:controlled",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         }));
         return Promise.resolve();
@@ -1479,6 +1835,7 @@ class CloseOnAppliedCommitTransport implements Transport {
           ok: {
             sessionId: "session:close-on-applied-commit",
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         }));
         return Promise.resolve();
@@ -1553,6 +1910,7 @@ Deno.test(
   "memory v2 client reconnects without reinstalling watch sets when the session resumes",
   async () => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL("memory://memory-v2-client-reconnect"),
     });
     const transport = new ReconnectableLoopbackTransport(server);
@@ -1560,9 +1918,15 @@ Deno.test(
     const writerClient = await connect({
       transport: loopback(server),
     });
-    const space = await client.mount("did:key:z6Mk-memory-v2-client-reconnect");
+    const space = await client.mount(
+      "did:key:z6Mk-memory-v2-client-reconnect",
+      {},
+      testSessionOpenAuthFactory,
+    );
     const writer = await writerClient.mount(
       "did:key:z6Mk-memory-v2-client-reconnect",
+      {},
+      testSessionOpenAuthFactory,
     );
     const originalSessionId = space.sessionId;
 
@@ -1780,6 +2144,7 @@ class TopLevelCaughtUpResumeTransport implements Transport {
             // Resume carries the caught-up marker ONLY at the top level — no
             // sync — exactly the case that previously stranded the runner.
             ...(resumed ? { resumed: true, caughtUpLocalSeq: 4 } : {}),
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         }));
         return Promise.resolve();
@@ -1879,6 +2244,7 @@ class EmptyCaughtUpResumeTransport implements Transport {
                 },
               }
               : {}),
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         }));
         return Promise.resolve();
@@ -1929,6 +2295,7 @@ Deno.test(
   "memory v2 client does not restore a closed session after reconnect",
   async () => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL("memory://memory-v2-client-closed-session-reconnect"),
       sessions: new SessionRegistry({ ttlMs: 0 }),
     });
@@ -1936,6 +2303,8 @@ Deno.test(
     const client = await connect({ transport });
     const space = await client.mount(
       "did:key:z6Mk-memory-v2-client-closed-session-reconnect",
+      {},
+      testSessionOpenAuthFactory,
     );
 
     try {
@@ -1971,6 +2340,7 @@ Deno.test(
   "memory v2 client reinstalls watch sets when reconnect opens a fresh session",
   async () => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL("memory://memory-v2-client-reconnect-expired"),
       sessions: new SessionRegistry({ ttlMs: 0 }),
     });
@@ -1981,9 +2351,13 @@ Deno.test(
     });
     const space = await client.mount(
       "did:key:z6Mk-memory-v2-client-reconnect-expired",
+      {},
+      testSessionOpenAuthFactory,
     );
     const writer = await writerClient.mount(
       "did:key:z6Mk-memory-v2-client-reconnect-expired",
+      {},
+      testSessionOpenAuthFactory,
     );
 
     try {
@@ -2209,6 +2583,7 @@ Deno.test("memory v2 client sends later transacts before earlier responses settl
 
 Deno.test("memory v2 client closes a revoked session after takeover and rejects stale resume tokens", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-session-takeover"),
   });
   const firstClient = await connect({
@@ -2225,14 +2600,14 @@ Deno.test("memory v2 client closes a revoked session after takeover and rejects 
   try {
     const first = await firstClient.mount(space, {
       sessionId: "session:shared",
-    });
+    }, testSessionOpenAuthFactory);
     const initialToken = first.sessionToken;
     assertExists(initialToken);
 
     const second = await secondClient.mount(space, {
       sessionId: first.sessionId,
       sessionToken: initialToken,
-    });
+    }, testSessionOpenAuthFactory);
     assertEquals(second.sessionId, first.sessionId);
     assertExists(second.sessionToken);
     assertEquals(second.sessionToken === initialToken, false);
@@ -2263,7 +2638,7 @@ Deno.test("memory v2 client closes a revoked session after takeover and rejects 
         staleClient.mount(space, {
           sessionId: first.sessionId,
           sessionToken: initialToken,
-        }),
+        }, testSessionOpenAuthFactory),
       Error,
       "resume token is no longer valid",
     );
@@ -2485,6 +2860,7 @@ class DisconnectableAckTransport implements Transport {
           ok: {
             sessionId: `session:ack-disconnect-${this.#sessionOpenCount}`,
             serverSeq: this.#watchSeq,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         });
         return Promise.resolve();
@@ -2621,6 +2997,7 @@ class SessionChangingTransport implements Transport {
           ok: {
             sessionId,
             serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
           },
         }));
         return Promise.resolve();
