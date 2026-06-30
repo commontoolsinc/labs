@@ -32,7 +32,9 @@ export const provider = new BasicTracerProvider({
 // LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
 // OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
 // spans still get OpenInference semantic-convention formatting for Phoenix; a
-// pass-through spanFilter lets non-LLM spans export unchanged for SigNoz.
+// pass-through spanFilter lets non-LLM spans through to SigNoz as well. (The
+// processor tags passed-through spans with an `openinference.span.kind`
+// attribute, so they are not strictly byte-for-byte unchanged.)
 provider.addSpanProcessor(
   new OpenInferenceBatchSpanProcessor({
     exporter: otlpExporter,
@@ -42,6 +44,30 @@ provider.addSpanProcessor(
 
 export function getTracerProvider() {
   return _provider;
+}
+
+/**
+ * Flush and shut down the tracer provider so buffered spans aren't dropped when
+ * the process exits. No-op if telemetry was never initialized. Mirrors the
+ * bg-piece-service shutdown so toolshed doesn't lose its last span batch on
+ * deploy/restart.
+ */
+export async function shutdownOpenTelemetry(): Promise<void> {
+  if (!_provider) return;
+  const p = _provider;
+  _provider = undefined;
+  try {
+    await p.forceFlush();
+    await p.shutdown();
+  } finally {
+    // Reset the global API state so getTracer() falls back to the API no-op
+    // after shutdown. We deliberately do NOT reset _providerRegistered: the
+    // `provider` above is a module-level const that init can't rebuild, so a
+    // re-init must stay a guarded no-op rather than re-register a torn-down
+    // instance. Shutdown here is process-exit-only.
+    trace.disable();
+    context.disable();
+  }
 }
 
 // Prefer Deno's built-in context manager when running on Deno ≥2.2.
@@ -64,9 +90,9 @@ const getContextManager = () => {
   return new AsyncHooksContextManager();
 };
 
-export function initOpenTelemetry() {
-  if (_providerRegistered || !env.OTEL_ENABLED) {
-    if (!env.OTEL_ENABLED) {
+export function initOpenTelemetry(enabled: boolean = env.OTEL_ENABLED) {
+  if (_providerRegistered || !enabled) {
+    if (!enabled) {
       console.log("OpenTelemetry is disabled via OTEL_ENABLED env var");
     } else {
       console.log("OpenTelemetry already initialized, skipping");

@@ -61,4 +61,26 @@ describe("OpenTelemetry setup", () => {
       assertEquals(getTracerProvider(), undefined);
     },
   );
+
+  it(
+    "re-initializes cleanly after shutdown",
+    { sanitizeOps: false, sanitizeResources: false },
+    async () => {
+      await initOpenTelemetry(cfg(true));
+      assert(getTracerProvider() !== undefined, "first init should register");
+      await shutdownOpenTelemetry();
+      assertEquals(getTracerProvider(), undefined);
+
+      // A second init after shutdown must rebuild a working provider. The old
+      // `_providerRegistered` guard was never reset, so this silently no-op'd
+      // and left the service running with no tracing.
+      await initOpenTelemetry(cfg(true));
+      assert(
+        getTracerProvider() !== undefined,
+        "init after shutdown should rebuild the provider",
+      );
+      await shutdownOpenTelemetry();
+      assertEquals(getTracerProvider(), undefined);
+    },
+  );
 });
