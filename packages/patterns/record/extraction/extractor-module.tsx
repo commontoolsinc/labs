@@ -50,6 +50,7 @@ import { getConfidenceLevel, SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 import { getCellValue } from "./schema-utils-pure.ts";
+import { getOcrErrorText } from "./error-utils.ts";
 
 // ===== Types =====
 
@@ -1819,9 +1820,9 @@ export const ExtractorModule = pattern<
       if (!calls || calls.length === 0) return errors;
 
       for (const call of calls) {
-        const error = call.ocr?.error as { message?: string } | undefined;
-        if (error) {
-          errors[call.index] = String(error.message || error);
+        const errorText = getOcrErrorText(call.ocr?.error);
+        if (errorText) {
+          errors[call.index] = errorText;
         }
       }
       return errors;
@@ -1831,6 +1832,12 @@ export const ExtractorModule = pattern<
     const hasOcrErrors = computed(() => {
       const errors = ocrErrors;
       return Object.keys(errors).length > 0;
+    });
+
+    const ocrErrorMessage = computed((): string | null => {
+      const errors = Object.values(ocrErrors);
+      if (errors.length === 0) return null;
+      return errors.join("; ");
     });
 
     // ===== PER-SOURCE EXTRACTION ARCHITECTURE =====
@@ -2655,8 +2662,9 @@ export const ExtractorModule = pattern<
                     >
                       <span style={{ fontSize: "16px" }}>⚠️</span>
                       <span>
-                        OCR failed for some photos. Extraction will continue
-                        with available text.
+                        OCR failed for some photos:{" "}
+                        {ocrErrorMessage}. Extraction will continue with
+                        available text.
                       </span>
                     </div>,
                     null,

@@ -1,7 +1,9 @@
 import {
+  clearGenerateTextResult,
   clearWishResults,
   findEventHandlers,
   NAME,
+  setGenerateTextResult,
   setWishResult,
   textContent,
   UI,
@@ -127,5 +129,86 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       textContent(uiOf(journal)).includes("Journal subject"),
       "journal renders entries with typed subject cells",
     );
+
+    const { default: ExtractorModule } = await import(
+      "../../../record/extraction/extractor-module.tsx"
+    );
+    setGenerateTextResult({
+      pending: false,
+      result: undefined,
+      error: "OCR request failed",
+    });
+    const extractor = instantiatePattern(ExtractorModule, {
+      parentSubPieces: new Writable([
+        {
+          type: "photo",
+          pinned: false,
+          piece: {
+            image: {
+              data: "data:image/png;base64,AAAA",
+            },
+            label: "Business card",
+          },
+        },
+      ]),
+      parentTrashedSubPieces: new Writable([]),
+      parentTitle: new Writable(""),
+      sourceSelections: new Writable({}),
+      trashSelections: new Writable({}),
+      selections: new Writable({}),
+      extractPhase: new Writable("select"),
+      extractionPrompt: new Writable(""),
+      cleanupNotesEnabled: new Writable(true),
+      notesContentSnapshot: new Writable({}),
+      cleanupApplyStatus: new Writable("pending"),
+      applyInProgress: new Writable(false),
+      errorDetailsExpanded: new Writable(false),
+    });
+    assert(
+      textContent(uiOf(extractor)).includes(
+        "OCR failed for some photos: OCR request failed.",
+      ),
+      "extractor renders OCR string errors",
+    );
+    clearGenerateTextResult();
+
+    setGenerateTextResult({
+      pending: false,
+      result: "Ada prefers tea.",
+      error: undefined,
+    });
+    const extractorWithoutOcrError = instantiatePattern(ExtractorModule, {
+      parentSubPieces: new Writable([
+        {
+          type: "photo",
+          pinned: false,
+          piece: {
+            image: {
+              data: "data:image/png;base64,BBBB",
+            },
+            label: "Tea note",
+          },
+        },
+      ]),
+      parentTrashedSubPieces: new Writable([]),
+      parentTitle: new Writable(""),
+      sourceSelections: new Writable({}),
+      trashSelections: new Writable({}),
+      selections: new Writable({}),
+      extractPhase: new Writable("select"),
+      extractionPrompt: new Writable(""),
+      cleanupNotesEnabled: new Writable(true),
+      notesContentSnapshot: new Writable({}),
+      cleanupApplyStatus: new Writable("pending"),
+      applyInProgress: new Writable(false),
+      errorDetailsExpanded: new Writable(false),
+    });
+    assert(
+      !textContent(uiOf(extractorWithoutOcrError)).includes(
+        "OCR failed for some photos",
+      ),
+      "extractor omits OCR error text when no OCR error is present",
+    );
+    clearGenerateTextResult();
   });
 }
