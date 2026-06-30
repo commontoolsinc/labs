@@ -1,15 +1,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   markProfilerStarted,
   markProfileStoppedOnce,
+  parseArg,
   type ProfileCaptureState,
+  profileErrorOutputPath,
   type ProfileStopState,
   recordConsoleProfileMessage,
+  requireArg,
   resumeDebuggerOnPause,
   sendInspectorCommand,
   startProfilerIfReady,
+  stopActiveProfiler,
+  stringifyRemoteObject,
+  waitForWebSocketOpen,
+  writeProfileCaptureFiles,
 } from "./capture-deno-inspector-profile-lib.ts";
 
 function createState(): ProfileCaptureState {
@@ -54,6 +61,67 @@ class FakeWebSocket {
 }
 
 describe("capture-deno-inspector-profile helpers", () => {
+  it("parses named string arguments", () => {
+    const args = [
+      "--websocket-url=ws://127.0.0.1:9333/session",
+      "--output=profile.cpuprofile",
+    ];
+
+    assertEquals(
+      parseArg(args, "websocket-url"),
+      "ws://127.0.0.1:9333/session",
+    );
+    assertEquals(parseArg(args, "missing"), undefined);
+  });
+
+  it("requires non-empty arguments", () => {
+    assertEquals(
+      requireArg(["--output=profile.cpuprofile"], "output"),
+      "profile.cpuprofile",
+    );
+    assertThrows(
+      () => requireArg(["--output="], "output"),
+      Error,
+      "--output is required",
+    );
+  });
+
+  it("resolves when the websocket is already open", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    await waitForWebSocketOpen(ws as unknown as WebSocket);
+
+    assertEquals(ws.added, []);
+  });
+
+  it("resolves after the websocket opens", async () => {
+    const ws = new FakeWebSocket();
+    const opened = waitForWebSocketOpen(ws as unknown as WebSocket);
+
+    ws.dispatch("open");
+    await opened;
+
+    assertEquals(ws.added, ["open", "error"]);
+    assertEquals(ws.removed, ["open", "error"]);
+  });
+
+  it("rejects when the websocket reports an error", async () => {
+    const ws = new FakeWebSocket();
+    const opened = waitForWebSocketOpen(ws as unknown as WebSocket);
+    const event = ws.dispatch("error");
+
+    let caught: unknown;
+    try {
+      await opened;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals(caught, event);
+    assertEquals(ws.removed, ["open", "error"]);
+  });
+
   it("resumes once when the debugger pauses", () => {
     const target = new EventTarget();
     const ws = new FakeWebSocket();
@@ -107,6 +175,14 @@ describe("capture-deno-inspector-profile helpers", () => {
       false,
     );
     assertEquals(ws.sent, []);
+  });
+
+  it("formats remote console values", () => {
+    assertEquals(stringifyRemoteObject({ value: 0 }), "0");
+    assertEquals(stringifyRemoteObject({ unserializableValue: "NaN" }), "NaN");
+    assertEquals(stringifyRemoteObject({ description: "Map(0)" }), "Map(0)");
+    assertEquals(stringifyRemoteObject({ type: "object" }), "[object]");
+    assertEquals(stringifyRemoteObject({}), "[unknown]");
   });
 
   it("starts the profiler when the websocket is open", async () => {
@@ -215,6 +291,120 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(starts, 1);
     assertEquals(state.profilerStarting, false);
     assertEquals(state.profilerActive, true);
+  });
+
+  it("stops an active profiler", async () => {
+    const state = createState();
+    state.profilerActive = true;
+
+    const result = await stopActiveProfiler(
+      state,
+      { readyState: WebSocket.OPEN },
+      {
+        stop: () => Promise.resolve({ profile: { nodes: [] } }),
+      },
+    );
+
+    assertEquals(result, { profile: { nodes: [] }, stopError: undefined });
+    assertEquals(state.profilerActive, false);
+  });
+
+  it("records profiler stop failures", async () => {
+    const state = createState();
+    state.profilerActive = true;
+
+    const result = await stopActiveProfiler(
+      state,
+      { readyState: WebSocket.OPEN },
+      {
+        stop: () => Promise.reject(new Error("closed")),
+      },
+    );
+
+    assertEquals(result.profile, null);
+    assertEquals(result.stopError, "Profiler.stop failed: Error: closed");
+    assertEquals(state.profilerActive, true);
+  });
+
+  it("skips stopping when the profiler is inactive", async () => {
+    const state = createState();
+    let stops = 0;
+
+    const result = await stopActiveProfiler(
+      state,
+      { readyState: WebSocket.OPEN },
+      {
+        stop: () => {
+          stops += 1;
+          return Promise.resolve({ profile: {} });
+        },
+      },
+    );
+
+    assertEquals(result, { profile: null, stopError: undefined });
+    assertEquals(stops, 0);
+  });
+
+  it("builds profiler error output paths", () => {
+    assertEquals(
+      profileErrorOutputPath("/tmp/profile.cpuprofile"),
+      "/tmp/profile.error.txt",
+    );
+    assertEquals(
+      profileErrorOutputPath("/tmp/profile.json"),
+      "/tmp/profile.json.error.txt",
+    );
+  });
+
+  it("writes captured profile and console files", async () => {
+    const state = createState();
+    state.consoleMessages.push("one", "two");
+    const writes: Array<[string, string]> = [];
+    const mkdirs: string[] = [];
+
+    await writeProfileCaptureFiles({
+      outputPath: "/tmp/profile.cpuprofile",
+      consoleOutputPath: "/tmp/profile.console.log",
+      state,
+      profile: { nodes: [] },
+      writer: {
+        mkdir: (path) => {
+          mkdirs.push(path);
+          return Promise.resolve();
+        },
+        writeTextFile: (path, data) => {
+          writes.push([path, data]);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    assertEquals(mkdirs, ["/tmp"]);
+    assertEquals(writes, [
+      ["/tmp/profile.cpuprofile", JSON.stringify({ nodes: [] }, null, 2)],
+      ["/tmp/profile.console.log", "one\ntwo"],
+    ]);
+  });
+
+  it("writes profiler stop errors", async () => {
+    const state = createState();
+    const writes: Array<[string, string]> = [];
+
+    await writeProfileCaptureFiles({
+      outputPath: "/tmp/profile.cpuprofile",
+      state,
+      profile: null,
+      stopError: "stop failed",
+      writer: {
+        mkdir: () => Promise.reject(new Error("exists")),
+        writeTextFile: (path, data) => {
+          writes.push([path, data]);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    assertEquals(writes, [["/tmp/profile.error.txt", "stop failed"]]);
   });
 
   it("marks start and stop latches from console messages", () => {
