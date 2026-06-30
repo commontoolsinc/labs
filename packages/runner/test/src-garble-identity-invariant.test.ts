@@ -209,3 +209,84 @@ Deno.test(
     expect(garbled?.kind).toBe("unsupported");
   },
 );
+
+// Two calls to ONE hoisted lift -> two action INSTANCES of the same symbol. The
+// content address (`cf:module/<hash>:<symbol>`) is per-symbol, so the action id
+// appends a source-independent per-instance key (a hash of reads/writes) to keep
+// instances distinct. This guards that fix: with a per-symbol-only id the two
+// collided onto one durable observation (one silently overwrote the other).
+const MULTI_INSTANCE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { pattern, lift } from 'commonfabric';",
+      "const dbl = lift((n: number) => n * 2);",
+      "export default pattern<{ a: number; b: number }>(({ a, b }) => {",
+      "  const da = dbl(a);",
+      "  const db = dbl(b);",
+      "  return { da, db };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
+async function runMultiAndCollect(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): Promise<{ actionId: string; fingerprint: string }[]> {
+  const runtime = newRuntime(storageManager);
+  try {
+    const compiled = await runtime.patternManager.compilePattern(
+      MULTI_INSTANCE_PROGRAM,
+    );
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<any>(space, "mi-result", undefined, tx);
+    const handle = runtime.run(tx, compiled, { a: 5, b: 9 }, resultCell);
+    await tx.commit();
+    for (let k = 0; k < 8; k++) {
+      await handle.pull();
+      await runtime.idle();
+    }
+    await runtime.storageManager.synced();
+    expect(resultCell.getAsQueryResult()).toEqual({ da: 10, db: 18 });
+    return await collectIdentities(runtime);
+  } finally {
+    runtime.scheduler.dispose();
+    await runtime.dispose();
+  }
+}
+
+Deno.test(
+  "two instances of one lift get DISTINCT per-instance ids (no collision), .src-independent",
+  async () => {
+    const baseline = await runMultiAndCollect(
+      StorageManager.emulate({ as: signer }),
+    );
+
+    // Two distinct action instances => two distinct durable observations (the
+    // pre-fix per-symbol id collapsed these to one).
+    expect(baseline.length).toBe(2);
+    expect(new Set(baseline.map((b) => b.actionId)).size).toBe(2);
+    // Same symbol (`:dbl`), distinct per-instance suffix; never a `:line:col`.
+    for (const { actionId } of baseline) {
+      expect(actionId).toMatch(/^cf:module\/[^:]+:dbl:[^:]+$/);
+      expect(actionId).not.toMatch(/:\d+:\d+$/);
+    }
+
+    // The per-instance key hashes reads/writes, not `.src`, so garbling `.src`
+    // leaves the ids byte-identical.
+    let counter = 0;
+    __setSrcAnnotationTransformForTest((loc) =>
+      `GARBLED-SRC-${counter++}-len${loc.length}`
+    );
+    let garbled: { actionId: string; fingerprint: string }[];
+    try {
+      garbled = await runMultiAndCollect(
+        StorageManager.emulate({ as: signer }),
+      );
+    } finally {
+      __setSrcAnnotationTransformForTest(undefined);
+    }
+    expect(garbled).toEqual(baseline);
+  },
+);

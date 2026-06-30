@@ -64,13 +64,28 @@ export function getSchedulerActionId(
   // spec's stated content key) wins, else `{ identity, symbol }` from provenance.
   // `.src` is no longer consulted for identity (debug-only; its source-map path
   // is broken/colliding).
+  //
+  // The content address is per-SYMBOL — it identifies the implementation, not
+  // the action instance. The action id must stay per-INSTANCE (it keys
+  // `actionStats` and the durable observation), so we append the
+  // source-independent `schedulerInstanceKey` (a hash of the action's
+  // process/reads/writes, set at action creation). Without it, N instances of
+  // one hoisted op (e.g. one `lift` called twice / a `map`) would collide on a
+  // single id. The fingerprint deliberately keeps NO instance key (it is the
+  // per-symbol code identity).
+  const instanceKey = (action as { schedulerInstanceKey?: unknown })
+    .schedulerInstanceKey;
+  const withInstance = (id: string): string =>
+    typeof instanceKey === "string" && instanceKey.length > 0
+      ? `${id}:${instanceKey}`
+      : id;
   const implementationHash =
     (action as { implementationHash?: unknown }).implementationHash;
   if (typeof implementationHash === "string" && implementationHash.length > 0) {
-    return implementationHash;
+    return withInstance(implementationHash);
   }
   const contentId = contentAddressedActionIdentity(action);
-  if (contentId) return contentId;
+  if (contentId) return withInstance(contentId);
   if (action.name && action.name !== "anonymous") return action.name;
 
   const existingId = state.anonymousActionIds.get(action);
