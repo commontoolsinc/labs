@@ -495,6 +495,18 @@ Deno.test("Capability analysis marks object assignment spreads as wildcard", () 
   assertEquals(input.wildcard, true);
 });
 
+Deno.test("Capability analysis treats elementById as a wildcard array read", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => input.elementById("k1").get();`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  // elementById addresses a separately derived entity, so the access is
+  // attributed conservatively to the whole array root.
+  assertEquals(input.wildcard, true);
+});
+
 Deno.test("Capability analysis does not record method names as read paths", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => input.get().foo;`,

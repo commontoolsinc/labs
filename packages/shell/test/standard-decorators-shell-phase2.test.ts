@@ -1,6 +1,9 @@
 import { assert } from "@std/assert";
 import { join } from "@std/path";
-import { runDenoCheckWithTemporaryConfig } from "@commonfabric/test-support/isolated-deno";
+import {
+  readDenoConfig,
+  runDenoCheckWithTemporaryConfig,
+} from "@commonfabric/test-support/isolated-deno";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
 
@@ -9,8 +12,8 @@ function decode(bytes: Uint8Array): string {
 }
 
 Deno.test("shell component slice type-checks under standard decorators", async () => {
-  const rootConfigPath = join(ROOT, "deno.json");
-  const rootConfig = JSON.parse(await Deno.readTextFile(rootConfigPath));
+  const rootConfigPath = join(ROOT, "deno.jsonc");
+  const rootConfig = await readDenoConfig(rootConfigPath);
 
   rootConfig.compilerOptions ??= {};
   rootConfig.compilerOptions.experimentalDecorators = false;

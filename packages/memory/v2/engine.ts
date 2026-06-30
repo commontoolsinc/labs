@@ -3892,7 +3892,7 @@ const applySchedulerObservationBatchCommit = (
 // exactly matches an own-key read) and whole-container readers still conflict
 // (their read prefixes the leaf). Keyset/shape readers are matched separately by
 // the nonRecursive path, which keeps the parent injection.
-const patchOverlapsRead = (
+export const patchOverlapsRead = (
   patches: readonly PatchOp[],
   readPath: readonly string[],
 ): boolean => {
@@ -3911,7 +3911,7 @@ const patchOverlapsRead = (
 // disjoint deep-value `replace` strictly BELOW `readPath` touches no ancestor, so
 // it no longer over-conflicts. Strict subset of `patchOverlapsRead` ⇒ never a
 // false-negative. (Recursive reads use the leaf-only `patchOverlapsRead` above.)
-const patchOverlapsNonRecursiveRead = (
+export const patchOverlapsNonRecursiveRead = (
   patches: readonly PatchOp[],
   readPath: readonly string[],
 ): boolean => {
@@ -3935,6 +3935,10 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
       return [from, to, parentPath(from), parentPath(to)];
     }
     case "splice":
+    case "append":
+    case "add-unique":
+    case "remove-by-value":
+    case "increment":
       return [parsePointer(patch.path)];
   }
 };
@@ -3964,6 +3968,10 @@ const touchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
   switch (patch.op) {
     case "replace":
     case "splice":
+    case "append":
+    case "add-unique":
+    case "remove-by-value":
+    case "increment":
       return [parsePointer(patch.path)];
     case "add":
     case "remove":

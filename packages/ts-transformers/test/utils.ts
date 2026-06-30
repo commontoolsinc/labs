@@ -58,7 +58,7 @@ export async function batchTypeCheckFixtures(
     return acc;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
@@ -288,7 +288,7 @@ export async function transformFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
@@ -634,7 +634,7 @@ export async function validateFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,

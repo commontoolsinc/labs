@@ -4,9 +4,11 @@ import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   type GraphQueryResult,
+  type HelloOkMessage,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
+  type SessionOpenAuthMetadata,
 } from "../v2.ts";
 
 const HELLO_FLAGS = getMemoryProtocolFlags();
@@ -20,6 +22,7 @@ const ALICE = "did:key:z6Mk-acl-alice";
 const BOB = "did:key:z6Mk-acl-bob";
 const CAROL = "did:key:z6Mk-acl-carol";
 const SERVICE = "did:key:z6Mk-acl-service";
+const TEST_AUDIENCE = "did:key:z6Mk-acl-test-audience";
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
@@ -50,36 +53,46 @@ const createAclServer = (
       const iss = message.invocation?.iss;
       return typeof iss === "string" ? iss : undefined;
     },
+    sessionOpenAuth: {
+      audience: TEST_AUDIENCE,
+    },
     acl,
   });
 
 type Harness = {
   messages: ServerMessage[];
   connection: ReturnType<Server["connect"]>;
+  sessionOpen: SessionOpenAuthMetadata;
 };
 
 const connect = async (server: Server): Promise<Harness> => {
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   await connection.receive(encodeMemoryBoundary(HELLO));
-  shiftMessage(messages); // hello.ok
-  return { messages, connection };
+  const hello = shiftMessage(messages) as HelloOkMessage;
+  assertEquals(hello.type, "hello.ok");
+  assertExists(hello.sessionOpen);
+  return { messages, connection, sessionOpen: hello.sessionOpen };
 };
 
 let requestCounter = 0;
 const nextRequestId = (label: string): string => `${label}-${++requestCounter}`;
 
 const openSession = async (
-  { connection, messages }: Harness,
+  { connection, messages, sessionOpen }: Harness,
   space: string,
-  principal?: string,
+  principal: string,
 ): Promise<ResponseMessage<{ sessionId: string; serverSeq: number }>> => {
   await connection.receive(encodeMemoryBoundary({
     type: "session.open",
     requestId: nextRequestId("open"),
     space,
     session: {},
-    ...(principal === undefined ? {} : { invocation: { iss: principal } }),
+    invocation: {
+      iss: principal,
+      aud: sessionOpen.audience,
+      challenge: sessionOpen.challenge.value,
+    },
   }));
   return assertResponse<{ sessionId: string; serverSeq: number }>(
     shiftMessage(messages),

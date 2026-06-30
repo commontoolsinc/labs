@@ -9,7 +9,7 @@ details.
 Whenever possible, make sure to use packages from JSR instead of npm.
 
 We are using Deno 2, so imports are a little different than deno 1. The
-deno.json file includes all of the dependencies and handles the mapping.
+deno.jsonc file includes all of the dependencies and handles the mapping.
 
 ## Core Technologies
 

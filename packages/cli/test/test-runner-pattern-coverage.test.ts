@@ -269,12 +269,14 @@ describe(
     it("passes the coverage directory from CF_PATTERN_COVERAGE_DIR", async () => {
       await withTempDir(async (coverageDir) => {
         await withEnv("CF_PATTERN_COVERAGE_DIR", coverageDir, async () => {
-          const { code, stderr } = await cf(
-            `test "${fixture("single.test.tsx")}" --root "${FIXTURES}"`,
-          );
+          await withEnv("CF_LOG_LEVEL", "error", async () => {
+            const { code, stderr } = await cf(
+              `test "${fixture("single.test.tsx")}" --root "${FIXTURES}"`,
+            );
 
-          expect(code).toBe(0);
-          checkStderr(stderr);
+            expect(code).toBe(0);
+            checkStderr(stderr);
+          });
         });
 
         const coverageFiles = await readCoverageFiles(coverageDir);

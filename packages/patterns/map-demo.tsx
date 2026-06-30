@@ -338,7 +338,7 @@ export default pattern<Input, Output>(
                       color="neutral"
                       variant="outline"
                       onClick={() => {
-                        fitBoundsTrigger.set(fitBoundsTrigger.get() + 1);
+                        fitBoundsTrigger.increment(1);
                       }}
                     >
                       Fit to All Stops

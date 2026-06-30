@@ -1698,6 +1698,85 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             ),
             false,
           );
+          // Positive check (not just "no blocked"): each re-rendered boundary is
+          // re-affirmed "ok". The reactive unblock recreates the subtree, so the
+          // live boundaries carry fresh ids; assert their final state is "ok".
+          const liveBoundaryIds = collector.getOpsOfType("create-element")
+            .filter((op) => op.tagName === "cf-cfc-authorship")
+            .map((op) => op.nodeId);
+          assertEquals(liveBoundaryIds.length >= 2, true);
+          for (const id of liveBoundaryIds) {
+            assertEquals(
+              collector.getOpsOfType("set-prop")
+                .filter((op) =>
+                  op.nodeId === id && op.key === "textIntegrityState"
+                )
+                .at(-1)?.value,
+              "ok",
+            );
+          }
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "nested text integrity recomputes the enclosing boundary when an inner boundary stops verifying",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const tree = (innerVerifies: boolean) => ({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [{
+            type: "vnode",
+            name: "cf-cfc-authorship",
+            props: {
+              key: "outer",
+              verifyTextIntegrity: true,
+              requiredTextIntegrity: signedReleaseAtom,
+            },
+            children: [{
+              type: "vnode",
+              name: "cf-cfc-authorship",
+              props: innerVerifies
+                ? {
+                  key: "inner",
+                  verifyTextIntegrity: true,
+                  requiredTextIntegrity: signedReleaseAtom,
+                }
+                : { key: "inner" },
+              children: [unsignedReleaseText as never],
+            }],
+          }],
+        });
+        const rootCell = new MockCell(tree(true));
+        const cancel = reconciler.mount(rootCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "textIntegrityState" && op.value === "blocked"
+            ),
+            true,
+          );
+          collector.clear();
+
+          // The inner boundary stops verifying but stays nested inside the outer
+          // (its enclosing-boundary set shrinks {outer,inner} -> {outer}). The
+          // outer still gates the failing text, so it stays hidden.
+          rootCell.set(tree(false));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Unsigned release note"), false);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            true,
+          );
         } finally {
           cancel();
         }

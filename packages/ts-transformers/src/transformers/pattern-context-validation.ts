@@ -49,6 +49,7 @@ import {
 } from "../ast/mod.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
+  addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
@@ -85,6 +86,49 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   // the rule callback eagerly at pattern build into a serialized AST; it is
   // never extracted to run later, so closure capture is harmless.
 ]);
+
+type ObjectMemberKind =
+  | "getter"
+  | "toJSON"
+  | "method"
+  | "setter"
+  | "function-property";
+
+// A getter and a `toJSON()` member run when the pattern result is stored;
+// a method, setter, or function-valued property is a function value the data
+// model cannot store. The fix advice leads with the option that fits the kind:
+// a plain property or computed() field for a value, a module-scope handler() or
+// lift() for behavior.
+function objectMemberMessage(kind: ObjectMemberKind): string {
+  switch (kind) {
+    case "getter":
+      return `A getter on an object literal in pattern or render context is ` +
+        `evaluated when the pattern result is stored, so a reactive value it ` +
+        `reads is captured as a one-time snapshot and stops tracking updates. ` +
+        `Expose the value as a plain property or a computed(() => ...) field.`;
+    case "toJSON":
+      return `A toJSON() member on an object literal in pattern or render ` +
+        `context runs when the pattern result is stored, so a reactive value ` +
+        `it reads is captured as a one-time snapshot and stops tracking ` +
+        `updates. Build the serialized shape from plain properties or ` +
+        `computed(() => ...) fields.`;
+    case "setter":
+      return `A setter on an object literal in pattern or render context is a ` +
+        `function value, which the reactive data model cannot store. Move this ` +
+        `write into a module-scope handler().`;
+    case "method":
+      return `A method on an object literal in pattern or render context is a ` +
+        `function value, which the reactive data model cannot store. Move this ` +
+        `behavior into a module-scope handler() or lift(); to expose a value, ` +
+        `use a plain property or a computed(() => ...) field.`;
+    case "function-property":
+      return `A function-valued property on an object literal in pattern or ` +
+        `render context is a function value, which the reactive data model ` +
+        `cannot store. Move this behavior into a module-scope handler() or ` +
+        `lift(); to expose a value, use a plain property or a ` +
+        `computed(() => ...) field.`;
+  }
+}
 
 export class PatternContextValidationTransformer
   extends HelpersOnlyTransformer {
@@ -141,6 +185,17 @@ export class PatternContextValidationTransformer
         if (this.validateClassCreation(node, context, checker)) {
           return node;
         }
+      }
+
+      // Object-literal methods, getters, and setters are function creation in
+      // another syntactic form; the arrow and function-expression spellings are
+      // handled above.
+      if (
+        ts.isMethodDeclaration(node) ||
+        ts.isGetAccessorDeclaration(node) ||
+        ts.isSetAccessorDeclaration(node)
+      ) {
+        this.validateObjectMemberCreation(node, context, checker);
       }
 
       // Check for optional chaining in reactive context
@@ -601,6 +656,21 @@ export class PatternContextValidationTransformer
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
+    // A function that is the value of an object-literal property is a member of
+    // that data object, not an event handler or array-method callback. It is
+    // rejected even inside JSX, where the expression-site lowering does not
+    // descend into it either.
+    if (this.isObjectLiteralPropertyValueFunction(node)) {
+      const kind = this.propertyValueFunctionKind(node);
+      if (
+        kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
+      ) {
+        return;
+      }
+      this.reportObjectMember(node, kind, context);
+      return;
+    }
+
     if (this.isInsideJsx(node)) {
       if (boundarySemantics?.decision.kind === "supported") {
         return;
@@ -664,6 +734,282 @@ export class PatternContextValidationTransformer
       node,
     });
     return true;
+  }
+
+  /**
+   * Validates object-literal methods, getters, and setters created in pattern
+   * or render context. The reactive-read lowering pass stops at every function
+   * boundary, so a reactive read inside such a body is never tracked. At result
+   * serialization a getter (or `toJSON`) runs once and freezes whatever it
+   * returns to a snapshot, while a method or setter is a function value the
+   * reactive data model cannot store. The whole member is rejected regardless
+   * of its body, so reads laundered through destructuring, spread, computed
+   * member names, or parameter defaults are covered too. A `toJSON` member is
+   * the one exception: it is storable (the data model converts a toJSON-bearing
+   * object), so it is reported only when its body reads a reactive value.
+   * Members inside a compute wrapper (computed()/lift()/handler()/action()) and
+   * object literals outside pattern/render context are left alone. Class members
+   * are out of scope for this rule (the gate requires an object-literal parent);
+   * a pattern-body class is rejected by the class-creation rule instead. The
+   * match is syntactic, so a function value reached through a call or reference
+   * rather than written inline (`{ read: makeReader() }`, `{ read: someFn }`) is
+   * not caught here.
+   */
+  private validateObjectMemberCreation(
+    node:
+      | ts.MethodDeclaration
+      | ts.GetAccessorDeclaration
+      | ts.SetAccessorDeclaration,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isObjectLiteralExpression(node.parent)) return;
+    if (isInsideSafeCallbackWrapper(node, checker, context)) return;
+    if (!isInsideRestrictedContext(node, checker, context)) return;
+
+    const kind = this.objectMemberKind(node);
+    if (
+      kind === "toJSON" && !this.memberBodyReadsReactiveValue(node, context)
+    ) {
+      return;
+    }
+    this.reportObjectMember(node.name, kind, context);
+  }
+
+  private objectMemberKind(
+    node:
+      | ts.MethodDeclaration
+      | ts.GetAccessorDeclaration
+      | ts.SetAccessorDeclaration,
+  ): ObjectMemberKind {
+    if (ts.isGetAccessorDeclaration(node)) return "getter";
+    if (ts.isSetAccessorDeclaration(node)) return "setter";
+    return this.getStaticMemberName(node.name) === "toJSON"
+      ? "toJSON"
+      : "method";
+  }
+
+  private getStaticMemberName(name: ts.PropertyName): string | undefined {
+    if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
+      return name.text;
+    }
+    if (ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
+      return name.text;
+    }
+    if (
+      ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)
+    ) {
+      return name.expression.text;
+    }
+    return undefined;
+  }
+
+  /**
+   * True when an arrow function or function expression is the value of a
+   * property assignment on an object literal (e.g. `{ read: () => ... }`).
+   * This is the function-valued-property spelling of an object member; the
+   * method/getter/setter spellings are matched directly by their node kinds.
+   * The function may be wrapped in transparent expressions (parentheses, `as`,
+   * `satisfies`, `!`, `<T>`) before the property assignment.
+   */
+  private isObjectLiteralPropertyValueFunction(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  ): boolean {
+    return !!this.getObjectLiteralFunctionPropertyAssignment(node);
+  }
+
+  // A `toJSON` property is invoked at store time like a `toJSON()` method, so
+  // it shares the serialization-snapshot mechanism rather than the
+  // unstorable-function one.
+  private propertyValueFunctionKind(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  ): ObjectMemberKind {
+    const property = this.getObjectLiteralFunctionPropertyAssignment(node);
+    if (property && this.getStaticMemberName(property.name) === "toJSON") {
+      return "toJSON";
+    }
+    return "function-property";
+  }
+
+  /**
+   * Walks up from a function node through transparent expression wrappers and
+   * returns the enclosing object-literal property assignment when the
+   * (possibly-wrapped) function is that property's value. A bare function
+   * declaration is never a property value.
+   */
+  private getObjectLiteralFunctionPropertyAssignment(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  ): ts.PropertyAssignment | undefined {
+    if (ts.isFunctionDeclaration(node)) return undefined;
+    let current: ts.Node = node;
+    let parent = current.parent;
+    while (parent && this.transparentWrapperInner(parent) === current) {
+      current = parent;
+      parent = current.parent;
+    }
+    if (
+      parent &&
+      ts.isPropertyAssignment(parent) &&
+      parent.initializer === current &&
+      ts.isObjectLiteralExpression(parent.parent)
+    ) {
+      return parent;
+    }
+    return undefined;
+  }
+
+  // Expressions that wrap a value without changing it: parentheses, `as`,
+  // `satisfies`, non-null `!`, and `<T>` assertions. Returns the wrapped inner
+  // expression, or undefined when the node is not such a wrapper.
+  private transparentWrapperInner(node: ts.Node): ts.Expression | undefined {
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isTypeAssertionExpression(node)
+    ) {
+      return node.expression;
+    }
+    return undefined;
+  }
+
+  private reportObjectMember(
+    reportNode: ts.Node,
+    kind: ObjectMemberKind,
+    context: TransformationContext,
+  ): void {
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:object-member",
+      message: objectMemberMessage(kind),
+      node: reportNode,
+    });
+  }
+
+  /**
+   * Narrow, toJSON-only body check. A `toJSON` member is the one function shape
+   * the data model can store: it converts a toJSON-bearing object via toJSON()
+   * rather than throwing. So a `toJSON` that reads no reactive value is storable
+   * and allowed; one that reads a reactive value captured from the enclosing
+   * pattern still freezes a snapshot at store time and is reported. This is the
+   * single exception to the rule's body-agnostic stance, scoped to toJSON.
+   */
+  private memberBodyReadsReactiveValue(
+    fn:
+      | ts.MethodDeclaration
+      | ts.GetAccessorDeclaration
+      | ts.SetAccessorDeclaration
+      | ts.ArrowFunction
+      | ts.FunctionExpression
+      | ts.FunctionDeclaration,
+    context: TransformationContext,
+  ): boolean {
+    const body = fn.body;
+    if (!body) return false;
+
+    // Collect every enclosing function up to the outermost, innermost first.
+    // The outermost is the pattern (or render) body, whose parameters are the
+    // reactive inputs. A toJSON nested in a callback still captures those outer
+    // inputs, so its reads of them count.
+    const enclosing: ts.FunctionLikeDeclaration[] = [];
+    let cursor: ts.Node | undefined = fn.parent;
+    while (cursor) {
+      if (ts.isFunctionLike(cursor)) {
+        enclosing.push(cursor as ts.FunctionLikeDeclaration);
+      }
+      cursor = cursor.parent;
+    }
+    if (enclosing.length === 0) return false;
+
+    // Reactive roots are matched by symbol, not by name, so a member parameter
+    // that shadows an input name is not mistaken for the reactive input. Seed
+    // the symbols with the outermost (pattern) inputs, then add locals
+    // initialized from a reactive value (a reactive-origin call, or a value
+    // rebound from an input or earlier reactive local — so reads laundered
+    // through `const { auth } = props` or `const a = value` count). A nested
+    // callback's own parameter is not seeded, so reading a plain element of a
+    // non-reactive array is not flagged.
+    const reactiveRootSymbols = new Set<ts.Symbol>();
+    const outermost = enclosing[enclosing.length - 1]!;
+    for (const parameter of outermost.parameters) {
+      addBindingTargetSymbols(
+        parameter.name,
+        reactiveRootSymbols,
+        context.checker,
+      );
+    }
+    for (let i = enclosing.length - 1; i >= 0; i--) {
+      const scopeBody = enclosing[i]!.body;
+      if (!scopeBody) continue;
+      const scan = (current: ts.Node): void => {
+        if (current !== scopeBody && ts.isFunctionLike(current)) return;
+        if (
+          ts.isVariableDeclaration(current) &&
+          current.initializer &&
+          isOpaqueSourceExpression(
+            current.initializer,
+            EMPTY_OPAQUE_ROOTS,
+            reactiveRootSymbols,
+            context,
+          )
+        ) {
+          addBindingTargetSymbols(
+            current.name,
+            reactiveRootSymbols,
+            context.checker,
+          );
+        }
+        ts.forEachChild(current, scan);
+      };
+      scan(scopeBody);
+    }
+    if (reactiveRootSymbols.size === 0) {
+      return false;
+    }
+
+    const readsOpaqueSource = (node: ts.Expression): boolean =>
+      isOpaqueSourceExpression(
+        node,
+        EMPTY_OPAQUE_ROOTS,
+        reactiveRootSymbols,
+        context,
+      );
+
+    let found = false;
+    const visit = (current: ts.Node): void => {
+      if (found) return;
+      if (current !== body && ts.isFunctionLike(current)) return;
+      if (
+        (ts.isPropertyAccessExpression(current) ||
+          ts.isElementAccessExpression(current)) &&
+        isTopmostMemberAccess(current) &&
+        readsOpaqueSource(current)
+      ) {
+        found = true;
+        return;
+      }
+      if (
+        ts.isIdentifier(current) &&
+        !this.isMemberAccessBase(current) &&
+        readsOpaqueSource(current)
+      ) {
+        found = true;
+        return;
+      }
+      if (ts.isCallExpression(current) && readsOpaqueSource(current)) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(current, visit);
+    };
+    visit(body);
+    // A reactive read in a parameter default runs when the member is called
+    // with no argument, so it counts too.
+    for (const parameter of fn.parameters) {
+      if (parameter.initializer) visit(parameter.initializer);
+    }
+    return found;
   }
 
   /**

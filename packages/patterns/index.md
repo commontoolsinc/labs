@@ -119,7 +119,7 @@ intended as style references.
 **`google/WIP/`** — parked, unfinished work that never graduated into
 `google/core/`.
 
-Support files with no tier (not patterns): `deno.json`, `mod.ts`, `index.md`,
+Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
 `test-ui-helpers.ts`, `tools/` (codegen tooling).
 

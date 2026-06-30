@@ -20,6 +20,10 @@ interface Repo {
   name: string;
 }
 
+interface GitHubRepoStats {
+  stargazers_count?: number;
+}
+
 interface InputSchema {
   repos:
     | Repo[]
@@ -40,12 +44,15 @@ export default pattern<InputSchema, Input>(({ repos }) => {
   const staticUrl = computed(() =>
     repos[0] ? `https://api.github.com/repos/facebook/${repos[0].name}` : ""
   );
-  const staticFetch = fetchData({ url: staticUrl, mode: "json" });
+  const staticFetch = fetchData<GitHubRepoStats>({
+    url: staticUrl,
+    mode: "json",
+  });
 
   // Approach 2: fetchData inside .map() - expression callback (no block syntax)
   // This is claimed to fail with frame mismatch or return undefined
   const dynamicFetches = repos.map((repo) =>
-    fetchData({
+    fetchData<GitHubRepoStats>({
       url: computed(() => `https://api.github.com/repos/facebook/${repo.name}`),
       mode: "json",
     })
@@ -58,10 +65,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
       : staticFetch.error
       ? `Error: ${staticFetch.error}`
       : staticFetch.result
-      ? `Stars: ${
-        (staticFetch.result as { stargazers_count?: number })
-          .stargazers_count ?? "N/A"
-      }`
+      ? `Stars: ${staticFetch.result.stargazers_count ?? "N/A"}`
       : "No data"
   );
 
@@ -172,10 +176,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
                     {" | "}
                     Result: {computed(() =>
                       fetch.result
-                        ? `Stars: ${
-                          (fetch.result as { stargazers_count?: number })
-                            .stargazers_count ?? "N/A"
-                        }`
+                        ? `Stars: ${fetch.result.stargazers_count ?? "N/A"}`
                         : "No data"
                     )}
                   </div>

@@ -4,6 +4,7 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type ChurnCounters,
   clickCfButton,
   clickTrustedAction,
   collectBrowserLoadSummary,
@@ -16,6 +17,41 @@ import {
 
 const { FRONTEND_URL } = env;
 const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
+
+// One stable, machine-parseable line per churn measurement, logged before the
+// assertions so a run that exceeds a bound still records its value rather than
+// hiding it behind the failure. The reload bounds below are timing- and
+// hardware-sensitive, so the right value can only be read from the real
+// distribution across CI runs and runners. The `CHURN_METRIC` tag and
+// `key=value` shape are the stable contract — keep them greppable.
+//
+// To pull the distribution from the most recent 100 CI runs (this test runs in
+// the "Deno Workflow" / deno.yml `package-integration-test` job; PRs land on
+// commontoolsinc/labs — adjust -R for a fork). Requires the `gh` CLI:
+//
+//   gh run list -R commontoolsinc/labs --workflow deno.yml --limit 100 \
+//     --json databaseId --jq '.[].databaseId' \
+//     | xargs -P4 -I{} gh run view -R commontoolsinc/labs {} --log 2>/dev/null \
+//     | grep 'CHURN_METRIC label=reload' > /tmp/churn.txt
+//
+//   for k in commitConflicts commitReverts scheduleRunErrors; do
+//     printf '%s:\n' "$k"
+//     grep -oE "$k=[0-9]+" /tmp/churn.txt | cut -d= -f2 | sort -n | uniq -c
+//   done
+//
+// The `uniq -c` columns are "occurrences value", so the largest value with a
+// non-trivial count is the floor the bound should clear.
+function logChurnMetric(label: string, churn: ChurnCounters): void {
+  console.log(
+    `CHURN_METRIC label=${label}` +
+      ` commitConflicts=${churn.commitConflicts}` +
+      ` commitReverts=${churn.commitReverts}` +
+      ` scheduleRunErrors=${churn.scheduleRunErrors}` +
+      ` commitRejected=${churn.commitRejected}` +
+      ` actionRuns=${churn.actionRuns}` +
+      ` eventLostRaces=${churn.eventLostRaces}`,
+  );
+}
 
 // deno-lint-ignore no-explicit-any
 async function profileTabHidden(page: any): Promise<boolean> {
@@ -110,6 +146,7 @@ describe("home rehydration", () => {
     // counters reflect real activity in this measurement).
     const afterCreate = await collectBrowserLoadSummary(page, "after-create");
     logBrowserLoadSummary(afterCreate);
+    logChurnMetric("after-create", afterCreate.churn);
     expect(afterCreate.churn.actionRuns).toBeGreaterThan(0);
 
     // RELOAD: re-instantiate the runtime against the populated, durable space.
@@ -121,15 +158,22 @@ describe("home rehydration", () => {
 
     const reload = await collectBrowserLoadSummary(page, "reload");
     logBrowserLoadSummary(reload);
+    logChurnMetric("reload", reload.churn);
 
     const c = reload.churn;
-    // Read-mostly reload: re-commits stay bounded rather than scaling into a
-    // storm. The exact count is timing- and hardware-sensitive (it is logged
-    // above for observability), so the bound is generous; the durability test
-    // below is the precise correctness gate.
-    expect(c.commitConflicts).toBeLessThanOrEqual(20);
-    expect(c.commitReverts).toBeLessThanOrEqual(20);
-    expect(c.scheduleRunErrors).toBeLessThanOrEqual(20);
+    // Read-mostly reload: re-commits stay near zero rather than scaling into a
+    // storm. Resuming reads confirmed-loaded state before re-deriving — owned
+    // cells are pre-synced, the manifest probe no longer reads not-yet-loaded
+    // derived cells, and the list builtins defer their reconcile until the
+    // durable container lands instead of overwriting it with []. The residual
+    // is a small, bounded number of optimistic re-commits that lose a stale
+    // basis once and settle. The exact count is timing- and hardware-sensitive,
+    // so this bound is a regression sentinel with margin, not the measured
+    // floor — the values logged above are the basis for narrowing it. The
+    // durability test below is the precise correctness gate.
+    expect(c.commitConflicts).toBeLessThanOrEqual(12);
+    expect(c.commitReverts).toBeLessThanOrEqual(12);
+    expect(c.scheduleRunErrors).toBeLessThanOrEqual(12);
   });
 
   it("a profile created in the post-reload window is durable", async () => {

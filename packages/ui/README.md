@@ -206,7 +206,7 @@ deno task test
 
 ```
 packages/ui/
-├── deno.json                 # Deno configuration
+├── deno.jsonc                # Deno configuration
 ├── README.md                 # This file
 ├── LLM-COMPONENT-INSTRUCTIONS.md  # AI assistant guide
 ├── src/

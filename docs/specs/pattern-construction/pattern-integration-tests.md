@@ -3,6 +3,13 @@
 > **Status:** Test harness implementation is **COMPLETE**. This spec documents
 > the design for reference.
 >
+> **What shipped:** The `.pattern.test.json` / `.pattern.test.ts` fixture format
+> proposed below was not adopted. Pattern tests are authored as `.test.tsx`
+> patterns and run with `cf test`. For the system as built, see
+> [PATTERN_TESTING_SPEC.md](../PATTERN_TESTING_SPEC.md) and the script-based
+> suites under `packages/runner/integration/`. This document is kept for the
+> design rationale behind that harness.
+>
 > **Terminology update:** What we previously called "patterns" are now referred
 > to as "patterns." The builder API still exports a `pattern(...)` helper, but
 > throughout this document we describe the authored artifacts as patterns.

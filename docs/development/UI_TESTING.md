@@ -294,3 +294,10 @@ If semantic locators are not finding your element:
 3. **Ensure components are loaded**: wait for the host element before querying
 4. **Fallback to pierce selectors**: use `[data-cf-input]` or
    `[data-cf-button]` with `strategy: "pierce"` for older components
+
+## Related documentation
+
+- [TESTING.md](TESTING.md) — running the suites and the general unit and
+  integration test structure.
+- [COVERAGE.md](COVERAGE.md) — how CI measures coverage and feeds the
+  coverage-debt gate.

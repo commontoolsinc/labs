@@ -203,7 +203,7 @@ Worth a quick spike before committing to raw FFI.
 ```
 packages/
   fuse/                          # Deno package (new)
-    deno.json
+    deno.jsonc
     mod.ts                       # Entry point
     ffi.ts                       # libfuse FFI bindings
     ffi-types.ts                 # C struct definitions for Deno FFI

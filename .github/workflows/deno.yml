@@ -132,8 +132,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3, 4, 5]
+        total: [5]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -519,11 +519,13 @@ jobs:
       # so unchanged patterns reuse last run's emitted bytes (skip the
       # type-check + transform + emit). The key folds in a hash of everything
       # that shapes the emitted bytes — the js-compiler, the CF transformer, the
-      # schema-generator it bakes schemas from, the api types it lowers into
-      # those schemas, the root deno.json compiler options (jsx/jsxImportSource),
-      # and the lockfile — so any change to what emits the bytes invalidates the
-      # whole file even when it leaves module identity and the runtime-version
-      # tag untouched. This input list mirrors COMPILE_FINGERPRINT_INPUTS in
+      # schema-generator it bakes schemas from, runner code that prepares and
+      # verifies compiled module records, static type assets loaded by the
+      # in-memory compiler, the api types lowered into schemas, the root
+      # deno.jsonc compiler options (jsx/jsxImportSource), and the lockfile — so
+      # any change to what emits or trusts the bytes invalidates the whole file
+      # even when it leaves module identity and the runtime-version tag untouched.
+      # This input list mirrors COMPILE_FINGERPRINT_INPUTS in
       # packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts, which
       # fingerprints the same set for the durable runtime cache; the
       # compiler-fingerprint test fails if the two drift. The pattern-source hash
@@ -533,9 +535,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'packages/api/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
           restore-keys: |
-            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/schema-generator/**', 'packages/api/**', 'deno.json', 'deno.lock') }}-${{ matrix.shard }}-
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -560,6 +562,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
@@ -616,6 +622,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run pattern reload integration tests
         run: |
           mkdir -p test-results
@@ -790,6 +800,7 @@ jobs:
         "pattern-unit-test",
         "package-integration-test",
         "cli-integration-test",
+        "generated-patterns-integration-test",
       ]
     environment: ci
     permissions:
@@ -806,6 +817,29 @@ jobs:
         with:
           name: common-binaries
           path: common-binaries
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      # Merge every job's LCOV report into one line-coverage file with
+      # repository-relative paths, so IDE users can download a single artifact
+      # covering the whole repository. Uploaded to Cloud Storage below alongside
+      # the signed binaries. Best-effort: a coverage problem must not block
+      # binary attestation or the deploys that depend on it.
+      - name: 📥 Download coverage reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+
+      - name: 🧬 Combine coverage LCOV
+        continue-on-error: true
+        run: |
+          deno run --allow-read --allow-write tasks/combine-coverage-lcov.ts \
+            --input-dir=coverage-artifacts \
+            --output=release/labs-${{ github.sha }}.lcov \
+            --repo-name=${{ github.event.repository.name }}
 
       - name: 🔐 Process & sign binaries
         run: |
@@ -970,6 +1004,14 @@ jobs:
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
+
+          # The combined coverage report is best-effort; upload it only if the
+          # combine step produced it. To download it for a given commit:
+          #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
+          if [ -f release/labs-${{ github.sha }}.lcov ]; then
+            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
+          fi
           echo "::endgroup::"
 
   # Automatic deployment to staging (toolshed)

@@ -2,6 +2,10 @@ import { assert, assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
 import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 const SPACE = "did:key:z6Mk-restore-flush-test";
 
@@ -143,12 +147,17 @@ Deno.test(
   "commits enqueued during restore are eventually flushed",
   async () => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL("memory://restore-flush-test"),
     });
 
     const transport = new ReconnectableTransport(server);
     const client = await connect({ transport });
-    const session = await client.mount(SPACE);
+    const session = await client.mount(
+      SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
     const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
       if (
         event.reason instanceof Error &&
@@ -274,12 +283,17 @@ Deno.test(
   "closing a session during restore does not replay queued commits after close begins",
   async () => {
     const server = new Server({
+      ...testSessionOpenServerOptions,
       store: new URL("memory://restore-flush-close-test"),
     });
 
     const transport = new ReconnectableTransport(server);
     const client = await connect({ transport });
-    const session = await client.mount(SPACE);
+    const session = await client.mount(
+      SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
     const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
       if (
         event.reason instanceof Error &&

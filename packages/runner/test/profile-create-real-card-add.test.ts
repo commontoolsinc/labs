@@ -8,6 +8,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // GOLD-STANDARD end-to-end repro of the profile card-add flow using the REAL
 // shipped patterns (profile-create.tsx + profile-home.tsx) — no synthetic
@@ -50,6 +51,7 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 const sysDir = fromFileUrl(

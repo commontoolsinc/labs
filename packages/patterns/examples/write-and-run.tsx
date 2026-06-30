@@ -21,11 +21,11 @@ interface Input {
 }
 
 const increment = handler<unknown, { value: Writable<number> }>(
-  (_, { value }) => value.set(value.get() + 1)
+  (_, { value }) => value.increment(1)
 );
 
 const decrement = handler<unknown, { value: Writable<number> }>(
-  (_, { value }) => value.set(value.get() - 1)
+  (_, { value }) => value.increment(-1)
 );
 
 export default pattern<Input>(({ value }) => {

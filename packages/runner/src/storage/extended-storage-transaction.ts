@@ -670,6 +670,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.tx.markCreateOnly?.(link);
   }
 
+  recordArrayAppend(link: NormalizedFullLink, count: number): void {
+    this.assertWritable("recordArrayAppend");
+    this.tx.recordArrayAppend?.(toMemorySpaceAddress(link), count);
+  }
+
+  recordAddUnique(link: NormalizedFullLink, count: number): void {
+    this.assertWritable("recordAddUnique");
+    this.tx.recordAddUnique?.(toMemorySpaceAddress(link), count);
+  }
+
+  recordIncrement(link: NormalizedFullLink, by: number): void {
+    this.assertWritable("recordIncrement");
+    this.tx.recordIncrement?.(toMemorySpaceAddress(link), by);
+  }
+
+  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
+    this.assertWritable("recordRemoveByValue");
+    this.tx.recordRemoveByValue?.(toMemorySpaceAddress(link), value);
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
@@ -1265,6 +1285,22 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void {
     this.wrapped.markCreateOnly?.(link);
+  }
+
+  recordArrayAppend(link: NormalizedFullLink, count: number): void {
+    this.wrapped.recordArrayAppend?.(link, count);
+  }
+
+  recordAddUnique(link: NormalizedFullLink, count: number): void {
+    this.wrapped.recordAddUnique?.(link, count);
+  }
+
+  recordIncrement(link: NormalizedFullLink, by: number): void {
+    this.wrapped.recordIncrement?.(link, by);
+  }
+
+  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
+    this.wrapped.recordRemoveByValue?.(link, value);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

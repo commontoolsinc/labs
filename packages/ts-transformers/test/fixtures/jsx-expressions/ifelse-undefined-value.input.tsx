@@ -10,7 +10,7 @@ import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern<Record<string, never>>(() => {
-  const { pending, result } = fetchData({
+  const { pending, result } = fetchData<string>({
     url: "/api/data",
     mode: "text",
   });

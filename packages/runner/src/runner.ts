@@ -895,25 +895,28 @@ export class Runner {
           link: derivedSigilLink,
         });
         setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+
+        // Seed the build-time default for the freshly created cell. The
+        // manifest entry and this default are written together in one
+        // transaction, so a manifest-referenced cell is already durable; on a
+        // cold-cache resume its value may simply be unsynced. Reading and
+        // seeding only when there is no manifest entry keeps resume read-mostly:
+        // a probe read of the not-yet-loaded value would otherwise enter the
+        // commit's conflict set and lose to the durable value when it streams
+        // in, reverting the whole instantiation commit.
+        const schemaDefault = isRecord(descriptor.schema)
+          ? descriptor.schema.default as JSONValue | undefined
+          : undefined;
+        if (schemaDefault !== undefined) {
+          const currentValue = derivedCell.getRawUntyped({
+            meta: ignoreReadForScheduling,
+          });
+          if (currentValue === undefined) {
+            derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
+          }
+        }
       } else {
         manifest.push(existingManifest[manifestMatch]);
-      }
-
-      const currentValue = derivedCell.getRawUntyped({
-        meta: ignoreReadForScheduling,
-      });
-      const schemaDefault = isRecord(descriptor.schema)
-        ? descriptor.schema.default as JSONValue | undefined
-        : undefined;
-      if (currentValue === undefined && schemaDefault !== undefined) {
-        // A manifest entry means this cell's doc is durable: the manifest entry
-        // and the build-time default are written together in one transaction.
-        // So for a manifest-referenced cell an undefined read means the doc is
-        // not loaded yet on a cold-cache resume, not that it is absent; seed the
-        // default only when there is no manifest entry yet.
-        if (manifestMatch === -1) {
-          derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
-        }
       }
     }
 
@@ -1850,6 +1853,28 @@ export class Runner {
       });
     }
 
+    // Sync the owned (derived internal) cells of this pattern and every nested
+    // sub-pattern, to any depth, before instantiating. The setup re-derivation
+    // and the sub-patterns' argument writes read these owned cells by value
+    // (e.g. a child bound to the parent's list). On a cold-cache resume an
+    // unsynced owned cell reads as absent and its read enters the instantiation
+    // commit's conflict set, so when the durable value streams in the whole
+    // batched instantiation commit loses and reverts — stranding the optimistic
+    // writes that the resumed actions then depend on. Pulling them here keeps
+    // that commit read-mostly.
+    // Resolving each sub-pattern node's output redirect chain needs a
+    // transaction (resolveLink reads link metadata). The walk only reads, so the
+    // transaction is discarded afterward.
+    const resolveTx = this.runtime.edit();
+    this.collectResumeOwnedCells(
+      pattern,
+      resultCell,
+      cells,
+      new Set(),
+      resolveTx,
+    );
+    resolveTx.abort("collectResumeOwnedCells: read-only resolution");
+
     // Sync all the previously computed results.
     if (pattern.resultSchema !== undefined) {
       cells.push(resultCell.asSchema(pattern.resultSchema));
@@ -1871,6 +1896,103 @@ export class Runner {
     await Promise.all(cells.map((c) => c.sync()));
 
     return true;
+  }
+
+  // Walk the pattern tree — this pattern and every nested sub-pattern — and
+  // collect each one's owned (derived internal) cells into `out`, so the resume
+  // pre-sync pulls them before instantiation reads them. A sub-pattern node's
+  // result cell is the cell reserved by the node's resolved output spot, the
+  // same `resultFor` identity instantiatePatternNode mints; deriving owned cells
+  // from it matches what the child's setup will use. The `seen` set keys on the
+  // result cell to bound the walk against a cyclic reference. This only pulls
+  // cells, so a node shape it cannot resolve contributes nothing rather than
+  // misbehaving.
+  private collectResumeOwnedCells(
+    pattern: Pattern,
+    resultCell: Cell<any>,
+    out: Cell<any>[],
+    seen: Set<string>,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const link = resultCell.getAsNormalizedFullLink();
+    const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    for (const descriptor of pattern.derivedInternalCells ?? []) {
+      out.push(getDerivedInternalCell(resultCell, descriptor));
+    }
+
+    for (const node of pattern.nodes) {
+      const module = node.module;
+      if (module.type !== "pattern" || !isPattern(module.implementation)) {
+        continue;
+      }
+      const childPattern = module.implementation;
+      const targetSpace = module.targetSpace ?? resultCell.space;
+      const childScope = patternDefaultScope(childPattern) ??
+        module.defaultScope;
+      // Resolve the node's reserved output spot the way instantiatePatternNode
+      // does: unwrap one level (so a deferred-alias output is decremented and
+      // followed) and follow the write-redirect chain to its resolved end (a
+      // pattern node reserves one result cell). The minting path keys the child
+      // result cell on the fully resolved redirect, so deriving from the same
+      // resolved spot yields the same `resultFor` identity the child's setup
+      // mints; the unresolved head of a multi-hop binding would be a different
+      // cell, pre-syncing the wrong owned-cell subtree.
+      const argumentLink = getMetaLink(resultCell, "argument") ??
+        resultCell.getAsNormalizedFullLink();
+      const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
+        this.runtime.cfc,
+        node.outputs,
+        argumentLink,
+        resultCell,
+      );
+      let spotLink: NormalizedFullLink | undefined;
+      try {
+        spotLink = firstResolvedOutputRedirect(
+          this.runtime,
+          tx,
+          unwrappedOutputs,
+          resultCell,
+        );
+      } catch (error) {
+        // A node shape that cannot be resolved contributes nothing rather than
+        // breaking the resume walk; log it so a resume that silently skips its
+        // owned-cell pre-sync is diagnosable.
+        logger.warn("resume-owned-cells", () => [
+          "skipping a sub-pattern node whose output redirect did not resolve",
+          error,
+        ]);
+        continue;
+      }
+      if (spotLink === undefined) continue;
+      let childResultCell = this.runtime.getCell(
+        targetSpace,
+        {
+          resultFor: {
+            space: spotLink.space,
+            id: spotLink.id,
+            path: [...spotLink.path],
+          },
+        },
+        childPattern.resultSchema,
+      );
+      if (childScope !== undefined && childScope !== "space") {
+        const childLink = childResultCell.getAsNormalizedFullLink();
+        childResultCell = this.runtime.getCellFromLink({
+          ...childLink,
+          scope: childScope,
+        });
+      }
+      this.collectResumeOwnedCells(
+        childPattern,
+        childResultCell,
+        out,
+        seen,
+        tx,
+      );
+    }
   }
 
   /**

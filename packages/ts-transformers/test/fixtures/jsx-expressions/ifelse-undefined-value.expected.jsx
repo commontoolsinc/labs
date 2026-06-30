@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     pending: boolean;
-    result: unknown;
+    result: string;
 }, boolean>(({ pending, result }) => pending || !result, {
     type: "object",
     properties: {
@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "boolean"
         },
         result: {
-            type: "unknown"
+            type: "string"
         }
     },
     required: ["pending", "result"]
@@ -29,12 +29,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
-    result: unknown;
+    result: string;
 }, boolean>(({ result }) => !!result, {
     type: "object",
     properties: {
         result: {
-            type: "unknown"
+            type: "string"
         }
     },
     required: ["result"]
@@ -50,7 +50,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
-    const __cf_destructure_1 = fetchData({
+    const __cf_destructure_1 = fetchData<string>({
         url: "/api/data",
         mode: "text",
     }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
@@ -63,21 +63,21 @@ export default pattern(() => {
         type: "object",
         properties: {
             result: {
-                type: "unknown"
+                type: "string"
             }
         },
         required: ["result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
+                type: "undefined"
+            }, {
                 type: "object",
                 properties: {
                     result: {
-                        type: "unknown"
+                        type: "string"
                     }
                 },
                 required: ["result"]
-            }, {
-                type: "undefined"
             }]
     } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
         pending: pending,
@@ -90,7 +90,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             data: {
-                type: "unknown"
+                type: "string"
             }
         },
         required: ["data"]
@@ -98,15 +98,15 @@ export default pattern(() => {
         type: "undefined"
     } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
+                type: "undefined"
+            }, {
                 type: "object",
                 properties: {
                     data: {
-                        type: "unknown"
+                        type: "string"
                     }
                 },
                 required: ["data"]
-            }, {
-                type: "undefined"
             }]
     } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ result: result }).for(["output2", 4], true), { data: result }, undefined).for("output2", true);
     return {

@@ -6,13 +6,39 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { verifySessionOpenAuthorization } from "../v2/session-open-auth.ts";
 
+const now = 1_000_000;
+const audience = bob.did();
+const challenge = {
+  value: "challenge:one",
+  expiresAt: now + 60,
+};
+
+const signedFields = (
+  extra: { aud?: string; challenge?: string; iat?: number; exp?: number } = {},
+) => ({
+  aud: audience,
+  challenge: challenge.value,
+  iat: now,
+  exp: now + 300,
+  ...extra,
+});
+
+const verifyOptions = (
+  extra: Partial<Parameters<typeof verifySessionOpenAuthorization>[1]> = {},
+) => ({
+  audience,
+  challenge,
+  nowSeconds: now,
+  ...extra,
+});
+
 // Build a signed session.open authorization the same way the production client
-// (v2-remote-session.ts) does, with optional aud/iat/exp for the PR5 checks.
+// does.
 const buildOpen = async (
-  extra: { aud?: string; iat?: number; exp?: number } = {},
+  extra: { aud?: string; challenge?: string; iat?: number; exp?: number } = {},
   identity = alice,
+  session: { sessionId?: string; seenSeq?: number; sessionToken?: string } = {},
 ) => {
-  const session = {};
   const sub = space.did();
   const invocation: Record<string, unknown> = {
     iss: identity.did(),
@@ -25,7 +51,7 @@ const buildOpen = async (
   if (signature.error) throw signature.error;
   return {
     space: sub,
-    session,
+    session: { ...session },
     invocation,
     authorization: { signature: new FabricBytes(signature.ok) },
   };
@@ -34,83 +60,194 @@ const buildOpen = async (
 describe("verifySessionOpenAuthorization", () => {
   it("accepts a valid signed open and returns the issuer principal", async () => {
     assertEquals(
-      await verifySessionOpenAuthorization(await buildOpen()),
+      await verifySessionOpenAuthorization(
+        await buildOpen(signedFields()),
+        verifyOptions(),
+      ),
       alice.did(),
     );
   });
 
   it("rejects a malformed/unauthorized open", async () => {
-    const msg = await buildOpen();
-    // Tamper with the issuer after signing — the signature no longer verifies.
+    const msg = await buildOpen(signedFields());
+    // Tamper with the issuer after signing.
     msg.invocation.iss = bob.did();
-    await assertRejects(() => verifySessionOpenAuthorization(msg));
+    await assertRejects(() =>
+      verifySessionOpenAuthorization(msg, verifyOptions())
+    );
   });
 
-  // --- expiry (no audience identity needed) ---
+  it("rejects a resume token changed outside the signed invocation", async () => {
+    const msg = await buildOpen(signedFields(), alice, {
+      sessionId: "session:resume",
+      seenSeq: 7,
+      sessionToken: "token:signed",
+    });
+    msg.session = {
+      sessionId: "session:resume",
+      seenSeq: 7,
+      sessionToken: "token:tampered",
+    };
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "authorization mismatch",
+    );
+  });
+
+  // --- expiry ---
 
   it("accepts an unexpired open", async () => {
-    const now = 1_000_000;
-    const msg = await buildOpen({ iat: now, exp: now + 300 });
+    const msg = await buildOpen(signedFields({ iat: now, exp: now + 300 }));
     assertEquals(
-      await verifySessionOpenAuthorization(msg, { nowSeconds: now + 10 }),
+      await verifySessionOpenAuthorization(
+        msg,
+        verifyOptions({
+          nowSeconds: now + 10,
+        }),
+      ),
       alice.did(),
     );
   });
 
   it("rejects an expired open (beyond the skew grace)", async () => {
-    const now = 1_000_000;
-    const msg = await buildOpen({ iat: now - 1000, exp: now - 500 });
+    const msg = await buildOpen(
+      signedFields({ iat: now - 1000, exp: now - 500 }),
+    );
     await assertRejects(
       () =>
-        verifySessionOpenAuthorization(msg, {
-          nowSeconds: now,
-          clockSkewSeconds: 120,
-        }),
+        verifySessionOpenAuthorization(
+          msg,
+          verifyOptions({
+            nowSeconds: now,
+            clockSkewSeconds: 120,
+          }),
+        ),
       Error,
       "expired",
     );
   });
 
   it("tolerates clock skew within the grace window", async () => {
-    const now = 1_000_000;
-    const msg = await buildOpen({ iat: now, exp: now - 30 }); // just expired
+    const msg = await buildOpen(signedFields({ iat: now, exp: now - 30 }));
     assertEquals(
-      await verifySessionOpenAuthorization(msg, {
-        nowSeconds: now,
-        clockSkewSeconds: 120,
-      }),
+      await verifySessionOpenAuthorization(
+        msg,
+        verifyOptions({
+          nowSeconds: now,
+          clockSkewSeconds: 120,
+        }),
+      ),
       alice.did(),
     );
   });
 
-  // --- audience binding (the cross-host replay fix) ---
+  it("rejects a missing issued-at timestamp", async () => {
+    const msg = await buildOpen({
+      aud: audience,
+      challenge: challenge.value,
+      exp: now + 300,
+    });
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "requires iat",
+    );
+  });
+
+  it("rejects a missing expiry timestamp", async () => {
+    const msg = await buildOpen({
+      aud: audience,
+      challenge: challenge.value,
+      iat: now,
+    });
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "requires exp",
+    );
+  });
+
+  // --- challenge binding ---
+
+  it("accepts a challenged open with the matching challenge", async () => {
+    const msg = await buildOpen(signedFields());
+    assertEquals(
+      await verifySessionOpenAuthorization(msg, verifyOptions()),
+      alice.did(),
+    );
+  });
+
+  it("rejects a missing challenge when one was issued", async () => {
+    const msg = await buildOpen({ aud: audience });
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "requires challenge",
+    );
+  });
+
+  it("rejects the wrong challenge", async () => {
+    const msg = await buildOpen(signedFields({ challenge: "challenge:other" }));
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "challenge mismatch",
+    );
+  });
+
+  it("rejects an expired challenge", async () => {
+    const msg = await buildOpen(signedFields());
+    await assertRejects(
+      () =>
+        verifySessionOpenAuthorization(
+          msg,
+          verifyOptions({
+            challenge: {
+              value: challenge.value,
+              expiresAt: now,
+            },
+            nowSeconds: now,
+          }),
+        ),
+      Error,
+      "challenge expired",
+    );
+  });
+
+  // --- audience binding ---
 
   it("accepts an audience-bound open at the matching host", async () => {
-    const aud = bob.did(); // stand-in for the host's audience identity
     assertEquals(
-      await verifySessionOpenAuthorization(await buildOpen({ aud }), {
-        audience: aud,
-      }),
+      await verifySessionOpenAuthorization(
+        await buildOpen(signedFields()),
+        verifyOptions(),
+      ),
       alice.did(),
+    );
+  });
+
+  it("rejects a missing audience when the server configures one", async () => {
+    const msg = await buildOpen({ challenge: challenge.value });
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "requires audience",
     );
   });
 
   it("rejects an audience-bound open replayed to a different host", async () => {
-    const msg = await buildOpen({ aud: bob.did() });
+    const msg = await buildOpen(signedFields());
     await assertRejects(
-      () => verifySessionOpenAuthorization(msg, { audience: mallory.did() }),
+      () =>
+        verifySessionOpenAuthorization(
+          msg,
+          verifyOptions({
+            audience: mallory.did(),
+          }),
+        ),
       Error,
       "audience mismatch",
-    );
-  });
-
-  it("ignores aud when the server configures no audience (opt-in rollout)", async () => {
-    // Until the memory server has an audience identity, an aud-bearing open is
-    // still accepted (no audience option passed) — so the client change can
-    // land before the server one.
-    assertEquals(
-      await verifySessionOpenAuthorization(await buildOpen({ aud: bob.did() })),
-      alice.did(),
     );
   });
 });

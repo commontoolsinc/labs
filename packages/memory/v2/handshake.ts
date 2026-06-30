@@ -2,6 +2,7 @@ import {
   compatibleMemoryProtocolFlags,
   getMemoryProtocolFlags,
   type HelloMessage,
+  type HelloOkMessage,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   type ServerMessage,
@@ -48,9 +49,10 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
     };
   }
 
-  return {
+  const response: HelloOkMessage = {
     type: "hello.ok",
     protocol: MEMORY_PROTOCOL,
     flags: wireMemoryProtocolFlags(expectedFlags),
   };
+  return response;
 };

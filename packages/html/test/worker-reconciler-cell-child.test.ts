@@ -156,6 +156,258 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "does not re-emit set-prop for unchanged static props on a reused child VNode (CT-1798)",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab", "data-role": "tab" },
+        children: ["A"],
+      } as WorkerVNode);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Re-set the reused child VNode with IDENTICAL props but changed children,
+      // so the reconcile path (updateChildrenInPlace -> updatePropsInPlace) runs
+      // in full. #4366 made this fire on every recompute; unchanged static props
+      // should no longer produce worker->main set-prop ops.
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab", "data-role": "tab" },
+        children: ["B"],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const unchangedPropOps = collector.getOpsOfType("set-prop").filter((op) =>
+        "key" in op && (op.key === "id" || op.key === "data-role")
+      );
+      assertEquals(
+        unchangedPropOps.length,
+        0,
+        "unchanged static props should not re-emit set-prop ops",
+      );
+      // Sanity: the reconcile path actually ran (children changed A -> B).
+      assertEquals(
+        collector.getOps().length > 0,
+        true,
+        "child reconcile should still emit ops for the changed children",
+      );
+
+      // A genuine prop change must still emit, while a still-unchanged sibling
+      // prop stays quiet.
+      collector.clear();
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "tab-2", "data-role": "tab" },
+        children: ["B"],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const idOps = collector.getOpsOfType("set-prop").filter((op) =>
+        "key" in op && op.key === "id"
+      );
+      assertEquals(idOps.length, 1, "changed static prop should re-emit once");
+      assertEquals(
+        (idOps[0] as any).value,
+        "tab-2",
+        "changed static prop should carry the new value",
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").filter((op) =>
+          "key" in op && op.key === "data-role"
+        ).length,
+        0,
+        "still-unchanged static prop should remain quiet",
+      );
+    },
+  );
+
+  await t.step(
+    "re-emits DOM-live props (value/checked) on a reused child even when unchanged, so the main thread can repair live-DOM drift (CT-1798 review)",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const liveProps = {
+        id: "field",
+        value: "hello",
+        checked: true,
+        scrollTop: 0,
+        scrollLeft: 0,
+      };
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "input",
+        props: { ...liveProps },
+        children: [],
+      } as WorkerVNode);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Reuse the same input VNode with IDENTICAL props. The worker can't see
+      // live DOM drift (user typing, browser-set checked, user scrolling), so
+      // the DOM-live props must still re-emit to let setPropDefault repair it;
+      // the inert id stays quiet.
+      childCell.set({
+        type: "vnode",
+        name: "input",
+        props: { ...liveProps },
+        children: [],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const keys = collector.getOpsOfType("set-prop")
+        .filter((op) => "key" in op)
+        .map((op) => (op as { key: string }).key);
+      for (const liveKey of ["value", "checked", "scrollTop", "scrollLeft"]) {
+        assertEquals(
+          keys.includes(liveKey),
+          true,
+          `DOM-live \`${liveKey}\` must re-emit so drift can be repaired`,
+        );
+      }
+      assertEquals(
+        keys.includes("id"),
+        false,
+        "inert `id` should still be skipped when unchanged",
+      );
+    },
+  );
+
+  await t.step(
+    "re-emits object/array static props on a reused child even with a stable reference (CT-1798 review)",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const styleObj = { color: "red" };
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "span",
+        props: { id: "s", style: styleObj },
+        children: ["A"],
+      } as WorkerVNode);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Same object reference, changed child to force the reconcile. Object
+      // props compare by reference (unreliable), so they must never be skipped.
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "s", style: styleObj },
+        children: ["B"],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const keys = collector.getOpsOfType("set-prop")
+        .filter((op) => "key" in op)
+        .map((op) => (op as { key: string }).key);
+      assertEquals(
+        keys.includes("style"),
+        true,
+        "object/array props must always re-emit",
+      );
+      assertEquals(
+        keys.includes("id"),
+        false,
+        "inert primitive `id` should still be skipped when unchanged",
+      );
+    },
+  );
+
+  await t.step(
+    "re-emits text-integrity props (cf-chat-message name/content) on a reused child even when unchanged (CT-1798 review)",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "cf-chat-message",
+        props: { id: "m1", name: "Alice", content: "hi" },
+        children: [],
+      } as WorkerVNode);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as Cell<WorkerRenderNode>],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Text-integrity sink props have policy-dependent transforms and must
+      // re-run on every reconcile; only inert id may be skipped.
+      childCell.set({
+        type: "vnode",
+        name: "cf-chat-message",
+        props: { id: "m1", name: "Alice", content: "hi" },
+        children: [],
+      } as WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const keys = collector.getOpsOfType("set-prop")
+        .filter((op) => "key" in op)
+        .map((op) => (op as { key: string }).key);
+      assertEquals(
+        keys.includes("name"),
+        true,
+        "text-integrity `name` must always re-emit",
+      );
+      assertEquals(
+        keys.includes("content"),
+        true,
+        "text-integrity `content` must always re-emit",
+      );
+      assertEquals(
+        keys.includes("id"),
+        false,
+        "inert `id` should still be skipped when unchanged",
+      );
+    },
+  );
+
+  await t.step(
     "replaces same-key child Cell when parent supplies a different cell",
     async () => {
       const collector = createOpsCollector();

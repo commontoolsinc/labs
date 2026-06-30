@@ -13,6 +13,10 @@ import {
   parseFabricRef,
   pinnedIdentity,
 } from "../sandbox/fabric-import-specifier.ts";
+import {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+} from "./compile-cache-version.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -80,22 +84,117 @@ export interface CompiledDoc extends ModuleDocBase {
  * transformer pipeline or SES verifier that alters emitted bytes (the source
  * set, keyed by content identity alone, persists across the change).
  *
- * The value is set automatically rather than bumped by hand. A binary build
- * bakes in `cf/esm-compile/<fingerprint>`, where `<fingerprint>` is a hash of
- * the compiler inputs (ts-transformers, js-compiler, schema-generator, the
- * `api` types lowered into baked schemas, the root `deno.json` compiler options,
- * and `deno.lock`), so editing any of those moves the tag and invalidates stale
- * compiled docs without a human bump. Runs from
- * source (dev / tests) use a stable `cf/esm-compile/source` sentinel in its own
- * namespace, so they never collide with a baked fingerprint. See
- * `compile-cache-version.ts` and `compiler-fingerprint.deno.ts`.
- *
- * History: compiled docs are stamped with the constant `cf-compiled-by:cf-
- * compiler` atom instead of a per-user DID atom. Older per-DID-atom docs carry
- * a different namespace tag; a write to their key would be rejected by the label
- * merge (addIntegrity cannot be weakened), so a tag change orphans them instead.
+ * The value is generated from a hash of the compiler inputs defined in
+ * `compiler-fingerprint.deno.ts`. Editing those inputs moves the tag and
+ * invalidates stale compiled docs. Deno source runs resolve the checked-in
+ * source marker to that hash at runtime. Runtimes without repository file access
+ * skip the compiled cache until a binary build bakes the hash into
+ * `compile-cache-version.ts`. See `getCompileCacheRuntimeVersion()` and
+ * `compiler-fingerprint.deno.ts`.
  */
-export { COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts";
+export {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+} from "./compile-cache-version.ts";
+
+type CompilerFingerprintModule = {
+  computeCurrentCompilerVersion(): Promise<string>;
+};
+
+type CompileCacheVersionGlobal = typeof globalThis & {
+  __cfCompileCacheRuntimeVersion?: unknown;
+};
+
+let compileCacheRuntimeVersion: Promise<string | undefined> | undefined;
+let compileCacheRuntimeVersionForTesting:
+  | Promise<string | undefined>
+  | undefined;
+
+export function getCompileCacheRuntimeVersion(): Promise<string | undefined> {
+  if (compileCacheRuntimeVersionForTesting !== undefined) {
+    return compileCacheRuntimeVersionForTesting;
+  }
+  compileCacheRuntimeVersion ??= resolveCompileCacheRuntimeVersion();
+  return compileCacheRuntimeVersion;
+}
+
+export function setCompileCacheRuntimeVersionForTesting(
+  version: string | undefined,
+): () => void {
+  const previous = compileCacheRuntimeVersionForTesting;
+  compileCacheRuntimeVersionForTesting = Promise.resolve(version);
+  return () => {
+    compileCacheRuntimeVersionForTesting = previous;
+  };
+}
+
+export function resolveBakedCompileCacheRuntimeVersionForTesting(
+  version: string,
+): Promise<string | undefined> {
+  return resolveCompileCacheRuntimeVersion(version);
+}
+
+async function resolveCompileCacheRuntimeVersion(): Promise<
+  string | undefined
+>;
+async function resolveCompileCacheRuntimeVersion(
+  version: string,
+): Promise<string | undefined>;
+async function resolveCompileCacheRuntimeVersion(
+  version = COMPILE_CACHE_RUNTIME_VERSION,
+): Promise<string | undefined> {
+  const definedVersion = buildDefinedCompileCacheRuntimeVersion();
+  if (definedVersion !== undefined) {
+    return definedVersion;
+  }
+  if (version !== SOURCE_COMPILE_CACHE_RUNTIME_VERSION) {
+    return version;
+  }
+  if (!hasDenoRuntime()) {
+    return undefined;
+  }
+  const specifier = new URL(
+    "./compiler-fingerprint.deno.ts",
+    import.meta.url,
+  ).href;
+  try {
+    const module = await import(specifier) as CompilerFingerprintModule;
+    return await module.computeCurrentCompilerVersion();
+  } catch (error) {
+    if (isUnavailableSourceFingerprint(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function buildDefinedCompileCacheRuntimeVersion(): string | undefined {
+  const value = (globalThis as CompileCacheVersionGlobal)
+    .__cfCompileCacheRuntimeVersion;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function hasDenoRuntime(): boolean {
+  const candidate = globalThis as { Deno?: { stat?: unknown } };
+  return typeof candidate.Deno?.stat === "function";
+}
+
+function isUnavailableSourceFingerprint(error: unknown): boolean {
+  return [
+    "NotFound",
+    "NotADirectory",
+    "NotCapable",
+    "PermissionDenied",
+  ].some((name) => isDenoError(error, name));
+}
+
+function isDenoError(error: unknown, name: string): boolean {
+  const errors = (globalThis as {
+    Deno?: { errors?: Record<string, unknown> };
+  }).Deno?.errors;
+  const errorClass = errors?.[name];
+  return typeof errorClass === "function" && error instanceof errorClass;
+}
 
 /** Cell key (id) for a source-set document. */
 export function sourceDocKey(identity: string): string {
@@ -483,15 +582,11 @@ export async function loadVerifiedSourceClosure(
 /**
  * The CFC integrity atom stamped on a compiled document: the constant
  * `cf-compiled-by:cf-compiler`, attesting that the doc was emitted by the
- * system compiler. The atom covers the CODE that produced the doc, not the
- * user who ran it — deliberately, so a shared space's compile cache is
- * readable by every member (a per-user atom made every other member a
- * permanent cache miss AND made their write-backs collide on the label merge).
- * Minting is gated: prepare strips `cf-compiled-by:` atoms from any write not
- * authored by a trusted builtin, and `writeCompiledDocs` below is the one
- * legitimate minter. The hard guarantee lands when the server becomes the sole
- * acceptor of this write integrity and attaches real attestation data. See the
- * threat model in docs/specs/module-loading.md.
+ * system compiler. The atom covers the code that produced the doc, so every
+ * member of a shared space can read the same compiled cache entry. Minting is
+ * gated: prepare strips `cf-compiled-by:` atoms from any write not authored by a
+ * trusted builtin, and `writeCompiledDocs` below is the legitimate minter. The
+ * server-side attestation model is described in docs/specs/module-loading.md.
  */
 export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
 

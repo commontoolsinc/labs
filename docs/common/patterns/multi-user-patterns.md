@@ -352,6 +352,37 @@ const roomButtons = conversation.rooms.map((room) => (
 For editable nested objects, pass a writable item reference and use `.key(...)`
 inside the child pattern or handler.
 
+## Concurrent Edits Without Clobbering
+
+When several users edit the same shared data at once, a handler written as
+read-the-whole-value, change it, write it back will lose writes: the runtime
+commits optimistically, and the second commit is rejected because its read of
+the value predates the other user's edit. Use the **mergeable** write methods so
+concurrent edits combine instead of overwriting each other — the commit carries
+the operation ("append this", "add if absent", "add this number", "remove
+this"), which the server applies against the current durable value:
+
+- Counter shared across users → `count.increment(1)`, not
+  `count.set(count.get() + 1)`.
+- Set-like shared list → `list.addUnique(item)`, not a read-then-`push`.
+- Append to a shared log/roster → `list.push(item)` (already mergeable).
+- Delete from a shared list → `list.removeByValue(item)`, not
+  `list.set(list.get().filter(...))`.
+- Edit one record of a shared list of records → address it by a stable key with
+  `list.elementById(key)` and edit its fields directly, instead of finding it by
+  index and rewriting the list; manage its membership with `addUnique` /
+  `removeByValue`.
+
+A write whose correctness depends on what it first read (for example "join only
+if this name is free") is not made safe this way; keep its explicit `.get()` so
+it conflicts-and-retries, or use `addUnique` when the condition is uniqueness.
+See [Writable → Mergeable writes](../concepts/types-and-schemas/writable.md#mergeable-writes-for-shared-multi-user-state)
+for the full method list and the
+[mergeable](../../development/mergeable-collection-writes.md) /
+[keyed](../../development/keyed-collection-writes.md) collection-write design
+notes. The lunch poll (`packages/patterns/lunch-poll/`) is a worked example: its
+votes and options are keyed, mergeable, multi-user state.
+
 ## Testing Multi-User Behavior
 
 Use pattern tests for deterministic state transitions and browser/integration
@@ -372,8 +403,11 @@ Three escalating options:
    or one identity in two sessions); supports trusted-surface CFC events
    headlessly. See `cfc-group-chat-demo-multi-runtime.test.ts`.
 3. **Two simultaneous browsers**
-   (`cfc-group-chat-demo-two-browsers.test.ts`): guards the real DOM input
-   binding / event-provenance / login stack.
+   (`cfc-group-chat-demo-two-browsers.test.ts`,
+   `lunch-poll-vote.test.ts`): guards the real DOM input binding /
+   event-provenance / login stack. The lunch-poll test casts two users' votes
+   on one option concurrently and asserts both survive — the mergeable-write
+   payoff through the browser.
 
 Expected visibility:
 
@@ -414,6 +448,9 @@ See:
 - Handlers use scoped `Writable` aliases when they need stable cell handles.
 - The pattern does not store user ids or session ids to fake isolation.
 - Object identity uses references and `equals()`, not synthetic ids.
+- Concurrently-edited shared collections and counters use the mergeable writes
+  (`push` / `addUnique` / `increment` / `removeByValue` / `elementById`), not
+  read-modify-write `set`, so simultaneous edits merge instead of clobbering.
 - Authorization is modeled with CFC/IFC policy, not scopes.
 - `PerAny<T>` is reserved for truly scope-polymorphic inner values.
 - Multi-user tests verify the active identity for each browser or CLI session.
