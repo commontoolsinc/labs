@@ -1,4 +1,9 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  awaitViewSettled,
+  env,
+  Page,
+  waitFor,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -55,10 +60,15 @@ describe("default-app notebook reload integration test", () => {
       return state.isNotebook;
     });
 
-    await waitFor(async () => !!(await clickButtonWithTitle(page, "New Note")));
-    await waitFor(async () =>
-      !!(await findButtonWithText(page, "Create Another"))
+    await waitFor(async () => await awaitViewSettled(page));
+    assert(
+      await clickButtonWithTitle(page, "New Note"),
+      "Expected New Note click to succeed",
     );
+    await waitFor(async () => {
+      await awaitViewSettled(page);
+      return !!(await findButtonWithText(page, "Create Another"));
+    });
     await waitFor(async () => await resetEventInvocationTrace(page));
 
     const noteCreates = 7;
