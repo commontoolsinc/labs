@@ -228,7 +228,7 @@ export default pattern<Input, Output>(
 
     // Auth via createGoogleAuth utility (requires Drive and Docs scopes)
     const {
-      auth,
+      availability,
       authInfo,
       fullUI: authFullUI,
       isReady: isAuthenticated,
@@ -244,6 +244,37 @@ export default pattern<Input, Output>(
 
     // Has error
     const hasError = computed(() => !!lastErrorCell.get());
+
+    const importButton = computed(() => {
+      if (availability.state !== "ready") return null;
+
+      return (
+        <cf-button
+          variant="primary"
+          type="button"
+          disabled={isFetchingCell}
+          onClick={importDocument({
+            docUrl: docUrlCell,
+            auth: availability.auth,
+            markdown: markdownCell,
+            docTitle: docTitleCell,
+            isFetching: isFetchingCell,
+            lastError: lastErrorCell,
+            includeComments: includeCommentsCell,
+            embedImages: embedImagesCell,
+          })}
+        >
+          {ifElse(
+            isFetchingCell,
+            <cf-hstack align="center" gap={1}>
+              <cf-loader />
+              <span>Importing...</span>
+            </cf-hstack>,
+            "Import",
+          )}
+        </cf-button>
+      );
+    });
 
     // Computed name based on doc title
     const pieceName = computed(() => {
@@ -292,34 +323,7 @@ export default pattern<Input, Output>(
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
-                  {ifElse(
-                    isAuthenticated,
-                    <cf-button
-                      variant="primary"
-                      type="button"
-                      disabled={isFetchingCell}
-                      onClick={importDocument({
-                        docUrl: docUrlCell,
-                        auth,
-                        markdown: markdownCell,
-                        docTitle: docTitleCell,
-                        isFetching: isFetchingCell,
-                        lastError: lastErrorCell,
-                        includeComments: includeCommentsCell,
-                        embedImages: embedImagesCell,
-                      })}
-                    >
-                      {ifElse(
-                        isFetchingCell,
-                        <cf-hstack align="center" gap={1}>
-                          <cf-loader />
-                          <span>Importing...</span>
-                        </cf-hstack>,
-                        "Import",
-                      )}
-                    </cf-button>,
-                    null,
-                  )}
+                  {importButton}
                 </cf-hstack>
 
                 {/* Options */}
