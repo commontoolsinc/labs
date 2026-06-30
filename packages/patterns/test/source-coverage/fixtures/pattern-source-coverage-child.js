@@ -83,7 +83,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         autoFetchOnAuth: true,
         resolveInlineImages: false,
       },
-      overrideAuth: {
+      overrideAuth: new Writable({
         token: "token",
         tokenType: "Bearer",
         scope: [],
@@ -91,7 +91,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         expiresAt: 4_000_000_000_000,
         refreshToken: "",
         user: { email: "ada@example.com", name: "Ada", picture: "" },
-      },
+      }),
     });
     assert(
       sendCountOf(gmailImporter.bgUpdater) === 1,
