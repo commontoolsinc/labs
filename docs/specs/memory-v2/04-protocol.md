@@ -83,6 +83,30 @@ uses its service identity DID. The standalone memory host uses a stable
 deterministic DID. The public memory client rejects a server that omits either
 field.
 
+#### Server Audience Ownership
+
+The audience value identifies the memory server or service that may accept the
+signed `session.open`. It is part of the signed invocation, so changing it
+invalidates signatures made for the old value.
+
+Production toolshed deployments own this value through the toolshed service
+identity. That DID must be stable across restarts and across horizontally scaled
+instances that serve the same logical memory endpoint. All instances behind one
+toolshed memory endpoint must advertise the same audience. Otherwise a client
+can sign for one instance and fail when routing sends it to another instance.
+
+Changing the toolshed service DID is an audience rotation. During rotation,
+clients must discover the new value from `hello.ok` and sign new `session.open`
+requests for it. Existing open sessions can continue only while their
+connection remains alive and keeps using challenges issued by the server that
+accepted them. Reconnects and new sessions must use the new audience. Operators
+should coordinate rotation with deployment routing and client reconnect
+behavior.
+
+Standalone and test memory hosts may use a deterministic local DID, but they
+still need to advertise an audience. The public client treats a missing audience
+as a protocol error.
+
 The challenge is scoped to this WebSocket connection. The current
 implementation generates 32 cryptographically random bytes and encodes them as
 64 hexadecimal characters. The challenge expires at `expiresAt`, in unix
