@@ -209,4 +209,21 @@ describe("makeMockFetch", () => {
     }
     expect((err as Error)?.message).toBe("pre-aborted");
   });
+
+  it("honors a Request input's own signal when init has none", async () => {
+    const ac = new AbortController();
+    const fetch = makeMockFetch(
+      () => [{ urlIncludes: "/r", body: "ok", delayMs: 1000 }],
+      realStub,
+    );
+    const p = fetch(new Request("https://x.test/r", { signal: ac.signal }));
+    ac.abort(new Error("req-cancelled"));
+    let err: unknown;
+    try {
+      await p;
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error)?.message).toBe("req-cancelled");
+  });
 });

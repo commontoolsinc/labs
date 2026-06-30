@@ -85,7 +85,9 @@ export function makeMockResponse(entry: FetchMockEntry): Response {
  * so a request matching an entry resolves to a mocked `Response`, and anything
  * else falls through to `realFetch`. A matched entry's `delayMs` is awaited
  * before the response is returned; like a real `fetch`, an aborted request
- * (via `init.signal`) rejects with the signal's reason instead of resolving.
+ * rejects with the signal's reason instead of resolving. The abort signal is
+ * taken from `init.signal`, falling back to a `Request` input's own signal
+ * (init.signal wins, mirroring `fetch`).
  */
 export function makeMockFetch(
   getEntries: () => FetchMockEntry[] | undefined,
@@ -94,7 +96,8 @@ export function makeMockFetch(
   return async (input, init) => {
     const entry = matchFetchMock(getEntries(), input);
     if (!entry) return realFetch(input as RequestInfo | URL, init);
-    const signal = init?.signal;
+    const signal = init?.signal ??
+      (input instanceof Request ? input.signal : null);
     if (signal?.aborted) throw signal.reason;
     if (typeof entry.delayMs === "number" && entry.delayMs > 0) {
       await delayOrAbort(entry.delayMs, signal);
