@@ -42,6 +42,32 @@ Deno.test("cf view --plain --line-numbers exits 0", async () => {
   assertEquals(code, 0);
 });
 
+Deno.test("cf view --plain --line-numbers prefixes lines with numbers", async () => {
+  const { code, stdout } = await cf(
+    "view --plain --line-numbers --color never",
+    SRC,
+  );
+  assertEquals(code, 0);
+  // The two source lines are printed with a right-aligned line-number gutter.
+  assert(
+    stdout.some((line) => /^\s*1 export const x = pattern/.test(line)),
+    stdout.join("\n"),
+  );
+  assert(
+    stdout.some((line) => /^\s*2 const y = x;/.test(line)),
+    stdout.join("\n"),
+  );
+});
+
+Deno.test("cf view --plain without --line-numbers has no number gutter", async () => {
+  const { code, stdout } = await cf("view --plain --color never", SRC);
+  assertEquals(code, 0);
+  assert(
+    stdout.some((line) => /^export const x = pattern/.test(line)),
+    stdout.join("\n"),
+  );
+});
+
 Deno.test("cf view --plain --diff renders a forced diff", async () => {
   const { code, stdout } = await cf("view --plain --diff", DIFF);
   assertEquals(code, 0);

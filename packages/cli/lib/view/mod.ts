@@ -77,7 +77,7 @@ export async function viewMain(options: ViewOptions): Promise<void> {
     return;
   }
 
-  printDocument(doc, color);
+  printDocument(doc, color, options.lineNumbers);
 }
 
 /**
@@ -150,9 +150,22 @@ function safeCwd(): string {
   }
 }
 
-function printDocument(doc: Document, color: boolean): void {
+function printDocument(
+  doc: Document,
+  color: boolean,
+  lineNumbers: boolean,
+): void {
   const encoder = new TextEncoder();
-  const out = doc.lines.map((line) => renderLineColored(line, color));
+  // Match the interactive gutter width: enough columns for the largest line
+  // number plus one, at least four.
+  const gutterWidth = lineNumbers
+    ? Math.max(4, String(doc.lines.length).length + 1)
+    : 0;
+  const out = doc.lines.map((line, i) => {
+    const text = renderLineColored(line, color);
+    if (gutterWidth === 0) return text;
+    return String(i + 1).padStart(gutterWidth - 1) + " " + text;
+  });
   Deno.stdout.writeSync(encoder.encode(out.join("\n")));
 }
 
