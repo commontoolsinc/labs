@@ -12,6 +12,7 @@ export type InspectorTarget = {
 export type ProfileCaptureState = {
   consoleMessages: string[];
   profilerActive: boolean;
+  profilerStarting: boolean;
   sawProfileStart: boolean;
   sawProfileStop: boolean;
 };
@@ -53,6 +54,45 @@ type ProfileWriteOptions = {
   stopError?: string;
   writer?: ProfileFileWriter;
 };
+
+type InspectorCommandSocket = Pick<WebSocket, "readyState" | "send">;
+
+export function sendInspectorCommand(
+  ws: InspectorCommandSocket,
+  id: number,
+  method: string,
+  params: Record<string, unknown> = {},
+): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify({ id, method, params }));
+  return true;
+}
+
+export function resumeDebuggerOnPause(
+  target: Pick<EventTarget, "addEventListener" | "removeEventListener">,
+  ws: InspectorCommandSocket,
+  id: number,
+  retryDelayMs?: number,
+): () => void {
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const stopListening = () => {
+    if (retry !== undefined) clearTimeout(retry);
+    target.removeEventListener("Debugger.paused", handlePaused);
+  };
+  const handlePaused = () => {
+    stopListening();
+    sendInspectorCommand(ws, id, "Debugger.resume");
+  };
+
+  target.addEventListener("Debugger.paused", handlePaused);
+  if (retryDelayMs !== undefined) {
+    retry = setTimeout(() => {
+      retry = undefined;
+      sendInspectorCommand(ws, id, "Debugger.resume");
+    }, retryDelayMs);
+  }
+  return stopListening;
+}
 
 export function parseArg(args: string[], name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -163,7 +203,9 @@ export function recordConsoleProfileMessage(
   text: string,
   profileStartRegex?: RegExp,
   profileStopRegex?: RegExp,
-): void {
+): { startedProfile: boolean; hadProfileStop: boolean } {
+  const hadProfileStart = state.sawProfileStart;
+  const hadProfileStop = state.sawProfileStop;
   state.consoleMessages.push(text);
   if (profileStartRegex?.test(text)) {
     state.sawProfileStart = true;
@@ -171,11 +213,21 @@ export function recordConsoleProfileMessage(
   if (profileStopRegex?.test(text)) {
     state.sawProfileStop = true;
   }
+  return {
+    startedProfile: !hadProfileStart && state.sawProfileStart,
+    hadProfileStop,
+  };
 }
 
-export function markProfilerStarted(state: ProfileCaptureState): void {
+export function markProfilerStarted(
+  state: ProfileCaptureState,
+  options: { clearStop?: boolean } = {},
+): void {
   state.profilerActive = true;
-  state.sawProfileStop = false;
+  state.profilerStarting = false;
+  if (options.clearStop ?? true) {
+    state.sawProfileStop = false;
+  }
 }
 
 export function markProfileStoppedOnce(
@@ -193,12 +245,23 @@ export async function startProfilerIfReady(
   ws: Pick<WebSocket, "readyState">,
   profiler: Pick<ProfilerController, "start">,
   log: (message: string) => void = () => {},
+  options: { clearStop?: boolean } = {},
 ): Promise<boolean> {
-  if (state.profilerActive || ws.readyState !== WebSocket.OPEN) return false;
-  await profiler.start();
-  markProfilerStarted(state);
-  log("profile: profiler started");
-  return true;
+  if (
+    state.profilerActive || state.profilerStarting ||
+    ws.readyState !== WebSocket.OPEN
+  ) {
+    return false;
+  }
+  state.profilerStarting = true;
+  try {
+    await profiler.start();
+    markProfilerStarted(state, options);
+    log("profile: profiler started");
+    return true;
+  } finally {
+    state.profilerStarting = false;
+  }
 }
 
 export async function stopActiveProfiler(

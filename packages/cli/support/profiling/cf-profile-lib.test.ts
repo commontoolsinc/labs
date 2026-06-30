@@ -1,16 +1,28 @@
 import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
 import {
   escapeRegex,
+  inspectWaitFlag,
   mirrorOutput,
   parseProfileArgs,
   pickInspectPort,
   profileTimestamp,
   slugifyProfileName,
   stopCaptureOnce,
+  waitForCliStatusOrStopOnCaptureFailure,
 } from "./cf-profile-lib.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const successStatus: Deno.CommandStatus = {
+  success: true,
+  code: 0,
+  signal: null,
+};
+const failureStatus: Deno.CommandStatus = {
+  success: false,
+  code: 1,
+  signal: null,
+};
 
 function createSink() {
   const chunks: Uint8Array[] = [];
@@ -24,6 +36,13 @@ function createSink() {
     },
   };
 }
+
+Deno.test("inspectWaitFlag pauses the profiled process until capture attaches", () => {
+  assertEquals(
+    inspectWaitFlag("127.0.0.1", 9333),
+    "--inspect-wait=127.0.0.1:9333",
+  );
+});
 
 Deno.test("parseProfileArgs separates profiler options from CLI arguments", () => {
   const parsed = parseProfileArgs([
@@ -165,6 +184,80 @@ Deno.test("stopCaptureOnce records a sent signal when kill fails", () => {
   });
 
   assertEquals(state.sent, true);
+});
+
+Deno.test("waitForCliStatusOrStopOnCaptureFailure stops the CLI after capture failure", async () => {
+  const cliStatus = Promise.withResolvers<Deno.CommandStatus>();
+  const cliStopState = { sent: false };
+  const signals: Deno.Signal[] = [];
+
+  const result = waitForCliStatusOrStopOnCaptureFailure(
+    cliStatus.promise,
+    Promise.resolve(failureStatus),
+    cliStopState,
+    {
+      kill: (signal) => {
+        signals.push(signal);
+        cliStatus.resolve({
+          success: false,
+          code: 143,
+          signal,
+        });
+      },
+    },
+  );
+
+  assertEquals(await result, {
+    success: false,
+    code: 143,
+    signal: "SIGTERM",
+  });
+  assertEquals(cliStopState.sent, true);
+  assertEquals(signals, ["SIGTERM"]);
+});
+
+Deno.test("waitForCliStatusOrStopOnCaptureFailure leaves the CLI running after capture success", async () => {
+  const cliStatus = Promise.withResolvers<Deno.CommandStatus>();
+  const cliStopState = { sent: false };
+  const signals: Deno.Signal[] = [];
+
+  const result = waitForCliStatusOrStopOnCaptureFailure(
+    cliStatus.promise,
+    Promise.resolve(successStatus),
+    cliStopState,
+    {
+      kill: (signal) => {
+        signals.push(signal);
+      },
+    },
+  );
+
+  await Promise.resolve();
+  cliStatus.resolve(successStatus);
+
+  assertEquals(await result, successStatus);
+  assertEquals(cliStopState.sent, false);
+  assertEquals(signals, []);
+});
+
+Deno.test("waitForCliStatusOrStopOnCaptureFailure returns when the CLI exits first", async () => {
+  const cliStopState = { sent: false };
+  const signals: Deno.Signal[] = [];
+
+  const result = await waitForCliStatusOrStopOnCaptureFailure(
+    Promise.resolve(successStatus),
+    new Promise(() => {}),
+    cliStopState,
+    {
+      kill: (signal) => {
+        signals.push(signal);
+      },
+    },
+  );
+
+  assertEquals(result, successStatus);
+  assertEquals(cliStopState.sent, false);
+  assertEquals(signals, []);
 });
 
 Deno.test("mirrorOutput ignores a missing stream", async () => {

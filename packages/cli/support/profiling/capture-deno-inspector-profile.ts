@@ -7,6 +7,8 @@ import {
   type ProfileStopState,
   recordConsoleProfileMessage,
   requireArg,
+  resumeDebuggerOnPause,
+  sendInspectorCommand,
   sleep,
   startProfilerIfReady,
   stopActiveProfiler,
@@ -54,6 +56,7 @@ const profileStopState: ProfileStopState = {
 const state: ProfileCaptureState = {
   consoleMessages: [],
   profilerActive: false,
+  profilerStarting: false,
   sawProfileStart: !profileStartRegex,
   sawProfileStop: false,
 };
@@ -62,16 +65,25 @@ celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
   const text = event.detail.args
     .map((arg) => stringifyRemoteObject(arg as Record<string, unknown>))
     .join(" ");
-  recordConsoleProfileMessage(
+  const profileMessage = recordConsoleProfileMessage(
     state,
     text,
     profileStartRegex,
     profileStopRegex,
   );
+  if (profileMessage.startedProfile) {
+    void startProfiler({ clearStop: profileMessage.hadProfileStop });
+  }
 });
 
-async function startProfiler() {
-  await startProfilerIfReady(state, ws, celestial.Profiler, console.log);
+async function startProfiler(options: { clearStop?: boolean } = {}) {
+  await startProfilerIfReady(
+    state,
+    ws,
+    celestial.Profiler,
+    console.log,
+    options,
+  );
 }
 
 const signalHandlers: Array<[Deno.Signal, () => void]> = [];
@@ -111,13 +123,13 @@ await celestial.Debugger.enable();
 await celestial.Profiler.enable();
 await celestial.Profiler.setSamplingInterval({ interval: 100 });
 
-await celestial.Runtime.runIfWaitingForDebugger();
-await celestial.Debugger.resume().catch(() => {});
-console.log("profile: resumed target");
-
 if (state.sawProfileStart) {
   await startProfiler();
 }
+
+const stopResumeOnPause = resumeDebuggerOnPause(celestial, ws, -2, 100);
+sendInspectorCommand(ws, -1, "Runtime.runIfWaitingForDebugger");
+console.log("profile: resumed target");
 
 const started = performance.now();
 while (performance.now() - started < timeoutMs) {
@@ -126,7 +138,9 @@ while (performance.now() - started < timeoutMs) {
     console.log(`profile: ${profileStopState.reason}`);
     break;
   }
-  if (state.sawProfileStart && !state.profilerActive) {
+  if (
+    state.sawProfileStart && !state.profilerActive && !state.profilerStarting
+  ) {
     await startProfiler();
   }
   if (state.profilerActive && state.sawProfileStop) {
@@ -160,6 +174,7 @@ for (const [signal, handler] of signalHandlers) {
   }
 }
 
+stopResumeOnPause();
 await celestial.close();
 
 console.log(

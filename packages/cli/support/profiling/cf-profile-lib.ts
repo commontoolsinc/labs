@@ -19,6 +19,12 @@ export type CaptureStopState = {
   sent: boolean;
 };
 
+type CommandStatus = Deno.CommandStatus;
+
+type KillableProcess = {
+  kill(signal: Deno.Signal): void;
+};
+
 type InspectPortListener = {
   addr: Deno.Addr;
   close(): void;
@@ -35,6 +41,10 @@ export const DEBUGGER_WAITING_MESSAGE =
 export const DEFAULT_PROFILE_DONE_MARKER = "__cf_profile_done__";
 
 const encoder = new TextEncoder();
+
+export function inspectWaitFlag(host: string, port: number): string {
+  return `--inspect-wait=${host}:${port}`;
+}
 
 export function parseProfileArgs(args: string[]): ParsedProfileArgs {
   const options: ProfileOptions = {
@@ -133,15 +143,37 @@ export function pickInspectPort(
 
 export function stopCaptureOnce(
   state: CaptureStopState,
-  capture: { kill(signal: Deno.Signal): void },
+  capture: KillableProcess,
+  signal: Deno.Signal = "SIGINT",
 ): void {
   if (state.sent) return;
   state.sent = true;
   try {
-    capture.kill("SIGINT");
+    capture.kill(signal);
   } catch {
     // Already exited.
   }
+}
+
+export async function waitForCliStatusOrStopOnCaptureFailure(
+  cliStatusPromise: Promise<CommandStatus>,
+  captureStatusPromise: Promise<CommandStatus>,
+  cliStopState: CaptureStopState,
+  cliProcess: KillableProcess,
+): Promise<CommandStatus> {
+  const firstStatus = await Promise.race([
+    cliStatusPromise.then((status) => ({ kind: "cli" as const, status })),
+    captureStatusPromise.then((status) => ({
+      kind: "capture" as const,
+      status,
+    })),
+  ]);
+
+  if (firstStatus.kind === "cli") return firstStatus.status;
+  if (!firstStatus.status.success) {
+    stopCaptureOnce(cliStopState, cliProcess, "SIGTERM");
+  }
+  return await cliStatusPromise;
 }
 
 export async function mirrorOutput(

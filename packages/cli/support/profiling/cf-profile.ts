@@ -5,12 +5,14 @@ import {
   DEFAULT_SUMMARY_PATTERN,
   DISABLED_SUMMARY_PATTERN,
   escapeRegex,
+  inspectWaitFlag,
   mirrorOutput,
   parseProfileArgs,
   pickInspectPort,
   profileTimestamp,
   slugifyProfileName,
   stopCaptureOnce,
+  waitForCliStatusOrStopOnCaptureFailure,
 } from "./cf-profile-lib.ts";
 
 const { options, cliArgs } = parseProfileArgs(Deno.args);
@@ -61,7 +63,7 @@ console.log(`cf-profile: writing CPU profile to ${cpuPath}`);
 const cliCommand = new Deno.Command(Deno.execPath(), {
   args: [
     "run",
-    `--inspect=127.0.0.1:${inspectPort}`,
+    inspectWaitFlag("127.0.0.1", inspectPort),
     "--allow-net",
     "--allow-ffi",
     "--allow-read",
@@ -138,7 +140,13 @@ const captureStatusPromise = (async () => {
   captureStopState.sent = true;
   return status;
 })();
-const cliStatus = await cliCommand.status;
+const cliStopState = { sent: false };
+const cliStatus = await waitForCliStatusOrStopOnCaptureFailure(
+  cliCommand.status,
+  captureStatusPromise,
+  cliStopState,
+  cliCommand,
+);
 await Promise.all([stdoutDone, stderrDone]);
 if (!captureStopState.sent) {
   stopCapture();

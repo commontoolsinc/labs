@@ -11,6 +11,8 @@ import {
   type ProfileStopState,
   recordConsoleProfileMessage,
   requireArg,
+  resumeDebuggerOnPause,
+  sendInspectorCommand,
   startProfilerIfReady,
   stopActiveProfiler,
   stringifyRemoteObject,
@@ -23,6 +25,7 @@ function createState(): ProfileCaptureState {
   return {
     consoleMessages: [],
     profilerActive: false,
+    profilerStarting: false,
     sawProfileStart: false,
     sawProfileStop: false,
   };
@@ -32,6 +35,7 @@ class FakeWebSocket {
   readyState: number = WebSocket.CONNECTING;
   added: string[] = [];
   removed: string[] = [];
+  sent: string[] = [];
   #listeners = new Map<string, Set<(event: Event) => void>>();
 
   addEventListener(type: string, listener: (event: Event) => void): void {
@@ -51,6 +55,10 @@ class FakeWebSocket {
       listener(event);
     }
     return event;
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
   }
 }
 
@@ -186,6 +194,80 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(ws.removed, ["open", "error"]);
   });
 
+  it("resumes once when the debugger pauses", () => {
+    const target = new EventTarget();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    resumeDebuggerOnPause(target, ws as unknown as WebSocket, -2);
+    target.dispatchEvent(new Event("Debugger.paused"));
+    target.dispatchEvent(new Event("Debugger.paused"));
+
+    assertEquals(ws.sent, [
+      '{"id":-2,"method":"Debugger.resume","params":{}}',
+    ]);
+  });
+
+  it("can stop listening for debugger pauses", () => {
+    const target = new EventTarget();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    const stopListening = resumeDebuggerOnPause(
+      target,
+      ws as unknown as WebSocket,
+      -2,
+    );
+    stopListening();
+    target.dispatchEvent(new Event("Debugger.paused"));
+
+    assertEquals(ws.sent, []);
+  });
+
+  it("retries debugger resume when no pause event arrives", async () => {
+    const target = new EventTarget();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    const stopListening = resumeDebuggerOnPause(
+      target,
+      ws as unknown as WebSocket,
+      -2,
+      1,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    stopListening();
+
+    assertEquals(ws.sent, [
+      '{"id":-2,"method":"Debugger.resume","params":{}}',
+    ]);
+  });
+
+  it("sends inspector commands when the websocket is open", () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    assertEquals(
+      sendInspectorCommand(ws as unknown as WebSocket, -1, "Debugger.resume"),
+      true,
+    );
+
+    assertEquals(ws.sent, [
+      '{"id":-1,"method":"Debugger.resume","params":{}}',
+    ]);
+  });
+
+  it("skips inspector commands when the websocket is closed", () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.CLOSED;
+
+    assertEquals(
+      sendInspectorCommand(ws as unknown as WebSocket, -1, "Debugger.resume"),
+      false,
+    );
+    assertEquals(ws.sent, []);
+  });
+
   it("formats remote console values", () => {
     assertEquals(stringifyRemoteObject({ value: 0 }), "0");
     assertEquals(stringifyRemoteObject({ unserializableValue: "NaN" }), "NaN");
@@ -218,6 +300,23 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(logs, ["profile: profiler started"]);
   });
 
+  it("can preserve a stop latch when the profiler starts", async () => {
+    const state = createState();
+    state.sawProfileStop = true;
+
+    const started = await startProfilerIfReady(
+      state,
+      { readyState: WebSocket.OPEN },
+      { start: () => Promise.resolve() },
+      () => {},
+      { clearStop: false },
+    );
+
+    assertEquals(started, true);
+    assertEquals(state.profilerActive, true);
+    assertEquals(state.sawProfileStop, true);
+  });
+
   it("marks profile stop once", () => {
     const state: ProfileStopState = { ended: false };
 
@@ -244,6 +343,45 @@ describe("capture-deno-inspector-profile helpers", () => {
 
     assertEquals(started, false);
     assertEquals(starts, 0);
+  });
+
+  it("does not start the profiler while a start is already in flight", async () => {
+    const state = createState();
+    let resolveStart: (() => void) | undefined;
+    let starts = 0;
+
+    const firstStart = startProfilerIfReady(
+      state,
+      { readyState: WebSocket.OPEN },
+      {
+        start: () => {
+          starts += 1;
+          return new Promise<void>((resolve) => {
+            resolveStart = resolve;
+          });
+        },
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const secondStarted = await startProfilerIfReady(
+      state,
+      { readyState: WebSocket.OPEN },
+      {
+        start: () => {
+          starts += 1;
+          return Promise.resolve();
+        },
+      },
+    );
+    resolveStart?.();
+    const firstStarted = await firstStart;
+
+    assertEquals(secondStarted, false);
+    assertEquals(firstStarted, true);
+    assertEquals(starts, 1);
+    assertEquals(state.profilerStarting, false);
+    assertEquals(state.profilerActive, true);
   });
 
   it("stops an active profiler", async () => {
@@ -363,22 +501,47 @@ describe("capture-deno-inspector-profile helpers", () => {
   it("marks start and stop latches from console messages", () => {
     const state = createState();
 
-    recordConsoleProfileMessage(
+    const startMessage = recordConsoleProfileMessage(
       state,
       "begin profile",
       /begin profile/,
       /stop profile/,
     );
-    recordConsoleProfileMessage(
+    const stopMessage = recordConsoleProfileMessage(
       state,
       "stop profile",
       /begin profile/,
       /stop profile/,
     );
 
+    expect(startMessage).toEqual({
+      startedProfile: true,
+      hadProfileStop: false,
+    });
+    expect(stopMessage).toEqual({
+      startedProfile: false,
+      hadProfileStop: false,
+    });
     expect(state.consoleMessages).toEqual(["begin profile", "stop profile"]);
     expect(state.sawProfileStart).toBe(true);
     expect(state.sawProfileStop).toBe(true);
+  });
+
+  it("reports whether a stop latch existed before a start message", () => {
+    const state = createState();
+    state.sawProfileStop = true;
+
+    const message = recordConsoleProfileMessage(
+      state,
+      "begin profile",
+      /begin profile/,
+      /stop profile/,
+    );
+
+    expect(message).toEqual({
+      startedProfile: true,
+      hadProfileStop: true,
+    });
   });
 
   it("clears an early stop latch when profiling actually starts", () => {
