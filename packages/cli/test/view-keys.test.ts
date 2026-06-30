@@ -74,3 +74,42 @@ Deno.test("decode: multibyte UTF-8 character", () => {
   assertEquals(keys[0].name, "λ");
   assertEquals(keys[0].char, "λ");
 });
+
+Deno.test("decode: a multibyte char split across reads keeps the partial in rest", () => {
+  // "λ" is 0xCE 0xBB. Deliver only the lead byte: it must be held in `rest`,
+  // not decoded into a U+FFFD replacement character.
+  const utf8 = bytes("λ");
+  const first = decodeKeys(utf8.subarray(0, 1));
+  assertEquals(first.keys.length, 0);
+  assertEquals(first.rest, raw(0xce));
+  // The next read prepends the leftover and completes the code point.
+  const second = decodeKeys(new Uint8Array([...first.rest, utf8[1]]));
+  assertEquals(second.keys.map((k) => k.name), ["λ"]);
+  assertEquals(second.keys[0].char, "λ");
+  assertEquals(second.rest.length, 0);
+});
+
+Deno.test("decode: a 4-byte emoji split across reads completes cleanly", () => {
+  // "😀" is 0xF0 0x9F 0x98 0x80. Split after the first two bytes.
+  const utf8 = bytes("😀");
+  const first = decodeKeys(utf8.subarray(0, 2));
+  assertEquals(first.keys.length, 0);
+  assertEquals(first.rest, utf8.subarray(0, 2));
+  const second = decodeKeys(
+    new Uint8Array([...first.rest, ...utf8.subarray(2)]),
+  );
+  assertEquals(second.keys.map((k) => k.name), ["😀"]);
+  assertEquals(second.rest.length, 0);
+});
+
+Deno.test("decode: a stray continuation byte is not held in rest", () => {
+  // 0x80 cannot start a sequence; it must decode now (to U+FFFD), not stall
+  // forever waiting for bytes that complete it.
+  const { keys, rest } = decodeKeys(raw(0x80));
+  assertEquals(keys.length, 1);
+  assertEquals(rest.length, 0);
+  // An out-of-range lead byte (0xFF) behaves the same way.
+  const bad = decodeKeys(raw(0xff));
+  assertEquals(bad.keys.length, 1);
+  assertEquals(bad.rest.length, 0);
+});

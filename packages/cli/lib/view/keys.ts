@@ -122,8 +122,29 @@ export function decodeKeys(buf: Uint8Array): DecodeResult {
       keys.push({ name: ch, char: ch });
       i += 1;
     } else {
+      // Multi-byte UTF-8: the lead byte's high bits give the sequence length.
+      // 11110xxx (0xf0–0xf7) → 4, 1110xxxx (0xe0–0xef) → 3, 110xxxxx
+      // (0xc0–0xdf) → 2. A stray continuation byte (10xxxxxx) or a byte that
+      // can never start a sequence (0xf8–0xff) has no expected length: it is
+      // decoded now as a replacement character rather than held back, so an
+      // invalid byte cannot stall forever in `rest`.
+      const expected = b >= 0xf8
+        ? 1
+        : b >= 0xf0
+        ? 4
+        : b >= 0xe0
+        ? 3
+        : b >= 0xc0
+        ? 2
+        : 1;
       let j = i + 1;
-      while (j < buf.length && (buf[j] & 0xc0) === 0x80) j += 1;
+      while (
+        j < buf.length && j - i < expected && (buf[j] & 0xc0) === 0x80
+      ) j += 1;
+      // A valid lead byte whose continuation bytes have not all arrived is an
+      // incomplete code point at the end of the read; keep it in `rest` so the
+      // next chunk completes it instead of emitting a replacement character.
+      if (expected > 1 && j - i < expected && j === buf.length) break;
       const ch = new TextDecoder().decode(buf.slice(i, j));
       keys.push({ name: ch, char: ch });
       i = j;
