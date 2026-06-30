@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
-import type { StructureNode } from "../lib/view/model.ts";
+import type { Document, StructureNode } from "../lib/view/model.ts";
 import {
   clamp,
   findMatches,
@@ -61,6 +61,43 @@ Deno.test("findMatches: smartcase", () => {
 Deno.test("findMatches: empty query returns nothing", () => {
   const doc = parseDocument(SAMPLE);
   assertEquals(findMatches(doc, "").length, 0);
+});
+
+/** A document whose lines are exactly `texts`, with no spans/structure. Enough
+ * for `findMatches`, which only reads each line's `text`. */
+function linesDoc(...texts: string[]): Document {
+  return {
+    text: texts.join("\n"),
+    lines: texts.map((text) => ({ text, spans: [] })),
+    structure: [],
+    flatStructure: [],
+    definitions: new Map(),
+  };
+}
+
+Deno.test("findMatches: case-insensitive columns are in the original string", () => {
+  // `İ` (U+0130) lowercases to two code units (`i` + combining dot above), so a
+  // match after it must not be shifted by the extra folded unit. `foo` starts
+  // at original code-point column 3 regardless of the fold length change.
+  assertEquals(
+    findMatches(linesDoc("İx foo"), "foo"),
+    [{ line: 0, start: 3, end: 6 }],
+  );
+  // Two length-changing characters before the match still leave it at column 3.
+  assertEquals(
+    findMatches(linesDoc("İİ foo"), "foo"),
+    [{ line: 0, start: 3, end: 6 }],
+  );
+  // A non-BMP character (one code point, two code units) counts as one column.
+  assertEquals(
+    findMatches(linesDoc("𝑻x bar"), "bar"),
+    [{ line: 0, start: 3, end: 6 }],
+  );
+  // Matching the `i` that `İ` folds to highlights the single original column.
+  assertEquals(
+    findMatches(linesDoc("İx"), "i"),
+    [{ line: 0, start: 0, end: 1 }],
+  );
 });
 
 Deno.test("nextMatchIndex: forward, backward and wrap", () => {

@@ -25,21 +25,68 @@ export function findMatches(doc: Document, query: string): Match[] {
   const needle = caseSensitive ? query : query.toLowerCase();
   const matches: Match[] = [];
   for (let line = 0; line < doc.lines.length; line++) {
-    const text = caseSensitive
-      ? doc.lines[line].text
-      : doc.lines[line].text.toLowerCase();
+    const original = doc.lines[line].text;
+    const { folded, colOf } = caseSensitive
+      ? plainHaystack(original)
+      : foldHaystack(original);
     let from = 0;
     for (;;) {
-      const idx = text.indexOf(needle, from);
+      const idx = folded.indexOf(needle, from);
       if (idx < 0) break;
-      // Columns are display code points, so highlights line up with the cells.
-      const start = cpLen(text.slice(0, idx));
-      const width = cpLen(text.slice(idx, idx + needle.length));
-      matches.push({ line, start, end: start + width });
+      // Columns are display code points in the ORIGINAL line, so highlights
+      // line up with the cells even when folding changes a character's length
+      // (e.g. `İ` U+0130 lowercases to two code units). `end` is one past the
+      // last original column the match touches, so it always covers at least
+      // the code point it starts on even if the needle matched a partial fold.
+      const start = colOf(idx);
+      const end = colOf(idx + needle.length - 1) + 1;
+      matches.push({ line, start, end });
       from = idx + Math.max(1, needle.length);
     }
   }
   return matches;
+}
+
+/** A search haystack plus a map from its UTF-16 offsets back to original
+ * code-point columns. `colOf(offset)` is the original column of the code point
+ * that produced the code unit at `offset`; `colOf(length)` is the column past
+ * the end. */
+interface Haystack {
+  readonly folded: string;
+  colOf(offset: number): number;
+}
+
+/**
+ * Build a case-folded haystack by lowercasing the original line one code point
+ * at a time, recording for each resulting code unit the original code-point
+ * column it came from. Doing the fold and the column map in the same walk keeps
+ * `indexOf` offsets valid indices into the map regardless of how a character's
+ * lowercase length differs from its original length.
+ */
+function foldHaystack(original: string): Haystack {
+  let folded = "";
+  // origColAt[k] = original code-point column that produced folded unit k.
+  const origColAt: number[] = [];
+  let col = 0;
+  for (const cp of original) {
+    const lower = cp.toLowerCase();
+    for (let i = 0; i < lower.length; i++) origColAt.push(col);
+    folded += lower;
+    col += 1;
+  }
+  return {
+    folded,
+    colOf: (offset) => offset < origColAt.length ? origColAt[offset] : col,
+  };
+}
+
+/** Case-sensitive haystack: the line verbatim, with offsets mapped to columns
+ * via {@link cpLen} (a non-BMP character is one code point but two code units). */
+function plainHaystack(original: string): Haystack {
+  return {
+    folded: original,
+    colOf: (offset) => cpLen(original.slice(0, offset)),
+  };
 }
 
 /** Index of the next match at/after (line, col), wrapping. -1 if none. */
