@@ -56,9 +56,18 @@ export async function shutdownOpenTelemetry(): Promise<void> {
   if (!_provider) return;
   const p = _provider;
   _provider = undefined;
-  _providerRegistered = false;
-  await p.forceFlush();
-  await p.shutdown();
+  try {
+    await p.forceFlush();
+    await p.shutdown();
+  } finally {
+    // Reset the global API state so getTracer() falls back to the API no-op
+    // after shutdown. We deliberately do NOT reset _providerRegistered: the
+    // `provider` above is a module-level const that init can't rebuild, so a
+    // re-init must stay a guarded no-op rather than re-register a torn-down
+    // instance. Shutdown here is process-exit-only.
+    trace.disable();
+    context.disable();
+  }
 }
 
 // Prefer Deno's built-in context manager when running on Deno ≥2.2.
@@ -81,9 +90,9 @@ const getContextManager = () => {
   return new AsyncHooksContextManager();
 };
 
-export function initOpenTelemetry() {
-  if (_providerRegistered || !env.OTEL_ENABLED) {
-    if (!env.OTEL_ENABLED) {
+export function initOpenTelemetry(enabled: boolean = env.OTEL_ENABLED) {
+  if (_providerRegistered || !enabled) {
+    if (!enabled) {
       console.log("OpenTelemetry is disabled via OTEL_ENABLED env var");
     } else {
       console.log("OpenTelemetry already initialized, skipping");
