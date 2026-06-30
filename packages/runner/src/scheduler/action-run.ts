@@ -728,10 +728,13 @@ export function schedulerImplementationFingerprint(
   actionId: string,
   telemetry: SchedulerActionInfo | undefined,
 ): string {
-  // Prefer the per-module content-addressed identity when available: it is
-  // stable across reloads, entry points, and TCB upgrades (see
-  // docs/specs/module-loading.md). The `src` source location is only stable
-  // within a single bundle layout, so it is the fallback.
+  // The implementation FINGERPRINT is the per-module content-addressed identity
+  // `cf:module/<hash>:<symbol>` — stable across reloads, entry points, and TCB
+  // upgrades (see docs/specs/content-addressed-action-identity.md). It is
+  // deliberately per-SYMBOL (it identifies the implementation code), with NO
+  // per-instance key — unlike the action id (`getSchedulerActionId`). `.src` is
+  // no longer consulted (the prior `src:` fallback depended on the source-map
+  // path).
   const implementationHash = (action as { implementationHash?: unknown })
     .implementationHash;
   if (typeof implementationHash === "string" && implementationHash.length > 0) {

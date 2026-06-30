@@ -170,6 +170,31 @@ function schedulerActionLinkIdentity(link: NormalizedFullLink) {
   };
 }
 
+/**
+ * A source-location-INDEPENDENT, per-instance discriminator for a scheduler
+ * action: a short hash of the action's `{ process, reads, writes }` cell links.
+ * Two instances of the same hoisted op (e.g. one `lift` called twice) differ in
+ * their reads/writes, so this distinguishes them; the links are reload-stable,
+ * so it is too. Unlike `schedulerJavaScriptActionName`/`schedulerRawActionName`
+ * it folds in NO source-derived name, so it is independent of `fn.src` and the
+ * debug annotation. It is appended to the content-addressed action id
+ * (`cf:module/<hash>:<symbol>:<instanceKey>`, `getSchedulerActionId`) so that the
+ * per-symbol content address stays the implementation *fingerprint* while the
+ * action id — the `actionStats` key and the durable observation key — stays
+ * per-*instance*. Without it, N instances of one symbol collide on a single id.
+ */
+function schedulerActionInstanceKey(parts: {
+  process?: NormalizedFullLink;
+  reads?: readonly NormalizedFullLink[];
+  writes?: readonly NormalizedFullLink[];
+}): string {
+  return hashOf({
+    process: parts.process ? schedulerActionLinkIdentity(parts.process) : null,
+    reads: (parts.reads ?? []).map(schedulerActionLinkIdentity),
+    writes: (parts.writes ?? []).map(schedulerActionLinkIdentity),
+  }).hashString.slice(0, 12);
+}
+
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
@@ -3546,6 +3571,12 @@ export class Runner {
         { setSrc: true },
       );
       this.applyImplementationHash(action, module.implementation);
+      (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+        schedulerActionInstanceKey({
+          process: processCell.getAsNormalizedFullLink(),
+          reads,
+          writes,
+        });
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3993,6 +4024,8 @@ export class Runner {
     };
     setRunnableName(action, rawName, { setSrc: true });
     this.applyImplementationHash(action, impl);
+    (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+      schedulerActionInstanceKey({ reads: inputCells, writes: outputCells });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
