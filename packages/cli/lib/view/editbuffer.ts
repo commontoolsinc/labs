@@ -333,7 +333,11 @@ export class EditBuffer {
   killWholeLine(): void {
     this.resetGoal();
     this.endYank();
-    const text = this.lines[this.row] + "\n";
+    // The killed line has a terminating newline only when it is not the last
+    // line; killing the last line (no newline after it) must not add one, or a
+    // later yank would insert a spurious trailing newline.
+    const hadNewline = this.row < this.lines.length - 1;
+    const text = this.lines[this.row] + (hadNewline ? "\n" : "");
     if (this.lines.length === 1) {
       this.lines[0] = "";
     } else {

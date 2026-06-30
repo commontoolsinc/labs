@@ -100,6 +100,32 @@ Deno.test("editbuffer: kill-whole-line removes the line", () => {
   assertEquals(b.text(), "a\nb\nc");
 });
 
+Deno.test("editbuffer: kill-whole-line of the last line keeps no trailing newline", () => {
+  // A single line with no terminating newline: kill it, then yank it back. The
+  // round-trip must reproduce the original exactly, leaving the buffer clean.
+  const b = new EditBuffer("only");
+  b.killWholeLine();
+  assertEquals(b.killRing[0], "only", "no spurious newline on the ring entry");
+  b.yank();
+  assertEquals(b.text(), "only");
+  assert(!b.dirty(), "yank of the killed last line does not dirty content");
+
+  // The last line of a multi-line buffer also has no terminating newline.
+  const c = new EditBuffer("a\nb");
+  c.row = 1; // on "b", the last line
+  c.killWholeLine();
+  assertEquals(c.killRing[0], "b", "last line carries no trailing newline");
+
+  // A non-last line does have a terminating newline, which must be preserved.
+  const d = new EditBuffer("x\ny");
+  d.row = 0; // on "x", followed by "y"
+  d.killWholeLine();
+  assertEquals(d.killRing[0], "x\n", "a non-last line keeps its newline");
+  d.yank();
+  assertEquals(d.text(), "x\ny");
+  assert(!d.dirty());
+});
+
 Deno.test("editbuffer: consecutive kills accrete into one ring entry", () => {
   const b = new EditBuffer("abcdef");
   b.col = 0;

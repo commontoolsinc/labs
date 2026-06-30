@@ -199,7 +199,11 @@ Deno.test("editbuffer: killWholeLine on the only line empties it in place", () =
   assertEquals(b.text(), "", "the single line is emptied, not removed");
   assertEquals(b.lines.length, 1);
   b.yank();
-  assertEquals(b.text(), "solo\n", "killed text includes the newline");
+  assertEquals(
+    b.text(),
+    "solo",
+    "the line had no terminating newline, so the yank adds none",
+  );
 });
 
 // --- killRegion / yank / yankPop early returns ------------------------------
