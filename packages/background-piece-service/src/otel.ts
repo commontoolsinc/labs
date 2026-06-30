@@ -18,6 +18,20 @@ export function getTracer(): Tracer {
     : trace.getTracer("bg-piece-service", "1.0.0");
 }
 
+/**
+ * Flush and shut down the tracer provider so buffered spans aren't dropped when
+ * the process exits. No-op if telemetry was never initialized.
+ */
+export async function shutdownOpenTelemetry() {
+  if (!_provider) return;
+  try {
+    await _provider.forceFlush();
+    await _provider.shutdown();
+  } catch (error) {
+    console.error("Error shutting down OpenTelemetry:", error);
+  }
+}
+
 export async function initOpenTelemetry() {
   if (_providerRegistered || !env.OTEL_ENABLED) {
     if (!env.OTEL_ENABLED) {

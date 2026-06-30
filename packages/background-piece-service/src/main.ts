@@ -4,7 +4,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 import { env, type EnvVars } from "./env.ts";
-import { getTracer, initOpenTelemetry } from "./otel.ts";
+import { getTracer, initOpenTelemetry, shutdownOpenTelemetry } from "./otel.ts";
+import { SpanStatusCode } from "@opentelemetry/api";
 import type { Identity } from "@commonfabric/identity";
 
 // 10 minute timeout
@@ -59,9 +60,12 @@ export function shutdown(
   exit: typeof Deno.exit = Deno.exit,
 ) {
   return () => {
-    service.stop().then(() => {
-      exit(0);
-    });
+    service.stop()
+      // Flush buffered spans before exiting so shutdown telemetry isn't dropped.
+      .then(() => shutdownOpenTelemetry())
+      .then(() => {
+        exit(0);
+      });
   };
 }
 
@@ -108,6 +112,13 @@ export async function startBackgroundPieceService(
     async (span) => {
       try {
         await service.initialize();
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
       } finally {
         span.end();
       }

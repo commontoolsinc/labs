@@ -41,7 +41,11 @@ const envSchema = z.object({
   // OpenTelemetry. When OTEL_ENABLED=true, spans are exported to the local OTel
   // Collector at OTEL_EXPORTER_OTLP_ENDPOINT, which forwards them to SigNoz.
   ENV: z.string().default("development"),
-  OTEL_ENABLED: z.coerce.boolean().default(false),
+  // NOT z.coerce.boolean(): Boolean("false") === true, so OTEL_ENABLED=false would
+  // wrongly enable telemetry (the same latent bug this file documents elsewhere).
+  OTEL_ENABLED: z.string().default("false").transform((v) =>
+    v === "true" || v === "1"
+  ),
   OTEL_SERVICE_NAME: z.string().default("bg-piece-service"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
 
