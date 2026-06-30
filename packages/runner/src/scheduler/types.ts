@@ -210,6 +210,19 @@ export type QueuedEvent = {
   onCommit?: (tx: IExtendedStorageTransaction) => void;
   notBefore?: number;
   /**
+   * Pending cross-space load count observed when this event first started
+   * processing, before its handler's dependency chain ran. Used to scope the
+   * CT-1795 cross-space park to loads THIS event kicked (vs. pre-existing /
+   * unrelated in-flight loads). Set once, carried across re-processing.
+   */
+  crossSpaceLoadBaseline?: number;
+  /**
+   * Number of times this event has been parked waiting for a cross-space load
+   * kicked by its own state to settle (CT-1795). Bounded so a value that
+   * legitimately stays empty (e.g. the viewer has no profile) still dispatches.
+   */
+  crossSpaceLoadParks?: number;
+  /**
    * Number of transient commit failures this intent has hit. Drives the
    * exponential backoff exponent; carried across backoff retries. Covers every
    * transient commit failure, not only conflicts.
