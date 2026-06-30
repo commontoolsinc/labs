@@ -263,6 +263,13 @@ export interface RuntimeOptions {
    * {@link ModuleByteCache}.
    */
   moduleByteCache?: ModuleByteCache;
+  /**
+   * Override for the outbound `fetch` used by network builtins (`fetchData`).
+   * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
+   * a test harness can inject a deterministic mock without mutating process
+   * globals. (LLM calls mock separately, at the `LLMClient` layer.)
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface CfcRuntimeStats {
@@ -379,6 +386,12 @@ export class Runtime {
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /**
+   * Outbound `fetch` used by network builtins (e.g. `fetchData`). Defaults to
+   * the host `globalThis.fetch`; a test harness can inject a mock via
+   * `RuntimeOptions.fetch`.
+   */
+  readonly fetch: typeof globalThis.fetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -448,6 +461,12 @@ export class Runtime {
     this.spaceHostMap = options.spaceHostMap
       ? Object.freeze({ ...options.spaceHostMap })
       : undefined;
+    // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
+    // preserving the existing behavior where a test overrides the global AFTER
+    // constructing the runtime (e.g. fetch-data-mutex.test.ts). An injected mock
+    // is used as-is.
+    this.fetch = options.fetch ??
+      ((input, init) => globalThis.fetch(input, init));
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));

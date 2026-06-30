@@ -62,6 +62,11 @@ import {
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
 import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import {
   type CDFPoint,
   getLogger,
   getLoggerCountsBreakdown,
@@ -913,11 +918,24 @@ export async function runTestPattern(
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
 
+  // Fetch mocking: a test opts in by exporting a module-scope `fetchMocks` array.
+  // We can't read it until after compile, so the injected fetch closes over a
+  // late-populated `fetchMockEntries` and falls through to the real fetch until
+  // (and unless) the test declares mocks. Driving the in-flight fetchData to
+  // completion is the harness's existing job — a `{ settle: true }` step (or any
+  // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
+  const realFetch = globalThis.fetch.bind(globalThis);
+  let fetchMockEntries: FetchMockEntry[] | undefined;
+  const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
+
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
     () =>
       new Runtime({
         storageManager,
+        // Inject a fetch that honors test-declared `fetchMocks` (scoped to this
+        // runtime; no process-global mutation).
+        fetch: mockFetch,
         // Match the production runtime default: enforce explicitly declared
         // `ifc` policies so pattern tests act as a regression net for CFC.
         // Patterns without CFC annotations are unaffected; tests that need a
@@ -991,6 +1009,12 @@ export async function runTestPattern(
         `Test pattern must export a pattern function as default`,
       );
     }
+
+    // Read the test's opt-in fetch mocks now (after compile, before the run):
+    // a fetchData with a non-empty URL fires during the initial settle, so the
+    // entries must be in place before `runtime.run(...)` below. `main` is the
+    // module namespace, so a named `fetchMocks` export is reachable.
+    fetchMockEntries = readFetchMocks(main);
 
     // Multi-user tests export a descriptor ({ setup?, participants }) as the
     // default export. They run in worker-isolated runtimes against a shared
