@@ -167,8 +167,8 @@ describe("createCompileByteCache", () => {
       }
       try {
         Deno.removeSync(dir, { recursive: true });
-      } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      } catch {
+        // The unload cleanup listener also removes this directory.
       }
     }
   });
