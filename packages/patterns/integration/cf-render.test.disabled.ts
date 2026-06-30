@@ -1,10 +1,14 @@
 import { env, Page, waitFor } from "@commonfabric/integration";
-import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import {
+  initializePiecesController,
+  PieceController,
+  PiecesController,
+} from "./pieces-controller.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -19,7 +23,7 @@ describe("cf-render integration test", () => {
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await PiecesController.initialize({
+    cc = await initializePiecesController({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -196,7 +200,7 @@ describe("cf-render subpath handling", () => {
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await PiecesController.initialize({
+    cc = await initializePiecesController({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,

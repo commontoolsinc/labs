@@ -11,9 +11,10 @@ import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
+  initializePiecesController,
   type PieceController,
   PiecesController,
-} from "@commonfabric/piece/ops";
+} from "./pieces-controller.ts";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
@@ -95,7 +96,7 @@ const handlers: Record<
 > = {
   async init({ rawIdentity, spaceName, apiUrl, diagnostics }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
-    cc = await PiecesController.initialize({
+    cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
       spaceName: spaceName as string,
