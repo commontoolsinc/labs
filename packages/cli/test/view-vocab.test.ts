@@ -3,12 +3,14 @@ import {
   BUILDER_NAMES,
   CALL_NAMES,
   CF_HELPERS_IDENTIFIER,
+  describeSynthetic,
   FUNCTION_HARDENING_HELPER_PREFIX,
   isBuilderName,
   isCallName,
   isSyntheticName,
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
+  SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../lib/view/vocab.ts";
 import {
   COMMONFABRIC_BUILDER_EXPORT_NAMES,
@@ -39,6 +41,20 @@ Deno.test("vocab: synthetic identifiers are detected by prefix", () => {
   assert(isSyntheticName("__cf_pattern_input"));
   assert(!isSyntheticName("regularName"));
   assert(!isSyntheticName("pattern"));
+});
+
+Deno.test("vocab: hoisted pattern helpers are recognised and described", () => {
+  // The transformer hoists the bare pattern call in `mapWithPattern(pattern(...))`
+  // to `const __cfPattern_N = __cfHelpers.pattern(...)`. Without the prefix the
+  // pager would treat that synthetic helper as an authored identifier.
+  assert(isSyntheticName(`${SYNTHETIC_PATTERN_HOIST_PREFIX}_1`));
+  assert(isSyntheticName("__cfPattern_42"));
+  assertEquals(
+    describeSynthetic(`${SYNTHETIC_PATTERN_HOIST_PREFIX}_1`),
+    "hoisted pattern helper",
+  );
+  // The mirrored literal must track the transformer's documented prefix.
+  assertEquals(SYNTHETIC_PATTERN_HOIST_PREFIX, "__cfPattern");
 });
 
 Deno.test("vocab: synthetic prefix literals match the documented transformer names", () => {

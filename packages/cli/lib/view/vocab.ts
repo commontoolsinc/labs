@@ -32,6 +32,8 @@ export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
 export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
 /** `ast/call-kind.ts` `SYNTHETIC_LIFT_HOIST_PREFIX` (`const __cfLift_N = …`). */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
+/** `ast/call-kind.ts` `SYNTHETIC_PATTERN_HOIST_PREFIX` (`const __cfPattern_N = …`). */
+export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
 /** `ast/call-kind.ts` `FUNCTION_HARDENING_HELPER_PREFIX`. */
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
 /** `ast/call-kind.ts` `SYNTHETIC_MODULE_CALLBACK_PREFIX`. */
@@ -40,6 +42,7 @@ export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 /** Prefixes that mark a transformer-synthesised identifier. */
 const SYNTHETIC_PREFIXES = [
   SYNTHETIC_LIFT_HOIST_PREFIX,
+  SYNTHETIC_PATTERN_HOIST_PREFIX,
   FUNCTION_HARDENING_HELPER_PREFIX,
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
   "__cfHandler",
@@ -79,6 +82,9 @@ export function describeSynthetic(name: string): string | null {
   }
   if (name.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX)) {
     return "hoisted lift helper";
+  }
+  if (name.startsWith(SYNTHETIC_PATTERN_HOIST_PREFIX)) {
+    return "hoisted pattern helper";
   }
   if (name.startsWith(FUNCTION_HARDENING_HELPER_PREFIX)) {
     return "function-hardening helper";
