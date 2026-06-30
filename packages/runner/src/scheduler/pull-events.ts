@@ -4,7 +4,7 @@ import {
   preflightQueuedEventDependencies,
   type SchedulerEventExecutionState,
 } from "./events.ts";
-import type { Action } from "./types.ts";
+import type { Action, QueuedEvent } from "./types.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -16,6 +16,20 @@ const logger = getLogger("scheduler", {
 // one settle cycle; the common case resolves in 1. The bound guarantees forward
 // progress if loads churn or a value legitimately never resolves.
 const MAX_CROSS_SPACE_LOAD_PARKS = 8;
+
+// CT-1795: backstop deadline for a single cross-space park. The settle promise
+// normally wakes the event well before this; the deadline only ensures a hung
+// load still dispatches (and that `idle()` has a wake timer to track the wait).
+const CROSS_SPACE_LOAD_BACKSTOP_MS = 2000;
+
+// CT-1795 per-event cross-space park bookkeeping, keyed by the queued event so it
+// survives re-processing and is GC'd with the event. `baseline` is the in-flight
+// cross-space load count captured before the event's handler chain ran (scopes
+// the park to loads THIS event kicked); `parks` counts parks so far (bounded).
+const crossSpaceParkState = new WeakMap<
+  QueuedEvent,
+  { baseline: number; parks: number }
+>();
 
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
@@ -60,11 +74,16 @@ export async function processPullQueuedEventDuringExecute(
 
   // CT-1795: record the cross-space load count before this event's handler
   // chain runs, so the park below only fires for loads THIS event kicked (not
-  // pre-existing / unrelated in-flight loads). Set once; preserved across
+  // pre-existing / unrelated in-flight loads). Captured once; preserved across
   // re-processing while the event stays parked at the queue head.
-  if (queuedEvent.crossSpaceLoadBaseline === undefined) {
-    queuedEvent.crossSpaceLoadBaseline =
-      state.runtime.storageManager.pendingCrossSpacePromiseCount?.() ?? 0;
+  let parkState = crossSpaceParkState.get(queuedEvent);
+  if (parkState === undefined) {
+    parkState = {
+      baseline:
+        state.runtime.storageManager.pendingCrossSpacePromiseCount?.() ?? 0,
+      parks: 0,
+    };
+    crossSpaceParkState.set(queuedEvent, parkState);
   }
 
   // Ensure handler dependencies are computed before running.
@@ -128,25 +147,42 @@ export async function processPullQueuedEventDuringExecute(
   // un-loaded default on the first pass: the wish node runs and settles while
   // its cross-space load is still in flight, so it is not a dirty dependency and
   // nothing keeps the event parked. If pulling the state pushed the cross-space
-  // load count above this event's baseline, park until those loads settle and
-  // the producing chain re-runs — so the FIRST handler invocation observes the
-  // resolved value instead of the empty default. Bounded and baseline-scoped:
-  // unrelated in-flight loads do not delay this event, and a value that stays
-  // empty still dispatches once the bound is reached.
+  // load count above this event's baseline, park the head event until those
+  // loads settle and the producing chain re-runs — so the FIRST handler
+  // invocation observes the resolved value instead of the empty default.
+  // Baseline-scoped (unrelated in-flight loads do not delay this event) and
+  // bounded (a value that stays empty still dispatches once the bound is hit).
   const storage = state.runtime.storageManager;
   const pendingLoads = storage.pendingCrossSpacePromiseCount?.() ?? 0;
-  const loadBaseline = queuedEvent.crossSpaceLoadBaseline ?? 0;
   if (
-    pendingLoads > loadBaseline &&
-    (queuedEvent.crossSpaceLoadParks ?? 0) < MAX_CROSS_SPACE_LOAD_PARKS
+    pendingLoads > parkState.baseline &&
+    parkState.parks < MAX_CROSS_SPACE_LOAD_PARKS
   ) {
     // Only park if we obtain a settle promise to wake on — never park without a
     // wake (a backend lacking cross-space tracking already reports 0 pending).
     const settled = storage.crossSpaceSettled?.();
     if (settled) {
-      queuedEvent.crossSpaceLoadParks = (queuedEvent.crossSpaceLoadParks ?? 0) +
-        1;
-      void settled.then(() => state.queueExecution());
+      parkState.parks += 1;
+      // Genuinely park the head via the queue-wake deadline (the same mechanism
+      // throttled deps use), so `idle()` accounts for the wait and the event is
+      // skipped — not re-preflighted — on every re-entry until it wakes. The
+      // settle promise wakes it early as soon as the cross-space load lands; the
+      // deadline is only a backstop so a hung load still dispatches.
+      const wakeAt = performance.now() + CROSS_SPACE_LOAD_BACKSTOP_MS;
+      queuedEvent.notBefore = wakeAt;
+      state.scheduleEventQueueWake(wakeAt);
+      void settled.then(() => {
+        // Wake as soon as the load settles instead of waiting out the backstop.
+        // Bring the deadline forward (rather than just clearing notBefore) so
+        // scheduleEventQueueWake cancels the backstop timer — leaving it armed
+        // would dangle a 2s timer past the event. Guard on `wakeAt` so a later
+        // re-park's deadline is left intact.
+        if (queuedEvent.notBefore === wakeAt) {
+          const now = performance.now();
+          queuedEvent.notBefore = now;
+          state.scheduleEventQueueWake(now);
+        }
+      });
       return;
     }
   }
