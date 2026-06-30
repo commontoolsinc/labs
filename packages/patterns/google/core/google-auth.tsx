@@ -273,9 +273,9 @@ export interface Output {
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display with avatar, name, and email */
-  userChip: unknown;
+  userChip: VNode;
   /** Minimal preview for picker display with scope summary */
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
   /**
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */

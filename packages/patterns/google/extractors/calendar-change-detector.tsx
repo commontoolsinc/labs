@@ -270,7 +270,7 @@ export interface PatternOutput {
   urgentChanges: ScheduleChange[];
   normalChanges: ScheduleChange[];
   hasChanges: boolean;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

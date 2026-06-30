@@ -66,6 +66,7 @@ const AIRTABLE_AUTH_SOURCE = `import {
   Stream,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -268,9 +269,9 @@ export interface Output {
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display */
-  userChip: unknown;
+  userChip: VNode;
   /** Minimal preview for picker display */
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh */
@@ -2532,6 +2533,7 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
   - \`tokenField="accessToken"\`
 - Handle token refresh via \`/api/integrations/${providerName}-oauth/refresh\`
 - Include a \`bgUpdater\` stream handler for background-piece-service
+- Type renderable output fields as \`VNode\`, including \`userChip\` and \`[TILE_UI]\`. Do not type renderable UI fields as \`unknown\`.
 - Define scope checkboxes matching the available scopes:
 ${
     Object.entries(providerConfig.scopes).map(([s, d]) =>
@@ -2593,7 +2595,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
-- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
+- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
   - Each provider call handler takes a non-null \`auth\` cell and the relevant state cells (\`loading\`, \`error\`, result cells)
@@ -2605,7 +2607,7 @@ Main importer pattern. Follow the Airtable importer reference:
   3. Defines computed cells for derived state (hasList, recordCount, etc.)
   4. Uses one terminal return statement; do not return early from the pattern body
   5. Renders \`auth ? mainContent : notReadyPanel\` so provider handlers are bound only in the authenticated branch where \`auth\` is non-null
-  6. Returns [NAME], [UI], and data outputs
+  6. Returns [NAME], [UI], and data outputs. Type \`[UI]\` as \`VNode\` in the Output interface.
 - UI structure:
   1. Title header
   2. \`{authUI}\` for auth status/picker
@@ -2629,6 +2631,7 @@ Main importer pattern. Follow the Airtable importer reference:
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
 9. **CTS transforms are enabled by default** — Do not add \`/// <cf-disable-transform />\` unless you are intentionally opting out
 10. **Import from "commonfabric"** — Not from individual packages
+11. **Concrete launcher state types** — Use \`boolean\` for loading or pending fields, \`string\` or \`string | null\` for error fields, and \`VNode\` for renderable UI fields. Keep raw API responses and unchecked child pattern outputs as \`unknown\` until a guard narrows them.
 </instructions>`);
 
   return sections.join("\n\n");

@@ -701,7 +701,7 @@ export interface PatternOutput {
   overdueCount: number;
   checkedOutCount: number;
   holdsReadyCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
   // Omnibot actions
   markAsReturned: Stream<{ title: string }>;
   dismissHold: Stream<{ title: string }>;

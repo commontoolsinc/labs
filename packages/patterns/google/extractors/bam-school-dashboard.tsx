@@ -375,7 +375,7 @@ export interface PatternOutput {
   urgentEvents: SchoolEvent[];
   upcomingEvents: SchoolEvent[];
   teacherMessages: SchoolEvent[];
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(

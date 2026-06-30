@@ -556,7 +556,7 @@ export interface PatternOutput {
   pastTickets: TrackedTicket[];
   todayCount: number;
   upcomingCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

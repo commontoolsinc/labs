@@ -199,7 +199,7 @@ interface PatternInput {
 export interface PatternOutput {
   notes: Note[];
   noteCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(() => {

@@ -169,6 +169,24 @@ Deno.test("generateImporterPrompt includes auth availability and current JSX gui
     instructions,
     "return the provider-typed fields including `availability`",
   );
+  assertStringIncludes(reference, "type VNode");
+  assertStringIncludes(reference, "[UI]: VNode;");
+  assertStringIncludes(reference, "userChip: VNode;");
+  assertStringIncludes(reference, "[TILE_UI]: VNode;");
+  assertFalse(reference.includes("userChip: unknown;"));
+  assertFalse(reference.includes("[TILE_UI]: unknown;"));
+  assertStringIncludes(
+    instructions,
+    "Type renderable output fields as `VNode`",
+  );
+  assertStringIncludes(
+    instructions,
+    "Use `boolean` for loading or pending fields",
+  );
+  assertStringIncludes(
+    instructions,
+    "Keep raw API responses and unchecked child pattern outputs as `unknown`",
+  );
   assertStringIncludes(reference, "AuthInfo");
   assertStringIncludes(reference, "return `Airtable: ${selectedBaseName}");
   assertFalse(reference.includes("return \\`Airtable:"));

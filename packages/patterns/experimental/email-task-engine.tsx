@@ -448,7 +448,7 @@ export interface PatternOutput {
   taskEmails: TaskEmail[];
   taskCount: number;
   analyses: TaskAnalysis[];
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 /** Email task engine for processing actionable emails. #emailTaskEngine */

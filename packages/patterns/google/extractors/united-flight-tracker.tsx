@@ -518,7 +518,7 @@ export interface Output {
   activeAlerts: TrackedFlight[];
   pastFlights: TrackedFlight[];
   trips: TrackedTrip[];
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<Input, Output>(({ overrideAuth }) => {

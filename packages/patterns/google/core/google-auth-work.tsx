@@ -48,7 +48,7 @@ export interface Output {
   auth: Writable<Auth>;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<Input, Output>(({ auth, selectedScopes }) => {
