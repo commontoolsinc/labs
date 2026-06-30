@@ -89,17 +89,27 @@ type RejectedRecord = {
   error: { name: string; message: string };
 };
 type ScriptedOutcome =
-  | { kind: "accept"; remoteInterleave?: RemoteCommit }
+  | {
+    kind: "accept";
+    remoteInterleave?: RemoteCommit;
+    responseGate?: Promise<void>;
+  }
   | {
     kind: "rejectConflict";
     message?: string;
     remoteInterleave?: RemoteCommit;
+    responseGate?: Promise<void>;
   }
-  | { kind: "dropThenReplayAccept"; remoteInterleave?: RemoteCommit }
+  | {
+    kind: "dropThenReplayAccept";
+    remoteInterleave?: RemoteCommit;
+    responseGate?: Promise<void>;
+  }
   | {
     kind: "dropThenReplayReject";
     message?: string;
     remoteInterleave?: RemoteCommit;
+    responseGate?: Promise<void>;
   };
 type RemoteCommit = {
   label: string;
@@ -408,20 +418,26 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
         });
         break;
       case "transact": {
+        const responseGate = message.commit
+          ? this.model.scripted.get(message.commit.localSeq)?.responseGate
+          : undefined;
         setTimeout(() => {
-          const commit = message.commit!;
-          const response = this.model.transact(commit);
-          if (response.type === "drop") {
-            this.#closeReceiver(new Error("disconnect"));
-            return;
-          }
-          this.respond({
-            type: "response",
-            requestId: message.requestId!,
-            ...(response.type === "accept"
-              ? { ok: response.applied }
-              : { error: response.error }),
-          });
+          void (async () => {
+            await responseGate;
+            const commit = message.commit!;
+            const response = this.model.transact(commit);
+            if (response.type === "drop") {
+              this.#closeReceiver(new Error("disconnect"));
+              return;
+            }
+            this.respond({
+              type: "response",
+              requestId: message.requestId!,
+              ...(response.type === "accept"
+                ? { ok: response.applied }
+                : { error: response.error }),
+            });
+          })();
         }, 0);
         break;
       }
@@ -1875,6 +1891,81 @@ Deno.test("memory v2 stacked commits: confirming the head pending write promotes
     assertStrictEquals(confirmedDocument, pendingDocument);
     assertStrictEquals(confirmedMaterialized, pendingMaterialized);
   } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: confirming a later same-doc patch keeps earlier pending overlay", async () => {
+  const harness = await createHarness();
+  const leftResponseGate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      left: 0,
+      right: 0,
+    });
+
+    let leftSettled = false;
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: leftResponseGate.promise,
+    });
+    const left = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/left",
+        value: 1,
+      }],
+      {
+        left: 1,
+        right: 0,
+      },
+    ).finally(() => {
+      leftSettled = true;
+    });
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const right = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      {
+        left: 1,
+        right: 2,
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        left: 1,
+        right: 2,
+      },
+    });
+
+    await assertResultOk(right);
+    assertEquals(leftSettled, false);
+    expectVisible(harness, {
+      A: {
+        left: 1,
+        right: 2,
+      },
+    });
+
+    leftResponseGate.resolve();
+    await assertResultOk(left);
+    expectVisible(harness, {
+      A: {
+        left: 1,
+        right: 2,
+      },
+    });
+  } finally {
+    leftResponseGate.resolve();
     await harness.close();
   }
 });
