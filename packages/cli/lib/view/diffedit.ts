@@ -495,43 +495,40 @@ interface MutableHunk {
  * hunk covered, taken from the recorded `newStart`/`newCount`. Hunks apply high
  * line number first so earlier ranges do not shift.
  *
- * A hunk body runs until the next line that is not part of one — a header, a
- * blank line, or `git log -p` commit metadata — so inter-hunk text is never
- * absorbed. Bodies are not delimited by the `@@` counts, which go stale the
- * moment a line is added.
+ * A hunk body is delimited by {@link parseDiff}, which consumes exactly the
+ * lines the `@@` counts cover. Reusing that one classification keeps save in
+ * step with the parser: a blank line inside the counted body is a context line
+ * (an empty content line some tools emit unprefixed), not a terminator, so its
+ * file line is carried to the new side instead of being dropped — which would
+ * leave fewer new-side lines than `newCount` and truncate the file on save.
+ * Inter-hunk text (`git log -p` commit metadata, a trailing separator) falls
+ * outside the parsed body, so it is never absorbed.
  */
 function save(
   text: string,
   fileText: ReadonlyMap<string, string>,
   hunks: readonly MutableHunk[],
 ): string {
-  const lines = text.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const model = parseDiff(text);
+  const rawLines = text.split("\n");
+  const modelHunks = model?.files.flatMap((f) => f.hunks) ?? [];
 
   const byFile = new Map<string, FileSplice[]>();
-  let i = 0;
-  let hunkIndex = 0;
-  while (i < lines.length) {
-    if (!/^@@ -\d/.test(lines[i])) {
-      i++;
-      continue;
-    }
+  modelHunks.forEach((hunk, hunkIndex) => {
+    const info = hunks[hunkIndex];
+    if (!info?.verified || !info.absPath) return;
     const newSide: string[] = [];
-    for (i++; i < lines.length; i++) {
-      const bl = lines[i];
-      if (isHeaderLine(bl)) break;
-      const c = bl[0];
-      if (c === " " || c === "+") newSide.push(bl.slice(1));
-      else if (c === "-" || c === "\\") continue; // old side / "\ No newline"
-      else break; // blank line, commit metadata, anything else: end of body
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const kind = model!.lines[i]?.kind;
+      // Context and added lines are the new side; the leading marker is stripped
+      // (an empty context line carries none, so slicing it stays empty). Removed
+      // and `\ No newline` lines belong to the old side only.
+      if (kind === "ctx" || kind === "add") newSide.push(rawLines[i].slice(1));
     }
-    const info = hunks[hunkIndex++];
-    if (info?.verified && info.absPath) {
-      const list = byFile.get(info.absPath) ?? [];
-      list.push({ newStart: info.newStart, newCount: info.newCount, newSide });
-      byFile.set(info.absPath, list);
-    }
-  }
+    const list = byFile.get(info.absPath) ?? [];
+    list.push({ newStart: info.newStart, newCount: info.newCount, newSide });
+    byFile.set(info.absPath, list);
+  });
 
   const out = new Map<string, string[]>();
   for (const [path, splices] of byFile) {
@@ -553,9 +550,4 @@ function save(
   return written === 1
     ? `Saved ${shortName([...out.keys()][0])}`
     : `Saved ${written} files`;
-}
-
-/** A diff structural line (file or hunk header) — the boundary of a hunk body. */
-function isHeaderLine(line: string): boolean {
-  return /^(@@|diff |--- |\+\+\+ |index )/.test(line);
 }

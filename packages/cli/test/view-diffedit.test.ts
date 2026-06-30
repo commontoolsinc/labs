@@ -1398,3 +1398,40 @@ Deno.test("diffedit: a blank (empty) diff line is not editable", () => {
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+Deno.test("diffedit: editing a hunk with a blank context line saves without truncating the file", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    // The new side on disk has a blank line between alpha and BETA. The diff's
+    // body therefore carries an empty (unprefixed) context line; the parser
+    // counts it toward the hunk while save must carry its file line, not stop.
+    Deno.writeTextFileSync(join(root, "m.ts"), "alpha\n\nBETA\ngamma\n");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,4 +1,4 @@",
+      " alpha",
+      "", // blank context line inside the counted body
+      "-beta",
+      "+BETA",
+      " gamma",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 7); // the "+BETA" added line, below the blank context line
+    press(s, "end");
+    type(s, "!");
+    press(s, "f3");
+    assert(s.view().message.startsWith("Saved"), s.view().message);
+    // The whole new side round-trips: the blank line, the edit, and every line
+    // after it survive — no early stop that splices away the file's tail.
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "alpha\n\nBETA!\ngamma\n",
+      "the blank context line did not truncate the saved file",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
