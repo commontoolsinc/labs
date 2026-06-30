@@ -36,18 +36,23 @@ describe("Engine implementation identity", () => {
     await storageManager?.close();
   });
 
+  // The reload-stable, content-addressed MODULE identity is what action
+  // identity now roots on (the scheduler fingerprint was re-rooted off `.src`
+  // onto content-addressed provenance). We assert it via `canonicalModuleSource`
+  // — the live canonicalizer that maps a per-program bundle path onto the
+  // per-module `cf:module/<hash>/<path>` identity. That is exactly the
+  // `moduleHashByPrefixedSource` machinery the (removed) `implementationHashForSource`
+  // reduced, so this preserves the invariant without the dead `.src`-reduction path.
   async function loadAndResolve(
     program: RuntimeProgram,
     modulePath: string,
-  ): Promise<{ id: string; implementationId: string | undefined }> {
+  ): Promise<{ id: string; moduleIdentity: string | undefined }> {
     const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
       program,
     );
     engine.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
-    const implementationId = engine.implementationHashForSource(
-      `/${id}${modulePath}:1:1`,
-    );
-    return { id, implementationId };
+    const moduleIdentity = engine.canonicalModuleSource(`/${id}${modulePath}`);
+    return { id, moduleIdentity };
   }
 
   it("gives a shared module the same content-addressed identity across entry points", async () => {
@@ -79,10 +84,10 @@ describe("Engine implementation identity", () => {
     // what used to make the implementation fingerprint unstable.
     expect(a.id).not.toBe(b.id);
 
-    // The content-addressed implementation identity is stable.
-    expect(a.implementationId).toBeTruthy();
-    expect(a.implementationId).toBe(b.implementationId);
-    expect(a.implementationId!.startsWith("cf:module/")).toBe(true);
+    // The content-addressed module identity is stable across entry points.
+    expect(a.moduleIdentity).toBeTruthy();
+    expect(a.moduleIdentity).toBe(b.moduleIdentity);
+    expect(a.moduleIdentity!.startsWith("cf:module/")).toBe(true);
   });
 
   it("hashes module identity over PRISTINE authored source, not the helper-injected form (CT-1740)", async () => {
@@ -130,12 +135,10 @@ describe("Engine implementation identity", () => {
       "/shared.ts",
     );
 
-    expect(after.implementationId).not.toBe(before.implementationId);
+    expect(after.moduleIdentity).not.toBe(before.moduleIdentity);
   });
 
-  it("returns undefined for a source location with no loaded module", () => {
-    expect(engine.implementationHashForSource("/unknown/x.tsx:1:1")).toBe(
-      undefined,
-    );
+  it("returns undefined for a source path with no loaded module", () => {
+    expect(engine.canonicalModuleSource("/unknown/x.tsx")).toBe(undefined);
   });
 });

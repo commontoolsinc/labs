@@ -111,24 +111,40 @@ To reproduce on the ESM path (keep = format-agnostic; replace = AMD-specific):
 | `/${id}` prefix + synthetic `/index.ts` (a workaround for AMD `outFile` prefix-flattening) | **Re-evaluate** — likely unnecessary for a real module graph, but `evaluate`'s prefix-stripping, `collectVerifiedLoadSources`, and identity source normalization all assume it, so any change is consistent across all four sites |
 | CF transformer pipeline (`CommonFabricTransformerPipeline`) | Keep — confirmed module-format-agnostic; feeds ESM emit unchanged |
 
-#### `fn.src` source locations have TWO consumers — both must keep working
+#### `fn.src` source locations: CFC verified-source still depends on them
 
 `annotateFunctionDebugMetadata` → `resolveLocationFromFunctionSource` produces
 `fn.src = "source:line:col"` by `script.indexOf(fn.toString())` against the
-active frame's bundle text, then mapping through the sourcemap. In this worktree
-that feeds **both**:
+active frame's bundle text, then mapping through the sourcemap; the reload-stable
+canonical form is `cf:module/<hash>/<path>:line:col`.
 
-1. `cfc/implementation-identity.ts` `resolveVerifiedImplementationIdentity` — the
-   CFC verified-load trust identity (`isVerifiedSourceInLoad`, `bundleId`, …).
-2. `harness/module-identity.ts` via `Engine.implementationHashForSource` — the
-   merged Phase 1 scheduler implementation fingerprint.
+This **used to** feed two consumers (CFC verified-source and the scheduler
+implementation fingerprint). The scheduler consumer is **gone**: scheduler action
+identity — action ids and the durable implementation fingerprint — was re-rooted
+onto content-addressed `{ identity, symbol }` provenance and no longer reads
+`fn.src`; the `Engine.implementationHashForSource` helper was removed. See
+`docs/specs/content-addressed-action-identity.md`.
 
-So the ESM artifact the compartment evaluates **must** (a) contain each
+The remaining consumer is **CFC verified-implementation identity**
+(`cfc/implementation-identity.ts`, `resolveProvenanceImplementationIdentity`).
+Its anti-spoof proof is the content-addressed provenance WeakMap
+(`harness/verified-provenance.ts`) — an entry exists only for a function
+registered during a verified evaluation, so the lookup itself authenticates.
+`fn.src` is then read as a **fail-closed consistency check**: the canonical
+source must point INTO the provenance module
+(`identityFromCanonicalSource(src) === provenance.identity`), else the identity
+resolves `unsupported` and the gated `writeAuthorizedBy` write is denied. (The
+former `isVerifiedSourceInLoad` / `bundleId` / `verifiedLoadId` registry arm was
+removed with the provenance migration — PR E2.)
+
+So the ESM artifact the compartment evaluates **must** still (a) contain each
 function's source verbatim, in emit order, so `indexOf`/`nextSearchOffset`
 resolves, and (b) carry a sourcemap over the same `filename`, and (c)
-`setVerifiedLoadSources` must include the normalized ESM source paths. This is
-the single most delicate integration constraint and gets its own test
-(`fn.src` resolves identically under both loaders for the same pattern).
+`setVerifiedLoadSources` must include the normalized ESM source paths — because
+CFC's consistency check fail-closes when `fn.src` does not resolve. This remains
+the single most delicate integration constraint and gets its own test (`fn.src`
+resolves to the canonical authored source under the ESM loader, and CFC
+verified-source resolves — `test/esm-source-location.test.ts`).
 
 ## Part A — Verifier classification port
 
