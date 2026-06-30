@@ -51,7 +51,6 @@
     "JSONSchema",
     "JSONValue",
     "LinkScope",
-    "OpaqueRef",
     "Pattern",
     "PerAny",
     "PerSession",

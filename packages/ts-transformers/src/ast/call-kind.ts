@@ -70,7 +70,6 @@ const CELL_LIKE_CLASSES = spellingsWhere({
   CellTypeConstructor: true,
   ScopedCellTypeConstructor: true,
   SqliteDb: false,
-  OpaqueRef: false,
   Reactive: false,
 });
 

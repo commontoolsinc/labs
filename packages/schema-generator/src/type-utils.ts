@@ -30,7 +30,6 @@ const CELL_LIKE_WRAPPER_NAMES = spellingsWhere({
   OpaqueCell: false, // split into OPAQUE_WRAPPER_NAMES (see NB above)
   Stream: false, // handled separately at each call site
   SqliteDb: false, // handled separately at each call site
-  OpaqueRef: false,
   Reactive: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -44,7 +43,6 @@ const OPAQUE_WRAPPER_NAMES = spellingsWhere({
   ComparableCell: false,
   Stream: false,
   SqliteDb: false,
-  OpaqueRef: false,
   Reactive: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -55,11 +53,10 @@ function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
 }
 
-// Spellings that participate in node-level wrapper detection. OpaqueRef (and
-// its successor spelling Reactive) is deliberately excluded: wrapperKindForName
-// has never treated it as a node wrapper, and its callers (Default-literal and
-// type-name resolution) must not start unwrapping it — revisit with the
-// OpaqueRef deprecation.
+// Spellings that participate in node-level wrapper detection. Reactive is
+// deliberately excluded: wrapperKindForName has never treated it as a node
+// wrapper, and its callers (Default-literal and type-name resolution) must not
+// start unwrapping it.
 const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
   Cell: true,
   Writable: true,
@@ -69,7 +66,6 @@ const NODE_WRAPPER_SPELLINGS: Readonly<Record<WrapperSpelling, boolean>> = {
   OpaqueCell: true,
   Stream: true,
   SqliteDb: true,
-  OpaqueRef: false,
   Reactive: false,
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
@@ -427,7 +423,7 @@ export function getNamedTypeKey(
   type: ts.Type,
   typeNode?: ts.TypeNode,
 ): string | undefined {
-  // Check if the TypeNode indicates this is a wrapper type (Default/Cell/Stream/OpaqueRef)
+  // Check if the TypeNode indicates this is a wrapper type (Default/Cell/Stream/Reactive)
   // Even if the type symbol says it's the inner type, if it's wrapped we shouldn't hoist it
   if (typeNode && ts.isTypeReferenceNode(typeNode)) {
     const nodeTypeName = getEntityNameText(typeNode.typeName);
@@ -440,12 +436,12 @@ export function getNamedTypeKey(
     }
   }
 
-  // Check if this is a Default/Cell/Stream/OpaqueRef wrapper type via alias
+  // Check if this is a Default/Cell/Stream/Reactive wrapper type via alias
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
     aliasName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(aliasName ?? "") ||
     aliasName === "Stream" || aliasName === "SqliteDb" ||
-    aliasName === "OpaqueRef" || aliasName === "Reactive"
+    aliasName === "Reactive"
   ) {
     return undefined;
   }
