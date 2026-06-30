@@ -2094,3 +2094,42 @@ Deno.test(
     assertEquals(input.readPaths.length, 0);
   },
 );
+
+Deno.test("Capability analysis marks an array-destructured parameter as wildcard", () => {
+  // Unpacking a parameter positionally (`[first, second]`) loses the
+  // field-level precision needed to shrink, so the root is wildcarded.
+  const fn = parseFirstCallback(
+    `const fn = ([first, second]) => first.id + second.value;`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const param = summary.params[0];
+
+  assert(param, "expected a parameter summary");
+  assertEquals(param.wildcard, true);
+});
+
+Deno.test("Capability analysis skips omitted elements in array destructuring", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const [, , third] = input.items;
+      return third.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assert(input.readPaths.includes("items"));
+});
+
+Deno.test("Capability analysis tracks reads through a nullish-fallback alias", () => {
+  const fn = parseFirstCallback(
+    `const fn = (a, b) => {
+      const picked = a.user ?? b.user;
+      return picked.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+
+  assert(getPaths(summary, "a").readPaths.includes("user"));
+  assert(getPaths(summary, "b").readPaths.includes("user"));
+});
