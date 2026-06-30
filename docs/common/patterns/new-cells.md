@@ -85,9 +85,18 @@ This makes each state explicit. It also lets TypeScript narrow the value before
 code passes it to a handler or provider client.
 
 ```typescript
+import { Writable } from "commonfabric";
+
+type AuthData = { token: string };
+
 type AuthAvailability =
   | { state: "loading"; auth: null }
   | { state: "ready"; auth: Writable<AuthData> };
+
+const availability: AuthAvailability = {
+  state: "ready",
+  auth: new Writable({ token: "token" }),
+};
 
 const auth = availability.state === "ready" ? availability.auth : null;
 ```
