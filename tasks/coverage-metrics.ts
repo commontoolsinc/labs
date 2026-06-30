@@ -5,7 +5,7 @@ export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
-const SOURCE_ROOTS = ["packages", "tasks", "scripts"];
+const SOURCE_ROOTS = ["packages", "tasks"];
 const EXCLUDED_PATH_PARTS = new Set([
   ".cache",
   "build",
@@ -188,6 +188,10 @@ export async function collectSourceFiles(
 
 export function shouldTrackSourceFile(relativePath: string): boolean {
   const normalized = toPosix(relativePath);
+  if (normalized === "scripts" || normalized.startsWith("scripts/")) {
+    return false;
+  }
+
   const extension = path.extname(normalized);
   if (!SOURCE_EXTENSIONS.has(extension)) return false;
 
