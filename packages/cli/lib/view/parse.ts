@@ -984,11 +984,12 @@ interface BuildCtx {
 }
 
 /**
- * One classification result. `recurseInto` lists the *child source nodes* to
- * descend into for sub-structure — chosen explicitly (not all of `forEachChild`)
- * so the primary-expression fold holds: a statement that wraps one primary
- * expression recurses into that expression's arguments/body/properties, never
- * re-emitting the expression itself.
+ * One classification result. `recurseInto` lists the *child source nodes*
+ * {@link buildNode} descends into for sub-structure — chosen explicitly rather
+ * than taken from `forEachChild`. A recognised shape narrows or suppresses its
+ * children: an import, schema, type alias, interface or enum lists none; a
+ * builder lists only its arguments; a closure or function its body. A generic
+ * (unclassified) node lists all its children, so the whole AST stays navigable.
  */
 interface Desc {
   kind: StructureKind;
@@ -1044,7 +1045,13 @@ function buildNode(node: ts.Node, depth: number, ctx: BuildCtx): StructureNode {
     astKinds: layers.map(syntaxKindName),
   };
   if (desc.name) registerDefinition(ctx, desc, sn);
-  for (const child of childNodes(inner)) {
+  // Descend only into the child source nodes the classification chose. A
+  // recognised shape narrows or suppresses its children here — an import,
+  // schema, type literal or other fold lists no children, a builder lists only
+  // its arguments — so the navigable tree stops at the fold instead of
+  // expanding into raw AST. A generic (unclassified) node lists all its
+  // children, keeping the whole AST reachable.
+  for (const child of desc.recurseInto) {
     if (child.getEnd() <= child.getStart(ctx.sf)) continue; // skip empty tokens
     sn.children.push(buildNode(child, depth + 1, ctx));
   }
@@ -1066,11 +1073,14 @@ function describeMerged(layers: ts.Node[], ctx: BuildCtx): Desc {
     if (d) return d;
   }
   // Prefer the innermost layer for the label: in an exact-range merge it is the
-  // most specific node (e.g. the call inside an expression statement).
+  // most specific node (e.g. the call inside an expression statement). A generic
+  // node has no fold, so it recurses into every child of that innermost layer,
+  // keeping the whole AST navigable.
+  const innermost = layers[layers.length - 1];
   return {
     kind: "node",
-    label: genericLabel(layers[layers.length - 1], ctx.sf),
-    recurseInto: [],
+    label: genericLabel(innermost, ctx.sf),
+    recurseInto: childNodes(innermost),
   };
 }
 
@@ -1278,9 +1288,10 @@ function registerDefinition(
  *     recognised builder/pattern/registered/synthetic calls, JSON-schema object
  *     literals) are nodes too.
  *
- * `recurseInto` carries the primary-expression fold: a statement that wraps a
- * single primary expression recurses into that expression's arguments/body, so
- * the expression is never re-emitted at (essentially) the same range.
+ * `recurseInto` chooses each shape's child source nodes: a recognised shape
+ * narrows or suppresses them (an import or schema lists none, a builder lists
+ * its arguments), while a statement wrapping an expression lists that
+ * expression so the call or closure inside stays its own node.
  */
 function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
   const { sf } = ctx;
@@ -1415,14 +1426,14 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     return {
       kind: "return",
       label: `return${returnSuffix(node.expression, sf)}`,
-      recurseInto: node.expression ? primaryChildren(node.expression) : [],
+      recurseInto: node.expression ? [node.expression] : [],
     };
   }
   if (ts.isThrowStatement(node)) {
     return {
       kind: "statement",
       label: `throw ${nodeFirstLine(node.expression, sf, 40)}`,
-      recurseInto: primaryChildren(node.expression),
+      recurseInto: [node.expression],
     };
   }
   if (isControlStatement(node)) {
@@ -1608,23 +1619,6 @@ function callDesc(
 function isReactiveCallee(callee: string): boolean {
   return callee === "pattern" || isBuilderName(callee) || isCallName(callee) ||
     isSyntheticName(callee);
-}
-
-/**
- * The child source nodes to recurse into for a primary expression: a builder
- * call hands back its arguments, a closure its body, anything else hands back
- * itself (so the descent finds reactive calls buried inside it).
- */
-function primaryChildren(expr: ts.Expression): ts.Node[] {
-  const e = peelExpr(expr);
-  if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) {
-    return bodyChildren(e);
-  }
-  if (ts.isCallExpression(e)) {
-    const callee = calleeName(e, e.getSourceFile());
-    if (isReactiveCallee(callee)) return [...e.arguments];
-  }
-  return [e];
 }
 
 /** The body (block or concise expression) of a function-like node, if any. */

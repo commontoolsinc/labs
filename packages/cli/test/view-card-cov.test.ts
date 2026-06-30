@@ -23,27 +23,28 @@ function findByLabel(doc: Document, label: string): StructureNode {
 // --- card title + "merges" line for merged generic AST nodes -----------------
 
 Deno.test("card: a merged generic node names every AST kind it merges", () => {
-  // The `{ lift, pattern }` import clause is a single navigable node that merges
-  // an ImportClause and a NamedImports node sharing one source range.
+  // In `a as B`, the type annotation `B` is a TypeReference whose sole child is
+  // the Identifier `B` over the same source range, so they merge into one
+  // navigable node carrying both AST kinds.
   const doc = parseDocument(`// transformed: /app.ts
-import { lift, pattern } from "commonfabric";
+const x = a as B;
 `);
-  const clause = findByLabel(doc, "{ lift, pattern }");
+  const clause = findByLabel(doc, "B");
   assertEquals(clause.kind, "node");
   assert(
     clause.astKinds && clause.astKinds.length > 1,
-    "the clause merges more than one AST node",
+    "the node merges more than one AST node",
   );
   const card = buildPeekCard(doc, clause);
   const text = card.info.map((l) => l.text).join("\n");
   // The card title for a generic node leads with the joined AST kinds.
   assert(
-    card.title.includes("ImportClause + NamedImports"),
+    card.title.includes("TypeReference + Identifier"),
     `generic-node title joins kinds: ${card.title}`,
   );
   // The "merges" line spells out the merged kinds, dot-separated.
   assert(
-    text.includes("merges") && text.includes("ImportClause · NamedImports"),
+    text.includes("merges") && text.includes("TypeReference · Identifier"),
     `merges line present: ${text}`,
   );
 });

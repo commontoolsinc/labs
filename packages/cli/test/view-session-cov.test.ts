@@ -1748,7 +1748,7 @@ Deno.test("session: revealing a use reference (no def offset) jumps via nodeAtLi
   press(s, "down"); // second reference (a use, no offset)
   assertEquals(
     s.view().overlay!.selectedLine,
-    15,
+    12,
     "the use reference selected",
   );
   press(s, "z"); // reveal it: findTargetIndex(-1) -> nodeAtLine, then pan right
@@ -1790,7 +1790,7 @@ Deno.test("session: following a dependency with no end offset matches a node by 
   press(s, "enter");
   press(s, "down"); // first reference (a definition, carries an end offset)
   press(s, "down"); // second reference (a dependency, no end offset)
-  assertEquals(s.view().overlay!.selectedLine, 11, "the dependency selected");
+  assertEquals(s.view().overlay!.selectedLine, 9, "the dependency selected");
   press(s, "z"); // findTargetIndex skips the exact lookup, matches by start
   assertEquals(s.view().overlay, null, "card closed");
   assert(s.view().selected, "a node matched by its start offset");

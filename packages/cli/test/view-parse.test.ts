@@ -347,12 +347,86 @@ Deno.test("parse: a mid-chain comment is collected and navigable", () => {
 });
 
 Deno.test("parse: nodes sharing an exact range merge into one", () => {
-  const doc = parseDocument(`import { Command } from "x";\n`, "m.ts");
-  // The ImportClause and the NamedImports cover the exact same `{ Command }`.
+  const doc = parseDocument(`const x = a as B;\n`, "m.ts");
+  // In `a as B` the type `B` is a TypeReference wrapping an Identifier over the
+  // exact same range, so the two AST kinds merge into one structure node.
   const merged = doc.flatStructure.find((n) => (n.astKinds?.length ?? 0) > 1);
   assert(merged, "an exact-range overlap is merged into one node");
   assert(
     merged!.astKinds!.length >= 2,
     `the merged node records every AST kind: ${merged!.astKinds}`,
+  );
+  assert(
+    merged!.astKinds!.includes("TypeReference") &&
+      merged!.astKinds!.includes("Identifier"),
+    `the merged node records both kinds: ${merged!.astKinds}`,
+  );
+});
+
+Deno.test("parse: recognised folds do not expand into raw AST children", () => {
+  // A node classified as a recognised shape (import, schema, type alias,
+  // interface) suppresses its children: the build descends only into the child
+  // source nodes the classification chose (`recurseInto`), never into raw
+  // `forEachChild` output. Each of these is a leaf in the structure tree.
+  const cases: Array<{ src: string; kind: string }> = [
+    { src: `import { Command, Other } from "x";\n`, kind: "import" },
+    {
+      src: `type Foo = {\n  a: number;\n  b: string;\n};\n`,
+      kind: "typeAlias",
+    },
+    { src: `interface Bar {\n  x: number;\n}\n`, kind: "interface" },
+    {
+      src:
+        `const s = { type: "object", properties: { token: { type: "string" } } } as const satisfies __cfHelpers.JSONSchema;\n`,
+      kind: "schema",
+    },
+  ];
+  for (const { src, kind } of cases) {
+    const doc = parseDocument(src, "m.ts");
+    const node = doc.flatStructure.find((n) => n.kind === kind);
+    assert(node, `expected a ${kind} node for ${JSON.stringify(src)}`);
+    assertEquals(
+      node!.children.length,
+      0,
+      `${kind} should fold to a leaf, but expanded into ${
+        node!.children.map((c) => c.label).join(", ")
+      }`,
+    );
+  }
+});
+
+Deno.test("parse: a schema binding does not leak schema keys or type machinery", () => {
+  // The over-expansion this guards against: descending into a folded schema
+  // re-emitted every property key (`type:`, `properties:`) and the trailing
+  // `as const satisfies __cfHelpers.JSONSchema` type position as navigable
+  // nodes, polluting the structure tree.
+  const doc = parseDocument(
+    `const s = { type: "object", properties: { token: { type: "string" } } } as const satisfies __cfHelpers.JSONSchema;\n`,
+    "m.ts",
+  );
+  assert(
+    !doc.flatStructure.some((n) => n.label === "properties:"),
+    "the schema fold should not emit a `properties:` node",
+  );
+  assert(
+    !doc.flatStructure.some((n) => n.label.includes("JSONSchema")),
+    "the schema fold should not emit the JSONSchema type position",
+  );
+});
+
+Deno.test("parse: a return of a reactive call keeps the call as its own node", () => {
+  // The statement still re-emits its primary expression as a node: the reactive
+  // call inside a `return` is reachable, then descends into its arguments.
+  const doc = parseDocument(
+    `function f() {\n  return pattern((input) => input);\n}\n`,
+    "m.ts",
+  );
+  const ret = doc.flatStructure.find((n) => n.kind === "return")!;
+  assert(ret, "the return statement is a node");
+  assert(
+    ret.children.some((c) => c.kind === "pattern"),
+    `the reactive call is a child of the return, got ${
+      ret.children.map((c) => `${c.kind}:${c.label}`).join(", ")
+    }`,
   );
 });
