@@ -16,6 +16,7 @@ import {
   buildSourceDocs,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
+  compiledDocWriteSchema,
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadSourceClosure,
@@ -330,6 +331,77 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
   });
 
+  it("loads duplicate source import links once", async () => {
+    const entryIdentity = "source-entry-with-duplicate-imports";
+    const childIdentity = "source-duplicate-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./child.ts";\nimport "./again.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./child.ts", targetIdentity: childIdentity },
+          { specifier: "./again.ts", targetIdentity: childIdentity },
+        ],
+      },
+      {
+        identity: childIdentity,
+        filename: "/child.ts",
+        source: `export const value = 1;`,
+        js: "/* compiled child */",
+        imports: [],
+      },
+    ];
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+
+    const loaded = await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+
+    expect(loaded?.size).toBe(2);
+    expect(loaded?.get(entryIdentity)?.imports).toEqual([
+      { specifier: "./child.ts", identity: childIdentity },
+      { specifier: "./again.ts", identity: childIdentity },
+    ]);
+  });
+
+  it("skips source imports that do not point to source documents", async () => {
+    const entryIdentity = "source-entry-with-broken-imports";
+    const missingIdentity = "source-missing-child";
+    const tx = runtime.edit();
+    const missingLink = runtime.getCell(
+      spaceA,
+      sourceDocKey(missingIdentity),
+      undefined,
+      tx,
+    ).getAsLink();
+    runtime.getCell(spaceA, sourceDocKey(entryIdentity), undefined, tx).set({
+      kind: "source",
+      identity: entryIdentity,
+      code: `export const value = 1;`,
+      filename: "/entry.ts",
+      imports: [
+        { specifier: "./plain.ts" },
+        { specifier: "./missing.ts", link: missingLink },
+      ],
+    });
+
+    const loaded = await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+
+    expect(loaded?.size).toBe(1);
+    expect(loaded?.get(entryIdentity)?.imports).toEqual([]);
+  });
+
   it("annotatePattern is non-normative (W4): the closure still verifies and the identity is unchanged", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     let tx = runtime.edit();
@@ -491,6 +563,126 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
       new Set(["/main.tsx", "/util.ts", "/types.ts"]),
     );
+  });
+
+  it("loads duplicate compiled import links once", async () => {
+    const entryIdentity = "compiled-entry-with-duplicate-imports";
+    const childIdentity = "compiled-duplicate-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./child.ts";\nimport "./again.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./child.ts", targetIdentity: childIdentity },
+          { specifier: "./again.ts", targetIdentity: childIdentity },
+        ],
+      },
+      {
+        identity: childIdentity,
+        filename: "/child.ts",
+        source: `export const value = 1;`,
+        js: "/* compiled child */",
+        imports: [],
+      },
+    ];
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(2);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([
+      { specifier: "./child.ts", identity: childIdentity },
+      { specifier: "./again.ts", identity: childIdentity },
+    ]);
+  });
+
+  it("skips compiled import links without integrity", async () => {
+    const entryIdentity = "compiled-entry-with-unstamped-import";
+    const missingIdentity = "compiled-unstamped-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./missing.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./missing.ts", targetIdentity: missingIdentity },
+        ],
+      },
+    ];
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(1);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([]);
+  });
+
+  it("skips compiled imports that do not carry links", async () => {
+    const entryIdentity = "compiled-entry-with-missing-link";
+    const wtx = runtime.edit();
+    const previousIdentity = wtx.getCfcState().implementationIdentity;
+    wtx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      runtime.getCell(
+        spaceA,
+        compiledDocKey(RTVER, entryIdentity),
+        compiledDocWriteSchema(),
+        wtx,
+      ).set({
+        kind: "compiled",
+        identity: entryIdentity,
+        code: "/* compiled entry */",
+        filename: "/entry.ts",
+        imports: [
+          { specifier: "./plain.ts" },
+        ],
+      });
+    } finally {
+      wtx.setCfcImplementationIdentity(previousIdentity);
+    }
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(1);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([]);
   });
 
   it("reaches an otherwise-unreachable module via the entry root link", async () => {
