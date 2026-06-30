@@ -2730,7 +2730,13 @@ export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
-export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
+export function getPatternEnvironment(): PatternEnvironment {
+  const location = globalThis.location;
+  const apiUrl = location
+    ? new URL(new URL(location.href).origin)
+    : new URL("http://localhost:8000");
+  return Object.freeze({ apiUrl });
+}
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
 export declare const toCompactDebugString: ToCompactDebugStringFunction;

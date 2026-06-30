@@ -16,10 +16,13 @@ import {
   pattern,
   TILE_UI,
   UI,
+  type VNode,
+  type Writable,
 } from "commonfabric";
 import GoogleAuth, {
   Auth,
   createPreviewUI,
+  type GoogleAuthCell,
   SelectedScopes,
 } from "./google-auth.tsx";
 
@@ -36,22 +39,13 @@ interface Input {
       docs: true;
       contacts: true;
     }>;
-  auth:
-    | Auth
-    | Default<{
-      token: "";
-      tokenType: "";
-      scope: [];
-      expiresIn: 0;
-      expiresAt: 0;
-      refreshToken: "";
-      user: { email: ""; name: ""; picture: "" };
-    }>;
+  auth: GoogleAuthCell;
 }
 
 /** Work Google account. #googleAuth #googleAuthWork */
 export interface Output {
-  auth: Auth;
+  [UI]: VNode;
+  auth: Writable<Auth>;
   accountType: "work";
   /** Minimal preview for picker display with WORK badge */
   [TILE_UI]: unknown;
@@ -65,7 +59,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
   // Build scopes record manually (same pattern as google-auth.tsx to avoid type casting)
   const previewUI = computed(() =>
     createPreviewUI(
-      baseAuth.auth,
+      baseAuth.auth.get(),
       {
         gmail: selectedScopes.gmail,
         gmailSend: selectedScopes.gmailSend,
@@ -81,11 +75,12 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
   );
 
   return {
-    [NAME]: computed(() =>
-      `Google Auth (Work)${
-        baseAuth.auth?.user?.email ? ` - ${baseAuth.auth.user.email}` : ""
-      }`
-    ),
+    [NAME]: computed(() => {
+      const authValue = baseAuth.auth.get();
+      return `Google Auth (Work)${
+        authValue?.user?.email ? ` - ${authValue.user.email}` : ""
+      }`;
+    }),
     [UI]: (
       <div>
         {/* Account type badge */}
@@ -113,16 +108,18 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
             WORK
           </span>
           <span>
-            {computed(() => baseAuth.auth?.user?.email || "Not logged in")}
+            {computed(() =>
+              baseAuth.auth.get()?.user?.email || "Not logged in"
+            )}
           </span>
         </div>
 
         {/* Embed the base auth UI */}
-        {baseAuth as any}
+        {baseAuth[UI]}
 
         {/* Prominent favorite CTA - only show when logged in */}
         {ifElse(
-          computed(() => !!baseAuth.auth?.user?.email),
+          computed(() => !!baseAuth.auth.get()?.user?.email),
           <div
             style={{
               marginTop: "16px",

@@ -24,13 +24,15 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  type PatternFactory,
+  safeDateNow,
   TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
@@ -125,6 +127,81 @@ const SCHOOL_EVENT_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type SchoolEventResult = Schema<typeof SCHOOL_EVENT_SCHEMA>;
+
+interface SchoolEmailAnalysis {
+  email: Email;
+  emailId: string;
+  emailDate: string;
+  sourceType: SourceType;
+  analysis: {
+    pending?: boolean;
+    error?: unknown;
+    result?: SchoolEventResult;
+  };
+  pending?: boolean;
+  error?: unknown;
+  result?: SchoolEventResult;
+}
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+const analyzeSchoolEmail = pattern<Email, SchoolEmailAnalysis>((email) => {
+  const sourceType = computed(() => classifySource(email.from || ""));
+
+  const analysis = generateObject<SchoolEventResult>({
+    prompt: computed((): string | undefined => {
+      if (!email.markdownContent) {
+        return undefined;
+      }
+
+      const source = sourceType;
+      return `Analyze this school email and extract event/announcement information.
+
+EMAIL FROM: ${email.from || ""}
+SUBJECT: ${email.subject || ""}
+DATE: ${email.date || ""}
+SOURCE TYPE: ${source} (${SOURCE_INFO[source as SourceType].label})
+
+EMAIL CONTENT:
+${email.markdownContent}
+
+Extract:
+1. Category: field_trip (outings), award (recognition/coyote awards), deadline (forms due), no_school (holidays), event (assemblies/gatherings), announcement (general news), attendance (absence-related), other
+
+2. Title: Concise name for this item (e.g., "Tilden Park Hike", "Coyote Award Ceremony", "Picture Day")
+
+3. Date: If a specific date is mentioned, format as YYYY-MM-DD. Parse relative dates based on the email date.
+
+4. Time: If mentioned (e.g., "10:00 AM")
+
+5. Action Required: What does the parent need to do? (e.g., "Bring bagged lunch", "Sign permission slip by Friday", "RSVP")
+
+6. Is Urgent: True if within 7 days, action required, or time-sensitive
+
+7. Summary: 1-2 sentences of what parents need to know`;
+    }) as any,
+    schema: SCHOOL_EVENT_SCHEMA,
+    model: "anthropic:claude-haiku-4-5",
+  });
+
+  const emailDate = computed(() => email.date || "");
+
+  return {
+    email,
+    emailId: email.id as string,
+    emailDate,
+    sourceType,
+    analysis,
+    pending: analysis.pending,
+    error: analysis.error,
+    result: analysis.result,
+  };
+});
 
 // =============================================================================
 // CONSTANTS
@@ -288,7 +365,7 @@ interface PatternInput {
       teacher: "Mr. Zaragoza";
     }>;
   dismissedIds?: Writable<string[] | Default<[]>>;
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
@@ -325,58 +402,10 @@ export default pattern<PatternInput, PatternOutput>(
     // Analyze each email to extract school event information
     // ==========================================================================
 
-    const emailAnalyses = allEmails.map((email: Email) => {
-      const sourceType = computed(() => classifySource(email.from || ""));
-
-      const analysis = generateObject<SchoolEventResult>({
-        prompt: computed((): string | undefined => {
-          if (!email?.markdownContent) {
-            return undefined;
-          }
-
-          const source = sourceType;
-          return `Analyze this school email and extract event/announcement information.
-
-EMAIL FROM: ${email.from || ""}
-SUBJECT: ${email.subject || ""}
-DATE: ${email.date || ""}
-SOURCE TYPE: ${source} (${SOURCE_INFO[source as SourceType].label})
-
-EMAIL CONTENT:
-${email.markdownContent}
-
-Extract:
-1. Category: field_trip (outings), award (recognition/coyote awards), deadline (forms due), no_school (holidays), event (assemblies/gatherings), announcement (general news), attendance (absence-related), other
-
-2. Title: Concise name for this item (e.g., "Tilden Park Hike", "Coyote Award Ceremony", "Picture Day")
-
-3. Date: If a specific date is mentioned, format as YYYY-MM-DD. Parse relative dates based on the email date.
-
-4. Time: If mentioned (e.g., "10:00 AM")
-
-5. Action Required: What does the parent need to do? (e.g., "Bring bagged lunch", "Sign permission slip by Friday", "RSVP")
-
-6. Is Urgent: True if within 7 days, action required, or time-sensitive
-
-7. Summary: 1-2 sentences of what parents need to know`;
-        }) as any,
-        schema: SCHOOL_EVENT_SCHEMA,
-        model: "anthropic:claude-haiku-4-5",
-      });
-
-      const emailDate = computed(() => email.date || "");
-
-      return {
-        email,
-        emailId: email.id as string,
-        emailDate,
-        sourceType,
-        analysis,
-        pending: analysis.pending,
-        error: analysis.error,
-        result: analysis.result,
-      };
-    });
+    const emailAnalyses = (allEmails as ReactiveArray<Email>).mapWithPattern(
+      analyzeSchoolEmail,
+      {},
+    );
 
     // Count pending/completed analyses
     const pendingCount = computed(
@@ -424,7 +453,7 @@ Extract:
       }
 
       // Sort by: urgent first, then by date (soonest first), then by source priority
-      const today = new Date();
+      const today = new Date(safeDateNow());
       today.setHours(0, 0, 0, 0);
 
       return events.sort((a, b) => {
@@ -446,7 +475,7 @@ Extract:
 
     // Filter events by category/criteria
     const urgentEvents = computed(() => {
-      const today = new Date();
+      const today = new Date(safeDateNow());
       today.setHours(0, 0, 0, 0);
 
       return allEvents.filter((e) => {
@@ -463,7 +492,7 @@ Extract:
     });
 
     const upcomingEvents = computed(() => {
-      const today = new Date();
+      const today = new Date(safeDateNow());
       today.setHours(0, 0, 0, 0);
 
       return allEvents
@@ -642,7 +671,8 @@ Extract:
                         borderLeft: computed(
                           () =>
                             `4px solid ${
-                              CATEGORY_INFO[event.category]?.color || "#9ca3af"
+                              CATEGORY_INFO[event.category]?.color ||
+                              "#9ca3af"
                             }`,
                         ),
                       }}
@@ -707,7 +737,8 @@ Extract:
                               style={{
                                 padding: "2px 8px",
                                 backgroundColor: computed(() =>
-                                  SOURCE_INFO[event.sourceType]?.priority === 1
+                                  SOURCE_INFO[event.sourceType]?.priority ===
+                                      1
                                     ? "#8b5cf6"
                                     : "#6b7280"
                                 ),
@@ -740,7 +771,7 @@ Extract:
                               style={{
                                 padding: "4px 10px",
                                 backgroundColor: computed(() => {
-                                  const today = new Date();
+                                  const today = new Date(safeDateNow());
                                   today.setHours(0, 0, 0, 0);
                                   return getUrgencyColor(
                                     daysUntil(event.date, today),
@@ -754,7 +785,7 @@ Extract:
                               }}
                             >
                               {computed(() => {
-                                const today = new Date();
+                                const today = new Date(safeDateNow());
                                 today.setHours(0, 0, 0, 0);
                                 return getDateLabel(
                                   daysUntil(event.date, today),
@@ -1007,7 +1038,7 @@ Extract:
                           textAlign: "center",
                           padding: "8px",
                           backgroundColor: computed(() => {
-                            const today = new Date();
+                            const today = new Date(safeDateNow());
                             today.setHours(0, 0, 0, 0);
                             return getUrgencyColor(
                               daysUntil(event.date, today),
@@ -1026,7 +1057,7 @@ Extract:
                           }}
                         >
                           {computed(() => {
-                            const today = new Date();
+                            const today = new Date(safeDateNow());
                             today.setHours(0, 0, 0, 0);
                             return getDateLabel(daysUntil(event.date, today));
                           })}

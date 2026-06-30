@@ -10,7 +10,7 @@
  * 3. Link: cf piece link google-auth/auth email-pattern-dreamer/overrideAuth
  */
 import { NAME, pattern, TILE_UI, UI, uiVariant } from "commonfabric";
-import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";
+import GmailImporter, { type GoogleAuthCell } from "../core/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -23,7 +23,7 @@ import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 export default pattern<PatternInput>(({ overrideAuth }) => {

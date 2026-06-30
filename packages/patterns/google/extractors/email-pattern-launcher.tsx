@@ -31,7 +31,9 @@ import {
   uiVariant,
   when,
 } from "commonfabric";
-import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import GmailExtractor, {
+  type GoogleAuthCell,
+} from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -42,19 +44,6 @@ import EmailTicketFinderPattern from "./email-ticket-finder.tsx";
 import CalendarChangeDetectorPattern from "./calendar-change-detector.tsx";
 import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
-
-const PATTERNS: any = {
-  "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
-  "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
-  "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
-  "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
-  "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
-  "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
-  "google/extractors/calendar-change-detector.tsx":
-    CalendarChangeDetectorPattern,
-  "google/extractors/email-notes.tsx": EmailNotesPattern,
-  "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
-};
 
 // =============================================================================
 // TYPES
@@ -119,7 +108,7 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
@@ -128,6 +117,18 @@ export interface PatternOutput {
   emailCount: number;
   matchCount: number;
   [TILE_UI]: unknown;
+}
+
+type LaunchablePattern = (
+  input: { overrideAuth?: GoogleAuthCell },
+) => unknown;
+
+function hasPatternLauncher(value: unknown): value is {
+  for: (patternUri: string) => unknown;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { for?: unknown };
+  return typeof candidate.for === "function";
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -218,6 +219,19 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // LAUNCH MATCHED PATTERNS
   // ==========================================================================
 
+  const patterns: Record<string, LaunchablePattern> = {
+    "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
+    "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
+    "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
+    "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
+    "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
+    "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
+    "google/extractors/calendar-change-detector.tsx":
+      CalendarChangeDetectorPattern,
+    "google/extractors/email-notes.tsx": EmailNotesPattern,
+    "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
+  };
+
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
     /*
@@ -245,9 +259,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const compiled = {
       result: computed(() => {
         const patternUri = matchInfo.patternUri;
-        const pattern = PATTERNS[patternUri];
-        if (!pattern) return null;
-        return pattern({} as any).for(patternUri);
+        const childPattern = patterns[patternUri];
+        if (!childPattern) return null;
+        const child = childPattern({ overrideAuth });
+        return hasPatternLauncher(child) ? child.for(patternUri) : null;
       }),
     };
 
@@ -504,7 +519,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
 
                       {/* Loading State */}
-                      {patternInfo.pending && (
+                      {when(
+                        patternInfo.pending,
                         <div
                           style={{
                             display: "flex",
@@ -517,11 +533,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         >
                           <cf-loader size="sm" />
                           <span>Loading pattern...</span>
-                        </div>
+                        </div>,
                       )}
 
                       {/* Error State */}
-                      {patternInfo.error && (
+                      {when(
+                        patternInfo.error,
                         <div
                           style={{
                             display: "block",
@@ -532,15 +549,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             fontSize: "14px",
                           }}
                         >
-                          Error: {patternInfo.error}
-                        </div>
+                          Error: {toIndentedDebugString(patternInfo.error)}
+                        </div>,
                       )}
 
                       {/* Preview UI from launched pattern */}
-                      {computed(() =>
-                        patternInfo.result && !patternInfo.pending &&
-                        !patternInfo.error
-                      ) && (
+                      {when(
+                        computed(() =>
+                          Boolean(patternInfo.result) &&
+                          !patternInfo.pending &&
+                          !patternInfo.error
+                        ),
                         <div
                           style={{
                             display: "block",
@@ -555,7 +574,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             [TILE_UI] export, or the platform default). */
                           }
                           {uiVariant(patternInfo.result, "tile")}
-                        </div>
+                        </div>,
                       )}
                     </div>
                   ))}
