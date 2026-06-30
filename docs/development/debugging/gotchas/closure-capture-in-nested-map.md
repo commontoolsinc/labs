@@ -71,7 +71,7 @@ const peopleNames = computed(() =>
 ))}
 ```
 
-The receiver is now an OpaqueRef again; the transformer rewrites the inner
+The receiver is now a Reactive again; the transformer rewrites the inner
 `.map`. Shipping example: `packages/patterns/factory-outputs/lot-watch/main.tsx`
 — the hoisted `people` receiver, consumed inside the sightings rows by the
 quick-pick chips

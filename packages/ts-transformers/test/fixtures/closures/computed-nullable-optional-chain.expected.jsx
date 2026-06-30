@@ -144,7 +144,7 @@ const __cfLift_5 = __cfHelpers.lift<{
 //   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })
 //   computed(() => topQuestion === null ? "" : topQuestion.question) → lift(({ topQuestion }) => ...)({ topQuestion })
 // Context: Tests both optional chaining (?.) and explicit null-check patterns on
-//   a nullable OpaqueRef. The capture schema correctly uses anyOf [Question, null]
+//   a nullable Reactive. The capture schema correctly uses anyOf [Question, null]
 //   with asOpaque: true for the topQuestion capture.
 export default pattern((_) => {
     // This computed can return null - simulates finding a question from a list

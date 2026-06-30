@@ -290,7 +290,7 @@ export function rewriteExpressionSite(
   if (context.options.mode === "error") {
     if (containerKind === "jsx-expression") {
       context.reportDiagnostic({
-        type: "opaque-ref:jsx-expression",
+        type: "reactive:jsx-expression",
         message:
           "JSX expression with Reactive computation should use computed()",
         node: expression,
@@ -368,7 +368,7 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
 
   if (context.options.mode === "error") {
     context.reportDiagnostic({
-      type: "opaque-ref:jsx-expression",
+      type: "reactive:jsx-expression",
       message: "JSX expression with Reactive computation should use computed()",
       node: expression,
     });

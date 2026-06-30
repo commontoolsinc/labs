@@ -23,7 +23,7 @@ descriptor lives as server-side state keyed by the handle cell's id.
 
 ```ts
 // Shown inside a pattern body.
-const db = sqliteDatabase({ tables }); // -> OpaqueRef<SqliteDb>, bound to a cell the runtime allocates here
+const db = sqliteDatabase({ tables }); // -> Reactive<SqliteDb>, bound to a cell the runtime allocates here
 ```
 
 **Status: implemented.** This is the source used by everything specified in this
@@ -86,7 +86,7 @@ const db = sqliteDatabase({}, { vm: vmHandle, path: "/data/app.db" });
 toolshed `/api` calls, which we intend to improve regardless. For this spec the
 source is **stubbed**: it assumes
 
-- an **opaque, cell-based handle to a VM** (`vmHandle: OpaqueRef<VmHandle>`),
+- an **opaque, cell-based handle to a VM** (`vmHandle: Reactive<VmHandle>`),
   resolved server-side to a concrete VM the same way other opaque
   capability handles are, and
 - a **file path within that VM** (`path: string`).

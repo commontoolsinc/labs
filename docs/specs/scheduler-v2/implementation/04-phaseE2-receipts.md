@@ -134,7 +134,7 @@ handlers that launch nothing.
    - Compute `resultCell`'s identity once:
      `const receiptCell = this.runtime.getCell(processCell.space, { resultFor: cause }, undefined, tx);`
      placed BEFORE the early return
-     (`if (!validateAndCheckOpaqueRefs(result, name) && frame.opaqueRefs.size === 0)`).
+     (`if (!validateAndCheckReactives(result, name) && frame.reactives.size === 0)`).
    - In the early-return (nothing-to-launch) branch, before
      `return result;`: write the minimal receipt value and mark
      create-only:

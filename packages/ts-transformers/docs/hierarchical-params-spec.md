@@ -98,7 +98,7 @@ items.map(() => <span>{element}</span>);
 
 - `capture-tree.ts` now rebuilds access expressions using the original operators
   (optional chaining vs. plain dot access).
-- Identifier normalisation is shared across closures, derives, and opaque-ref
+- Identifier normalisation is shared across closures, derives, and reactive
   transforms.
 - The `derive` transformer was updated alongside closures so its synthesized
   callbacks use the same hierarchical capture helpers and keep destructuring
@@ -200,6 +200,6 @@ Representative fixtures documenting the new behaviour:
 ### Test Commands
 
 - `deno task test` (from `packages/ts-transformers/`) – runs unit and fixture
-  suites covering closures, derive, and opaque-ref transforms.
+  suites covering closures, derive, and reactive transforms.
 - `deno lint` / `deno fmt` – keep transformer and fixture files consistent (lint
   excludes expected fixtures by default).

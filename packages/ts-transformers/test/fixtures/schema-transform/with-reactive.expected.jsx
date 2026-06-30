@@ -49,7 +49,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: with-opaque-ref
+// FIXTURE: with-reactive
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved

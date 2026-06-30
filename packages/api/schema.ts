@@ -23,8 +23,8 @@ import type {
   JSONSchema,
   ModuleFactory,
   OpaqueCell,
-  OpaqueRef,
   PatternFactory,
+  Reactive,
   ReadonlyCell,
   SELF,
   Stream,
@@ -377,7 +377,7 @@ declare module "commonfabric" {
     // Function + two schemas: infer types from JSONSchema literals
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<Schema<OS>> },
+        input: Reactive<Schema<IS>> & { [SELF]: Reactive<Schema<OS>> },
       ) => FactoryInput<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
@@ -386,7 +386,7 @@ declare module "commonfabric" {
     // Function + one schema: infer input type from JSONSchema literal
     <IS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<any> },
+        input: Reactive<Schema<IS>> & { [SELF]: Reactive<any> },
       ) => any,
       argumentSchema: IS,
     ): PatternFactory<SchemaWithoutCell<IS>, any>;
@@ -430,7 +430,7 @@ declare module "commonfabric" {
     <S extends JSONSchema = JSONSchema>(
       target: FactoryInput<WishParams>,
       schema: S,
-    ): OpaqueRef<WishState<Schema<S>> & UIRenderable>;
+    ): Reactive<WishState<Schema<S>> & UIRenderable>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload

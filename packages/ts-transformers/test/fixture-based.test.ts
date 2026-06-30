@@ -47,11 +47,11 @@ const configs: FixtureConfig[] = [
     describe: "Schema Transformer",
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
-      if (name === "with-opaque-ref") return "works with Reactive transformer";
+      if (name === "with-reactive") return "works with Reactive transformer";
       return `transforms ${formatted}`;
     },
     groups: [
-      { pattern: /with-opaque-ref/, name: "Reactive integration" },
+      { pattern: /with-reactive/, name: "Reactive integration" },
     ],
   },
   {

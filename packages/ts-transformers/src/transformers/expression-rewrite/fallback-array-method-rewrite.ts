@@ -3,7 +3,7 @@ import ts from "typescript";
 import { classifyArrayMethodAccess } from "../../ast/mod.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import { isFallbackOperator } from "../../utils/reactive-keys.ts";
-import { isSimpleReactiveAccess } from "../opaque-ref/opaque-ref.ts";
+import { isSimpleReactiveAccess } from "../cell-type.ts";
 
 export function isFallbackMapReceiverExpression(
   expression: ts.BinaryExpression,

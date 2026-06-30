@@ -271,7 +271,7 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
 // FIXTURE: array-method-value-lift
 // Verifies (CT-1777): a bare reactive VALUE-expression in the return position of a
 // reactive map/filter/flatMap callback is lifted to a value-level lift, so it runs on
-// resolved values instead of being emitted raw on OpaqueRef proxies. Before CT-1777 a
+// resolved values instead of being emitted raw on Reactive proxies. Before CT-1777 a
 // filter predicate `v.optionId === oid` compiled to a proxy-vs-proxy `===` — reference
 // equality, i.e. a constant `false` — so the filter matched nothing (silent, type-clean).
 //   - filter predicate comparison      → filterWithPattern(pattern(... return lift(...)(...)))

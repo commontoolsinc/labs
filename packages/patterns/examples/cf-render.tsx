@@ -48,7 +48,7 @@ export const Counter = pattern<PatternState>((state) => {
       <div>
         {
           /* Even though we could end up passing extra data to decrement, our schema prevents that actually reaching the handler.
-          In fact, we are passing `value` as an Reactive<number> here but it becomes a Writable<number> at invocation time */
+          In fact, we are passing `value` as a Reactive<number> here but it becomes a Writable<number> at invocation time */
         }
         <cf-button onClick={decrement(state)}>
           dec to {previous(state.value)}

@@ -15,7 +15,7 @@ import {
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { isBrandedCellType } from "./opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "./cell-type.ts";
 import {
   isPatternFactoryCalleeExpression,
   isPatternFactoryHelperExpression,

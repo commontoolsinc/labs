@@ -21,7 +21,7 @@ import {
   typeToSchemaTypeNode,
   unwrapCellLikeType,
 } from "../ast/mod.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
+import { getCellKind } from "./cell-type.ts";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,11 +1,11 @@
 import * as __cfHelpers from "commonfabric";
-import { pattern, OpaqueRef } from "commonfabric";
+import { pattern, Reactive } from "commonfabric";
 interface Email {
     id: string;
     content: string;
 }
 interface State {
-    emails: OpaqueRef<Email[]>;
+    emails: Reactive<Email[]>;
     prompt: string;
 }
 /**
@@ -16,7 +16,7 @@ interface State {
  * the closure transformer would try to capture T as: { T: T, prompt: prompt }
  * This caused "ReferenceError: T is not defined" at runtime.
  */
-function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
+function processWithType<T>(emails: Reactive<Email[]>, _prompt: string) {
     // T is used here but should NOT be captured - it's a type, not a value
     return emails.mapWithPattern(__cfHelpers.pattern({
         type: "object",

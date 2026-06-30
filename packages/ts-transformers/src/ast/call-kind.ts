@@ -43,10 +43,7 @@ import {
   COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
   COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commonfabric-runtime-registry.ts";
-import {
-  getCellKind,
-  isBrandedCellType,
-} from "../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind, isBrandedCellType } from "../transformers/cell-type.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
   getTypeAtLocationWithFallback,

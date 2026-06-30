@@ -16,7 +16,7 @@ import type {
   StripCell,
   toJSON,
 } from "./types.ts";
-import { reactive, stream } from "./opaque-ref.ts";
+import { reactive, stream } from "./reactive.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,

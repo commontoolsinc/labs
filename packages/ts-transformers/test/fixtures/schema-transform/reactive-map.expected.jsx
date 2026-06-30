@@ -91,7 +91,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     },
     required: ["title", "done", "position"]
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: opaque-ref-map
+// FIXTURE: reactive-map
 // Verifies: .map() on typed arrays is transformed to .mapWithPattern() with generated schemas
 //   items.map((item) => item.title) → items.mapWithPattern(pattern(...), {})
 //   items.map((item, index) => ({...})) → items.mapWithPattern(pattern(...), {}) with index param

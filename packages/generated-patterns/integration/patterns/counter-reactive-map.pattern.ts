@@ -51,7 +51,7 @@ const clampToNumberArray = (entries: number[] | undefined) => {
 
 const liftClampToNumberArray = lift(clampToNumberArray);
 
-export const counterWithOpaqueRefMap = pattern<OpaqueMapArgs>(
+export const counterWithReactiveMap = pattern<OpaqueMapArgs>(
   ({ value, history, labelPrefix }) => {
     const safeHistory = liftClampToNumberArray(history);
     const labels = safeHistory.map((entry, index) => str`#${index}: ${entry}`);
@@ -76,4 +76,4 @@ export const counterWithOpaqueRefMap = pattern<OpaqueMapArgs>(
   },
 );
 
-export default counterWithOpaqueRefMap;
+export default counterWithReactiveMap;

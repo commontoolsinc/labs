@@ -8,7 +8,7 @@ const model = toSchema<State>({
   "default": { value: 0 },
 });
 
-// FIXTURE: with-opaque-ref
+// FIXTURE: with-reactive
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved

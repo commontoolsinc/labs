@@ -63,7 +63,7 @@ export default pattern((__cf_pattern_input) => {
           {/* Regular JSX expression - should be wrapped in a lift-applied computation */}
           <span>Count: {__cfLift_1({ count: count })}</span>
 
-          {/* Event handler with OpaqueRef - should NOT be wrapped in a lift-applied computation */}
+          {/* Event handler with Reactive - should NOT be wrapped in a lift-applied computation */}
           <cf-button onClick={handleClick({ count })}>
             Click me
           </cf-button>

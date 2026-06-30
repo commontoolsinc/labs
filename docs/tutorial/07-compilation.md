@@ -85,7 +85,7 @@ one handles the branded wrapper types:
 | `number` | `{ type: "number" }` |
 | `Cell<T>` / `Writable<T>` | schema of `T` + `asCell: ["cell"]` |
 | `Stream<T>` | schema of `T` + `asCell: ["stream"]` |
-| `OpaqueRef<T>` | schema of `T` + `asCell: ["opaque"]` |
+| `Reactive<T>` | schema of `T` + `asCell: ["opaque"]` |
 | `T \| Default<V>` | schema of `T` + `default: V` |
 | `PerSpace<T>` / `PerUser<T>` / `PerSession<T>` | schema of `T` + `scope: "space" \| "user" \| "session"` (folded into the `asCell` entry when the inner type is cell-wrapped) |
 
@@ -148,7 +148,7 @@ Node {
 }
 ```
 
-During body execution your "values" are `OpaqueRef`s — proxies that record
+During body execution your "values" are `Reactive`s — proxies that record
 operations like `.key()` chains instead of performing them. That's the
 body-runs-once trick demystified: the body manipulates *placeholders*, and
 real data only flows later, when the scheduler executes nodes (Chapter 8).

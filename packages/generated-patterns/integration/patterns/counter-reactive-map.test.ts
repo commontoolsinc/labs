@@ -2,12 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "../pattern-harness.ts";
 import type { PatternIntegrationScenario } from "../pattern-harness.ts";
 
-export const counterOpaqueRefMapScenario: PatternIntegrationScenario<
+export const counterReactiveMapScenario: PatternIntegrationScenario<
   { value?: number; history?: number[]; labelPrefix?: string }
 > = {
   name: "counter uses opaque ref map for history",
-  module: new URL("./counter-opaque-ref-map.pattern.ts", import.meta.url),
-  exportName: "counterWithOpaqueRefMap",
+  module: new URL("./counter-reactive-map.pattern.ts", import.meta.url),
+  exportName: "counterWithReactiveMap",
   argument: {
     value: 5,
     history: [2, 5],
@@ -51,9 +51,9 @@ export const counterOpaqueRefMapScenario: PatternIntegrationScenario<
   ],
 };
 
-export const scenarios = [counterOpaqueRefMapScenario];
+export const scenarios = [counterReactiveMapScenario];
 
-describe("counter-opaque-ref-map", () => {
+describe("counter-reactive-map", () => {
   for (const scenario of scenarios) {
     it(scenario.name, async () => {
       await runPatternScenario(scenario);

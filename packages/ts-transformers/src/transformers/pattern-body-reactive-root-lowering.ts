@@ -41,7 +41,7 @@ import {
 import {
   classifyUnsupportedExpressionSiteCallRoot,
 } from "./expression-site-policy.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
+import { getCellKind } from "./cell-type.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([

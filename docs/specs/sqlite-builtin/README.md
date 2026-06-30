@@ -33,7 +33,7 @@ distinct (and CFC can gate them independently):
 
 - **`db.query<Row>(sql, { params?, reactOn? })`** — read-only `SELECT`. Reactive:
   re-runs when its `reactOn` input changes. Returns
-  `OpaqueRef<{ pending, result?: Row[], error? }>`, the same shape as
+  `Reactive<{ pending, result?: Row[], error? }>`, the same shape as
   `fetchData`/`generateText`
   (see [`packages/runner/src/builtins/fetch-data.ts`](../../../packages/runner/src/builtins/fetch-data.ts)).
   A free `sqliteQuery<Row>({ db, sql, ... })` function is equivalent.
@@ -128,7 +128,7 @@ const db = sqliteDatabase({
       ts: "integer",
     }),
   },
-}); // -> OpaqueRef<SqliteDb>
+}); // -> Reactive<SqliteDb>
 
 // Reactive read. Passing the whole `db` as reactOn means "any committed write
 // re-runs". The typed <Row> Cell<User> field surfaces author_cf_link as a Cell.

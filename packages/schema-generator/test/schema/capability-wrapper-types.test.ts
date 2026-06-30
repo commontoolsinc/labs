@@ -115,10 +115,10 @@ describe("Schema: Capability wrapper types", () => {
     expect(value).toEqual({ type: "unknown", asCell: ["cell"] });
   });
 
-  it("OpaqueRef<T> erases to T without wrapper metadata", async () => {
+  it("Reactive<T> erases to T without wrapper metadata", async () => {
     const code = `
       interface X {
-        value: OpaqueRef<{ foo: string }>;
+        value: Reactive<{ foo: string }>;
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");

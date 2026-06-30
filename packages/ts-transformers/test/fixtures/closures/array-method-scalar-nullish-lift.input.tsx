@@ -11,7 +11,7 @@ interface Row {
 // Verifies (CT-1779): a SCALAR nullish-coalescing `??` with a reactive operand in the
 // return / predicate position of a reactive map/filter/flatMap callback is value-lifted,
 // so the `?? default` fallback runs on the RESOLVED value. Emitted raw, `v.name ?? "d"`
-// collapses to the bare field projection — an OpaqueRef proxy is never null and `??`
+// collapses to the bare field projection — a Reactive proxy is never null and `??`
 // can't be trapped — so the default is silently dropped (type-clean, no error).
 //   - scalar string `??`        → mapWithPattern(pattern(... return lift(... r.name ?? "default")))
 //   - scalar boolean `??` (pred) → filterWithPattern(pattern(... return lift(... r.active ?? true)))
