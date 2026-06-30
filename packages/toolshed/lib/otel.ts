@@ -21,18 +21,16 @@ export const provider = new BasicTracerProvider({
     "service.name": env.OTEL_SERVICE_NAME || "toolshed-dev",
     "service.version": "1.0.0",
     "deployment.environment": env.ENV || "development",
-    "openinference.project.name": env.CFTS_AI_LLM_PHOENIX_PROJECT,
   }),
 });
 
 // Add span processor after construction (API changed in newer SDK versions)
 //
 // Export ALL spans (HTTP request spans from the otel middleware AND LLM spans) to
-// the OTLP collector. The collector fans them out: its Phoenix pipeline filters to
-// LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
+// the OTLP collector, which forwards everything to SigNoz. We keep the
 // OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
-// spans still get OpenInference semantic-convention formatting for Phoenix; a
-// pass-through spanFilter lets non-LLM spans through to SigNoz as well. (The
+// spans get OpenInference / GenAI semantic-convention enrichment, which SigNoz
+// consumes; a pass-through spanFilter lets non-LLM spans through as well. (The
 // processor tags passed-through spans with an `openinference.span.kind`
 // attribute, so they are not strictly byte-for-byte unchanged.)
 provider.addSpanProcessor(
