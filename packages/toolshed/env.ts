@@ -205,15 +205,6 @@ const EnvSchema = z.object({
   // background service operator identity).
   MEMORY_SERVICE_DIDS: z.string().default(""),
 
-  // INTERIM fail-closed allowlist of channel space DIDs permitted for external
-  // ingest (location-ingest, future webhook trails). Default empty => reject
-  // ALL ingest. This is the stopgap that closes the forge hole (an external
-  // presenter can self-sign a session.open for ANY space it names, so the
-  // endpoint must NOT trust the request-supplied space). It is replaced by the
-  // server-side channel registry + presenter-WRITE recheck in the grant plan
-  // (docs/development/proposals/vouched-ingest-channel-grant-plan.md, Step 3).
-  INGEST_CHANNEL_ALLOWLIST: z.string().default(""),
-
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
 

@@ -20,7 +20,6 @@ import staticRoute from "@/routes/static/static.index.ts";
 import patterns from "@/routes/patterns/patterns.index.ts";
 import sandboxExec from "@/routes/sandbox/exec/exec.index.ts";
 import webhooks from "@/routes/webhooks/webhooks.index.ts";
-import locationIngest from "@/routes/location-ingest/location-ingest.index.ts";
 
 const app = createApp();
 
@@ -46,7 +45,6 @@ const routes = [
   patterns,
   sandboxExec,
   webhooks,
-  locationIngest,
 ] as const;
 
 routes.forEach((route) => {
