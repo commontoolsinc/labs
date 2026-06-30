@@ -1,7 +1,3 @@
-import type {
-  CompiledModuleArtifact,
-  ModuleByteCache,
-} from "@commonfabric/runner";
 import { dirname } from "@std/path";
 
 // The compiled-module-byte cache, in full. The runtime defines only the
@@ -25,6 +21,23 @@ export interface SerializedModuleBytes {
   key: string;
   js: string;
   sourceMap?: unknown;
+}
+
+export interface CompiledModuleArtifact {
+  js: string;
+  sourceMap?: unknown;
+}
+
+export interface ModuleByteCache {
+  getCompleteSet(
+    runtimeVersion: string,
+    identities: readonly string[],
+  ): Map<string, CompiledModuleArtifact> | undefined;
+
+  putAll(
+    runtimeVersion: string,
+    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+  ): void;
 }
 
 /**
@@ -185,6 +198,34 @@ export function createCompileByteCache(): ModuleByteCache {
   const cacheFile = Deno.env.get("CF_COMPILE_CACHE_FILE");
   if (!cacheFile) return cache;
 
+  const restored = restoreCompileByteCache(cache, cacheFile);
+  if (restored !== undefined) {
+    console.log(
+      `[compile-byte-cache] restored ${restored} modules from ${cacheFile}`,
+    );
+  }
+
+  globalThis.addEventListener("unload", () => {
+    try {
+      const written = writeCompileByteCache(cache, cacheFile);
+      console.log(
+        `[compile-byte-cache] wrote ${written} modules to ${cacheFile}`,
+      );
+    } catch (error) {
+      console.error(
+        `[compile-byte-cache] failed to write ${cacheFile}:`,
+        error,
+      );
+    }
+  });
+
+  return cache;
+}
+
+function restoreCompileByteCache(
+  cache: ProcessModuleByteCache,
+  cacheFile: string,
+): number | undefined {
   let text: string | undefined;
   try {
     text = Deno.readTextFileSync(cacheFile);
@@ -199,27 +240,64 @@ export function createCompileByteCache(): ModuleByteCache {
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed)) {
       cache.restore(parsed);
-      console.log(
-        `[compile-byte-cache] restored ${parsed.length} modules from ${cacheFile}`,
-      );
+      return parsed.length;
     }
   }
+  return undefined;
+}
 
-  globalThis.addEventListener("unload", () => {
-    try {
-      Deno.mkdirSync(dirname(cacheFile), { recursive: true });
-      const snapshot = cache.snapshot();
-      Deno.writeTextFileSync(cacheFile, JSON.stringify(snapshot));
-      console.log(
-        `[compile-byte-cache] wrote ${snapshot.length} modules to ${cacheFile}`,
-      );
-    } catch (error) {
-      console.error(
-        `[compile-byte-cache] failed to write ${cacheFile}:`,
-        error,
-      );
-    }
+export function writeCompileByteCacheForTesting(
+  cache: ProcessModuleByteCache,
+  cacheFile: string,
+): number {
+  return writeCompileByteCache(cache, cacheFile);
+}
+
+export function restoreCompileByteCacheForTesting(
+  cache: ProcessModuleByteCache,
+  cacheFile: string,
+): number | undefined {
+  return restoreCompileByteCache(cache, cacheFile);
+}
+
+function writeCompileByteCache(
+  cache: ProcessModuleByteCache,
+  cacheFile: string,
+): number {
+  Deno.mkdirSync(dirname(cacheFile), { recursive: true });
+  const lock = Deno.openSync(`${cacheFile}.lock`, {
+    create: true,
+    read: true,
+    write: true,
   });
+  let locked = false;
+  try {
+    lock.lockSync(true);
+    locked = true;
+    restoreCompileByteCache(cache, cacheFile);
+    const snapshot = cache.snapshot();
+    writeTextFileAtomicSync(cacheFile, JSON.stringify(snapshot));
+    return snapshot.length;
+  } finally {
+    try {
+      if (locked) lock.unlockSync();
+    } finally {
+      lock.close();
+    }
+  }
+}
 
-  return cache;
+function writeTextFileAtomicSync(path: string, text: string): void {
+  const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
+  try {
+    Deno.writeTextFileSync(tempPath, text);
+    Deno.renameSync(tempPath, path);
+  } catch (error) {
+    try {
+      Deno.removeSync(tempPath);
+    } catch {
+      // The temp file may not have been created yet.
+    }
+    throw error;
+  }
 }

@@ -227,12 +227,21 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: ♻️ Restore/save generated pattern compile byte cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
+          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
+          restore-keys: |
+            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
         env:
+          CF_COMPILE_CACHE_FILE: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           DENO_COVERAGE_DIR: ../../coverage/raw/generated-patterns-${{ matrix.shard }}
         run: |
           TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})

@@ -1,19 +1,12 @@
 import { env } from "@commonfabric/integration";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { createCompileByteCache } from "./compile-byte-cache.ts";
+import { initializePiecesController } from "./pieces-controller.ts";
 
 const { API_URL } = env;
-
-// Share compiled module bytes across this suite's fresh-per-pattern runtimes.
-// In-memory within the process; also persisted to disk when CF_COMPILE_CACHE_FILE
-// is set (CI), so a shard reuses bytes it compiled last run. The cache lives
-// entirely in test code; the runtime only consults the injected interface.
-const moduleByteCache = createCompileByteCache();
 
 // Optional sharding for CI fan-out: PATTERN_INTEGRATION_SHARD="i/n" (1-based)
 // runs only the patterns where (sorted index % n) == (i - 1), so the pattern
@@ -68,11 +61,10 @@ describe("Compile all patterns", () => {
       // The PatternManager caches compiled patterns indefinitely, so we need a
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
-      const cc = await PiecesController.initialize({
+      const cc = await initializePiecesController({
         spaceName: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,
-        moduleByteCache,
       });
 
       try {

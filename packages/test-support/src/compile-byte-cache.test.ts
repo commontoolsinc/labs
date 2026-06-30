@@ -1,11 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { ProcessModuleByteCache } from "./compile-byte-cache.ts";
+import {
+  createCompileByteCache,
+  ProcessModuleByteCache,
+  restoreCompileByteCacheForTesting,
+  writeCompileByteCacheForTesting,
+} from "./compile-byte-cache.ts";
+
+const RT = "rtv";
 
 describe("ProcessModuleByteCache", () => {
-  const RT = "rtv";
-
   it("returns stored bytes by identity and reports a full set", () => {
     const cache = new ProcessModuleByteCache();
     cache.put(RT, "a", { js: "JS_A" });
@@ -75,5 +80,57 @@ describe("ProcessModuleByteCache", () => {
     ] as unknown[]);
     expect(cache.get(RT, "ok")).toEqual({ js: "GOOD" });
     expect(cache.stats().entries).toBe(1);
+  });
+});
+
+describe("createCompileByteCache", () => {
+  it("creates an in-memory cache when CF_COMPILE_CACHE_FILE is unset", () => {
+    const previous = Deno.env.get("CF_COMPILE_CACHE_FILE");
+    try {
+      Deno.env.delete("CF_COMPILE_CACHE_FILE");
+      const cache = createCompileByteCache();
+      cache.putAll(RT, [{ identity: "id", js: "JS" }]);
+      expect(cache.getCompleteSet(RT, ["id"])).toEqual(
+        new Map([["id", { js: "JS" }]]),
+      );
+    } finally {
+      if (previous === undefined) {
+        Deno.env.delete("CF_COMPILE_CACHE_FILE");
+      } else {
+        Deno.env.set("CF_COMPILE_CACHE_FILE", previous);
+      }
+    }
+  });
+
+  it("restores from disk and writes a merged snapshot", () => {
+    const dir = Deno.makeTempDirSync({ prefix: "compile-byte-cache-" });
+    const cacheFile = `${dir}/cache.json`;
+    try {
+      Deno.writeTextFileSync(
+        cacheFile,
+        JSON.stringify([{ key: `${RT}\0from-disk`, js: "DISK" }]),
+      );
+
+      const cache = new ProcessModuleByteCache();
+      expect(restoreCompileByteCacheForTesting(cache, cacheFile)).toBe(1);
+      expect(cache.getCompleteSet(RT, ["from-disk"])).toEqual(
+        new Map([["from-disk", { js: "DISK" }]]),
+      );
+      cache.putAll(RT, [{ identity: "from-run", js: "RUN" }]);
+
+      expect(writeCompileByteCacheForTesting(cache, cacheFile)).toBe(2);
+
+      const restored = new ProcessModuleByteCache();
+      restored.restore(JSON.parse(Deno.readTextFileSync(cacheFile)));
+      expect(restored.getCompleteSet(RT, ["from-disk", "from-run"]))
+        .toEqual(
+          new Map([
+            ["from-disk", { js: "DISK" }],
+            ["from-run", { js: "RUN" }],
+          ]),
+        );
+    } finally {
+      Deno.removeSync(dir, { recursive: true });
+    }
   });
 });

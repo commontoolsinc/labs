@@ -253,12 +253,15 @@ describe("compile-cache version axis", () => {
 
   it("CI compile-cache key mirrors the fingerprint input set", async () => {
     // The workflow carries a literal copy of the input globs (GitHub Actions
-    // cannot import the TS list). Both the `key` and `restore-keys` lines hash
-    // exactly the args `ciHashFilesArgs()` renders.
+    // cannot import the TS list). The pattern and generated-pattern cache keys
+    // hash exactly the args `ciHashFilesArgs()` renders.
     const workflow = await Deno.readTextFile(denoWorkflowPath);
     const expected = `hashFiles(${ciHashFilesArgs()})`;
     const occurrences = workflow.split(expected).length - 1;
-    expect(occurrences).toBe(2);
+    expect(occurrences).toBe(4);
+    expect(workflow).toContain(
+      "hashFiles('packages/generated-patterns/**/*.ts')",
+    );
   });
 
   it("renders directory inputs as globs and file inputs verbatim", () => {

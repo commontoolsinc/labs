@@ -1,4 +1,8 @@
 export {
+  createCompileByteCache,
+  ProcessModuleByteCache,
+} from "./compile-byte-cache.ts";
+export {
   createUnifiedDiff,
   defineFixtureSuite,
   shouldUpdateGoldens,
@@ -13,5 +17,10 @@ export type {
   FixtureGroup,
   FixtureSuiteConfig,
 } from "./fixture-runner.ts";
+export type {
+  CompiledModuleArtifact,
+  ModuleByteCache,
+  SerializedModuleBytes,
+} from "./compile-byte-cache.ts";
 export type { DenoCheckWithTemporaryConfigOptions } from "./isolated-deno.ts";
 export type { DenoCommandWithTemporaryLockOptions } from "./isolated-deno.ts";
