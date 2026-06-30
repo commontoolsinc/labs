@@ -120,7 +120,7 @@ export function flatMap(
   // normal reconcile via its journaled read, so it converges either way.
   const awaitInputThenSettle = (inputListCell: Cell<any>): void => {
     runtime.storageManager.trackUntilSettled(
-      Promise.resolve(inputListCell.sync())
+      inputListCell.sync()
         .then(() =>
           runtime.editWithRetry((settleTx) => {
             if (!result) return;
@@ -208,10 +208,6 @@ export function flatMap(
     // no-ops against the durable value.
     if (elementAwaitSync && resultWithLog.get() === undefined) {
       const pending = result.sync();
-      // syncCell is async, so the container pull is always a Promise; the union
-      // on Cell.sync() is a vestigial synchronous fast path the storage manager
-      // no longer takes. Assert it to narrow before awaiting.
-      if (!(pending instanceof Promise)) throw new Error("result.sync()");
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the read above is journaled). If the
       // container was never persisted — so nothing will ever stream in to
