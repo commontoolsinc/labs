@@ -574,24 +574,118 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_MAP).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:read"]}
+                  disabled={checkboxesDisabled}
                 >
-                  <cf-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </cf-checkbox>
-                </label>
-              ))}
+                  {SCOPE_MAP["data.records:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.records:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["webhook:manage"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["webhook:manage"]}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 
@@ -954,7 +1048,8 @@ export default pattern<Input, Output>(
       bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
-);`;
+);
+`;
 
 // Read from: packages/patterns/airtable/core/util/airtable-auth-manager.tsx
 const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
@@ -1109,21 +1204,22 @@ export const AirtableAuthManager = pattern<
   };
 });
 
-export default AirtableAuthManager;`;
+export default AirtableAuthManager;
+`;
 
 // Read from: packages/patterns/airtable/core/util/airtable-client.ts
 const AIRTABLE_CLIENT_SOURCE = `/**
  * Airtable API client with automatic token refresh and retry logic.
  *
  * Usage:
- * \\\`\\\`\\\`typescript
+ * \`\`\`typescript
  * import { AirtableClient } from "./util/airtable-client.ts";
  *
  * const client = AirtableClient(authCell, { debugMode: true });
  * const bases = await client.listBases();
  * const tables = await client.listTables(baseId);
  * const records = await client.listRecords(baseId, tableId);
- * \\\`\\\`\\\`
+ * \`\`\`
  */
 import { getPatternEnvironment, Writable } from "commonfabric";
 
@@ -1238,7 +1334,7 @@ export function AirtableClient(
         const response = await fetch(url, {
           ...options,
           headers: {
-            Authorization: \\\`Bearer \\\${token}\\\`,
+            Authorization: \`Bearer \${token}\`,
             "Content-Type": "application/json",
             ...options.headers,
           },
@@ -1252,12 +1348,11 @@ export function AirtableClient(
 
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
-          const waitMs = retryAfter
-            ? parseInt(retryAfter) * 1000
-            : delay * (attempt + 1);
+          const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          const waitMs = !isNaN(parsed) ? parsed * 1000 : delay * (attempt + 1);
           debugLog(
             debugMode,
-            \\\`Rate limited, waiting \\\${waitMs}ms...\\\`,
+            \`Rate limited, waiting \${waitMs}ms...\`,
           );
           await sleep(waitMs);
           continue;
@@ -1266,7 +1361,7 @@ export function AirtableClient(
         if (!response.ok) {
           const errorBody = await response.text();
           throw new Error(
-            \\\`Airtable API error \\\${response.status}: \\\${errorBody}\\\`,
+            \`Airtable API error \${response.status}: \${errorBody}\`,
           );
         }
 
@@ -1276,7 +1371,7 @@ export function AirtableClient(
         if (attempt < retries) {
           debugLog(
             debugMode,
-            \\\`Request failed (attempt \\\${attempt + 1}/\\\${retries + 1}):\\\`,
+            \`Request failed (attempt \${attempt + 1}/\${retries + 1}):\`,
             lastError.message,
           );
           await sleep(delay);
@@ -1313,7 +1408,7 @@ export function AirtableClient(
     );
 
     if (!res.ok) {
-      throw new Error(\\\`Token refresh failed: \\\${res.status}\\\`);
+      throw new Error(\`Token refresh failed: \${res.status}\`);
     }
 
     const json = await res.json();
@@ -1343,7 +1438,7 @@ export function AirtableClient(
     let offset: string | undefined;
 
     do {
-      const url = new URL(\\\`\\\${AIRTABLE_META_BASE}/bases\\\`);
+      const url = new URL(\`\${AIRTABLE_META_BASE}/bases\`);
       if (offset) url.searchParams.set("offset", offset);
 
       const response = await request<{
@@ -1355,7 +1450,7 @@ export function AirtableClient(
       offset = response.offset;
     } while (offset);
 
-    debugLog(debugMode, \\\`Found \\\${bases.length} bases\\\`);
+    debugLog(debugMode, \`Found \${bases.length} bases\`);
     return bases;
   }
 
@@ -1365,13 +1460,13 @@ export function AirtableClient(
   async function listTables(
     baseId: string,
   ): Promise<AirtableTable[]> {
-    debugLog(debugMode, \\\`Listing tables for base \\\${baseId}...\\\`);
+    debugLog(debugMode, \`Listing tables for base \${baseId}...\`);
 
     const response = await request<{ tables: AirtableTable[] }>(
-      \\\`\\\${AIRTABLE_META_BASE}/bases/\\\${baseId}/tables\\\`,
+      \`\${AIRTABLE_META_BASE}/bases/\${baseId}/tables\`,
     );
 
-    debugLog(debugMode, \\\`Found \\\${response.tables.length} tables\\\`);
+    debugLog(debugMode, \`Found \${response.tables.length} tables\`);
     return response.tables;
   }
 
@@ -1385,7 +1480,7 @@ export function AirtableClient(
   ): Promise<AirtableRecord[]> {
     debugLog(
       debugMode,
-      \\\`Listing records from \\\${baseId}/\\\${tableIdOrName}...\\\`,
+      \`Listing records from \${baseId}/\${tableIdOrName}...\`,
     );
 
     const records: AirtableRecord[] = [];
@@ -1394,7 +1489,7 @@ export function AirtableClient(
 
     do {
       const url = new URL(
-        \\\`\\\${AIRTABLE_API_BASE}/\\\${baseId}/\\\${encodeURIComponent(tableIdOrName)}\\\`,
+        \`\${AIRTABLE_API_BASE}/\${baseId}/\${encodeURIComponent(tableIdOrName)}\`,
       );
 
       if (options.pageSize) {
@@ -1415,10 +1510,10 @@ export function AirtableClient(
       }
       if (options.sort) {
         for (let i = 0; i < options.sort.length; i++) {
-          url.searchParams.set(\\\`sort[\\\${i}][field]\\\`, options.sort[i].field);
+          url.searchParams.set(\`sort[\${i}][field]\`, options.sort[i].field);
           if (options.sort[i].direction) {
             url.searchParams.set(
-              \\\`sort[\\\${i}][direction]\\\`,
+              \`sort[\${i}][direction]\`,
               options.sort[i].direction!,
             );
           }
@@ -1439,7 +1534,7 @@ export function AirtableClient(
     } while (offset);
 
     const result = records.slice(0, maxRecords);
-    debugLog(debugMode, \\\`Fetched \\\${result.length} records\\\`);
+    debugLog(debugMode, \`Fetched \${result.length} records\`);
     return result;
   }
 
@@ -1455,6 +1550,7 @@ const AIRTABLE_IMPORTER_SOURCE = `import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -1486,6 +1582,7 @@ interface Input {
 
 /** Import records from an Airtable base. #airtableImporter */
 export interface Output {
+  [UI]: VNode;
   records: readonly AirtableRecordData[];
   bases: readonly BaseInfo[];
   tables: readonly TableInfo[];
@@ -2141,7 +2238,8 @@ function formatCellValue(value: unknown): string {
     return JSON.stringify(value);
   }
   return String(value);
-}`;
+}
+`;
 
 // ---------------------------------------------------------------------------
 // Prompt generation
