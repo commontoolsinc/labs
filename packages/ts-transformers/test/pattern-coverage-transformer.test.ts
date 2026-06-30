@@ -488,3 +488,31 @@ switch (x) {
   // recorded.
   assertEquals(spans.some((span) => span.startLine === caseOneLine), true);
 });
+
+Deno.test("single-statement control-flow bodies are wrapped and recorded", () => {
+  const source = `const flag = 1;
+if (flag > 0) doThen(); else doElse();
+if (flag > 0) doIfOnly();
+while (flag < 0) doWhile();
+do doDo(); while (flag < 0);
+for (let i = 0; i < 0; i++) doFor();
+`;
+  const { output, spans } = transformWithCoverage(source);
+
+  // Each non-block branch/body is instrumented even without braces.
+  expectSpanContaining(spans, source, "doThen();");
+  expectSpanContaining(spans, source, "doElse();");
+  expectSpanContaining(spans, source, "doWhile();");
+  expectSpanContaining(spans, source, "doDo();");
+  expectSpanContaining(spans, source, "doFor();");
+
+  // The bare statements are lifted into blocks carrying a hit call.
+  assertMatch(
+    output,
+    /if \(flag > 0\)\s*\{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+doThen\(\);/,
+  );
+  assertMatch(
+    output,
+    /while \(flag < 0\)\s*\{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+doWhile\(\);/,
+  );
+});
