@@ -1979,6 +1979,15 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
+      "packages/background-piece-service": {
+        "dependencies": [
+          "npm:@opentelemetry/api@^1.7.0",
+          "npm:@opentelemetry/context-async-hooks@^1.19.0",
+          "npm:@opentelemetry/exporter-trace-otlp-proto@0.46",
+          "npm:@opentelemetry/resources@^1.19.0",
+          "npm:@opentelemetry/sdk-trace-base@^1.19.0"
+        ]
+      },
       "packages/cf-harness": {
         "dependencies": [
           "jsr:@db/sqlite@0.12"
