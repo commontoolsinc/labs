@@ -304,7 +304,7 @@ async function handleLLMError<T, P>(
   runtime: Runtime,
   pendingCell: Cell<boolean>,
   resultCell: Cell<T>,
-  errorCell: Cell<unknown>,
+  errorCell: Cell<string | undefined>,
   partialCell: Cell<P>,
   requestHashCell: Cell<string | undefined>,
   requestHash: string,
@@ -322,7 +322,7 @@ async function handleLLMError<T, P>(
 
   await runtime.editWithRetry((tx) => {
     pendingCell.withTx(tx).set(false);
-    errorCell.withTx(tx).set(error);
+    errorCell.withTx(tx).set(message);
     resultCell.withTx(tx).set(undefined as T);
     partialCell.withTx(tx).set(undefined as P);
     requestHashCell.withTx(tx).set(requestHash);

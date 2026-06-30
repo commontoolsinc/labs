@@ -1850,7 +1850,7 @@ export interface BuiltInLLMState {
   pending: boolean;
   result?: BuiltInLLMContent;
   partial?: string;
-  error?: unknown;
+  error?: string;
   cancelGeneration: Stream<void>;
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
   groundingSources?: readonly BuiltInLLMGroundingSource[];
@@ -1861,7 +1861,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   result?: T;
   messages?: BuiltInLLMMessage[];
   partial?: string;
-  error?: unknown;
+  error?: string;
   cancelGeneration: Stream<void>;
   // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
   // improve the structured result), but does NOT surface `groundingSources` —
@@ -1872,7 +1872,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
 export interface BuiltInLLMDialogState {
   pending: boolean;
   result?: any;
-  error?: unknown;
+  error?: string;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
   pinCell: Stream<{ path: string; name: string }>;
@@ -1986,7 +1986,7 @@ export type BuiltInGenerateTextParams =
 export interface BuiltInGenerateTextState {
   pending: boolean;
   result?: string;
-  error?: unknown;
+  error?: string;
   partial?: string;
   requestHash?: string;
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
@@ -2427,7 +2427,9 @@ export type WishState<T> = {
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export interface WishFunction {
-  <T = unknown>(target: FactoryInput<WishParams>): OpaqueRef<WishState<T>>;
+  <T = unknown>(
+    target: FactoryInput<WishParams>,
+  ): OpaqueRef<WishState<T> & UIRenderable>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(

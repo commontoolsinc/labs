@@ -55,6 +55,7 @@ export function registerBuiltins(runtime: Runtime) {
     raw<BuiltInGenerateObjectParams, {
       pending: Cell<boolean>;
       result: Cell<Record<string, unknown> | undefined>;
+      error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
     }>(generateObject, { isEffect: true }),
@@ -64,6 +65,7 @@ export function registerBuiltins(runtime: Runtime) {
     raw<BuiltInGenerateTextParams, {
       pending: Cell<boolean>;
       result: Cell<string | undefined>;
+      error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
     }>(generateText, { isEffect: true }),

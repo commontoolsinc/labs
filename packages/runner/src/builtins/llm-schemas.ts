@@ -245,7 +245,7 @@ export const LLMResultSchema = internSchema(
           { type: "array", items: { type: "object" } },
         ],
       },
-      error: {},
+      error: { type: "string" },
       partial: { type: "string" },
       requestHash: { type: "string" },
       groundingSources: {
@@ -271,7 +271,7 @@ export const GenerateTextResultSchema = internSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: { type: "string" },
-      error: {},
+      error: { type: "string" },
       partial: { type: "string" },
       requestHash: { type: "string" },
       groundingSources: {
@@ -298,7 +298,7 @@ export const GenerateObjectResultSchema = internSchema(
       pending: { type: "boolean", default: false },
       result: { type: "object" },
       messages: { type: "array", items: LLMMessageSchema },
-      error: {},
+      error: { type: "string" },
       partial: { type: "string" },
       requestHash: { type: "string" },
       // No `groundingSources` here — generateObject's JSON-mode path returns
