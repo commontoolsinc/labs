@@ -22,6 +22,7 @@ import VScrollStory from "../stories/cf-vscroll-story.tsx";
 import HScrollStory from "../stories/cf-hscroll-story.tsx";
 import TextareaStory from "../stories/cf-textarea-story.tsx";
 import MessageInputStory from "../stories/cf-message-input-story.tsx";
+import SubmitInputStory from "../stories/cf-submit-input-story.tsx";
 import ToolbarStory from "../stories/cf-toolbar-story.tsx";
 import HeadingStory from "../stories/cf-heading-story.tsx";
 import TextStory from "../stories/cf-text-story.tsx";
@@ -126,6 +127,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TextareaStory({});
         case "message-input":
           return MessageInputStory({});
+        case "submit-input":
+          return SubmitInputStory({});
         case "toolbar":
           return ToolbarStory({});
         case "heading":

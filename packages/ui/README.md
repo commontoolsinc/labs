@@ -135,7 +135,8 @@ Useful references:
 | Element           | Element           | Element            | Element            |
 | ----------------- | ----------------- | ------------------ | ------------------ |
 | `cf-chat`         | `cf-chat-message` | `cf-message-beads` | `cf-message-input` |
-| `cf-prompt-input` | `cf-question`     | `cf-tool-call`     | `cf-tools-chip`    |
+| `cf-prompt-input` | `cf-question`     | `cf-submit-input`  | `cf-tool-call`     |
+| `cf-tools-chip`   |                   |                    |                    |
 
 ### Identity And Integrations
 

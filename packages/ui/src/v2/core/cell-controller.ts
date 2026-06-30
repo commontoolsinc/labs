@@ -236,6 +236,14 @@ export class CellController<T> implements ReactiveController {
   }
 
   /**
+   * Run any pending (debounced or throttled) write immediately, so a following
+   * read or commit sees the latest value.
+   */
+  flush(): void {
+    this._inputTiming?.flush();
+  }
+
+  /**
    * Check if current value is a Cell
    */
   hasCell(): boolean {

@@ -435,3 +435,75 @@ describe("captureOriginalValue", () => {
     expect(formField.isDirty()).toBe(false);
   });
 });
+
+describe("FormFieldController commit", () => {
+  it("flushes the cell controller and writes through the cell", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    let flushed = false;
+    let cellSet: string | undefined;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "current",
+      setValue: () => {},
+      flush: () => {
+        flushed = true;
+      },
+      getCell: () => ({
+        set: (v: string) => {
+          cellSet = v;
+          return Promise.resolve();
+        },
+      }),
+    };
+
+    const formField = new FormFieldController(host, { cellController });
+    await formField.commit();
+
+    expect(flushed).toBe(true);
+    expect(cellSet).toBe("current");
+  });
+
+  it("falls back to setValue when no cell is bound", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    let setArg: string | undefined;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "current",
+      setValue: (v: string) => {
+        setArg = v;
+      },
+      getCell: () => null,
+    };
+
+    const formField = new FormFieldController(host, { cellController });
+    await formField.commit();
+
+    expect(setArg).toBe("current");
+  });
+
+  it("commits the buffered value when one is present", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    let cellSet: string | undefined;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "cell-value",
+      setValue: () => {},
+      getCell: () => ({
+        set: (v: string) => {
+          cellSet = v;
+          return Promise.resolve();
+        },
+      }),
+    };
+
+    const formField = new FormFieldController(host, { cellController });
+    // Simulate a buffered edit, as a form context would produce.
+    const buffered = formField as unknown as {
+      _buffer: string;
+      _hasBuffer: boolean;
+    };
+    buffered._buffer = "buffered";
+    buffered._hasBuffer = true;
+
+    await formField.commit();
+
+    expect(cellSet).toBe("buffered");
+  });
+});
