@@ -1,5 +1,4 @@
 import {
-  CloneForMutationError,
   cloneIfNecessary,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
@@ -424,13 +423,12 @@ const setChildAtReplayKey = (
       container.push(value);
       return;
     }
-    if (!isArrayIndexPropertyName(key)) {
-      throw new Error(`pending replay cannot write non-index array key ${key}`);
+    if (isArrayIndexPropertyName(key)) {
+      container[Number(key)] = value;
+      return;
     }
-    container[Number(key)] = value;
-    return;
   }
-  container[key] = value;
+  (container as Record<string, FabricValue>)[key] = value;
 };
 
 type MutableReplaySpine = {
@@ -439,23 +437,14 @@ type MutableReplaySpine = {
 };
 
 const baseWithMutableReplaySpine = (
-  base: FabricValue,
+  base: PendingReplayContainer,
   path: readonly string[],
 ): MutableReplaySpine => {
-  if (path.length === 0) {
-    throw new Error("pending replay spine requires a non-empty path");
-  }
-
   // Pending patches are replayed against the latest confirmed value after
   // earlier optimistic materializations may have been dropped. If the surviving
   // patch was built through that dropped parent, the confirmed value can be a
   // stale non-container at the same path. Rebuild only the mutable spine needed
   // for this replay; normal cloneWithValueAtPath/cloneForMutation remain strict.
-  if (!isPendingReplayContainer(base)) {
-    // cloneWithPendingReplayValueAtPath only calls this for descendant/leaf
-    // clone errors; root-level non-containers remain strict.
-    throw new Error("pending replay repair requires a container root");
-  }
   const root = cloneIfNecessary(base, { frozen: false, deep: false });
   let current = root;
 
@@ -474,14 +463,10 @@ const baseWithMutableReplaySpine = (
 };
 
 const cloneWithReplayValueAtPath = (
-  base: FabricValue,
+  base: PendingReplayContainer,
   path: readonly string[],
   value: FabricValue,
 ): FabricValue => {
-  if (path.length === 0) {
-    return cloneIfNecessary(value);
-  }
-
   const { root, parent } = baseWithMutableReplaySpine(base, path);
   setChildAtReplayKey(
     parent,
@@ -497,22 +482,10 @@ export const cloneWithPendingReplayValueAtPath = (
   path: readonly string[],
   value: FabricValue,
 ): FabricValue => {
-  if (path.length > 0 && isPendingReplayContainer(base)) {
-    return cloneWithReplayValueAtPath(base, path, value);
-  }
-
-  try {
+  if (path.length === 0 || !isPendingReplayContainer(base)) {
     return cloneWithValueAtPath(base, path, value);
-  } catch (error) {
-    if (
-      !(error instanceof CloneForMutationError) ||
-      (error.kind !== "non-container-descent" &&
-        error.kind !== "non-mutable-leaf")
-    ) {
-      throw error;
-    }
-    return cloneWithReplayValueAtPath(base, path, value);
   }
+  return cloneWithReplayValueAtPath(base, path, value);
 };
 
 const applyPendingVersion = (
