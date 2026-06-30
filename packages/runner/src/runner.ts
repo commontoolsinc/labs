@@ -76,7 +76,7 @@ import {
   mergeObjects,
   sanitizeDebugLabel,
   setRunnableName,
-  validateAndCheckOpaqueRefs,
+  validateAndCheckReactives,
 } from "./runner-utils.ts";
 import {
   resolveBuiltinImplementationIdentity,
@@ -95,7 +95,7 @@ import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
-  validateAndCheckOpaqueRefs,
+  validateAndCheckReactives,
 } from "./runner-utils.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
@@ -2706,8 +2706,8 @@ export class Runner {
     const receiptsEnabled =
       this.runtime.experimental.commitPreconditions === true;
     if (
-      !validateAndCheckOpaqueRefs(result, name) &&
-      frame.opaqueRefs.size === 0
+      !validateAndCheckReactives(result, name) &&
+      frame.reactives.size === 0
     ) {
       if (receiptsEnabled) {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
@@ -2944,8 +2944,8 @@ export class Runner {
     narrowestReadScope?: CellScope,
   ): any {
     if (
-      !validateAndCheckOpaqueRefs(result, name) &&
-      frame.opaqueRefs.size === 0
+      !validateAndCheckReactives(result, name) &&
+      frame.reactives.size === 0
     ) {
       recordOutputSchemaPolicyInputs(
         tx,

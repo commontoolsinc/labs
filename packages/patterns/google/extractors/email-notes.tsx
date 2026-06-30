@@ -463,7 +463,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 <cf-vstack gap="3">
                   {notes.map((note) => {
                     // Check if this note is being processed
-                    // Extract noteId first to avoid OpaqueRef issues in the projection
+                    // Extract noteId first to avoid Reactive issues in the projection
                     const noteId = note.id;
                     const isProcessing = (processingNotes.get() || []).includes(
                       noteId,

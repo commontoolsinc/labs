@@ -1,4 +1,4 @@
-// toCell and toOpaqueRef hook tests: verifying that objects returned from
+// toCell and toReactive hook tests: verifying that objects returned from
 // cell.get() can be converted back to cells via Symbol hooks.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -17,7 +17,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("toCell and toOpaqueRef hooks", () => {
+describe("toCell and toReactive hooks", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -39,7 +39,7 @@ describe("toCell and toOpaqueRef hooks", () => {
   });
 
   describe("Basic hook functionality", () => {
-    it("should add toCell and toOpaqueRef symbols to objects returned from Cell.get()", () => {
+    it("should add toCell and toReactive symbols to objects returned from Cell.get()", () => {
       const schema = {
         type: "object",
         properties: {
@@ -548,7 +548,7 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       // cellProp should be a cell, not have hooks
       expect(isCell(result.cellProp)).toBe(true);
-      // Cells themselves have toOpaqueRef (part of Cell interface) but not toCell
+      // Cells themselves have toReactive (part of Cell interface) but not toCell
       expect(toCell in result.cellProp).toBe(false);
     });
 
@@ -707,7 +707,7 @@ describe("toCell and toOpaqueRef hooks", () => {
   });
 });
 
-describe("toCell and toOpaqueRef hooks: circular references", () => {
+describe("toCell and toReactive hooks: circular references", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;

@@ -41,9 +41,9 @@ import type {
   Module,
   NavigateToFunction,
   NonPrivateRandomFunction,
-  OpaqueRef,
   Pattern,
   PatternToolFunction,
+  Reactive,
   SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
@@ -141,11 +141,11 @@ export type {
   ModuleFactory,
   NodeFactory,
   OpaqueCell,
-  OpaqueRef,
   Pattern,
   PatternFactory,
   PatternFunction,
   Props,
+  Reactive,
   RenderNode,
   RequireDefaults,
   SchemaScope,
@@ -163,20 +163,20 @@ export type {
 export type { AsCellEntry } from "@commonfabric/api";
 export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
-export const isOpaqueRefMarker = Symbol("isOpaqueRef");
+export const isReactiveMarker = Symbol("isReactive");
 
-export function isOpaqueRef<T = any>(
+export function isReactive<T = any>(
   value: unknown,
-): value is OpaqueRef<T> {
+): value is Reactive<T> {
   return !!value &&
-    typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
+    typeof (value as { [isReactiveMarker]: true })[isReactiveMarker] ===
       "boolean";
 }
 
 export type NodeRef = {
-  module: Module | Pattern | OpaqueRef<Module | Pattern>;
+  module: Module | Pattern | Reactive<Module | Pattern>;
   inputs: FactoryInput<any>;
-  outputs: OpaqueRef<any>;
+  outputs: Reactive<any>;
   frame: Frame | undefined;
 };
 
@@ -288,7 +288,7 @@ export type Frame = {
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
-  opaqueRefs: Set<OpaqueRef<any>>;
+  reactives: Set<Reactive<any>>;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
   /**

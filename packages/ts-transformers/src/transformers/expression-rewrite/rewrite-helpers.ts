@@ -200,7 +200,7 @@ export function createReactiveWrapperForExpression(
  * "!"` declared in the enclosing pattern/map callback) become explicit
  * lift-applied inputs instead of flowing through lexical closure.
  *
- * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
+ * The dataflow analyzer only surfaces reactive captures (Cell/Reactive).
  * Plain-JS values declared in enclosing scope are invisible to it, so they
  * default to lexical closure when `createLiftAppliedCall` emits the callback.
  * That breaks the self-contained-callback contract that SES sandboxing and

@@ -11,7 +11,7 @@ import {
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { opaqueRef } from "../src/builder/opaque-ref.ts";
+import { reactive } from "../src/builder/opaque-ref.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Identity } from "@commonfabric/identity";
@@ -36,7 +36,7 @@ describe("pattern", () => {
     frame = pushFrame({
       space,
       generatedIdCounter: 0,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
       runtime,
     });
   });
@@ -65,7 +65,7 @@ describe("pattern", () => {
   it("creates a pattern, with an inner opaque ref", () => {
     const double = lift(({ x }) => x * 2);
     const doublePattern = pattern<{ x: number }>(() => {
-      const x = opaqueRef<number>(1);
+      const x = reactive<number>(1);
       (x as any).for("x");
       return { double: double({ x }) };
     });

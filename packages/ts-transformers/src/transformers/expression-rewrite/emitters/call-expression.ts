@@ -206,7 +206,7 @@ function shouldFilterNestedLocalsForCallWrapper(
     }
 
     const receiverAnalysis = analyze(callee.expression);
-    return receiverAnalysis.containsOpaqueRef;
+    return receiverAnalysis.containsReactive;
   }
 
   const sinkReceiverChain = classifyArrayMethodResultSinkReceiverChainCall(
@@ -226,7 +226,7 @@ function shouldFilterNestedLocalsForCallWrapper(
   }
 
   const receiverAnalysis = analyze(callee.expression);
-  return receiverAnalysis.containsOpaqueRef;
+  return receiverAnalysis.containsReactive;
 }
 
 function isCellGetTerminalCall(

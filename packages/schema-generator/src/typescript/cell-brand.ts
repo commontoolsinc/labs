@@ -19,7 +19,7 @@ export type CellWrapperKind =
   | "ReadonlyCell"
   | "WriteonlyCell"
   | "SqliteDb"
-  | "OpaqueRef"; // this last one may be obsolete.
+  | "Reactive";
 
 export interface CellWrapperInfo {
   brand: CellBrand;
@@ -173,7 +173,7 @@ export function wrapperKindToBrand(
 ): CellBrand | undefined {
   switch (wrapperKind) {
     case "OpaqueCell":
-    case "OpaqueRef":
+    case "Reactive":
       return "opaque";
     case "Stream":
       return "stream";

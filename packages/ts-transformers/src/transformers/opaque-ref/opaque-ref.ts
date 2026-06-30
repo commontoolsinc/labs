@@ -59,7 +59,7 @@ export function getCellKind(
   return utilGetCellKind(type, checker);
 }
 
-export function isSimpleOpaqueRefAccess(
+export function isSimpleReactiveAccess(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {

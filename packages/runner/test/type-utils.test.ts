@@ -4,7 +4,7 @@ import {
   type FactoryInput,
   isModule,
   isPattern,
-  type OpaqueRef,
+  type Reactive,
 } from "../src/builder/types.ts";
 import { isWriteRedirectLink } from "../src/link-utils.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -17,7 +17,7 @@ describe("value type", () => {
     } = {
       foo: "foo",
       bar: "bar",
-    } as OpaqueRef<{
+    } as Reactive<{
       foo: string;
       bar: string;
     }>;

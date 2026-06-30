@@ -61,15 +61,15 @@ import {
   type NodeFactory,
   type NodeRef,
   type OpaqueCell,
-  type OpaqueRef,
   type PatternFactory,
+  type Reactive,
   type Schema,
   SELF,
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
-import { isOpaqueRefMarker } from "./builder/types.ts";
+import { isReactiveMarker } from "./builder/types.ts";
 import {
   type CellResult,
   createQueryResultProxy,
@@ -180,7 +180,7 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
- * OpaqueRef/Cell. These wrapped the callback in an anonymous inline pattern,
+ * Reactive/Cell. These wrapped the callback in an anonymous inline pattern,
  * which has no stable content-addressed `{ identity, symbol }` and so cannot be
  * passed/persisted by identity (CT-1623). Authored pattern code is always
  * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
@@ -190,7 +190,7 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 function throwOpFunctionFormMessage(
   method: "map" | "filter" | "flatMap",
 ): string {
-  return `OpaqueRef.${method}(fn) is no longer supported: an inline pattern has ` +
+  return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
     `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
     `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
@@ -397,9 +397,9 @@ declare module "@commonfabric/api" {
       name?: unknown;
       external?: unknown;
     };
-    getAsOpaqueRefProxy(
+    getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
-    ): OpaqueRef<T>;
+    ): Reactive<T>;
     toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
@@ -413,7 +413,7 @@ declare module "@commonfabric/api" {
     copyTrap: boolean;
 
     /** Set the self-reference for SELF symbol support in patterns */
-    setSelfRef(selfRef: OpaqueRef<any>): void;
+    setSelfRef(selfRef: Reactive<any>): void;
   }
 
   interface ICreatable<C extends AnyBrandedCell<any>> {
@@ -479,7 +479,7 @@ const cellMethods = new Set<
   "setSchema",
   "connect",
   "export",
-  "getAsOpaqueRefProxy",
+  "getAsReactiveProxy",
   "setSelfRef",
   "exec",
   "query",
@@ -657,7 +657,7 @@ export class CellImpl<T extends FabricValue>
   private _kind: CellKind;
 
   // Self-reference for pattern SELF symbol support
-  private _selfRef?: OpaqueRef<any>;
+  private _selfRef?: Reactive<any>;
   private viewRefHashCache?: {
     link: NormalizedFullLink;
     cfcLabelView: CfcLabelView | undefined;
@@ -2181,7 +2181,7 @@ export class CellImpl<T extends FabricValue>
    */
   connect(node: NodeRef): void {
     // For cells created during pattern construction, we need to track which nodes
-    // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
+    // they're connected to. Since Cell doesn't have a nodes set like Reactive's store,
     // we'll store this in a WeakMap keyed by the cell instance.
     const top = this._causeContainer.cell;
     if (!cellNodes.has(top)) {
@@ -2191,7 +2191,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Export cell metadata for introspection, similar to OpaqueRef's export method.
+   * Export cell metadata for introspection, similar to Reactive's export method.
    * If the cell has a link, it's included as 'external'.
    */
   export(): {
@@ -2233,20 +2233,20 @@ export class CellImpl<T extends FabricValue>
    * Set the self-reference for pattern SELF symbol support.
    * This allows patterns to access their own output via the SELF symbol.
    */
-  setSelfRef(selfRef: OpaqueRef<any>): void {
+  setSelfRef(selfRef: Reactive<any>): void {
     this._selfRef = selfRef;
   }
 
   /**
-   * Wrap this cell in a proxy that provides OpaqueRef behavior.
+   * Wrap this cell in a proxy that provides Reactive behavior.
    * The proxy adds Symbol.iterator, Symbol.toPrimitive, and toCell support,
    * and recursively wraps child cells accessed via property access.
    *
-   * @returns A proxied version of this cell with OpaqueRef behavior
+   * @returns A proxied version of this cell with Reactive behavior
    */
-  getAsOpaqueRefProxy(
+  getAsReactiveProxy(
     boundTarget?: (...args: unknown[]) => unknown,
-  ): OpaqueRef<T> {
+  ): Reactive<T> {
     const self = this as unknown as Cell<T>;
     // `query`/`exec` are SqliteDb-only methods whose names are also common data
     // fields (e.g. wish's `query`). Only forward them as methods on a
@@ -2260,7 +2260,7 @@ export class CellImpl<T extends FabricValue>
             let index = 0;
             while (index < 50) { // Limit to 50 items like original
               const itemCell = self.key(index) as Cell<unknown>;
-              yield itemCell.getAsOpaqueRefProxy();
+              yield itemCell.getAsReactiveProxy();
               index++;
             }
           };
@@ -2273,7 +2273,7 @@ export class CellImpl<T extends FabricValue>
         } else if (prop === toCell) {
           // Return a function that returns the unproxied cell
           return () => self;
-        } else if (prop === isOpaqueRefMarker) {
+        } else if (prop === isReactiveMarker) {
           return true;
         } else if (prop === SELF) {
           // Return the self-reference if set (for pattern SELF symbol support)
@@ -2289,7 +2289,7 @@ export class CellImpl<T extends FabricValue>
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite")
           ) {
-            return nestedCell.getAsOpaqueRefProxy(
+            return nestedCell.getAsReactiveProxy(
               (self as unknown as Record<
                 string,
                 (...args: unknown[]) => unknown
@@ -2297,19 +2297,19 @@ export class CellImpl<T extends FabricValue>
                 .bind(self),
             );
           } else {
-            return nestedCell.getAsOpaqueRefProxy();
+            return nestedCell.getAsReactiveProxy();
           }
         }
         // Delegate everything else to orignal target
         return (target as any)[prop];
       },
     });
-    return proxy as unknown as OpaqueRef<T>;
+    return proxy as unknown as Reactive<T>;
   }
 
   /**
    * Map over an array cell, creating a new derived array.
-   * Similar to Array.prototype.map but works with OpaqueRefs.
+   * Similar to Array.prototype.map but works with Reactives.
    */
   /**
    * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
@@ -2330,7 +2330,7 @@ export class CellImpl<T extends FabricValue>
       maxConfidentiality?: ReadonlyArray<unknown>;
       onExceed?: "fail" | "skip";
     },
-  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+  ): Reactive<{ pending: boolean; result?: Row[]; error?: unknown }> {
     return sqliteQueryNodeFactory({
       db: this,
       sql,
@@ -2343,16 +2343,16 @@ export class CellImpl<T extends FabricValue>
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+    }) as Reactive<{ pending: boolean; result?: Row[]; error?: unknown }>;
   }
 
   map<S>(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<S>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     throw new Error(throwOpFunctionFormMessage("map"));
   }
 
@@ -2364,7 +2364,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     // Create the factory if it doesn't exist
     if (!mapFactory) {
       mapFactory = createNodeFactory({
@@ -2374,7 +2374,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = mapFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });
@@ -2396,11 +2396,11 @@ export class CellImpl<T extends FabricValue>
       array: (T extends Array<infer U> ? U : T)[],
     ) => S,
     initialValue: S,
-  ): OpaqueRef<S> {
+  ): Reactive<S> {
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
-    })(this as unknown as OpaqueRef<any>);
+    })(this as unknown as Reactive<any>);
   }
 
   /**
@@ -2417,7 +2417,7 @@ export class CellImpl<T extends FabricValue>
       index: number,
       array: (T extends Array<infer U> ? U : T)[],
     ) => boolean,
-  ): OpaqueRef<number> {
+  ): Reactive<number> {
     // Uses lift rather than a per-element-pattern builtin (like filter/map)
     // because findIndex returns a plain number, not an element reference —
     // there's no benefit to per-element reactive tracking. The lift approach
@@ -2429,21 +2429,21 @@ export class CellImpl<T extends FabricValue>
         throw new TypeError("findIndex called on non-array value");
       }
       return list.findIndex(fn);
-    })(this as unknown as OpaqueRef<any>);
+    })(this as unknown as Reactive<any>);
   }
 
   /**
    * Filter an array cell, creating a new array with only matching elements.
-   * Similar to Array.prototype.filter but works with OpaqueRefs.
+   * Similar to Array.prototype.filter but works with Reactives.
    * Output contains cell references to the original elements.
    */
   filter(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     throw new Error(throwOpFunctionFormMessage("filter"));
   }
 
@@ -2455,7 +2455,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
         type: "ref",
@@ -2464,7 +2464,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = filterFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });
@@ -2474,16 +2474,16 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * FlatMap over an array cell, creating a flattened array from per-element arrays.
-   * Similar to Array.prototype.flatMap but works with OpaqueRefs.
+   * Similar to Array.prototype.flatMap but works with Reactives.
    * Each callback should return an array; results are concatenated one level deep.
    */
   flatMap<S>(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<S[]>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     throw new Error(throwOpFunctionFormMessage("flatMap"));
   }
 
@@ -2495,7 +2495,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     if (!flatMapFactory) {
       flatMapFactory = createNodeFactory({
         type: "ref",
@@ -2504,7 +2504,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = flatMapFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });

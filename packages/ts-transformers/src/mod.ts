@@ -36,6 +36,6 @@ export { CommonFabricTransformerPipeline } from "./cf-pipeline.ts";
 export {
   CompositeDiagnosticTransformer,
   type DiagnosticMessageTransformer,
-  OpaqueRefErrorTransformer,
-  type OpaqueRefErrorTransformerOptions,
+  ReactiveErrorTransformer,
+  type ReactiveErrorTransformerOptions,
 } from "./diagnostics/mod.ts";

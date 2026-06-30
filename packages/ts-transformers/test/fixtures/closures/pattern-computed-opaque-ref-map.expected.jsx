@@ -12,7 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
-    items: number[] & {} & { [SELF]: OpaqueRef<any>; };
+    items: number[] & {} & { [SELF]: Reactive<any>; };
 }, number[]>(({ items }) => items.map((n) => n * 2), {
     type: "object",
     properties: {

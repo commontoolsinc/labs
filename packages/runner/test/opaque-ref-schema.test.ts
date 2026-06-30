@@ -10,7 +10,7 @@ import { isRecord } from "@commonfabric/utils/types";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-describe("OpaqueRef Schema Support", () => {
+describe("Reactive Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];

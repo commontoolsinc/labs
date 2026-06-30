@@ -116,8 +116,8 @@ Deno.test(
       type BrandedCell<T, Brand extends string> = {
         readonly [CELL_BRAND]: Brand;
       };
-      type OpaqueRef<T> = BrandedCell<T, "opaque">;
-      declare const count: OpaqueRef<number>;
+      type Reactive<T> = BrandedCell<T, "opaque">;
+      declare const count: Reactive<number>;
 
       const branch = { label: count + " people" };
     `);
@@ -150,8 +150,8 @@ Deno.test(
       type BrandedCell<T, Brand extends string> = {
         readonly [CELL_BRAND]: Brand;
       };
-      type OpaqueRef<T> = BrandedCell<T, "opaque">;
-      declare const count: OpaqueRef<number>;
+      type Reactive<T> = BrandedCell<T, "opaque">;
+      declare const count: Reactive<number>;
 
       const branch = {
         label: count + " people",
@@ -184,8 +184,8 @@ Deno.test(
       type BrandedCell<T, Brand extends string> = {
         readonly [CELL_BRAND]: Brand;
       };
-      type OpaqueRef<T> = BrandedCell<T, "opaque">;
-      declare const count: OpaqueRef<number>;
+      type Reactive<T> = BrandedCell<T, "opaque">;
+      declare const count: Reactive<number>;
       declare const collection: {
         map<T>(fn: (item: number) => T): T[];
       };

@@ -220,7 +220,7 @@ export function findPendingComputeWrapCandidate(
     }
 
     const nodeAnalysis = analyze(node);
-    if (!nodeAnalysis.containsOpaqueRef || !nodeAnalysis.requiresRewrite) {
+    if (!nodeAnalysis.containsReactive || !nodeAnalysis.requiresRewrite) {
       ts.forEachChild(node, visit);
       return;
     }

@@ -7,7 +7,7 @@
  * 3. Return { tests: TestStep[] }
  *
  * TestStep is a discriminated union:
- * - { assertion: OpaqueRef<boolean> } from computed(() => condition)
+ * - { assertion: Reactive<boolean> } from computed(() => condition)
  * - { action: Stream<void> } from action(() => sideEffect)
  *
  * The discriminated union avoids TypeScript declaration emit issues
@@ -42,7 +42,7 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import type { OpaqueRef } from "@commonfabric/api";
+import type { Reactive } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -135,7 +135,7 @@ function formatError(error: unknown): string {
  * reads an async-builtin result to keep the read deterministic under load.
  */
 export type TestStep =
-  | { assertion: OpaqueRef<boolean>; skip?: boolean }
+  | { assertion: Reactive<boolean>; skip?: boolean }
   | {
     action: Stream<unknown>;
     event?: unknown;

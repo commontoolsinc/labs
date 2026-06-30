@@ -1249,25 +1249,6 @@ export type Reactive<T> = T;
 /** @deprecated Use {@link Reactive}. */
 export type OpaqueRef<T> = Reactive<T>;
 
-// Helper type for OpaqueRef's inner property/array mapping
-// Handles nullable types by extracting the non-null part for mapping
-type OpaqueRefInner<T> = [T] extends
-  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-  // For nullable types (T | null | undefined), extract and map the non-null part
-  : [NonNullable<T>] extends [never] ? T
-  // Handle nullable branded cells (e.g., (OpaqueRef<X> | undefined) from .find() on proxy arrays)
-  // Use NonNullable<T> instead of T to avoid leaking null/undefined into the
-  // OpaqueCell<T> & OpaqueRefInner<T> intersection, where TypeScript's
-  // intersection simplification would erase them (object & undefined = never).
-  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? NonNullable<T>
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
-  : T;
-
 // ============================================================================
 // CellLike and FactoryInput - Utility types for accepting cells
 // ============================================================================
@@ -1358,7 +1339,7 @@ export type FactoryInput<T> =
 
 /**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
- * wrapped in any number of OpaqueRef layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
+ * wrapped in any number of Reactive layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
@@ -1424,7 +1405,7 @@ export type Handler<T = any, R = any> = Module & {
 };
 
 export type NodeFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1432,7 +1413,7 @@ export type NodeFactory<T, R> =
   };
 
 export type PatternFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
   & {
@@ -1441,7 +1422,7 @@ export type PatternFactory<T, R> =
   };
 
 export type ModuleFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => OpaqueRef<R>)
+  & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Module
   & toJSON
   & {
@@ -1789,7 +1770,7 @@ export type BuiltInLLMTool =
       extraParams?: Record<string, any>;
       useResultSchemaForObservation?: boolean;
     }
-    | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
+    | { handler: Stream<any> | Reactive<any>; pattern?: never }
   );
 
 /**
@@ -2029,21 +2010,21 @@ export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+      input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
     ) => FactoryInput<R>,
   ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+      input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
     ) => any,
   ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+      input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -2052,7 +2033,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+      input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
     ) => FactoryInput<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -2152,45 +2133,45 @@ export type ActionFunction = {
   <T>(fn: (event: T) => void): Stream<T>;
 };
 
-export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
+export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
 
 export type StrFunction = (
   strings: TemplateStringsArray,
   ...values: any[]
-) => OpaqueRef<string>;
+) => Reactive<string>;
 
 export type IfElseFunction = <T = any, U = any, V = any>(
   condition: FactoryInput<T>,
   ifTrue: FactoryInput<U>,
   ifFalse: FactoryInput<V>,
-) => OpaqueRef<U | V>;
+) => Reactive<U | V>;
 
 export type WhenFunction = <T = any, U = any>(
   condition: FactoryInput<T>,
   value: FactoryInput<U>,
-) => OpaqueRef<T | U>;
+) => Reactive<T | U>;
 
 export type UnlessFunction = <T = any, U = any>(
   condition: FactoryInput<T>,
   fallback: FactoryInput<U>,
-) => OpaqueRef<T | U>;
+) => Reactive<T | U>;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export type LLMFunction = (
   params: FactoryInput<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMState>;
+) => Reactive<BuiltInLLMState>;
 
 export type LLMDialogFunction = (
   params: FactoryInput<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMDialogState>;
+) => Reactive<BuiltInLLMDialogState>;
 
 export type GenerateObjectFunction = <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
+) => Reactive<BuiltInLLMGenerateObjectState<T>>;
 
 export type GenerateTextFunction = (
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => OpaqueRef<BuiltInGenerateTextState>;
+) => Reactive<BuiltInGenerateTextState>;
 
 export type FetchOptions = {
   body?: JSONValue;
@@ -2213,11 +2194,11 @@ export type FetchDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<{ pending: boolean; result: T; error?: any }>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
-) => OpaqueRef<{
+) => Reactive<{
   pending: boolean;
   result: {
     files: Array<{ name: string; contents: string }>;
@@ -2232,11 +2213,11 @@ export type StreamDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<{ pending: boolean; result: T; error?: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
-) => OpaqueRef<BuiltInCompileAndRunState<S>>;
+) => Reactive<BuiltInCompileAndRunState<S>>;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
@@ -2271,7 +2252,7 @@ export interface ISqliteQueryable {
       /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
       onExceed?: "fail" | "skip";
     },
-  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+  ): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
 }
 
 /**
@@ -2296,7 +2277,7 @@ export type SqliteTableSchemas = Record<string, JSONSchema>;
 /** Non-default database source. Cell-derived (default) needs no source; on-disk
  *  databases are injected as a pattern input, not selected here. */
 export type SqliteDatabaseSource = {
-  vm: OpaqueRef<unknown>;
+  vm: Reactive<unknown>;
   path: string;
 };
 
@@ -2304,7 +2285,7 @@ export type SqliteDatabaseFunction = {
   (
     options?: { tables?: SqliteTableSchemas },
     source?: SqliteDatabaseSource,
-  ): OpaqueRef<SqliteDb>;
+  ): Reactive<SqliteDb>;
   /** Bind the db (and so its on-disk file) to a scope. The transformer lowers
    *  `const db: PerUser<SqliteDb> = sqliteDatabase(...)` to `.asScope("user")`;
    *  call it explicitly for the same effect. */
@@ -2330,7 +2311,7 @@ export type SqliteQueryParams = {
 };
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
-) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+) => Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
@@ -2425,11 +2406,11 @@ export type WishState<T> = {
   [UI]?: VNode;
 };
 
-export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
+export type NavigateToFunction = (cell: Reactive<any>) => Reactive<boolean>;
 export interface WishFunction {
   <T = unknown>(
     target: FactoryInput<WishParams>,
-  ): OpaqueRef<WishState<T> & UIRenderable>;
+  ): Reactive<WishState<T> & UIRenderable>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
@@ -2603,7 +2584,7 @@ export type RequireDefaults<T> =
   // Use Exclude<T[K], undefined> to strip the `| undefined` that TypeScript
   // adds for optional fields (T[K] of `a?: X` includes `X | undefined`).
   // Without this, the required field's value type would still include
-  // `| undefined`, which propagates through OpaqueRef and makes the field
+  // `| undefined`, which propagates through Reactive and makes the field
   // possibly-undefined in the pattern body despite being required.
   & {
     [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
@@ -2834,7 +2815,7 @@ export type UIRenderable = {
 export type JSXElement =
   | VNode
   | AnyBrandedCell<UIRenderable>
-  | OpaqueRef<UIRenderable>;
+  | Reactive<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

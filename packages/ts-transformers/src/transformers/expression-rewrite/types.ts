@@ -5,7 +5,7 @@ import type { ReactiveContextKind } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import type { ExpressionContainerKind } from "../expression-site-types.ts";
 
-export type OpaqueRefHelperName =
+export type ReactiveHelperName =
   | "lift"
   | "ifElse"
   | "when"

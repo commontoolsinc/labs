@@ -930,7 +930,7 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
  * an `asScope(scope)` method (the lowering target). This covers the schema-built
  * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
  * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
- * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * type is just `(...) => Reactive<...>` with an `asScope` method and so lacks
  * the `argumentSchema`/`resultSchema` shape that check keys on.
  */
 function calleeExposesAsScope(

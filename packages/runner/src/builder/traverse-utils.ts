@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { type FactoryInput, isOpaqueRef, isPattern } from "./types.ts";
+import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
@@ -33,7 +33,7 @@ export function traverseValue(
 
   // Traverse value
   if (
-    !isOpaqueRef(value) &&
+    !isReactive(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
     (isRecord(value) || isPattern(value))

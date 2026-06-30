@@ -798,7 +798,7 @@ export default pattern<PatternInput, PatternOutput>(
     });
 
     // Group active items by due date for checkbox-based bulk returns
-    // Pre-compute ALL derived values here to avoid OpaqueRef issues in UI
+    // Pre-compute ALL derived values here to avoid Reactive issues in UI
     const itemsByDueDate = computed(() => {
       const groups = new Map<string, TrackedItem[]>();
       const items = activeItems || [];
@@ -1239,7 +1239,7 @@ export default pattern<PatternInput, PatternOutput>(
                         {/* Items in this group */}
                         <cf-vstack gap="2">
                           {group.items.map((item) => {
-                            // Extract key before computed to avoid OpaqueRef issues
+                            // Extract key before computed to avoid Reactive issues
                             const itemKey = item.key;
                             const isChecked = computed(() => {
                               const deselected = selectedItems.get() || [];

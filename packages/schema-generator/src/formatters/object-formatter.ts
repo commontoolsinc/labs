@@ -35,7 +35,7 @@ const logger = getLogger("schema-generator.object", {
 
 /**
  * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
- * ModuleFactory<T, R> when called returns OpaqueRef<R>.
+ * ModuleFactory<T, R> when called returns Reactive<R>.
  * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
  * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
  *
@@ -51,7 +51,7 @@ function getWrapperSchemaFromCallable(
   // Get the return type of the first call signature
   const callReturnType = callSignatures[0]!.getReturnType();
 
-  // Check if the return type is a wrapper (Stream<T>, Cell<T>, or OpaqueRef<...>)
+  // Check if the return type is a wrapper (Stream<T>, Cell<T>, or Reactive<...>)
   const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
   if (wrapperInfo?.kind === "Stream") {
     return { asCell: ["stream"] };
@@ -61,26 +61,6 @@ function getWrapperSchemaFromCallable(
   }
   if (wrapperInfo?.kind === "SqliteDb") {
     return { asCell: ["sqlite"] };
-  }
-
-  // Also check if it's an OpaqueRef wrapping a Stream or Cell
-  if (wrapperInfo?.kind === "OpaqueRef") {
-    // Get the inner type of OpaqueRef
-    const typeRef = wrapperInfo.typeRef;
-    const typeArgs = checker.getTypeArguments(typeRef);
-    if (typeArgs.length > 0) {
-      const innerType = typeArgs[0]!;
-      const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
-      if (innerWrapperInfo?.kind === "Stream") {
-        return { asCell: ["stream"] };
-      }
-      if (innerWrapperInfo?.kind === "Cell") {
-        return { asCell: ["cell"] };
-      }
-      if (innerWrapperInfo?.kind === "SqliteDb") {
-        return { asCell: ["sqlite"] };
-      }
-    }
   }
 
   return undefined;
