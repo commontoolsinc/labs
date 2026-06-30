@@ -288,6 +288,33 @@ export async function clickTrustedAction(
   }
 }
 
+/**
+ * Submit a `cf-submit-input` from the keyboard: focus its inner field and press
+ * a real Enter. The field sits inside a `<form>` with a hidden native submit
+ * button, so Enter triggers the browser's implicit form submission, which fires
+ * a trusted click on that button — carrying the typed text to the host exactly
+ * like the visible button's click. The Enter must be a real CDP key press: a
+ * scripted `KeyboardEvent` does not trigger implicit submission, which is why an
+ * earlier dispatched-keydown attempt never reached the create handler.
+ *
+ * The view is settled first so the form is interactive, and the inner input is
+ * resolved by piercing shadow roots (the `inputId` is forwarded to the inner
+ * `<input>`, so the selector matches it directly).
+ */
+export async function submitViaEnter(
+  page: Page,
+  inputSelector: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  await settleView(page, { timeout });
+  const input = await page.waitForSelector(inputSelector, {
+    strategy: "pierce",
+    timeout,
+  });
+  await input.focus();
+  await page.keyboard.press("Enter");
+}
+
 export async function clickTrustedActionAndWaitForText(
   page: Page,
   action: string,
