@@ -230,6 +230,13 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     expect(v.missing).toEqual([]);
   });
 
+  it("flags a missing entry document", () => {
+    const v = verifySourceDocs("missing-entry", new Map());
+    expect(v.ok).toBe(false);
+    expect(v.mismatches).toEqual([]);
+    expect(v.missing).toEqual(["missing-entry"]);
+  });
+
   it("rejects a tampered document (recomputed identity != key)", () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const docs = new Map(buildSourceDocs(modules, entryIdentity));
