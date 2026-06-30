@@ -131,7 +131,30 @@ deno task cf inspect converge      of:fid1:… --all --path value
 deno task cf inspect converge-scan --all --json
 ```
 
-A standalone `cli.ts` entry exists for use outside the `cf` CLI.
+### Remote (`--remote`) — inspect a staging/server without SSH
+
+Any command takes `--remote [url]` (defaults to `CF_API_URL`). Instead of
+reading on-disk DBs, it downloads a **read-only SQLite snapshot** from the
+server's dump endpoint into a local cache (`~/.cache/cf-inspect/<host>/`), then
+inspects it fully offline. Requests are signed with `--identity` / `CF_IDENTITY`
+(CF1 first-party auth); the server gates access to an allowlist of DIDs.
+
+```bash
+export CF_IDENTITY=./me.key
+deno task cf inspect spaces  --remote https://rapids.saga-castor.ts.net   # list dumpable spaces
+deno task cf inspect summary z6Mkqa41 --remote https://rapids…            # fetch + inspect one
+deno task cf inspect pull --all       --remote https://rapids…            # cache them all, then
+deno task cf inspect group                                                #   inspect offline
+```
+
+The dump endpoint is **off by default** and must be enabled per environment on
+the server (`MEMORY_DUMP_ENABLED=true`, allowlist via `MEMORY_DUMP_DIDS` /
+`MEMORY_SERVICE_DIDS`); it refuses to mount under `ENV=production` unless
+`MEMORY_DUMP_ALLOW_IN_PRODUCTION` is also set. Pair it with a network perimeter
+(staging is Tailscale-only). See `packages/toolshed/routes/storage/memory/`.
+
+A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
+`--remote` requires the `cf` CLI for request signing).
 
 ## Known characteristics
 

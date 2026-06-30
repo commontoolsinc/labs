@@ -1,7 +1,7 @@
 import * as Path from "@std/path";
 import type { MemorySpace } from "../interface.ts";
 
-const encodeStoreSubject = (subject: MemorySpace): string => {
+export const encodeStoreSubject = (subject: MemorySpace): string => {
   const value = String(subject);
   if (
     value.length === 0 ||

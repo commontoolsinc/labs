@@ -12,6 +12,7 @@ export * from "./model.ts";
 export * from "./queries.ts";
 export * from "./multispace.ts";
 export * from "./discover.ts";
+export * from "./remote.ts";
 export * from "./grouping.ts";
 export * from "./graph.ts";
 export * from "./timetravel.ts";

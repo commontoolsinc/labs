@@ -2069,6 +2069,7 @@
       "packages/toolshed": {
         "dependencies": [
           "jsr:@cmd-johnson/oauth2-client@2",
+          "jsr:@db/sqlite@0.12",
           "jsr:@std/cli@^1.0.12",
           "npm:@ai-sdk/anthropic@^2.0.9",
           "npm:@ai-sdk/google-vertex@^3.0.16",

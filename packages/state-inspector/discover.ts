@@ -7,6 +7,7 @@
 // walk a bounded depth under each cache base rather than assume a fixed path.
 
 import { openSpace } from "./db.ts";
+import { rootCacheDir } from "./remote.ts";
 
 export interface DiscoveredSpace {
   /** Space DID (DB file basename without `.sqlite`). */
@@ -51,6 +52,8 @@ export function candidateRoots(cwd: string = Deno.cwd()): string[] {
       dbPath.endsWith(".sqlite") ? (dirname(dbPath) || ".") : dbPath,
     );
   }
+  // Spaces pulled from a remote (`cf inspect --remote` / `pull`) land here.
+  roots.push(rootCacheDir());
   // Walk up from cwd; check both cache layouts at each level.
   let dir = cwd;
   for (let i = 0; i < 8; i++) {

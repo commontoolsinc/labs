@@ -18,6 +18,8 @@ import {
   convergence,
   type ConvergenceResult,
   convergenceScan,
+  // Remote acquisition (`cf inspect --remote` / `pull`).
+  defaultCacheDir,
   describeIdentity,
   describePiece,
   diffEntity,
@@ -25,6 +27,7 @@ import {
   entityConflicts,
   entityHistory,
   entityTimeline,
+  fetchSpaceDb,
   getValueAt,
   graphToDot,
   groupDiscoveredSpaces,
@@ -32,12 +35,15 @@ import {
   hotEntities,
   listCommits,
   listEntityModels,
+  listRemoteSpaces,
   listScopes,
   listSqliteFiles,
   openSpace,
   openSpaces,
   quickStats,
+  type RemoteSpace,
   renderInspectorHtml,
+  type RequestSigner,
   resolveSpacePath,
   type Scope,
   scopeOverlay,
@@ -50,6 +56,8 @@ import {
   summarizeSpace,
   valueAsIdentity,
 } from "@commonfabric/state-inspector";
+import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
+import { loadIdentity } from "../lib/identity.ts";
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -98,12 +106,110 @@ function fmtSession(s: string): string {
   return decoded.length > 22 ? `${decoded.slice(0, 21)}…` : decoded;
 }
 
-// Resolve --all / --spaces / --dir into open spaces; caller must close them.
-function resolveMultiSpaces(opts: {
+// ── Remote acquisition (`cf inspect --remote`) ──────────────────────────────
+// The autopsy stays 100% offline; --remote only changes where the SQLite file
+// comes from: instead of the local on-disk store, fetch a read-only snapshot
+// from a toolshed dump endpoint into the local cache, then open it as usual.
+
+interface RemoteOpts {
+  remote?: string | boolean;
+  identity?: string;
+}
+
+// Resolve the remote base URL from --remote (its value, or CF_API_URL when the
+// flag is given bare). Returns null when not in remote mode.
+function remoteBaseUrl(options: RemoteOpts): string | null {
+  const r = options.remote;
+  if (r === undefined || r === false) return null;
+  if (r === true) {
+    const env = Deno.env.get("CF_API_URL");
+    if (!env) {
+      throw new Error(
+        "--remote needs a URL, e.g. --remote https://host (or set CF_API_URL).",
+      );
+    }
+    return env;
+  }
+  return r;
+}
+
+// Build a CF1 first-party request signer from --identity / CF_IDENTITY. Returns
+// undefined when no key is configured (requests then go out unsigned, e.g. for a
+// Tailscale-perimeter-only server).
+async function remoteSigner(
+  options: RemoteOpts,
+): Promise<RequestSigner | undefined> {
+  const path = options.identity ?? Deno.env.get("CF_IDENTITY");
+  if (!path) return undefined;
+  const identity = await loadIdentity(path);
+  return ({ url, method }) =>
+    signFirstPartyHttpRequest({ url: new URL(url), method, signer: identity });
+}
+
+// Map a token (full DID, prefix, or substring) to a full space DID on a remote.
+// A `did:`-prefixed token is taken as-is (no list round-trip).
+async function resolveRemoteDid(
+  token: string,
+  base: string,
+  sign: RequestSigner | undefined,
+): Promise<string> {
+  if (token.startsWith("did:")) return token;
+  const spaces = await listRemoteSpaces(base, { sign });
+  const exact = spaces.filter((s) => s.space === token);
+  const matches = exact.length
+    ? exact
+    : spaces.filter((s) => s.space.includes(token));
+  if (matches.length === 1) return matches[0].space;
+  if (matches.length === 0) {
+    throw new Error(
+      `no remote space matches "${token}" (run: inspect spaces --remote).`,
+    );
+  }
+  throw new Error(
+    `"${token}" is ambiguous across ${matches.length} remote spaces; use a full DID.`,
+  );
+}
+
+// Open a space by token: from the remote (fetch + cache) when --remote is set,
+// otherwise from the local on-disk store.
+async function openByToken(
+  token: string,
+  options: RemoteOpts,
+): Promise<ReturnType<typeof openSpace>> {
+  const base = remoteBaseUrl(options);
+  if (!base) return openSpace(resolveSpacePath(token));
+  const sign = await remoteSigner(options);
+  const did = await resolveRemoteDid(token, base, sign);
+  return openSpace(await fetchSpaceDb(did, base, { sign }));
+}
+
+// Resolve --all / --spaces / --dir (and --remote) into open spaces; caller must
+// close them.
+async function resolveMultiSpaces(opts: {
   all?: boolean;
   spaces?: string;
   dir?: string;
-}): SpaceRef[] {
+  remote?: string | boolean;
+  identity?: string;
+}): Promise<SpaceRef[]> {
+  const base = remoteBaseUrl(opts);
+  if (base) {
+    const sign = await remoteSigner(opts);
+    let dids: string[];
+    if (opts.all) {
+      dids = (await listRemoteSpaces(base, { sign })).map((s) => s.space);
+    } else if (opts.spaces) {
+      dids = await Promise.all(
+        opts.spaces.split(",").map((t) => t.trim()).filter(Boolean)
+          .map((t) => resolveRemoteDid(t, base, sign)),
+      );
+    } else {
+      throw new Error("with --remote, provide --all or --spaces <a,b,…>.");
+    }
+    const paths: string[] = [];
+    for (const did of dids) paths.push(await fetchSpaceDb(did, base, { sign }));
+    return openSpaces(paths);
+  }
   if (opts.dir) return openSpaces(listSqliteFiles(opts.dir));
   if (opts.all) return openSpaces(discoverSpaceDbs().map((s) => s.path));
   if (opts.spaces) {
@@ -133,10 +239,53 @@ export const inspect = new Command()
   )
   .default("help")
   .globalOption("--json", "Output machine-readable JSON.")
+  .globalOption(
+    "--remote [url:string]",
+    "Inspect a remote toolshed: fetch read-only space snapshots into a local " +
+      "cache instead of reading on-disk DBs. Bare --remote uses CF_API_URL.",
+  )
+  .globalOption(
+    "--identity <path:string>",
+    "Identity keyfile used to sign --remote dump requests (default CF_IDENTITY).",
+  )
   /* inspect spaces */
-  .command("spaces", "List discovered local space DBs with quick stats.")
+  .command(
+    "spaces",
+    "List space DBs: local on-disk by default, or a remote toolshed's with " +
+      "--remote.",
+  )
   .option("--dir <dir:string>", "Extra directory to search for *.sqlite files.")
-  .action((options) => {
+  .action(async (options) => {
+    // --remote: list the spaces the remote will dump (no per-space stats, since
+    // those need the DB which we don't fetch just to list).
+    const base = remoteBaseUrl(options);
+    if (base) {
+      const sign = await remoteSigner(options);
+      const spaces = await listRemoteSpaces(base, { sign });
+      out(!!options.json, { remote: base, spaces }, () => {
+        if (spaces.length === 0) {
+          console.log(`no spaces available at ${base}.`);
+          return;
+        }
+        console.log(`${spaces.length} space(s) at ${base}:`);
+        console.log(
+          Table.from([
+            ["DID", "SIZE", "MODIFIED"],
+            ...spaces.map((s: RemoteSpace) => [
+              s.space,
+              humanSize(s.sizeBytes),
+              new Date(s.mtimeMs).toISOString(),
+            ]),
+          ]).toString(),
+        );
+        console.log(
+          "\ntip: `inspect summary <did> --remote` fetches + inspects one; " +
+            "`inspect pull --all --remote` caches them all.",
+        );
+      });
+      return;
+    }
+
     const discovered = discoverSpaceDbs(
       options.dir ? { dirs: [options.dir] } : {},
     );
@@ -169,6 +318,47 @@ export const inspect = new Command()
             r.lastActivity ?? "?",
           ]),
         ]).toString(),
+      );
+    });
+  })
+  /* inspect pull */
+  .command(
+    "pull [space:string]",
+    "Download remote space snapshot(s) into the local cache for offline " +
+      "inspection. Pass a space, or --all. Requires --remote.",
+  )
+  .option("--all", "Pull every space the remote exposes.")
+  .option("--force", "Re-download even if a cached copy exists.")
+  .action(async (options, space) => {
+    const base = remoteBaseUrl(options);
+    if (!base) {
+      throw new Error("pull requires --remote <url> (or CF_API_URL).");
+    }
+    const sign = await remoteSigner(options);
+    const cacheDir = defaultCacheDir(base);
+
+    let dids: string[];
+    if (options.all) {
+      dids = (await listRemoteSpaces(base, { sign })).map((s) => s.space);
+    } else if (space) {
+      dids = [await resolveRemoteDid(space, base, sign)];
+    } else {
+      throw new Error("provide a <space> or --all.");
+    }
+
+    const pulled: { did: string; path: string }[] = [];
+    for (const did of dids) {
+      const path = await fetchSpaceDb(did, base, {
+        sign,
+        force: options.force,
+      });
+      pulled.push({ did, path });
+    }
+    out(!!options.json, { remote: base, cacheDir, pulled }, () => {
+      console.log(`pulled ${pulled.length} space(s) into ${cacheDir}:`);
+      for (const p of pulled) console.log(`  ${p.did}`);
+      console.log(
+        "\nnow inspect them offline, e.g. `inspect summary <did-prefix>`.",
       );
     });
   })
@@ -296,8 +486,8 @@ export const inspect = new Command()
     "summary <space:string>",
     "Space overview: commits, sessions, hot ops.",
   )
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const sum = summarizeSpace(s);
       out(!!options.json, sum, () => {
@@ -341,8 +531,8 @@ export const inspect = new Command()
     "Per-identity scopes in a space: shared/space + per-user + per-session.",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const scopes = listScopes(s, { branch: options.branch });
       out(!!options.json, scopes, () => {
@@ -379,8 +569,8 @@ export const inspect = new Command()
     "Identities that touched this space (committers + per-user/session scopes).",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const ps = spaceParticipants(s, { branch: options.branch });
       out(!!options.json, ps, () => {
@@ -416,8 +606,8 @@ export const inspect = new Command()
   )
   .option("--session <prefix:string>", "Filter by session id prefix.")
   .option("--limit <n:number>", "Max rows.", { default: 50 })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const rows = listCommits(s, {
         session: options.session,
@@ -443,8 +633,8 @@ export const inspect = new Command()
   )
   .option("--limit <n:number>", "Max rows.", { default: 20 })
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const rows = hotEntities(s, {
         limit: options.limit,
@@ -469,8 +659,8 @@ export const inspect = new Command()
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--limit <n:number>", "Max contested entities.", { default: 100 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       if (entity) {
         const c = entityConflicts(s, entity, {
@@ -566,8 +756,8 @@ export const inspect = new Command()
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       let rows = listEntityModels(s, {
         limit: options.limit,
@@ -611,8 +801,8 @@ export const inspect = new Command()
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--code", "Include the full pattern TS source.")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       const piece = describePiece(s, entity, {
         branch: options.branch,
@@ -676,8 +866,8 @@ export const inspect = new Command()
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       let g: SpaceGraph = buildSpaceGraph(s, {
         branch: options.branch,
@@ -768,8 +958,8 @@ export const inspect = new Command()
     "--app-url <url:string>",
     "Live shell base origin for deep links (e.g. https://host).",
   )
-  .action((options, space) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
     try {
       const bundle = buildInspectorBundle(s, {
         branch: options.branch,
@@ -799,8 +989,8 @@ export const inspect = new Command()
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max rows.", { default: 200 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       const rows = entityHistory(s, {
         id: entity,
@@ -840,8 +1030,8 @@ export const inspect = new Command()
   .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--doc", "Show the whole document, not just value.")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       // --as composes the per-identity overlay; otherwise a single raw scope.
       if (options.as) {
@@ -897,8 +1087,8 @@ export const inspect = new Command()
     "An entity's value across EVERY scope (per-user/session divergence).",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       const o = scopeOverlay(s, entity, { branch: options.branch });
       out(!!options.json, o, () => {
@@ -942,8 +1132,8 @@ export const inspect = new Command()
   .option("--doc", "Diff the whole document, not just value.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       const d = diffEntity(s, {
         id: entity,
@@ -988,8 +1178,8 @@ export const inspect = new Command()
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max rows.", { default: 500 })
-  .action((options, space, entity) => {
-    const s = openSpace(resolveSpacePath(space));
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
     try {
       if (entity) {
         const steps = entityTimeline(s, {
@@ -1041,8 +1231,8 @@ export const inspect = new Command()
   .option("--path <path:string>", "Navigate into value, e.g. value/count.")
   .option("--scope <scope:string>", "Scope key (default: space).")
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options, entity) => {
-    const refs = resolveMultiSpaces(options);
+  .action(async (options, entity) => {
+    const refs = await resolveMultiSpaces(options);
     try {
       const index = buildCrossSpaceLinkIndex(refs, {
         scope: options.scope,
@@ -1096,8 +1286,8 @@ export const inspect = new Command()
   .option("--dir <dir:string>", "Directory of *.sqlite files.")
   .option("--limit <n:number>", "Max findings.", { default: 50 })
   .option("--branch <branch:string>", "Branch (default: '').")
-  .action((options) => {
-    const refs = resolveMultiSpaces(options);
+  .action(async (options) => {
+    const refs = await resolveMultiSpaces(options);
     try {
       const result = convergenceScan(refs, {
         limit: options.limit,

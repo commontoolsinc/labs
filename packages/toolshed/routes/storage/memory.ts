@@ -26,7 +26,7 @@ if (env.DB_PATH) {
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
+export const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
   singleFileMode: Boolean(env.DB_PATH),
 });
 await FS.ensureDir(memoryEngineStoreUrl);

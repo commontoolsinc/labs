@@ -107,6 +107,12 @@ fixed recipe. The recurring debugging questions and where they resolve:
   file.html` (self-contained: tree + graph + detail pane
   with value, schema, CFC labels, lineage, links, source; `--app-url` adds live
   deep-links).
+- _"The space I need is on staging/a server, not local."_ → add `--remote [url]`
+  (defaults to `CF_API_URL`) to ANY command: it downloads a read-only snapshot
+  into `~/.cache/cf-inspect/<host>/` and inspects it offline. `spaces --remote`
+  lists what's dumpable; `pull --all --remote` caches everything so subsequent
+  commands run offline. Signs with `CF_IDENTITY`/`--identity`; the server gates
+  on a DID allowlist.
 
 ## Gotchas that will mislead you if unflagged
 
