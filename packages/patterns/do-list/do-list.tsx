@@ -67,7 +67,7 @@ export interface DoListOutput {
       attachments?: Writable<any>[];
     }>
   >;
-  archiveCompleted: Reactive<Stream<unknown>>;
+  archiveCompleted: Reactive<Stream<void>>;
 }
 
 // ===== Module-scope Handlers =====
@@ -257,7 +257,7 @@ const removeAttachment = handler<
 });
 
 const archiveCompletedHandler = handler<
-  unknown,
+  void,
   { items: Writable<DoItem[]> }
 >((_, { items }) => {
   items.set(items.get().filter((i) => !i.done));
@@ -422,7 +422,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
             variant="ghost"
             size="sm"
             style="font-size: 0.8rem; color: var(--cf-colors-gray-500);"
-            onClick={() => archiveCompleted.send({})}
+            onClick={() => archiveCompleted.send()}
           >
             Archive completed
           </cf-button>
@@ -480,7 +480,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                       variant="ghost"
                       size="sm"
                       style="font-size: 0.8rem; color: var(--cf-colors-gray-500);"
-                      onClick={() => archiveCompleted.send({})}
+                      onClick={() => archiveCompleted.send()}
                     >
                       Archive all
                     </cf-button>

@@ -429,7 +429,7 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
       }
     });
 
-    const { pending, result } = fetchData({
+    const { pending, result } = fetchData<string>({
       url: resolvedUrl,
       mode: "text",
     });

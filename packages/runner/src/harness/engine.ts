@@ -22,9 +22,9 @@ import {
 import ts from "typescript";
 import {
   CommonFabricTransformerPipeline,
-  OpaqueRefErrorTransformer,
   PATTERN_COVERAGE_GLOBAL,
   type PatternCoverageOptions,
+  ReactiveErrorTransformer,
   sourceDisablesCfTransform,
 } from "@commonfabric/ts-transformers";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -366,7 +366,7 @@ export class Engine extends EventTarget implements Harness {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new OpaqueRefErrorTransformer({
+          diagnosticMessageTransformer: new ReactiveErrorTransformer({
             verbose: options.verboseErrors,
           }),
           beforeTransformers: (program) => {

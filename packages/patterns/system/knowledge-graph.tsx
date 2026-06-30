@@ -183,12 +183,14 @@ const KnowledgeGraph = pattern<Input>(() => {
       if (!piece) continue;
       const pieceName = (piece.get()[NAME] ?? "").toString();
       const mentioned = piece.key("mentioned").get() ?? [];
-      for (const mentionedItem of mentioned) {
+      for (let index = 0; index < mentioned.length; index++) {
+        const mentionedItem = mentioned[index];
         if (!mentionedItem) continue;
+        const mentionedCell = piece.key("mentioned").key(index);
         const mentionedName = (mentionedItem[NAME] ?? "").toString();
         result.push({
           from: piece,
-          to: mentionedItem as Writable<MentionablePiece>,
+          to: mentionedCell,
           fromName: pieceName,
           toName: mentionedName,
           description: "mentions",
@@ -293,12 +295,10 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
     return groups.map(
       (group: { name: string; pieceNames: string[]; summary: string }) => ({
         [NAME]: group.name,
-        linkedPieces: (group.pieceNames ?? [])
-          .map((name: string) =>
-            entryList.find((e: any) => e.name === name)
-              ?.piece
-          )
-          .filter(Boolean) as Writable<MentionablePiece>[],
+        linkedPieces: (group.pieceNames ?? []).flatMap((name: string) => {
+          const piece = entryList.find((e: any) => e.name === name)?.piece;
+          return piece ? [piece] : [];
+        }),
         summary: group.summary,
       }),
     );

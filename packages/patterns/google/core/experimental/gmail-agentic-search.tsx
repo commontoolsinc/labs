@@ -55,9 +55,9 @@ import type {
   SharedQuery,
 } from "./gmail-search-registry.tsx";
 
-// Re-export Auth type for convenience
-export type { Auth } from "../gmail-importer.tsx";
-import type { Auth } from "../gmail-importer.tsx";
+// Re-export Auth types for convenience
+export type { Auth, GoogleAuthCell } from "../gmail-importer.tsx";
+import type { GoogleAuthCell } from "../gmail-importer.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_AGENT = false;
@@ -188,20 +188,9 @@ export interface GmailAgenticSearchInput {
   // Debug log - tracks agent activity for debugging
   debugLog?: DebugLogEntry[] | Default<[]>;
 
-  // WORKAROUND (CT-1085): Accept auth as direct input since favorites don't persist.
-  // Users can manually link gmail-auth's auth output to this input.
+  // Direct auth cells can be manually linked when favorites do not persist.
   // If provided, this takes precedence over wish-based auth.
-  auth?:
-    | Auth
-    | Default<{
-      token: "";
-      tokenType: "";
-      scope: [];
-      expiresIn: 0;
-      expiresAt: 0;
-      refreshToken: "";
-      user: { email: ""; name: ""; picture: "" };
-    }>;
+  auth?: GoogleAuthCell;
 
   // ========================================================================
   // SHARED SEARCH STRINGS SUPPORT
@@ -249,7 +238,7 @@ export interface GmailAgenticSearchOutput {
   };
 
   // Auth state (exposed for embedding patterns)
-  auth: Auth;
+  auth: GoogleAuthCell | null;
   isAuthenticated: boolean;
   hasGmailScope: boolean;
   authSource: "direct" | "wish" | "none"; // Where auth came from
@@ -269,8 +258,8 @@ export interface GmailAgenticSearchOutput {
   lastScanAt: number;
 
   // Actions (bound handlers for embedding patterns to use)
-  startScan: Stream<unknown>;
-  stopScan: Stream<unknown>;
+  startScan: Stream<void>;
+  stopScan: Stream<void>;
 
   // ========================================================================
   // SHARED SEARCH STRINGS
@@ -371,7 +360,7 @@ const setAccountTypeHandler = handler<
 
 // Handler to stop scan
 const stopScanHandler = handler<
-  unknown,
+  void,
   {
     lastScanAt: Writable<number | Default<0>>;
     isScanning: Writable<boolean | Default<false>>;
@@ -432,7 +421,7 @@ const addDebugLogEntry = (
 const searchGmailHandler = handler<
   { query: string; result?: Writable<any> },
   {
-    auth: Writable<Auth>;
+    auth: GoogleAuthCell | null;
     // Stream<T> in signature lets framework unwrap opaque stream from wished pieces
     authRefreshStream: RefreshStreamType | null;
     progress: Writable<SearchProgress>;
@@ -445,8 +434,6 @@ const searchGmailHandler = handler<
     lastExecutedQueryIdCell: Writable<string | null>;
   }
 >(async (input, state) => {
-  const authData = state.auth.get();
-  const token = authData?.token as string;
   const max = state.maxSearches.get();
   const currentProgress = state.progress.get();
 
@@ -456,6 +443,27 @@ const searchGmailHandler = handler<
     message: `Searching Gmail: "${input.query}"`,
     details: { query: input.query, searchCount: currentProgress.searchCount },
   });
+
+  if (!state.auth) {
+    const authErrorResult = {
+      success: false,
+      authError: true,
+      message: "Authentication required",
+      emails: [],
+    };
+    if (input.result) {
+      input.result.set(authErrorResult);
+    }
+    state.progress.set({
+      ...currentProgress,
+      status: "auth_error",
+      authError: "Authentication required",
+    });
+    return authErrorResult;
+  }
+
+  const authData = state.auth.get();
+  const token = authData?.token as string;
 
   // Check if we've hit the search limit
   if (max > 0 && currentProgress.searchCount >= max) {
@@ -727,18 +735,18 @@ const searchGmailHandler = handler<
 
 // Handler to start scan
 const startScanHandler = handler<
-  unknown,
+  void,
   {
     isScanning: Writable<boolean | Default<false>>;
     isAuthenticated: Writable<boolean>;
     progress: Writable<SearchProgress>;
-    auth: Writable<Auth>;
+    auth: GoogleAuthCell | null;
     debugLog: Writable<DebugLogEntry[]>;
     // Stream<T> in signature lets framework unwrap opaque stream from wished pieces
     authRefreshStream: RefreshStreamType | null;
   }
 >(async (_, state) => {
-  if (!state.isAuthenticated.get()) return;
+  if (!state.isAuthenticated.get() || !state.auth) return;
 
   const authData = state.auth.get();
 
@@ -997,7 +1005,7 @@ const GmailAgenticSearch = pattern<
     lastScanAt,
     searchProgress, // Can be passed in for parent coordination
     debugLog, // Debug log for tracking agent activity
-    auth: inputAuth, // CT-1085 workaround: direct auth input
+    auth: inputAuth, // Direct auth input
     accountType: _accountType, // Multi-account support: "default" | "personal" | "work" (prefixed with _ as read-only input, using selectedAccountType instead)
     // Shared search strings support
     agentTypeUrl,
@@ -1011,8 +1019,9 @@ const GmailAgenticSearch = pattern<
     // AUTH HANDLING
     // ========================================================================
 
-    // Check if we have direct auth input (CT-1085 workaround)
-    const hasDirectAuth = !!(inputAuth?.token);
+    // Check if we have direct auth input.
+    const directAuth = inputAuth ?? null;
+    const hasDirectAuth = directAuth !== null;
 
     // Local writable cell for account type selection
     // Input `accountType` may be read-only (Default cells are read-only when using default value)
@@ -1116,11 +1125,11 @@ const GmailAgenticSearch = pattern<
     const hasWishedAuth = wishedAuthReady;
 
     // Access auth via property path to maintain writability
-    // When hasDirectAuth is true, we use inputAuth directly (it's already an Auth cell)
-    // When hasDirectAuth is false, we use wishedAuth from the utility
-    // NOTE: This means inputAuth must be passed as a live cell reference, not derived.
+    // When hasDirectAuth is true, we use inputAuth directly.
+    // When hasDirectAuth is false, we use wishedAuth from the utility.
+    // This means inputAuth must be passed as a live cell reference, not derived.
     // See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
-    const auth = hasDirectAuth ? inputAuth : wishedAuth;
+    const auth = hasDirectAuth ? directAuth : wishedAuth;
 
     // ========================================================================
     // CROSS-PIECE TOKEN REFRESH
@@ -1151,22 +1160,22 @@ const GmailAgenticSearch = pattern<
       ? "wish"
       : "none";
 
-    const isAuthenticated = !!(auth && auth.token && auth.user &&
-      auth.user.email);
+    const authValue = computed(() => auth?.get() ?? null);
+    const isAuthenticated = !!(authValue && authValue.token && authValue.user &&
+      authValue.user.email);
 
     // Check if token may be expired based on expiresAt timestamp
     const tokenMayBeExpired = computed(() => {
-      const a = auth as Auth;
-      if (!a?.expiresAt) return false;
+      if (!authValue?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return safeDateNow() > (a.expiresAt - bufferMs);
+      return safeDateNow() > (authValue.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
     const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
-    const hasGmailScope = (((auth as Auth)?.scope || []) as string[]).includes(
+    const hasGmailScope = ((authValue?.scope || []) as string[]).includes(
       GMAIL_SCOPE,
     );
 
@@ -2341,9 +2350,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
         recommendation: "share" | "share_with_edits" | "do_not_share";
       };
 
-      const pendingWritable = pendingSubmissions as Writable<
-        PendingSubmission[]
-      >;
+      const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((
         s: PendingSubmission | null,
       ): s is PendingSubmission => s != null);
@@ -2363,18 +2370,24 @@ Be conservative: when in doubt, recommend "do_not_share".`,
 
       // Update the submission with screening results using .key().key().set()
       const itemCell = pendingWritable.key(idx);
-      (itemCell.key("sanitizedQuery") as Writable<string>).set(
+      const sanitizedQueryCell: Writable<string> = itemCell.key(
+        "sanitizedQuery",
+      );
+      const piiWarningsCell: Writable<string[]> = itemCell.key("piiWarnings");
+      const generalizabilityIssuesCell: Writable<string[]> = itemCell.key(
+        "generalizabilityIssues",
+      );
+      const recommendationCell: Writable<
+        "share" | "share_with_edits" | "do_not_share" | "pending"
+      > = itemCell.key("recommendation");
+      sanitizedQueryCell.set(
         screeningData.sanitizedQuery || submission.originalQuery,
       );
-      (itemCell.key("piiWarnings") as Writable<string[]>).set(
-        screeningData.piiFound || [],
-      );
-      (itemCell.key("generalizabilityIssues") as Writable<string[]>).set(
+      piiWarningsCell.set(screeningData.piiFound || []);
+      generalizabilityIssuesCell.set(
         screeningData.generalizabilityIssues || [],
       );
-      (itemCell.key("recommendation") as Writable<
-        "share" | "share_with_edits" | "do_not_share" | "pending"
-      >).set(screeningData.recommendation);
+      recommendationCell.set(screeningData.recommendation);
     });
 
     // Note: approvePendingSubmissionHandler, rejectPendingSubmissionHandler, updateSanitizedQueryHandler
@@ -2568,18 +2581,19 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                             value={submission.sanitizedQuery}
                             onChange={(e: any) => {
                               const newValue = e.target.value;
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
                               const subs = pendingWritable.get() || [];
                               const idx = subs.findIndex((
                                 s: PendingSubmission,
                               ) => s.localQueryId === submission.localQueryId);
                               if (idx >= 0) {
-                                (pendingWritable.key(idx).key(
-                                  "sanitizedQuery",
-                                ) as Writable<string>).set(newValue);
+                                const sanitizedQueryCell: Writable<string> =
+                                  pendingWritable.key(idx).key(
+                                    "sanitizedQuery",
+                                  );
+                                sanitizedQueryCell.set(newValue);
                               }
                             }}
                             style={{
@@ -2604,13 +2618,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                           <cf-button
                             onClick={() => {
                               // Reject
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
-                              const localWritable = localQueries as Writable<
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
+                              const localWritable: Writable<
                                 LocalQuery[]
-                              >;
+                              > = localQueries;
                               const subs = pendingWritable.get() || [];
                               pendingWritable.set(
                                 subs.filter((s: PendingSubmission) =>
@@ -2623,11 +2636,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 q: LocalQuery,
                               ) => q.id === submission.localQueryId);
                               if (idx >= 0) {
-                                (localWritable.key(idx).key(
-                                  "shareStatus",
-                                ) as Writable<
+                                const shareStatusCell: Writable<
                                   "private" | "pending_review" | "submitted"
-                                >).set("private");
+                                > = localWritable.key(idx).key(
+                                  "shareStatus",
+                                );
+                                shareStatusCell.set("private");
                               }
                             }}
                             variant="ghost"
@@ -2639,18 +2653,19 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                           <cf-button
                             onClick={() => {
                               // Approve
-                              const pendingWritable =
-                                pendingSubmissions as Writable<
-                                  PendingSubmission[]
-                                >;
+                              const pendingWritable: Writable<
+                                PendingSubmission[]
+                              > = pendingSubmissions;
                               const subs = pendingWritable.get() || [];
                               const idx = subs.findIndex((
                                 s: PendingSubmission,
                               ) => s.localQueryId === submission.localQueryId);
                               if (idx >= 0) {
-                                (pendingWritable.key(idx).key(
-                                  "userApproved",
-                                ) as Writable<boolean>).set(true);
+                                const userApprovedCell: Writable<boolean> =
+                                  pendingWritable.key(idx).key(
+                                    "userApproved",
+                                  );
+                                userApprovedCell.set(true);
                               }
                             }}
                             variant={submission.userApproved
@@ -2699,13 +2714,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 );
                                 const submitHandler = registry?.result
                                   ?.submitQuery;
-                                const pendingWritable =
-                                  pendingSubmissions as Writable<
-                                    PendingSubmission[]
-                                  >;
-                                const localWritable = localQueries as Writable<
+                                const pendingWritable: Writable<
+                                  PendingSubmission[]
+                                > = pendingSubmissions;
+                                const localWritable: Writable<
                                   LocalQuery[]
-                                >;
+                                > = localQueries;
 
                                 // Submit each approved query
                                 approved.forEach(
@@ -2727,10 +2741,12 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         submission.localQueryId
                                     );
                                     if (idx >= 0) {
-                                      (pendingWritable.key(idx).key(
+                                      const submittedAtCell: Writable<
+                                        number | undefined
+                                      > = pendingWritable.key(idx).key(
                                         "submittedAt",
-                                      ) as Writable<number | undefined>)
-                                        .set(safeDateNow());
+                                      );
+                                      submittedAtCell.set(safeDateNow());
                                     }
 
                                     // Update local query status to submitted
@@ -2740,13 +2756,14 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                       q: LocalQuery,
                                     ) => q.id === submission.localQueryId);
                                     if (qIdx >= 0) {
-                                      (localWritable.key(qIdx).key(
-                                        "shareStatus",
-                                      ) as Writable<
+                                      const shareStatusCell: Writable<
                                         | "private"
                                         | "pending_review"
                                         | "submitted"
-                                      >).set("submitted");
+                                      > = localWritable.key(qIdx).key(
+                                        "shareStatus",
+                                      );
+                                      shareStatusCell.set("submitted");
                                     }
                                   },
                                 );

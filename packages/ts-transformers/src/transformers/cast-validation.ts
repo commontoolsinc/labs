@@ -3,15 +3,21 @@
  *
  * Validates type assertions (casts) and reports diagnostics for problematic patterns:
  * - `as unknown as X` (double-cast): ERROR - bypasses type safety
- * - `as OpaqueRef<...>`: ERROR - framework handles OpaqueRef wrapping automatically
- * - `as Cell<...>` and other cell-like types: WARNING - prefer proper type annotations
+ * - `as Reactive<...>`: ERROR - framework handles Reactive wrapping automatically
+ * - `as Cell<...>` and other cell-like types: ERROR - prefer proper type annotations
  */
 import ts from "typescript";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
-import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import {
+  getImportTypeModuleName,
+  HelpersOnlyTransformer,
+  isCommonFabricDeclaration,
+  isCommonFabricModuleName,
+  TransformationContext,
+} from "../core/mod.ts";
 
 /**
- * Cell-like types that should trigger a warning when cast to.
+ * Cell-like types that should trigger an error when cast to.
  * These types have special reactive semantics that casts can bypass.
  */
 const CELL_LIKE_TYPE_NAMES = spellingsWhere({
@@ -47,6 +53,10 @@ const FORBIDDEN_CAST_TYPE_NAMES = spellingsWhere({
   CellTypeConstructor: false,
   ScopedCellTypeConstructor: false,
 });
+
+type CastTargetClassification =
+  | { kind: "forbidden"; typeName: string }
+  | { kind: "cellLike"; typeName: string };
 
 export class CastValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -186,48 +196,212 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     castNode: ts.Node,
     context: TransformationContext,
   ): void {
-    const typeName = this.extractTypeName(typeNode);
-    if (!typeName) return;
+    const typeNames = this.extractTypeNames(typeNode, context);
+    const classification = this.classifyCastTarget(typeNames);
+    if (!classification) return;
 
-    // Check for forbidden cast targets (ERROR)
-    if (FORBIDDEN_CAST_TYPE_NAMES.has(typeName)) {
+    if (classification.kind === "forbidden") {
       context.reportDiagnostic({
         severity: "error",
         type: "cast-validation:forbidden-cast",
-        message: `Casting to '${typeName}<>' is not allowed. ` +
+        message: `Casting to '${classification.typeName}<>' is not allowed. ` +
           "The framework handles this type conversion automatically.",
         node: castNode,
       });
       return;
     }
 
-    // Check for cell-like cast targets (WARNING)
-    if (CELL_LIKE_TYPE_NAMES.has(typeName)) {
-      context.reportDiagnostic({
-        severity: "warning",
-        type: "cast-validation:cell-cast",
-        message: `Casting to '${typeName}<>' is discouraged. ` +
-          "Consider using proper type annotations instead.",
-        node: castNode,
-      });
+    context.reportDiagnostic({
+      severity: "error",
+      type: "cast-validation:cell-cast",
+      message: `Casting to '${classification.typeName}<>' is not allowed. ` +
+        "Use a type annotation instead.",
+      node: castNode,
+    });
+  }
+
+  private classifyCastTarget(
+    typeNames: readonly string[],
+  ): CastTargetClassification | undefined {
+    const forbiddenTypeName = typeNames.find((typeName) =>
+      FORBIDDEN_CAST_TYPE_NAMES.has(typeName)
+    );
+    if (forbiddenTypeName) {
+      return { kind: "forbidden", typeName: forbiddenTypeName };
     }
+
+    const cellLikeTypeName = typeNames.find((typeName) =>
+      CELL_LIKE_TYPE_NAMES.has(typeName)
+    );
+    if (cellLikeTypeName) {
+      return { kind: "cellLike", typeName: cellLikeTypeName };
+    }
+
+    return undefined;
   }
 
   /**
-   * Extracts the base type name from a type node.
-   * For example, `Cell<number>` returns "Cell", `OpaqueRef<Foo>` returns "OpaqueRef".
+   * Extracts wrapper names from a cast target.
+   * For example, `Cell<number>` returns "Cell".
+   * A nested type like `Cell<number> | undefined` returns "Cell".
    */
-  private extractTypeName(typeNode: ts.TypeNode): string | undefined {
+  private extractTypeNames(
+    typeNode: ts.TypeNode,
+    context: TransformationContext,
+    seenSymbols = new Set<ts.Symbol>(),
+  ): string[] {
+    const names = new Set<string>();
+
+    const visit = (node: ts.TypeNode): void => {
+      if (ts.isParenthesizedTypeNode(node)) {
+        visit(node.type);
+        return;
+      }
+      if (ts.isUnionTypeNode(node) || ts.isIntersectionTypeNode(node)) {
+        for (const child of node.types) visit(child);
+        return;
+      }
+      const name = this.extractTypeReferenceName(
+        node,
+        context,
+        seenSymbols,
+      );
+      if (name) names.add(name);
+    };
+
+    visit(typeNode);
+    return [...names];
+  }
+
+  private extractTypeReferenceName(
+    typeNode: ts.TypeNode,
+    context: TransformationContext,
+    seenSymbols: Set<ts.Symbol>,
+  ): string | undefined {
     if (ts.isTypeReferenceNode(typeNode)) {
-      const typeName = typeNode.typeName;
-      if (ts.isIdentifier(typeName)) {
-        return typeName.text;
-      }
-      // Handle qualified names like `Foo.Bar`
-      if (ts.isQualifiedName(typeName)) {
-        return typeName.right.text;
-      }
+      return this.resolveWrapperTypeName(
+        typeNode.typeName,
+        context,
+        seenSymbols,
+      );
+    }
+    if (ts.isImportTypeNode(typeNode)) {
+      return this.resolveImportTypeName(typeNode);
     }
     return undefined;
+  }
+
+  private resolveImportTypeName(
+    typeNode: ts.ImportTypeNode,
+  ): string | undefined {
+    const qualifier = typeNode.qualifier;
+    const moduleName = getImportTypeModuleName(typeNode);
+    if (
+      !qualifier ||
+      !moduleName ||
+      !isCommonFabricModuleName(moduleName)
+    ) {
+      return undefined;
+    }
+    const typeName = ts.isIdentifier(qualifier)
+      ? qualifier.text
+      : qualifier.right.text;
+    return this.isWrapperTypeName(typeName) ? typeName : undefined;
+  }
+
+  private resolveWrapperTypeName(
+    typeName: ts.EntityName,
+    context: TransformationContext,
+    seenSymbols: Set<ts.Symbol>,
+  ): string | undefined {
+    const symbol = context.checker.getSymbolAtLocation(typeName);
+    return symbol &&
+      this.resolveWrapperSymbolName(symbol, context, seenSymbols);
+  }
+
+  private resolveWrapperSymbolName(
+    symbol: ts.Symbol,
+    context: TransformationContext,
+    seenSymbols: Set<ts.Symbol>,
+  ): string | undefined {
+    if (seenSymbols.has(symbol)) return undefined;
+    seenSymbols.add(symbol);
+
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      const aliasedSymbol = context.checker.getAliasedSymbol(symbol);
+      const aliasedName = this.resolveWrapperSymbolName(
+        aliasedSymbol,
+        context,
+        seenSymbols,
+      );
+      if (aliasedName) return aliasedName;
+    }
+
+    const symbolName = symbol.getName();
+    if (
+      this.isWrapperTypeName(symbolName) &&
+      this.hasCommonFabricDeclaration(symbol)
+    ) {
+      return symbolName;
+    }
+
+    for (const declaration of symbol.declarations ?? []) {
+      if (ts.isTypeAliasDeclaration(declaration)) {
+        const typeNames = this.extractTypeNames(
+          declaration.type,
+          context,
+          seenSymbols,
+        );
+        const wrapperName = typeNames.find((name) =>
+          this.isWrapperTypeName(name)
+        );
+        if (wrapperName) return wrapperName;
+      }
+
+      if (ts.isInterfaceDeclaration(declaration)) {
+        const wrapperName = this.resolveInterfaceHeritageWrapperName(
+          declaration,
+          context,
+          seenSymbols,
+        );
+        if (wrapperName) return wrapperName;
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveInterfaceHeritageWrapperName(
+    declaration: ts.InterfaceDeclaration,
+    context: TransformationContext,
+    seenSymbols: Set<ts.Symbol>,
+  ): string | undefined {
+    for (const clause of declaration.heritageClauses ?? []) {
+      for (const heritageType of clause.types) {
+        const symbol = context.checker.getSymbolAtLocation(
+          heritageType.expression,
+        );
+        if (!symbol) continue;
+        const wrapperName = this.resolveWrapperSymbolName(
+          symbol,
+          context,
+          seenSymbols,
+        );
+        if (wrapperName) return wrapperName;
+      }
+    }
+
+    return undefined;
+  }
+
+  private isWrapperTypeName(typeName: string): boolean {
+    return FORBIDDEN_CAST_TYPE_NAMES.has(typeName) ||
+      CELL_LIKE_TYPE_NAMES.has(typeName);
+  }
+
+  private hasCommonFabricDeclaration(symbol: ts.Symbol): boolean {
+    return (symbol.declarations ?? []).some((declaration) =>
+      isCommonFabricDeclaration(declaration)
+    );
   }
 }

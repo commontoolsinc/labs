@@ -11,7 +11,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // Import types from public API for compile-time type tests
-import { type OpaqueRef } from "@commonfabric/api";
+import { type Reactive } from "@commonfabric/api";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -212,16 +212,16 @@ describe("Pattern Runner - SELF", () => {
     const treePattern = pattern<{ name: string }, TreeNode>(
       ({ name, [SELF]: self }) => {
         // Positive type tests: these assignments SHOULD work
-        const _correctType: OpaqueRef<TreeNode> = self;
-        const _correctChildren: OpaqueRef<TreeNode[]> = self.children;
-        const _correctName: OpaqueRef<string> = self.name;
+        const _correctType: Reactive<TreeNode> = self;
+        const _correctChildren: Reactive<TreeNode[]> = self.children;
+        const _correctName: Reactive<string> = self.name;
 
         // Negative type tests: these should NOT work (verified by @ts-expect-error)
-        // If self were ApiOpaqueRef<any>, these would succeed, making @ts-expect-error unused
-        // @ts-expect-error - self should not be assignable to ApiOpaqueRef<{ wrong: true }>
-        const _wrongType: OpaqueRef<{ wrong: true }> = self;
-        // @ts-expect-error - children should not be assignable to ApiOpaqueRef<string[]>
-        const _wrongChildren: OpaqueRef<string[]> = self.children;
+        // If self were ApiReactive<any>, these would succeed, making @ts-expect-error unused
+        // @ts-expect-error - self should not be assignable to ApiReactive<{ wrong: true }>
+        const _wrongType: Reactive<{ wrong: true }> = self;
+        // @ts-expect-error - children should not be assignable to ApiReactive<string[]>
+        const _wrongChildren: Reactive<string[]> = self.children;
 
         // Use self in the return type
         const children: (typeof self)[] = [];

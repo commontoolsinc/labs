@@ -3,8 +3,8 @@ import {
   cloneTypeNode,
   createRegisteredTypeLiteral,
   getDeclaredTypeNodeForBindingElement,
+  reportUnknownReactiveType,
   shouldPreserveBindingDeclaredTypeNode,
-  warnIfUnknownReactiveType,
 } from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
@@ -930,7 +930,7 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
  * an `asScope(scope)` method (the lowering target). This covers the schema-built
  * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
  * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
- * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * type is just `(...) => Reactive<...>` with an `asScope` method and so lacks
  * the `argumentSchema`/`resultSchema` shape that check keys on.
  */
 function calleeExposesAsScope(
@@ -1521,8 +1521,8 @@ function visitReactiveConditional(
   // so an unknown condition silently reads back as undefined at this boundary.
   // The branches are result values that flow outward unmaterialized — an unknown
   // branch is not lost here; it propagates as the call's unknown result and is
-  // warned about where that result is consumed (captured).
-  warnIfUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
+  // reported where that result is consumed (captured).
+  reportUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
 
   return visitPrependedWidenedSchemaCall(
     node,
@@ -2598,7 +2598,7 @@ function reportAnyResultSchema(
 /**
  * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
  * result is an error (the whole output is permissive). A concrete result that
- * nests `unknown` fields is a warning: those fields lower to
+ * nests `unknown` fields is also an error: those fields lower to
  * `{ type: "unknown" }`, which a consumer reading them back materializes as
  * `undefined` — the producer-side form of the unknown-capture bug.
  */
@@ -2617,7 +2617,7 @@ function reportUnknownPatternResult(
   if (paths.length === 0) return;
   const fields = paths.map((p) => `\`${p}\``).join(", ");
   context.reportDiagnosticOnce({
-    severity: "warning",
+    severity: "error",
     type: "pattern-result:unknown-type",
     message:
       `pattern() output ${paths.length > 1 ? "fields" : "field"} ${fields} ` +

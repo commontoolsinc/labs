@@ -18,6 +18,10 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("list builtin edge paths");
 const space = signer.did();
@@ -337,10 +341,11 @@ class LoopbackSessionFactory implements SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: plainLoopback(this.getServer()),
     });
-    const session = await client.mount(spaceId, {}, () => ({
-      invocation: {},
-      authorization: { principal: sgnr?.did() },
-    }));
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(sgnr),
+    );
     return { client, session };
   }
 }
@@ -403,6 +408,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = LoopbackStorageManager.make(signer, server);
     sm2 = LoopbackStorageManager.make(signer, server);
@@ -546,6 +552,7 @@ describe("cross-space link load kick", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     writerStorage = SharedServerStorageManager.connectTo(server, {
       as: signer,

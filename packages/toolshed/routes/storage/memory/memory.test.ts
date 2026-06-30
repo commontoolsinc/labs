@@ -7,6 +7,7 @@ import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  type SessionOpenChallenge,
 } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -19,6 +20,16 @@ const HELLO = {
   protocol: MEMORY_PROTOCOL,
   flags: getMemoryProtocolFlags(),
 } as const;
+
+type HelloOkWithSessionOpen = {
+  type: "hello.ok";
+  protocol: string;
+  flags: ReturnType<typeof getMemoryProtocolFlags>;
+  sessionOpen: {
+    audience: string;
+    challenge: SessionOpenChallenge;
+  };
+};
 
 const openSocket = async (url: URL): Promise<WebSocket> => {
   const socket = new WebSocket(url);
@@ -33,15 +44,34 @@ const createSessionOpenAuth = async (
   identity: Identity,
   space: string,
   session: { sessionId?: string; seenSeq?: number } = {},
+  sessionOpen: {
+    audience?: string;
+    challenge?: SessionOpenChallenge;
+  },
+  overrides: {
+    audience?: string | null;
+    challenge?: string | null;
+  } = {},
 ) => {
+  const iat = Math.floor(Date.now() / 1000);
+  const audience = overrides.audience ?? sessionOpen.audience;
+  const challenge = overrides.challenge ?? sessionOpen.challenge?.value;
   const invocation = {
     iss: identity.did(),
     cmd: "session.open",
     sub: space,
+    ...(overrides.audience === null || audience === undefined ? {} : {
+      aud: audience,
+    }),
     args: {
       protocol: MEMORY_PROTOCOL,
       session,
     },
+    ...(overrides.challenge === null || challenge === undefined ? {} : {
+      challenge,
+    }),
+    iat,
+    exp: iat + 300,
   };
   const signature = await identity.sign(hashOf(invocation).bytes);
   if (signature.error) {
@@ -291,17 +321,20 @@ serialTest("memory websocket negotiates a session", async () => {
     const socket = await openSocket(address);
     socket.send(encodeMemoryBoundary(HELLO));
 
-    const message = await readJsonMessage<{
-      type: "hello.ok";
-      protocol: string;
-      flags: ReturnType<typeof getMemoryProtocolFlags>;
-    }>(socket);
+    const message = await readJsonMessage<HelloOkWithSessionOpen>(socket);
 
     assertEquals(message.type, "hello.ok");
     assertEquals(message.protocol, MEMORY_PROTOCOL);
     assertEquals(message.flags, getMemoryProtocolFlags());
+    assert(message.sessionOpen.audience.length > 0);
+    assert(message.sessionOpen.challenge.value.length > 0);
 
-    const auth = await createSessionOpenAuth(identity, space);
+    const auth = await createSessionOpenAuth(
+      identity,
+      space,
+      {},
+      message.sessionOpen,
+    );
     socket.send(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
@@ -362,6 +395,235 @@ serialTest("memory websocket rejects an unsigned session open", async () => {
   }
 });
 
+serialTest("memory websocket rejects a missing challenge", async () => {
+  const identity = await Identity.fromPassphrase(
+    "memory-route-missing-challenge",
+  );
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
+    const auth = await createSessionOpenAuth(
+      identity,
+      identity.did(),
+      {},
+      hello.sessionOpen,
+      { challenge: null },
+    );
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+    assert(message.error.message.includes("challenge"));
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket rejects a mismatched challenge", async () => {
+  const identity = await Identity.fromPassphrase(
+    "memory-route-wrong-challenge",
+  );
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
+    const auth = await createSessionOpenAuth(
+      identity,
+      identity.did(),
+      {},
+      hello.sessionOpen,
+      { challenge: "challenge:wrong" },
+    );
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+    assert(message.error.message.includes("challenge"));
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket rejects a missing audience", async () => {
+  const identity = await Identity.fromPassphrase(
+    "memory-route-missing-audience",
+  );
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
+    const auth = await createSessionOpenAuth(
+      identity,
+      identity.did(),
+      {},
+      hello.sessionOpen,
+      { audience: null },
+    );
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+    assert(message.error.message.includes("audience"));
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket rejects a mismatched audience", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-wrong-audience");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
+    const auth = await createSessionOpenAuth(
+      identity,
+      identity.did(),
+      {},
+      hello.sessionOpen,
+      { audience: "did:key:z6Mk-memory-route-wrong-audience" },
+    );
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+    assert(message.error.message.includes("audience"));
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket rejects a reused challenge", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-reused");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
+    const auth = await createSessionOpenAuth(
+      identity,
+      identity.did(),
+      {},
+      hello.sessionOpen,
+    );
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+    const opened = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string; serverSeq: number };
+    }>(socket);
+    assertEquals(opened.requestId, "open-1");
+    assert(opened.ok.sessionId.length > 0);
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-2",
+      space: identity.did(),
+      session: {},
+      ...auth,
+    }));
+    const replay = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+    assertEquals(replay.requestId, "open-2");
+    assertEquals(replay.error.name, "AuthorizationError");
+    assert(replay.error.message.includes("challenge"));
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
 serialTest("memory websocket resumes a requested session id", async () => {
   const identity = await Identity.fromPassphrase("memory-route-resume-auth");
   const server = Deno.serve({ port: 0 }, app.fetch);
@@ -374,12 +636,12 @@ serialTest("memory websocket resumes a requested session id", async () => {
     const socket = await openSocket(address);
     socket.send(encodeMemoryBoundary(HELLO));
 
-    await readJsonMessage(socket);
+    const hello = await readJsonMessage<HelloOkWithSessionOpen>(socket);
 
     const auth = await createSessionOpenAuth(identity, space, {
       sessionId: "session:test-resume",
       seenSeq: 7,
-    });
+    }, hello.sessionOpen);
     socket.send(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",

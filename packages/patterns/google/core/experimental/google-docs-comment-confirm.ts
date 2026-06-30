@@ -82,53 +82,55 @@ export interface PendingCommentAction {
 // API Client (TRUST BOUNDARY - API calls happen here)
 // =============================================================================
 
-class GoogleDocsClient {
-  private token: string;
+function createGoogleDocsClient(token: string) {
+  return new (class GoogleDocsClient {
+    private token: string;
 
-  constructor(token: string) {
-    this.token = token;
-  }
-
-  async createReply(
-    fileId: string,
-    commentId: string,
-    content: string,
-    resolve = false,
-  ): Promise<void> {
-    const url = new URL(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/comments/${commentId}/replies`,
-    );
-    url.searchParams.set("fields", "id,content,action");
-
-    const body: { content: string; action?: string } = { content };
-    if (resolve) {
-      body.action = "resolve";
+    constructor(token: string) {
+      this.token = token;
     }
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    async createReply(
+      fileId: string,
+      commentId: string,
+      content: string,
+      resolve = false,
+    ): Promise<void> {
+      const url = new URL(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/comments/${commentId}/replies`,
+      );
+      url.searchParams.set("fields", "id,content,action");
 
-    if (!res.ok) {
-      const text = await res.text();
-      if (res.status === 401) {
-        throw new Error(
-          "Token expired. Please re-authenticate in your Google Auth piece.",
-        );
+      const body: { content: string; action?: string } = { content };
+      if (resolve) {
+        body.action = "resolve";
       }
-      if (res.status === 403) {
-        throw new Error(
-          "Access denied. You may not have permission to comment on this document.",
-        );
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        if (res.status === 401) {
+          throw new Error(
+            "Token expired. Please re-authenticate in your Google Auth piece.",
+          );
+        }
+        if (res.status === 403) {
+          throw new Error(
+            "Access denied. You may not have permission to comment on this document.",
+          );
+        }
+        throw new Error(`Failed to post reply: ${res.status} - ${text}`);
       }
-      throw new Error(`Failed to post reply: ${res.status} - ${text}`);
     }
-  }
+  })(token);
 }
 
 // =============================================================================
@@ -178,7 +180,7 @@ export const executeAction = handler<
   lastError.set(null);
 
   try {
-    const client = new GoogleDocsClient(token);
+    const client = createGoogleDocsClient(token);
     const resolve = pendingAction.type === "reply-resolve";
 
     await client.createReply(

@@ -156,14 +156,14 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
-  const allPieceCells = allPieces as MentionableCell[];
+  const allPieceCells: MentionableCell[] = allPieces;
 
   computeIndex({ allPieces: allPieceCells });
 
   // Compute mentionable list from allPieces reactively
-  const mentionable = computeMentionable({
+  const mentionable: MentionableCell[] = computeMentionable({
     allPieces: allPieceCells,
-  }) as MentionableCell[];
+  });
 
   const query = new Writable("");
 

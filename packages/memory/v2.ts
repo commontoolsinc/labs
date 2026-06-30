@@ -217,6 +217,7 @@ export interface SessionOpenResult {
   caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
+  sessionOpen: SessionOpenAuthMetadata;
 }
 
 export interface MemoryProtocolFlags {
@@ -250,6 +251,17 @@ export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
+  sessionOpen?: SessionOpenAuthMetadata;
+}
+
+export interface SessionOpenChallenge {
+  value: string;
+  expiresAt: number;
+}
+
+export interface SessionOpenAuthMetadata {
+  challenge: SessionOpenChallenge;
+  audience: string;
 }
 
 export interface SessionDescriptor {

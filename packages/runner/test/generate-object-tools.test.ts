@@ -354,6 +354,7 @@ describe("generateObject with tools", () => {
     expect(result.key("pending").get()).toBe(false);
     // Result should be undefined after error
     expect(result.key("result").get()).toBeUndefined();
+    expect(typeof result.key("error").get()).toBe("string");
   });
 
   it("should pass schema to presentResult tool inputSchema", async () => {

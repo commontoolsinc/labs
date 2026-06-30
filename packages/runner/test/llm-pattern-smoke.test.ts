@@ -16,6 +16,7 @@ import {
   enableMockMode,
   resetMockMode,
 } from "@commonfabric/llm/client";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -99,6 +100,80 @@ describe("LLM pattern smoke tests", () => {
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("Hello from mock!");
+  });
+
+  it("generateText surfaces grounding sources from native search", async () => {
+    const prompt = "smoke-test-generateText-grounding";
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ) &&
+        req.nativeModelToolIds?.length === 1 &&
+        req.nativeModelToolIds[0] === GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      {
+        role: "assistant",
+        content: "Searched the web.",
+        id: "smoke-grounding",
+        nativeModelToolResults: [{
+          type: "cf-harness.native-model-tool-result",
+          toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+          provider: "google",
+          sources: [
+            {
+              url: "https://example.com/a",
+              title: "A",
+              snippet: "First source",
+            },
+            {
+              url: "https://example.com/a",
+              title: "Duplicate",
+              snippet: "Duplicate source",
+            },
+            {
+              title: "B",
+              description: "Second source",
+            },
+          ],
+        }],
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateText({
+        prompt,
+        search: true,
+        nativeModelToolIds: [GOOGLE_SEARCH_NATIVE_MODEL_TOOL],
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "smoke-generateText-grounding",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await waitForPendingToBecomeFalse(result);
+    await runtime.idle();
+
+    expect(result.key("pending").get()).toBe(false);
+    expect(result.key("result").get()).toBe("Searched the web.");
+    expect(result.key("groundingSources").get()).toEqual([
+      {
+        url: "https://example.com/a",
+        title: "A",
+        snippet: "First source",
+      },
+      {
+        title: "B",
+        snippet: "Second source",
+      },
+    ]);
   });
 
   it("generateObject with typed schema returns structured object", async () => {

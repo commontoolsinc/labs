@@ -392,7 +392,7 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
       1,
-      "Runner Tests (1/4)",
+      "Runner Tests (1/5)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:01:40Z",
       [
@@ -405,7 +405,7 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
     ),
     makeJob(
       2,
-      "Runner Tests (2/4)",
+      "Runner Tests (2/5)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:01:10Z",
       [
@@ -419,11 +419,11 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
   ]);
 
   assertEquals(
-    metrics.get("job: Runner Tests (1/4)")?.durationSeconds,
+    metrics.get("job: Runner Tests (1/5)")?.durationSeconds,
     100,
   );
   assertEquals(
-    metrics.get("job: Runner Tests (2/4)")?.durationSeconds,
+    metrics.get("job: Runner Tests (2/5)")?.durationSeconds,
     70,
   );
   assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
@@ -556,7 +556,7 @@ Deno.test("computeCiWallTimeRevisitSignals stays quiet for balanced CI", () => {
     ),
     makeJob(
       5,
-      "Runner Tests (1/4)",
+      "Runner Tests (1/5)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:01:35Z",
       [],
@@ -598,7 +598,7 @@ Deno.test("computeCiWallTimeRevisitSignals flags slow and imbalanced jobs", () =
     ),
     makeJob(
       5,
-      "Runner Tests (1/4)",
+      "Runner Tests (1/5)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:01:25Z",
       [],

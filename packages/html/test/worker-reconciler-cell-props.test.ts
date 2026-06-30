@@ -5,7 +5,7 @@ import type { WorkerVNode } from "../src/worker/types.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "@commonfabric/runner";
+import { KeepAsCell, Runtime } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 
@@ -865,7 +865,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         const propsCell = new MockPropsCell({
           $value: "linked content",
         }, {
-          $value: bindingCell.getAsLink({ keepAsCell: true }),
+          $value: bindingCell.getAsLink({ keepAsCell: KeepAsCell.All }),
         });
         const rootCell = new MockCell({
           type: "vnode",
@@ -991,7 +991,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           props: {
             $value: bindingCell.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
             author: "alice",
           },
@@ -1075,7 +1075,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           type: "vnode",
           name: "cf-vstack",
           props: {},
-          children: [linkedChild.getAsLink({ keepAsCell: true })],
+          children: [linkedChild.getAsLink({ keepAsCell: KeepAsCell.All })],
         });
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
@@ -1141,7 +1141,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
                 props: { id: "nested-inline-card" },
                 children: ["Nested inline child"],
               },
-              linkedChild.getAsLink({ keepAsCell: true }),
+              linkedChild.getAsLink({ keepAsCell: KeepAsCell.All }),
             ],
           }],
         });
@@ -1331,6 +1331,107 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             "Changed prop should be title",
           );
           assertEquals((updatedOps[0] as any).value, "baz");
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> re-emits DOM-live props (value) on an unchanged repeat, parity with inline props (CT-1803)",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({
+          className: "foo",
+          value: "hello",
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "input",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          // Re-emit identical values. The worker can't see live DOM drift, so
+          // the DOM-live `value` must re-emit to let setPropDefault repair it;
+          // the inert className stays quiet (parity with the inline static path).
+          propsCell.set({ className: "foo", value: "hello" });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const keys = collector.getOpsOfType("set-prop")
+            .map((op: any) => op.key);
+          assertEquals(
+            keys.includes("value"),
+            true,
+            "DOM-live `value` must re-emit so drift can be repaired",
+          );
+          assertEquals(
+            keys.includes("className"),
+            false,
+            "inert className should be skipped when unchanged",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> re-emits text-integrity props (cf-chat-message name/content) on an unchanged repeat (CT-1803)",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({
+          id: "m1",
+          name: "Alice",
+          content: "hi",
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-chat-message",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          // Text-integrity sinks have policy-dependent transforms and must
+          // re-run; only the inert id may be skipped.
+          propsCell.set({ id: "m1", name: "Alice", content: "hi" });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const keys = collector.getOpsOfType("set-prop")
+            .map((op: any) => op.key);
+          assertEquals(
+            keys.includes("name"),
+            true,
+            "text-integrity `name` must re-emit",
+          );
+          assertEquals(
+            keys.includes("content"),
+            true,
+            "text-integrity `content` must re-emit",
+          );
+          assertEquals(
+            keys.includes("id"),
+            false,
+            "inert id should be skipped when unchanged",
+          );
         } finally {
           cancel();
         }

@@ -96,18 +96,15 @@ const fillAndVerify = async (
 
   const root = input.getRootNode();
   const host = root instanceof ShadowRoot ? root.host : element;
-  const hostWithCell = host as Element & {
-    value?: {
-      get?: () => unknown;
-      set?: (value: string) => Promise<void>;
-      sync?: () => Promise<unknown>;
-    };
+  // The host component owns durably committing a typed edit. A cf-input two-way
+  // bound to a Cell flushes the value into the cell and awaits the runtime
+  // round-trip via commit(); a field with no cell (cf-submit-input) exposes no
+  // commit() and its DOM value is authoritative. Drive the DOM like a user and
+  // then ask the host to commit, rather than reaching into the cell.
+  const hostElement = host as Element & {
+    commit?: () => Promise<void>;
     requestUpdate?: () => void | Promise<void>;
   };
-  const readCellValue = () =>
-    typeof hostWithCell.value?.get === "function"
-      ? hostWithCell.value.get()
-      : undefined;
 
   input.focus();
   const valueSetter = Object.getOwnPropertyDescriptor(
@@ -120,22 +117,16 @@ const fillAndVerify = async (
   input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   input.blur();
 
-  if (typeof hostWithCell.value?.set === "function") {
-    await hostWithCell.value.set(nextValue);
-  }
-  const cellValue = typeof hostWithCell.value?.sync === "function"
-    ? await hostWithCell.value.sync()
-    : readCellValue();
-  if (typeof hostWithCell.requestUpdate === "function") {
-    await hostWithCell.requestUpdate.call(hostWithCell);
-  }
+  // Ask the host to flush and durably commit the typed value (a no-op for
+  // fields not bound to a cell), then re-render so the inner input reflects the
+  // committed value before we read it back.
+  await hostElement.commit?.();
+  await hostElement.requestUpdate?.();
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
 
-  return hostWithCell.value !== undefined
-    ? cellValue === nextValue
-    : input.value === nextValue;
+  return input.value === nextValue;
 };
 
 // Scroll the cf-button behind `selector` into view and tag its inner click
@@ -1159,8 +1150,6 @@ type CfInputProbe = {
   selector: string;
   found: boolean;
   value: string;
-  cellValue: unknown;
-  hasCell: boolean;
   disabled: boolean;
   readOnly: boolean;
   visible: boolean;
@@ -1191,8 +1180,6 @@ async function readCfInputProbe(
         selector: targetSelector,
         found: false,
         value: "",
-        cellValue: undefined,
-        hasCell: false,
         disabled: false,
         readOnly: false,
         visible: false,
@@ -1207,8 +1194,6 @@ async function readCfInputProbe(
         selector: element.tagName.toLowerCase(),
         found: false,
         value: "",
-        cellValue: undefined,
-        hasCell: false,
         disabled: false,
         readOnly: false,
         visible: false,
@@ -1224,22 +1209,14 @@ async function readCfInputProbe(
       style.visibility !== "hidden" && style.display !== "none";
     const root = input.getRootNode();
     const host = root instanceof ShadowRoot ? root.host : element;
-    const hostWithCell = host as Element & {
-      value?: { get?: () => unknown };
-    };
-    const cellValue = typeof hostWithCell.value?.get === "function"
-      ? hostWithCell.value.get()
-      : undefined;
     return {
       selector: input.tagName.toLowerCase(),
       found: true,
       value: input.value,
-      cellValue,
-      hasCell: hostWithCell.value !== undefined,
       disabled: input.disabled,
       readOnly: input.readOnly,
       visible,
-      hostTagName: hostWithCell.tagName.toLowerCase(),
+      hostTagName: host.tagName.toLowerCase(),
     };
   }, { args: [selector] });
 }

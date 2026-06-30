@@ -473,7 +473,7 @@ async function startFetch(
       apiBase,
       options,
     );
-    const response = await fetch(
+    const response = await runtime.fetch(
       resolvedUrl,
       {
         signal: abortSignal,

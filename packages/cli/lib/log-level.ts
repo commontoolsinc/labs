@@ -37,9 +37,8 @@ export function extractLogLevel(
  *
  * An explicit `--log-level` wins. Otherwise a pre-set `CF_LOG_LEVEL` env var is
  * left as-is (its floor was applied at module load). Otherwise the floor
- * defaults to `warn` so transformer-pipeline warnings (e.g. unknown-typed
- * reactive captures) reach authors; on the happy path no runtime `logger.warn`
- * fires, so this stays quiet in practice.
+ * defaults to `warn` so transformer-pipeline diagnostics reach authors; on the
+ * happy path no runtime `logger.warn` fires, so this stays quiet in practice.
  */
 export function applyLogLevel(args: string[]): string[] {
   const { level, args: cleanArgs } = extractLogLevel(args);

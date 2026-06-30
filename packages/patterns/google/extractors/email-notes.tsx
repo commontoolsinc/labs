@@ -22,6 +22,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   TILE_UI,
   UI,
   Writable,
@@ -74,7 +75,7 @@ function cleanContent(content: string): string {
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date();
+    const now = new Date(safeDateNow());
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -162,7 +163,7 @@ const fetchLabels = handler<
 >(async (_event, { auth, taskCurrentLabelId, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_NOTES });
+    const client = GmailSendClient(auth, { debugMode: DEBUG_NOTES });
     const labels = await client.listLabels();
 
     // Find task-current label (case-insensitive)
@@ -209,24 +210,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const processingNotes = new Writable<string[]>([]).for("processingNotes");
   const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
-  // Use createGoogleAuth for scopes that include gmailModify
-  // Note: We use auth directly (not wrapped in a reactive projection) because
-  // GmailSendClient requires a Writable<Auth> with .get() method. Wrapping it in
-  // a derived/conditional value would lose writability.
+  // Use createGoogleAuth for scopes that include gmailModify.
   const {
-    auth,
+    availability,
     fullUI: authUI,
     isReady,
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
-
-  // Create a Stream from the fetchLabels handler for auto-triggering
-  const labelFetcherStream = fetchLabels({
-    auth,
-    taskCurrentLabelId,
-    loadingLabels,
-  });
+  const auth = availability.state === "ready" ? availability.auth : null;
 
   // NOTE: Auto-fetch labels was removed because having side effects (writes to
   // Writable cells, sending to streams) inside computed() caused infinite reactive
@@ -237,11 +229,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Directly instantiate GmailExtractor with task-current filter (raw mode)
   // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
   // filter by label here and do client-side filtering for empty subjects
-  // Pass auth directly to maintain Writable<Auth> for token refresh
+  // Pass the live auth cell when available so token refresh can persist.
+  const extractorAuth = auth === null ? undefined : auth;
   const extractor = GmailExtractor({
     gmailQuery: "label:task-current",
     limit: 100,
-    overrideAuth: auth,
+    overrideAuth: extractorAuth,
   });
 
   // Get emails from extractor
@@ -397,7 +390,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
               : null}
 
             {/* Label status - only show when there's a problem or loading */}
-            {isReady && (!taskCurrentLabelId.get() || loadingLabels.get())
+            {auth && (!taskCurrentLabelId.get() || loadingLabels.get())
               ? (
                 <div
                   style={{
@@ -418,7 +411,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
                   )}
                   <button
                     type="button"
-                    onClick={labelFetcherStream}
+                    onClick={fetchLabels({
+                      auth,
+                      taskCurrentLabelId,
+                      loadingLabels,
+                    })}
                     disabled={loadingLabels}
                     style={{
                       marginLeft: "8px",
@@ -439,7 +436,27 @@ export default pattern<PatternInput, PatternOutput>(() => {
               : null}
 
             {/* Notes list */}
-            {noteCount === 0
+            {!isReady
+              ? (
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                    border: "1px solid #e5e7eb",
+                    color: "#4b5563",
+                  }}
+                >
+                  <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                    Waiting for Google connection
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Connect Google with Gmail label access before loading notes
+                    or labels.
+                  </div>
+                </div>
+              )
+              : noteCount === 0
               ? (
                 <div
                   style={{
@@ -463,7 +480,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 <cf-vstack gap="3">
                   {notes.map((note) => {
                     // Check if this note is being processed
-                    // Extract noteId first to avoid OpaqueRef issues in the projection
+                    // Extract noteId first to avoid Reactive issues in the projection
                     const noteId = note.id;
                     const isProcessing = (processingNotes.get() || []).includes(
                       noteId,

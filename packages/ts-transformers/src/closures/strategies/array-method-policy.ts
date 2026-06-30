@@ -22,7 +22,7 @@ import { classifyOpaquePathTerminalCall } from "../../transformers/opaque-roots.
  * Detects a fallback-guarded reactive receiver: `(<reactive> ?? fallback)` or
  * `(<reactive> || fallback)`, where `<reactive>` is a reactive value (e.g. a
  * `cell.get()` lowered to a lift-applied call, a `.key(...)` access, or any
- * other OpaqueRef-producing expression).
+ * other Reactive-producing expression).
  *
  * The `?? []` (or `|| []`) guard is the documented defense against a scoped
  * cell reading `undefined` before sync. But it also collapses the receiver's
@@ -56,7 +56,7 @@ function isReactiveFallbackLeft(
   }
   // A `cell.get()` / `cell.key(...)` read isn't reactive-producing on its own
   // (it's a read), but when its receiver is reactive the whole `.get()` result
-  // is still an OpaqueRef at runtime once lowered — so the fallback receiver
+  // is still a Reactive at runtime once lowered — so the fallback receiver
   // needs the WithPattern rewrite. Match `<reactive>.get()` / `.key(...)`.
   if (
     ts.isCallExpression(left) &&
@@ -97,13 +97,13 @@ function hasSharedReactiveCollectionProvenance(
  * Check if an array method call should be transformed to its WithPattern variant.
  *
  * Type-based approach with context awareness (CT-1186 fix):
- * 1. computed()/lift() calls always return OpaqueRef at runtime -> TRANSFORM
- * 2. Inside safe wrappers (computed/lift/etc), OpaqueRef gets auto-unwrapped
- *    to a plain array, so we should NOT transform OpaqueRef method calls there.
+ * 1. computed()/lift() calls always return Reactive at runtime -> TRANSFORM
+ * 2. Inside safe wrappers (computed/lift/etc), Reactive gets auto-unwrapped
+ *    to a plain array, so we should NOT transform Reactive method calls there.
  *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
  * 3. Local aliases created by nested computed()/lift() calls inside the current
  *    compute callback become opaque again and should transform.
- * 4. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
+ * 4. Outside safe wrappers, transform all cell-like types (Reactive, Cell, Stream).
  */
 export function shouldTransformArrayMethod(
   methodCall: ts.CallExpression,
@@ -165,7 +165,7 @@ export function shouldTransformArrayMethod(
 
   // `(reactive ?? fallback).map(...)`: the fallback guard hides the reactive
   // receiver from the type-based classifier above (it sees a plain array), but
-  // at runtime the receiver is still an OpaqueRef and needs the WithPattern
+  // at runtime the receiver is still a Reactive and needs the WithPattern
   // rewrite. Mirror the lift-applied special-case (CT-1626).
   if (isReactiveFallbackReceiver(mapTarget, context.checker)) {
     return contextInfo.kind === "pattern";

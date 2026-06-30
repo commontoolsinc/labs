@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isOpaqueRef } from "../src/builder/types.ts";
-import { opaqueRef } from "../src/builder/opaque-ref.ts";
+import { isReactive } from "../src/builder/types.ts";
+import { reactive } from "../src/builder/opaque-ref.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-describe("opaqueRef function", () => {
+describe("reactive function", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -25,13 +25,13 @@ describe("opaqueRef function", () => {
   });
 
   it("creates an opaque ref", () => {
-    const c = opaqueRef<number>();
-    expect(isOpaqueRef(c)).toBe(true);
+    const c = reactive<number>();
+    expect(isReactive(c)).toBe(true);
   });
 
   it("throws on get", () => {
-    const c = opaqueRef<number>();
-    // Use type assertion since .get() is no longer on OpaqueRef type
+    const c = reactive<number>();
+    // Use type assertion since .get() is no longer on Reactive type
     // but we want to verify runtime still throws
     expect(() => (c as any).get()).toThrow();
   });

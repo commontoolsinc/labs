@@ -4,10 +4,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { Resource } from "@opentelemetry/resources";
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import env from "@/env.ts";
-import {
-  isOpenInferenceSpan,
-  OpenInferenceBatchSpanProcessor,
-} from "@arizeai/openinference-vercel";
+import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 
 // Ensure we only register once even during hot-reload
 let _providerRegistered = false;
@@ -29,12 +26,17 @@ export const provider = new BasicTracerProvider({
 });
 
 // Add span processor after construction (API changed in newer SDK versions)
+//
+// Export ALL spans (HTTP request spans from the otel middleware AND LLM spans) to
+// the OTLP collector. The collector fans them out: its Phoenix pipeline filters to
+// LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
+// OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
+// spans still get OpenInference semantic-convention formatting for Phoenix; a
+// pass-through spanFilter lets non-LLM spans export unchanged for SigNoz.
 provider.addSpanProcessor(
   new OpenInferenceBatchSpanProcessor({
     exporter: otlpExporter,
-    spanFilter: (span) => {
-      return isOpenInferenceSpan(span);
-    },
+    spanFilter: () => true,
   }),
 );
 

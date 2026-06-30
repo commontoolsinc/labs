@@ -70,16 +70,19 @@ import {
   pattern,
   Stream,
 } from "commonfabric";
-import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
+import GmailImporter, {
+  type Auth,
+  type Email,
+  type GoogleAuthCell,
+} from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import {
   createReadOnlyAuthCell,
   GmailSendClient,
 } from "./util/gmail-send-client.ts";
 
-// Re-export Email and Auth types and ProcessingStatus for consumers
-export type { Auth, Email } from "./gmail-importer.tsx";
-export { default as ProcessingStatus } from "./processing-status.tsx";
+// Re-export Email and Auth types for consumers
+export type { Auth, Email, GoogleAuthCell } from "./gmail-importer.tsx";
 
 // =============================================================================
 // TYPES
@@ -128,7 +131,7 @@ export interface GmailExtractorInput {
   // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
 
   /** Optional linked auth (overrides wish() default) */
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /**
@@ -206,13 +209,20 @@ export interface GmailExtractorOutput {
  * - Large HTML emails convert to verbose markdown
  * - We want individual emails to fit comfortably
  */
-const MAX_CONTENT_CHARS = 100_000; // ~25k tokens, safe limit for email body
-const MAX_HTML_CONTENT_CHARS = 50_000; // HTML is often more verbose, use smaller limit
+function maxContentChars(): number {
+  return 100_000;
+}
+
+function maxHtmlContentChars(): number {
+  return 50_000;
+}
 
 /**
  * Truncation suffix to indicate content was cut off.
  */
-const TRUNCATION_SUFFIX = "\n\n[Content truncated due to length...]";
+function truncationSuffix(): string {
+  return "\n\n[Content truncated due to length...]";
+}
 
 // =============================================================================
 // HELPERS
@@ -230,7 +240,8 @@ function truncateContent(
   if (content.length <= maxLength) return content;
 
   // Find a good break point (newline or space) near the limit
-  const targetLength = maxLength - TRUNCATION_SUFFIX.length;
+  const suffix = truncationSuffix();
+  const targetLength = maxLength - suffix.length;
   let breakPoint = targetLength;
 
   // Look for a newline within the last 500 chars of the target
@@ -246,7 +257,7 @@ function truncateContent(
     }
   }
 
-  return content.slice(0, breakPoint) + TRUNCATION_SUFFIX;
+  return content.slice(0, breakPoint) + suffix;
 }
 
 /**
@@ -276,15 +287,15 @@ function interpolateTemplate(template: string, email: Email): string {
   // Prepare content fields with truncation and base64 stripping
   const markdownContent = truncateContent(
     stripBase64Images(email.markdownContent),
-    MAX_CONTENT_CHARS,
+    maxContentChars(),
   );
   const plainText = truncateContent(
     stripBase64Images(email.plainText),
-    MAX_CONTENT_CHARS,
+    maxContentChars(),
   );
   const htmlContent = truncateContent(
     stripBase64Images(email.htmlContent),
-    MAX_HTML_CONTENT_CHARS,
+    maxHtmlContentChars(),
   );
 
   return template
@@ -346,7 +357,7 @@ const addLabelsHandler = handler<
 
   // Type assertion needed because handler state provides readonly Auth properties,
   // but createReadOnlyAuthCell expects mutable Auth. Safe because we only read from it.
-  const client = new GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
+  const client = GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
     debugMode: false,
   });
 
@@ -375,7 +386,7 @@ const removeLabelsHandler = handler<
 
   // Type assertion needed because handler state provides readonly Auth properties,
   // but createReadOnlyAuthCell expects mutable Auth. Safe because we only read from it.
-  const client = new GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
+  const client = GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
     debugMode: false,
   });
 

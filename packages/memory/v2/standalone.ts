@@ -15,13 +15,19 @@
 import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
+import { Identity } from "@commonfabric/identity";
 
-// Session.open verification is shared with toolshed's memory route — see
-// session-open-auth.ts. The standalone test server does not configure an
-// audience (audience binding is opt-in), so this enforces signature + expiry.
+const standaloneMemoryAudience = (await Identity.fromPassphrase(
+  "common tools standalone memory audience",
+)).did();
+
+// Session.open verification is shared with toolshed's memory route. The
+// standalone server advertises a stable audience DID and requires the
+// connection challenge issued in `hello.ok`.
 const authorizeSessionOpen = (
   message: Parameters<typeof verifySessionOpenAuthorization>[0],
-): Promise<string> => verifySessionOpenAuthorization(message);
+  context: Parameters<typeof verifySessionOpenAuthorization>[1],
+): Promise<string> => verifySessionOpenAuthorization(message, context);
 
 let nextConnectionTag = 0;
 
@@ -49,6 +55,9 @@ export class StandaloneMemoryServer {
   ): StandaloneMemoryServer {
     const memory = new MemoryServer.Server({
       authorizeSessionOpen,
+      sessionOpenAuth: {
+        audience: standaloneMemoryAudience,
+      },
       acl: options.acl,
     });
     const http = Deno.serve({

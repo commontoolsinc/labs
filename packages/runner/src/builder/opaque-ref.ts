@@ -3,7 +3,7 @@ import {
   type FactoryInput,
   type JSONSchema,
   type JSONValue,
-  type OpaqueRef,
+  type Reactive,
   type SchemaWithoutCell,
   type Stream,
 } from "./types.ts";
@@ -12,17 +12,17 @@ import { createCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 
 /**
- * Implementation of opaqueRef that creates actual Cells.
+ * Implementation of reactive that creates actual Cells.
  * Uses getTopFrame() to access the runtime.
  * @param value - Optional schema default value
  * @param schema - Optional schema
- * @returns An OpaqueRef
+ * @returns An Reactive
  */
-function opaqueRefWithCell<T>(
+function reactiveWithCell<T>(
   value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
   kind?: CellKind,
-): OpaqueRef<T> {
+): Reactive<T> {
   const frame = getTopFrame();
   if (!frame || !frame.runtime) {
     throw new Error(
@@ -52,35 +52,35 @@ function opaqueRefWithCell<T>(
     kind,
   );
 
-  frame.opaqueRefs.add(cell);
+  frame.reactives.add(cell);
 
-  // Use the cell's built-in method to get a proxied OpaqueRef
-  return cell.getAsOpaqueRefProxy();
+  // Use the cell's built-in method to get a proxied Reactive
+  return cell.getAsReactiveProxy();
 }
 
-// Legacy opaqueRef for backward compatibility - creates proxies without Cell
+// Legacy reactive for backward compatibility - creates proxies without Cell
 // This is used during pattern construction before we have a runtime
-export function opaqueRef<S extends JSONSchema>(
+export function reactive<S extends JSONSchema>(
   value: FactoryInput<SchemaWithoutCell<S>> | SchemaWithoutCell<S> | undefined,
   schema: S,
-): OpaqueRef<SchemaWithoutCell<S>>;
-export function opaqueRef<T>(
+): Reactive<SchemaWithoutCell<S>>;
+export function reactive<T>(
   value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
-): OpaqueRef<T>;
+): Reactive<T>;
 
-export function opaqueRef<T>(
+export function reactive<T>(
   value?: FactoryInput<T> | T | undefined,
   schema?: JSONSchema,
-): OpaqueRef<T> {
-  return opaqueRefWithCell<T>(value, schema);
+): Reactive<T> {
+  return reactiveWithCell<T>(value, schema);
 }
 
 export function stream<T>(
   schema?: JSONSchema,
 ): Stream<T> {
-  // The runtime creates a Stream cell, but opaqueRefWithCell is typed to return OpaqueRef
-  return opaqueRefWithCell<T>(undefined, schema, "stream") as unknown as Stream<
+  // The runtime creates a Stream cell, but reactiveWithCell is typed to return Reactive
+  return reactiveWithCell<T>(undefined, schema, "stream") as unknown as Stream<
     T
   >;
 }

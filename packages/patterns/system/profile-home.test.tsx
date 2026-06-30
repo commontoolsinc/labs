@@ -10,7 +10,7 @@ export default pattern(() => {
   // assertions prove the read-only presentation renders, distinct from the edit
   // form, and the toggle swaps between them.
   const action_toggle_editing = action(() => {
-    profile.toggleEditing.send({});
+    profile.toggleEditing.send();
   });
 
   const action_set_avatar = action(() => {

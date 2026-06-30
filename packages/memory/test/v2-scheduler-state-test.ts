@@ -23,6 +23,11 @@ import {
   setPersistentSchedulerStateConfig,
   toDocumentPath,
 } from "../v2.ts";
+import {
+  testSessionOpenAuth,
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -883,12 +888,13 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
   const server = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
   });
   const client = await connect({ transport: loopback(server) });
   const ownerSpace = "did:key:scheduler-owner-space";
   const readSpace = "did:key:scheduler-read-space";
-  const owner = await client.mount(ownerSpace);
-  const reader = await client.mount(readSpace);
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
+  const reader = await client.mount(readSpace, {}, testSessionOpenAuthFactory);
   const mirroredRead = {
     ...sourceRead,
     space: readSpace,
@@ -965,9 +971,14 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
   const setupServer = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
   });
   const setupClient = await connect({ transport: loopback(setupServer) });
-  const setupOwner = await setupClient.mount(ownerSpace);
+  const setupOwner = await setupClient.mount(
+    ownerSpace,
+    {},
+    testSessionOpenAuthFactory,
+  );
   try {
     await setupOwner.transact({
       localSeq: 1,
@@ -984,9 +995,10 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
   const server = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
   });
   const client = await connect({ transport: loopback(server) });
-  const owner = await client.mount(ownerSpace);
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
 
   try {
     const listed = await owner.listSchedulerActionSnapshots({
@@ -1009,12 +1021,13 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
   const server = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
   });
   const client = await connect({ transport: loopback(server) });
   const ownerSpace = "did:key:scheduler-batch-owner-space";
   const readSpace = "did:key:scheduler-batch-read-space";
-  const owner = await client.mount(ownerSpace);
-  const reader = await client.mount(readSpace);
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
+  const reader = await client.mount(readSpace, {}, testSessionOpenAuthFactory);
   const mirroredRead = {
     ...sourceRead,
     space: readSpace,
@@ -1075,11 +1088,12 @@ Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", 
   const server = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
   });
   const client = await connect({ transport: loopback(server) });
   const ownerSpace = "did:key:scheduler-owner-authorized-space";
   const readSpace = "did:key:scheduler-unmounted-read-space";
-  const owner = await client.mount(ownerSpace);
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
   const mirroredRead = {
     ...sourceRead,
     space: readSpace,
@@ -1124,12 +1138,12 @@ Deno.test("memory v2 server propagates cross-space dirty state back to the owner
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
-  const server = new Server({ store });
+  const server = new Server({ ...testSessionOpenServerOptions, store });
   const client = await connect({ transport: loopback(server) });
   const ownerSpace = "did:key:scheduler-owner-dirty-space";
   const readSpace = "did:key:scheduler-owner-read-space";
-  const owner = await client.mount(ownerSpace);
-  const reader = await client.mount(readSpace);
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
+  const reader = await client.mount(readSpace, {}, testSessionOpenAuthFactory);
   const mirroredRead = {
     ...sourceRead,
     space: readSpace,

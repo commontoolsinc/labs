@@ -15,8 +15,8 @@ import {
   ifElse,
   NAME,
   nonPrivateRandom,
-  OpaqueRef,
   pattern,
+  Reactive,
   safeDateNow,
   Stream,
   UI,
@@ -105,12 +105,12 @@ interface Output {
   edits: Edit[];
   appliedEdits: Edit[];
   failedEdits: FailedEdit[];
-  create: OpaqueRef<Stream<{ detail: { message: string } }>>;
+  create: Reactive<Stream<{ detail: { message: string } }>>;
   // Per-item actions wrapped in objects (safe from spurious invocation)
   actions: Array<{
-    toggle: OpaqueRef<Stream<unknown>>;
-    delete: OpaqueRef<Stream<unknown>>;
-    update: OpaqueRef<Stream<unknown>>;
+    toggle: Reactive<Stream<unknown>>;
+    delete: Reactive<Stream<unknown>>;
+    update: Reactive<Stream<unknown>>;
   }>;
 }
 

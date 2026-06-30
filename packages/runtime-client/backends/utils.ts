@@ -1,4 +1,10 @@
-import { Cell, JSONSchema, parseLink, SigilLink } from "@commonfabric/runner";
+import {
+  Cell,
+  JSONSchema,
+  KeepAsCell,
+  parseLink,
+  SigilLink,
+} from "@commonfabric/runner";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
 import { Runtime } from "@commonfabric/runner";
@@ -44,7 +50,7 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   const link = parseLink(
     cell.getAsLink({
       includeSchema: true,
-      keepAsCell: true,
+      keepAsCell: KeepAsCell.All,
     }),
   );
   // Check before casting to a NormalizedFullLink

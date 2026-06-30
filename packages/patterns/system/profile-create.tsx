@@ -71,21 +71,28 @@ export type CreateProfileEvent = {
 export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
-    draftName?: Writable<string>;
     profiles: Writable<ProfileHomeOutput[]>;
   }
->((event, { draftName, profiles }) => {
+>((event, { profiles }) => {
+  // The submitted name rides the event: the create surface is a
+  // `cf-submit-input`, whose submit-button click carries the typed text as
+  // `event.target.value` (and the trusted surface's UI integrity). The handler
+  // keeps no draft cell. This is what makes clear-on-submit safe: the push
+  // materializes the profile in its own `inSpace` space, so the create is a
+  // cross-space (multi-space) commit the runner drives through a pending →
+  // resolve → retry cycle plus optimistic-conflict retries. Re-reading a
+  // mutable draft on those retries — or clearing one — would race a back-to-back
+  // second create; the event payload is fixed per creation, so the name stays
+  // stable across retries and nothing is cleared late. The field clears itself
+  // in the DOM after submit, with no durable write to clobber.
   const name = (event.name ?? event.detail?.message ?? event.target?.value ??
-    draftName?.get() ?? "").trim();
+    "").trim();
   if (name) {
     profiles.push(
       ProfileHome.inSpace()({
         initialName: name,
       }) as ProfileHomeOutput,
     );
-    // Clear the draft name input after a successful create (mirrors the form
-    // handlers in self.tsx / home's space input).
-    draftName?.set("");
   }
 });
 
@@ -204,7 +211,6 @@ export type TrustedProfileMru = Cfc<
 export type ProfileCreateInput = {
   profiles: Writable<ProfileHomeOutput[]>;
   inputId?: string;
-  buttonId?: string;
 };
 
 export type ProfileCreateOutput = {
@@ -214,10 +220,8 @@ export type ProfileCreateOutput = {
 };
 
 export default pattern<ProfileCreateInput, ProfileCreateOutput>(
-  ({ profiles, inputId, buttonId }) => {
-    const draftName = new Writable("").for("draftName");
+  ({ profiles, inputId }) => {
     const createProfile = submitProfileCreation({
-      draftName,
       profiles: profiles as any,
     });
     return {
@@ -230,19 +234,18 @@ export default pattern<ProfileCreateInput, ProfileCreateOutput>(
           data-ui-event-integrity={TRUSTED_PROFILE_CREATE_SURFACE}
           gap="1"
         >
-          <cf-input
-            id={inputId ?? "profile-name-input"}
-            $value={draftName}
-            placeholder="Your name..."
-            timingStrategy="immediate"
-          />
-          <cf-button
-            id={buttonId ?? "profile-create-button"}
+          {
+            /* The submit-button click carries the typed name as
+              event.target.value with this surface's trusted UI integrity, so
+              the create needs no draft cell and the field self-clears. */
+          }
+          <cf-submit-input
+            inputId={inputId ?? "profile-name-input"}
             data-ui-action={TRUSTED_PROFILE_CREATE_ACTION}
+            placeholder="Your name..."
+            buttonText="Create profile"
             onClick={createProfile}
-          >
-            Create profile
-          </cf-button>
+          />
         </cf-vstack>
       ),
     };

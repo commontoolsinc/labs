@@ -207,7 +207,7 @@ Validates `as` and angle-bracket assertions:
   - parenthesized/mixed equivalents
 - **Error** `cast-validation:forbidden-cast`
   - casts to `OpaqueRef<...>`
-- **Warning** `cast-validation:cell-cast`
+- **Error** `cast-validation:cell-cast`
   - casts to cell-like types: `Cell`, `OpaqueCell`, `Stream`, `ComparableCell`,
     `ReadonlyCell`, `WriteonlyCell`, `Writable`, `CellTypeConstructor`
 

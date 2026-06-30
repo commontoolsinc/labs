@@ -15,7 +15,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import {
   type AnyCellWrapping,
   type JSONSchema,
-  type OpaqueRef,
+  type Reactive,
   Schema,
 } from "../src/builder/types.ts";
 import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
@@ -883,8 +883,8 @@ describe("Schema-to-TS Type Conversion", () => {
     // Verify that the pattern function parameter matches our expected input type
     expectType<InferredInput, ExpectedInput>();
 
-    // The expected output is the output schema wrapped in a single OpaqueRef.
-    type DeepOpaqueOutput = OpaqueRef<Schema<typeof outputSchema>>;
+    // The expected output is the output schema wrapped in a single Reactive.
+    type DeepOpaqueOutput = Reactive<Schema<typeof outputSchema>>;
     expectType<DeepOpaqueOutput, InferredOutput>();
 
     // Uncomment for debugging - shows what the actual structure is

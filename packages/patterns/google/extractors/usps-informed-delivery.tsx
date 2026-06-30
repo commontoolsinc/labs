@@ -24,12 +24,15 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  type PatternFactory,
   TILE_UI,
   UI,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
-import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import GmailExtractor, {
+  type GoogleAuthCell,
+} from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // Debug flag for development - disable in production
@@ -73,6 +76,13 @@ interface HouseholdMember {
   mailCount: number;
   firstSeen: number;
   isConfirmed: boolean;
+}
+
+interface MailPieceImageInfo {
+  emailId: string;
+  emailDate: string;
+  imageUrl: string;
+  imageIndex: number;
 }
 
 // =============================================================================
@@ -147,6 +157,26 @@ const MAIL_ANALYSIS_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type MailAnalysis = Schema<typeof MAIL_ANALYSIS_SCHEMA>;
+
+interface MailPieceAnalysisItem {
+  imageInfo: MailPieceImageInfo;
+  imageUrl: string;
+  analysis: {
+    pending: boolean;
+    error?: unknown;
+    result?: MailAnalysis;
+  };
+  pending: boolean;
+  error?: unknown;
+  result?: MailAnalysis;
+}
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
 
 // =============================================================================
 // HELPERS
@@ -228,6 +258,88 @@ function _namesMatch(name1: string, name2: string): boolean {
   return false;
 }
 
+const analyzeMailPiece = pattern<
+  MailPieceImageInfo,
+  MailPieceAnalysisItem
+>((imageInfo) => {
+  const analysis = generateObject<MailAnalysis>({
+    prompt: computed(() => {
+      if (!imageInfo.imageUrl) {
+        if (DEBUG_USPS) {
+          console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+        }
+
+        return undefined;
+      }
+      const url = imageInfo.imageUrl;
+
+      if (DEBUG_USPS) {
+        console.log(
+          `[USPS LLM] Processing image URL (first 100 chars):`,
+          url.slice(0, 100),
+        );
+      }
+
+      const isBase64 = url.startsWith("data:");
+      if (DEBUG_USPS) {
+        console.log(
+          `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
+        );
+      }
+
+      return [
+        { type: "image" as const, image: url },
+        {
+          type: "text" as const,
+          text:
+            `Analyze this scanned mail piece image from USPS Informed Delivery. Extract:
+1. The recipient name (who the mail is addressed to)
+2. The sender or company name (from return address if visible)
+3. The type of mail - use these categories:
+   - "personal": Greeting cards, holiday cards, wedding invitations, thank you notes, handwritten letters - mail personally sent to you, NOT business mail
+   - "bill": Utility bills, credit card statements, invoices, payment requests
+   - "financial": Bank statements, tax documents (1099s, W-2s), investment reports, brokerage statements - financial documents that are NOT bills
+   - "advertisement": Flyers, coupons, promotional mailers, catalogs, marketing materials
+   - "package": Package arrival notices, delivery confirmations
+   - "government": IRS notices, DMV renewals, court documents, voter registration, official government correspondence
+   - "medical": Insurance EOBs, appointment reminders, prescription notices, hospital correspondence
+   - "subscription": Magazines, newsletters, membership renewals
+   - "charity": Donation requests, nonprofit mailings
+   - "other": Anything that doesn't fit the above categories
+4. Whether it appears to be spam/junk mail
+5. Whether it appears URGENT or time-sensitive. Consider urgent:
+   - Government correspondence (IRS, DMV, court notices, etc.)
+   - Legal documents or certified mail indicators
+   - Medical correspondence (hospitals, insurance EOBs, etc.)
+   - Late bills mentioning due dates
+   - Bank account alerts
+   - Time-sensitive offers with deadlines
+
+IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritten correspondence - NOT for business mail.
+
+If you cannot read the image clearly, make your best guess based on what you can see.`,
+        },
+      ];
+    }) as any,
+    schema: MAIL_ANALYSIS_SCHEMA,
+    model: "anthropic:claude-sonnet-4-5",
+  });
+
+  return {
+    imageInfo,
+    imageUrl: imageInfo.imageUrl,
+    analysis,
+    pending: analysis.pending,
+    error: analysis.error,
+    result: analysis.result,
+  };
+});
+
+const extractMailPieceResult = pattern<
+  MailPieceAnalysisItem,
+  MailAnalysis | undefined
+>((analysisItem) => analysisItem.result);
+
 // =============================================================================
 // HANDLERS
 // =============================================================================
@@ -266,12 +378,12 @@ interface PatternInput {
   householdMembers?: HouseholdMember[] | Default<[]>;
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
 export interface PatternOutput {
-  mailPieces: MailAnalysis[];
+  mailPieces: (MailAnalysis | undefined)[];
   householdMembers: HouseholdMember[];
   mailCount: number;
   spamCount: number;
@@ -323,13 +435,8 @@ export default pattern<PatternInput, PatternOutput>(
 
     // First, extract all mail piece images from all emails
     // Returns array of { emailId, emailDate, imageUrl } objects
-    const mailPieceImages = computed(() => {
-      const images: {
-        emailId: string;
-        emailDate: string;
-        imageUrl: string;
-        imageIndex: number;
-      }[] = [];
+    const mailPieceImages = computed<MailPieceImageInfo[]>(() => {
+      const images: MailPieceImageInfo[] = [];
       for (const email of uspsEmails || []) {
         const urls = extractMailPieceImages(email.htmlContent);
         urls.forEach((url, idx) => {
@@ -348,89 +455,9 @@ export default pattern<PatternInput, PatternOutput>(
     // Count of images to analyze
     const imageCount = computed(() => mailPieceImages?.length || 0);
 
-    // Analyze each image with generateObject - this is called at pattern level (reactive)
-    // Uses .map() over the derived array to create per-item LLM calls with automatic caching
-    const mailPieceAnalyses = mailPieceImages.map((imageInfo) => {
-      // Get the image URL from the cell
-      const analysis = generateObject<MailAnalysis>({
-        // Prompt computed from imageUrl
-        prompt: computed(() => {
-          if (!imageInfo?.imageUrl) {
-            if (DEBUG_USPS) {
-              console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
-            }
-
-            return undefined; // No-op while there is no URL
-          }
-          const url = imageInfo.imageUrl;
-
-          // Debug logging (gated by DEBUG_USPS flag)
-          if (DEBUG_USPS) {
-            console.log(
-              `[USPS LLM] Processing image URL (first 100 chars):`,
-              url?.slice(0, 100),
-            );
-          }
-
-          // Check if it's a base64 data URL vs external URL
-          const isBase64 = url.startsWith("data:");
-          if (DEBUG_USPS) {
-            console.log(
-              `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
-            );
-          }
-
-          // NOTE: External URLs from USPS require authentication and may fail.
-          // The LLM server cannot fetch authenticated URLs.
-          // For now, we still try and display an error if it fails.
-          return [
-            { type: "image" as const, image: url },
-            {
-              type: "text" as const,
-              text:
-                `Analyze this scanned mail piece image from USPS Informed Delivery. Extract:
-1. The recipient name (who the mail is addressed to)
-2. The sender or company name (from return address if visible)
-3. The type of mail - use these categories:
-   - "personal": Greeting cards, holiday cards, wedding invitations, thank you notes, handwritten letters - mail personally sent to you, NOT business mail
-   - "bill": Utility bills, credit card statements, invoices, payment requests
-   - "financial": Bank statements, tax documents (1099s, W-2s), investment reports, brokerage statements - financial documents that are NOT bills
-   - "advertisement": Flyers, coupons, promotional mailers, catalogs, marketing materials
-   - "package": Package arrival notices, delivery confirmations
-   - "government": IRS notices, DMV renewals, court documents, voter registration, official government correspondence
-   - "medical": Insurance EOBs, appointment reminders, prescription notices, hospital correspondence
-   - "subscription": Magazines, newsletters, membership renewals
-   - "charity": Donation requests, nonprofit mailings
-   - "other": Anything that doesn't fit the above categories
-4. Whether it appears to be spam/junk mail
-5. Whether it appears URGENT or time-sensitive. Consider urgent:
-   - Government correspondence (IRS, DMV, court notices, etc.)
-   - Legal documents or certified mail indicators
-   - Medical correspondence (hospitals, insurance EOBs, etc.)
-   - Late bills mentioning due dates
-   - Bank account alerts
-   - Time-sensitive offers with deadlines
-
-IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritten correspondence - NOT for business mail.
-
-If you cannot read the image clearly, make your best guess based on what you can see.`,
-            },
-          ];
-        }) as any,
-        schema: MAIL_ANALYSIS_SCHEMA,
-        // IMPORTANT: Must specify model explicitly for generateObject with images
-        model: "anthropic:claude-sonnet-4-5",
-      });
-
-      return {
-        imageInfo,
-        imageUrl: imageInfo.imageUrl,
-        analysis,
-        pending: analysis.pending,
-        error: analysis.error,
-        result: analysis.result,
-      };
-    });
+    const mailPieceAnalyses = (
+      mailPieceImages as ReactiveArray<MailPieceImageInfo>
+    ).mapWithPattern(analyzeMailPiece, {});
 
     // Count pending analyses
     const pendingCount = computed(
@@ -445,7 +472,9 @@ If you cannot read the image clearly, make your best guess based on what you can
         ).length || 0,
     );
 
-    const mailPieces = mailPieceAnalyses.map((a) => a.result);
+    const mailPieces = (
+      mailPieceAnalyses as ReactiveArray<MailPieceAnalysisItem>
+    ).mapWithPattern(extractMailPieceResult, {});
 
     // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
   clickTrustedAction,
+  fillCfInput,
   waitForRuntimeIdle,
   waitForText,
 } from "./cfc-browser-helpers.ts";
@@ -74,7 +75,7 @@ describe("shared profile integration test", () => {
 
     await submitProfileCreate(
       page,
-      "cf-input",
+      "#wish-profile-name-input",
       "Ada Lovelace",
     );
     await waitForText(page, "#shared-profile-name", "Ada Lovelace");
@@ -89,7 +90,7 @@ describe("shared profile integration test", () => {
 
     await submitProfileCreate(
       page,
-      "cf-input",
+      "#wish-profile-name-input",
       "Grace Hopper",
     );
     await waitForText(page, "#shared-profile-name", "Grace Hopper");
@@ -121,110 +122,16 @@ async function submitProfileCreate(
   inputSelector: string,
   message: string,
 ) {
-  await fillAllProfileCreateInputs(page, inputSelector, message);
+  // The create surface is a `cf-submit-input` whose inner input carries the id
+  // passed as `inputId` by the #profile create launch (see runner wish.ts:
+  // `inputId: "wish-profile-name-input"`). `fillCfInput` drives the DOM like a
+  // user and calls the host's `commit()` (a no-op for a cell-less submit input),
+  // then the trusted submit click carries the typed text as event.target.value.
+  await fillCfInput(page, inputSelector, message, {
+    timeout: SHARED_PROFILE_TIMEOUT,
+  });
   await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
   await waitForRuntimeIdle(page);
-}
-
-async function fillAllProfileCreateInputs(
-  page: Page,
-  inputSelector: string,
-  message: string,
-) {
-  try {
-    await page.waitForSelector(inputSelector, {
-      strategy: "pierce",
-      timeout: SHARED_PROFILE_TIMEOUT,
-    });
-  } catch (cause) {
-    const snapshot = await readProfileCreateProbe(page).catch(() => undefined);
-    throw new Error(
-      `Unable to find profile create input "${inputSelector}". Probe: ${
-        JSON.stringify(snapshot)
-      }`,
-      { cause },
-    );
-  }
-  const filled = await page.evaluate(
-    async (selector, value): Promise<number> => {
-      function collect(root: Document | ShadowRoot, result: Element[]): void {
-        for (const element of root.querySelectorAll("*")) {
-          try {
-            if (element.matches(selector)) {
-              result.push(element);
-            }
-          } catch {
-            // Invalid selectors are reported through the zero filled count.
-          }
-          if (element.shadowRoot) {
-            collect(element.shadowRoot, result);
-          }
-        }
-      }
-
-      function isVisible(element: HTMLElement): boolean {
-        const rect = element.getBoundingClientRect();
-        const style = globalThis.getComputedStyle(element);
-        return rect.width > 0 && rect.height > 0 &&
-          rect.bottom >= 0 && rect.right >= 0 &&
-          rect.top <= globalThis.innerHeight &&
-          rect.left <= globalThis.innerWidth &&
-          style.visibility !== "hidden" &&
-          style.display !== "none";
-      }
-
-      const matches: Element[] = [];
-      collect(document, matches);
-      let count = 0;
-      for (const element of matches) {
-        const host = element as HTMLElement & {
-          value?: {
-            set?: (value: string) => Promise<void>;
-            sync?: () => Promise<unknown>;
-          };
-          requestUpdate?: () => void | Promise<void>;
-        };
-        const input = element instanceof HTMLInputElement
-          ? element
-          : element.shadowRoot?.querySelector("input");
-        if (!(input instanceof HTMLInputElement) || !isVisible(input)) {
-          continue;
-        }
-        input.focus();
-        const valueSetter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value",
-        )?.set;
-        if (valueSetter) {
-          valueSetter.call(input, value);
-        } else {
-          input.value = value;
-        }
-        input.dispatchEvent(
-          new Event("input", { bubbles: true, composed: true }),
-        );
-        input.dispatchEvent(
-          new Event("change", { bubbles: true, composed: true }),
-        );
-        if (typeof host.value?.set === "function") {
-          await host.value.set(value);
-        }
-        if (typeof host.value?.sync === "function") {
-          await host.value.sync();
-        }
-        if (typeof host.requestUpdate === "function") {
-          await host.requestUpdate();
-        }
-        input.blur();
-        count++;
-      }
-      return count;
-    },
-    { args: [inputSelector, message] },
-  );
-  if (filled === 0) {
-    throw new Error(`Profile create input not filled: ${inputSelector}`);
-  }
 }
 
 async function readProfileCreateProbe(page: Page) {

@@ -9,14 +9,14 @@ import type {
   ModuleFactory,
   NodeRef,
   OpaqueCell,
-  OpaqueRef,
+  Reactive,
   Schema,
   SchemaWithoutCell,
   Stream,
   StripCell,
   toJSON,
 } from "./types.ts";
-import { opaqueRef, stream } from "./opaque-ref.ts";
+import { reactive, stream } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
@@ -132,8 +132,8 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: FactoryInput<T>): OpaqueRef<R> => {
-    const outputs = opaqueRef<R>(undefined, module.resultSchema);
+  const factory = Object.assign((inputs: FactoryInput<T>): Reactive<R> => {
+    const outputs = reactive<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
     connectInputAndOutputs(node);
@@ -502,7 +502,7 @@ export function handler<E, T>(
 // unsafe closures: doesn't need any arguments.
 // Uses argumentSchema: false to signal "takes no input" so the action
 // validation doesn't skip it due to undefined arguments.
-export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
+export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
   createNodeFactory<any, T>({
     type: "javascript",
     implementation: fn,

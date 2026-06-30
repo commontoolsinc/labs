@@ -414,8 +414,12 @@ set of module docs.
   and the integrity-label constant live in
   `packages/runner/src/compilation-cache/cell-cache.ts`. Import-link entries use
   sigil links (`asCell`) + a link-following schema. `runtimeVersion` is the
-  manually-bumped `COMPILE_CACHE_RUNTIME_VERSION` constant (no automatic build
-  fingerprint exists at runtime).
+  `COMPILE_CACHE_RUNTIME_VERSION` constant, set automatically from
+  `cf/esm-compile/<fingerprint>`, a hash of the compiler inputs defined in
+  `compiler-fingerprint.deno.ts`. Deno source runs resolve the checked-in source
+  marker to that fingerprint at runtime. Runtimes without repository file access
+  skip compiled-cache reads and writes until a binary build writes the
+  fingerprint into `compile-cache-version.ts` before `deno compile`.
 - **4.3.2 Source-set store.** ✅ Done. `writeSourceDocs` / `loadSourceClosure`
   (link-following, `sync()`-ing each cell for cross-session loads) +
   `verifySourceDocs` (Merkle `hash(content) === key` recompute). **Files:**

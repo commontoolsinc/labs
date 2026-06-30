@@ -79,7 +79,7 @@ describe("normalizeDataFlows", () => {
     } as const;
 
     const relevant = getRelevantDataFlows({
-      containsOpaqueRef: true,
+      containsReactive: true,
       requiresRewrite: true,
       dataFlows: [syntheticElement, ignoredUse],
       graph: {

@@ -2,6 +2,10 @@ import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { connect, loopback, WatchView } from "../v2/client.ts";
 import type { EntitySnapshot } from "../v2.ts";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 Deno.test("memory v2 watch view keeps same id snapshots in different scopes", () => {
   const view = WatchView.fromSync({
@@ -49,6 +53,7 @@ Deno.test("memory v2 watch view keeps same id snapshots in different scopes", ()
 
 Deno.test("memory v2 client installs a watch set and receives live updates", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-client-watch"),
     subscriptionRefreshDelayMs: 0,
   });
@@ -59,8 +64,16 @@ Deno.test("memory v2 client installs a watch set and receives live updates", asy
     transport: loopback(server),
   });
   const space = "did:key:z6Mk-memory-v2-client-watch";
-  const writer = await writerClient.mount(space);
-  const watcher = await watcherClient.mount(space);
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const watcher = await watcherClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
 
   try {
     await writer.transact({

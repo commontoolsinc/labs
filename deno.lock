@@ -1888,7 +1888,6 @@
     },
     "uuid@9.0.1": {
       "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-      "deprecated": true,
       "bin": true
     },
     "w3c-keyname@2.2.8": {
@@ -1980,6 +1979,15 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
+      "packages/background-piece-service": {
+        "dependencies": [
+          "npm:@opentelemetry/api@^1.7.0",
+          "npm:@opentelemetry/context-async-hooks@^1.19.0",
+          "npm:@opentelemetry/exporter-trace-otlp-proto@0.46",
+          "npm:@opentelemetry/resources@^1.19.0",
+          "npm:@opentelemetry/sdk-trace-base@^1.19.0"
+        ]
+      },
       "packages/cf-harness": {
         "dependencies": [
           "jsr:@db/sqlite@0.12"
@@ -2049,6 +2057,12 @@
         "dependencies": [
           "npm:@lit/context@^1.1.5",
           "npm:@lit/task@^1.0.2"
+        ]
+      },
+      "packages/state-inspector": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.12",
+          "jsr:@std/assert@1"
         ]
       },
       "packages/static": {

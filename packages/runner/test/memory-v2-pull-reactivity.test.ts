@@ -10,6 +10,7 @@ import type { Action } from "../src/scheduler.ts";
 import type { URI } from "@commonfabric/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -59,7 +60,11 @@ describe("Memory v2 pull reactivity", () => {
     remoteClient = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(candidate.server()),
     });
-    remoteSession = await remoteClient.mount(space);
+    remoteSession = await remoteClient.mount(
+      space,
+      {},
+      testSessionOpenAuthFactory,
+    );
     remoteLocalSeq = 1;
   });
 

@@ -46,11 +46,11 @@ export const WRAPPER_SPELLING_TO_KIND = {
   OpaqueCell: "OpaqueCell",
   Stream: "Stream",
   SqliteDb: "SqliteDb",
-  // Deprecation intended — see the note on CellWrapperKind in cell-brand.ts.
-  OpaqueRef: "OpaqueRef",
-  // Successor spelling for OpaqueRef (api will alias OpaqueRef = Reactive);
-  // classified identically everywhere until OpaqueRef is removed.
-  Reactive: "OpaqueRef",
+  // Deprecated spelling of Reactive. The `OpaqueRef` spelling and its api alias
+  // are removed in CT-1756 stage 3; until then it is classified identically to
+  // Reactive so lingering authored references keep resolving.
+  OpaqueRef: "Reactive",
+  Reactive: "Reactive",
   // The interface typing the `Cell` constructor/namespace value (api/index.ts).
   CellTypeConstructor: undefined,
   // The interface typing the scoped-cell factory value (api/index.ts).

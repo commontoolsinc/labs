@@ -5,7 +5,7 @@ import {
   type FactoryInput,
   type Frame,
   type ICell,
-  isOpaqueRef,
+  isReactive,
   JSONObject,
   type JSONSchema,
   type JSONValue,
@@ -13,9 +13,9 @@ import {
   type Node,
   type NodeRef,
   type OpaqueCell,
-  type OpaqueRef,
   type Pattern,
   type PatternFactory,
+  type Reactive,
   type RequireDefaults,
   type Schema,
   type SchemaWithoutCell,
@@ -23,7 +23,7 @@ import {
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
-import { opaqueRef } from "./opaque-ref.ts";
+import { reactive } from "./opaque-ref.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
@@ -39,6 +39,7 @@ import {
 import { traverseValue } from "./traverse-utils.ts";
 import {
   getStableInternalPathSegment,
+  KeepAsCell,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import { type LegacyAlias } from "../sigil-types.ts";
@@ -70,33 +71,33 @@ import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 // Function-only overloads (most common)
 export function pattern<T>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
   ) => any,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
   ) => FactoryInput<R>,
 ): PatternFactory<T, R>;
 // Function + schemas overloads
 export function pattern<S extends JSONSchema>(
   fn: (
-    input: OpaqueRef<SchemaWithoutCell<S>> & {
-      [SELF]: OpaqueRef<any>;
+    input: Reactive<SchemaWithoutCell<S>> & {
+      [SELF]: Reactive<any>;
     },
   ) => any,
   argumentSchema: S,
 ): PatternFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 export function pattern<S extends JSONSchema, R>(
   fn: (
-    input: OpaqueRef<SchemaWithoutCell<S>> & { [SELF]: OpaqueRef<R> },
+    input: Reactive<SchemaWithoutCell<S>> & { [SELF]: Reactive<R> },
   ) => FactoryInput<R>,
   argumentSchema: S,
 ): PatternFactory<SchemaWithoutCell<S>, R>;
 export function pattern<S extends JSONSchema, RS extends JSONSchema>(
   fn: (
-    input: OpaqueRef<SchemaWithoutCell<S>> & {
-      [SELF]: OpaqueRef<Schema<RS>>;
+    input: Reactive<SchemaWithoutCell<S>> & {
+      [SELF]: Reactive<Schema<RS>>;
     },
   ) => FactoryInput<Schema<RS>>,
   argumentSchema: S,
@@ -105,14 +106,14 @@ export function pattern<S extends JSONSchema, RS extends JSONSchema>(
 // Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
 export function pattern<T>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
   ) => any,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
   ) => FactoryInput<R>,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
@@ -120,7 +121,7 @@ export function pattern<T, R>(
 // Implementation signature
 export function pattern<T, R>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
   ) => FactoryInput<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
@@ -128,17 +129,17 @@ export function pattern<T, R>(
   hardenVerifiedFunction(fn);
 
   // The pattern graph is created by calling `fn` which populates for `inputs`
-  // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
+  // and `outputs` with Value<> (which containts Reactive<>) and/or default
   // values.
   const frame = pushFrame();
 
-  const inputs = opaqueRef<RequireDefaults<T>>(
+  const inputs = reactive<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
-  const selfRef = opaqueRef<R>(
+  const selfRef = reactive<R>(
     undefined,
     resultSchema as JSONSchema | undefined,
   );
@@ -149,7 +150,7 @@ export function pattern<T, R>(
   let result;
   try {
     const outputs = fn!(
-      inputs as OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+      inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
     );
 
     applyInputIfcToOutput(inputs, outputs);
@@ -169,24 +170,24 @@ export function pattern<T, R>(
 // Same as above, but assumes the caller manages the frame
 export function patternFromFrame<T, R>(
   fn: (
-    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
   ) => FactoryInput<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
-  const inputs = opaqueRef<RequireDefaults<T>>(
+  const inputs = reactive<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
-  const selfRef = opaqueRef<R>(undefined, resultSchema);
+  const selfRef = reactive<R>(undefined, resultSchema);
 
   // Attach SELF to the underlying cell so the proxy can return it
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
   const outputs = fn(
-    inputs as OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
   );
   return factoryFromPattern<T, R>(
     argumentSchema,
@@ -199,13 +200,13 @@ export function patternFromFrame<T, R>(
 function factoryFromPattern<T, R>(
   argumentSchemaArg: JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
-  inputs: OpaqueRef<RequireDefaults<T>>,
+  inputs: Reactive<RequireDefaults<T>>,
   outputs: FactoryInput<R>,
 ): PatternFactory<T, R> {
-  // Capture selfRef before collectCellsAndNodes transforms inputs from OpaqueRef to Cell
-  // (collectCellsAndNodes replaces OpaqueRef proxies with their underlying Cells,
-  // and SELF access only works through the OpaqueRef proxy)
-  const selfRef = (inputs as unknown as { [SELF]: OpaqueRef<any> })[SELF];
+  // Capture selfRef before collectCellsAndNodes transforms inputs from Reactive to Cell
+  // (collectCellsAndNodes replaces Reactive proxies with their underlying Cells,
+  // and SELF access only works through the Reactive proxy)
+  const selfRef = (inputs as unknown as { [SELF]: Reactive<any> })[SELF];
 
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<ICell<unknown>>();
@@ -220,7 +221,7 @@ function factoryFromPattern<T, R>(
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
         const { frame, nodes, path, scope, name } = value.export();
-        if (isOpaqueRef(value) && frame !== getTopFrame()) {
+        if (isReactive(value) && frame !== getTopFrame()) {
           throw new Error(
             closureCaptureErrorMessage({
               capturedCell: { path, scope, name },
@@ -275,7 +276,7 @@ function factoryFromPattern<T, R>(
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueRef(input) && input.export().cell === cell &&
+            isReactive(input) && input.export().cell === cell &&
             !cell.export().name && !usedNames.has(key)
           ) {
             cell.for(key, true); // allowIfSet=true to not override existing causes
@@ -288,14 +289,14 @@ function factoryFromPattern<T, R>(
 
   // Also collect otherwise disconnected cells and nodes, e.g. those that are
   // assigned to cells via .set or .push and aren't otherwise connected.
-  getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
+  getTopFrame()?.reactives.forEach((ref) => collectCellsAndNodes(ref));
 
   const inputCell = isCell(inputs) ? inputs : getCellOrThrow(inputs);
   const selfRefCell = getCellOrThrow(selfRef);
   const inputRootCell = inputCell.export().cell;
   const selfRefRootCell = selfRefCell.export().cell;
   const cellNameForCell = (
-    cell: ICell<unknown> | OpaqueCell<any> | OpaqueRef<any>,
+    cell: ICell<unknown> | OpaqueCell<any> | Reactive<any>,
   ): "argument" | "result" | undefined => {
     const rootCell = cell.export().cell;
     return rootCell === inputRootCell
@@ -338,7 +339,7 @@ function factoryFromPattern<T, R>(
   });
 
   const cellReferenceForCell = (
-    cell: ICell<unknown> | OpaqueCell<any> | OpaqueRef<any>,
+    cell: ICell<unknown> | OpaqueCell<any> | Reactive<any>,
   ): LegacyAlias["$alias"] | undefined => {
     const { cell: top, path, external, scope, schema } = cell.export();
     // If we have an external id, don't bother with all this
@@ -361,7 +362,7 @@ function factoryFromPattern<T, R>(
     }
   };
 
-  const allCellsAndInternalRoots = new Set<ICell<unknown> | OpaqueRef<any>>(
+  const allCellsAndInternalRoots = new Set<ICell<unknown> | Reactive<any>>(
     allCells,
   );
   allCells.forEach((cell) => {
@@ -422,10 +423,7 @@ function factoryFromPattern<T, R>(
     }
 
     const sanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, {
-        keepStreams: true,
-        keepAsCell: true,
-      })
+      ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
       : undefined;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
@@ -486,11 +484,8 @@ function factoryFromPattern<T, R>(
   });
 
   const pattern: Pattern & toJSON = {
-    argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
-      keepStreams: true,
-      keepAsCell: true,
-    }),
-    resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
+    argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
+    resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,
@@ -504,7 +499,7 @@ function factoryFromPattern<T, R>(
     defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
-      (inputs: FactoryInput<T>): OpaqueRef<R> => {
+      (inputs: FactoryInput<T>): Reactive<R> => {
         const module: Module & toJSON = {
           type: "pattern",
           implementation: factory,
@@ -514,7 +509,7 @@ function factoryFromPattern<T, R>(
           toJSON: () => moduleToJSON(module),
         };
 
-        const outputs = opaqueRef<R>();
+        const outputs = reactive<R>();
         const frame = getTopFrame();
         if (defaultSpace !== undefined) {
           const targetSpace = resolveInSpaceTargetSpace(defaultSpace, frame);
@@ -665,7 +660,7 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
 
   const result = {
     parent,
-    opaqueRefs: new Set(),
+    reactives: new Set(),
     generatedIdCounter: 0,
     ...(parent?.implementationIdentity && {
       implementationIdentity: parent.implementationIdentity,
@@ -706,7 +701,7 @@ export function pushFrameFromCause(
     parent,
     cause,
     generatedIdCounter: 0,
-    opaqueRefs: new Set(),
+    reactives: new Set(),
     ...(parent?.implementationIdentity && {
       implementationIdentity: parent.implementationIdentity,
     }),

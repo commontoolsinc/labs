@@ -11,7 +11,7 @@ const adjustKeyedCounter = handler(
   ) => {
     const key = typeof event?.key === "string" ? event.key : "default";
     const amount = typeof event?.amount === "number" ? event.amount : 1;
-    const entry = context.counters.key(key) as Cell<number>;
+    const entry: Cell<number> = context.counters.key(key);
     const current = entry.get() ?? 0;
     entry.set(current + amount);
   },

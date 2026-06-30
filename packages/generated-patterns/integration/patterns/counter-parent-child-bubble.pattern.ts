@@ -25,8 +25,8 @@ type BubbleRecord = {
 };
 
 const asIncrementStream = (
-  ref: unknown,
-): Stream<{ amount?: number }> => ref as Stream<{ amount?: number }>;
+  ref: Stream<{ amount?: number }>,
+): Stream<{ amount?: number }> => ref;
 
 const sanitizeAmount = (value: unknown): number => {
   return typeof value === "number" && Number.isFinite(value) ? value : 1;

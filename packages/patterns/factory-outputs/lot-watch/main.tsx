@@ -475,8 +475,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     >(
       {} as LotWatchAdminRegistryValue,
     );
-    const adminRegistry =
-      (inputAdminRegistry ?? defaultAdminRegistry) as LotWatchAdminRegistryCell;
+    const adminRegistry: LotWatchAdminRegistryCell = inputAdminRegistry ??
+      defaultAdminRegistry;
     const adminManagerCredential = new Writable.perUser<
       LotWatchAdminManagerCredential | null
     >(null);

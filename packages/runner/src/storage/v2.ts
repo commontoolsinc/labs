@@ -384,19 +384,34 @@ const isPendingReplayContainer = (
   value: unknown,
 ): value is PendingReplayContainer => isPlainContainer(value);
 
+const isReplayArrayKey = (key: string): boolean =>
+  isArrayIndexPropertyName(key) || key === "-";
+
 const emptyReplayContainerForNextKey = (
   nextKey: string,
-): PendingReplayContainer =>
-  isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
+): PendingReplayContainer => isReplayArrayKey(nextKey) ? [] : {};
+
+const canReuseReplayContainer = (
+  value: unknown,
+  nextKey: string,
+): value is PendingReplayContainer =>
+  isPendingReplayContainer(value) &&
+  (!Array.isArray(value) || isReplayArrayKey(nextKey));
 
 const childAtReplayKey = (
   container: PendingReplayContainer,
   key: string,
 ): FabricValue => {
-  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
-    return undefined;
+  if (Array.isArray(container)) {
+    if (key === "-") {
+      return undefined;
+    }
+    if (!isArrayIndexPropertyName(key)) {
+      return undefined;
+    }
+    return container[Number(key)];
   }
-  return (container as Record<string, FabricValue>)[key];
+  return container[key];
 };
 
 const setChildAtReplayKey = (
@@ -404,35 +419,76 @@ const setChildAtReplayKey = (
   key: string,
   value: FabricValue,
 ): void => {
-  (container as Record<string, FabricValue>)[key] = value;
+  if (Array.isArray(container)) {
+    if (key === "-") {
+      container.push(value);
+      return;
+    }
+    if (!isArrayIndexPropertyName(key)) {
+      throw new Error(`pending replay cannot write non-index array key ${key}`);
+    }
+    container[Number(key)] = value;
+    return;
+  }
+  container[key] = value;
+};
+
+type MutableReplaySpine = {
+  root: PendingReplayContainer;
+  parent: PendingReplayContainer;
 };
 
 const baseWithMutableReplaySpine = (
   base: FabricValue,
   path: readonly string[],
-): FabricValue => {
+): MutableReplaySpine => {
+  if (path.length === 0) {
+    throw new Error("pending replay spine requires a non-empty path");
+  }
+
   // Pending patches are replayed against the latest confirmed value after
   // earlier optimistic materializations may have been dropped. If the surviving
   // patch was built through that dropped parent, the confirmed value can be a
   // stale non-container at the same path. Rebuild only the mutable spine needed
   // for this replay; normal cloneWithValueAtPath/cloneForMutation remain strict.
-  const root = isPendingReplayContainer(base)
-    ? cloneIfNecessary(base, { frozen: false, deep: false })
-    : emptyReplayContainerForNextKey(path[0] ?? "");
-  let current = root as PendingReplayContainer;
+  if (!isPendingReplayContainer(base)) {
+    // cloneWithPendingReplayValueAtPath only calls this for descendant/leaf
+    // clone errors; root-level non-containers remain strict.
+    throw new Error("pending replay repair requires a container root");
+  }
+  const root = cloneIfNecessary(base, { frozen: false, deep: false });
+  let current = root;
 
   for (let index = 0; index < path.length - 1; index++) {
     const key = path[index]!;
     const nextKey = path[index + 1]!;
     const existing = childAtReplayKey(current, key);
-    const next = isPendingReplayContainer(existing)
+    const next = canReuseReplayContainer(existing, nextKey)
       ? cloneIfNecessary(existing, { frozen: false, deep: false })
       : emptyReplayContainerForNextKey(nextKey);
     setChildAtReplayKey(current, key, next);
     current = next;
   }
 
-  return root;
+  return { root, parent: current };
+};
+
+const cloneWithReplayValueAtPath = (
+  base: FabricValue,
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue => {
+  if (path.length === 0) {
+    return cloneIfNecessary(value);
+  }
+
+  const { root, parent } = baseWithMutableReplaySpine(base, path);
+  setChildAtReplayKey(
+    parent,
+    path[path.length - 1]!,
+    cloneIfNecessary(value),
+  );
+  return cloneIfNecessary(root);
 };
 
 /** @internal Exported for testing only. */
@@ -441,6 +497,10 @@ export const cloneWithPendingReplayValueAtPath = (
   path: readonly string[],
   value: FabricValue,
 ): FabricValue => {
+  if (path.length > 0 && isPendingReplayContainer(base)) {
+    return cloneWithReplayValueAtPath(base, path, value);
+  }
+
   try {
     return cloneWithValueAtPath(base, path, value);
   } catch (error) {
@@ -451,11 +511,7 @@ export const cloneWithPendingReplayValueAtPath = (
     ) {
       throw error;
     }
-    return cloneWithValueAtPath(
-      baseWithMutableReplaySpine(base, path),
-      path,
-      value,
-    );
+    return cloneWithReplayValueAtPath(base, path, value);
   }
 };
 

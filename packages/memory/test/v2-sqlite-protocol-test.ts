@@ -9,6 +9,10 @@ import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
 import type { SqliteDbRef } from "../v2.ts";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 const SPACE = "did:key:z6Mk-sqlite-protocol-test";
 
@@ -34,9 +38,12 @@ describe("sqlite protocol verbs (loopback)", () => {
 
   beforeEach(async () => {
     dbId = `of:test-db-${crypto.randomUUID()}`;
-    server = new Server({ store: new URL("memory://sqlite-protocol-test") });
+    server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://sqlite-protocol-test"),
+    });
     client = await connect({ transport: loopback(server) });
-    session = await client.mount(SPACE);
+    session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
   });
 
   afterEach(async () => {
@@ -130,7 +137,11 @@ describe("sqlite protocol verbs (loopback)", () => {
     // space). The fix detaches each cell-db before the post-commit await, so the
     // ≤1-attached invariant holds and neither write leaks into the other db.
     const client2 = await connect({ transport: loopback(server) });
-    const session2 = await client2.mount(SPACE);
+    const session2 = await client2.mount(
+      SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
     try {
       const dbA: SqliteDbRef = {
         id: `of:b1-a-${crypto.randomUUID()}`,

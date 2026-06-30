@@ -76,6 +76,7 @@ export {
   getMetaLink,
   isCellLink as isLink,
   isWriteRedirectLink,
+  KeepAsCell,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
@@ -121,8 +122,8 @@ export {
   ID,
   ID_FIELD,
   isModule,
-  isOpaqueRef as isOpaqueRef,
   isPattern,
+  isReactive,
   isStreamValue,
   type JSONObject,
   type JSONSchema,
@@ -133,10 +134,10 @@ export {
   NAME,
   type NodeFactory,
   OAuth2TokenSchema,
-  type OpaqueRef,
   type Pattern,
   type PatternFactory,
   type Props,
+  type Reactive,
   type RenderNode,
   type Schema,
   schema,
@@ -151,7 +152,7 @@ export {
   WebhookConfigSchema,
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
-export { opaqueRef as cell } from "./builder/opaque-ref.ts";
+export { reactive as cell } from "./builder/opaque-ref.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,

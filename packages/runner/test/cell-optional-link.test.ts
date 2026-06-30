@@ -151,7 +151,7 @@ describe("Cell with Optional Link", () => {
       pushFrame({
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const cell = new CellImpl(runtime, tx);
@@ -175,7 +175,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "lift-cause" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const cell = new CellImpl(runtime, tx);
@@ -196,7 +196,7 @@ describe("Cell with Optional Link", () => {
         space,
         inHandler: true,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       try {
@@ -270,7 +270,7 @@ describe("Cell with Optional Link", () => {
       pushFrame({
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       try {
@@ -318,7 +318,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const cell1 = new CellImpl(runtime, tx);
@@ -347,7 +347,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const cell1 = new CellImpl(runtime, tx);
@@ -376,7 +376,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const cell1 = new CellImpl(runtime, tx);
@@ -409,7 +409,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "first-frame" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const parent = new CellImpl(runtime, tx);
@@ -420,7 +420,7 @@ describe("Cell with Optional Link", () => {
         cause: { type: "second-frame" },
         space,
         generatedIdCounter: 0,
-        opaqueRefs: new Set(),
+        reactives: new Set(),
       });
 
       const child = parent.key("child");

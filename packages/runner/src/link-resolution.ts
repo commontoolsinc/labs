@@ -320,16 +320,12 @@ export function resolveLink(
       // If we're crossing spaces, force fetching data from server, as the
       // original server will not have pushed the data to the client yet.
       if (crossSpace) {
-        const maybePromise = runtime.getCellFromLink(link).sync();
-        if (maybePromise instanceof Promise) {
-          // Swallow sync failures: this kick is best-effort (the read still
-          // resolves from the local replica) and an unhandled rejection here
-          // would otherwise escape the resolution path.
-          const promise = maybePromise.catch(() => {}).finally(() => {
-            runtime.storageManager.removeCrossSpacePromise(promise);
-          }) as unknown as Promise<void>;
-          runtime.storageManager.addCrossSpacePromise(promise);
-        }
+        // Swallow sync failures: this kick is best-effort (the read still
+        // resolves from the local replica) and an unhandled rejection here
+        // would otherwise escape the resolution path.
+        runtime.storageManager.trackUntilSettled(
+          runtime.getCellFromLink(link).sync().catch(() => {}),
+        );
       }
     } else {
       break;

@@ -10,6 +10,7 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 import { JSONValue } from "@commonfabric/runner/shared";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isPrimitiveCellLink } from "../src/link-types.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -116,6 +117,7 @@ describe("rehydrate internal default (CT-1666)", () => {
           ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
     });
     sm1 = new SharedServerStorageManager(signer, server);
     sm2 = new SharedServerStorageManager(signer, server);

@@ -2,12 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   CompositeDiagnosticTransformer,
-  OpaqueRefErrorTransformer,
+  ReactiveErrorTransformer,
 } from "../src/diagnostics/mod.ts";
 
-describe("OpaqueRefErrorTransformer", () => {
+describe("ReactiveErrorTransformer", () => {
   it("transforms .get() on OpaqueCell error to clear message", () => {
-    const transformer = new OpaqueRefErrorTransformer();
+    const transformer = new ReactiveErrorTransformer();
     const originalMessage =
       "Property 'get' does not exist on type 'OpaqueCell<number> & number'.";
 
@@ -20,7 +20,7 @@ describe("OpaqueRefErrorTransformer", () => {
   });
 
   it("includes original error in verbose mode", () => {
-    const transformer = new OpaqueRefErrorTransformer({ verbose: true });
+    const transformer = new ReactiveErrorTransformer({ verbose: true });
     const originalMessage =
       "Property 'get' does not exist on type 'OpaqueCell<number> & number'.";
 
@@ -33,7 +33,7 @@ describe("OpaqueRefErrorTransformer", () => {
   });
 
   it("returns null for unrelated errors", () => {
-    const transformer = new OpaqueRefErrorTransformer();
+    const transformer = new ReactiveErrorTransformer();
     const unrelatedMessage =
       "Type 'string' is not assignable to type 'number'.";
 
@@ -43,7 +43,7 @@ describe("OpaqueRefErrorTransformer", () => {
   });
 
   it("handles complex OpaqueCell types", () => {
-    const transformer = new OpaqueRefErrorTransformer();
+    const transformer = new ReactiveErrorTransformer();
     const complexMessage =
       "Property 'get' does not exist on type 'OpaqueCell<{ items: string[]; count: number }> & { items: string[]; count: number }'.";
 
@@ -56,7 +56,7 @@ describe("OpaqueRefErrorTransformer", () => {
 
 describe("CompositeDiagnosticTransformer", () => {
   it("returns first successful transformation", () => {
-    const transformer1 = new OpaqueRefErrorTransformer();
+    const transformer1 = new ReactiveErrorTransformer();
     const transformer2 = {
       transform: (msg: string) =>
         msg.includes("foo") ? "transformed foo" : null,

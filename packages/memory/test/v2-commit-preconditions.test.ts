@@ -14,6 +14,10 @@ import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { type EntityDocument, toDocumentPath } from "../v2.ts";
 import type { FabricValue } from "@commonfabric/api";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -613,11 +617,14 @@ Deno.test("malformed preconditions are rejected with ProtocolError", async () =>
 
 Deno.test("precondition failures keep name and precondition through client round trip", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-commit-preconditions-client"),
   });
   const client = await connect({ transport: loopback(server) });
   const session = await client.mount(
     "did:key:z6Mk-memory-v2-commit-preconditions-client",
+    {},
+    testSessionOpenAuthFactory,
   );
 
   try {
@@ -653,11 +660,14 @@ Deno.test("precondition failures keep name and precondition through client round
 
 Deno.test("entity-absent failures keep receipt-exists through client round trip", async () => {
   const server = new Server({
+    ...testSessionOpenServerOptions,
     store: new URL("memory://memory-v2-entity-absent-client"),
   });
   const client = await connect({ transport: loopback(server) });
   const session = await client.mount(
     "did:key:z6Mk-memory-v2-entity-absent-client",
+    {},
+    testSessionOpenAuthFactory,
   );
 
   try {
