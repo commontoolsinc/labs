@@ -163,4 +163,50 @@ describe("makeMockFetch", () => {
     expect(done).toBe(false);
     expect(await (await p).text()).toBe("slow");
   });
+
+  const realStub =
+    (() => Promise.resolve(new Response("real"))) as typeof globalThis.fetch;
+
+  it("resolves a delayed response when the signal is present but not aborted", async () => {
+    const ac = new AbortController();
+    const fetch = makeMockFetch(
+      () => [{ urlIncludes: "/slow", body: "ok", delayMs: 10 }],
+      realStub,
+    );
+    const res = await fetch("https://x.test/slow", { signal: ac.signal });
+    expect(await res.text()).toBe("ok");
+  });
+
+  it("rejects a delayed response if the signal aborts during the delay", async () => {
+    const ac = new AbortController();
+    const fetch = makeMockFetch(
+      () => [{ urlIncludes: "/slow", body: "ok", delayMs: 1000 }],
+      realStub,
+    );
+    const p = fetch("https://x.test/slow", { signal: ac.signal });
+    ac.abort(new Error("cancelled"));
+    let err: unknown;
+    try {
+      await p;
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error)?.message).toBe("cancelled");
+  });
+
+  it("rejects immediately when the signal is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort(new Error("pre-aborted"));
+    const fetch = makeMockFetch(
+      () => [{ urlIncludes: "/x", body: "ok" }],
+      realStub,
+    );
+    let err: unknown;
+    try {
+      await fetch("https://x.test/x", { signal: ac.signal });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error)?.message).toBe("pre-aborted");
+  });
 });

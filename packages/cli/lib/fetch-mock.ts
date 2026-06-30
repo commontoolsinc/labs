@@ -84,7 +84,8 @@ export function makeMockResponse(entry: FetchMockEntry): Response {
  * mock entries on each call — they're populated after compile, before the run —
  * so a request matching an entry resolves to a mocked `Response`, and anything
  * else falls through to `realFetch`. A matched entry's `delayMs` is awaited
- * before the response is returned.
+ * before the response is returned; like a real `fetch`, an aborted request
+ * (via `init.signal`) rejects with the signal's reason instead of resolving.
  */
 export function makeMockFetch(
   getEntries: () => FetchMockEntry[] | undefined,
@@ -93,9 +94,36 @@ export function makeMockFetch(
   return async (input, init) => {
     const entry = matchFetchMock(getEntries(), input);
     if (!entry) return realFetch(input as RequestInfo | URL, init);
+    const signal = init?.signal;
+    if (signal?.aborted) throw signal.reason;
     if (typeof entry.delayMs === "number" && entry.delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, entry.delayMs));
+      await delayOrAbort(entry.delayMs, signal);
     }
     return makeMockResponse(entry);
   };
+}
+
+/**
+ * Resolve after `ms`, or — mirroring `fetch` — reject with the signal's reason if
+ * the request is aborted first. Cleans up its timer/listener either way.
+ */
+function delayOrAbort(
+  ms: number,
+  signal: AbortSignal | null | undefined,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!signal) {
+      setTimeout(resolve, ms);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
