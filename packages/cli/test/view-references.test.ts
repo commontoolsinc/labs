@@ -5,6 +5,55 @@ import {
   findDependencies,
   findReferences,
 } from "../lib/view/references.ts";
+import type {
+  Document,
+  Line,
+  Span,
+  StructureNode,
+  TokenClass,
+} from "../lib/view/model.ts";
+
+/** Build one identifier-class span at a given column. */
+function ident(
+  col: number,
+  text: string,
+  cls: TokenClass = "identifier",
+): Span {
+  return { col, text, cls };
+}
+
+/** Assemble a synthetic Document from line texts plus per-line spans. */
+function makeDoc(lines: { text: string; spans: Span[] }[]): Document {
+  const text = lines.map((l) => l.text).join("\n");
+  const modelLines: Line[] = lines.map((l) => ({
+    text: l.text,
+    spans: l.spans,
+  }));
+  return {
+    text,
+    lines: modelLines,
+    structure: [],
+    flatStructure: [],
+    definitions: new Map(),
+  };
+}
+
+/** A structure node with sensible, overridable defaults. */
+function node(partial: Partial<StructureNode>): StructureNode {
+  return {
+    kind: "closure",
+    label: "synthetic",
+    startLine: 0,
+    endLine: 0,
+    startCol: 0,
+    endCol: 1000,
+    startOffset: 0,
+    endOffset: 1000,
+    depth: 0,
+    children: [],
+    ...partial,
+  };
+}
 
 Deno.test("findReferences: declaration plus call site, with inside flag", () => {
   const doc = parseDocument(SAMPLE);
@@ -20,6 +69,50 @@ Deno.test("findReferences: declaration plus call site, with inside flag", () => 
     outside.some((r) => r.lineText.includes("__cfLift_1({")),
     "call-site context captured",
   );
+});
+
+Deno.test("findReferences: inside flag honors column bounds on boundary lines", () => {
+  // One line, two occurrences of `foo`. The node covers only the second one
+  // (columns 6..9); the first, at column 0, is a sibling to its left. With only
+  // line bounds it is wrongly flagged inside, so it would vanish from the "uses"
+  // list (and could be picked as the declaration).
+  const doc = makeDoc([
+    { text: "foo = foo", spans: [ident(0, "foo"), ident(6, "foo")] },
+  ]);
+  const within = node({
+    name: "x",
+    startLine: 0,
+    endLine: 0,
+    startCol: 6,
+    endCol: 9,
+  });
+  const refs = findReferences(doc, "foo", within);
+  assertEquals(refs.map((r) => [r.col, r.inside]), [[0, false], [6, true]]);
+
+  // The same applies across boundary lines: a use to the left of startCol on
+  // the start line, and one at/after endCol on the end line, are both outside.
+  const multi = makeDoc([
+    { text: "bar  bar", spans: [ident(0, "bar"), ident(5, "bar")] },
+    { text: "bar  bar", spans: [ident(0, "bar"), ident(5, "bar")] },
+  ]);
+  const node2 = node({
+    name: "y",
+    startLine: 0,
+    endLine: 1,
+    startCol: 5,
+    endCol: 5,
+  });
+  const got = findReferences(multi, "bar", node2).map((r) => [
+    r.line,
+    r.col,
+    r.inside,
+  ]);
+  assertEquals(got, [
+    [0, 0, false], // start line, left of startCol
+    [0, 5, true], // start line, at startCol
+    [1, 0, true], // end line, before endCol
+    [1, 5, false], // end line, at endCol (exclusive)
+  ]);
 });
 
 Deno.test("findReferences: ignores non-identifier occurrences", () => {

@@ -56,8 +56,13 @@ export function findReferences(
   for (let line = 0; line < doc.lines.length; line++) {
     for (const span of doc.lines[line].spans) {
       if (span.text !== name || !IDENT_CLASSES.has(span.cls)) continue;
+      // Bound by the node's actual span, including column bounds on the boundary
+      // lines, so a sibling occurrence on the same line as (but outside the
+      // column range of) the node is not mistaken for one inside it.
       const inside = within
-        ? line >= within.startLine && line <= within.endLine
+        ? line >= within.startLine && line <= within.endLine &&
+          (line !== within.startLine || span.col >= within.startCol) &&
+          (line !== within.endLine || span.col < within.endCol)
         : false;
       refs.push({
         line,
