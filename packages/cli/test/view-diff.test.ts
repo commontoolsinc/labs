@@ -628,6 +628,63 @@ Deno.test("diff doc: CRLF content matches a CRLF workspace and stays semantic", 
   }
 });
 
+Deno.test("diff: git C-style-quoted paths are decoded for special bytes", () => {
+  // git wraps a path with special bytes in double quotes with C-style escapes:
+  // `\t` for tab, `\"` for quote, `\\` for backslash, octal `\NNN` for
+  // non-ASCII bytes (UTF-8). Without decoding, the resolved path is the literal
+  // backslash sequence, so the workspace lookup and in-place save miss the
+  // file.
+  const diff = `diff --git "a/with\\ttab.ts" "b/with\\ttab.ts"
+--- "a/with\\ttab.ts"
++++ "b/with\\ttab.ts"
+@@ -1,1 +1,1 @@
+-old
++new
+diff --git "a/na\\303\\257ve.ts" "b/na\\303\\257ve.ts"
+--- "a/na\\303\\257ve.ts"
++++ "b/na\\303\\257ve.ts"
+@@ -1,1 +1,1 @@
+-old
++new
+diff --git "a/q\\".ts" "b/q\\".ts"
+--- "a/q\\".ts"
++++ "b/q\\".ts"
+@@ -1,1 +1,1 @@
+-old
++new
+diff --git "a/back\\\\slash.ts" "b/back\\\\slash.ts"
+--- "a/back\\\\slash.ts"
++++ "b/back\\\\slash.ts"
+@@ -1,1 +1,1 @@
+-old
++new
+`;
+  const model = parseDiff(diff)!;
+  assertEquals(model.files.length, 4);
+  // Tab escape becomes a real tab, not a literal backslash-t.
+  assertEquals(model.files[0].oldPath, "with\ttab.ts");
+  assertEquals(model.files[0].newPath, "with\ttab.ts");
+  // Octal \303\257 is the UTF-8 encoding of "ï".
+  assertEquals(model.files[1].newPath, "naïve.ts");
+  // Escaped quote unescapes to a literal double-quote in the path.
+  assertEquals(model.files[2].newPath, 'q".ts');
+  // Escaped backslash unescapes to a single backslash.
+  assertEquals(model.files[3].newPath, "back\\slash.ts");
+});
+
+Deno.test("diff: an unquoted plain diff path keeps a literal backslash", () => {
+  // No surrounding quotes means no C-style decoding: a literal backslash in an
+  // unquoted plain `diff -u` header survives verbatim.
+  const diff = `--- d1/lit\\tname.ts\t2026-06-11 15:08:19
++++ d2/lit\\tname.ts\t2026-06-11 15:08:25
+@@ -1,1 +1,1 @@
+-old
++new
+`;
+  const model = parseDiff(diff)!;
+  assertEquals(model.files[0].newPath, "d2/lit\\tname.ts");
+});
+
 Deno.test("diff workspace: realWorkspace resolves via the repo root and blocks escapes", () => {
   const root = Deno.makeTempDirSync();
   const outside = Deno.makeTempDirSync();

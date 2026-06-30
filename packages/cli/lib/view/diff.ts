@@ -252,13 +252,73 @@ export function parseDiff(text: string): DiffModel | null {
 
 /** Strip the `a/` / `b/` prefix (and surrounding quotes); null for /dev/null.
  * The unified-diff format separates path from timestamp with a tab, so plain
- * `diff -u` headers like `--- d/x.ts<TAB>2026-06-11 …` cut at the tab. */
+ * `diff -u` headers like `--- d/x.ts<TAB>2026-06-11 …` cut at the tab. A git
+ * path containing special bytes is wrapped in double quotes with C-style
+ * escapes (`\t`, `\"`, `\\`, octal `\NNN` for high/non-ASCII bytes); a quoted
+ * path is decoded, an unquoted one is taken verbatim after the tab cut. */
 function stripSide(path: string): string | undefined {
-  let p = path.split("\t", 1)[0].trim();
-  if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
+  const trimmed = path.trim();
+  const p = trimmed.startsWith('"')
+    ? decodeCStyle(trimmed)
+    : trimmed.split("\t", 1)[0].trim();
   if (p === "/dev/null") return undefined;
   if (p.startsWith("a/") || p.startsWith("b/")) return p.slice(2);
   return p;
+}
+
+/** Decode a git C-style-quoted path (`"…"`). Recognizes the single-character
+ * escapes git emits (`\a \b \t \n \v \f \r \" \\`) and octal `\NNN` byte
+ * escapes, reassembling consecutive octal bytes and interpreting them as UTF-8.
+ * A string without a closing quote, or with an unrecognized escape, falls back
+ * to the surrounding-quote strip so the path is never silently dropped. */
+function decodeCStyle(quoted: string): string {
+  const SIMPLE: Record<string, number> = {
+    a: 7,
+    b: 8,
+    t: 9,
+    n: 10,
+    v: 11,
+    f: 12,
+    r: 13,
+    '"': 34,
+    "\\": 92,
+  };
+  const fallback = () => quoted.replace(/^"|"$/g, "");
+  const out: number[] = [];
+  let i = 1; // past the opening quote
+  while (i < quoted.length) {
+    const ch = quoted[i];
+    if (ch === '"') return new TextDecoder().decode(new Uint8Array(out));
+    if (ch !== "\\") {
+      out.push(...new TextEncoder().encode(ch));
+      i++;
+      continue;
+    }
+    const next = quoted[i + 1];
+    if (next === undefined) return fallback();
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (
+        j < quoted.length && oct.length < 3 &&
+        quoted[j] >= "0" && quoted[j] <= "7"
+      ) {
+        oct += quoted[j];
+        j++;
+      }
+      out.push(parseInt(oct, 8) & 0xff);
+      i = j;
+      continue;
+    }
+    if (next in SIMPLE) {
+      out.push(SIMPLE[next]);
+      i += 2;
+      continue;
+    }
+    return fallback();
+  }
+  // No closing quote: not a well-formed C-style string.
+  return fallback();
 }
 
 function isFileMeta(line: string): boolean {
