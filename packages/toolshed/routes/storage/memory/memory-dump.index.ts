@@ -25,33 +25,25 @@ import { createRouter } from "@/lib/create-app.ts";
 import type { AppBindings } from "@/lib/types.ts";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "@/routes/storage/memory.ts";
+import { dumpAllowSet, isDumpEnabled } from "./memory-dump-policy.ts";
 
 const DUMP_BASE = "/api/storage/memory/dump";
 
 const errMessage = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
-const parseDids = (csv: string): string[] =>
-  csv.split(",").map((d) => d.trim()).filter((d) => d.length > 0);
+const dumpEndpointEnabled = (): boolean =>
+  isDumpEnabled({
+    enabled: env.MEMORY_DUMP_ENABLED,
+    env: env.ENV,
+    allowInProduction: env.MEMORY_DUMP_ALLOW_IN_PRODUCTION,
+  });
 
-/** Whether the dump endpoint should be served in this environment at all. */
-function dumpEndpointEnabled(): boolean {
-  if (!env.MEMORY_DUMP_ENABLED) return false;
-  // Defense in depth: never expose raw dumps in production unless explicitly
-  // and separately opted in.
-  if (env.ENV === "production" && !env.MEMORY_DUMP_ALLOW_IN_PRODUCTION) {
-    return false;
-  }
-  return true;
-}
-
-/** DIDs permitted to download dumps. */
-function dumpAllowlist(): Set<string> {
-  return new Set([
-    ...parseDids(env.MEMORY_DUMP_DIDS),
-    ...parseDids(env.MEMORY_SERVICE_DIDS),
-  ]);
-}
+const dumpAllowlist = (): Set<string> =>
+  dumpAllowSet({
+    dumpDids: env.MEMORY_DUMP_DIDS,
+    serviceDids: env.MEMORY_SERVICE_DIDS,
+  });
 
 const requireDumpAccess: MiddlewareHandler<AppBindings> = async (c, next) => {
   // Disabled => indistinguishable from "no such route".

@@ -3,11 +3,17 @@
 // env is parsed once at module load, so we set the MEMORY_DUMP_* vars and a
 // temp MEMORY_DIR BEFORE dynamically importing the router. Every static import
 // here is env-free, so env.ts first evaluates inside the dynamic import below.
+//
+// The fixture is seeded through the SAME `resolveSpaceStoreUrl` + the SAME
+// `memoryEngineStoreUrl` the live server uses, so it lands at the exact path the
+// route resolves (directory mode nests one `engine-v3/` deeper than MEMORY_DIR).
 
 import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
+import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
 
@@ -15,23 +21,7 @@ const SQLITE_MAGIC = "SQLite format 3\0";
 const DUMP_BASE = "/api/storage/memory/dump";
 const SPACE = "did:key:z6MkDumpEndpointTestSpace000000000000000000000000";
 
-// Fabricate a temp MEMORY_DIR with a single, real (tiny) space store.
 const tmp = await Deno.makeTempDir({ prefix: "cf-dump-it-" });
-const engineDir = Path.join(tmp, "engine-v3");
-await Deno.mkdir(engineDir, { recursive: true });
-const storePath = Path.fromFileUrl(
-  new URL(
-    `./${encodeURIComponent(SPACE)}.sqlite`,
-    Path.toFileUrl(`${engineDir}/`),
-  ),
-);
-{
-  const db = new Database(storePath);
-  db.exec("CREATE TABLE probe (n INTEGER)");
-  db.exec("INSERT INTO probe (n) VALUES (42)");
-  db.close();
-}
-
 const allowed = await Identity.fromPassphrase("dump endpoint allowed signer");
 const stranger = await Identity.fromPassphrase("dump endpoint stranger signer");
 
@@ -41,7 +31,20 @@ Deno.env.set("MEMORY_DUMP_DIDS", allowed.did());
 
 const { createTestApp } = await import("@/lib/create-app.ts");
 const { default: dumpRouter } = await import("./memory-dump.index.ts");
+// The store the server uses; seed the fixture exactly where the route reads.
+const { memoryEngineStoreUrl } = await import("@/routes/storage/memory.ts");
 const app = createTestApp(dumpRouter);
+
+{
+  const storePath = Path.fromFileUrl(
+    resolveSpaceStoreUrl(memoryEngineStoreUrl, SPACE as MemorySpace),
+  );
+  await Deno.mkdir(Path.dirname(storePath), { recursive: true });
+  const db = new Database(storePath);
+  db.exec("CREATE TABLE probe (n INTEGER)");
+  db.exec("INSERT INTO probe (n) VALUES (42)");
+  db.close();
+}
 
 function sign(path: string, signer: Identity): Promise<Headers> {
   return signFirstPartyHttpRequest({

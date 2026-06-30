@@ -1,22 +1,30 @@
 // Unit tests for the read-only dump helpers (list / resolve / snapshot).
+//
+// Fixtures are seeded through the SAME `resolveSpaceStoreUrl` the live
+// `MemoryServer` uses, so the test exercises the real on-disk layout (where
+// directory-mode stores nest space DBs one `engine-v3/` deeper than the store
+// root) rather than a hand-simplified path.
 
 import { assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import type { MemorySpace } from "../interface.ts";
 import { listSpaceStores, snapshotSpaceStore, spaceStorePath } from "./dump.ts";
 
 const SPACE_A = "did:key:z6MkDumpHelperSpaceAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const SPACE_B = "did:key:z6MkDumpHelperSpaceBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
-async function makeEngineRoot(): Promise<URL> {
+/** A store dir as the toolshed would pass to MemoryServer (directory mode). */
+async function makeStore(): Promise<URL> {
   const tmp = await Deno.makeTempDir({ prefix: "cf-dump-unit-" });
-  const root = Path.toFileUrl(`${Path.join(tmp, "engine-v3")}/`);
-  await Deno.mkdir(Path.fromFileUrl(root), { recursive: true });
-  return root;
+  return Path.toFileUrl(`${tmp}/`);
 }
 
-function seedStore(root: URL, space: string, rows: number): void {
-  const path = spaceFilePath(root, space);
+// Seed a space exactly where the server would write it.
+function seedStore(store: URL, space: string, rows: number): void {
+  const path = canonicalPath(store, space);
+  Deno.mkdirSync(Path.dirname(path), { recursive: true });
   const db = new Database(path);
   try {
     db.exec("CREATE TABLE probe (n INTEGER)");
@@ -28,19 +36,22 @@ function seedStore(root: URL, space: string, rows: number): void {
   }
 }
 
-// Mirror engine path realization: percent-encode in URL space, decode on disk.
-function spaceFilePath(root: URL, space: string): string {
-  return Path.fromFileUrl(
-    new URL(`./${encodeURIComponent(space)}.sqlite`, root),
+function canonicalPath(store: URL, space: string): string {
+  return Path.fromFileUrl(resolveSpaceStoreUrl(store, space as MemorySpace));
+}
+
+async function rm(store: URL): Promise<void> {
+  await Deno.remove(Path.fromFileUrl(store), { recursive: true }).catch(
+    () => {},
   );
 }
 
 Deno.test("listSpaceStores returns decoded DIDs, newest first", async () => {
-  const root = await makeEngineRoot();
+  const store = await makeStore();
   try {
-    seedStore(root, SPACE_A, 1);
-    seedStore(root, SPACE_B, 1);
-    const spaces = listSpaceStores(root);
+    seedStore(store, SPACE_A, 1);
+    seedStore(store, SPACE_B, 1);
+    const spaces = listSpaceStores(store);
     const dids = spaces.map((s) => s.space).sort();
     assertEquals(dids, [SPACE_A, SPACE_B].sort());
     for (const s of spaces) {
@@ -49,34 +60,30 @@ Deno.test("listSpaceStores returns decoded DIDs, newest first", async () => {
       assertEquals(s.sizeBytes > 0, true);
     }
   } finally {
-    await Deno.remove(Path.fromFileUrl(new URL("..", root)), {
-      recursive: true,
-    });
+    await rm(store);
   }
 });
 
-Deno.test("spaceStorePath resolves real files and blocks traversal", async () => {
-  const root = await makeEngineRoot();
+Deno.test("spaceStorePath matches the server's canonical path + blocks traversal", async () => {
+  const store = await makeStore();
   try {
-    seedStore(root, SPACE_A, 1);
-    const resolved = spaceStorePath(root, SPACE_A);
-    assertEquals(resolved, spaceFilePath(root, SPACE_A));
-    assertEquals(spaceStorePath(root, "did:key:zMissing"), null);
+    seedStore(store, SPACE_A, 1);
+    // Must equal the exact path MemoryServer.openEngine would resolve.
+    assertEquals(spaceStorePath(store, SPACE_A), canonicalPath(store, SPACE_A));
+    assertEquals(spaceStorePath(store, "did:key:zMissing"), null);
     // Path traversal in the id is rejected by the encode guard.
-    assertEquals(spaceStorePath(root, "../../etc/passwd"), null);
-    assertEquals(spaceStorePath(root, "a/b"), null);
+    assertEquals(spaceStorePath(store, "../../etc/passwd"), null);
+    assertEquals(spaceStorePath(store, "a/b"), null);
   } finally {
-    await Deno.remove(Path.fromFileUrl(new URL("..", root)), {
-      recursive: true,
-    });
+    await rm(store);
   }
 });
 
 Deno.test("snapshotSpaceStore produces a consistent, openable copy", async () => {
-  const root = await makeEngineRoot();
+  const store = await makeStore();
   try {
-    seedStore(root, SPACE_A, 100);
-    const source = spaceStorePath(root, SPACE_A)!;
+    seedStore(store, SPACE_A, 100);
+    const source = spaceStorePath(store, SPACE_A)!;
     const destDir = await Deno.makeTempDir({ prefix: "cf-dump-snap-" });
     const dest = Path.join(destDir, "snap.sqlite");
     try {
@@ -96,9 +103,7 @@ Deno.test("snapshotSpaceStore produces a consistent, openable copy", async () =>
       await Deno.remove(destDir, { recursive: true });
     }
   } finally {
-    await Deno.remove(Path.fromFileUrl(new URL("..", root)), {
-      recursive: true,
-    });
+    await rm(store);
   }
 });
 

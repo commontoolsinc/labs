@@ -2,6 +2,7 @@
 
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { defaultCacheDir, fetchSpaceDb, listRemoteSpaces } from "../remote.ts";
+import { discoverSpaceDbs, resolveSpacePath } from "../discover.ts";
 
 const SPACE = "did:key:z6MkRemoteTestSpace000000000000000000000000000000";
 const realFetch = globalThis.fetch;
@@ -67,6 +68,31 @@ Deno.test("fetchSpaceDb caches: second call does not re-fetch", async () => {
       assertEquals(p1, p2);
       assertEquals(stub.calls.length, 1); // cached on the 2nd call
       assertEquals((await Deno.readFile(p1)).length, 3);
+    } finally {
+      stub.restore();
+    }
+  });
+});
+
+Deno.test("a pulled DB is discoverable and resolvable by full DID", async () => {
+  await withCacheDir(async (cacheDir) => {
+    // A minimal-but-real SQLite header so quickStats/open don't choke on it.
+    const stub = stubFetch(() =>
+      new Response(new TextEncoder().encode("SQLite format 3\0rest"), {
+        status: 200,
+      })
+    );
+    try {
+      const path = await fetchSpaceDb(SPACE, "http://h:1", { cacheDir });
+      // Cached under the LITERAL did filename (no %3A), matching local layout.
+      assertStringIncludes(path, `${SPACE}.sqlite`);
+      assertEquals(path.includes("%3A"), false);
+
+      // …so normal local discovery reports the real DID and resolves it by the
+      // full DID a `pull` would have printed (the workflow Codex flagged).
+      const found = discoverSpaceDbs({ dirs: [cacheDir] });
+      assertEquals(found.some((s) => s.did === SPACE), true);
+      assertEquals(resolveSpacePath(SPACE, found), path);
     } finally {
       stub.restore();
     }

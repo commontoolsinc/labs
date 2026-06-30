@@ -10,10 +10,18 @@
 //   * It produces ONE consistent file even though the live server keeps the
 //     store in WAL mode — `VACUUM INTO` checkpoints into the copy, so the result
 //     has no `-wal`/`-shm` companions to ship.
+//
+// `store` here is the SAME value the toolshed hands `MemoryServer` (its
+// `#store`). The server resolves each space's file via `resolveSpaceStoreUrl`,
+// so we MUST resolve through the same helper rather than assuming files sit
+// directly under `store` — directory mode nests them one more `engine-v3/` deep.
 
 import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
-import { encodeStoreSubject } from "./storage-path.ts";
+import {
+  resolveSpaceStoreDirUrl,
+  resolveSpaceStoreUrl,
+} from "./storage-path.ts";
 import type { MemorySpace } from "../interface.ts";
 
 const SQLITE_SUFFIX = ".sqlite";
@@ -26,16 +34,18 @@ export interface SpaceStoreInfo {
 }
 
 /**
- * List the space stores under a memory engine root (the `engine-v3/` directory
- * produced by `resolveMemoryEngineStoreRootUrl`). Newest-first by mtime.
+ * List the space stores for a memory `store` (the value passed to
+ * `MemoryServer`). Resolves the actual per-space directory via the shared
+ * `resolveSpaceStoreDirUrl`, so it matches the server's on-disk layout exactly.
+ * Newest-first by mtime.
  */
-export function listSpaceStores(engineStoreRoot: URL): SpaceStoreInfo[] {
-  const dir = Path.fromFileUrl(engineStoreRoot);
+export function listSpaceStores(store: URL): SpaceStoreInfo[] {
+  const dir = Path.fromFileUrl(resolveSpaceStoreDirUrl(store));
   let entries: Deno.DirEntry[];
   try {
     entries = [...Deno.readDirSync(dir)];
   } catch {
-    return []; // missing/unreadable root → no spaces
+    return []; // missing/unreadable dir → no spaces
   }
   const out: SpaceStoreInfo[] = [];
   for (const entry of entries) {
@@ -64,24 +74,18 @@ export function listSpaceStores(engineStoreRoot: URL): SpaceStoreInfo[] {
 }
 
 /**
- * Resolve the on-disk sqlite path for a space within an engine root, or null if
- * it does not exist. `encodeStoreSubject` rejects path-traversal in the space id
- * (`/`, `\`, `..`, NUL), so an attacker-supplied id can never escape the root.
+ * Resolve the on-disk sqlite path for a space within `store`, or null if it does
+ * not exist. Uses the same `resolveSpaceStoreUrl` the server uses (so the path
+ * always matches), and that helper's `encodeStoreSubject` rejects path-traversal
+ * in the space id (`/`, `\`, `..`, NUL) — an attacker-supplied id can't escape.
  */
 export function spaceStorePath(
-  engineStoreRoot: URL,
+  store: URL,
   space: string,
 ): string | null {
   let path: string;
   try {
-    // `encodeStoreSubject` percent-encodes the id (and rejects path-traversal:
-    // `/`, `\`, `..`, NUL). Realizing the URL with `fromFileUrl` then decodes it
-    // back to the literal on-disk filename — exactly how the engine resolves it.
-    const fileUrl = new URL(
-      `./${encodeStoreSubject(space as MemorySpace)}${SQLITE_SUFFIX}`,
-      engineStoreRoot,
-    );
-    path = Path.fromFileUrl(fileUrl);
+    path = Path.fromFileUrl(resolveSpaceStoreUrl(store, space as MemorySpace));
   } catch {
     return null; // invalid space id
   }

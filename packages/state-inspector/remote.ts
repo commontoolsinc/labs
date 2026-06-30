@@ -114,9 +114,17 @@ export async function fetchSpaceDb(
   baseUrl: string,
   opts: FetchOptions = {},
 ): Promise<string> {
+  // Reject ids that can't be a safe single filename (DIDs never contain these).
+  if (space.includes("/") || space.includes("\\") || space.includes("\0")) {
+    throw new Error(`invalid space id for cache filename: ${space}`);
+  }
   const cacheDir = opts.cacheDir ?? defaultCacheDir(baseUrl);
   await Deno.mkdir(cacheDir, { recursive: true });
-  const dest = `${cacheDir}/${encodeURIComponent(space)}.sqlite`;
+  // Cache with the LITERAL did filename — same convention the server/local
+  // store uses (`did:key:….sqlite`), so local discovery reports the real DID
+  // and `inspect <full-did>` resolves a pulled DB. (URL path segments below are
+  // still percent-encoded; only the on-disk filename is literal.)
+  const dest = `${cacheDir}/${space}.sqlite`;
 
   if (!opts.force) {
     try {
