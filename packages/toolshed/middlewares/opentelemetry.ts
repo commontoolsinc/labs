@@ -39,7 +39,6 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
 
     await obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
       span.setAttribute("http.method", method);
-      span.setAttribute("http.route", path + c.req.routePath);
       span.setAttribute("http.host", c.req.header("host") || "unknown");
       span.setAttribute(
         "http.user_agent",
@@ -114,6 +113,14 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
 
         throw error;
       } finally {
+        // `c.req.routePath` only resolves to the matched route *template* (e.g.
+        // "/api/foo/:id") after `next()` has run; read before, it is this
+        // middleware's own "*", and `path` is the high-cardinality concrete URL.
+        // Set the template now so http.route and the span name aggregate
+        // per-route in the backend instead of exploding cardinality.
+        const route = c.req.routePath || path;
+        span.setAttribute("http.route", route);
+        span.updateName(`${method} ${route}`);
         span.end();
       }
     });
