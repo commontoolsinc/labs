@@ -5,6 +5,7 @@ import { Resource } from "@opentelemetry/resources";
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import env from "@/env.ts";
 import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
+import { samplerFromEnv } from "@/lib/otel-sampler.ts";
 
 // Ensure we only register once even during hot-reload
 let _providerRegistered = false;
@@ -23,6 +24,11 @@ export const provider = new BasicTracerProvider({
     "deployment.environment": env.ENV || "development",
     "openinference.project.name": env.CFTS_AI_LLM_PHOENIX_PROJECT,
   }),
+  // The SDK doesn't read OTEL_TRACES_SAMPLER from the env under Deno, so build
+  // the sampler explicitly. Defaults (always_on / 1.0) keep 100% sampling.
+  // NOTE: head sampling here applies to LLM/OpenInference spans too, so a ratio
+  // below 1.0 also thins the spans the collector forwards to Phoenix.
+  sampler: samplerFromEnv(env.OTEL_TRACES_SAMPLER, env.OTEL_TRACES_SAMPLER_ARG),
 });
 
 // Add span processor after construction (API changed in newer SDK versions)
