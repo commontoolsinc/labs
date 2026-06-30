@@ -1977,6 +1977,72 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assertStringIncludes(result.output, '"bar"');
     },
   );
+
+  await t.step(
+    "errors when an array item access names a property the element type lacks",
+    async () => {
+      // The shrink-coverage check recurses through the array into its element
+      // type to validate item-level property reads.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: { id: string }[]) =>",
+        "  items.map((item) => item.missing));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "errors when a readonly array item access names a missing property",
+    async () => {
+      // Same recursion, but the element type is reached through a readonly
+      // array node.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: readonly { id: string }[]) =>",
+        "  items.map((item) => item.missing));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "validates array item reads alongside an array-root length read",
+    async () => {
+      // Reading both an array-root property (`length`) and item-level fields
+      // exercises the array-root path branch of the coverage check.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: { id: string }[]) => {",
+        "  const count = items.length;",
+        "  const ids = items.map((item) => item.missing);",
+        "  return { count, ids };",
+        "});",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
 });
 
 function getShrinkErrors(
