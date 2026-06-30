@@ -11,6 +11,25 @@ function sectionBetween(prompt: string, start: string, end: string): string {
   return endParts[0];
 }
 
+function sourceBlockBetween(
+  prompt: string,
+  heading: string,
+  endMarker: string,
+): string {
+  const startParts = prompt.split(`${heading}\n\n`);
+  assertEquals(startParts.length, 2);
+  const endParts = startParts[1].split(endMarker);
+  assertEquals(endParts.length, 2);
+  return endParts[0];
+}
+
+function commonfabricImports(source: string): string {
+  const matches = source.matchAll(
+    /import\s*\{(?<imports>[\s\S]*?)\}\s*from\s*"commonfabric";/g,
+  );
+  return Array.from(matches, (match) => match.groups?.imports ?? "").join("\n");
+}
+
 const providerConfig: ExtractedProviderConfig = {
   name: "acme",
   authorizationEndpoint: "https://auth.example.com/oauth/authorize",
@@ -143,6 +162,7 @@ Deno.test("generateImporterPrompt includes auth availability and current JSX gui
     instructions,
     'Always use `wish({ query: "#acmeAuth", scope: [".", "~"] })`',
   );
+  assertFalse(instructions.includes("ifElse"));
 
   assertStringIncludes(reference, "## Reference: Airtable Auth Pattern");
   assertStringIncludes(
@@ -152,6 +172,67 @@ Deno.test("generateImporterPrompt includes auth availability and current JSX gui
   assertStringIncludes(reference, "AuthInfo");
   assertStringIncludes(reference, "return `Airtable: ${selectedBaseName}");
   assertFalse(reference.includes("return \\`Airtable:"));
+});
+
+Deno.test("generateImporterPrompt embeds current Airtable source references", async () => {
+  const prompt = generateImporterPrompt({
+    providerName: "acme",
+    brandColor: "#123456",
+    api,
+    providerConfig,
+    primaryListEndpoint: "/v1/widgets",
+    primaryGetEndpoint: "/v1/widgets/{id}",
+  });
+  const references = [
+    {
+      heading: "## Reference: Airtable Auth Pattern (airtable-auth.tsx)",
+      endMarker:
+        "\n\n## Reference: Airtable Auth Manager (airtable-auth-manager.tsx)",
+      source: new URL(
+        "../airtable/core/airtable-auth.tsx",
+        import.meta.url,
+      ),
+    },
+    {
+      heading:
+        "## Reference: Airtable Auth Manager (airtable-auth-manager.tsx)",
+      endMarker: "\n\n## Reference: Airtable API Client (airtable-client.ts)",
+      source: new URL(
+        "../airtable/core/util/airtable-auth-manager.tsx",
+        import.meta.url,
+      ),
+    },
+    {
+      heading: "## Reference: Airtable API Client (airtable-client.ts)",
+      endMarker: "\n\n## Reference: Airtable Importer (airtable-importer.tsx)",
+      source: new URL(
+        "../airtable/core/util/airtable-client.ts",
+        import.meta.url,
+      ),
+    },
+    {
+      heading: "## Reference: Airtable Importer (airtable-importer.tsx)",
+      endMarker: "\n</reference-implementations>",
+      source: new URL("../airtable/airtable-importer.tsx", import.meta.url),
+    },
+  ];
+
+  let importerSource = "";
+  for (const reference of references) {
+    const embedded = sourceBlockBetween(
+      prompt,
+      reference.heading,
+      reference.endMarker,
+    );
+    assertEquals(embedded, await Deno.readTextFile(reference.source));
+
+    if (reference.heading.includes("Importer")) {
+      importerSource = embedded;
+    }
+  }
+
+  assertFalse(/\bifElse\s*\(/.test(importerSource));
+  assertFalse(/\bifElse\b/.test(commonfabricImports(importerSource)));
 });
 
 Deno.test("generateImporterPrompt renders extracted API details", () => {
