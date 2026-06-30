@@ -92,28 +92,29 @@ describe("capture-deno-inspector-profile helpers", () => {
       1000,
       /mod\.ts$/,
       {
-        fetchFn: async (endpoint) => {
+        fetchFn: (endpoint) => {
           endpoints.push(endpoint);
-          return {
+          return Promise.resolve({
             ok: true,
-            json: async () => [
-              {
-                id: "worker",
-                type: "worker",
-                url: "file:///worker.ts",
-                webSocketDebuggerUrl: "ws://127.0.0.1/worker",
-              },
-              {
-                id: "node",
-                title: "CLI",
-                type: "node",
-                url: "file:///packages/cli/mod.ts",
-                webSocketDebuggerUrl: "ws://127.0.0.1/node",
-              },
-            ],
-          };
+            json: () =>
+              Promise.resolve([
+                {
+                  id: "worker",
+                  type: "worker",
+                  url: "file:///worker.ts",
+                  webSocketDebuggerUrl: "ws://127.0.0.1/worker",
+                },
+                {
+                  id: "node",
+                  title: "CLI",
+                  type: "node",
+                  url: "file:///packages/cli/mod.ts",
+                  webSocketDebuggerUrl: "ws://127.0.0.1/node",
+                },
+              ]),
+          });
         },
-        sleepMs: async () => {
+        sleepMs: () => {
           throw new Error("matching target should not sleep");
         },
       },
@@ -131,7 +132,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     await assertRejects(
       () =>
         waitForTarget("127.0.0.1", 9229, 100, undefined, {
-          fetchFn: async () => {
+          fetchFn: () => {
             fetches += 1;
             throw new Error("not ready");
           },
