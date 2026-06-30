@@ -218,6 +218,21 @@ into #4391** and reframe #4391 from "label-neutral container probe-scoping" to "
 complete S16 filter/flatMap over-taint fix." (Off-main alternative would have to
 re-include #4391's container probe-scoping anyway, so folding is cleaner.)
 
+### Status (2026-06-30): LANDED on #4391, fully green
+Stage 2 folded into #4391 (`gideon/4367-followups`); full runner suite + the
+coverage-debt ratchet green (35/35 checks). Coverage note: the fix added uncovered
+lines (structure re-stamp removal-splice; tx invalidate-after-prepare; the
+`TransactionWrapper` delegate) — covered by new tests (`cfc-structure-container.test.ts`
++ the index-only / grow / flatMap cases in `cfc-flow-pointwise.test.ts`).
+**cubic review:** two P2s claimed `parseLink()` drops a carried `cfcLabelView` from
+element cells. Assessed + resolved as false positives — `cfcLabelView` extraction is a
+write-path concern (`data-updating.ts`), the coordinator reads *committed* input (no
+transient view to drop), the materialization is byte-identical to merged `map`, and an
+**A/B (getRaw vs old asSchema().get())** showed the result container's per-slot link
+labels are identical (`["0"]/link=[alice]`, `["1"]/link=[bob]`). Reasoning is on the
+resolved PR threads. (Verification agents split 2–1 on this; the A/B settled it — a
+reminder that "parseLink drops the view" was structurally true but observably inert.)
+
 ## CT-1801 / SC-8 — recommendation
 Hold the CFC specs PR. The canonical spec **is** at
 `cf-feat-1/specs/cfc/` (08-05 collection transitions, 08-09 runtime propagation).
