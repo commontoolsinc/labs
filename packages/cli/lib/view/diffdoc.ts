@@ -257,7 +257,9 @@ export function buildDiffDocument(
         mapping,
         definitions,
         hunks,
-        markdown: isMarkdownPath(file.newPath),
+        // A deleted file's new path is /dev/null (absent), so fall back to the
+        // old path; otherwise a removed .md reads as TypeScript.
+        markdown: isMarkdownPath(file.newPath ?? file.oldPath),
       }));
     }
 
