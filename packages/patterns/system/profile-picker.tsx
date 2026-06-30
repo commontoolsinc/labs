@@ -76,7 +76,6 @@ export default pattern<
   const profileCreate = ProfileCreate({
     profiles: profiles as any,
     inputId: "wish-profile-picker-name-input",
-    buttonId: "wish-profile-picker-create-button",
   });
 
   return {

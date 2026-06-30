@@ -97,6 +97,16 @@ export class InputTimingController implements ReactiveController {
   }
 
   /**
+   * Run any pending callback immediately and cancel the scheduled timer.
+   * No-op when nothing is pending.
+   */
+  flush(): void {
+    const callback = this.pendingCallback;
+    this.cancel();
+    callback?.();
+  }
+
+  /**
    * Notify the controller that the input has gained focus
    */
   onFocus(): void {
@@ -166,13 +176,17 @@ export class InputTimingController implements ReactiveController {
 
     // Leading edge execution
     if (timeSinceLastCall >= this.options.delay && this.options.leading) {
+      this.pendingCallback = null;
       this.lastCallTime = now;
       callback();
     } else if (this.options.trailing) {
-      // Schedule trailing edge execution
+      // Schedule trailing edge execution. Mirror the callback into
+      // pendingCallback so flush() (and onBlur) can run it immediately.
       const remainingTime = this.options.delay - timeSinceLastCall;
+      this.pendingCallback = callback;
       this.timeoutId = setTimeout(() => {
         this.timeoutId = null;
+        this.pendingCallback = null;
         this.lastCallTime = Date.now();
         callback();
       }, remainingTime);

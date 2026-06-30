@@ -2922,6 +2922,7 @@ interface CFQuestionElement extends CFHTMLElement {}
 interface CFAlertElement extends CFHTMLElement {}
 interface CFVStackElement extends CFHTMLElement {}
 interface CFMessageInputElement extends CFHTMLElement {}
+interface CFSubmitInputElement extends CFHTMLElement {}
 interface CFToolbarElement extends CFHTMLElement {}
 interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
@@ -3346,6 +3347,17 @@ interface CFMessageInputAttributes<T> extends CFHTMLAttributes<T> {
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "appearance"?: "rounded";
   "oncf-send"?: EventHandler<{ message: string }>;
+}
+
+interface CFSubmitInputAttributes<T> extends CFHTMLAttributes<T> {
+  "placeholder"?: string;
+  "buttonText"?: string;
+  "inputId"?: string;
+  "disabled"?: boolean | CellLike<boolean>;
+  // Optional initial text. The field is otherwise uncontrolled: it mirrors the
+  // typed text into its own `value` (read on the host as event.target.value on
+  // submit) and is not meant for two-way cell binding.
+  "initialValue"?: string;
 }
 
 interface CTSendMessageAttributes<T> extends CFHTMLAttributes<T> {
@@ -5045,6 +5057,10 @@ declare global {
       "cf-message-input": CFDOM.DetailedHTMLProps<
         CFMessageInputAttributes<CFMessageInputElement>,
         CFMessageInputElement
+      >;
+      "cf-submit-input": CFDOM.DetailedHTMLProps<
+        CFSubmitInputAttributes<CFSubmitInputElement>,
+        CFSubmitInputElement
       >;
       "cf-chat-message": CFDOM.DetailedHTMLProps<
         CFChatMessageAttributes<CFChatMessageElement>,

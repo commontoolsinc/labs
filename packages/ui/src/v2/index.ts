@@ -111,6 +111,7 @@ export * from "./components/cf-vscroll/index.ts";
 export * from "./components/cf-vstack/index.ts";
 export * from "./components/cf-select/index.ts";
 export * from "./components/cf-message-input/index.ts";
+export * from "./components/cf-submit-input/index.ts";
 export * from "./components/cf-prompt-input/index.ts";
 export * from "./components/cf-keybind/index.ts";
 export * from "./components/cf-tools-chip/index.ts";
