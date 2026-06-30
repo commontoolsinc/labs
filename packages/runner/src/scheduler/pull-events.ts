@@ -11,6 +11,12 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+// CT-1795: upper bound on how many times one event may park waiting for a
+// cross-space load (kicked by its own handler state) to settle. Each park costs
+// one settle cycle; the common case resolves in 1. The bound guarantees forward
+// progress if loads churn or a value legitimately never resolves.
+const MAX_CROSS_SPACE_LOAD_PARKS = 8;
+
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
   eventBlockingDeps: Set<Action>,
@@ -51,6 +57,15 @@ export async function processPullQueuedEventDuringExecute(
 
   const { handler } = queuedEvent;
   const handlerId = state.getActionId(handler);
+
+  // CT-1795: record the cross-space load count before this event's handler
+  // chain runs, so the park below only fires for loads THIS event kicked (not
+  // pre-existing / unrelated in-flight loads). Set once; preserved across
+  // re-processing while the event stays parked at the queue head.
+  if (queuedEvent.crossSpaceLoadBaseline === undefined) {
+    queuedEvent.crossSpaceLoadBaseline =
+      state.runtime.storageManager.pendingCrossSpacePromiseCount?.() ?? 0;
+  }
 
   // Ensure handler dependencies are computed before running.
   let shouldSkipEvent = false;
@@ -106,6 +121,35 @@ export async function processPullQueuedEventDuringExecute(
   }
 
   if (shouldSkipEvent) return;
+
+  // CT-1795: the preflight above pulled this handler's bound state, but a value
+  // derived from an async cross-space read (e.g. a #profileName wish behind a
+  // plain-value computed arg, read by the handler only) resolves to its
+  // un-loaded default on the first pass: the wish node runs and settles while
+  // its cross-space load is still in flight, so it is not a dirty dependency and
+  // nothing keeps the event parked. If pulling the state pushed the cross-space
+  // load count above this event's baseline, park until those loads settle and
+  // the producing chain re-runs — so the FIRST handler invocation observes the
+  // resolved value instead of the empty default. Bounded and baseline-scoped:
+  // unrelated in-flight loads do not delay this event, and a value that stays
+  // empty still dispatches once the bound is reached.
+  const storage = state.runtime.storageManager;
+  const pendingLoads = storage.pendingCrossSpacePromiseCount?.() ?? 0;
+  const loadBaseline = queuedEvent.crossSpaceLoadBaseline ?? 0;
+  if (
+    pendingLoads > loadBaseline &&
+    (queuedEvent.crossSpaceLoadParks ?? 0) < MAX_CROSS_SPACE_LOAD_PARKS
+  ) {
+    // Only park if we obtain a settle promise to wake on — never park without a
+    // wake (a backend lacking cross-space tracking already reports 0 pending).
+    const settled = storage.crossSpaceSettled?.();
+    if (settled) {
+      queuedEvent.crossSpaceLoadParks = (queuedEvent.crossSpaceLoadParks ?? 0) +
+        1;
+      void settled.then(() => state.queueExecution());
+      return;
+    }
+  }
 
   await dispatchQueuedEvent({
     runtime: state.runtime,
