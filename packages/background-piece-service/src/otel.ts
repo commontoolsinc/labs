@@ -46,50 +46,56 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
     return;
   }
 
-  // Import the OTel SDK lazily, only when telemetry is enabled. The SDK probes
-  // the environment at import time (e.g. os.hostname()), which requires Deno's
-  // --allow-sys; static imports would force that on every consumer/test that
-  // imports this module even with telemetry disabled. Only @opentelemetry/api
-  // (side-effect free) is imported statically above.
-  const { BasicTracerProvider, BatchSpanProcessor } = await import(
-    "@opentelemetry/sdk-trace-base"
-  );
-  const { OTLPTraceExporter } = await import(
-    "@opentelemetry/exporter-trace-otlp-proto"
-  );
-  const { Resource } = await import("@opentelemetry/resources");
-  const { AsyncHooksContextManager } = await import(
-    "@opentelemetry/context-async-hooks"
-  );
+  // Fail open: telemetry is optional, so a setup error must not block the
+  // service from booting — log it and carry on without tracing.
+  try {
+    // Import the OTel SDK lazily, only when telemetry is enabled. The SDK probes
+    // the environment at import time (e.g. os.hostname()), which requires Deno's
+    // --allow-sys; static imports would force that on every consumer/test that
+    // imports this module even with telemetry disabled. Only @opentelemetry/api
+    // (side-effect free) is imported statically above.
+    const { BasicTracerProvider, BatchSpanProcessor } = await import(
+      "@opentelemetry/sdk-trace-base"
+    );
+    const { OTLPTraceExporter } = await import(
+      "@opentelemetry/exporter-trace-otlp-proto"
+    );
+    const { Resource } = await import("@opentelemetry/resources");
+    const { AsyncHooksContextManager } = await import(
+      "@opentelemetry/context-async-hooks"
+    );
 
-  // env guarantees defaults for all of these (see env.ts), so no fallbacks needed.
-  const exporter = new OTLPTraceExporter({
-    url: `${cfg.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/traces`,
-  });
-  const provider = new BasicTracerProvider({
-    resource: new Resource({
-      "service.name": cfg.OTEL_SERVICE_NAME,
-      "service.version": "1.0.0",
-      "deployment.environment": cfg.ENV,
-    }),
-  });
-  // Export all spans to the local OTLP collector, which forwards to SigNoz.
-  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+    // env guarantees defaults for all of these (see env.ts), so no fallbacks.
+    const exporter = new OTLPTraceExporter({
+      url: `${cfg.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/traces`,
+    });
+    const provider = new BasicTracerProvider({
+      resource: new Resource({
+        "service.name": cfg.OTEL_SERVICE_NAME,
+        "service.version": "1.0.0",
+        "deployment.environment": cfg.ENV,
+      }),
+    });
+    // Export all spans to the local OTLP collector, which forwards to SigNoz.
+    provider.addSpanProcessor(new BatchSpanProcessor(exporter));
 
-  // Prefer Deno's built-in context manager (Deno >= 2.2); fall back to the
-  // async-hooks manager otherwise.
-  // deno-lint-ignore no-explicit-any
-  const denoCm = (globalThis as any)?.Deno?.telemetry?.contextManager;
-  const contextManager = denoCm && typeof denoCm.enable === "function"
-    ? denoCm
-    : new AsyncHooksContextManager();
-  context.setGlobalContextManager(contextManager.enable());
+    // Prefer Deno's built-in context manager (Deno >= 2.2); fall back to the
+    // async-hooks manager otherwise.
+    // deno-lint-ignore no-explicit-any
+    const denoCm = (globalThis as any)?.Deno?.telemetry?.contextManager;
+    const contextManager = denoCm && typeof denoCm.enable === "function"
+      ? denoCm
+      : new AsyncHooksContextManager();
+    context.setGlobalContextManager(contextManager.enable());
 
-  trace.setGlobalTracerProvider(provider);
-  _provider = provider;
-  _providerRegistered = true;
+    trace.setGlobalTracerProvider(provider);
+    _provider = provider;
+    _providerRegistered = true;
 
-  console.log(
-    `OpenTelemetry initialized successfully with endpoint: ${cfg.OTEL_EXPORTER_OTLP_ENDPOINT}`,
-  );
+    console.log(
+      `OpenTelemetry initialized successfully with endpoint: ${cfg.OTEL_EXPORTER_OTLP_ENDPOINT}`,
+    );
+  } catch (error) {
+    console.error("Failed to initialize OpenTelemetry:", error);
+  }
 }
