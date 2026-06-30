@@ -76,7 +76,7 @@ The `tests` array uses a discriminated union to avoid TypeScript declaration emi
 ```typescript
 // Shown at module scope.
 type TestStep =
-  | { assertion: OpaqueRef<boolean> }  // from computed(() => condition)
+  | { assertion: Reactive<boolean> }  // from computed(() => condition)
   | { action: Stream<void> };          // from action(() => handler.send())
 ```
 

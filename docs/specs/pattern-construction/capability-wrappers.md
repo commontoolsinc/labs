@@ -6,7 +6,7 @@
 
 ## Objectives
 
-- Collapse `OpaqueRef` and runtime `Cell` APIs into a single type system whose
+- Collapse `Reactive` and runtime `Cell` APIs into a single type system whose
   surface area is gated by explicit capabilities (`Opaque`, `Readonly`,
   `Mutable`, `Writeonly`).
 - Use TypeScript's type system (branded types) rather than runtime Proxy objects
@@ -18,7 +18,7 @@
 
 ## Current Behaviors Informing Design
 
-- `opaqueRef` proxies in `packages/runner/src/builder/opaque-ref.ts` capture
+- `reactive` proxies in `packages/runner/src/builder/reactive.ts` capture
   nested schema information via `ContextualFlowControl` so that child property
   accesses can inherit IFC annotations. They also record connected nodes with
   `.connect` and export builder metadata used by `factoryFromPattern`.
@@ -42,7 +42,7 @@ The actual implementation uses **branded types** rather than runtime Proxy wrapp
   and derives (currently just `.map`).
 - Define capability types by combining these factored parts with specific brand
   configurations:
-  - `OpaqueRef<T>`: `{ opaque: true, read: false, write: false, stream: false }`
+  - `Reactive<T>`: `{ opaque: true, read: false, write: false, stream: false }`
     - Supports: property proxies, `.map`, `.filter`, `.derive`, structural equality
   - `Cell<T>` (Mutable): `{ opaque: false, read: true, write: true, stream: true }`
     - Supports: everything (`.get`, `.set`, `.update`, `.push`, `.redirectTo`, `.send`)
@@ -52,8 +52,8 @@ The actual implementation uses **branded types** rather than runtime Proxy wrapp
     - Supports: `.get`, `.getAsQueryResult`, schema navigation
   - `WriteonlyCell<T>`: `{ opaque: false, read: false, write: true, stream: false }`
     - Supports: `.set`, `.update`, `.redirectTo` but hides `.get`
-- For `OpaqueRef`, keep proxy behavior where each key access returns another
-  `OpaqueRef`.
+- For `Reactive`, keep proxy behavior where each key access returns another
+  `Reactive`.
 - Simplify most wrap/unwrap types to use `CellLike`.
 
 ### Comparison to Original Proxy Design
@@ -65,10 +65,10 @@ because TypeScript's type system can enforce the same boundaries more efficientl
 ## Construction Flow (Branded Types)
 
 1. Builder entry points (`pattern`, `lift`, `handler`) push a frame and work with
-   the unified `CellLike` types instead of separate `opaqueRef` and `Cell` types.
+   the unified `CellLike` types instead of separate `reactive` and `Cell` types.
 2. Cell creation is deferred - cells can be created without an immediate link,
    using `.for(cause)` to establish the link later.
-3. For compatibility during migration, legacy `OpaqueRef` helper affordances
+3. For compatibility during migration, legacy `Reactive` helper affordances
    (`setDefault`, `unsafe_bindToPatternAndPath`) continue working until all call
    sites migrate.
 4. During runtime execution, `pushFrameFromCause` seeds the frame with the
@@ -79,7 +79,7 @@ because TypeScript's type system can enforce the same boundaries more efficientl
 ## Type System Notes
 
 - Export capability-specific TypeScript types from `@commonfabric/api`:
-  `OpaqueRef<T>`, `Cell<T>`, `ReadonlyCell<T>`, `WriteonlyCell<T>`, and
+  `Reactive<T>`, `Cell<T>`, `ReadonlyCell<T>`, `WriteonlyCell<T>`, and
   `Stream<T>`.
 - All types extend a shared `CellLike<T>` base with branded capability flags.
 - Extend our JSON Schema annotations so authors can declare capabilities at any
@@ -90,7 +90,7 @@ because TypeScript's type system can enforce the same boundaries more efficientl
   (e.g., array helpers only appear when `T` extends `readonly any[]`). Reuse the
   IFC-aware schema lookup utilities to keep helper availability aligned with the
   JSON schema.
-- Augment builders so `pattern` factories default to `OpaqueRef` inputs while
+- Augment builders so `pattern` factories default to `Reactive` inputs while
   `lift` can declare stronger capabilities for each argument via a typed options
   bag (e.g., `{ inputs: { item: Capability.Mutable } }`).
 

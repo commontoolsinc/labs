@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isReactive } from "../src/builder/types.ts";
-import { reactive } from "../src/builder/opaque-ref.ts";
+import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";

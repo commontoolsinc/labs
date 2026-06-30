@@ -57,8 +57,8 @@ current offline harness.
       through handler.
 - [x] Counter with nested array of objects — update deep path entries via
       handler and assert final structure.
-- [x] Counter with `OpaqueRef.map` usage — map over array cell to produce
-      derived array and assert reactivity.
+- [x] Counter with `Reactive.map` usage — map over array cell to produce derived
+      array and assert reactivity.
 - [x] Counter returning render tree with handlers — include `render` helper to
       convert function events to handlers and verify wiring.
 - [x] Counter replicator pattern — return array of child patterns produced via

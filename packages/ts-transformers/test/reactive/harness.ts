@@ -42,18 +42,14 @@ type BrandedCell<T, Brand extends string> = {
   readonly [CELL_BRAND]: Brand;
 };
 
-interface OpaqueRefMethods<T> {
-  map<S>(fn: (...args: unknown[]) => S): OpaqueRef<S[]>;
+interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {
+  map<S>(fn: (...args: unknown[]) => S): OpaqueCell<S[]>;
 }
 
-type OpaqueRef<T> =
-  & BrandedCell<T, "opaque">
-  & OpaqueRefMethods<T>;
-
 declare const state: {
-  readonly count: OpaqueRef<number>;
-  readonly flag: OpaqueRef<boolean>;
-  readonly items: OpaqueRef<number[]>;
+  readonly count: OpaqueCell<number>;
+  readonly flag: OpaqueCell<boolean>;
+  readonly items: OpaqueCell<number[]>;
 };
 
 declare function ifElse<T>(predicate: boolean, whenTrue: T, whenFalse: T): T;

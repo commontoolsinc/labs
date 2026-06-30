@@ -159,16 +159,18 @@ Deno.test("classifyArrayCallbackContainerCall downgrades reactive array callback
 
 Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive when the receiver is reactive", () => {
   const { sourceFile, checker } = createProgram(`
-    interface OpaqueRefMethods<T> {
-      key(path: string): OpaqueRef<T>;
+    declare const CELL_BRAND: unique symbol;
+    type BrandedCell<T, Brand extends string> = {
+      readonly [CELL_BRAND]: Brand;
+    };
+
+    interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {
       mapWithPattern<U>(callback: (value: any) => U): U[];
     }
 
-    type OpaqueRef<T> = T & OpaqueRefMethods<T>;
+    declare const items: OpaqueCell<number[]>;
 
-    declare const items: OpaqueRef<{ values: number[] }>;
-
-    const value = items.key("values").mapWithPattern((n: number) => n + 1);
+    const value = items.mapWithPattern((n: number) => n + 1);
   `);
 
   const expression = findInitializer(sourceFile, "value");

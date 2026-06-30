@@ -48,7 +48,7 @@ library → external → internal):
 // Shown for illustration only.
 // Current (internal packages mixed without grouping)
 import { JSONSchema7 } from "json-schema";
-import { isOpaqueRef, OpaqueRef } from "./spell.js";
+import { isReactive, Reactive } from "./spell.js";
 import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
 
 // Should be:
@@ -60,7 +60,7 @@ import { JSONSchema7 } from "json-schema";
 
 // Internal
 import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
-import { isOpaqueRef, OpaqueRef } from "./spell.js";
+import { isReactive, Reactive } from "./spell.js";
 ```
 
 ### `packages/identity/src/ed25519/index.ts`

@@ -8,7 +8,7 @@ import {
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
-import { isBrandedCellType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "../transformers/cell-type.ts";
 import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,

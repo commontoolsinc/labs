@@ -11,7 +11,7 @@ import {
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { reactive } from "../src/builder/opaque-ref.ts";
+import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Identity } from "@commonfabric/identity";

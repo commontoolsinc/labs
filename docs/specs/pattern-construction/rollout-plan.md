@@ -11,15 +11,15 @@
     out parts.
   - [x] Add `ComparableCell<>`.
   - [x] Add `ReadonlyCell` and `WriteonlyCell`.
-  - [x] Make `OpaqueRef` a variant of `OpaqueCell` with the current proxy
-    behavior, i.e. each key is an `OpaqueRef` again. That's just for now, until
+  - [x] Make `Reactive` a variant of `OpaqueCell` with the current proxy
+    behavior, i.e. each key is a `Reactive` again. That's just for now, until
     the AST does a .key transformation under the hood.
   - [x] Update `CellLike` to be based on `BrandedCell` but allow nesting.
   - [x] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
   - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
     - [x] "Accept any T where any sub part of T can be wrapped in one or more
       `BrandedCell`" (for inputs to node factories)
-    - [x] "Strip any `BrandedCell` from T and then wrap it in OpaqueRef<>" (for
+    - [x] "Strip any `BrandedCell` from T and then wrap it in Reactive<>" (for
       outputs of node factories, where T is the output of the inner function)
     - [x] Make passing the output of the second into the first work. Tricky
       because we're doing almost opposite expansions on the type.
@@ -43,9 +43,9 @@
     into `anotherCell.set()` for example). We want to encourage .for use in
     ambiguous cases.
 - [x] Add space and event to Frame
-- [ ] First merge of OpaqueRef and RegularCell
+- [ ] First merge of Reactive and RegularCell
   - [x] Create OpaqueCell type
-  - [x] Make OpaqueRef a proxy around OpaqueCell
+  - [x] Make Reactive a proxy around OpaqueCell
   - [x] Add methods to Cell that allow linking to node invocations
     - [x] `setPreExisting` deprecated
     - [x] `setDefault` deprecated
@@ -58,8 +58,8 @@
       `external`.
     - [x] `map` and `mapWithPattern`: Copy over
     - [x] `toJSON` return `null` when no link otherwise what Cell does.
-  - [x] No need for `toOpaqueRef` anymore, since all cells are now also
-    OpaqueRef. So remove all that.
+  - [x] No need for `toReactive` anymore, since all cells are now also
+    Reactive. So remove all that.
   - [x] Call that for returned value in lift/handler, with a .for("assigned
     variable of property", true)
   - [ ] For now treat result as pattern, but it should be one where all nodes
@@ -89,7 +89,7 @@
       - [ ] (P2) keep a history of previously used ones, we'll eventually need
         this for safe updating on schema changes
 - [ ] Change lifecycle of patterns so that they are run like a lift, with an
-  OpaqueRef already tied to the arguments cell as input.
+  Reactive already tied to the arguments cell as input.
   - [ ] This should allow us to remove the JSON pattern representation
 - [ ] Add `Cell.for(cause)` cell factory, replacing
   - [ ] `cell` and
@@ -141,7 +141,7 @@
 - **What does "adds extension if cause already exists" mean?** (Task line 24)
   - Need to clarify the extension mechanism for the flexible `.for()` parameter
   - How does this relate to the cause tracking work (lines 39-46)?
-- **What is "First merge of OpaqueRef and RegularCell"?** (Task line 33)
+- **What is "First merge of Reactive and RegularCell"?** (Task line 33)
   - This seems like a major milestone - needs clearer definition
   - What specifically gets merged and how?
 - **What does "treat result as pattern" mean?** (Task line 37-38)

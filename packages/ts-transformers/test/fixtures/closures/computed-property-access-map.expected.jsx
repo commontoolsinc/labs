@@ -11,7 +11,7 @@ import { __cfHelpers } from "commonfabric";
  * Regression: .map() on a property access of a computed result inside
  * another computed() should NOT be transformed to .mapWithPattern().
  *
- * Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
+ * Inside a lift-applied callback, Reactive values are unwrapped to plain JS,
  * so `result.tasks` is a plain array.
  */
 import { computed, pattern, UI } from "commonfabric";
@@ -136,7 +136,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 // FIXTURE: computed-property-access-map
 // Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => result.tasks.map(fn)) → lift(({ result }) => result.tasks.map(fn))({ result: { tasks: result.key("tasks") } })
-// Context: Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
+// Context: Inside a lift-applied callback, Reactive values are unwrapped to plain JS,
 //   so `result.tasks` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on property access paths.
 //   Note the captures use result.key("tasks") to extract the needed sub-property.

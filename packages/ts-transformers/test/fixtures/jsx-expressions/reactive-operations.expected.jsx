@@ -53,8 +53,8 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: opaque-ref-operations
-// Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in a lift-applied computation with asCell schema
+// FIXTURE: reactive-operations
+// Verifies: arithmetic on cell-backed Reactives in JSX is wrapped in a lift-applied computation with asCell schema
 //   {count}           → {count}  (bare ref, no transform)
 //   {count.get() + 1} → lift(({count}) => count.get() + 1)({ count: asCell })
 //   {price.get() * 1.1} → lift(...)({ price: asCell })

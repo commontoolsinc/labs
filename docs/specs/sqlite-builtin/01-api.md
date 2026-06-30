@@ -26,7 +26,7 @@ expressed as built-ins registered in
 [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts)
 and surfaced as builder factories in
 [`packages/runner/src/builder/built-in.ts`](../../../packages/runner/src/builder/built-in.ts).
-A reactive read returns an `OpaqueRef<{ pending, result, error }>` and re-runs
+A reactive read returns a `Reactive<{ pending, result, error }>` and re-runs
 when its inputs change. `db.query` is the same shape and slots into the same
 machinery — read-tracking, scheduler subscription, post-commit effects, request
 hashing — but is invoked as a method on the `SqliteDb` cell rather than as a free
@@ -80,7 +80,7 @@ export interface ISqliteQueryable {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
     },
-  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+  ): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
 }
 
 /** A DB handle cell exposing the SQLite method surface (.exec/.query) instead of
@@ -121,12 +121,12 @@ context (the default, cell-derived source).
 export type SqliteDatabaseFunction = (
   options?: { tables?: SqliteTableSchemas },
   source?: SqliteDatabaseSource,
-) => OpaqueRef<SqliteDb>;
+) => Reactive<SqliteDb>;
 
 /** Non-default database source. Cell-derived (default) needs no source; on-disk
  *  databases are injected as a pattern input, not selected here. */
 export type SqliteDatabaseSource = {
-  vm: OpaqueRef<unknown>; // VM file (stub, Section 03.2)
+  vm: Reactive<unknown>; // VM file (stub, Section 03.2)
   path: string;
 };
 // NOTE: there is no way to point a database at an arbitrary cell. The
@@ -162,7 +162,7 @@ const db = sqliteDatabase({
       author_cf_link: cfLink<User>(), // TEXT in SQLite, Cell<User> in TS
     }),
   },
-}); // -> OpaqueRef<SqliteDb>
+}); // -> Reactive<SqliteDb>
 ```
 
 This is the single source of truth: there is no per-query `rows` argument.
@@ -198,7 +198,7 @@ db.query<Row = Record<string, unknown>>(
      *  See Section 05. */
     reactOn?: unknown;
   },
-): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
 ```
 
 `db.query` is **read-only**. The server rejects any statement that is not a
@@ -216,7 +216,7 @@ export type SqliteQueryParams = {
 };
 export declare const sqliteQuery: <Row = Record<string, unknown>>(
   params: Opaque<SqliteQueryParams>,
-) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+) => Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
 ```
 
 `db.query<Row>(sql, opts)` and `sqliteQuery<Row>({ db, sql, ...opts })` lower to
@@ -229,7 +229,7 @@ receiver brand for the `db.query<Row>` form, and the free-function form keyed on
 the `sqliteQuery` export
 ([`packages/ts-transformers/src/transformers/schema-injection.ts`](../../../packages/ts-transformers/src/transformers/schema-injection.ts);
 brand recognition in
-[`packages/ts-transformers/src/transformers/opaque-ref/opaque-ref.ts`](../../../packages/ts-transformers/src/transformers/opaque-ref/opaque-ref.ts)).
+[`packages/ts-transformers/src/transformers/cell-type.ts`](../../../packages/ts-transformers/src/transformers/cell-type.ts)).
 A `Cell<T>` field in `Row` lowers to `asCell`, which is what drives `_cf_link`
 decode-to-`Cell` (Section [02](./02-cf-link-encoding.md)). Because the return
 type and the runtime schema are the same `Row`, they cannot drift.
@@ -273,7 +273,7 @@ db.exec(
 ```
 
 `db.exec` is **imperative and synchronous from the author's point of view** — it
-returns `void`, not an `OpaqueRef`. It must be called **inside a handler/action**
+returns `void`, not a `Reactive`. It must be called **inside a handler/action**
 (it needs a transaction; calling it outside one throws).
 
 It records a `sqlite` op onto the **caller's transaction**, so the write commits

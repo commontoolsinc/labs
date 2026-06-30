@@ -196,7 +196,7 @@ Line 20 sets the Cell with the filtered array.
 
 When you call `.map()` on a Cell array, each item returned is actually a
 Cell reference maintains its connection to the Cell system. These proxies have
-internal symbols like `Symbol("toCell")` and `Symbol("toOpaqueRef")` attached to
+internal symbols like `Symbol("toCell")` and `Symbol("toReactive")` attached to
 them and a path property that specifies its location in the Cell structure.
 
 

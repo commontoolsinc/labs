@@ -380,7 +380,7 @@ Near-term direction implied by the current delta backlog:
 1. move terminology from “safe context” toward semantic context naming
 2. make conditional-operator rewrite policy context-driven and coherent
 3. prioritize deterministic rules over local heuristics where possible
-4. migrate from `OpaqueRef`-driven heuristics toward capability dataflow from
+4. migrate from `Reactive`-driven heuristics toward capability dataflow from
    regular parameter flow
 5. make context-scoped boundary emission explicit: broad opaque pattern
    boundaries plus least-capability/path-shrunk compute boundaries

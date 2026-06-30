@@ -16,7 +16,7 @@ import {
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
-import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind } from "../../transformers/cell-type.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {

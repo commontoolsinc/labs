@@ -8,9 +8,8 @@
 - API exports and `commonfabric.d.ts` now define `HandlerFunction` in terms of
   `HandlerState<T>` and `StripCell<T>`, and the runner augments these interfaces
   with runtime-specific behaviour.
-- Schema generator and opaque-ref transformers detect cell kinds via
-  `CELL_BRAND`, keeping the hierarchical capture utilities valid across
-  transformers.
+- Schema generator and reactive transformers detect cell kinds via `CELL_BRAND`,
+  keeping the hierarchical capture utilities valid across transformers.
 
 ## Impact on Handler Closures
 
@@ -79,7 +78,7 @@
 - We focus on inline arrow functions for now; other inline forms can be handled
   later if necessary.
 - If the attribute already references a value returned from `handler(...)` (an
-  `OpaqueRef`/cell) or any non-inline identifier, we leave it as-is.
+  `Reactive`/cell) or any non-inline identifier, we leave it as-is.
 - Captured cells/streams/opaque refs require no special casing—the capture tree
   handles them generically.
 

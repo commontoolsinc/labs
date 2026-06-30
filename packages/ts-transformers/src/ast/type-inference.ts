@@ -1,8 +1,5 @@
 import ts from "typescript";
-import {
-  getCellKind,
-  isBrandedCellType,
-} from "../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind, isBrandedCellType } from "../transformers/cell-type.ts";
 import {
   getTypeAtLocationWithFallback,
   isDefaultAliasSymbol,

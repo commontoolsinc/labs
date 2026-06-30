@@ -1116,7 +1116,7 @@ export class CFMap extends BaseElement {
   ): HTMLElement {
     const container = document.createElement("div");
 
-    // Check if we have an Reactive popup (advanced mode)
+    // Check if we have a Reactive popup (advanced mode)
     if (feature.popup) {
       // Create a cf-render element for the popup content
       const cfRender = document.createElement("cf-render");

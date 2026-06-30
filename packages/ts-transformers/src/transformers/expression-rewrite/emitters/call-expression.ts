@@ -6,7 +6,7 @@ import {
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
 } from "../../../ast/mod.ts";
-import { getCellKind } from "../../opaque-ref/opaque-ref.ts";
+import { getCellKind } from "../../cell-type.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import { createLiftAppliedCall } from "../../builtins/lift-applied.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";

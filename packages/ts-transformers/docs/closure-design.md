@@ -1,6 +1,6 @@
 # Closure Transformation Design
 
-_Status: Complete for OpaqueRef/Cell Map Callbacks_
+_Status: Complete for Reactive/Cell Map Callbacks_
 
 ## Problem & Solution
 
@@ -33,7 +33,7 @@ state.items.mapWithPattern(
 ### Pipeline Order
 
 ```
-Closure → SchemaInjection → OpaqueRefJSX → SchemaGenerator
+Closure → SchemaInjection → ReactiveJSX → SchemaGenerator
 ```
 
 **Why First?** TypeChecker references original AST. Running first means node
@@ -63,7 +63,7 @@ presence.
 
 - Variables from parent function scopes
 - Variables from parent callback scopes (nested maps)
-- Both reactive (OpaqueRef) and plain values
+- Both reactive (`Reactive`/`Cell`) and plain values
 
 **DON'T Capture**:
 
@@ -75,7 +75,8 @@ presence.
 
 ## What We Transform
 
-**Transform**: `OpaqueRef<T[]>.map()` and `Cell<T[]>.map()` with captures
+**Transform**: `Reactive<T[]>.map()` and `Cell<T[]>.map()` with captures
+
 **Don't Transform**: Plain `T[].map()` or reactive maps without captures
 
 ## Known Limitations

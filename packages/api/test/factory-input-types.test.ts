@@ -5,9 +5,9 @@ import type {
   FactoryInput,
   HandlerFactory,
   JSONSchema,
-  OpaqueRef,
   PatternFactory,
   PatternFunction,
+  Reactive,
   SELF,
   StripCell,
   WishFunction,
@@ -92,7 +92,7 @@ const _wrongRoomBinding: MustBeTrue<
 type SchemaPatternOverloadAcceptsFactoryInput = PatternFunction extends {
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
-      input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<Schema<OS>> },
+      input: Reactive<Schema<IS>> & { [SELF]: Reactive<Schema<OS>> },
     ) => FactoryInput<Schema<OS>>,
     argumentSchema: IS,
     resultSchema: OS,
@@ -104,7 +104,7 @@ type SchemaWishOverloadAcceptsFactoryInput = WishFunction extends {
   <S extends JSONSchema = JSONSchema>(
     target: FactoryInput<WishParams>,
     schema: S,
-  ): OpaqueRef<WishState<Schema<S>>>;
+  ): Reactive<WishState<Schema<S>>>;
 } ? true
   : never;
 

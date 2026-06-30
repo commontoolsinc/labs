@@ -24,14 +24,14 @@ It does not list pure schema-generation/type-emission code unless that code exis
 - `src/policy/rewrite-policy.ts`
   - `classifyReactiveReceiverKind(...)`
   - `shouldRewriteCollectionMethod(...)`
-  Uses `isOpaqueRefType(...)` and `getCellKind(...)` to distinguish:
+  Uses `isReactiveType(...)` and `getCellKind(...)` to distinguish:
   - plain receivers
   - opaque values that auto-unwrap in compute contexts
   - cell/stream receivers that still require rewrite
 
 - `src/ast/dataflow.ts`
-  The dataflow analyzer uses `checker.getTypeAtLocation(...)`, `isOpaqueRefType(...)`, `isReactiveValueExpression(...)`, and `symbolDeclaresCommonFabricDefault(...)` to decide:
-  - `containsOpaqueRef`
+  The dataflow analyzer uses `checker.getTypeAtLocation(...)`, `isReactiveType(...)`, `isReactiveValueExpression(...)`, and `symbolDeclaresCommonFabricDefault(...)` to decide:
+  - `containsReactive`
   - `requiresRewrite`
   - which expressions become explicit dependencies
 
@@ -92,7 +92,7 @@ These are not new policy decisions by themselves, but they preserve type informa
   Unwrap opaque captures to `T` inside lift-applied callbacks, while preserving `Cell<T>` / `Stream<T>` as wrapped.
 
 - `src/transformers/builtins/lift-applied.ts`
-  - `replaceOpaqueRefsWithParams(...)`
+  - `replaceReactivesWithParams(...)`
   Registers synthetic lift-applied parameters with unwrapped types for the same reason.
 
 - `src/transformers/pattern-body-reactive-root-lowering.ts`

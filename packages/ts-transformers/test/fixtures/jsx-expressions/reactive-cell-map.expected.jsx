@@ -210,9 +210,9 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: opaque-ref-cell-map
+// FIXTURE: reactive-cell-map
 // Verifies: a reactive factory result still rewrites JSX ifElse predicates after
-//           the forbidden OpaqueRef cast is removed
+//           the forbidden Reactive cast is removed
 //   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
 //   cellRef.map((piece, index) => <li>...) → mapWithPattern(...) even with
 //     `as { cellRef: any[] }`, because the cast does not change the reactive origin

@@ -23,7 +23,7 @@ import {
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
-import { reactive } from "./opaque-ref.ts";
+import { reactive } from "./reactive.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,

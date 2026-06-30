@@ -1,5 +1,5 @@
 import * as __cfHelpers from "commonfabric";
-import { pattern, UI, OpaqueRef } from "commonfabric";
+import { pattern, UI, Reactive } from "commonfabric";
 interface Item {
     id: number;
     name: string;
@@ -9,8 +9,8 @@ interface State {
     prefix: string;
 }
 export default pattern((state) => {
-    // Type assertion to OpaqueRef<Item[]>
-    const typedItems = state.key("items") as OpaqueRef<Item[]>;
+    // Type assertion to Reactive<Item[]>
+    const typedItems = state.key("items") as Reactive<Item[]>;
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}

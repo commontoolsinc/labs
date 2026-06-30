@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import {
   getCellKind,
   isBrandedCellType,
-} from "../../src/transformers/opaque-ref/opaque-ref.ts";
+} from "../../src/transformers/cell-type.ts";
 import { analyzeExpression, CELL_VARIANTS_PRELUDE } from "./harness.ts";
 
 Deno.test("detects opaque brand", () => {
