@@ -20,6 +20,15 @@ export const TILE_UI = "__tile_ui";
 export const SELF = "__self";
 
 const wishResults = new Map<string, unknown>();
+let generateTextResult: {
+  pending: boolean;
+  result?: unknown;
+  error?: unknown;
+} = {
+  pending: false,
+  result: "",
+  error: undefined,
+};
 
 export function setWishResult(query: string, result: unknown): void {
   wishResults.set(query, result);
@@ -27,6 +36,22 @@ export function setWishResult(query: string, result: unknown): void {
 
 export function clearWishResults(): void {
   wishResults.clear();
+}
+
+export function setGenerateTextResult(result: {
+  pending: boolean;
+  result?: unknown;
+  error?: unknown;
+}): void {
+  generateTextResult = result;
+}
+
+export function clearGenerateTextResult(): void {
+  generateTextResult = {
+    pending: false,
+    result: "",
+    error: undefined,
+  };
 }
 
 export class Writable<T = unknown> {
@@ -221,6 +246,16 @@ export function generateObject<T>(
   _params: Record<string, unknown>,
 ): { pending: false; result: T; error: undefined } {
   return { pending: false, result: {} as T, error: undefined };
+}
+
+export function generateText<T>(
+  _params: Record<string, unknown>,
+): { pending: boolean; result?: T; error?: unknown } {
+  return generateTextResult as {
+    pending: boolean;
+    result?: T;
+    error?: unknown;
+  };
 }
 
 export function llmDialog<T>(
