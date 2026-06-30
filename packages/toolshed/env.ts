@@ -85,12 +85,6 @@ export const EnvSchema = z.object({
   // The gateway is reachable only on Tailscale; toolshed falls back cleanly
   // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
   CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
-
-  // LLM Observability Tool
-  CFTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
-  CFTS_AI_LLM_PHOENIX_URL: z.string().default(""),
-  CFTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
-  CFTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
   // ===========================================================================
 
   // ===========================================================================
