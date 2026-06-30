@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
-import { renderFrame, type ViewState } from "../lib/view/render.ts";
+import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
 import { _internal } from "../lib/view/render.ts";
 import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
@@ -196,6 +196,50 @@ Deno.test("renderFrame: a non-BMP glyph keeps the overlay borders flush", () => 
     `right border aligned at one column, got ${rightBorderCols}`,
   );
   assert(rows.map(stripAnsi).join("\n").includes("𝑻 lift"), "title survives");
+});
+
+Deno.test("renderFrame: overlay on a tiny terminal does not throw", () => {
+  const doc = parseDocument(SAMPLE);
+  const overlay = {
+    title: "DEFINITION-PEEK",
+    lines: [{
+      text: "hello",
+      spans: [{ col: 0, text: "hello", cls: "plain" as const }],
+    }],
+    scroll: 0,
+    footer: "esc close",
+  };
+  // Sizes smaller than the overlay's border chrome must not crash the renderer
+  // (a negative inner width/height would feed a negative repeat/slice). The
+  // box collapses and the overlay is simply skipped.
+  for (const [width, height] of [[2, 1], [3, 2], [1, 1], [6, 3]]) {
+    // The call itself throwing is the regression under test; reaching the
+    // assertion means it did not.
+    const rows = renderFrame(doc, baseView({ width, height, overlay }));
+    assertEquals(
+      rows.length,
+      height,
+      `emits ${height} rows at ${width}x${height}`,
+    );
+  }
+});
+
+Deno.test("overlayBox: inner dimensions never go negative", () => {
+  for (let width = 0; width <= 50; width++) {
+    for (let height = 0; height <= 24; height++) {
+      const box = overlayBox(width, height);
+      assert(box.innerW >= 0, `innerW >= 0 at ${width}x${height}`);
+      assert(box.innerH >= 0, `innerH >= 0 at ${width}x${height}`);
+      assert(box.x >= 0, `x >= 0 at ${width}x${height}`);
+      assert(box.y >= 0, `y >= 0 at ${width}x${height}`);
+      // The box never extends past the terminal it is centred in.
+      assert(box.boxW <= Math.max(0, width), `boxW fits at ${width}x${height}`);
+      assert(
+        box.boxH <= Math.max(0, height),
+        `boxH fits at ${width}x${height}`,
+      );
+    }
+  }
 });
 
 Deno.test("render _internal: sliceVisible keeps ANSI and counts visible cols", () => {

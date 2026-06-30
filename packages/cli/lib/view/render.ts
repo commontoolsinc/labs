@@ -328,17 +328,28 @@ export interface OverlayBox {
   innerH: number;
 }
 
-/** Geometry of the centred overlay box for the given terminal size. */
+/** Geometry of the centred overlay box for the given terminal size. The box is
+ * clamped to fit inside the terminal, so on a terminal too small to hold the box
+ * the dimensions collapse to the terminal size rather than going negative. Inner
+ * dimensions never go below 0, which keeps {@link applyOverlay}'s repeat/slice
+ * maths safe. A box narrower or shorter than the 2-cell border chrome cannot be
+ * drawn; `applyOverlay` checks for that. */
 export function overlayBox(width: number, height: number): OverlayBox {
-  const boxW = Math.min(width - 4, Math.max(40, Math.floor(width * 0.8)));
-  const boxH = Math.min(height - 4, Math.max(6, Math.floor(height * 0.7)));
+  const boxW = Math.max(
+    0,
+    Math.min(width - 4, Math.max(40, Math.floor(width * 0.8))),
+  );
+  const boxH = Math.max(
+    0,
+    Math.min(height - 4, Math.max(6, Math.floor(height * 0.7))),
+  );
   return {
-    x: Math.floor((width - boxW) / 2),
-    y: Math.floor((height - boxH) / 2),
+    x: Math.max(0, Math.floor((width - boxW) / 2)),
+    y: Math.max(0, Math.floor((height - boxH) / 2)),
     boxW,
     boxH,
-    innerW: boxW - 2,
-    innerH: boxH - 2,
+    innerW: Math.max(0, boxW - 2),
+    innerH: Math.max(0, boxH - 2),
   };
 }
 
@@ -351,6 +362,9 @@ function applyOverlay(
     view.width,
     view.height,
   );
+  // A terminal smaller than the 2-cell border chrome leaves no room to draw the
+  // box; show the underlying content rather than indexing rows out of range.
+  if (boxW < 2 || boxH < 2) return;
 
   const border = view.color ? ui.overlayBorder : EMPTY_STYLE;
   const bg: Style = { bg: ui.overlayBg };
