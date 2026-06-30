@@ -25,7 +25,6 @@ import {
   safeDateNow,
   TILE_UI,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
@@ -200,7 +199,7 @@ interface PatternInput {
 export interface PatternOutput {
   notes: Note[];
   noteCount: number;
-  [TILE_UI]: VNode;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(() => {

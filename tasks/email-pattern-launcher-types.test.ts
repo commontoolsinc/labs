@@ -3,7 +3,6 @@ import { fromFileUrl, join } from "@std/path";
 import { TILE_UI, UI, type VNode } from "commonfabric";
 import type {
   LaunchedPatternInfo,
-  LaunchedPatternResult,
   PatternOutput,
 } from "../packages/patterns/google/extractors/email-pattern-launcher.tsx";
 
@@ -19,8 +18,9 @@ type ErrorIsStringOrNull = Expect<
   Equal<LaunchedPatternInfo["error"], string | null>
 >;
 type ResultIsKnownLauncherBoundary = Expect<
-  Equal<LaunchedPatternInfo["result"], LaunchedPatternResult | null>
+  Equal<LaunchedPatternInfo["result"], Record<string, unknown> | null>
 >;
+type LaunchedPatternResult = NonNullable<LaunchedPatternInfo["result"]>;
 type OutputTileIsVNode = Expect<Equal<PatternOutput[typeof TILE_UI], VNode>>;
 type ResultUiStaysUnknownUntilNarrowed = Expect<
   Equal<LaunchedPatternResult[typeof UI], unknown>

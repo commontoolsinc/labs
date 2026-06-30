@@ -28,7 +28,6 @@ import {
   safeDateNow,
   TILE_UI,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -376,7 +375,7 @@ export interface PatternOutput {
   urgentEvents: SchoolEvent[];
   upcomingEvents: SchoolEvent[];
   teacherMessages: SchoolEvent[];
-  [TILE_UI]: VNode;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(

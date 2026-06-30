@@ -27,7 +27,6 @@ import {
   TILE_UI,
   toIndentedDebugString,
   UI,
-  type VNode,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -519,7 +518,7 @@ export interface Output {
   activeAlerts: TrackedFlight[];
   pastFlights: TrackedFlight[];
   trips: TrackedTrip[];
-  [TILE_UI]: VNode;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<Input, Output>(({ overrideAuth }) => {

@@ -33,7 +33,6 @@ import {
   TILE_UI,
   toIndentedDebugString,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -702,7 +701,7 @@ export interface PatternOutput {
   overdueCount: number;
   checkedOutCount: number;
   holdsReadyCount: number;
-  [TILE_UI]: VNode;
+  [TILE_UI]: import("commonfabric").VNode;
   // Omnibot actions
   markAsReturned: Stream<{ title: string }>;
   dismissHold: Stream<{ title: string }>;
