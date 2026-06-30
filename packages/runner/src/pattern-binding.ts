@@ -17,6 +17,7 @@ import {
   isCellLink,
   isLegacyAlias,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
   sanitizeSchemaForLinks,
@@ -48,7 +49,7 @@ type UnwrapOneLevelOptions = {
    * sanitized schema (`sanitizeSchemaForLinks` strips `asCell` entries,
    * taking their scope annotation with them), so a `PerUser<Cell<>>`
    * declaration is invisible on the link by the time aliases are bound. The
-   * authored pattern schema keeps `asCell` (`keepAsCell: true` in
+   * authored pattern schema keeps `asCell` (`keepAsCell: KeepAsCell.All` in
    * builder/pattern.ts) and is the ground truth for what each slot declared.
    * (Internal cells don't need this: each derived internal cell carries its
    * declared scope on its descriptor, realized directly on its link.)
@@ -150,7 +151,7 @@ const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
   // Compiled aliases retain asCell for schema fidelity. Live redirects use link
   // schemas without cell wrappers so scoped asCell entries do not stamp the
   // redirect link's own scope and bypass stored argument links.
-  sanitizeSchemaForLinks(schema, { keepStreams: true });
+  sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,

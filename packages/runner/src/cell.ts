@@ -113,10 +113,10 @@ import {
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
+  KeepAsCell,
   type NormalizedFullLink,
   type NormalizedLink,
   parseLink,
-  type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
@@ -338,7 +338,8 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
-      } & SanitizeSchemaForLinksOptions,
+        keepAsCell?: KeepAsCell;
+      },
     ): SigilLink;
     getAsWriteRedirectLink(
       options?: {
@@ -2005,7 +2006,8 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
-    } & SanitizeSchemaForLinksOptions,
+      keepAsCell?: KeepAsCell;
+    },
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
       ...options,
@@ -3041,7 +3043,8 @@ export function convertCellsToLinks(
     includeSchema?: boolean;
     doNotConvertCellResults?: boolean;
     includeCfcLabelView?: boolean;
-  } & SanitizeSchemaForLinksOptions = {},
+    keepAsCell?: KeepAsCell;
+  } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {

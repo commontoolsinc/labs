@@ -76,6 +76,7 @@ export {
   getMetaLink,
   isCellLink as isLink,
   isWriteRedirectLink,
+  KeepAsCell,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,

@@ -7,7 +7,12 @@ import {
   type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
-import { getCellOrThrow, isCell, isCellResult } from "@commonfabric/runner";
+import {
+  getCellOrThrow,
+  isCell,
+  isCellResult,
+  KeepAsCell,
+} from "@commonfabric/runner";
 
 /**
  * Fragment element name used for JSX fragments.
@@ -27,7 +32,7 @@ function bindingTargetLink(value: unknown): unknown {
     try {
       return (value as unknown as LinkableCell).getAsLink({
         includeSchema: true,
-        keepAsCell: true,
+        keepAsCell: KeepAsCell.All,
       });
     } catch (error) {
       if (isDeferredLinkContextError(error)) return value;
@@ -38,7 +43,7 @@ function bindingTargetLink(value: unknown): unknown {
     try {
       return (getCellOrThrow(value) as unknown as LinkableCell).getAsLink({
         includeSchema: true,
-        keepAsCell: true,
+        keepAsCell: KeepAsCell.All,
       });
     } catch (error) {
       if (isDeferredLinkContextError(error)) return value;

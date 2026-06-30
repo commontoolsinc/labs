@@ -211,7 +211,10 @@ export function createSigilLinkFromParsedLink(
     baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
-  } & SanitizeSchemaForLinksOptions = {},
+    // Which asCell entries to preserve in the included schema. When omitted,
+    // streams are kept (see below) and all other asCell entries are stripped.
+    keepAsCell?: KeepAsCell;
+  } = {},
 ): SigilLink {
   // Create the base structure
   const sigil: SigilLink = linkRefFrom<CellLinkRefPayload>({
@@ -247,12 +250,11 @@ export function createSigilLinkFromParsedLink(
   // Include schema if requested. Empty `{}` and JSON Schema `true` are
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
-    // If they didn't opt-out of keepStreams, set it to true
-    const extendedOptions = {
-      ...options,
-      keepStreams: options.keepStreams ?? true,
-    };
-    const schema = sanitizeSchemaForLinks(link.schema, extendedOptions);
+    // Default to keeping streams unless a broader mode was requested.
+    const schema = sanitizeSchemaForLinks(
+      link.schema,
+      options.keepAsCell ?? KeepAsCell.OnlyStream,
+    );
     if (isNontrivialSchema(schema)) reference.schema = schema;
   }
 
@@ -313,7 +315,7 @@ export function findAndInlineDataURILinks(value: any): any {
             ...(schema !== undefined && { schema }),
           }, {
             includeSchema: true,
-            keepAsCell: true,
+            keepAsCell: KeepAsCell.All,
           });
           return findAndInlineDataURILinks(newSigilLink);
         }
@@ -384,7 +386,7 @@ export function createDataCellURI(
         const link = parseLink(value, baseLink);
         return createSigilLinkFromParsedLink(link, {
           includeSchema: true,
-          keepAsCell: true,
+          keepAsCell: KeepAsCell.All,
         });
       } else if (Array.isArray(value)) {
         return value.map((item) =>
@@ -408,12 +410,17 @@ export function createDataCellURI(
   return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
 
-export type SanitizeSchemaForLinksOptions = {
-  // Keep the entire asCell entry, which preserves cell, opaque, and stream
-  keepAsCell?: boolean;
-  // Only keep the asCell property if it's a stream
-  keepStreams?: boolean;
-};
+/**
+ * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
+ */
+export enum KeepAsCell {
+  // Strip all asCell entries (cell, opaque, and stream).
+  None = "None",
+  // Keep the asCell entry only when it's a stream.
+  OnlyStream = "OnlyStream",
+  // Keep the entire asCell entry (preserves cell, opaque, and stream).
+  All = "All",
+}
 
 /**
  * Traverse schema and remove all asCell flags.
@@ -426,15 +433,15 @@ export type SanitizeSchemaForLinksOptions = {
  */
 export function sanitizeSchemaForLinks(
   schema: JSONSchema,
-  options?: SanitizeSchemaForLinksOptions,
+  keepAsCell?: KeepAsCell,
 ): JSONSchema;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options?: SanitizeSchemaForLinksOptions,
+  keepAsCell?: KeepAsCell,
 ): JSONSchema | undefined;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options?: SanitizeSchemaForLinksOptions,
+  keepAsCell: KeepAsCell = KeepAsCell.None,
 ): JSONSchema | undefined {
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
@@ -458,7 +465,7 @@ export function sanitizeSchemaForLinks(
     defs: {},
     defCounter: 0,
     reservedNames: existingDefNames,
-    options: options ?? {},
+    keepAsCell,
   };
 
   const result = recursiveStripAsCellFromSchema(
@@ -491,8 +498,8 @@ interface SanitizeContext {
   defCounter: number;
   // Reserved def names (from existing $defs in input schema)
   reservedNames: Set<string>;
-  // Options
-  options: SanitizeSchemaForLinksOptions;
+  // Which asCell entries to preserve while stripping.
+  keepAsCell: KeepAsCell;
 }
 
 /**
@@ -552,14 +559,14 @@ function recursiveStripAsCellFromSchema(
   let result;
   // Shallow copy — only top-level keys are deleted/replaced; children are
   // handled by recursive calls that create their own copies.
-  if (context.options.keepAsCell) {
+  if (context.keepAsCell === KeepAsCell.All) {
     result = { ...schema };
   } else {
     const { asCell: _c, ...restSchema } = schema;
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     // If we're keeping streams and the outermost is a stream, keep it
     if (
-      context.options.keepStreams &&
+      context.keepAsCell === KeepAsCell.OnlyStream &&
       ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
     ) {
       result = { asCell: asCellValues, ...restSchema };
@@ -624,7 +631,7 @@ function recursiveStripAsCellFromSchema(
 
   // Stream properties will be removed if didn't keep streams, so we need to
   // remove them from required if present.
-  if (context.options.keepStreams !== true) {
+  if (context.keepAsCell === KeepAsCell.None) {
     removeStrippedStreamPropertiesFromRequired(schema, result, context);
   }
 
@@ -647,7 +654,9 @@ function schemaLosesStreamCellMarker(
   schema: unknown,
   context: SanitizeContext,
 ): boolean {
-  if (context.options.keepAsCell || !isRecord(schema)) return false;
+  if (context.keepAsCell === KeepAsCell.All || !isRecord(schema)) {
+    return false;
+  }
 
   const asCellValues = ContextualFlowControl.getAsCellValues(schema);
   const hasStreamMarker = asCellValues.some((entry) =>
@@ -656,7 +665,7 @@ function schemaLosesStreamCellMarker(
   if (!hasStreamMarker) return false;
 
   return !(
-    context.options.keepStreams &&
+    context.keepAsCell === KeepAsCell.OnlyStream &&
     ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
   );
 }
