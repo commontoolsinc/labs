@@ -80,6 +80,34 @@ Deno.test("markdown: headings become a nested navigation tree", () => {
   );
 });
 
+Deno.test("markdown: heading-like lines inside fenced code blocks are not nav nodes", () => {
+  // A `#` comment inside a ``` fence and a `###` line inside a ~~~ fence both
+  // match the heading regex but are code, not document structure.
+  const doc = markdownDocument(
+    [
+      "# Title",
+      "",
+      "```sh",
+      "# this is a shell comment, not a heading",
+      "echo hi",
+      "```",
+      "",
+      "~~~",
+      "### still inside a fence",
+      "~~~",
+      "",
+      "## Real Section",
+      "",
+      "body",
+      "",
+    ].join("\n"),
+  );
+  assertEquals(doc.flatStructure.map((n) => n.label), [
+    "# Title",
+    "## Real Section",
+  ]);
+});
+
 Deno.test("markdown: parseDocument dispatches on a .md filename", () => {
   const doc = parseDocument("# Heading\n\nplain prose\n", "notes.md");
   assertEquals(doc.lines[0].spans.map((s) => s.cls), ["sectionHeader"]);

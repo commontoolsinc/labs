@@ -168,7 +168,17 @@ function headingTree(
   textLen: number,
 ): StructureNode[] {
   const heads: { level: number; title: string; line: number }[] = [];
+  let fence: string | null = null; // the run (``` or ~~~) of an open code block
   for (let i = 0; i < raw.length; i++) {
+    const opener = raw[i].trimStart().match(/^(`{3,}|~{3,})/);
+    if (fence !== null) {
+      if (opener && raw[i].trimStart().startsWith(fence)) fence = null;
+      continue;
+    }
+    if (opener) {
+      fence = opener[1];
+      continue;
+    }
     const m = raw[i].match(/^(#{1,6})\s+(.*\S)\s*$/);
     if (m) heads.push({ level: m[1].length, title: m[2], line: i });
   }
