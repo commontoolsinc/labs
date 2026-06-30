@@ -99,9 +99,9 @@ deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 ```
 
 The transformed output is dense. Pipe it into `cf view` for an interactive,
-syntax-aware pager (less-like) that colours builders, schemas, closures and
-type positions, and lets you navigate the structure tree (`wasd`), search (`/`)
-and peek definitions. The text shown is verbatim — colour only:
+syntax-aware pager (less-like) that colours builders, schemas, closures and type
+positions, and lets you navigate the structure tree (`wasd`), search (`/`) and
+peek definitions. The text shown is verbatim — colour only:
 
 ```bash
 deno task cf check <pattern>.tsx --show-transformed --no-run | deno task cf view
