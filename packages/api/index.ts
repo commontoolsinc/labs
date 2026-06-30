@@ -1246,9 +1246,6 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  */
 export type Reactive<T> = T;
 
-/** @deprecated Use {@link Reactive}. */
-export type OpaqueRef<T> = Reactive<T>;
-
 // ============================================================================
 // CellLike and FactoryInput - Utility types for accepting cells
 // ============================================================================

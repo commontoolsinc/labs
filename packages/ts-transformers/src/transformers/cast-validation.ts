@@ -31,7 +31,6 @@ const CELL_LIKE_TYPE_NAMES = spellingsWhere({
   CellTypeConstructor: true,
   ScopedCellTypeConstructor: false,
   SqliteDb: false,
-  OpaqueRef: false, // error, not warning — see FORBIDDEN_CAST_TYPE_NAMES
   Reactive: false, // error, not warning — see FORBIDDEN_CAST_TYPE_NAMES
 });
 
@@ -40,7 +39,6 @@ const CELL_LIKE_TYPE_NAMES = spellingsWhere({
  * Casting to these types is never allowed.
  */
 const FORBIDDEN_CAST_TYPE_NAMES = spellingsWhere({
-  OpaqueRef: true,
   Reactive: true,
   Cell: false,
   Writable: false,
