@@ -2519,21 +2519,28 @@ export class Runner {
   }
 
   /**
-   * Attach a stable, content-addressed implementation identity to an action,
-   * derived from its bundle-relative source location. No-op when the harness
-   * cannot resolve the location (built-in or unmapped sources); the scheduler
-   * then falls back to the raw source location for its implementation
-   * fingerprint. See docs/specs/module-loading.md.
+   * Attach a stable, content-addressed implementation identity
+   * (`cf:module/<identity>:<symbol>`) to an action, derived from its module
+   * implementation's verified provenance — NOT from the source location. This
+   * keeps action identity / fingerprints independent of `.src` and its (broken)
+   * source-map resolution: the discriminator is the hoisted `__cfReg`/export
+   * `symbol`, not `:line:col`. No-op for implementations with no verified
+   * provenance (host / dynamic / test builders); the scheduler then resolves
+   * `getVerifiedProvenance` live or falls to a generated id.
+   * See docs/specs/content-addressed-action-identity.md.
    */
   private applyImplementationHash(
     action: Action,
-    sourceLocation: string,
+    implementation: unknown,
   ): void {
-    const implementationHash = this.runtime.harness
-      .implementationHashForSource?.(sourceLocation);
-    if (implementationHash) {
+    const provenance = typeof implementation === "function"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    if (provenance?.identity) {
       (action as { implementationHash?: string }).implementationHash =
-        implementationHash;
+        provenance.symbol
+          ? `cf:module/${provenance.identity}:${provenance.symbol}`
+          : `cf:module/${provenance.identity}`;
     }
   }
 
@@ -3537,7 +3544,7 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
-      this.applyImplementationHash(action, name);
+      this.applyImplementationHash(action, module.implementation);
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3984,9 +3991,7 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
-    if (impl.src) {
-      this.applyImplementationHash(action, impl.src);
-    }
+    this.applyImplementationHash(action, impl);
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.

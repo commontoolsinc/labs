@@ -24,18 +24,53 @@ import {
 } from "../sandbox/ses-runtime.ts";
 import type { SchedulerActionInfo } from "../telemetry.ts";
 import { MAX_TRIGGER_TRACE_HISTORY } from "./constants.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 
 export interface SchedulerActionIdentityState {
   readonly anonymousActionIds: WeakMap<Action | EventHandler, string>;
   anonymousActionCounter: number;
 }
 
+/**
+ * Content-addressed action identity — `cf:module/<identity>:<symbol>` resolved
+ * from the action's module implementation via the verified-provenance index
+ * (populated by `Engine.recordModuleProvenance`). This is `.src`-INDEPENDENT:
+ * it does not read the source-location annotation or its source-map resolution,
+ * so identity is stable regardless of whether `.src` resolves correctly. The
+ * `symbol` (the hoisted `__cfLift_N`/export name) is the within-module
+ * discriminator — see docs/specs/content-addressed-action-identity.md (§3 uses
+ * the same `{ moduleIdentity, symbol }`). Returns undefined for actions with no
+ * verified provenance (host / dynamic / test builders), which fall back to
+ * `.name` / a generated id.
+ */
+export function contentAddressedActionIdentity(
+  action: Action | EventHandler,
+): string | undefined {
+  const impl = (action as { module?: { implementation?: unknown } }).module
+    ?.implementation;
+  const provenance = getVerifiedProvenance(impl);
+  if (!provenance?.identity) return undefined;
+  return provenance.symbol
+    ? `cf:module/${provenance.identity}:${provenance.symbol}`
+    : `cf:module/${provenance.identity}`;
+}
+
 export function getSchedulerActionId(
   state: SchedulerActionIdentityState,
   action: Action | EventHandler,
 ): string {
-  const namedAction = action as Action & { src?: string };
-  if (namedAction.src) return namedAction.src;
+  // Content-addressed identity, consistent with the durable fingerprint
+  // (`schedulerImplementationFingerprint`): a pre-set `implementationHash` (the
+  // spec's stated content key) wins, else `{ identity, symbol }` from provenance.
+  // `.src` is no longer consulted for identity (debug-only; its source-map path
+  // is broken/colliding).
+  const implementationHash =
+    (action as { implementationHash?: unknown }).implementationHash;
+  if (typeof implementationHash === "string" && implementationHash.length > 0) {
+    return implementationHash;
+  }
+  const contentId = contentAddressedActionIdentity(action);
+  if (contentId) return contentId;
   if (action.name && action.name !== "anonymous") return action.name;
 
   const existingId = state.anonymousActionIds.get(action);
