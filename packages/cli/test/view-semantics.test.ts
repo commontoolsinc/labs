@@ -205,6 +205,37 @@ const flag = ext();`;
   }
 });
 
+Deno.test("semantics: JSONC import map survives a trailing comma", () => {
+  // Deno configs are JSONC and commonly carry trailing commas, which make a
+  // plain JSON.parse throw. The config must still be parsed so the import map
+  // is not silently dropped and a mapped specifier still resolves.
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.jsonc"),
+      `{
+  // workspace config
+  "imports": {
+    "ext": "./ext.ts",
+  },
+}
+`,
+    );
+    Deno.writeTextFileSync(
+      join(root, "ext.ts"),
+      "export function ext(): boolean { return true; }\n",
+    );
+    const blob = `// transformed: /main.ts
+import { ext } from "ext";
+const flag = ext();`;
+    const doc = parseDocument(blob);
+    const sem = createSemantics(blob, { cwd: root })!;
+    assertEquals(sem.typeAt(nameOffsetOf(doc, "flag")), "boolean");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("semantics: refuses to read files outside the workspace root", () => {
   const root = Deno.makeTempDirSync(); // the "repo" (holds deno.json)
   const outside = Deno.makeTempDirSync(); // a sibling, outside the root

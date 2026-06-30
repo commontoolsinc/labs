@@ -20,6 +20,7 @@
  */
 import ts from "typescript";
 import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 import type { Line } from "./model.ts";
 import { parseDocument } from "./parse.ts";
 import type { DiffMaps } from "./diffdoc.ts";
@@ -611,48 +612,16 @@ function discoverConfig(
 }
 
 function parseImports(raw: string): Record<string, string> {
+  // Deno configs are JSONC: they may carry comments and trailing commas, both
+  // of which make JSON.parse throw. Parse as JSONC so a comment or a trailing
+  // comma does not drop the whole import map.
   const parsed = safe(() => JSON.parse(raw)) ??
-    safe(() => JSON.parse(stripJsonc(raw)));
+    safe(() => parseJsonc(raw));
   const imports = (parsed as { imports?: unknown } | undefined)?.imports;
   if (!imports || typeof imports !== "object") return {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(imports as Record<string, unknown>)) {
     if (typeof v === "string") out[k] = v;
-  }
-  return out;
-}
-
-/**
- * Strip line and block comments from JSONC, leaving comment-like sequences that
- * sit inside string values intact (so a `"https://…"` or `"a//b"` value
- * survives). String-aware, unlike a plain regex.
- */
-function stripJsonc(text: string): string {
-  let out = "";
-  let inString = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inString) {
-      out += c;
-      if (c === "\\") {
-        out += text[i + 1] ?? "";
-        i++;
-      } else if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      out += c;
-    } else if (c === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-    } else if (c === "/" && text[i + 1] === "*") {
-      i += 2;
-      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
-      i++; // step past the closing slash
-    } else {
-      out += c;
-    }
   }
   return out;
 }
