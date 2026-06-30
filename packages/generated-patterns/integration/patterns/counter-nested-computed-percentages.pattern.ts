@@ -106,9 +106,9 @@ const recordContribution = handler(
       return;
     }
 
-    const groupCell = context.groups.key(groupIndex) as Cell<
-      ContributionGroupSeed
-    >;
+    const groupCell: Cell<ContributionGroupSeed> = context.groups.key(
+      groupIndex,
+    );
     if (typeof event.groupLabel === "string") {
       groupCell.key("label").set(event.groupLabel.trim());
     }
@@ -117,7 +117,9 @@ const recordContribution = handler(
       return;
     }
 
-    const itemsCell = groupCell.key("items") as Cell<ContributionItemSeed[]>;
+    const itemsCell: Cell<ContributionItemSeed[] | undefined> = groupCell.key(
+      "items",
+    );
     const current = itemsCell.get();
     const items = Array.isArray(current) ? [...current] : [];
 

@@ -20,11 +20,11 @@
 import {
   computed,
   Default,
-  type FactoryInput,
   generateObject,
   handler,
   NAME,
   pattern,
+  schema,
   Stream,
   TILE_UI,
   UI,
@@ -385,7 +385,7 @@ const dismissTask = handler<
 // =============================================================================
 
 // Simpler flat schema that works better with the framework's type system
-const SUGGESTION_SCHEMA = {
+const SUGGESTION_SCHEMA = schema({
   type: "object" as const,
   description:
     "Suggested action for this email. Use actionType to indicate what kind of action.",
@@ -430,7 +430,7 @@ const SUGGESTION_SCHEMA = {
     },
   },
   required: ["actionType", "confidence"],
-};
+});
 
 // =============================================================================
 // PATTERN
@@ -547,18 +547,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Analyze each task email with LLM
   const analyses = taskEmails.map((email: TaskEmail) => {
-    const prompt = computed(() => {
-      if (!email?.subject) return undefined;
+    const llmAnalysis = generateObject<SuggestionResult>({
+      prompt: computed(() => {
+        // Build notes context directly from availableNotes
+        const notes = availableNotes || [];
+        const notesContext = notes.length === 0
+          ? "No existing notes found."
+          : notes.map((n: { title: string; contentPreview: string }) =>
+            `- "${n.title}": ${n.contentPreview}`
+          ).join("\n");
 
-      // Build notes context directly from availableNotes
-      const notes = availableNotes || [];
-      const notesContext = notes.length === 0
-        ? "No existing notes found."
-        : notes.map((n: { title: string; contentPreview: string }) =>
-          `- "${n.title}": ${n.contentPreview}`
-        ).join("\n");
-
-      return `You are analyzing an email to suggest an action. The email has been labeled "task-current" indicating the user wants to take action on it.
+        return `You are analyzing an email to suggest an action. The email has been labeled "task-current" indicating the user wants to take action on it.
 
 AVAILABLE NOTES:
 ${notesContext}
@@ -583,10 +582,7 @@ Consider:
 - Use low confidence (<0.5) when unsure
 
 Respond with the most appropriate action.`;
-    });
-
-    const llmAnalysis = generateObject<SuggestionResult>({
-      prompt: prompt as FactoryInput<string>,
+      }),
       schema: SUGGESTION_SCHEMA,
       model: "anthropic:claude-sonnet-4-5",
     });

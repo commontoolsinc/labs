@@ -260,15 +260,15 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     roomDraft,
   }: GroupChatDemoInput,
 ): GroupChatDemoOutput => {
-  const myProfileCell = myProfile as MyProfileCell;
-  const profilesCell = profiles as SharedProfilesCell;
-  const messagesCell = messages as SharedMessagesCell;
-  const roomsCell = rooms as SharedRoomsCell;
-  const adminRegistryCell = adminRegistry as ChatAdminRegistryCell;
-  const profileDraftCell = profileDraft as DraftCell;
-  const messageDraftCell = messageDraft as DraftCell;
-  const hostMessageDraftCell = hostMessageDraft as DraftCell;
-  const roomDraftCell = roomDraft as RoomDraftCell;
+  const myProfileCell: MyProfileCell = myProfile!;
+  const profilesCell: SharedProfilesCell = profiles!;
+  const messagesCell: SharedMessagesCell = messages!;
+  const roomsCell: SharedRoomsCell = rooms!;
+  const adminRegistryCell: ChatAdminRegistryCell = adminRegistry!;
+  const profileDraftCell: DraftCell = profileDraft!;
+  const messageDraftCell: DraftCell = messageDraft!;
+  const hostMessageDraftCell: DraftCell = hostMessageDraft!;
+  const roomDraftCell: RoomDraftCell = roomDraft!;
   const trustedProfileSave = TrustedProfileSaveSurface({
     myProfile: myProfileCell,
     profiles: profilesCell,

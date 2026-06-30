@@ -24,6 +24,7 @@ import {
 
 // Import Google Docs client
 import {
+  type Auth,
   extractFileId,
   type GoogleComment,
   GoogleDocsClient,
@@ -81,7 +82,7 @@ const importDocument = handler<
   unknown,
   {
     docUrl: Cell<string>;
-    auth: Cell<unknown>;
+    auth: Cell<Auth>;
     markdown: Cell<string>;
     docTitle: Cell<string>;
     isFetching: Cell<boolean>;
@@ -115,7 +116,7 @@ const importDocument = handler<
       return;
     }
 
-    const authData = auth.get() as { token?: string } | null;
+    const authData = auth.get();
     const token = authData?.token;
     if (!token) {
       lastError.set("Please authenticate with Google first");
@@ -127,7 +128,7 @@ const importDocument = handler<
 
     try {
       // Create client with auth Cell for automatic token refresh
-      const client = new GoogleDocsClient(auth as Cell<any>, {
+      const client = new GoogleDocsClient(auth, {
         debugMode: true,
       });
 

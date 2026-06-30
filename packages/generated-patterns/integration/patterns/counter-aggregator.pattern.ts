@@ -53,9 +53,10 @@ const adjustCounter = handler(
       return;
     }
 
-    const entryCell = context.counters.key(index) as Cell<CounterEntry>;
-    const valueCell = entryCell.key("value") as Cell<number>;
-    const current = typeof valueCell.get() === "number" ? valueCell.get() : 0;
+    const entryCell: Cell<CounterEntry> = context.counters.key(index);
+    const valueCell: Cell<number | undefined> = entryCell.key("value");
+    const value = valueCell.get();
+    const current = typeof value === "number" ? value : 0;
     const delta = typeof event.delta === "number" ? event.delta : 0;
     const nextValue = typeof event.set === "number"
       ? event.set

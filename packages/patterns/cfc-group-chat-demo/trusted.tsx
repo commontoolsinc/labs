@@ -235,10 +235,13 @@ export const chatAdminRolesValue = (
   if (bootstrapAdmin === undefined) {
     return [];
   }
+  const subject: ProfileCell = adminRegistry.key("bootstrapAdmin").key(
+    "subject",
+  )
+    .resolveAsCell();
   return [{
     ...bootstrapAdmin,
-    subject: adminRegistry.key("bootstrapAdmin").key("subject")
-      .resolveAsCell() as ProfileCell,
+    subject,
   } as ChatAdminRole];
 };
 

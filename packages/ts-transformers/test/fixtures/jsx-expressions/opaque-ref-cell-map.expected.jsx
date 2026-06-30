@@ -57,10 +57,8 @@ const createCellRef = lift(({ isInitialized, storedCellRef }) => {
             items: true
         } as const satisfies __cfHelpers.JSONSchema);
         newCellRef.set([]);
-        // Local cast: the schema types storedCellRef as a cell of a generic object,
-        // but this fixture stores an array cell into it; the schema accuracy isn't
-        // what this transformer fixture exercises.
-        (storedCellRef as Cell<unknown>).set(newCellRef);
+        const storedCellValue: Cell<unknown> = storedCellRef;
+        storedCellValue.set(newCellRef);
         isInitialized.set(true);
         return {
             cellRef: newCellRef,

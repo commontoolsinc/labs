@@ -29,7 +29,7 @@ const adjustReplica = handler(
     if (requested < 0 || requested >= list.length) return;
 
     const amount = typeof event?.amount === "number" ? event.amount : 1;
-    const target = context.values.key(requested) as Cell<number>;
+    const target: Cell<number> = context.values.key(requested);
     const current = target.get() ?? 0;
     target.set(current + amount);
   },

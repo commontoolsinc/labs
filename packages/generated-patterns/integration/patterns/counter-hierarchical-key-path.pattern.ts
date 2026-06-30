@@ -114,16 +114,14 @@ const updateHierarchicalCounter = handler(
     const path = normalizePath(event?.path);
     const amount = typeof event?.amount === "number" ? event.amount : 1;
 
-    let current: Cell<unknown> = context.hierarchy as Cell<unknown>;
+    let current: Cell<any> = context.hierarchy;
     const recordedPath: string[] = [];
     for (const key of path) {
-      current = (current as Cell<Record<PropertyKey, unknown>>).key(
-        key as never,
-      );
+      current = current.key(key as never);
       recordedPath.push(String(key));
     }
 
-    const leaf = current as Cell<number>;
+    const leaf: Cell<number> = current;
     const base = toNumber(leaf.get());
     leaf.set(base + amount);
 

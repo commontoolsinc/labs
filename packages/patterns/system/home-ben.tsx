@@ -49,7 +49,7 @@ type SpaceEntry = {
  * Uses schema to properly resolve nested cell references.
  */
 function captureSnapshot(
-  cell: Writable<{ [NAME]?: string }>,
+  cell: Writable<unknown>,
   schemaTag?: string,
 ): JournalSnapshot {
   let name = "";
@@ -58,7 +58,8 @@ function captureSnapshot(
   try {
     const value = cell.get();
     if (value && typeof value === "object" && NAME in value) {
-      name = value[NAME] || "";
+      const valueName = value[NAME];
+      name = typeof valueName === "string" ? valueName : "";
     }
   } catch {
     // Ignore errors - name is optional
@@ -134,10 +135,7 @@ const removeFavorite = handler<
     const hashTags = (favorite.tags ?? []).map((t) => `#${t}`);
 
     // Capture snapshot before removing
-    const snapshot = captureSnapshot(
-      piece as Writable<{ [NAME]?: string }>,
-      hashTags.join(" "),
-    );
+    const snapshot = captureSnapshot(piece, hashTags.join(" "));
 
     favorites.remove(favorite);
 
@@ -145,7 +143,7 @@ const removeFavorite = handler<
     journal.push({
       timestamp: safeDateNow(),
       eventType: "piece:unfavorited",
-      subject: piece as any,
+      subject: piece,
       snapshot,
       narrative: "",
       narrativePending: true,
