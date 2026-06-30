@@ -146,7 +146,8 @@ if (cliArgs.length === 0) {
   throw new Error("cf-profile requires a Common Fabric CLI command");
 }
 
-const repoRoot = resolve(fromFileUrl(new URL("..", import.meta.url)));
+const profilingDir = dirname(fromFileUrl(import.meta.url));
+const repoRoot = resolve(profilingDir, "../../../..");
 const inspectPort = pickInspectPort(options.inspectPort);
 const defaultOutputDir = join(
   repoRoot,
@@ -179,8 +180,7 @@ const profileStopPattern = options.profileStopPattern
 const targetUrlPattern = options.targetUrlPattern ?? "packages/cli/mod.ts";
 const cliPath = join(repoRoot, "packages", "cli", "mod.ts");
 const capturePath = join(
-  repoRoot,
-  "scripts",
+  profilingDir,
   "capture-deno-inspector-profile.ts",
 );
 

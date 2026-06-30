@@ -1,4 +1,4 @@
-import { Celestial } from "../packages/vendor-astral/bindings/celestial.ts";
+import { Celestial } from "../../../../packages/vendor-astral/bindings/celestial.ts";
 import { dirname } from "@std/path";
 import {
   markProfilerStarted,
@@ -220,12 +220,12 @@ async function stopProfile(reason: string) {
 await celestial.Runtime.enable();
 console.log("profile: runtime enabled");
 await celestial.Console.enable();
-await celestial.Debugger.enable();
+await celestial.Debugger.enable({});
 await celestial.Profiler.enable();
 await celestial.Profiler.setSamplingInterval({ interval: 100 });
 
 await celestial.Runtime.runIfWaitingForDebugger();
-await celestial.Debugger.resume().catch(() => {});
+await celestial.Debugger.resume({}).catch(() => {});
 console.log("profile: resumed target");
 
 if (state.sawProfileStart) {
