@@ -16,6 +16,12 @@
  * One declarative fetch mock. The first entry whose `urlIncludes` is a substring
  * of a request URL wins; `base64Body` takes precedence over `body` (for binary
  * payloads like images).
+ *
+ * `delayMs` holds the response for a fixed real-time delay before returning, so a
+ * `fetchData` isn't resolved instantly — useful for tests that depend on *when* a
+ * fetch resolves. It stays deterministic: `runtime.settled()` awaits the actual
+ * (delayed) fetch promise. (Precise, manually-released ordering — a "gate" — needs
+ * a SES-clean harness mechanism; tracked as a follow-up, see CT-1768.)
  */
 export interface FetchMockEntry {
   urlIncludes: string;
@@ -23,6 +29,8 @@ export interface FetchMockEntry {
   contentType?: string;
   body?: string;
   base64Body?: string;
+  /** Fixed real-time delay (ms) before the mock returns. */
+  delayMs?: number;
 }
 
 /** Read & validate a test's `fetchMocks` export from the compiled module namespace. */
@@ -75,16 +83,19 @@ export function makeMockResponse(entry: FetchMockEntry): Response {
  * Build the `fetch` to inject as `RuntimeOptions.fetch`. Reads the (late-bound)
  * mock entries on each call — they're populated after compile, before the run —
  * so a request matching an entry resolves to a mocked `Response`, and anything
- * else falls through to `realFetch`.
+ * else falls through to `realFetch`. A matched entry's `delayMs` is awaited
+ * before the response is returned.
  */
 export function makeMockFetch(
   getEntries: () => FetchMockEntry[] | undefined,
   realFetch: typeof globalThis.fetch,
 ): typeof globalThis.fetch {
-  return (input, init) => {
+  return async (input, init) => {
     const entry = matchFetchMock(getEntries(), input);
-    return entry
-      ? Promise.resolve(makeMockResponse(entry))
-      : realFetch(input as RequestInfo | URL, init);
+    if (!entry) return realFetch(input as RequestInfo | URL, init);
+    if (typeof entry.delayMs === "number" && entry.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, entry.delayMs));
+    }
+    return makeMockResponse(entry);
   };
 }

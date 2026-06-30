@@ -149,4 +149,18 @@ describe("makeMockFetch", () => {
       "now-mocked",
     );
   });
+
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("waits for delayMs before returning", async () => {
+    const fetch = makeMockFetch(
+      () => [{ urlIncludes: "/slow", body: "slow", delayMs: 40 }],
+      (() => Promise.resolve(new Response("real"))) as typeof globalThis.fetch,
+    );
+    let done = false;
+    const p = fetch("https://x.test/slow").then((r) => (done = true, r));
+    await tick(); // a 0ms timer fires before the 40ms delay
+    expect(done).toBe(false);
+    expect(await (await p).text()).toBe("slow");
+  });
 });
