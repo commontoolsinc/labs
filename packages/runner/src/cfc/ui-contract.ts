@@ -545,6 +545,48 @@ const eventEnvelopePayloads = (
   return payloads;
 };
 
+// Binding lowers handler context props one level at a time but preserves the
+// surrounding object/array structure (see `unwrapOneLevelAndBindtoDoc`), so a
+// contract-bearing link can sit nested inside a `$ctx` entry (e.g.
+// `myHandler({ config: { savedTitle: state.x } })`) rather than at its top
+// level. Walk plain objects/arrays to collect every reachable bound link,
+// treating a parsed link as a leaf (do not descend into its sigil envelope).
+const collectContextLinks = (
+  value: unknown,
+  write: NormalizedFullLink,
+  seen: Set<unknown>,
+  depth: number,
+  out: NormalizedFullLink[],
+): void => {
+  if (depth > 16) {
+    return;
+  }
+  let link: NormalizedFullLink | undefined;
+  try {
+    link = parseLink(value as unknown, write);
+  } catch {
+    link = undefined;
+  }
+  if (link !== undefined) {
+    out.push(link);
+    return;
+  }
+  if (!isRecord(value) && !Array.isArray(value)) {
+    return;
+  }
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    collectContextLinks(child, write, seen, depth + 1, out);
+  }
+};
+
+// A `$ctx` link that addresses the write target carries the schema (and thus
+// any uiContract) for that write. At handler-execution time these are bound
+// sigil links that already address an absolute document, so a link only
+// contributes a contract when it points into the same document as `write`.
 const contractCandidatesFromEventContext = (
   event: unknown,
   write: NormalizedFullLink,
@@ -554,25 +596,19 @@ const contractCandidatesFromEventContext = (
     if (!isRecord(payload.value) || !isRecord(payload.value.$ctx)) {
       continue;
     }
-    for (const value of Object.values(payload.value.$ctx)) {
-      if (!isRecord(value) || !isRecord(value.$alias)) {
-        continue;
-      }
-      const alias = value.$alias;
+    const links: NormalizedFullLink[] = [];
+    collectContextLinks(payload.value.$ctx, write, new Set(), 0, links);
+    for (const link of links) {
       if (
-        !Array.isArray(alias.path) ||
-        !pathHasPrefix(write.path, alias.path)
+        link.id !== write.id ||
+        link.space !== write.space ||
+        (link.scope ?? "space") !== (write.scope ?? "space") ||
+        !pathHasPrefix(write.path, link.path)
       ) {
         continue;
       }
-      const aliasSpace = typeof alias.space === "string"
-        ? alias.space
-        : payload.space;
-      if (aliasSpace !== undefined && aliasSpace !== write.space) {
-        continue;
-      }
-      for (const entry of uiContractsFromSchema(alias.schema as JSONSchema)) {
-        if (pathPatternMatches([...alias.path, ...entry.path], write.path)) {
+      for (const entry of uiContractsFromSchema(link.schema)) {
+        if (pathPatternMatches([...link.path, ...entry.path], write.path)) {
           contracts.push(entry.contract);
         }
       }

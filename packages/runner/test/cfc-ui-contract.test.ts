@@ -447,12 +447,7 @@ describe("CFC trusted UI event enforcement", () => {
       schema: {
         type: "object",
         properties: {
-          argument: {
-            type: "object",
-            properties: {
-              savedTitle: { $ref: "#/$defs/TrustedAction" },
-            },
-          },
+          savedTitle: { $ref: "#/$defs/TrustedAction" },
         },
         $defs: {
           TrustedAction: trustedPatternUiActionSchema,
@@ -474,7 +469,7 @@ describe("CFC trusted UI event enforcement", () => {
         space,
         scope: "space",
         id: "of:cfc-ui-contract-nested-document",
-        path: ["argument", "savedTitle"],
+        path: ["savedTitle"],
       }],
       rendererEvent({
         type: "click",
@@ -497,7 +492,7 @@ describe("CFC trusted UI event enforcement", () => {
         input.kind === "trusted-event" &&
         input.target.space === space &&
         input.target.id === "of:cfc-ui-contract-nested-document" &&
-        input.target.path.join("/") === "argument/savedTitle"
+        input.target.path.join("/") === "savedTitle"
       ),
     ).toBe(true);
   });
@@ -585,12 +580,7 @@ describe("CFC trusted UI event enforcement", () => {
       schema: {
         type: "object",
         properties: {
-          argument: {
-            type: "object",
-            properties: {
-              savedTitle: { $ref: "#/$defs/TrustedAction" },
-            },
-          },
+          savedTitle: { $ref: "#/$defs/TrustedAction" },
         },
         $defs: {
           TrustedAction: trustedPatternUiActionSchema,
@@ -639,7 +629,7 @@ describe("CFC trusted UI event enforcement", () => {
         space,
         scope: "space",
         id: "of:cfc-ui-contract-linked-event-document",
-        path: ["argument", "savedTitle"],
+        path: ["savedTitle"],
       }],
       rendererEvent(eventEnvelopeLink),
     );
@@ -648,14 +638,15 @@ describe("CFC trusted UI event enforcement", () => {
       writePolicyInputs.some((input) =>
         input.kind === "trusted-event" &&
         input.eventId ===
-          "trusted-event:click:of:cfc-ui-contract-linked-event-document:argument/savedTitle" &&
+          "trusted-event:click:of:cfc-ui-contract-linked-event-document:savedTitle" &&
         input.target.id === "of:cfc-ui-contract-linked-event-document" &&
-        input.target.path.join("/") === "argument/savedTitle"
+        input.target.path.join("/") === "savedTitle"
       ),
     ).toBe(true);
   });
 
-  it("uses handler event context aliases as UI contract schema hints", () => {
+  it("uses bound sigil-link event context as UI contract schema hints", () => {
+    const documentId = "of:cfc-ui-contract-context-link-document-argument";
     const writePolicyInputs: Array<
       ReturnType<
         IExtendedStorageTransaction["getCfcState"]
@@ -683,6 +674,8 @@ describe("CFC trusted UI event enforcement", () => {
         },
       },
     };
+    // At handler-execution time the `$ctx` entry is a bound sigil link that
+    // already addresses the write's document, not a symbolic `$alias`.
     const eventEnvelopeLink = {
       "/": {
         [LINK_V1_TAG]: {
@@ -691,12 +684,16 @@ describe("CFC trusted UI event enforcement", () => {
               value: {
                 $ctx: {
                   savedTitle: {
-                    $alias: {
-                      path: ["argument", "savedTitle"],
-                      schema: {
-                        $ref: "#/$defs/TrustedAction",
-                        $defs: {
-                          TrustedAction: trustedPatternUiActionSchema,
+                    "/": {
+                      [LINK_V1_TAG]: {
+                        id: documentId,
+                        path: ["savedTitle"],
+                        space,
+                        schema: {
+                          $ref: "#/$defs/TrustedAction",
+                          $defs: {
+                            TrustedAction: trustedPatternUiActionSchema,
+                          },
                         },
                       },
                     },
@@ -717,8 +714,8 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         scope: "space",
-        id: "of:cfc-ui-contract-context-document",
-        path: ["argument", "savedTitle"],
+        id: documentId,
+        path: ["savedTitle"],
       }],
       rendererEvent(eventEnvelopeLink),
     );
@@ -727,14 +724,16 @@ describe("CFC trusted UI event enforcement", () => {
       writePolicyInputs.some((input) =>
         input.kind === "trusted-event" &&
         input.eventId ===
-          "trusted-event:click:of:cfc-ui-contract-context-document:argument/savedTitle" &&
-        input.target.id === "of:cfc-ui-contract-context-document" &&
-        input.target.path.join("/") === "argument/savedTitle"
+          `trusted-event:click:${documentId}:savedTitle` &&
+        input.target.id === documentId &&
+        input.target.path.join("/") === "savedTitle"
       ),
     ).toBe(true);
   });
 
-  it("uses event context alias item schemas for array item writes", () => {
+  it("uses bound sigil-link event context item schemas for array item writes", () => {
+    const documentId =
+      "of:cfc-ui-contract-context-link-array-document-argument";
     const writePolicyInputs: Array<
       ReturnType<
         IExtendedStorageTransaction["getCfcState"]
@@ -770,15 +769,19 @@ describe("CFC trusted UI event enforcement", () => {
               value: {
                 $ctx: {
                   messages: {
-                    $alias: {
-                      path: ["argument", "messages"],
-                      schema: {
-                        type: "array",
-                        items: {
-                          $ref: "#/$defs/TrustedAction",
-                        },
-                        $defs: {
-                          TrustedAction: trustedPatternUiActionSchema,
+                    "/": {
+                      [LINK_V1_TAG]: {
+                        id: documentId,
+                        path: ["messages"],
+                        space,
+                        schema: {
+                          type: "array",
+                          items: {
+                            $ref: "#/$defs/TrustedAction",
+                          },
+                          $defs: {
+                            TrustedAction: trustedPatternUiActionSchema,
+                          },
                         },
                       },
                     },
@@ -798,9 +801,9 @@ describe("CFC trusted UI event enforcement", () => {
       tx as unknown as IExtendedStorageTransaction,
       [{
         space,
-        id: "of:cfc-ui-contract-context-array-document",
+        id: documentId,
         scope: "space",
-        path: ["argument", "messages", "0"],
+        path: ["messages", "0"],
       }],
       rendererEvent(eventEnvelopeLink),
     );
@@ -809,9 +812,98 @@ describe("CFC trusted UI event enforcement", () => {
       writePolicyInputs.some((input) =>
         input.kind === "trusted-event" &&
         input.eventId ===
-          "trusted-event:click:of:cfc-ui-contract-context-array-document:argument/messages/0" &&
-        input.target.id === "of:cfc-ui-contract-context-array-document" &&
-        input.target.path.join("/") === "argument/messages/0"
+          `trusted-event:click:${documentId}:messages/0` &&
+        input.target.id === documentId &&
+        input.target.path.join("/") === "messages/0"
+      ),
+    ).toBe(true);
+  });
+
+  it("uses sigil links nested inside event context entries as schema hints", () => {
+    const documentId =
+      "of:cfc-ui-contract-context-nested-link-document-argument";
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    // Binding preserves nesting, so the contract-bearing sigil link can sit
+    // below the top level of a `$ctx` entry (e.g. `{ config: { savedTitle } }`).
+    const eventEnvelopeLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify({
+              value: {
+                $ctx: {
+                  config: {
+                    savedTitle: {
+                      "/": {
+                        [LINK_V1_TAG]: {
+                          id: documentId,
+                          path: ["savedTitle"],
+                          space,
+                          schema: {
+                            $ref: "#/$defs/TrustedAction",
+                            $defs: {
+                              TrustedAction: trustedPatternUiActionSchema,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                $event: rawTrustedEvent,
+              },
+            }))
+          }`,
+          path: ["$event"],
+          space,
+        },
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        scope: "space",
+        id: documentId,
+        path: ["savedTitle"],
+      }],
+      rendererEvent(eventEnvelopeLink),
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId ===
+          `trusted-event:click:${documentId}:savedTitle` &&
+        input.target.id === documentId &&
+        input.target.path.join("/") === "savedTitle"
       ),
     ).toBe(true);
   });
@@ -827,7 +919,7 @@ describe("CFC trusted UI event enforcement", () => {
         space,
         scope: "space",
         id: "of:cfc-ui-contract-leaf-defs-document",
-        path: ["argument", "savedTitle"],
+        path: ["savedTitle"],
       },
       schema: {
         type: "unknown",
@@ -852,7 +944,7 @@ describe("CFC trusted UI event enforcement", () => {
         space,
         scope: "space",
         id: "of:cfc-ui-contract-leaf-defs-document",
-        path: ["argument", "savedTitle"],
+        path: ["savedTitle"],
       }],
       rendererEvent({
         type: "click",
@@ -874,7 +966,7 @@ describe("CFC trusted UI event enforcement", () => {
       writePolicyInputs.some((input) =>
         input.kind === "trusted-event" &&
         input.target.id === "of:cfc-ui-contract-leaf-defs-document" &&
-        input.target.path.join("/") === "argument/savedTitle"
+        input.target.path.join("/") === "savedTitle"
       ),
     ).toBe(true);
   });
@@ -890,18 +982,13 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         scope: "user",
-        id: documentId,
+        id: `${documentId}-argument`,
         path: [],
       },
       schema: {
         type: "object",
         properties: {
-          argument: {
-            type: "object",
-            properties: {
-              savedTitle: { $ref: "#/$defs/TrustedAction" },
-            },
-          },
+          savedTitle: { $ref: "#/$defs/TrustedAction" },
         },
         $defs: {
           TrustedAction: trustedPatternUiActionSchema,
@@ -912,10 +999,10 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         scope: "space",
-        id: documentId,
-        path: ["argument", "savedTitle"],
+        id: `${documentId}-argument`,
+        path: ["savedTitle"],
       },
-      eventId: `trusted-event:click:${documentId}:argument/savedTitle`,
+      eventId: `trusted-event:click:${documentId}-argument:savedTitle`,
       provenance: {
         origin: "dom",
         trusted: true,
@@ -942,8 +1029,8 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         scope: "user",
-        id: documentId,
-        path: ["argument", "savedTitle"],
+        id: `${documentId}-argument`,
+        path: ["savedTitle"],
       }],
       rendererEvent({
         type: "click",
@@ -963,8 +1050,8 @@ describe("CFC trusted UI event enforcement", () => {
 
     const trustedScopes = writePolicyInputs.flatMap((input) =>
       input.kind === "trusted-event" &&
-        input.target.id === documentId &&
-        input.target.path.join("/") === "argument/savedTitle"
+        input.target.id === `${documentId}-argument` &&
+        input.target.path.join("/") === "savedTitle"
         ? [input.target.scope]
         : []
     );
