@@ -767,15 +767,12 @@ export class Runtime {
     const key = `${link.space}\0${link.id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     this.missingDocLoadKicks.add(key);
-    const maybePromise = this.getCellFromLink(link).sync();
-    if (maybePromise instanceof Promise) {
-      this.storageManager.trackUntilSettled(
-        maybePromise.catch(() => {
-          // Allow a retry on failure (e.g. transient disconnect).
-          this.missingDocLoadKicks.delete(key);
-        }),
-      );
-    }
+    this.storageManager.trackUntilSettled(
+      this.getCellFromLink(link).sync().catch(() => {
+        // Allow a retry on failure (e.g. transient disconnect).
+        this.missingDocLoadKicks.delete(key);
+      }),
+    );
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {

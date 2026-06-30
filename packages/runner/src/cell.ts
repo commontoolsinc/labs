@@ -325,7 +325,7 @@ declare module "@commonfabric/api" {
       callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
-    sync(): Promise<Cell<T>> | Cell<T>;
+    sync(): Promise<Cell<T>>;
     pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
@@ -1921,7 +1921,7 @@ export class CellImpl<T extends FabricValue>
     }
   }
 
-  sync(): Promise<Cell<T>> | Cell<T> {
+  sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
