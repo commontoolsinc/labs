@@ -2179,6 +2179,17 @@ Deno.test("memory v2 pending replay: stale array append markers rebuild synchron
   );
 });
 
+Deno.test("memory v2 pending replay: array object-key writes remain strict", () => {
+  const error = assertThrows(
+    () => cloneWithPendingReplayValueAtPath([], ["name"], "b"),
+    Error,
+  );
+  assertEquals(
+    error.message,
+    "pending replay cannot write non-index array key name",
+  );
+});
+
 Deno.test("memory v2 pending replay: unrelated clone errors remain strict", () => {
   const error = assertThrows(
     () => cloneWithPendingReplayValueAtPath(5, ["x"], 1),

@@ -423,12 +423,13 @@ const setChildAtReplayKey = (
       container.push(value);
       return;
     }
-    if (isArrayIndexPropertyName(key)) {
-      container[Number(key)] = value;
-      return;
+    if (!isArrayIndexPropertyName(key)) {
+      throw new Error(`pending replay cannot write non-index array key ${key}`);
     }
+    container[Number(key)] = value;
+    return;
   }
-  (container as Record<string, FabricValue>)[key] = value;
+  container[key] = value;
 };
 
 type MutableReplaySpine = {
