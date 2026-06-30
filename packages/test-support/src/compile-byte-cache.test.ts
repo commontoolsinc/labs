@@ -102,6 +102,77 @@ describe("createCompileByteCache", () => {
     }
   });
 
+  it("restores from CF_COMPILE_CACHE_FILE and writes on unload", () => {
+    const previous = Deno.env.get("CF_COMPILE_CACHE_FILE");
+    const originalLog = console.log;
+    const messages: string[] = [];
+    const dir = Deno.makeTempDirSync({ prefix: "compile-byte-cache-env-" });
+    const cacheFile = `${dir}/cache.json`;
+    let registeredUnloadWriter = false;
+
+    console.log = (...args: unknown[]) => {
+      messages.push(args.map(String).join(" "));
+    };
+
+    try {
+      Deno.writeTextFileSync(
+        cacheFile,
+        JSON.stringify([{ key: `${RT}\0from-env`, js: "ENV" }]),
+      );
+      Deno.env.set("CF_COMPILE_CACHE_FILE", cacheFile);
+
+      const cache = createCompileByteCache();
+      registeredUnloadWriter = true;
+      expect(cache.getCompleteSet(RT, ["from-env"])).toEqual(
+        new Map([["from-env", { js: "ENV" }]]),
+      );
+      cache.putAll(RT, [{ identity: "from-unload", js: "UNLOAD" }]);
+
+      globalThis.dispatchEvent(new Event("unload"));
+
+      const restored = new ProcessModuleByteCache();
+      restored.restore(JSON.parse(Deno.readTextFileSync(cacheFile)));
+      expect(restored.getCompleteSet(RT, ["from-env", "from-unload"]))
+        .toEqual(
+          new Map([
+            ["from-env", { js: "ENV" }],
+            ["from-unload", { js: "UNLOAD" }],
+          ]),
+        );
+      expect(
+        messages.some((message) =>
+          message.includes("[compile-byte-cache] restored 1 modules")
+        ),
+      ).toBe(true);
+      expect(
+        messages.some((message) =>
+          message.includes("[compile-byte-cache] wrote 2 modules")
+        ),
+      ).toBe(true);
+    } finally {
+      console.log = originalLog;
+      if (previous === undefined) {
+        Deno.env.delete("CF_COMPILE_CACHE_FILE");
+      } else {
+        Deno.env.set("CF_COMPILE_CACHE_FILE", previous);
+      }
+      if (registeredUnloadWriter) {
+        globalThis.addEventListener("unload", () => {
+          try {
+            Deno.removeSync(dir, { recursive: true });
+          } catch {
+            // The test may have already removed the directory.
+          }
+        });
+      }
+      try {
+        Deno.removeSync(dir, { recursive: true });
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
+    }
+  });
+
   it("restores from disk and writes a merged snapshot", () => {
     const dir = Deno.makeTempDirSync({ prefix: "compile-byte-cache-" });
     const cacheFile = `${dir}/cache.json`;
