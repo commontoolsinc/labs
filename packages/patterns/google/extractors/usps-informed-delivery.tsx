@@ -27,6 +27,7 @@ import {
   type PatternFactory,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -396,7 +397,7 @@ export interface PatternOutput {
   medicalCount: number;
   subscriptionCount: number;
   charityCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(

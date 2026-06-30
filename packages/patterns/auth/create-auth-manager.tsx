@@ -78,12 +78,9 @@ export interface AuthManagerOutput<
   isReady: boolean;
   currentEmail: string;
   currentState: AuthState;
-  // deno-lint-ignore no-explicit-any
-  pickerUI: any;
-  // deno-lint-ignore no-explicit-any
-  statusUI: any;
-  // deno-lint-ignore no-explicit-any
-  fullUI: any;
+  pickerUI: VNode;
+  statusUI: VNode;
+  fullUI: VNode;
 }
 
 interface AuthPiece<TAuth extends OAuthAuthData = OAuthAuthData> {

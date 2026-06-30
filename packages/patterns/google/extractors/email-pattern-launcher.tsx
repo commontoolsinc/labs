@@ -29,6 +29,7 @@ import {
   toIndentedDebugString,
   UI,
   uiVariant,
+  type VNode,
   when,
 } from "commonfabric";
 import GmailExtractor, {
@@ -65,6 +66,16 @@ interface PatternMatchInfo {
   entry: RegistryEntry;
   /** Email addresses that triggered this pattern */
   matchedEmails: string[];
+}
+
+export interface LaunchedPatternResult {
+  [key: string]: unknown;
+}
+
+export interface LaunchedPatternInfo extends PatternMatchInfo {
+  pending: boolean;
+  error: string | null;
+  result: LaunchedPatternResult | null;
 }
 
 // =============================================================================
@@ -113,10 +124,10 @@ interface PatternInput {
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
 export interface PatternOutput {
-  matchedPatterns: unknown[];
+  matchedPatterns: LaunchedPatternInfo[];
   emailCount: number;
   matchCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
 }
 
 type LaunchablePattern = (
@@ -129,6 +140,12 @@ function hasPatternLauncher(value: unknown): value is {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as { for?: unknown };
   return typeof candidate.for === "function";
+}
+
+function isLaunchedPatternResult(
+  value: unknown,
+): value is LaunchedPatternResult {
+  return typeof value === "object" && value !== null;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -233,8 +250,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   };
 
   // Launch each matched pattern - use .map() for reactive pattern instantiation
-  const launchedPatterns = patternMatches.map((matchInfo) => {
-    /*
+  const launchedPatterns = patternMatches.map(
+    (matchInfo): LaunchedPatternInfo => {
+      /*
     const url = computed(() => `/api/patterns/${matchInfo.patternUri}`);
 
     // Fetch the pattern program
@@ -256,30 +274,34 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const compiled = compileAndRun(compileParams);
     */
 
-    const compiled = {
-      result: computed(() => {
-        const patternUri = matchInfo.patternUri;
-        const childPattern = patterns[patternUri];
-        if (!childPattern) return null;
-        const child = childPattern({ overrideAuth });
-        return hasPatternLauncher(child) ? child.for(patternUri) : null;
-      }),
-    };
+      const compiled = {
+        result: computed<LaunchedPatternResult | null>(() => {
+          const patternUri = matchInfo.patternUri;
+          const childPattern = patterns[patternUri];
+          if (!childPattern) return null;
+          const child = childPattern({ overrideAuth });
+          const result = hasPatternLauncher(child)
+            ? child.for(patternUri)
+            : child;
+          return isLaunchedPatternResult(result) ? result : null;
+        }),
+      };
 
-    return {
-      patternUri: matchInfo.patternUri,
-      entry: matchInfo.entry,
-      matchedEmails: matchInfo.matchedEmails,
-      pending: false, /*computed(
+      return {
+        patternUri: matchInfo.patternUri,
+        entry: matchInfo.entry,
+        matchedEmails: matchInfo.matchedEmails,
+        pending: false, /*computed(
         () => programFetch.pending || compiled.pending,
       ),*/
-      error: null,
-      /* error: computed(
+        error: null,
+        /* error: computed(
         () => programFetch.error || compiled.error,
       ),*/
-      result: compiled.result,
-    };
-  });
+        result: compiled.result,
+      };
+    },
+  );
 
   // Preview UI for compact display
   const previewUI = (
