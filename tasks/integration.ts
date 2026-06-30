@@ -347,6 +347,128 @@ function buildPatternTestJUnit(
   return lines.join("\n");
 }
 
+/**
+ * The directory, relative to a package root, that holds its integration test
+ * files. Most packages keep them directly in `integration/`. The
+ * generated-patterns package keeps them in `integration/patterns/`, matching
+ * the glob its own `integration` task runs.
+ */
+export function integrationTestDir(pkg: string): string {
+  return pkg === "generated-patterns" ? "integration/patterns" : "integration";
+}
+
+/**
+ * Select the integration test files whose name matches a filter.
+ *
+ * Keeps the names ending in `.test.ts` whose name contains the filter
+ * substring, sorted so the order is stable.
+ */
+export function selectIntegrationTestFiles(
+  fileNames: string[],
+  filter: string,
+): string[] {
+  return fileNames
+    .filter((name) => name.endsWith(".test.ts") && name.includes(filter))
+    .sort();
+}
+
+/**
+ * List the integration test files in a directory whose name matches a filter.
+ *
+ * Reads the directory one level deep and returns the matching file names. A
+ * missing directory yields an empty list. Nested directories such as
+ * `integration/reload/` are not descended into, matching the single-level set
+ * the package's `integration` task runs.
+ */
+export async function findIntegrationTestFiles(
+  integrationDir: string,
+  filter: string,
+): Promise<string[]> {
+  const fileNames: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(integrationDir)) {
+      if (entry.isFile) {
+        fileNames.push(entry.name);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
+  }
+  return selectIntegrationTestFiles(fileNames, filter);
+}
+
+/**
+ * Build the `deno test` arguments for a name-filtered integration run. The
+ * matching files are passed as explicit paths under `relDir`. Deno does not
+ * filter explicitly-passed paths through a package `test` config's `exclude`,
+ * so they run even where that config drops the `integration/` directory.
+ */
+export function buildFilteredTestArgs(
+  pkg: string,
+  relDir: string,
+  testFiles: string[],
+  junitDir?: string,
+): string[] {
+  const args = ["test", "-A"];
+
+  if (pkg === "patterns") {
+    args.push("--v8-flags=--max-old-space-size=4096", "--trace-leaks");
+  } else if (pkg === "generated-patterns") {
+    args.push("--trace-leaks", "--parallel");
+  }
+
+  if (junitDir) {
+    args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
+  }
+
+  for (const name of testFiles) {
+    args.push(`./${relDir}/${name}`);
+  }
+
+  return args;
+}
+
+/**
+ * Run a package's integration tests filtered by name.
+ *
+ * Enumerates the matching test files and passes them to `deno test` as explicit
+ * paths. A glob string handed to `deno test` is expanded and then filtered
+ * through the package's `test` config; that config's `exclude` drops the
+ * `integration/` directory, leaving no modules to run. Explicit file paths skip
+ * that filtering, so the files are enumerated here instead of passing a glob.
+ * Returns a failing result, without running anything, when no file matches.
+ */
+export async function runFilteredIntegration(
+  pkg: string,
+  packageDir: string,
+  env: Record<string, string>,
+  filter: string,
+  junitDir?: string,
+  run: typeof runCommand = runCommand,
+): Promise<{ success: boolean; code: number }> {
+  const relDir = integrationTestDir(pkg);
+  const testFiles = await findIntegrationTestFiles(
+    path.join(packageDir, relDir),
+    filter,
+  );
+
+  if (testFiles.length === 0) {
+    console.error(
+      `No integration test files in ${pkg} match filter "${filter}".`,
+    );
+    return { success: false, code: 1 };
+  }
+
+  const args = buildFilteredTestArgs(pkg, relDir, testFiles, junitDir);
+  return await run(["deno", ...args], {
+    cwd: packageDir,
+    env,
+    inheritStdio: true,
+  });
+}
+
 /** Recursively walk a directory yielding file paths. */
 async function* walkDir(dir: string): AsyncGenerator<string> {
   for await (const entry of Deno.readDir(dir)) {
@@ -359,7 +481,7 @@ async function* walkDir(dir: string): AsyncGenerator<string> {
   }
 }
 
-async function runPackageIntegration(
+export async function runPackageIntegration(
   pkg: string,
   apiUrl: string,
   rootDir: string,
@@ -445,28 +567,13 @@ async function runPackageIntegration(
       inheritStdio: true,
     });
   } else if (filter) {
-    // Run with filter - find matching test files
-    const globPattern = `./integration/*${filter}*.test.ts`;
-    const args = ["test", "-A"];
-
-    // Add package-specific flags
-    if (pkg === "patterns") {
-      args.push("--v8-flags=--max-old-space-size=4096", "--trace-leaks");
-    } else if (pkg === "generated-patterns") {
-      args.push("--trace-leaks", "--parallel");
-    }
-
-    // Add JUnit output if --junit-dir was specified
-    if (junitDir) {
-      args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
-    }
-
-    args.push(globPattern);
-    result = await runCommand(["deno", ...args], {
-      cwd: packageDir,
+    result = await runFilteredIntegration(
+      pkg,
+      packageDir,
       env,
-      inheritStdio: true,
-    });
+      filter,
+      junitDir,
+    );
   } else {
     // Run the standard integration task
     result = await runCommand(["deno", "task", "integration"], {
@@ -777,7 +884,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error("Integration run failed:", error);
-  Deno.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error("Integration run failed:", error);
+    Deno.exit(1);
+  });
+}
