@@ -23,7 +23,10 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
-import { toActionRunTraceAddress } from "./diagnostics.ts";
+import {
+  contentAddressedActionIdentity,
+  toActionRunTraceAddress,
+} from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
@@ -734,9 +737,12 @@ export function schedulerImplementationFingerprint(
   if (typeof implementationHash === "string" && implementationHash.length > 0) {
     return `impl:${implementationHash}`;
   }
-  const sourceId = (action as { src?: unknown }).src;
-  if (typeof sourceId === "string" && sourceId.length > 0) {
-    return `src:${sourceId}`;
+  // `.src` is no longer consulted for the durable fingerprint; resolve the
+  // content-addressed `{ identity, symbol }` directly (the prior `src:` fallback
+  // depended on the source-map path).
+  const contentId = contentAddressedActionIdentity(action);
+  if (contentId) {
+    return `impl:${contentId}`;
   }
   const telemetryId = schedulerObservationPieceId(actionId, telemetry);
   return `action:${telemetryId}:${actionId}`;
