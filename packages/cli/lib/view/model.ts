@@ -129,9 +129,9 @@ export type NodeMeta =
     readonly output?: SchemaMeta;
     /** Keys of the returned object literal, when discernible. */
     readonly returns?: readonly string[];
-    /** Explicit type arguments, e.g. `fetchData<{ connections: … }>`. */
+    /** Explicit type arguments, e.g. `fetchJson<{ connections: … }>`. */
     readonly typeArgs?: readonly string[];
-    /** Keys of the non-schema object argument, e.g. fetchData's `{ url, … }`. */
+    /** Keys of the non-schema object argument, e.g. fetchJson's `{ url, … }`. */
     readonly args?: readonly string[];
     /** Names of builders/patterns called inside the body. */
     readonly innerBuilders: readonly string[];

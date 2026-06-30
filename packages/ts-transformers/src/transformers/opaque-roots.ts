@@ -214,7 +214,7 @@ export function isOpaqueSourceExpression(
   }
 
   // Property/element access chains that bottom out on an opaque-origin
-  // call (`wish(...).result`, `fetchData(...).result.items`, etc.) are
+  // call (`wish(...).result`, `fetchJson(...).result.items`, etc.) are
   // also opaque sources — the chain navigates through reactive cells
   // before being read. The body-lowering pre-pass rewrites these into
   // destructure form, but consumers that examine the source AST before

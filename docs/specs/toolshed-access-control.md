@@ -23,8 +23,8 @@ These routes require a first-party HTTP request proof:
 - `POST /api/agent-tools/web-read`
 - `POST /api/sandbox/exec`
 
-They were selected first because first-party code calls them through
-`fetchData`, and each route spends server-held or local runtime authority.
+They were selected first because first-party code calls them through the
+fetch builtins, and each route spends server-held or local runtime authority.
 `web-search` uses the AI gateway. `web-read` uses the Jina key. `sandbox/exec`
 uses the sandbox service to run commands.
 
@@ -64,7 +64,7 @@ far in the future, and proofs with an excessive lifetime.
 
 ## First-Party Caller Behavior
 
-The runtime adds request proofs only to narrow `fetchData` requests:
+The runtime adds request proofs only to narrow fetch-builtin requests:
 
 - the resolved URL must target the runtime API origin
 - the route path must be one of the protected local routes
@@ -79,7 +79,7 @@ looks like a toolshed route.
 These routes are privileged but are not changed in this pass:
 
 - AI routes under `/api/ai/*`. They use provider keys or gateway authority.
-  They have broader caller shapes than the three local `fetchData` tools. They
+  They have broader caller shapes than the three local fetch-builtin tools. They
   should get the same kind of caller authentication once their browser and
   service caller model is written down.
 - Webhook admin routes such as create, list, and delete. They write toolshed

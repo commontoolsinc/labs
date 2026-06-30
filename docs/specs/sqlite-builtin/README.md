@@ -34,8 +34,8 @@ distinct (and CFC can gate them independently):
 - **`db.query<Row>(sql, { params?, reactOn? })`** — read-only `SELECT`. Reactive:
   re-runs when its `reactOn` input changes. Returns
   `Reactive<{ pending, result?: Row[], error? }>`, the same shape as
-  `fetchData`/`generateText`
-  (see [`packages/runner/src/builtins/fetch-data.ts`](../../../packages/runner/src/builtins/fetch-data.ts)).
+  `fetchJson`/`generateText`
+  (see [`packages/runner/src/builtins/fetch.ts`](../../../packages/runner/src/builtins/fetch.ts)).
   A free `sqliteQuery<Row>({ db, sql, ... })` function is equivalent.
 - **`db.exec(sql, params?)`** — writes (`INSERT`/`UPDATE`/`DELETE`). Imperative,
   called inside a handler; returns `void`. It records a `sqlite` op onto the
@@ -60,7 +60,7 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 
 1. **Reuse the existing reactive-builtin machinery.** Scheduler integration,
    post-commit effects, request hashing/deduplication, and the CFC write-policy
-   sink are all already solved for `fetchData`/`llm`. SQLite access plugs into
+   sink are all already solved for `fetchJson`/`llm`. SQLite access plugs into
    the same seams rather than inventing parallel infrastructure.
 2. **Server-side execution.** Queries run inside toolshed, which already hosts
    the space and owns the SQLite engine

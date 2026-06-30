@@ -631,7 +631,7 @@ function rewriteTrackedOpaquePatternBody(
       const initializer = unwrapExpression(declaration.initializer);
       let rootIdentifier: ts.Identifier;
       // True only when the destructure root is a fresh reactive-origin call
-      // (`wish(...)`, `fetchData(...)`, etc.). In that case the synthesized
+      // (`wish(...)`, `fetchJson(...)`, etc.). In that case the synthesized
       // root cell starts without a cause, so we attach a stable `.for(...)`
       // to each named leaf below to pin its shared causeContainer to a
       // user-facing identifier — otherwise the cell falls back to a

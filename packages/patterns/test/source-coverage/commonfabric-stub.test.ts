@@ -232,12 +232,56 @@ export function wish<T>({ query }: { query: string }): WishState<T> {
   return { result: wishResults.get(query) as T | undefined };
 }
 
-export function fetchData<T>(
+export function fetchJson<T>(
   _params: Record<string, unknown>,
 ): { pending: false; result: T; error: undefined } {
   return {
     pending: false,
-    result: { stargazers_count: 123 } as T,
+    // A GitHub-repo-shaped stub: covers both `stargazers_count` readers and
+    // patterns that walk further into the response (owner, name, etc.).
+    result: {
+      name: "stub-repo",
+      owner: { login: "stub-owner" },
+      description: "stub description",
+      stargazers_count: 123,
+      forks_count: 0,
+      language: "TypeScript",
+      html_url: "https://example.com/stub-repo",
+    } as T,
+    error: undefined,
+  };
+}
+
+export function fetchJsonUnchecked(
+  _params: Record<string, unknown>,
+): { pending: false; result: unknown; error: undefined } {
+  return {
+    pending: false,
+    result: { stargazers_count: 123 },
+    error: undefined,
+  };
+}
+
+export function fetchText(
+  _params: Record<string, unknown>,
+): { pending: false; result: string; error: undefined } {
+  return {
+    pending: false,
+    result: "stub text",
+    error: undefined,
+  };
+}
+
+export function fetchBinary(
+  _params: Record<string, unknown>,
+): {
+  pending: false;
+  result: { bytes: Uint8Array; mediaType: string };
+  error: undefined;
+} {
+  return {
+    pending: false,
+    result: { bytes: new Uint8Array(), mediaType: "application/octet-stream" },
     error: undefined,
   };
 }

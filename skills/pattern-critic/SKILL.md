@@ -39,6 +39,8 @@ Then use the detailed references already maintained in the repo for:
 - `docs/common/components/COMPONENTS.md`
 - `docs/common/patterns/ui-cookbook.md`
 - `docs/common/capabilities/llm.md` - LLM integration
+- `docs/common/capabilities/fetch.md` - fetch builtins
+  (fetchJson/fetchText/fetchBinary)
 
 ## Quick Patterns
 

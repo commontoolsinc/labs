@@ -1,15 +1,15 @@
-import { computed, fetchData, pattern } from "commonfabric";
+import { computed, fetchJson, pattern } from "commonfabric";
 
-// CT-1334: Sub-pattern combining fetchData() with a computed() projection that
+// CT-1334: Sub-pattern combining fetchJson() with a computed() projection that
 // captures a pattern parameter in a template literal.
 //
 // The `token` from the sub-pattern's destructured input is captured inside
 // computed() via `${token}`. The ts-transformer must extract it as an
 // explicit input so the projection receives the resolved value.
 //
-// NOTE on the explicit fetchData<T>: this test asserts the *materialized*
+// NOTE on the explicit fetchJson<T>: this test asserts the *materialized*
 // contact names, so `page.result` must carry a concrete schema. With no type
-// arg, FetchDataFunction's only inference site (`result?: T`) is absent, so TS
+// arg, the only inference site (`result?: T`) is absent, so TS
 // infers `T = unknown`; the transformer then emits the computed's input schema
 // for `page.result` as `{ type: "unknown" }`. A `{type:"unknown"}` field does
 // not schema-materialize across the computed capture boundary at runtime
@@ -43,10 +43,9 @@ const FetchPage = pattern<
     headers: { Authorization: `Bearer ${token}` },
   }));
 
-  const page = fetchData<{ connections: { name: string }[] }>({
+  const page = fetchJson<{ connections: { name: string }[] }>({
     url,
     options,
-    mode: "json",
   });
 
   const pageResultRef = page.result;
@@ -70,7 +69,7 @@ const FetchPage = pattern<
   });
 });
 
-export const fetchDataDeriveSubpattern = pattern<
+export const fetchJsonDeriveSubpattern = pattern<
   { token: string },
   { contacts: string[]; pending: boolean }
 >(({ token }) => {
@@ -81,4 +80,4 @@ export const fetchDataDeriveSubpattern = pattern<
   };
 });
 
-export default fetchDataDeriveSubpattern;
+export default fetchJsonDeriveSubpattern;

@@ -21,8 +21,11 @@ import type {
   EntityRefToStringFunction,
   EqualsFunction,
   FactoryInput,
-  FetchDataFunction,
+  FetchBinaryFunction,
+  FetchJsonFunction,
+  FetchJsonUncheckedFunction,
   FetchProgramFunction,
+  FetchTextFunction,
   GenerateObjectFunction,
   GenerateTextFunction,
   GetEntityIdFunction,
@@ -323,7 +326,10 @@ export interface BuilderFunctionsAndConstants {
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
   generateText: GenerateTextFunction;
-  fetchData: FetchDataFunction;
+  fetchBinary: FetchBinaryFunction;
+  fetchText: FetchTextFunction;
+  fetchJson: FetchJsonFunction;
+  fetchJsonUnchecked: FetchJsonUncheckedFunction;
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;

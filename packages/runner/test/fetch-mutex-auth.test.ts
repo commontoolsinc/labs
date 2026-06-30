@@ -12,10 +12,10 @@ import {
   verifyFirstPartyHttpRequest,
 } from "../src/toolshed-http-auth.ts";
 
-const signer = await Identity.fromPassphrase("test fetch-data mutex");
+const signer = await Identity.fromPassphrase("test fetch mutex");
 const space = signer.did();
 
-describe("fetch-data mutex mechanism: protected request auth", () => {
+describe("fetch-json mutex mechanism: protected request auth", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -76,13 +76,12 @@ describe("fetch-data mutex mechanism: protected request auth", () => {
     await storageManager?.close();
   });
 
-  it("adds custom auth headers to protected toolshed fetchData requests", async () => {
-    const fetchData = byRef("fetchData");
+  it("adds custom auth headers to protected toolshed fetchJson requests", async () => {
+    const fetchJson = byRef("fetchJson");
     const testRecipe = pattern<{ query: string }>(
       ({ query }) =>
-        fetchData({
+        fetchJson({
           url: "/api/agent-tools/web-search",
-          mode: "json",
           options: {
             method: "POST",
             headers: {
@@ -143,13 +142,12 @@ describe("fetch-data mutex mechanism: protected request auth", () => {
     expect(verified.userDid).toBe(signer.did());
   });
 
-  it("replaces caller-supplied auth headers on protected fetchData requests", async () => {
-    const fetchData = byRef("fetchData");
+  it("replaces caller-supplied auth headers on protected fetchJson requests", async () => {
+    const fetchJson = byRef("fetchJson");
     const testRecipe = pattern<{ query: string }>(
       ({ query }) =>
-        fetchData({
+        fetchJson({
           url: "/api/agent-tools/web-search",
-          mode: "json",
           options: {
             method: "POST",
             headers: {
@@ -218,12 +216,11 @@ describe("fetch-data mutex mechanism: protected request auth", () => {
   });
 
   it("does not add auth headers to protected-looking external requests", async () => {
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testRecipe = pattern<{ query: string }>(
       ({ query }) =>
-        fetchData({
+        fetchJson({
           url: "http://external.test/api/agent-tools/web-search",
-          mode: "json",
           options: {
             method: "POST",
             headers: {

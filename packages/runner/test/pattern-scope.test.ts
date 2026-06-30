@@ -2449,7 +2449,7 @@ Deno.test("when keeps condition scope while selecting narrower value link", asyn
   }
 });
 
-Deno.test("fetchData state cells use narrowest input scope", async () => {
+Deno.test("fetchJson state cells use narrowest input scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -2458,10 +2458,10 @@ Deno.test("fetchData state cells use narrowest input scope", async () => {
   const tx = runtime.edit();
 
   try {
-    const { fetchData, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const { fetchJson, pattern } = createTrustedBuilder(runtime).commonfabric;
     const urlBase = runtime.getCell<string>(
       space,
-      "fetchData user scoped url",
+      "fetchJson user scoped url",
       undefined,
       tx,
     );
@@ -2472,11 +2472,11 @@ Deno.test("fetchData state cells use narrowest input scope", async () => {
     );
     url.set("");
 
-    const Root = pattern<{ url: string }>(({ url }) => fetchData({ url }));
+    const Root = pattern<{ url: string }>(({ url }) => fetchJson({ url }));
 
     const resultCell = runtime.getCell(
       space,
-      "fetchData state cells use narrowest input scope",
+      "fetchJson state cells use narrowest input scope",
       undefined,
       tx,
     );

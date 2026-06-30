@@ -265,7 +265,7 @@ export interface RuntimeOptions {
    */
   moduleByteCache?: ModuleByteCache;
   /**
-   * Override for the outbound `fetch` used by network builtins (`fetchData`).
+   * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
    * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
    * a test harness can inject a deterministic mock without mutating process
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
@@ -388,7 +388,7 @@ export class Runtime {
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
   /**
-   * Outbound `fetch` used by network builtins (e.g. `fetchData`). Defaults to
+   * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
    * `RuntimeOptions.fetch`.
    */
@@ -464,8 +464,8 @@ export class Runtime {
       : undefined;
     // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
     // preserving the existing behavior where a test overrides the global AFTER
-    // constructing the runtime (e.g. fetch-data-mutex.test.ts). An injected mock
-    // is used as-is.
+    // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
+    // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
     this.staticCache = isDeno()
@@ -557,7 +557,7 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work the async builtins (fetchData,
+  // In-flight async builtin operations — the work the async builtins (fetchJson,
   // fetchProgram, llm/llmDialog, and reactive sqlite queries) perform AFTER their
   // handler returns, from a post-commit outbox flush: a network / LLM call or a
   // sqlite RPC, plus the result writeback. `idle()` deliberately does NOT wait

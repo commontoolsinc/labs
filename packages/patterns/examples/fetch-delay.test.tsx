@@ -1,8 +1,8 @@
 // Pattern-test for the CT-1768 fetch-mock `delayMs` (Robin/ubik2's suggestion):
-// a mock can return after a fixed real-time delay, so a fetchData isn't resolved
+// a mock can return after a fixed real-time delay, so a fetchJson isn't resolved
 // instantly. `runtime.settled()` (driven by `{ settle: true }`) still awaits the
 // delayed fetch, so the result is observed deterministically once it lands.
-import { computed, fetchData, pattern } from "commonfabric";
+import { computed, fetchJson, pattern } from "commonfabric";
 
 export const fetchMocks = [
   {
@@ -15,7 +15,7 @@ export const fetchMocks = [
 
 export default pattern(() => {
   const url = computed(() => "https://example.test/api/slow");
-  const fetched = fetchData<{ v: number }>({ url, mode: "json" });
+  const fetched = fetchJson<{ v: number }>({ url });
   const result_is_7 = computed(() => fetched.result?.v === 7);
   return {
     tests: [

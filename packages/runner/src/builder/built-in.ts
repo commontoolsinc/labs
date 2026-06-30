@@ -19,6 +19,7 @@ import type {
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  FetchBinaryResult,
   FetchOptions,
   PatternToolFunction,
   PatternToolResult,
@@ -133,17 +134,51 @@ export const generateText = createNodeFactory({
   params: FactoryInput<BuiltInGenerateTextParams>,
 ) => Reactive<BuiltInGenerateTextState>;
 
-export const fetchData = createNodeFactory({
+export const fetchBinary = createNodeFactory({
   type: "ref",
-  implementation: "fetchData",
+  implementation: "fetchBinary",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{
+  pending: boolean;
+  result: FetchBinaryResult;
+  error?: unknown;
+}>;
+
+export const fetchText = createNodeFactory({
+  type: "ref",
+  implementation: "fetchText",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: string; error?: unknown }>;
+
+export const fetchJson = createNodeFactory({
+  type: "ref",
+  implementation: "fetchJson",
 }) as <T>(
   params: FactoryInput<{
     url: string;
-    mode?: "json" | "text";
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
 ) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+
+export const fetchJsonUnchecked = createNodeFactory({
+  type: "ref",
+  implementation: "fetchJsonUnchecked",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: any; error?: unknown }>;
 
 export const fetchProgram = createNodeFactory({
   type: "ref",

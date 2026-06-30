@@ -200,39 +200,38 @@ Deno.test("card: schemas render as TypeScript-like types", () => {
 const FETCH = `// transformed: /app.ts
 export const test = pattern((__cf_pattern_input) => {
     const url = __cfLift_1({ token: 1 }).for("url", true);
-    const page = fetchData<{
+    const page = fetchJson<{
         connections: { name: string }[];
     }>({
         url,
-        mode: "json",
     }).for("page", true);
     return { ok: page.key("pending") };
 }, { type: "object" } as const satisfies __cfHelpers.JSONSchema, { type: "object" } as const satisfies __cfHelpers.JSONSchema);`;
 
 Deno.test("card: a builder call without schemas shows type args and arg keys", () => {
   const doc = parseDocument(FETCH);
-  const fd = doc.flatStructure.find((n) => n.label === "fetchData")!;
-  assert(fd, "found the fetchData node");
+  const fd = doc.flatStructure.find((n) => n.label === "fetchJson")!;
+  assert(fd, "found the fetchJson node");
   const meta = fd.meta;
   assert(meta?.kind === "contract");
   if (meta?.kind === "contract") {
     // the self-reference bug is gone
-    assertEquals(meta.innerBuilders.includes("fetchData"), false);
+    assertEquals(meta.innerBuilders.includes("fetchJson"), false);
   }
   const text = buildPeekCard(doc, fd).info.map((l) => l.text).join("\n");
-  assert(!text.includes("fetchData\ncalls  fetchData"), "no self-call line");
-  assert(!/calls .*fetchData/.test(text), "fetchData is not 'calling itself'");
+  assert(!text.includes("fetchJson\ncalls  fetchJson"), "no self-call line");
+  assert(!/calls .*fetchJson/.test(text), "fetchJson is not 'calling itself'");
   assert(text.includes("type args"), "shows type arguments");
   assert(
     text.includes("{ connections: { name: string }[] }"),
     "type argument rendered as a type",
   );
-  assert(text.includes("args  { url, mode }"), "shows the argument keys");
+  assert(text.includes("args  { url }"), "shows the argument keys");
 });
 
 Deno.test("card: dependencies stay within the node's own span", () => {
   const doc = parseDocument(FETCH);
-  const fd = doc.flatStructure.find((n) => n.label === "fetchData")!;
+  const fd = doc.flatStructure.find((n) => n.label === "fetchJson")!;
   const deps = findDependencies(doc, fd);
   // `url` (a shorthand reference inside the call) is a real dependency...
   assert(deps.some((d) => d.name === "url"), "url is a dependency");

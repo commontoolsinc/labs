@@ -1902,7 +1902,7 @@ function contractMeta(
       }
       const obj = unwrapToObject(arg);
       if (obj && ctx.schemaSet.has(obj)) schemas.push(parseSchemaObject(obj));
-      else if (obj) configArg ??= obj; // a plain object arg, e.g. fetchData({…})
+      else if (obj) configArg ??= obj; // a plain object arg, e.g. fetchJson({…})
     }
     const typeArgs = call.typeArguments?.map((t) =>
       normalizeType(t.getText(ctx.sf))
@@ -1919,7 +1919,7 @@ function contractMeta(
       typeArgs: typeArgs.length > 0 ? typeArgs : undefined,
       args: args.length > 0 ? args : undefined,
       // Scan the arguments (callback + object args), never the callee, so a
-      // call like fetchData({…}) is not reported as "containing" itself.
+      // call like fetchJson({…}) is not reported as "containing" itself.
       innerBuilders: innerBuilderNames(call.arguments, ctx.sf),
     };
   });

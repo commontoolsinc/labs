@@ -1,7 +1,7 @@
 import {
   computed,
   Default,
-  fetchData,
+  fetchJson,
   NAME,
   pattern,
   UI,
@@ -36,7 +36,7 @@ type GithubResponse = {
     site_admin: boolean;
   };
   html_url: string;
-  description: string;
+  description: string | null;
   fork: boolean;
   url: string;
   forks_url: string;
@@ -82,11 +82,11 @@ type GithubResponse = {
   ssh_url: string;
   clone_url: string;
   svn_url: string;
-  homepage: string;
+  homepage: string | null;
   size: number;
   stargazers_count: number;
   watchers_count: number;
-  language: string;
+  language: string | null;
   has_issues: boolean;
   has_projects: boolean;
   has_downloads: boolean;
@@ -104,7 +104,7 @@ type GithubResponse = {
     spdx_id: string;
     url: string;
     node_id: string;
-  };
+  } | null;
   allow_forking: boolean;
   is_template: boolean;
   web_commit_signoff_required: boolean;
@@ -116,7 +116,8 @@ type GithubResponse = {
   default_branch: string;
   temp_clone_token: string | null;
   custom_properties: Record<string, any>;
-  organization: {
+  // GitHub omits `organization` for user-owned repos.
+  organization?: {
     login: string;
     id: number;
     node_id: string;
@@ -163,9 +164,8 @@ export default pattern<
   });
 
   // Fetch repository data
-  const repoData = fetchData<GithubResponse>({
+  const repoData = fetchJson<GithubResponse>({
     url: apiUrl,
-    mode: "json",
   });
   const data = repoData.result;
 
