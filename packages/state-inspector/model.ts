@@ -24,6 +24,32 @@
 //   legacy (pre-#3522) — a separate process cell whose `value` carries
 //     { $TYPE, resultRef, … }; the result cell links to it via `source`.
 // We classify both; modern is the verified path, legacy is best-effort.
+//
+// ┌─ LEGACY-PROCESS-CELL — retirement note (grep this tag to find every site) ─┐
+// The `legacy`/process-cell era (`$TYPE` / `spell` / `resultRef` pieces) is a
+// CLOSED format: it is only emitted by stores written before the spell→
+// patternIdentity flip (#3522, then the runtime cutover ~2026-06; no space mixes
+// the two). Once such stores have aged out of every cache/box we inspect, ALL of
+// this support can be deleted — it is dead weight on a tool that only ever reads
+// fresh data. We keep it now solely to read old DBs faithfully (and label them
+// honestly as "legacy process").
+//
+// To retire it, grep `LEGACY-PROCESS-CELL` and delete each marked site:
+//   • model.ts   — `isLegacyProcessValue`, the two `regime: "legacy"` branches in
+//                  `classifyDocument`, `lineage.source`, and collapse `Regime`
+//                  to `"modern" | "n/a"` (drop the union member + its consumers).
+//   • detail.ts  — `legacyResultId`, `legacyName`, and the `regime === "legacy"`
+//                  branches that call them.
+// That is the WHOLE surface — it is intentionally confined to classification
+// (model.ts) and rendering (detail.ts).
+//
+// Do NOT remove the other two, UNRELATED "legacy" axes when you do this; they
+// retire on their own (different) timelines:
+//   • decode.ts  — at-rest codec routing (`fvj1:` envelope vs plain-JSON sigil
+//                  links). A serialization concern, orthogonal to process cells.
+//   • db.ts / reconstruct.ts — DBs lacking branch/snapshot/scope_key tables
+//                  (`hasTable`, the scope_key shim). A schema-migration concern.
+// └────────────────────────────────────────────────────────────────────────────┘
 
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
@@ -39,6 +65,8 @@ export type EntityKind =
   | "free-cell" // a standalone cell, owned by no piece
   | "unknown";
 
+// LEGACY-PROCESS-CELL: `"legacy"` collapses out when the process-cell era is
+// retired, leaving `"modern" | "n/a"` (see top-of-file retirement note).
 export type Regime = "modern" | "legacy" | "n/a";
 
 export type ValueShape =
@@ -61,7 +89,10 @@ export interface Lineage {
   owner?: string;
   /** Owned child cell ids — a piece's `internal` manifest. */
   internal?: string[];
-  /** Legacy process/source cell link target. */
+  /**
+   * Legacy process/source cell link target.
+   * LEGACY-PROCESS-CELL: removed with the process-cell era (top-of-file note).
+   */
   source?: string;
 }
 
@@ -134,7 +165,11 @@ function isPieceResultValue(v: unknown): boolean {
   return isObj(v) && ("$UI" in v || "$NAME" in v || "$TILE_UI" in v);
 }
 
-/** A legacy process cell value: `{ $TYPE, resultRef|spell|source, … }`. */
+/**
+ * A legacy process cell value: `{ $TYPE, resultRef|spell|source, … }`.
+ * LEGACY-PROCESS-CELL: delete with the closed process-cell era (see top-of-file
+ * retirement note).
+ */
 function isLegacyProcessValue(
   v: unknown,
 ): v is {
@@ -215,6 +250,8 @@ export function classifyDocument(doc: EntityDocument): Classification {
       lineage,
     };
   }
+  // LEGACY-PROCESS-CELL: both `regime: "legacy"` branches below retire together
+  // with the closed process-cell era (see top-of-file retirement note).
   // Legacy: a process cell carries `{ $TYPE, resultRef, … }`.
   if (isLegacyProcessValue(value)) {
     lineage.source = linkId(value.resultRef) ?? linkId(value.source);

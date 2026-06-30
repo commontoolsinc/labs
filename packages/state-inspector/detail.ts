@@ -125,7 +125,12 @@ function importSpecifier(v: unknown): string | undefined {
   return undefined;
 }
 
-/** The `resultRef` target of a legacy process cell (`{ $TYPE, resultRef, … }`). */
+/**
+ * The `resultRef` target of a legacy process cell (`{ $TYPE, resultRef, … }`).
+ * LEGACY-PROCESS-CELL: this and `legacyName` (plus their `regime === "legacy"`
+ * callers below) retire with the closed process-cell era — see the retirement
+ * note at the top of model.ts for the full removal checklist.
+ */
 function legacyResultId(v: unknown): string | undefined {
   if (isObj(v) && "$TYPE" in v && "resultRef" in v) {
     return parseSigilLink(v.resultRef)?.id;
