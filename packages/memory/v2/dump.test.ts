@@ -107,6 +107,26 @@ Deno.test("snapshotSpaceStore produces a consistent, openable copy", async () =>
   }
 });
 
+Deno.test("single-file (DB_PATH) mode: literal-%3A filenames round-trip", async () => {
+  // Single-file/clustering mode keeps the percent-encoded filename literally on
+  // disk (`did%3Akey%3A….sqlite`) — distinct from directory mode. Lock it so a
+  // refactor can't silently fork existing clustered data into new files.
+  const tmp = await Deno.makeTempDir({ prefix: "cf-dump-file-" });
+  const store = Path.toFileUrl(Path.join(tmp, "cluster.sqlite"));
+  try {
+    seedStore(store, SPACE_A, 1);
+    // On-disk name is the literal percent-encoded form for this mode.
+    const onDisk = Path.basename(canonicalPath(store, SPACE_A));
+    assertEquals(onDisk, `${encodeURIComponent(SPACE_A)}.sqlite`);
+    assertEquals(onDisk.includes("%3A"), true);
+    // …yet listing decodes it back to the canonical DID, and resolution matches.
+    assertEquals(listSpaceStores(store).map((s) => s.space), [SPACE_A]);
+    assertEquals(spaceStorePath(store, SPACE_A), canonicalPath(store, SPACE_A));
+  } finally {
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+  }
+});
+
 async function exists(path: string): Promise<boolean> {
   try {
     await Deno.stat(path);

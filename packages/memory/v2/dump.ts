@@ -44,8 +44,11 @@ export function listSpaceStores(store: URL): SpaceStoreInfo[] {
   let entries: Deno.DirEntry[];
   try {
     entries = [...Deno.readDirSync(dir)];
-  } catch {
-    return []; // missing/unreadable dir → no spaces
+  } catch (error) {
+    // The store dir may simply not exist yet → no spaces. Permission / IO
+    // errors must surface rather than masquerade as an empty store.
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
   }
   const out: SpaceStoreInfo[] = [];
   for (const entry of entries) {
@@ -60,8 +63,10 @@ export function listSpaceStores(store: URL): SpaceStoreInfo[] {
     let stat: Deno.FileInfo;
     try {
       stat = Deno.statSync(Path.join(dir, entry.name));
-    } catch {
-      continue;
+    } catch (error) {
+      // Tolerate a file removed between readdir and stat; surface anything else.
+      if (error instanceof Deno.errors.NotFound) continue;
+      throw error;
     }
     out.push({
       space,
@@ -91,8 +96,10 @@ export function spaceStorePath(
   }
   try {
     return Deno.statSync(path).isFile ? path : null;
-  } catch {
-    return null;
+  } catch (error) {
+    // Absent space → null; permission / IO errors must surface.
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
   }
 }
 
