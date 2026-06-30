@@ -7,8 +7,9 @@ export type OtelConfig = Pick<
   "OTEL_ENABLED" | "OTEL_SERVICE_NAME" | "OTEL_EXPORTER_OTLP_ENDPOINT" | "ENV"
 >;
 
-// Ensure we only register once even during hot-reload.
-let _providerRegistered = false;
+// The single registered provider, or undefined when telemetry is off or has been
+// shut down. init/shutdown guard on this so they stay idempotent and re-init-safe
+// (e.g. across a hot-reload or an init -> shutdown -> init cycle in tests).
 let _provider:
   | import("@opentelemetry/sdk-trace-base").BasicTracerProvider
   | undefined;
@@ -34,12 +35,21 @@ export async function shutdownOpenTelemetry(): Promise<void> {
   // shutdown) is a no-op rather than touching a torn-down provider.
   const provider = _provider;
   _provider = undefined;
-  await provider.forceFlush();
-  await provider.shutdown();
+  try {
+    await provider.forceFlush();
+    await provider.shutdown();
+  } finally {
+    // Reset the global API state too, so a later initOpenTelemetry() can register
+    // a fresh provider + context manager cleanly, and getTracer() falls back to
+    // the API no-op tracer until then. (We don't swallow flush/shutdown errors —
+    // the caller decides; see main.ts's shutdown handler.)
+    trace.disable();
+    context.disable();
+  }
 }
 
 export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
-  if (_providerRegistered || !cfg.OTEL_ENABLED) {
+  if (_provider || !cfg.OTEL_ENABLED) {
     if (!cfg.OTEL_ENABLED) {
       console.log("OpenTelemetry is disabled via OTEL_ENABLED env var");
     }
@@ -90,7 +100,6 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
 
     trace.setGlobalTracerProvider(provider);
     _provider = provider;
-    _providerRegistered = true;
 
     console.log(
       `OpenTelemetry initialized successfully with endpoint: ${cfg.OTEL_EXPORTER_OTLP_ENDPOINT}`,

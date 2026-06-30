@@ -32,7 +32,9 @@ export const provider = new BasicTracerProvider({
 // LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
 // OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
 // spans still get OpenInference semantic-convention formatting for Phoenix; a
-// pass-through spanFilter lets non-LLM spans export unchanged for SigNoz.
+// pass-through spanFilter lets non-LLM spans through to SigNoz as well. (The
+// processor tags passed-through spans with an `openinference.span.kind`
+// attribute, so they are not strictly byte-for-byte unchanged.)
 provider.addSpanProcessor(
   new OpenInferenceBatchSpanProcessor({
     exporter: otlpExporter,
@@ -42,6 +44,21 @@ provider.addSpanProcessor(
 
 export function getTracerProvider() {
   return _provider;
+}
+
+/**
+ * Flush and shut down the tracer provider so buffered spans aren't dropped when
+ * the process exits. No-op if telemetry was never initialized. Mirrors the
+ * bg-piece-service shutdown so toolshed doesn't lose its last span batch on
+ * deploy/restart.
+ */
+export async function shutdownOpenTelemetry(): Promise<void> {
+  if (!_provider) return;
+  const p = _provider;
+  _provider = undefined;
+  _providerRegistered = false;
+  await p.forceFlush();
+  await p.shutdown();
 }
 
 // Prefer Deno's built-in context manager when running on Deno ≥2.2.

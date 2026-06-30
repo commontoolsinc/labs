@@ -29,7 +29,9 @@ function flagValue() {
 }
 
 // NOTE: This is where we define the environment variable types and defaults.
-const EnvSchema = z.object({
+// Exported so the parsing rules (e.g. OTEL_ENABLED) can be unit-tested without
+// going through the module-level singleton below.
+export const EnvSchema = z.object({
   ENV: z.string().default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().default(8000),
@@ -48,9 +50,20 @@ const EnvSchema = z.object({
   // ===========================================================================
   // OpenTelemetry Configuration
   // ===========================================================================
-  OTEL_ENABLED: z.coerce.boolean().default(false),
+  // NOT z.coerce.boolean(): Boolean("false") === true, so OTEL_ENABLED=false
+  // would wrongly enable telemetry (and, with the all-span exporter, start
+  // shipping every HTTP request span). Mirror bg-piece-service's strict parse so
+  // only "true"/"1" enable it and "false"/unset disable it.
+  OTEL_ENABLED: z.string().default("false").transform((v) =>
+    v === "true" || v === "1"
+  ),
   OTEL_SERVICE_NAME: z.string().default("toolshed"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
+  // NOTE: these sampler knobs are currently NOT honored. lib/otel.ts builds the
+  // provider without a Sampler, and the OTel JS SDK does not auto-read
+  // OTEL_TRACES_SAMPLER from the environment under Deno (verified empirically),
+  // so effective sampling is always-on regardless of these values. Left declared
+  // pending a decision to either wire a Sampler from them or drop them.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
   // ===========================================================================

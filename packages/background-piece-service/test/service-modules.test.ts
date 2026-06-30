@@ -1285,6 +1285,25 @@ describe("background piece service entry point", () => {
     assertEquals(calls, ["stop", "exit:0"]);
   });
 
+  it("still exits when stop() rejects", async () => {
+    const calls: string[] = [];
+    const callback = shutdown(
+      {
+        stop: () => {
+          calls.push("stop");
+          return Promise.reject(new Error("stop boom"));
+        },
+      },
+      ((code?: number) => {
+        calls.push(`exit:${code}`);
+      }) as typeof Deno.exit,
+    );
+    // A rejected stop()/flush must still reach exit(0) — otherwise the signal
+    // handler hangs until the orchestrator force-kills the process.
+    await callback();
+    assertEquals(calls, ["stop", "exit:0"]);
+  });
+
   it("runs the service entry point only when invoked as main", async () => {
     let calls = 0;
     await runMainIfMain(false, () => {

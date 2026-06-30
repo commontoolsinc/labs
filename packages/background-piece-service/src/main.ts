@@ -59,14 +59,20 @@ export function shutdown(
   service: Pick<BackgroundPieceService, "stop">,
   exit: typeof Deno.exit = Deno.exit,
 ) {
-  return () => {
+  return () =>
     service.stop()
       // Flush buffered spans before exiting so shutdown telemetry isn't dropped.
       .then(() => shutdownOpenTelemetry())
-      .then(() => {
+      .catch((error) => {
+        // A failed stop()/flush (e.g. the collector is unreachable, which makes
+        // forceFlush reject) must not strand the process. Log and still exit so
+        // the signal handler always terminates cleanly instead of hanging until
+        // the orchestrator SIGKILLs us.
+        console.error("Error during shutdown:", error);
+      })
+      .finally(() => {
         exit(0);
       });
-  };
 }
 
 export async function startBackgroundPieceService(
@@ -83,7 +89,8 @@ export async function startBackgroundPieceService(
 ): Promise<ServiceLike> {
   // Set up tracing before doing any work so spans (incl. runner-library spans)
   // are exported to the local OTel collector -> SigNoz. No-op unless OTEL_ENABLED.
-  await initOpenTelemetry();
+  // Use the injected env so tests/alternate callers control telemetry config.
+  await initOpenTelemetry(dependencies.env);
 
   const workerTimeoutMs = parseWorkerTimeout(args);
   const identity = await dependencies.getIdentity(
