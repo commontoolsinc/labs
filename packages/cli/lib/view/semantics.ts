@@ -1,0 +1,729 @@
+/**
+ * Optional semantic layer for `cf view`: a TypeScript {@link ts.LanguageService}
+ * built over the transformed blob, used to answer "what type is this?" (and, in
+ * later stages, "where is this defined?").
+ *
+ * The blob `--show-transformed` emits is a self-contained module graph: each
+ * `// transformed: <path>` section is a module, and sections import one another
+ * by those exact paths. Splitting the blob into one virtual file per section and
+ * resolving the one external dependency (`commonfabric`, mapped to a real file
+ * by the repo's deno import map) makes the whole thing type-checkable. Because we
+ * check the same text we render, file offsets line up with the structure nodes —
+ * no source map needed.
+ *
+ * Everything here is best-effort and isolated: construction is cheap (the heavy
+ * program is built lazily on the first query), every query is wrapped so a
+ * failure degrades to `null`, and when the blob cannot be resolved (piped from
+ * outside a repo, partial output) the pager simply shows no semantic info. The
+ * pure parser remains the authoritative, dependency-free path for everything
+ * else.
+ */
+import ts from "typescript";
+import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+import type { Line } from "./model.ts";
+import { parseDocument } from "./parse.ts";
+import type { DiffMaps } from "./diffdoc.ts";
+
+/** A resolved definition site for a referenced symbol. */
+export interface DefTarget {
+  readonly name: string;
+  /** Offset within the same blob, when the definition is in-blob. */
+  readonly blobOffset?: number;
+  /** Real file path, when the definition is in a file outside the blob. */
+  readonly filePath?: string;
+  /** Character offset within `filePath`. */
+  readonly fileOffset?: number;
+  /** 0-based line of the definition (blob line in-blob, file line otherwise). */
+  readonly line: number;
+  /** A trimmed one-line preview of the definition site. */
+  readonly preview: string;
+}
+
+export interface Semantics {
+  /** The inferred type at a source offset, or `null` when not knowable. */
+  typeAt(offset: number): string | null;
+  /**
+   * Where the symbol at a source offset is defined. In-blob definitions carry a
+   * `blobOffset` (another section of the same text); definitions in real files
+   * carry a `filePath`. Empty when nothing resolves.
+   */
+  definitionOf(offset: number): DefTarget[];
+  /** Read and colour an external file (within the workspace) so the pager can
+   * show a definition that lives outside the blob. Null when unreadable. */
+  fileLines(filePath: string): readonly Line[] | null;
+  /** Build the TypeScript program now (off the interactive path), so the first
+   * real query does not pay the one-time cost. Safe to call repeatedly. */
+  prewarm(): void;
+}
+
+interface Options {
+  /** Working directory to discover the deno import map from. */
+  cwd: string;
+  /** Name for the implicit single section when the text has no headers. */
+  fileName?: string;
+}
+
+interface SectionFile {
+  /** Virtual file name (the section header path, or `fileName`). */
+  name: string;
+  /** Global offset of the section's first character in the blob. */
+  start: number;
+  end: number;
+  text: string;
+}
+
+/**
+ * Build a semantic service over `text`. Returns a service whose queries are
+ * always safe to call; returns `null` only when even the lightweight setup is
+ * impossible. The TypeScript program is not built until the first query.
+ */
+export function createSemantics(
+  text: string,
+  options: Options,
+): Semantics | null {
+  let sections: SectionFile[];
+  try {
+    sections = splitSections(text, options.fileName ?? "transformed.ts");
+  } catch {
+    return null;
+  }
+  if (sections.length === 0) return null;
+
+  const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
+    { importMap: {}, root: options.cwd };
+  const libDir = safe(() => defaultLibDir());
+
+  // Lazily-built, cached program state. `failed` latches so a broken setup is
+  // not retried on every keystroke.
+  let service: ts.LanguageService | undefined;
+  let program: ts.Program | undefined;
+  let failed = false;
+
+  const build = (): ts.Program | undefined => {
+    if (program) return program;
+    if (failed) return undefined;
+    try {
+      const host = makeHost(sections, importMap, libDir, options.cwd, root);
+      service = ts.createLanguageService(host, ts.createDocumentRegistry());
+      program = service.getProgram();
+      if (!program) failed = true;
+      return program;
+    } catch {
+      failed = true;
+      return undefined;
+    }
+  };
+
+  const sectionAt = (offset: number): SectionFile | undefined =>
+    sections.find((s) => offset >= s.start && offset < s.end);
+  const sectionByVfile = new Map(sections.map((s) => [s.name, s] as const));
+
+  // Memoise resolutions and real-file reads: the info card resolves the same
+  // offsets repeatedly (a symbol appears in both "depends on" and "defined
+  // elsewhere"), and many external defs land in the same large file.
+  const defCache = new Map<number, DefTarget[]>();
+  const realFiles = new Map<string, string | undefined>();
+  const readReal = (path: string): string | undefined => {
+    if (realFiles.has(path)) return realFiles.get(path);
+    const content = within(path, root)
+      ? safe(() => Deno.readTextFileSync(path))
+      : undefined;
+    realFiles.set(path, content);
+    return content;
+  };
+
+  return {
+    prewarm(): void {
+      try {
+        build();
+      } catch {
+        // best-effort warm-up; a failed build latches and stays silent
+      }
+    },
+    typeAt(offset: number): string | null {
+      try {
+        const prog = build();
+        if (!prog) return null;
+        const section = sectionAt(offset);
+        if (!section) return null;
+        return typeStringAt(prog, section.name, offset - section.start);
+      } catch {
+        return null;
+      }
+    },
+    definitionOf(offset: number): DefTarget[] {
+      const cached = defCache.get(offset);
+      if (cached) return cached;
+      let out: DefTarget[] = [];
+      try {
+        if (build() && service) {
+          const section = sectionAt(offset);
+          if (section) {
+            const local = offset - section.start;
+            const defs = service.getDefinitionAtPosition(section.name, local) ??
+              [];
+            for (const d of defs) {
+              const sec = sectionByVfile.get(d.fileName);
+              if (sec) {
+                const blobOffset = sec.start + d.textSpan.start;
+                const { line, preview } = lineAndPreview(text, blobOffset);
+                out.push({ name: d.name, blobOffset, line, preview });
+              } else {
+                // A real file. Skip libs / anything outside the workspace —
+                // jumping into lib.d.ts for `Set` is noise, not a definition.
+                const content = readReal(d.fileName);
+                if (content === undefined) continue;
+                const at = lineAndPreview(content, d.textSpan.start);
+                out.push({
+                  name: d.name,
+                  filePath: d.fileName,
+                  fileOffset: d.textSpan.start,
+                  line: at.line,
+                  preview: at.preview,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        out = [];
+      }
+      defCache.set(offset, out);
+      return out;
+    },
+    fileLines(filePath: string): readonly Line[] | null {
+      try {
+        const content = readReal(filePath);
+        if (content === undefined) return null;
+        return parseDocument(content, filePath).lines;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/**
+ * Build a semantic service for a DIFF view: the program's root files are the
+ * real, current workspace files the diff names, and every query translates
+ * diff-text offsets to file offsets (and back) through {@link DiffMaps}. So
+ * "what type is this?" and "where is this defined?" are answered against the
+ * workspace as it is now — not the old side of the diff.
+ */
+export function createDiffSemantics(
+  diffText: string,
+  maps: DiffMaps,
+  options: Options,
+): Semantics | null {
+  const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
+    { importMap: {}, root: options.cwd };
+  const libDir = safe(() => defaultLibDir());
+  const rootFiles = maps.rootFiles.filter((p) => within(p, root));
+  if (rootFiles.length === 0) return null;
+
+  let service: ts.LanguageService | undefined;
+  let program: ts.Program | undefined;
+  let failed = false;
+  const build = (): ts.Program | undefined => {
+    if (program) return program;
+    if (failed) return undefined;
+    try {
+      const host = makeHost(
+        [],
+        importMap,
+        libDir,
+        options.cwd,
+        root,
+        rootFiles,
+      );
+      service = ts.createLanguageService(host, ts.createDocumentRegistry());
+      program = service.getProgram();
+      if (!program) failed = true;
+      return program;
+    } catch {
+      failed = true;
+      return undefined;
+    }
+  };
+
+  const defCache = new Map<number, DefTarget[]>();
+  const realFiles = new Map<string, string | undefined>();
+  const readReal = (path: string): string | undefined => {
+    if (realFiles.has(path)) return realFiles.get(path);
+    const content = within(path, root)
+      ? safe(() => Deno.readTextFileSync(path))
+      : undefined;
+    realFiles.set(path, content);
+    return content;
+  };
+
+  return {
+    prewarm(): void {
+      try {
+        build();
+      } catch {
+        // best-effort warm-up; a failed build latches and stays silent
+      }
+    },
+    typeAt(offset: number): string | null {
+      try {
+        const prog = build();
+        if (!prog) return null;
+        const at = maps.toFile(offset);
+        if (!at) return null;
+        return typeStringAt(prog, at.path, at.offset);
+      } catch {
+        return null;
+      }
+    },
+    definitionOf(offset: number): DefTarget[] {
+      const cached = defCache.get(offset);
+      if (cached) return cached;
+      let out: DefTarget[] = [];
+      try {
+        if (build() && service) {
+          const at = maps.toFile(offset);
+          if (at) {
+            const defs = service.getDefinitionAtPosition(at.path, at.offset) ??
+              [];
+            for (const d of defs) {
+              // A definition on a line the diff shows maps back into the diff;
+              // anything else within the workspace opens as an external file.
+              const inDiff = maps.fromFile(d.fileName, d.textSpan.start);
+              if (inDiff !== null) {
+                const { line, preview } = lineAndPreview(diffText, inDiff);
+                out.push({ name: d.name, blobOffset: inDiff, line, preview });
+                continue;
+              }
+              const content = readReal(d.fileName);
+              if (content === undefined) continue;
+              const atDef = lineAndPreview(content, d.textSpan.start);
+              out.push({
+                name: d.name,
+                filePath: d.fileName,
+                fileOffset: d.textSpan.start,
+                line: atDef.line,
+                preview: atDef.preview,
+              });
+            }
+          }
+        }
+      } catch {
+        out = [];
+      }
+      defCache.set(offset, out);
+      return out;
+    },
+    fileLines(filePath: string): readonly Line[] | null {
+      try {
+        const content = readReal(filePath);
+        if (content === undefined) return null;
+        return parseDocument(content, filePath).lines;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/** The cleaned type string of the node at `local` in `fileName`, or null. */
+function typeStringAt(
+  program: ts.Program,
+  fileName: string,
+  local: number,
+): string | null {
+  const sf = program.getSourceFile(fileName);
+  if (!sf) return null;
+  const node = nodeAt(sf, local);
+  if (!node) return null;
+  const checker = program.getTypeChecker();
+  const type = checker.getTypeAtLocation(node);
+  // No `UseFullyQualifiedType`: it prefixes names with `import("/abs/path")`,
+  // which is noise in a one-line card. The enclosing node lets the checker
+  // pick a readable name.
+  const str = checker.typeToString(
+    type,
+    node,
+    ts.TypeFormatFlags.NoTruncation,
+  );
+  return usefulType(str);
+}
+
+/** 0-based line and a trimmed, clamped preview of the line holding `offset`. */
+function lineAndPreview(
+  content: string,
+  offset: number,
+): { line: number; preview: string } {
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  let line = 0;
+  for (let i = 0; i < clamped; i++) if (content[i] === "\n") line++;
+  const start = content.lastIndexOf("\n", clamped - 1) + 1;
+  let end = content.indexOf("\n", clamped);
+  if (end < 0) end = content.length;
+  const preview = content.slice(start, end).trim();
+  return {
+    line,
+    preview: preview.length > 72 ? `${preview.slice(0, 71)}…` : preview,
+  };
+}
+
+// --- section splitting -------------------------------------------------------
+
+const HEADER = /^\/\/\s*transformed:\s*(.*)$/;
+
+function splitSections(text: string, fallbackName: string): SectionFile[] {
+  const lineStarts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") lineStarts.push(i + 1);
+  }
+  const lines = text.split("\n");
+  const marks: { name: string; start: number }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(HEADER);
+    if (m) {
+      marks.push({ name: m[1].trim() || fallbackName, start: lineStarts[i] });
+    }
+  }
+  if (marks.length === 0) {
+    return [{ name: fallbackName, start: 0, end: text.length, text }];
+  }
+  return marks.map((mark, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].start : text.length;
+    return {
+      name: uniqueName(mark.name, marks, i),
+      start: mark.start,
+      end,
+      text: text.slice(mark.start, end),
+    };
+  });
+}
+
+/** Disambiguate sections that share a header path (rare, but keep names 1:1). */
+function uniqueName(
+  name: string,
+  marks: { name: string }[],
+  index: number,
+): string {
+  const dupesBefore =
+    marks.slice(0, index).filter((m) => m.name === marks[index].name).length;
+  if (dupesBefore === 0) return name;
+  // A trailing `#N` reads as a URL fragment, which TypeScript strips — the file
+  // would then be unreachable. Insert the disambiguator before the extension so
+  // the virtual name stays a real `.ts`/`.tsx` path.
+  const slash = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
+  const dot = name.lastIndexOf(".");
+  return dot > slash + 1
+    ? `${name.slice(0, dot)}.${dupesBefore}${name.slice(dot)}`
+    : `${name}.${dupesBefore}.ts`;
+}
+
+// --- compiler host -----------------------------------------------------------
+
+function makeHost(
+  sections: SectionFile[],
+  importMap: Record<string, string>,
+  libDir: string | undefined,
+  cwd: string,
+  readRoot: string,
+  /** Real on-disk files to include as program roots (the diff mode's files). */
+  extraRoots: readonly string[] = [],
+): ts.LanguageServiceHost {
+  const sectionPaths = new Set(sections.map((s) => s.name));
+  const sectionByName = new Map(sections.map((s) => [s.name, s] as const));
+  const fileCache = new Map<string, string | undefined>();
+
+  // A real-file read is allowed only within the workspace root or the bundled
+  // TypeScript lib directory. The pager runs under broad `--allow-read`, so this
+  // keeps a crafted blob from naming arbitrary files via its import specifiers.
+  const readable = (path: string): boolean =>
+    within(path, readRoot) || (libDir !== undefined && within(path, libDir));
+
+  const readReal = (path: string): string | undefined => {
+    if (fileCache.has(path)) return fileCache.get(path);
+    let content: string | undefined;
+    if (readable(path)) {
+      try {
+        content = Deno.readTextFileSync(path);
+      } catch {
+        content = undefined;
+      }
+    }
+    fileCache.set(path, content);
+    return content;
+  };
+  const getText = (name: string): string | undefined => {
+    const section = sectionByName.get(name);
+    if (section) return section.text;
+    return readReal(name);
+  };
+
+  const resolve = (spec: string, containing: string): string | undefined => {
+    if (sectionPaths.has(spec)) return spec;
+    const mapped = mapSpecifier(spec, importMap);
+    if (mapped) return within(mapped, readRoot) ? mapped : undefined;
+    let candidate: string | undefined;
+    if (spec.startsWith("./") || spec.startsWith("../")) {
+      candidate = resolveRelative(join(dirname(containing), spec));
+    } else if (isAbsolute(spec)) {
+      candidate = resolveRelative(spec);
+    }
+    // Real files must sit inside the workspace; section paths resolve above.
+    return candidate && within(candidate, readRoot) ? candidate : undefined;
+  };
+
+  const compilerOptions: ts.CompilerOptions = {
+    allowJs: true,
+    checkJs: false,
+    target: ts.ScriptTarget.ES2023,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    allowImportingTsExtensions: true,
+    skipLibCheck: true,
+    skipDefaultLibCheck: true,
+    noEmit: true,
+    noLib: libDir === undefined,
+    strict: false,
+  };
+
+  return {
+    getScriptFileNames: () => [...sections.map((s) => s.name), ...extraRoots],
+    getScriptVersion: () => "1",
+    getScriptSnapshot: (name) => {
+      const t = getText(name);
+      return t === undefined ? undefined : ts.ScriptSnapshot.fromString(t);
+    },
+    getCurrentDirectory: () => cwd,
+    getCompilationSettings: () => compilerOptions,
+    getDefaultLibFileName: (opts) =>
+      libDir ? join(libDir, ts.getDefaultLibFileName(opts)) : "lib.d.ts",
+    fileExists: (name) => sectionPaths.has(name) || getText(name) !== undefined,
+    readFile: (name) => getText(name),
+    directoryExists: (dir) => {
+      try {
+        return Deno.statSync(dir).isDirectory;
+      } catch {
+        return false;
+      }
+    },
+    getDirectories: () => [],
+    resolveModuleNameLiterals: (literals, containing) =>
+      literals.map((literal) => {
+        const target = resolve(literal.text, containing);
+        if (!target) return { resolvedModule: undefined };
+        return {
+          resolvedModule: {
+            resolvedFileName: target,
+            extension: extensionOf(target),
+            isExternalLibraryImport: false,
+          },
+        };
+      }),
+  };
+}
+
+function resolveRelative(base: string): string | undefined {
+  for (
+    const candidate of [
+      base,
+      `${base}.ts`,
+      `${base}.tsx`,
+      join(base, "index.ts"),
+    ]
+  ) {
+    try {
+      if (Deno.statSync(candidate).isFile) return candidate;
+    } catch { /* try next */ }
+  }
+  return undefined;
+}
+
+function extensionOf(path: string): ts.Extension {
+  if (path.endsWith(".tsx")) return ts.Extension.Tsx;
+  if (path.endsWith(".d.ts")) return ts.Extension.Dts;
+  if (path.endsWith(".json")) return ts.Extension.Json;
+  if (path.endsWith(".jsx")) return ts.Extension.Jsx;
+  if (path.endsWith(".js")) return ts.Extension.Js;
+  return ts.Extension.Ts;
+}
+
+// --- import map + libs -------------------------------------------------------
+
+/**
+ * Map a specifier to a real local file via the import map. Values in `importMap`
+ * are already absolute (resolved against the deno.json that declared them), so
+ * resolution does not depend on where cf view was launched.
+ */
+function mapSpecifier(
+  spec: string,
+  importMap: Record<string, string>,
+): string | undefined {
+  const exact = importMap[spec];
+  if (exact !== undefined) return resolveRelative(exact);
+  // Prefix mapping: `@scope/pkg/` → directory. The mapped value is the absolute
+  // directory; append the remainder after the prefix and resolve once.
+  for (const key of Object.keys(importMap)) {
+    if (key.endsWith("/") && spec.startsWith(key)) {
+      return resolveRelative(join(importMap[key], spec.slice(key.length)));
+    }
+  }
+  return undefined;
+}
+
+function isLocalSpecifier(value: string): boolean {
+  return value.startsWith("./") || value.startsWith("../") ||
+    value.startsWith("/") || isAbsolute(value);
+}
+
+/**
+ * Walk from `cwd` up to the filesystem root, merging the `imports` of every
+ * deno.json(c) found; a nearer config wins. Local targets are resolved to
+ * absolute paths against the directory of the config that declared them — which
+ * is what Deno does, and is what makes resolution correct no matter which
+ * subdirectory cf view was launched from. `root` is the topmost directory that
+ * held a config, used to bound real-file reads.
+ */
+function discoverConfig(
+  cwd: string,
+): { importMap: Record<string, string>; root: string } {
+  const importMap: Record<string, string> = {};
+  let root = cwd;
+  let dir = cwd;
+  for (let depth = 0; depth < 64; depth++) {
+    for (const file of ["deno.json", "deno.jsonc"]) {
+      let raw: string;
+      try {
+        raw = Deno.readTextFileSync(join(dir, file));
+      } catch {
+        continue;
+      }
+      root = dir; // a config lives here; allow reads under the topmost one
+      for (const [key, value] of Object.entries(parseImports(raw))) {
+        if (key in importMap) continue; // a nearer config already set this key
+        if (!isLocalSpecifier(value)) continue; // jsr:/npm:/https: → leave as any
+        importMap[key] = isAbsolute(value) ? value : join(dir, value);
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return { importMap, root };
+}
+
+function parseImports(raw: string): Record<string, string> {
+  const parsed = safe(() => JSON.parse(raw)) ??
+    safe(() => JSON.parse(stripJsonc(raw)));
+  const imports = (parsed as { imports?: unknown } | undefined)?.imports;
+  if (!imports || typeof imports !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(imports as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Strip line and block comments from JSONC, leaving comment-like sequences that
+ * sit inside string values intact (so a `"https://…"` or `"a//b"` value
+ * survives). String-aware, unlike a plain regex.
+ */
+function stripJsonc(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        out += text[i + 1] ?? "";
+        i++;
+      } else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++; // step past the closing slash
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+/** True if `child` is `parent` or sits beneath it (lexically). */
+function lexicallyWithin(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * True if `child` sits beneath `parent` PHYSICALLY: the check canonicalises
+ * both sides, so an in-workspace symlink pointing outside the workspace does
+ * not pass. `child` must exist (a nonexistent path cannot be read anyway).
+ */
+function within(child: string, parent: string): boolean {
+  if (!lexicallyWithin(child, parent)) return false;
+  try {
+    return lexicallyWithin(Deno.realPathSync(child), realDir(parent));
+  } catch {
+    return false;
+  }
+}
+
+function realDir(path: string): string {
+  try {
+    return Deno.realPathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Directory holding the bundled `lib.*.d.ts`, derived from the ts module URL. */
+function defaultLibDir(): string {
+  return dirname(fromFileUrl(import.meta.resolve("typescript")));
+}
+
+// --- ast helpers -------------------------------------------------------------
+
+/** The deepest node whose range contains `pos`. */
+function nodeAt(sf: ts.SourceFile, pos: number): ts.Node | undefined {
+  let found: ts.Node | undefined;
+  const visit = (n: ts.Node): void => {
+    if (pos >= n.getStart(sf) && pos < n.getEnd()) {
+      found = n;
+      n.forEachChild(visit);
+    }
+  };
+  sf.forEachChild(visit);
+  return found;
+}
+
+/**
+ * Suppress useless results so the card stays silent rather than say `any`. Also
+ * tidies the type for a one-line card: drops the `import("/abs/path").` prefix
+ * TypeScript emits for out-of-scope symbols, collapses whitespace, and clamps
+ * the length.
+ */
+function usefulType(str: string): string | null {
+  const tidy = str
+    .replace(/import\("[^"]*"\)\./g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (tidy === "" || tidy === "any" || tidy === "error") return null;
+  return tidy.length > 72 ? `${tidy.slice(0, 71)}…` : tidy;
+}
+
+function safe<T>(fn: () => T): T | undefined {
+  try {
+    return fn();
+  } catch {
+    return undefined;
+  }
+}

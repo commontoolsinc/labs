@@ -12,6 +12,7 @@
     ".": "./mod.ts"
   },
   "imports": {
-    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.8"
+    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.8",
+    "typescript": "npm:typescript"
   }
 }
