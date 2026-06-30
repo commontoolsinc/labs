@@ -323,11 +323,9 @@ export function resolveLink(
         // Swallow sync failures: this kick is best-effort (the read still
         // resolves from the local replica) and an unhandled rejection here
         // would otherwise escape the resolution path.
-        const promise = runtime.getCellFromLink(link).sync().catch(() => {})
-          .finally(() => {
-            runtime.storageManager.removeCrossSpacePromise(promise);
-          }) as unknown as Promise<void>;
-        runtime.storageManager.addCrossSpacePromise(promise);
+        runtime.storageManager.trackUntilSettled(
+          runtime.getCellFromLink(link).sync().catch(() => {}),
+        );
       }
     } else {
       break;
