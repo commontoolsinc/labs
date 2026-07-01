@@ -28,8 +28,9 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
-import { EXPERIMENTAL } from "../lib/env.ts";
+import { ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
 import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
+import { initBrowserOtel } from "../lib/otel.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -104,6 +105,19 @@ export class XRootView extends BaseView {
           return undefined;
         }
 
+        // Browser OpenTelemetry (Phase 3): self-gated + lazy — returns null
+        // (and imports no OTel SDK) unless telemetryEnabled is set. Attributes
+        // use the identity's DID and the currently resolved space (home space
+        // as the coarse default; the bridge also derives per-marker space.did
+        // from cell paths).
+        const userDid = app.identity.did();
+        const telemetry = await initBrowserOtel({
+          apiUrl: app.apiUrl,
+          userDid,
+          spaceDid: this.space ?? userDid,
+          environment: ENVIRONMENT,
+        });
+
         const rt = await RuntimeInternals.create({
           identity: app.identity,
           apiUrl: app.apiUrl,
@@ -113,6 +127,8 @@ export class XRootView extends BaseView {
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.
           navigate,
+          // Purely additive; null when telemetry is disabled.
+          telemetry: telemetry ?? undefined,
         });
 
         if (signal.aborted) {

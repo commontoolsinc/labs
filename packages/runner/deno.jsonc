@@ -18,6 +18,7 @@
     "./shared": "./src/shared.ts",
     "./slugs": "./src/slugs.ts",
     "./schemas": "./src/schemas.ts",
+    "./telemetry-otel-bridge": "./src/telemetry-otel-bridge.ts",
     "./storage/inspector": "./src/storage/inspector.ts",
     "./storage/telemetry": "./src/storage/telemetry.ts",
     "./storage/write-stack-trace": "./src/storage/write-stack-trace.ts",
