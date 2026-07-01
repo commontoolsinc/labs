@@ -28,12 +28,16 @@ const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /** Max records accepted in one POST (on top of the 1 MB body limit). */
 export const MAX_BATCH = 1000;
 
-// The partition leaf the caller chooses (e.g. a UTC day `2026-07-01`). The
-// write is ALWAYS confined to the channel's registered space + causePrefix, so
-// the partition value is not a security boundary — this bound just keeps it a
-// single clean segment so labs and loom derive the same cell cause.
-const PARTITION_RE = /^[A-Za-z0-9._-]{1,64}$/;
-export const isValidPartition = (p: string): boolean => PARTITION_RE.test(p);
+// A single clean cause segment. Used for BOTH halves of the cell cause
+// `${causePrefix}/${partition}`. Charset + length bounded, and never `.`/`..`
+// (which pass the charset but would address a cell loom's date enumerator never
+// reads — a silent write-to-nowhere). NOT a security boundary: the write is
+// always confined to the channel's registered space + causePrefix regardless of
+// the value — this is a shape contract so labs and loom derive the same cell id.
+const SEGMENT_RE = /^[A-Za-z0-9._-]{1,64}$/;
+export const isValidSegment = (s: string): boolean =>
+  SEGMENT_RE.test(s) && s !== "." && s !== "..";
+export const isValidPartition = isValidSegment;
 
 export interface IngestRegistration {
   id: string;
@@ -196,11 +200,100 @@ export async function appendToJournal(
   };
   await custodyIngest.update(
     cell,
-    (current) => [
-      ...((current as Record<string, unknown>[] | undefined) ?? []),
-      ...records,
-    ],
+    (current) => [...(current ?? []), ...records],
     channel,
   );
   return records.length;
+}
+
+const DUMMY_HASH = "0".repeat(64);
+
+/** A minimal logger shape so processIngest is testable without a pino instance. */
+interface IngestLogger {
+  error: (obj: unknown, msg: string) => void;
+  info: (obj: unknown, msg: string) => void;
+}
+
+export type IngestResult =
+  | { status: 200; body: { received: number; appended: number } }
+  | { status: 400 | 401 | 413 | 502; body: { error: string } };
+
+/**
+ * The transport-independent core of the ingest handler — everything after the
+ * bearer token and JSON body have been pulled off the request. Split out from
+ * the Hono handler so the full auth contract (bearer lookup, dummy-hash-
+ * equalized 401 for missing/disabled/wrong-token, 502-vs-401, hostile-partition
+ * 400, batch cap) is unit-testable against a real runtime. `body` is the
+ * already-parsed JSON payload.
+ */
+export async function processIngest(
+  runtime: Runtime,
+  serviceSpace: string,
+  id: string,
+  token: string,
+  body: unknown,
+  logger?: IngestLogger,
+): Promise<IngestResult> {
+  // Storage errors must 502, not masquerade as 401.
+  let registration: IngestRegistration | null;
+  try {
+    registration = await getRegistration(runtime, serviceSpace, id);
+  } catch (error) {
+    logger?.error(
+      { error, id },
+      "ingest: storage error looking up registration",
+    );
+    return { status: 502, body: { error: "Failed to process request" } };
+  }
+
+  if (!registration || !registration.enabled) {
+    // Match the real verification path so missing/disabled channels can't be
+    // distinguished from a wrong token by timing.
+    await verifyIngestSecret(token, DUMMY_HASH);
+    return { status: 401, body: { error: "Invalid request" } };
+  }
+  if (!(await verifyIngestSecret(token, registration.secretHash))) {
+    return { status: 401, body: { error: "Invalid request" } };
+  }
+
+  const partition = (body as { partition?: unknown } | null)?.partition;
+  const records = (body as { records?: unknown } | null)?.records;
+
+  if (typeof partition !== "string" || !isValidPartition(partition)) {
+    return { status: 400, body: { error: "Invalid or missing partition" } };
+  }
+  if (
+    !Array.isArray(records) ||
+    records.length === 0 ||
+    !records.every(
+      (r) => r !== null && typeof r === "object" && !Array.isArray(r),
+    )
+  ) {
+    return {
+      status: 400,
+      body: { error: "records must be a non-empty array of objects" },
+    };
+  }
+  if (records.length > MAX_BATCH) {
+    return {
+      status: 413,
+      body: { error: `Batch too large (max ${MAX_BATCH} records)` },
+    };
+  }
+
+  try {
+    const appended = await appendToJournal(
+      runtime,
+      registration,
+      partition,
+      records as Record<string, unknown>[],
+    );
+    logger?.info({ id, partition, appended }, "ingest: appended records");
+    // received === appended in v1 (no server dedup); `appended` is a distinct
+    // field only to leave room for a future dedup story without a wire change.
+    return { status: 200, body: { received: records.length, appended } };
+  } catch (error) {
+    logger?.error({ error, id, partition }, "ingest: failed to append records");
+    return { status: 502, body: { error: "Failed to write records" } };
+  }
 }

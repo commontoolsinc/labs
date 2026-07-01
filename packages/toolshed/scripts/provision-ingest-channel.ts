@@ -20,6 +20,7 @@ import { identity } from "@/lib/identity.ts";
 import {
   generateIngestId,
   generateIngestSecret,
+  isValidSegment,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 
@@ -38,6 +39,16 @@ if (!space || !installId) {
 }
 const causePrefix = flags["cause-prefix"] ?? "location";
 const name = flags.name ?? `ingest-${installId}`;
+
+// causePrefix is the other half of the `${causePrefix}/${partition}` cause that
+// loom must recompute to read the cells — hold it to the same clean-segment rule
+// as the partition so an operator typo can't silently orphan the read path.
+if (!isValidSegment(causePrefix)) {
+  console.error(
+    `Invalid --cause-prefix '${causePrefix}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
+  );
+  Deno.exit(2);
+}
 
 const runtime = new Runtime({
   apiUrl: new URL(env.MEMORY_URL),

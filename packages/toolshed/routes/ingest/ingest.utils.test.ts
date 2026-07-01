@@ -11,9 +11,15 @@ import {
   type IngestRegistration,
   isValidPartition,
   journalCell,
+  MAX_BATCH,
+  processIngest,
   saveRegistration,
   verifyIngestSecret,
 } from "./ingest.utils.ts";
+
+// Golden cell id for cause "location/2026-07-01" — pins the cross-repo cell
+// address so a fabric hash-format change fails CI loudly (loom recomputes it).
+const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
 
 // The journal sink is the security-critical write path (durable, marked, into a
 // caller-provided space). These exercise it directly against an emulated store
@@ -194,5 +200,122 @@ describe("ingest journal sink", () => {
     await saveRegistration(runtime, space, r);
     expect(await getRegistration(runtime, space, "ing_rt")).toEqual(r);
     expect(await getRegistration(runtime, space, "ing_missing")).toBeNull();
+  });
+
+  it("day-cell id is a stable function of the cause (cross-repo golden id)", async () => {
+    // loom READS by recomputing this exact id from the cause string. If the
+    // fabric hash format changes, this literal breaks CI loudly instead of
+    // silently orphaning loom's reader.
+    const cell = journalCell(runtime, reg(), "2026-07-01");
+    await cell.sync();
+    expect(cell.getAsNormalizedFullLink().id).toBe(GOLDEN_ID);
+  });
+
+  // --- processIngest: the full auth + validation contract ---
+  const savedReg = async (
+    overrides: Partial<IngestRegistration> = {},
+  ): Promise<{ r: IngestRegistration; secret: string }> => {
+    const { secret, hashPromise } = generateIngestSecret();
+    const secretHash = await hashPromise;
+    const r = reg({ id: "ing_auth", secretHash, ...overrides });
+    await saveRegistration(runtime, space, r);
+    return { r, secret };
+  };
+
+  it("processIngest: unknown / disabled / wrong-token all -> identical 401", async () => {
+    const { r } = await savedReg({ id: "ing_ok" });
+    await saveRegistration(
+      runtime,
+      space,
+      reg({ id: "ing_off", secretHash: "unused", enabled: false }),
+    );
+
+    const unknown = await processIngest(runtime, space, "ing_unknown", "t", {
+      partition: "2026-07-01",
+      records: [{ x: 1 }],
+    });
+    const disabled = await processIngest(runtime, space, "ing_off", "t", {
+      partition: "2026-07-01",
+      records: [{ x: 1 }],
+    });
+    const wrong = await processIngest(runtime, space, "ing_ok", "ingsec_nope", {
+      partition: "2026-07-01",
+      records: [{ x: 1 }],
+    });
+
+    for (const res of [unknown, disabled, wrong]) {
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Invalid request" });
+    }
+    // A wrong token wrote nothing.
+    const cell = journalCell(runtime, r, "2026-07-01");
+    await cell.sync();
+    expect(cell.get()).toBeUndefined();
+  });
+
+  it("processIngest: storage lookup error -> 502 (not 401)", async () => {
+    const broken = {
+      getCell() {
+        throw new Error("boom");
+      },
+    } as unknown as Runtime;
+    const res = await processIngest(broken, space, "ing_x", "t", {
+      partition: "d",
+      records: [{ x: 1 }],
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it("processIngest: valid token -> 200 and durably appends", async () => {
+    const { r, secret } = await savedReg({ id: "ing_write" });
+    const res = await processIngest(runtime, space, "ing_write", secret, {
+      partition: "2026-07-05",
+      records: [{ point_id: "a" }, { point_id: "b" }],
+    });
+    expect(res).toEqual({ status: 200, body: { received: 2, appended: 2 } });
+    const cell = journalCell(runtime, r, "2026-07-05");
+    await cell.sync();
+    expect(cell.get()).toEqual([{ point_id: "a" }, { point_id: "b" }]);
+  });
+
+  it("processIngest: hostile / missing partition -> 400, no write", async () => {
+    const { secret } = await savedReg({ id: "ing_part" });
+    for (const bad of ["../x", "", "a/b", "..", "."]) {
+      const res = await processIngest(runtime, space, "ing_part", secret, {
+        partition: bad,
+        records: [{ x: 1 }],
+      });
+      expect(res.status).toBe(400);
+    }
+    const missing = await processIngest(runtime, space, "ing_part", secret, {
+      records: [{ x: 1 }],
+    });
+    expect(missing.status).toBe(400);
+  });
+
+  it("processIngest: bad records shape -> 400", async () => {
+    const { secret } = await savedReg({ id: "ing_rec" });
+    const bodies: unknown[] = [
+      { partition: "d", records: [] },
+      { partition: "d", records: "nope" },
+      { partition: "d", records: [1, 2] },
+      { partition: "d", records: [null] },
+      { partition: "d", records: [["nested"]] },
+      { partition: "d" },
+    ];
+    for (const body of bodies) {
+      const res = await processIngest(runtime, space, "ing_rec", secret, body);
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("processIngest: over-cap batch -> 413", async () => {
+    const { secret } = await savedReg({ id: "ing_cap" });
+    const records = Array.from({ length: MAX_BATCH + 1 }, (_, i) => ({ i }));
+    const res = await processIngest(runtime, space, "ing_cap", secret, {
+      partition: "2026-07-06",
+      records,
+    });
+    expect(res.status).toBe(413);
   });
 });

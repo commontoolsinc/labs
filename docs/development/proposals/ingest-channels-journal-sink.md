@@ -118,6 +118,7 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 4. **`install_id` join** comes from the channel registration at read time, never from the lean point; a missing `install_id` is a hard error in production, not a `local-dev` fallback.
 5. **Dedup on read** — the `journal` sink appends; `point_id` idempotency is loom's on import.
 6. **Day-cell addressing** — day = UTC date of `point.ts` (`YYYY-MM-DD`); one point → one cell; midnight-spanning batches split client-side (one POST per UTC day). The read helper enumerates the same day cells.
+7. **Cell-id derivation (load-bearing).** A partition cell is `runtime.getCell(userSpace, "${causePrefix}/${partition}", schema)`; its document id is `of:` + the fabric `fid1` hash of the causal reference built from the cause string `${causePrefix}/${partition}` (e.g. cause `location/2026-07-01` → `of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8`). loom's reader must compute the **same** id to read the cell — it should reuse the shared fabric hasher, not reimplement `fid1` in Python, since a byte-level mismatch silently orphans the read path. A golden-id test (`ingest.utils.test.ts`) pins this so any hash-format drift fails CI loudly. Both `causePrefix` and `partition` are constrained to a single clean segment (`^[A-Za-z0-9._-]{1,64}$`, never `.`/`..`) so the two sides derive identical ids.
 
 ## Open decisions
 
@@ -147,3 +148,5 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 - Ingest where the runtime never sees the raw bytes (Estuary is operator-trusted v1).
 - Per-record (vs per-POST) provenance attestation — would need `custodyIngest.append` (N marks); a future fork.
 - Retention/GC of old journal partitions (a future generic trail-management concern).
+- **Intra-partition size cap.** `appendToJournal` does `[...current, ...records]` with no per-partition ceiling, and `custodyIngest.update` re-serializes the whole value each write, so sustained appends to one partition are O(N²) and grow unbounded within per-POST limits. Confined to the token holder's own space and bounded in practice by per-day partitioning (one UTC day of genuine traffic); a cheap element-count backstop is a tracked follow-up, not v1.
+- **Extracting the shared bearer-auth crypto + registry.** `verifyIngestSecret`, `randomBase62`, and the service-space registry are copied from `webhooks.utils.ts` (the proven path). A `lib/ingest-registry.ts` extraction shared by both routes is the fast-follow that avoids drift — deferred with the self-serve create work to keep this PR from churning shipped, re-vendored webhook code.
