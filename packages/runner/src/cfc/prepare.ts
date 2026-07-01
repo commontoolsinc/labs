@@ -3198,6 +3198,26 @@ export const prepareBoundaryCommit = (
   if (ingestKey !== undefined) {
     targetKeys.add(ingestKey);
   }
+  // (S16) Result containers a list coordinator (filter/flatMap) declared this
+  // tx: re-derive their `structure` label from J every reconcile, decoupled
+  // from value writes. Membership taint (the predicate-result reads the
+  // coordinator consumed) settles on a later pass than the container's root
+  // value write, and incremental changes are slot/no-op writes that never
+  // re-stamp the root — so without this the taint never lands. Only when there
+  // IS taint (flowHasLabels): a transient empty-J reconcile must NOT clear a
+  // correct prior structure label (resume/loading), so we leave the container
+  // off the persist loop then (fail-safe: keep the existing label).
+  const structureContainerPaths = new Map<string, readonly string[]>();
+  if (flowPersist && flowHasLabels) {
+    for (const addr of tx.getCfcState().structureContainers) {
+      const containerKey = targetKey(addr);
+      structureContainerPaths.set(
+        containerKey,
+        canonicalizeLogicalPath(addr.path),
+      );
+      targetKeys.add(containerKey);
+    }
+  }
   if (flowPersist && flowTargets !== undefined) {
     // Flow targets enter the persist loop when there is taint to attach or
     // stale per-value components (derived/link) to replace under a written
@@ -3540,6 +3560,28 @@ export const prepareBoundaryCommit = (
           continue;
         }
         derivedStampPaths.push(path);
+      }
+      // (S16) A declared list-coordinator container re-derives its `structure`
+      // from J this reconcile even with no value write: drop the carried-forward
+      // structure entry at the exact container path (preserving per-slot
+      // `link[i]` labels) and re-stamp it below with the current J.
+      const structureContainerPath = structureContainerPaths.get(key);
+      if (structureContainerPath !== undefined) {
+        const containerPathKey = pathKey(structureContainerPath);
+        for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
+          const candidateEntry = persistedLabelEntries[i];
+          if (
+            candidateEntry.origin === "structure" &&
+            pathKey(candidateEntry.path) === containerPathKey
+          ) {
+            persistedLabelEntries.splice(i, 1);
+          }
+        }
+        if (
+          !structureStampPaths.some((p) => pathKey(p) === containerPathKey)
+        ) {
+          structureStampPaths.push(structureContainerPath);
+        }
       }
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
