@@ -138,7 +138,7 @@ undefined for pre-existing records, so editing or removing an old option
 silently no-ops, and toggling an old vote adds a parallel new-scheme vote that
 double-counts in the tally. There is no data migration for pattern instances, so
 this applies to fresh polls; existing deployed polls would need to be recreated
-(or a one-time migration written) to benefit.
+to benefit.
 
 ## The danger with `push`, and making it safe
 
