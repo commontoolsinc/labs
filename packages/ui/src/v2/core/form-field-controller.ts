@@ -53,6 +53,11 @@ export interface CellControllerLike<T> {
   getValue(): T;
   setValue(value: T): void;
   /**
+   * Optional: run any pending (debounced) write immediately, so a following
+   * read or commit sees the latest value.
+   */
+  flush?(): void;
+  /**
    * Optional method to get the underlying CellHandle for direct async operations.
    * Used by FormFieldController to await cell.set() during flush.
    * Returns null if no Cell is bound, or the CellHandle with async set().
@@ -160,6 +165,33 @@ export class FormFieldController<T> implements ReactiveController {
     } else {
       this._cellController.setValue(value);
     }
+  }
+
+  /**
+   * Flush the field's current value to the bound cell and await the set()
+   * round-trip. Uses the buffered value in a form context, otherwise the cell
+   * controller's value, draining any pending debounced/throttled write first.
+   * In a form context this commits the field immediately rather than waiting for
+   * the form's atomic submit, and rebaselines dirty/reset tracking to the
+   * committed value. Resolves once the local apply and the set() round-trip
+   * complete; it does not surface a remote-commit rejection (the underlying
+   * set() logs and swallows that). When no Cell is bound, it falls back to the
+   * cell controller's setValue, mirroring the form's flush.
+   */
+  async commit(): Promise<void> {
+    this._cellController.flush?.();
+    const valueToFlush = this._hasBuffer
+      ? this._buffer as T
+      : this._cellController.getValue();
+    const cell = this._cellController.getCell?.();
+    if (cell) {
+      await cell.set(valueToFlush);
+    } else {
+      this._cellController.setValue(valueToFlush);
+    }
+    // Rebaseline dirty/reset tracking so a later isDirty()/reset() stays
+    // coherent with what was committed (mirrors the form-registered flush).
+    this._originalValue = valueToFlush;
   }
 
   /**

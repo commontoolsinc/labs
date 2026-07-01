@@ -281,7 +281,7 @@ export function rewriteExpressionSite(
   const hasLogicalOps = containsLogicalBinaryOperator(expression);
   const controlFlowNeedsRewrite = containerKind === "jsx-expression" &&
     isControlFlowRewriteExpression(expression) &&
-    analysis.containsOpaqueRef;
+    analysis.containsReactive;
 
   if (!analysis.requiresRewrite && !hasLogicalOps && !controlFlowNeedsRewrite) {
     return undefined;
@@ -290,9 +290,9 @@ export function rewriteExpressionSite(
   if (context.options.mode === "error") {
     if (containerKind === "jsx-expression") {
       context.reportDiagnostic({
-        type: "opaque-ref:jsx-expression",
+        type: "reactive:jsx-expression",
         message:
-          "JSX expression with OpaqueRef computation should use computed()",
+          "JSX expression with Reactive computation should use computed()",
         node: expression,
       });
     }
@@ -368,9 +368,8 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
 
   if (context.options.mode === "error") {
     context.reportDiagnostic({
-      type: "opaque-ref:jsx-expression",
-      message:
-        "JSX expression with OpaqueRef computation should use computed()",
+      type: "reactive:jsx-expression",
+      message: "JSX expression with Reactive computation should use computed()",
       node: expression,
     });
     return expression;
@@ -791,7 +790,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
     } = {},
   ): ts.Expression | undefined => {
     const analysis = analyze(expression);
-    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+    if (analysis.containsReactive && analysis.requiresRewrite) {
       const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
         analysis,
       );

@@ -67,6 +67,7 @@ import {
   type CfcFlowLabelsMode,
   type CfcLabelView,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  externalIngestStamp,
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
@@ -263,6 +264,13 @@ export interface RuntimeOptions {
    * {@link ModuleByteCache}.
    */
   moduleByteCache?: ModuleByteCache;
+  /**
+   * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
+   * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
+   * a test harness can inject a deterministic mock without mutating process
+   * globals. (LLM calls mock separately, at the `LLMClient` layer.)
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface CfcRuntimeStats {
@@ -379,6 +387,12 @@ export class Runtime {
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /**
+   * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
+   * the host `globalThis.fetch`; a test harness can inject a mock via
+   * `RuntimeOptions.fetch`.
+   */
+  readonly fetch: typeof globalThis.fetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -448,6 +462,12 @@ export class Runtime {
     this.spaceHostMap = options.spaceHostMap
       ? Object.freeze({ ...options.spaceHostMap })
       : undefined;
+    // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
+    // preserving the existing behavior where a test overrides the global AFTER
+    // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
+    // mock is used as-is.
+    this.fetch = options.fetch ??
+      ((input, init) => globalThis.fetch(input, init));
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
@@ -537,7 +557,7 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work the async builtins (fetchData,
+  // In-flight async builtin operations — the work the async builtins (fetchJson,
   // fetchProgram, llm/llmDialog, and reactive sqlite queries) perform AFTER their
   // handler returns, from a post-commit outbox flush: a network / LLM call or a
   // sqlite RPC, plus the result writeback. `idle()` deliberately does NOT wait
@@ -748,15 +768,12 @@ export class Runtime {
     const key = `${link.space}\0${link.id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     this.missingDocLoadKicks.add(key);
-    const maybePromise = this.getCellFromLink(link).sync();
-    if (maybePromise instanceof Promise) {
-      this.storageManager.trackUntilSettled(
-        maybePromise.catch(() => {
-          // Allow a retry on failure (e.g. transient disconnect).
-          this.missingDocLoadKicks.delete(key);
-        }),
-      );
-    }
+    this.storageManager.trackUntilSettled(
+      this.getCellFromLink(link).sync().catch(() => {
+        // Allow a retry on failure (e.g. transient disconnect).
+        this.missingDocLoadKicks.delete(key);
+      }),
+    );
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
@@ -874,6 +891,18 @@ export class Runtime {
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
+      // A vouched ingest still needs its provenance mark minted even where CFC
+      // enforcement is disabled (e.g. the operator/toolshed runtime). The mint
+      // is a builtin-authored boundary-commit step that never rejects, so run
+      // prepare for it explicitly rather than forcing the enforcement dial up
+      // (which would desync ingest txs from the runtime's real mode). The
+      // stamp already marked the tx relevant; nothing else here applies when
+      // disabled, so fall straight through to prepareCfc.
+      if (externalIngestStamp(tx) !== undefined) {
+        if (state.prepare.status === "unprepared") {
+          tx.prepareCfc();
+        }
+      }
       return;
     }
     // Flow-label relevance is computed, not caller-marked (S16): the

@@ -23,7 +23,7 @@ descriptor lives as server-side state keyed by the handle cell's id.
 
 ```ts
 // Shown inside a pattern body.
-const db = sqliteDatabase({ tables }); // -> OpaqueRef<SqliteDb>, bound to a cell the runtime allocates here
+const db = sqliteDatabase({ tables }); // -> Reactive<SqliteDb>, bound to a cell the runtime allocates here
 ```
 
 **Status: implemented.** This is the source used by everything specified in this
@@ -86,7 +86,7 @@ const db = sqliteDatabase({}, { vm: vmHandle, path: "/data/app.db" });
 toolshed `/api` calls, which we intend to improve regardless. For this spec the
 source is **stubbed**: it assumes
 
-- an **opaque, cell-based handle to a VM** (`vmHandle: OpaqueRef<VmHandle>`),
+- an **opaque, cell-based handle to a VM** (`vmHandle: Reactive<VmHandle>`),
   resolved server-side to a concrete VM the same way other opaque
   capability handles are, and
 - a **file path within that VM** (`path: string`).
@@ -97,7 +97,7 @@ Atomicity guarantees (Section [04](./04-server-execution-and-transactions.md))
 are **not** offered for VM sources in v1 — a VM file cannot be ATTACHed to the
 space engine's connection, so writes to it cannot join the space commit
 transaction. When implemented, VM-file writes will run as a post-commit effect
-(like `fetchData`) with at-least-once semantics, not as part of the atomic
+(like `fetchJson`) with at-least-once semantics, not as part of the atomic
 commit. This limitation is intentional and called out so callers don't assume
 cross-store atomicity they won't get.
 

@@ -1,14 +1,14 @@
-# OpaqueRef Transformer Status & Roadmap
+# Reactive Transformer Status & Roadmap
 
 _Last updated: 2025-09-23_
 
 ## Overview
 
 `@commonfabric/ts-transformers` now houses our TypeScript AST transformers. The
-package exposes the modular OpaqueRef rewrite we ship to pattern authors (via
-`createModularOpaqueRefTransformer`), and `@commonfabric/js-runtime` now
-consumes that implementation directly. This document captures the current
-implementation, outstanding gaps, and the focused roadmap we intend to pursue.
+package exposes the modular Reactive rewrite we ship to pattern authors (via
+`createModularReactiveTransformer`), and `@commonfabric/js-runtime` now consumes
+that implementation directly. This document captures the current implementation,
+outstanding gaps, and the focused roadmap we intend to pursue.
 
 ## Current Implementation
 
@@ -21,10 +21,10 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 - **Shared context** – `core/context.ts` centralises the TypeScript checker,
   cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting,
   and import management.
-- **Data flow analysis** – `opaque-ref/dataflow.ts` walks expressions to collect
+- **Data flow analysis** – `reactive/dataflow.ts` walks expressions to collect
   reactive data flows, handles most scope boundaries, and records provenance so
   map callbacks typed as `any` can still be derived.
-- **Rewrite helpers** – `opaque-ref/rewrite/**` modules handle property access,
+- **Rewrite helpers** – `reactive/rewrite/**` modules handle property access,
   binary/call/template expressions, ternaries, unary `!`, and container rewrites
   using a common binding plan. Import requests are applied at the end of the
   pass.
@@ -37,7 +37,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 - **Map callback parity** – parameters annotated as `any`/`number` now derive
   correctly inside `.map` callbacks.
 - **Unary `!`** – predicates like `!flag` wrap into `derive` where necessary.
-- **Docs fixture** – `opaque-ref-cell-map` fixture reproduces the CT-891 case so
+- **Docs fixture** – `reactive-cell-map` fixture reproduces the CT-891 case so
   we keep coverage on the new transformer.
 - **Optional import handling** – the modular path defers import insertion until
   all rules run, preventing duplicate helper imports.
@@ -117,8 +117,8 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 
 ### Future Extensions
 
-- **Proactive OpaqueRef conversion**: Add new rule to automatically wrap
-  non-OpaqueRef values that should be reactive, leveraging the cleaned-up
+- **Proactive Reactive conversion**: Add new rule to automatically wrap
+  non-Reactive values that should be reactive, leveraging the cleaned-up
   architecture to identify candidates and apply appropriate transformations
 - **Import flexibility**: Expand helper resolution so the rewrite pipeline works
   when authors:
@@ -146,7 +146,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 
 ### Problem Statement
 
-The normalization phase (`opaque-ref/normalize.ts`) is responsible for:
+The normalization phase (`reactive/normalize.ts`) is responsible for:
 
 1. Deduplicating expressions that refer to the same reactive value
 2. Suppressing parent expressions when child expressions are more specific
@@ -286,7 +286,7 @@ See "Test Coverage Analysis" section below for comprehensive testing strategy.
 
 #### 1. Unit Tests for Normalization
 
-Create `test/opaque-ref/normalize.test.ts`:
+Create `test/reactive/normalize.test.ts`:
 
 ```typescript
 // Test parent suppression logic directly
@@ -362,10 +362,10 @@ Use a property-based testing framework to:
 
 ## References
 
-- `packages/ts-transformers/src/opaque-ref/transformer.ts`
-- `packages/ts-transformers/src/opaque-ref/dataflow.ts`
-- `packages/ts-transformers/src/opaque-ref/rewrite/**`
-- `packages/ts-transformers/src/opaque-ref/normalize.ts` (needs refactor)
+- `packages/ts-transformers/src/reactive/transformer.ts`
+- `packages/ts-transformers/src/reactive/dataflow.ts`
+- `packages/ts-transformers/src/reactive/rewrite/**`
+- `packages/ts-transformers/src/reactive/normalize.ts` (needs refactor)
 - `packages/ts-transformers/test/fixtures`
 - `packages/schema-generator/docs/refactor_plan.md` (historical context; see
   Linear tickets for remaining work)

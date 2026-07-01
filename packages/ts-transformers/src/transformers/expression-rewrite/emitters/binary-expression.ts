@@ -101,7 +101,7 @@ export const emitBinaryExpression: Emitter = ({
   // This is important for cases like `computed(() => plainValue) && <JSX>`
   // where the computed() returns a reactive value but doesn't contain reactive
   // refs in its inputs.
-  const leftIsOpaqueRef = isReactiveValueExpression(
+  const leftIsReactive = isReactiveValueExpression(
     expression.left,
     context.checker,
   );
@@ -109,7 +109,7 @@ export const emitBinaryExpression: Emitter = ({
   // Skip if no dataflows AND left side isn't reactive
   if (
     dataFlows.length === 0 &&
-    !leftIsOpaqueRef &&
+    !leftIsReactive &&
     !shouldLowerByContextPolicy
   ) {
     return undefined;

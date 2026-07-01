@@ -1080,7 +1080,7 @@ export interface IObjectCreator<T> {
 
   // In the SchemaObjectTraverser system, we don't need to annotate the object
   // or even create a returned value.
-  // In the validateAndTransform system, we may add the toCell and toOpaqueRef
+  // In the validateAndTransform system, we may add the toCell and toReactive
   // functions or actualy create the cell.
   createObject(
     link: NormalizedFullLink,

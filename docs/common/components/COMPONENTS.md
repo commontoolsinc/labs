@@ -135,7 +135,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-map` | Interactive Leaflet/OpenStreetMap map (see [cf-map](#cf-map)) | `$value`, `$center`, `$zoom`, `$bounds` |
 | `cf-markdown` | Renders markdown with syntax highlighting and copy buttons | `$content` |
 | `cf-message-beads` | Compact bead visualization of a message history | `$messages` |
-| `cf-message-input` | Input + send button combo for chat-style item entry | |
+| `cf-message-input` | Input + send button combo for chat-style item entry; emits a synthetic (untrusted) `cf-send` event, so use `cf-submit-input` when the submit must authorize an owner-protected write | |
 | `cf-modal` | Accessible modal dialog with bottom-sheet presentation mode | `$open` |
 | `cf-modal-provider` | Modal stack manager | |
 | `cf-oauth` | Generic OAuth authentication | `$auth` |
@@ -161,6 +161,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-skeleton` | Animated loading placeholder | |
 | `cf-slider` | Range input slider | |
 | `cf-space-link` | Renders a space as a clickable navigation pill | |
+| `cf-submit-input` | Text field + submit button whose real (trusted) click carries the typed text as `event.target.value` with the surface's UI integrity, so it can authorize an owner-protected runtime write; prefer over `cf-message-input` when the submit gesture must be trusted | |
 | `cf-svg` | Renders SVG content from a string | |
 | `cf-switch` | Toggle switch for binary on/off state | `$checked` |
 | `cf-tab` | Individual tab button used within `cf-tab-list` | |

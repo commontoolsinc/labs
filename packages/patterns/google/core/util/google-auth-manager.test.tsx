@@ -4,7 +4,7 @@
  * Tests the GoogleAuthManager pattern behavior:
  * - Initial state (loading when no auth exists)
  * - Helper computed values (isReady, currentEmail, currentState)
- * - AuthInfo structure
+ * - Auth availability and AuthInfo structure
  *
  * Note: Since this pattern depends on wish() finding auth pieces,
  * we can only test the "no auth found" scenarios without external setup.
@@ -16,6 +16,7 @@ import {
   GoogleAuthManager,
   type GoogleAuthManagerOutput,
 } from "./google-auth-manager.tsx";
+import { hasText } from "../../../test/vnode-helpers.ts";
 
 export interface TestOutput {
   tests: unknown[];
@@ -61,18 +62,20 @@ export default pattern<Record<string, never>, TestOutput>(() => {
     return state === "loading";
   });
 
-  const assert_default_auth_null = computed(() => authDefault.auth === null);
+  const assert_default_availability_loading = computed(() =>
+    authDefault.availability.state === "loading" &&
+    authDefault.availability.auth === null
+  );
 
-  // AuthInfo should exist and have expected structure
-  const _assert_authInfo_exists = computed(
+  const assert_authInfo_exists = computed(
     () => authDefault.authInfo != null,
   );
 
-  const _assert_authInfo_state_matches = computed(
+  const assert_authInfo_state_matches = computed(
     () => authDefault.authInfo.state === authDefault.currentState,
   );
 
-  const _assert_authInfo_email_empty = computed(
+  const assert_authInfo_email_empty = computed(
     () => authDefault.authInfo.email === "",
   );
 
@@ -96,6 +99,14 @@ export default pattern<Record<string, never>, TestOutput>(() => {
     () => authDefault.pickerUI !== undefined,
   );
 
+  const assert_fullUI_names_google_permissions = computed(() =>
+    hasText(authWithScopes.fullUI, "Connect Your Google Account") &&
+    hasText(
+      authWithScopes.fullUI,
+      "Gmail (read emails), Calendar (read events)",
+    )
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -104,15 +115,12 @@ export default pattern<Record<string, never>, TestOutput>(() => {
       // === Initial state checks ===
       { assertion: assert_default_not_ready },
       { assertion: assert_default_state_initial },
-      { assertion: assert_default_auth_null },
+      { assertion: assert_default_availability_loading },
 
       // === AuthInfo structure checks ===
-      // NOTE: authInfo is a computed that depends on wish() results.
-      // In the unit test harness (no real wish infrastructure), the
-      // computed never fully materializes, so these are skipped.
-      // { assertion: assert_authInfo_exists },
-      // { assertion: assert_authInfo_state_matches },
-      // { assertion: assert_authInfo_email_empty },
+      { assertion: assert_authInfo_exists },
+      { assertion: assert_authInfo_state_matches },
+      { assertion: assert_authInfo_email_empty },
 
       // === Variant instances ===
       { assertion: assert_withScopes_not_ready },
@@ -123,6 +131,7 @@ export default pattern<Record<string, never>, TestOutput>(() => {
       { assertion: assert_fullUI_exists },
       { assertion: assert_statusUI_exists },
       { assertion: assert_pickerUI_exists },
+      { assertion: assert_fullUI_names_google_permissions },
     ],
     // Expose subjects for debugging
     authDefault,

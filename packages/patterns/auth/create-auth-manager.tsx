@@ -23,11 +23,19 @@ import {
   safeDateNow,
   type Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
 
-import type { AuthInfo, AuthState, TokenExpiryWarning } from "./auth-types.ts";
+import type {
+  AuthAvailability,
+  AuthCell,
+  AuthInfo,
+  AuthState,
+  OAuthAuthData,
+  TokenExpiryWarning,
+} from "./auth-types.ts";
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
 import { STATUS_COLORS, STATUS_MESSAGES } from "./auth-manager-descriptor.ts";
 import { formatTimeRemaining } from "./auth-ui-helpers.tsx";
@@ -37,7 +45,14 @@ import {
 } from "./auth-reactive.ts";
 
 // Re-export for consumers
-export type { AuthInfo, AuthState, TokenExpiryWarning };
+export type {
+  AuthAvailability,
+  AuthCell,
+  AuthInfo,
+  AuthState,
+  OAuthAuthData,
+  TokenExpiryWarning,
+};
 
 // =============================================================================
 // SHARED TYPES
@@ -54,35 +69,32 @@ export interface AuthManagerBaseInput extends AuthManagerInput {
   createAuth: Stream<void>;
 }
 
-export interface AuthManagerOutput {
-  // deno-lint-ignore no-explicit-any
-  auth: any | null;
-  authInfo: AuthInfo;
+export interface AuthManagerOutput<
+  TAuth extends OAuthAuthData = OAuthAuthData,
+> {
+  auth: AuthCell<TAuth> | null;
+  availability: AuthAvailability<TAuth>;
+  authInfo: AuthInfo<TAuth>;
   isReady: boolean;
   currentEmail: string;
   currentState: AuthState;
-  // deno-lint-ignore no-explicit-any
-  pickerUI: any;
-  // deno-lint-ignore no-explicit-any
-  statusUI: any;
-  // deno-lint-ignore no-explicit-any
-  fullUI: any;
+  pickerUI: VNode;
+  statusUI: VNode;
+  fullUI: VNode;
 }
 
-// deno-lint-ignore no-explicit-any
-interface AuthPiece {
-  // deno-lint-ignore no-explicit-any
-  auth?: any;
+interface AuthPiece<TAuth extends OAuthAuthData = OAuthAuthData> {
+  auth?: AuthCell<TAuth>;
   scopes?: string[];
   selectedScopes?: Record<string, boolean>;
-  userChip?: unknown;
+  userChip?: VNode;
   refreshToken?: unknown;
 }
 
-interface DerivedAuthState {
-  // deno-lint-ignore no-explicit-any
-  auth: any | null;
-  authInfo: AuthInfo;
+interface DerivedAuthState<TAuth extends OAuthAuthData = OAuthAuthData> {
+  auth: AuthCell<TAuth> | null;
+  availability: AuthAvailability<TAuth>;
+  authInfo: AuthInfo<TAuth>;
   currentEmail: string;
   currentState: AuthState;
   hasRequiredScopes: boolean;
@@ -93,7 +105,7 @@ interface DerivedAuthState {
   isTokenExpiredState: boolean;
   missingScopes: string[];
   missingScopesList: string;
-  piece: AuthPiece | null;
+  piece: AuthPiece<TAuth> | null;
   refreshStream: unknown;
   scopesList: string;
   showAvatar: boolean;
@@ -108,7 +120,7 @@ interface DerivedAuthState {
   tokenTimeRemaining: number | null;
   expiryHintColor: string;
   expiryHintWeight: string;
-  userChip: unknown;
+  userChip: VNode | null;
 }
 
 // =============================================================================
@@ -157,13 +169,14 @@ const deriveAuthState = lift<{
   debugMode,
 }) => {
   const auth = piece?.auth ?? null;
-  const currentEmail = auth?.user?.email ?? "";
+  const authData = auth?.get() ?? null;
+  const currentEmail = authData?.user?.email ?? "";
   const requestedScopes = Array.isArray(requiredScopes) ? requiredScopes : [];
-  const grantedScopes = Array.isArray(auth?.scope) ? auth.scope : [];
-  const hasToken = !!auth?.[descriptor.tokenField];
+  const grantedScopes = Array.isArray(authData?.scope) ? authData.scope : [];
+  const hasToken = !!authData?.[descriptor.tokenField];
   const hasEmail = currentEmail !== "";
-  const tokenExpiresAt = typeof auth?.expiresAt === "number"
-    ? auth.expiresAt
+  const tokenExpiresAt = typeof authData?.expiresAt === "number"
+    ? authData.expiresAt
     : null;
   const tokenTimeRemaining = tokenExpiresAt === null
     ? null
@@ -222,8 +235,8 @@ const deriveAuthState = lift<{
     .join(", ");
   const showAvatar = descriptor.hasAvatarSupport &&
     currentState === "ready" &&
-    !!auth?.user?.picture;
-  const avatarUrl = (auth?.user?.picture ?? "") as string;
+    !!authData?.user?.picture;
+  const avatarUrl = (authData?.user?.picture ?? "") as string;
   const showExpiryInStatus = currentState === "ready" &&
     tokenExpiryDisplay !== "";
   const expiryHintColor = tokenExpiryWarning === "warning" ? "#b45309" : "#666";
@@ -251,12 +264,26 @@ const deriveAuthState = lift<{
     );
   }
 
+  const availability: AuthAvailability = !auth
+    ? { state: "loading", auth: null }
+    : currentState === "needs-login"
+    ? { state: "needs-login", auth }
+    : currentState === "missing-scopes"
+    ? {
+      state: "missing-scopes",
+      auth,
+      missingScopes,
+    }
+    : currentState === "token-expired"
+    ? { state: "token-expired", auth }
+    : { state: "ready", auth };
+
   return {
     auth,
+    availability,
     authInfo: {
       state: currentState,
-      auth,
-      authCell: auth,
+      availability,
       email: currentEmail,
       hasRequiredScopes,
       grantedScopes,
@@ -304,7 +331,7 @@ const deriveAuthState = lift<{
 // BASE PATTERN
 // =============================================================================
 
-export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
+const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
   ({ requiredScopes, accountType, debugMode, descriptor, createAuth }) => {
     // ======================================================================
     // WISH SETUP
@@ -338,6 +365,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       debugMode,
     });
     const auth = authState.auth;
+    const availability = authState.availability;
     const authInfo = authState.authInfo;
     const currentEmail = authState.currentEmail;
     const currentState = authState.currentState;
@@ -702,7 +730,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
             borderBottom: readyBorderBottom,
           }}
         >
-          {authState.userChip as any}
+          {authState.userChip}
           <div
             style={{
               marginLeft: "auto",
@@ -804,6 +832,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     // ====================================================================
     return {
       auth,
+      availability,
       authInfo,
       isReady,
       currentEmail,
@@ -815,3 +844,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     };
   },
 );
+
+export const AuthManagerBase = AuthManagerBasePattern as <
+  TAuth extends OAuthAuthData = OAuthAuthData,
+>(input: AuthManagerBaseInput) => AuthManagerOutput<TAuth>;

@@ -21,7 +21,7 @@ import {
   typeToSchemaTypeNode,
   unwrapCellLikeType,
 } from "../ast/mod.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
+import { getCellKind } from "./cell-type.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -697,7 +697,6 @@ const CELL_LIKE_TYPE_NODE_NAMES = spellingsWhere({
   Cell: true,
   Writable: true,
   OpaqueCell: true,
-  OpaqueRef: true,
   Reactive: true,
   ComparableCell: true,
   ReadonlyCell: true,

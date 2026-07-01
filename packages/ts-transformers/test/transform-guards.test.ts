@@ -374,8 +374,8 @@ Deno.test(
       `import { Cell, Default, handler, pattern, type Stream } from "commonfabric";
 
 const asIncrementStream = (
-  ref: unknown,
-): Stream<{ amount?: number }> => ref as Stream<{ amount?: number }>;
+  ref: Stream<{ amount?: number }>,
+): Stream<{ amount?: number }> => ref;
 
 const childIncrement = handler(
   (_event: { amount?: number } | undefined, _context: { value: Cell<number> }) => {},

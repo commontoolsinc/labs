@@ -107,7 +107,7 @@ describe("Schema: real API FactoryInput", () => {
     const code = `
       import type {
         FactoryInput,
-        OpaqueRef,
+        Reactive,
         Stream,
       } from "./packages/api/index.ts";
 
@@ -119,7 +119,7 @@ describe("Schema: real API FactoryInput", () => {
       }
 
       interface SchemaRoot {
-        state: FactoryInput<OpaqueRef<LLMState>>;
+        state: FactoryInput<Reactive<LLMState>>;
       }
     `;
     const { type, checker, sourceFile } = getTypeFromRealApiCode(

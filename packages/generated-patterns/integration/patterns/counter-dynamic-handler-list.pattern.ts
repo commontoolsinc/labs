@@ -65,7 +65,7 @@ const adjustValue = handler(
     }
 
     const amount = toInteger(event?.amount, 1);
-    const target = context.values.key(requested) as Cell<number>;
+    const target: Cell<number> = context.values.key(requested);
     const current = toInteger(target.get(), 0);
     const nextValue = current + amount;
     target.set(nextValue);

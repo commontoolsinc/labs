@@ -684,7 +684,7 @@ export function reportUnknownReactiveType(
       `type \`unknown\`, so its schema is \`{ type: "unknown" }\`, which the ` +
       `runner reads back as \`undefined\` instead of materializing it. Add an ` +
       `explicit type so it can be inferred (e.g. ` +
-      `\`fetchData<{ /* result shape */ }>({ ... })\`).`,
+      `\`fetchJson<{ /* result shape */ }>({ ... })\`).`,
     node: expression,
   });
 }

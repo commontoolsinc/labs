@@ -5,7 +5,7 @@ import type { WorkerVNode } from "../src/worker/types.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "@commonfabric/runner";
+import { KeepAsCell, Runtime } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 
@@ -865,7 +865,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         const propsCell = new MockPropsCell({
           $value: "linked content",
         }, {
-          $value: bindingCell.getAsLink({ keepAsCell: true }),
+          $value: bindingCell.getAsLink({ keepAsCell: KeepAsCell.All }),
         });
         const rootCell = new MockCell({
           type: "vnode",
@@ -991,7 +991,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           props: {
             $value: bindingCell.getAsLink({
               includeSchema: true,
-              keepAsCell: true,
+              keepAsCell: KeepAsCell.All,
             }),
             author: "alice",
           },
@@ -1075,7 +1075,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           type: "vnode",
           name: "cf-vstack",
           props: {},
-          children: [linkedChild.getAsLink({ keepAsCell: true })],
+          children: [linkedChild.getAsLink({ keepAsCell: KeepAsCell.All })],
         });
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
@@ -1141,7 +1141,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
                 props: { id: "nested-inline-card" },
                 children: ["Nested inline child"],
               },
-              linkedChild.getAsLink({ keepAsCell: true }),
+              linkedChild.getAsLink({ keepAsCell: KeepAsCell.All }),
             ],
           }],
         });

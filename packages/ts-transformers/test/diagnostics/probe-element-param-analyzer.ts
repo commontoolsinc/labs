@@ -4,7 +4,7 @@
  * For each `arr.map((p, ...) => …)` callback in fixture inputs, asks the
  * dataflow analyzer what it currently reports for every read of `p`, `p.x`,
  * `p.x.y`, etc. inside the callback body. This captures the analyzer's
- * blind spot before the Phase 2 fix: any line where `containsOpaqueRef=false`
+ * blind spot before the Phase 2 fix: any line where `containsReactive=false`
  * for a `p.foo`-style access is a place where the analyzer fails to recognize
  * the read as reactive.
  *
@@ -33,7 +33,7 @@ interface Probe {
   inJsx: boolean;
   inMethodCall: boolean;
   typeText: string;
-  containsOpaqueRef: boolean;
+  containsReactive: boolean;
   requiresRewrite: boolean;
   dataFlowsLength: number;
   reactiveMap: boolean;
@@ -301,14 +301,14 @@ async function main() {
           analysis = analyze(acc.expression);
         } catch (_) {
           analysis = {
-            containsOpaqueRef: false,
+            containsReactive: false,
             requiresRewrite: false,
             dataFlows: [],
           };
         }
 
         totalProbes++;
-        const silent = !analysis.containsOpaqueRef &&
+        const silent = !analysis.containsReactive &&
           !analysis.requiresRewrite;
         if (silent) {
           analyzerSilent++;
@@ -331,7 +331,7 @@ async function main() {
             acc.inMethodCall ? "y" : "n",
             accessText,
             typeText,
-            analysis.containsOpaqueRef ? "y" : "n",
+            analysis.containsReactive ? "y" : "n",
             analysis.requiresRewrite ? "y" : "n",
             analysis.dataFlows.length,
             reactiveMap ? "y" : "n",

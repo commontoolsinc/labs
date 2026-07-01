@@ -78,6 +78,7 @@ on the Common Fabric runtime.
 ### capabilities/ — built-in effects
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; reactive results, no `await`
+- [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary`; reactive results, no `await`
 
 ### workflows/ — CLI and testing mechanics
 

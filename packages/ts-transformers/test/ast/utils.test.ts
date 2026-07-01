@@ -12,6 +12,7 @@ import {
   isMethodCall,
   isOptionalMemberSymbol,
   setParentPointers,
+  visitEachChildWithJsx,
 } from "../../src/ast/utils.ts";
 
 function createProgram(source: string): {
@@ -295,4 +296,41 @@ Deno.test("AST utils set synthetic parent pointers for method-call helpers", () 
     getMethodCallTarget(callee.expression as ts.PropertyAccessExpression),
     undefined,
   );
+});
+
+Deno.test("visitEachChildWithJsx traverses elements, self-closing tags, and fragments", () => {
+  const source =
+    `const elem = <div a={oldName}><span b={oldName} />{oldName}</div>;\n` +
+    `const frag = <>{oldName} trailing</>;`;
+  const sourceFile = ts.createSourceFile(
+    "/test.tsx",
+    source,
+    ts.ScriptTarget.ES2020,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  const result = ts.transform(sourceFile, [
+    (context) => (root) => {
+      const visit: ts.Visitor = (visited) => {
+        if (ts.isIdentifier(visited) && visited.text === "oldName") {
+          return ts.factory.createIdentifier("newName");
+        }
+        return visitEachChildWithJsx(visited, visit, context);
+      };
+      return ts.visitNode(root, visit) as ts.SourceFile;
+    },
+  ]);
+
+  const printed = ts.createPrinter().printFile(
+    result.transformed[0] as ts.SourceFile,
+  );
+  result.dispose?.();
+
+  // The rename reached identifiers nested inside the element, the self-closing
+  // child, and the fragment — proving each branch traversed its children.
+  assertEquals(printed.includes("oldName"), false);
+  assert(printed.includes("<div a={newName}>"));
+  assert(printed.includes("<span b={newName}/>"));
+  assert(printed.includes("<>{newName} trailing</>"));
 });

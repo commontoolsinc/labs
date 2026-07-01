@@ -3,6 +3,11 @@ import type { Context } from "@hono/hono";
 import { getLogger } from "@commonfabric/utils/logger";
 import { runtime } from "@/index.ts";
 import type { JSONSchema } from "@commonfabric/runner";
+import {
+  custodyIngest,
+  durableSet,
+  type VouchedChannel,
+} from "@/lib/custody-ingest.ts";
 import type {
   OAuth2ProviderConfig,
   OAuth2Tokens,
@@ -147,6 +152,20 @@ export async function getAuthCell(docLink: string, schema: JSONSchema) {
   }
 }
 
+// Build the vouched-ingest channel for an OAuth auth cell. Pre-grant-infra the
+// channel is the cell's own space (the dedicated ingest location); the presenter
+// has no DID, so audience records the generic OAuth source. Both are
+// recorded-not-enforced and become real channel-space / presenter DIDs once the
+// owner grant lands (vouched-ingest-channel.md).
+function oauthIngestChannel(
+  authCell: Awaited<ReturnType<typeof getAuthCell>>,
+): VouchedChannel {
+  return {
+    channel: authCell.getAsNormalizedFullLink().space,
+    audience: "did:web:commonfabric.org#oauth2",
+  };
+}
+
 export async function persistTokens(
   tokenData: Record<string, unknown>,
   authCellDocLink: string,
@@ -156,10 +175,13 @@ export async function persistTokens(
     const authCell = await getAuthCell(authCellDocLink, schema);
     if (!authCell) throw new Error("Auth cell not found");
 
-    const { error } = await authCell.runtime.editWithRetry((tx: any) => {
-      authCell.withTx(tx).set(tokenData);
-    });
-    if (error) throw error;
+    // Tokens arrive from the OAuth provider — external bytes deposited into the
+    // fabric — so this is a vouched ingest: custodyIngest mints the
+    // ExternalIngest mark and split-mints it safely. channel/audience are
+    // recorded-not-enforced provenance; pre-grant-infra they identify the
+    // ingest location and source. They become the channel-space / presenter
+    // DIDs once the owner-grant lands (see vouched-ingest-channel.md).
+    await custodyIngest.set(authCell, tokenData, oauthIngestChannel(authCell));
 
     return tokenData;
   } catch (error) {
@@ -177,10 +199,9 @@ export async function clearAuthData(
     const authCell = await getAuthCell(authCellDocLink, schema);
     if (!authCell) throw new Error("Auth cell not found");
 
-    const { error } = await authCell.runtime.editWithRetry((tx: any) => {
-      authCell.withTx(tx).set(emptyData);
-    });
-    if (error) throw error;
+    // Clearing tokens on logout is an operator/user action, NOT external
+    // ingest — a governed durable write, but no provenance mark.
+    await durableSet(authCell, emptyData);
     return emptyData;
   } catch (error) {
     logger.error("Error clearing auth data:", error);

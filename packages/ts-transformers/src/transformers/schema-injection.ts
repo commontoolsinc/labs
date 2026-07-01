@@ -930,7 +930,7 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
  * an `asScope(scope)` method (the lowering target). This covers the schema-built
  * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
  * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
- * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * type is just `(...) => Reactive<...>` with an `asScope` method and so lacks
  * the `argumentSchema`/`resultSchema` shape that check keys on.
  */
 function calleeExposesAsScope(
@@ -3980,6 +3980,99 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      // fetchJson<T>({ url, ... }) - lowers the T type argument to an
+      // injected `schema` property (mirrors generate-object's `schema` and
+      // sqliteQuery's `rowSchema`). The runtime builtin verifies the fetched
+      // JSON against it at fetch time. A type argument is required;
+      // fetchJsonUnchecked is the untyped escape hatch.
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "fetchJson"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        if (!typeArgs || typeArgs.length !== 1) {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "fetch-json:missing-type-argument",
+            message: "fetchJson requires an explicit type argument, e.g. " +
+              "fetchJson<MyResult>({ url }). Use fetchJsonUnchecked for JSON " +
+              "whose shape isn't declared as a type.",
+            node,
+          });
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        {
+          const paramsArg = args[0];
+
+          // An explicit `schema` property takes precedence over injection.
+          const hasExplicitSchema = paramsArg &&
+            ts.isObjectLiteralExpression(paramsArg) &&
+            paramsArg.properties.some(
+              (p: ts.ObjectLiteralElementLike) =>
+                p.name && ts.isIdentifier(p.name) && p.name.text === "schema",
+            );
+
+          if (!hasExplicitSchema) {
+            const resolved = resolveInjectableSchemaType(
+              typeArgs[0],
+              checker,
+              sourceFile,
+              factory,
+              typeRegistry,
+              () => undefined,
+            );
+            const schemaCall = createRegisteredSchemaCallFromResolvedType(
+              context,
+              resolved,
+              checker,
+              typeRegistry,
+            );
+
+            if (schemaCall) {
+              // The derived `schema` is emitted FIRST so any caller-written
+              // property wins by later-property-wins semantics. The up-front
+              // check only catches an identifier `schema` key on an object
+              // literal; emitting first also lets a `schema` reached through
+              // a spread or a computed key override the derived one, matching
+              // the documented "explicit schema takes precedence" contract.
+              const schemaProp = factory.createPropertyAssignment(
+                "schema",
+                schemaCall,
+              );
+              let newParams: ts.Expression;
+              if (paramsArg && ts.isObjectLiteralExpression(paramsArg)) {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp, ...paramsArg.properties],
+                  true,
+                );
+              } else if (paramsArg) {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp, factory.createSpreadAssignment(paramsArg)],
+                  true,
+                );
+              } else {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp],
+                  true,
+                );
+              }
+
+              const updated = factory.createCallExpression(
+                node.expression,
+                node.typeArguments,
+                [newParams, ...args.slice(1)],
+              );
+              context.markSchemaInjected(updated);
+              return ts.visitEachChild(updated, visit, transformation);
+            }
+          }
         }
       }
 

@@ -4,6 +4,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 import { env, type EnvVars } from "./env.ts";
+import { getTracer, initOpenTelemetry, shutdownOpenTelemetry } from "./otel.ts";
+import { SpanStatusCode } from "@opentelemetry/api";
 import type { Identity } from "@commonfabric/identity";
 
 // 10 minute timeout
@@ -57,11 +59,20 @@ export function shutdown(
   service: Pick<BackgroundPieceService, "stop">,
   exit: typeof Deno.exit = Deno.exit,
 ) {
-  return () => {
-    service.stop().then(() => {
-      exit(0);
-    });
-  };
+  return () =>
+    service.stop()
+      // Flush buffered spans before exiting so shutdown telemetry isn't dropped.
+      .then(() => shutdownOpenTelemetry())
+      .catch((error) => {
+        // A failed stop()/flush (e.g. the collector is unreachable, which makes
+        // forceFlush reject) must not strand the process. Log and still exit so
+        // the signal handler always terminates cleanly instead of hanging until
+        // the orchestrator SIGKILLs us.
+        console.error("Error during shutdown:", error);
+      })
+      .finally(() => {
+        exit(0);
+      });
 }
 
 export async function startBackgroundPieceService(
@@ -76,6 +87,11 @@ export async function startBackgroundPieceService(
     log: console.log,
   },
 ): Promise<ServiceLike> {
+  // Set up tracing before doing any work so spans (incl. runner-library spans)
+  // are exported to the local OTel collector -> SigNoz. No-op unless OTEL_ENABLED.
+  // Use the injected env so tests/alternate callers control telemetry config.
+  await initOpenTelemetry(dependencies.env);
+
   const workerTimeoutMs = parseWorkerTimeout(args);
   const identity = await dependencies.getIdentity(
     dependencies.env.IDENTITY,
@@ -98,7 +114,23 @@ export async function startBackgroundPieceService(
     shutdown(service, dependencies.exit),
   );
 
-  await service.initialize();
+  await getTracer().startActiveSpan(
+    "bg-piece-service.startup",
+    async (span) => {
+      try {
+        await service.initialize();
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      } finally {
+        span.end();
+      }
+    },
+  );
   dependencies.log("Background Piece Service started successfully");
   dependencies.log("Press Ctrl+C to stop");
   return service;

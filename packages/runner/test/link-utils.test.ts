@@ -13,6 +13,7 @@ import {
   isLegacyAlias,
   isSigilLink,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedLink,
   parseLink,
   parseLinkOrThrow,
@@ -651,7 +652,7 @@ describe("link-utils", () => {
         path: [],
         space,
         schema,
-      }, { includeSchema: true, keepStreams: false });
+      }, { includeSchema: true, keepAsCell: KeepAsCell.None });
 
       expect(linkRefPayload(result).schema).toEqual({
         type: "object",
@@ -804,6 +805,41 @@ describe("link-utils", () => {
       });
     });
 
+    it("keeps required entries for boolean property schemas", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          payload: true,
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["payload", "submit"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          payload: true,
+          submit: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["payload"],
+      });
+    });
+
     it("should keep required entries for preserved stream properties", () => {
       const schema = {
         type: "object",
@@ -820,9 +856,90 @@ describe("link-utils", () => {
         required: ["setTitle"],
       } as const satisfies JSONSchema;
 
-      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+      const result = sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
       expect(result).toEqual(schema);
+    });
+
+    it("respects KeepAsCell modes for mixed cell wrappers", () => {
+      const schema = {
+        type: "object",
+        asCell: ["stream", "cell"],
+        properties: {
+          title: { type: "string" },
+          count: {
+            type: "number",
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string", asCell: ["opaque"] },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            asCell: ["cell", "stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count", "submit", "nestedStream"],
+      } as const satisfies JSONSchema;
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.None)).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          count: { type: "number" },
+          submit: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count"],
+      });
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream)).toEqual({
+        type: "object",
+        asCell: ["stream", "cell"],
+        properties: {
+          title: { type: "string" },
+          count: { type: "number" },
+          submit: {
+            type: "object",
+            asCell: ["stream"],
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+          nestedStream: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+            required: ["value"],
+          },
+        },
+        required: ["title", "count", "submit", "nestedStream"],
+      });
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.All)).toEqual(schema);
     });
 
     it("should handle arrays of schemas", () => {
@@ -1050,14 +1167,14 @@ describe("link-utils", () => {
       expect((result as any).b).not.toHaveProperty("asCell");
     });
 
-    it("should handle keepStreams option with circular schemas", () => {
+    it("should handle OnlyStream option with circular schemas", () => {
       const schema: any = {
         type: "object",
         asCell: ["stream"],
       };
       schema.self = schema;
 
-      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+      const result = sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
       // Expect the new version of asStream (where it's an entry in asCell)
       expect((result as any).asCell).toEqual(["stream"]);
@@ -1209,8 +1326,8 @@ describe("link-utils", () => {
       const resultDefault = sanitizeSchemaForLinks(schema);
       expect(resultDefault).not.toHaveProperty("asCell");
 
-      // With keepAsCell: true, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, { keepAsCell: true });
+      // With keepAsCell: All, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, KeepAsCell.All);
       expect((resultKept as any).asCell).toEqual(["opaque"]);
     });
   });

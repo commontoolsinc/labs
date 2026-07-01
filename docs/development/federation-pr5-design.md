@@ -1,5 +1,14 @@
 # Federation PR5 — audience-bound `session.open` + space lifecycle
 
+> Historical note: this document records an older PR design and is not the
+> current source of truth for memory WebSocket authentication. Current behavior
+> is documented in
+> [`docs/specs/memory-v2/04-protocol.md`](../specs/memory-v2/04-protocol.md).
+> In the current protocol, memory servers advertise `sessionOpen.audience` and a
+> one-time challenge in `hello.ok`; clients sign `aud`, `challenge`, `iat`, and
+> `exp` into `session.open`; and protected toolshed session opens require those
+> checks.
+
 Status: **Part A mechanism implemented; one decision needs Berni.** Last of the
 §14 federation arc (PR1–PR4 + site-table v0 landed). This is the *forcing
 function* for making the site table's host hints trustworthy: until the open

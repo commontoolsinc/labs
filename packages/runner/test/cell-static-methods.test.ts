@@ -233,12 +233,12 @@ describe("Cell Static Methods", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const cell = Cell.of([1, 2, 3]) as any;
 
-        expect(() => cell.map(() => 1)).toThrow("OpaqueRef.map(fn)");
+        expect(() => cell.map(() => 1)).toThrow("Reactive.map(fn)");
         expect(() => cell.filter(() => true)).toThrow(
-          "OpaqueRef.filter(fn)",
+          "Reactive.filter(fn)",
         );
         expect(() => cell.flatMap(() => [1])).toThrow(
-          "OpaqueRef.flatMap(fn)",
+          "Reactive.flatMap(fn)",
         );
       });
     });

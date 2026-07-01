@@ -892,20 +892,20 @@ describe("generateObject with tools", () => {
 
   it("should handle mixed handler and patternTool-based tools", async () => {
     loadConversationFixture({
-      description: "fetchData → analyzeData → presentResult",
+      description: "loadData → analyzeData → presentResult",
       responses: [
         {
           type: "sendRequest",
           expectRequest: {
-            hasTools: ["fetchData", "analyzeData", "presentResult"],
+            hasTools: ["loadData", "analyzeData", "presentResult"],
             messageCount: 1,
           },
           response: {
             role: "assistant",
             content: [{
               type: "tool-call",
-              toolCallId: "call_fetchData_1",
-              toolName: "fetchData",
+              toolCallId: "call_loadData_1",
+              toolName: "loadData",
               input: {},
             }],
             id: "s1",
@@ -951,7 +951,7 @@ describe("generateObject with tools", () => {
       required: ["analysis", "total"],
     };
 
-    const fetchData = handler(
+    const loadData = handler(
       {
         type: "object",
         properties: { result: { type: "object", asCell: ["cell"] } },
@@ -983,9 +983,9 @@ describe("generateObject with tools", () => {
           prompt: "test-mixed-tools",
           schema: resultSchema,
           tools: {
-            fetchData: {
+            loadData: {
               description: "Fetch data from source",
-              handler: fetchData({}),
+              handler: loadData({}),
             },
             analyzeData: patternTool(analyzeData, {
               data: dataCell,

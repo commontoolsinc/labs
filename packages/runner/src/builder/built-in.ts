@@ -5,8 +5,8 @@ import type {
   FactoryInput,
   JSONSchema,
   NodeFactory,
-  OpaqueRef,
   PatternFactory,
+  Reactive,
   Schema,
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
@@ -19,6 +19,7 @@ import type {
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  FetchBinaryResult,
   FetchOptions,
   PatternToolFunction,
   PatternToolResult,
@@ -101,14 +102,14 @@ export const compileAndRun = createNodeFactory({
   implementation: "compileAndRun",
 }) as <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
-) => OpaqueRef<BuiltInCompileAndRunState<S>>;
+) => Reactive<BuiltInCompileAndRunState<S>>;
 
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
 }) as (
   params: FactoryInput<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMState>;
+) => Reactive<BuiltInLLMState>;
 
 export const llmDialog = createNodeFactory({
   type: "ref",
@@ -117,40 +118,74 @@ export const llmDialog = createNodeFactory({
   propagateInputIfc: false,
 }) as (
   params: FactoryInput<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMDialogState>;
+) => Reactive<BuiltInLLMDialogState>;
 
 export const generateObject = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
 }) as <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
+) => Reactive<BuiltInLLMGenerateObjectState<T>>;
 
 export const generateText = createNodeFactory({
   type: "ref",
   implementation: "generateText",
 }) as (
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => OpaqueRef<BuiltInGenerateTextState>;
+) => Reactive<BuiltInGenerateTextState>;
 
-export const fetchData = createNodeFactory({
+export const fetchBinary = createNodeFactory({
   type: "ref",
-  implementation: "fetchData",
+  implementation: "fetchBinary",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{
+  pending: boolean;
+  result: FetchBinaryResult;
+  error?: unknown;
+}>;
+
+export const fetchText = createNodeFactory({
+  type: "ref",
+  implementation: "fetchText",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: string; error?: unknown }>;
+
+export const fetchJson = createNodeFactory({
+  type: "ref",
+  implementation: "fetchJson",
 }) as <T>(
   params: FactoryInput<{
     url: string;
-    mode?: "json" | "text";
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
+) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+
+export const fetchJsonUnchecked = createNodeFactory({
+  type: "ref",
+  implementation: "fetchJsonUnchecked",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: any; error?: unknown }>;
 
 export const fetchProgram = createNodeFactory({
   type: "ref",
   implementation: "fetchProgram",
 }) as (
   params: FactoryInput<{ url: string }>,
-) => OpaqueRef<{
+) => Reactive<{
   pending: boolean;
   result: {
     files: Array<{ name: string; contents: string }>;
@@ -168,7 +203,7 @@ export const streamData = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
+) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
 
 export const sqliteDatabase = createNodeFactory({
   type: "ref",
@@ -190,7 +225,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition?: FactoryInput<T>,
   ifTrue?: FactoryInput<U>,
   ifFalse?: FactoryInput<V>,
-): OpaqueRef<U | V> {
+): Reactive<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
     implementation: "ifElse",
@@ -205,7 +240,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
       condition,
       ifTrue,
       ifFalse,
-    }) as OpaqueRef<U | V>;
+    }) as Reactive<U | V>;
   }
 
   // Legacy signature: ifElse(cond, ifTrue, ifFalse)
@@ -213,7 +248,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     condition: conditionSchemaOrCondition,
     ifTrue: ifTrueSchemaOrIfTrue,
     ifFalse: ifFalseSchemaOrIfFalse,
-  }) as OpaqueRef<U | V>;
+  }) as Reactive<U | V>;
 }
 
 let ifElseFactory:
@@ -236,7 +271,7 @@ export function when<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | FactoryInput<T>,
   condition?: FactoryInput<T>,
   value?: FactoryInput<U>,
-): OpaqueRef<T | U> {
+): Reactive<T | U> {
   whenFactory ||= createNodeFactory({
     type: "ref",
     implementation: "when",
@@ -249,14 +284,14 @@ export function when<T = unknown, U = unknown>(
       resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       value,
-    }) as OpaqueRef<T | U>;
+    }) as Reactive<T | U>;
   }
 
   // Legacy signature: when(cond, value)
   return whenFactory({
     condition: conditionSchemaOrCondition,
     value: valueSchemaOrValue,
-  }) as OpaqueRef<T | U>;
+  }) as Reactive<T | U>;
 }
 
 let whenFactory:
@@ -277,7 +312,7 @@ export function unless<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | FactoryInput<T>,
   condition?: FactoryInput<T>,
   fallback?: FactoryInput<U>,
-): OpaqueRef<T | U> {
+): Reactive<T | U> {
   unlessFactory ||= createNodeFactory({
     type: "ref",
     implementation: "unless",
@@ -290,14 +325,14 @@ export function unless<T = unknown, U = unknown>(
       resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       fallback,
-    }) as OpaqueRef<T | U>;
+    }) as Reactive<T | U>;
   }
 
   // Legacy signature: unless(cond, fallback)
   return unlessFactory({
     condition: conditionSchemaOrCondition,
     fallback: fallbackSchemaOrFallback,
-  }) as OpaqueRef<T | U>;
+  }) as Reactive<T | U>;
 }
 
 let unlessFactory:
@@ -335,19 +370,19 @@ export function uiVariant(
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
-}) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
+}) as (cell: Reactive<unknown>) => Reactive<boolean>;
 
 export function wish<T = unknown>(
   target: FactoryInput<WishParams>,
-): OpaqueRef<WishState<T>>;
+): Reactive<WishState<T>>;
 export function wish<T = unknown>(
   target: FactoryInput<WishParams>,
   schema: JSONSchema,
-): OpaqueRef<WishState<T>>;
+): Reactive<WishState<T>>;
 export function wish<T = unknown>(
   target: FactoryInput<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<WishState<T>> {
+): Reactive<WishState<T>> {
   let param;
   let resultSchema;
 
@@ -378,7 +413,7 @@ export function wish<T = unknown>(
 export function str(
   strings: TemplateStringsArray,
   ...values: unknown[]
-): OpaqueRef<string> {
+): Reactive<string> {
   const interpolatedString = ({
     strings,
     values,

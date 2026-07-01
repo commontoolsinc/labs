@@ -113,12 +113,12 @@ like:
 ```ts
 const fromWish = computed(() => {
   const foo = wish<T>(...).result!;        // not lowered
-  return foo.map(...);                     // works anyway via OpaqueRef proxy
+  return foo.map(...);                     // works anyway via Reactive proxy
 });
 ```
 
 …stay as plain JS access at compile time. The `foo.map(...)` lowering still
-works because the OpaqueRef proxy at runtime returns a cell for `.result`, and
+works because the Reactive proxy at runtime returns a cell for `.result`, and
 `.map`/`.mapWithPattern` work on cells. So in practice the lowering gap is
 silent. Producing correct lowered output here would require either extending the
 walker to descend into `computed(...)` callbacks (alongside the existing

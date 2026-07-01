@@ -1,8 +1,7 @@
 # @commonfabric/test-support
 
-Shared testing infrastructure for Common Fabric packages. This package currently
-exports a configurable fixture runner that powers schema generator and
-transformer tests without duplicating boilerplate code.
+Shared testing infrastructure for Common Fabric packages. This package exports
+helpers that tests can reuse without duplicating setup code.
 
 ## Usage
 
@@ -25,6 +24,11 @@ await defineFixtureSuite({
   },
 });
 ```
+
+The package also exports a compiled-module-byte cache helper for integration
+tests that build `Runtime` or `PiecesController` instances. It keeps an
+in-memory cache in every run and writes a disk snapshot when
+`CF_COMPILE_CACHE_FILE` is set.
 
 The configuration API is flexible enough to handle text-based outputs,
 structured comparisons, per-suite warmup hooks, grouped fixture descriptions,

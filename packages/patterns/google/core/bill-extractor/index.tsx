@@ -64,11 +64,12 @@ import {
   Default,
   handler,
   pattern,
+  safeDateNow,
   Stream,
   Writable,
 } from "commonfabric";
 import GmailExtractor from "../gmail-extractor.tsx";
-import type { Auth } from "../gmail-extractor.tsx";
+import type { GoogleAuthCell } from "../gmail-extractor.tsx";
 import ProcessingStatus from "../processing-status.tsx";
 import {
   BILL_EXTRACTION_SCHEMA,
@@ -88,7 +89,7 @@ import {
 // Re-export types and schema for consumers
 export { BILL_EXTRACTION_SCHEMA } from "./types.ts";
 export type { BillAnalysis, BillStatus, TrackedBill } from "./types.ts";
-export type { Auth } from "../gmail-extractor.tsx";
+export type { Auth, GoogleAuthCell } from "../gmail-extractor.tsx";
 
 // Re-export helpers for use in pattern UI
 export {
@@ -136,7 +137,7 @@ export interface BillExtractorInput {
   websiteUrl?: string;
 
   /** Gmail auth (optional - uses wish() if not provided) */
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 
   /** State for persistence - which bills user manually marked as paid */
   manuallyPaid?: Writable<string[] | Default<[]>>;
@@ -264,7 +265,7 @@ export function processBills(
   isDemoMode: boolean,
 ): TrackedBill[] {
   const billMap: Record<string, TrackedBill> = {};
-  const today = new Date();
+  const today = new Date(safeDateNow());
   today.setHours(0, 0, 0, 0);
 
   const sortedAnalyses = [...(rawAnalyses || [])]
@@ -417,7 +418,7 @@ const BillExtractor = pattern<BillExtractorInput, BillExtractorOutput>(
       const paidKeys = manuallyPaid?.get() || [];
       const payments = paymentConfirmations || {};
       const isDemoMode = demoMode?.get() ?? true;
-      const today = new Date();
+      const today = new Date(safeDateNow());
       today.setHours(0, 0, 0, 0);
 
       const sortedAnalyses = [...(extractor.rawAnalyses || [])]

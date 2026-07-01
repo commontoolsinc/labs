@@ -19,9 +19,9 @@ export interface DiagnosticMessageTransformer {
 }
 
 /**
- * Options for the OpaqueRef error transformer.
+ * Options for the Reactive error transformer.
  */
-export interface OpaqueRefErrorTransformerOptions {
+export interface ReactiveErrorTransformerOptions {
   /**
    * When true, appends the original TypeScript error to the transformed message.
    * Useful for debugging.
@@ -30,22 +30,22 @@ export interface OpaqueRefErrorTransformerOptions {
 }
 
 /**
- * Transforms confusing OpaqueRef-related TypeScript errors into clear, actionable messages.
+ * Transforms confusing Reactive-related TypeScript errors into clear, actionable messages.
  *
  * For example, transforms:
  *   "Property 'get' does not exist on type 'OpaqueCell<number> & number'"
  * Into:
  *   "Unnecessary .get() call on a reactive value. This value can be accessed directly..."
  */
-export class OpaqueRefErrorTransformer implements DiagnosticMessageTransformer {
+export class ReactiveErrorTransformer implements DiagnosticMessageTransformer {
   private verbose: boolean;
 
-  constructor(options: OpaqueRefErrorTransformerOptions = {}) {
+  constructor(options: ReactiveErrorTransformerOptions = {}) {
     this.verbose = options.verbose ?? false;
   }
 
   transform(message: string): string | null {
-    // Detect .get() called on OpaqueCell/OpaqueRef types
+    // Detect .get() called on OpaqueCell/Reactive types
     // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
     const match = message.match(
       /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,

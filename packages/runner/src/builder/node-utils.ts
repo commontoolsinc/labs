@@ -86,8 +86,8 @@ export function applyInputIfcToOutput<T, R>(
   }
 }
 
-// Attach ifc confidentiality to OpaqueRef objects reachable
-// from the outputs without descending into OpaqueRef objects
+// Attach ifc confidentiality to Reactive objects reachable
+// from the outputs without descending into Reactive objects
 // TODO(@ubik2) Investigate: can we have cycles here?
 function attachCfcToOutputs(
   outputs: unknown,

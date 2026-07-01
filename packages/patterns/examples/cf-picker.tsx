@@ -12,7 +12,7 @@ export type Result = {
 
 export default pattern<Input, Result>(
   (_) => {
-    // Create counter instances - these are OpaqueRefs to pattern results
+    // Create counter instances - these are Reactives to pattern results
     const counterA = Counter({ value: 10 });
     const counterB = Note({
       content: "This is item B (a Note)",

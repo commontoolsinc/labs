@@ -7,6 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commonfabric/runner";
 import { sleep } from "@commonfabric/utils/sleep";
+import { createCompileByteCache } from "@commonfabric/test-support/compile-byte-cache";
 
 export interface EventSpec {
   stream: string;
@@ -33,6 +34,7 @@ export interface PatternIntegrationScenario<TArgument = any> {
 
 const signer = await Identity.fromPassphrase("pattern integration harness");
 const space = signer.did();
+const moduleByteCache = createCompileByteCache();
 
 function splitPath(path: string): (string | number)[] {
   return path.split(".")
@@ -66,6 +68,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    moduleByteCache,
     errorHandlers: [(error) => {
       runtimeErrors.push(error);
     }],
@@ -77,7 +80,9 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   if (scenario.exportName) {
     program.mainExport = scenario.exportName;
   }
-  const patternFactory = await runtime.patternManager.compilePattern(program);
+  const patternFactory = await runtime.patternManager.compilePattern(program, {
+    space,
+  });
 
   const tx = runtime.edit();
   const resultCell = runtime.getCell<any>(

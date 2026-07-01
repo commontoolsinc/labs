@@ -28,7 +28,7 @@ It is still a work in progress.
 - derive
 - other builtins
   - ifelse
-  - fetchdata
+  - fetchjson
   - navigateTo
   - wish
   - compileAndRun

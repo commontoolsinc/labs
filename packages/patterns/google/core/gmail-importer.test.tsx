@@ -11,8 +11,12 @@
  *
  * Run: deno task cf test packages/patterns/google/core/gmail-importer.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern } from "commonfabric";
-import GmailImporter from "./gmail-importer.tsx";
+import { computed, pattern, UI, Writable } from "commonfabric";
+import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import { hasText } from "../../test/vnode-helpers.ts";
+
+const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
+const futureExpiry = 4102444800000;
 
 export default pattern(() => {
   // Instantiate with default settings
@@ -35,6 +39,31 @@ export default pattern(() => {
       autoFetchOnAuth: false,
       resolveInlineImages: true,
     },
+  });
+
+  const directAuth = new Writable<Auth>({
+    token: "test-token",
+    tokenType: "Bearer",
+    scope: [gmailScope],
+    expiresIn: 3600,
+    expiresAt: futureExpiry,
+    refreshToken: "refresh-token",
+    user: {
+      email: "direct@example.com",
+      name: "Direct User",
+      picture: "",
+    },
+  });
+
+  const importerWithOverrideAuth = GmailImporter({
+    settings: {
+      gmailFilterQuery: "in:INBOX",
+      limit: 5,
+      debugMode: false,
+      autoFetchOnAuth: false,
+      resolveInlineImages: false,
+    },
+    overrideAuth: directAuth,
   });
 
   // ==========================================================================
@@ -69,6 +98,11 @@ export default pattern(() => {
     () => importer.emailCount !== undefined,
   );
 
+  const assert_override_auth_marks_importer_ready = computed(() =>
+    importerWithOverrideAuth.isReady === true &&
+    hasText(importerWithOverrideAuth[UI], "Fetch Emails")
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -85,9 +119,11 @@ export default pattern(() => {
       // === Output structure ===
       { assertion: assert_has_emails_property },
       { assertion: assert_has_emailCount_property },
+      { assertion: assert_override_auth_marks_importer_ready },
     ],
     // Expose subjects for debugging
     importer,
     importerWithSettings,
+    importerWithOverrideAuth,
   };
 });

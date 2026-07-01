@@ -10,7 +10,7 @@ import {
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
-import { isOpaqueRef } from "./builder/types.ts";
+import { isReactive } from "./builder/types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -41,7 +41,7 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 /**
  * Generates an entity ID.
  *
- * Derivation inputs must resolve: a Cell with no entityId or an OpaqueRef with
+ * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
  * no value throws rather than minting a random substitute, so a derived id never
  * silently becomes non-deterministic (audit S14). A missing `cause`, by
  * contrast, deliberately mints a fresh random id.
@@ -102,13 +102,13 @@ export function createRef(
       obj = obj.toJSON() ?? obj;
     }
 
-    if (isOpaqueRef(obj)) {
+    if (isReactive(obj)) {
       const val = obj.export().value;
       if (val == null) {
-        // An OpaqueRef feeding a derived id must carry a value; otherwise the
+        // An Reactive feeding a derived id must carry a value; otherwise the
         // id would silently become non-deterministic (audit S14). Fail closed.
         throw new Error(
-          "[createRef] OpaqueRef has no value; cannot derive a stable id",
+          "[createRef] Reactive has no value; cannot derive a stable id",
         );
       }
       return val;

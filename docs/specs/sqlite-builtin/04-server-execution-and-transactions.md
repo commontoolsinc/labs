@@ -333,7 +333,7 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
   `db.exec` does a read-modify-write of the handle cell's `rev` in the same
   commit, two concurrent `db.exec` commits conflict on that cell's
   optimistic-concurrency revision and serialize — one retries (Section
-  [05](./05-reactivity.md)). (Contrast `fetchData`, which needs `tryClaimMutex`
+  [05](./05-reactivity.md)). (Contrast `fetchJson`, which needs `tryClaimMutex`
   because it has no transactional backstop.)
 
 > **As-built proof.** Atomic cells + the `sqlite` op in one commit is proven

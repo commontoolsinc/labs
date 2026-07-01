@@ -252,7 +252,7 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       generatedIdCounter: 0,
       inHandler: true,
-      opaqueRefs: new Set(),
+      reactives: new Set(),
     };
     pushFrame(frame);
 

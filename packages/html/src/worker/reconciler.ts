@@ -21,6 +21,7 @@ import {
   isCell,
   isStream,
   type JSONSchema,
+  KeepAsCell,
   parseLink,
   type Stream,
   UI,
@@ -2888,7 +2889,7 @@ export class WorkerReconciler {
     return convertCellsToLinks(value, {
       doNotConvertCellResults: true,
       includeSchema: true,
-      keepStreams: true,
+      keepAsCell: KeepAsCell.OnlyStream,
     });
   }
 

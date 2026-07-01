@@ -1,39 +1,39 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { validateAndCheckOpaqueRefs } from "../src/runner.ts";
-import { isOpaqueRefMarker } from "../src/builder/types.ts";
+import { validateAndCheckReactives } from "../src/runner.ts";
+import { isReactiveMarker } from "../src/builder/types.ts";
 
-describe("validateAndCheckOpaqueRefs", () => {
+describe("validateAndCheckReactives", () => {
   describe("valid values", () => {
     it("accepts null", () => {
-      expect(validateAndCheckOpaqueRefs(null)).toBe(false);
+      expect(validateAndCheckReactives(null)).toBe(false);
     });
 
     it("accepts undefined", () => {
-      expect(validateAndCheckOpaqueRefs(undefined)).toBe(false);
+      expect(validateAndCheckReactives(undefined)).toBe(false);
     });
 
     it("accepts primitives", () => {
-      expect(validateAndCheckOpaqueRefs("hello")).toBe(false);
-      expect(validateAndCheckOpaqueRefs(42)).toBe(false);
-      expect(validateAndCheckOpaqueRefs(true)).toBe(false);
-      expect(validateAndCheckOpaqueRefs(false)).toBe(false);
+      expect(validateAndCheckReactives("hello")).toBe(false);
+      expect(validateAndCheckReactives(42)).toBe(false);
+      expect(validateAndCheckReactives(true)).toBe(false);
+      expect(validateAndCheckReactives(false)).toBe(false);
     });
 
     it("accepts plain objects", () => {
-      expect(validateAndCheckOpaqueRefs({})).toBe(false);
-      expect(validateAndCheckOpaqueRefs({ a: 1, b: "hello" })).toBe(false);
+      expect(validateAndCheckReactives({})).toBe(false);
+      expect(validateAndCheckReactives({ a: 1, b: "hello" })).toBe(false);
     });
 
     it("accepts arrays", () => {
-      expect(validateAndCheckOpaqueRefs([])).toBe(false);
-      expect(validateAndCheckOpaqueRefs([1, 2, 3])).toBe(false);
-      expect(validateAndCheckOpaqueRefs([{ a: 1 }, { b: 2 }])).toBe(false);
+      expect(validateAndCheckReactives([])).toBe(false);
+      expect(validateAndCheckReactives([1, 2, 3])).toBe(false);
+      expect(validateAndCheckReactives([{ a: 1 }, { b: 2 }])).toBe(false);
     });
 
     it("accepts nested structures", () => {
       expect(
-        validateAndCheckOpaqueRefs({
+        validateAndCheckReactives({
           a: { b: { c: [1, 2, { d: "hello" }] } },
         }),
       ).toBe(false);
@@ -41,98 +41,98 @@ describe("validateAndCheckOpaqueRefs", () => {
 
     it("accepts cell links", () => {
       const cellLink = { "/": { [Symbol.for("cell-link")]: { id: "test" } } };
-      expect(validateAndCheckOpaqueRefs(cellLink)).toBe(false);
+      expect(validateAndCheckReactives(cellLink)).toBe(false);
     });
   });
 
   describe("invalid values", () => {
     it("rejects Map", () => {
-      expect(() => validateAndCheckOpaqueRefs(new Map())).toThrow(
+      expect(() => validateAndCheckReactives(new Map())).toThrow(
         /Action returned a Map[\s\S]*Consider using a plain object/,
       );
     });
 
     it("rejects Set", () => {
-      expect(() => validateAndCheckOpaqueRefs(new Set())).toThrow(
+      expect(() => validateAndCheckReactives(new Set())).toThrow(
         /Action returned a Set[\s\S]*Consider using an array/,
       );
     });
 
     it("rejects functions", () => {
-      expect(() => validateAndCheckOpaqueRefs(() => {})).toThrow(
+      expect(() => validateAndCheckReactives(() => {})).toThrow(
         /Action returned a function/,
       );
     });
 
     it("rejects Date", () => {
-      expect(() => validateAndCheckOpaqueRefs(new Date())).toThrow(
+      expect(() => validateAndCheckReactives(new Date())).toThrow(
         /Action returned a Date/,
       );
     });
 
     it("rejects RegExp", () => {
-      expect(() => validateAndCheckOpaqueRefs(/test/)).toThrow(
+      expect(() => validateAndCheckReactives(/test/)).toThrow(
         /Action returned a RegExp/,
       );
     });
 
     it("rejects NaN", () => {
-      expect(() => validateAndCheckOpaqueRefs(NaN)).toThrow(
+      expect(() => validateAndCheckReactives(NaN)).toThrow(
         /Action returned a NaN[\s\S]*Check your inputs or return null instead/,
       );
     });
 
     it("rejects Infinity", () => {
-      expect(() => validateAndCheckOpaqueRefs(Infinity)).toThrow(
+      expect(() => validateAndCheckReactives(Infinity)).toThrow(
         /Action returned a Infinity[\s\S]*Check your inputs or return null instead/,
       );
     });
 
     it("rejects -Infinity", () => {
-      expect(() => validateAndCheckOpaqueRefs(-Infinity)).toThrow(
+      expect(() => validateAndCheckReactives(-Infinity)).toThrow(
         /Action returned a Infinity[\s\S]*Check your inputs or return null instead/,
       );
     });
 
     it("rejects BigInt", () => {
-      expect(() => validateAndCheckOpaqueRefs(BigInt(123))).toThrow(
+      expect(() => validateAndCheckReactives(BigInt(123))).toThrow(
         /Action returned a BigInt[\s\S]*Consider converting to number or string/,
       );
     });
 
     it("rejects Symbol", () => {
-      expect(() => validateAndCheckOpaqueRefs(Symbol("test"))).toThrow(
+      expect(() => validateAndCheckReactives(Symbol("test"))).toThrow(
         /Action returned a Symbol[\s\S]*Consider removing this property/,
       );
     });
 
     it("rejects NaN nested in object", () => {
-      expect(() => validateAndCheckOpaqueRefs({ value: NaN })).toThrow(
+      expect(() => validateAndCheckReactives({ value: NaN })).toThrow(
         /Action returned a NaN at path "value"/,
       );
     });
 
     it("rejects nested Map with path info", () => {
-      expect(() => validateAndCheckOpaqueRefs({ data: { items: new Map() } }))
+      expect(() => validateAndCheckReactives({ data: { items: new Map() } }))
         .toThrow(/Action returned a Map at path "data\.items"/);
     });
 
     it("rejects Map in array with path info", () => {
-      expect(() => validateAndCheckOpaqueRefs([1, 2, new Map()])).toThrow(
+      expect(() => validateAndCheckReactives([1, 2, new Map()])).toThrow(
         /Action returned a Map at path "\[2\]"/,
       );
     });
 
     it("rejects Set in nested structure with path info", () => {
       expect(() =>
-        validateAndCheckOpaqueRefs({
+        validateAndCheckReactives({
           a: { b: [{ c: new Set() }] },
         })
       ).toThrow(/Action returned a Set at path "a\.b\.\[0\]\.c"/);
     });
 
     it("rejects function in object with path info", () => {
-      expect(() => validateAndCheckOpaqueRefs({ handler: () => {} })).toThrow(
+      expect(() => validateAndCheckReactives({ handler: () => {} })).toThrow(
         /Action returned a function at path "handler"/,
       );
     });
@@ -141,13 +141,13 @@ describe("validateAndCheckOpaqueRefs", () => {
   describe("action name in errors", () => {
     it("includes action name in error message", () => {
       expect(() =>
-        validateAndCheckOpaqueRefs(new Map(), "handleClick (src/app.ts:42)")
+        validateAndCheckReactives(new Map(), "handleClick (src/app.ts:42)")
       ).toThrow(/in action: handleClick \(src\/app\.ts:42\)/);
     });
 
     it("includes action name with nested path", () => {
       expect(() =>
-        validateAndCheckOpaqueRefs(
+        validateAndCheckReactives(
           { data: new Set() },
           "onSubmit (components/Form.tsx:15)",
         )
@@ -157,11 +157,11 @@ describe("validateAndCheckOpaqueRefs", () => {
     });
 
     it("works without action name", () => {
-      expect(() => validateAndCheckOpaqueRefs(new Map())).toThrow(
+      expect(() => validateAndCheckReactives(new Map())).toThrow(
         /Action returned a Map/,
       );
       // Should not include "in action:" when no name provided
-      expect(() => validateAndCheckOpaqueRefs(new Map())).not.toThrow(
+      expect(() => validateAndCheckReactives(new Map())).not.toThrow(
         /in action:/,
       );
     });
@@ -169,22 +169,22 @@ describe("validateAndCheckOpaqueRefs", () => {
 
   describe("opaque ref detection", () => {
     it("returns true for opaque ref at top level", () => {
-      const opaqueRef = { [isOpaqueRefMarker]: true };
-      expect(validateAndCheckOpaqueRefs(opaqueRef)).toBe(true);
+      const reactive = { [isReactiveMarker]: true };
+      expect(validateAndCheckReactives(reactive)).toBe(true);
     });
 
     it("returns true when opaque ref is nested in object", () => {
-      const opaqueRef = { [isOpaqueRefMarker]: true };
-      expect(validateAndCheckOpaqueRefs({ data: opaqueRef })).toBe(true);
+      const reactive = { [isReactiveMarker]: true };
+      expect(validateAndCheckReactives({ data: reactive })).toBe(true);
     });
 
     it("returns true when opaque ref is in array", () => {
-      const opaqueRef = { [isOpaqueRefMarker]: true };
-      expect(validateAndCheckOpaqueRefs([1, opaqueRef, 3])).toBe(true);
+      const reactive = { [isReactiveMarker]: true };
+      expect(validateAndCheckReactives([1, reactive, 3])).toBe(true);
     });
 
     it("returns false when no opaque refs present", () => {
-      expect(validateAndCheckOpaqueRefs({ a: 1, b: "hello" })).toBe(false);
+      expect(validateAndCheckReactives({ a: 1, b: "hello" })).toBe(false);
     });
   });
 });

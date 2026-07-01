@@ -238,6 +238,33 @@ describe("RuntimeClient", () => {
       cancel2();
     });
 
+    it("dispatches CellHandle.push as a CellPush (read-modify-write append)", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const schema = {
+        type: "array",
+        items: { type: "string" },
+      } as const satisfies JSONSchema;
+
+      const cell = await rt.getCell<string[]>(
+        session.space,
+        "test-push-" + Date.now(),
+        schema,
+      );
+      await cell.set(["a"]);
+      await rt.idle();
+      await cell.sync();
+
+      // push routes through CellPush -> handleCellPush (read-modify-write),
+      // appending to the current array rather than blindly overwriting it.
+      cell.push("b");
+      await rt.idle();
+      await cell.sync();
+
+      assertEquals(cell.get(), ["a", "b"]);
+    });
+
     it("late subscribers receive initial value from existing subscription", async () => {
       // Regression test for bug where text interpolation {value} would show blank
       // when used alongside cf-input bound to the same cell. The issue was that

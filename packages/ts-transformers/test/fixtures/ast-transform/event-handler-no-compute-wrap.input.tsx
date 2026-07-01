@@ -32,7 +32,7 @@ export default pattern<{ count: Default<number, 0> }>(
           {/* Regular JSX expression - should be wrapped in a lift-applied computation */}
           <span>Count: {count + 1}</span>
 
-          {/* Event handler with OpaqueRef - should NOT be wrapped in a lift-applied computation */}
+          {/* Event handler with Reactive - should NOT be wrapped in a lift-applied computation */}
           <cf-button onClick={handleClick({ count })}>
             Click me
           </cf-button>

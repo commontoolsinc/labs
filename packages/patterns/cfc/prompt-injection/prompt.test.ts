@@ -35,3 +35,11 @@ Deno.test("parseResultSchemaInput fails closed for malformed schema strings", ()
     type: "object",
   });
 });
+
+Deno.test("parseResultSchemaInput accepts direct schemas and rejects other values", () => {
+  const schema = { type: "object", properties: {} } as const;
+  assertEquals(parseResultSchemaInput(true), true);
+  assertEquals(parseResultSchemaInput(schema), schema);
+  assertEquals(parseResultSchemaInput(["not-a-schema-object"]), false);
+  assertEquals(parseResultSchemaInput(null), false);
+});

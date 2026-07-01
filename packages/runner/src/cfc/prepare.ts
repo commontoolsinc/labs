@@ -1,6 +1,7 @@
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
+  cfcAtom,
 } from "@commonfabric/api/cfc";
 import {
   internSchema,
@@ -39,6 +40,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { externalIngestStamp } from "./external-ingest.ts";
 import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
@@ -2652,6 +2654,12 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   // Derivation provenance is evidence minted by the flow stage (§8.9.3).
   CFC_ATOM_TYPE.TransformedBy,
   CFC_ATOM_TYPE.UserSurfaceInput,
+  // External-ingest provenance is minted by the runtime-internal ingest seam
+  // from verified channel metadata only (the split-mint). Gating it here is
+  // load-bearing: the payload bytes are authored under the ordinary member
+  // identity, so any ExternalIngest atom an attacker smuggles into the payload
+  // is stripped — the trusted mark can only come from the builtin mint step.
+  CFC_ATOM_TYPE.ExternalIngest,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
@@ -3174,6 +3182,22 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  // A vouched ingest writes its provenance mark even when the payload write
+  // carries no schema candidate and flow labels are off, so the ingest target
+  // must enter the persist loop on its own. The anchor is the cell the helper
+  // declared, not whatever the value diff happened to touch (an array append
+  // diffs to `[...P,"N"]`/`[...P,"length"]`, never `P`).
+  const ingestStamp = externalIngestStamp(tx);
+  const ingestKey = ingestStamp !== undefined
+    ? targetKey({
+      space: ingestStamp.target.space,
+      scope: normalizeCellScope(ingestStamp.target.scope),
+      id: ingestStamp.target.id,
+    })
+    : undefined;
+  if (ingestKey !== undefined) {
+    targetKeys.add(ingestKey);
+  }
   if (flowPersist && flowTargets !== undefined) {
     // Flow targets enter the persist loop when there is taint to attach or
     // stale per-value components (derived/link) to replace under a written
@@ -3210,6 +3234,7 @@ export const prepareBoundaryCommit = (
     const undefinedCandidate = candidateSchema === undefined;
     const target = targetFromKey(key);
     const { space, id, scope } = target;
+    const isIngestTarget = ingestKey !== undefined && key === ingestKey;
     const existing = storedMetadataFor(
       tx,
       space,
@@ -3265,9 +3290,22 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
+    // A verification failure records a reason (which rejects the whole commit
+    // in enforcing modes) and skips persisting this target's declared label.
+    // But the external-ingest MARK is runtime-authored provenance, orthogonal
+    // to whether the payload satisfies its schema — it must still persist in the
+    // non-rejecting modes the ingest path runs in (the mint runs even under
+    // `disabled`, see runtime.ts). So the ingest target is exempt from the
+    // skip: enforcing modes still abort the tx via the recorded reason (nothing
+    // persists), while `disabled`/`observe` commit with the mark intact. The
+    // DECLARED label is still skipped for a failed ingest target (see
+    // ingestVerificationFailed below), so a non-rejecting commit stores only the
+    // runtime's mark, never the payload's unverified policy metadata.
+    let ingestVerificationFailed = false;
     if (requirementFailure) {
       reasons.push(requirementFailure);
-      continue;
+      if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
     const trustedEventFailure = verifyTrustedEventRequirements(
       tx,
@@ -3276,7 +3314,8 @@ export const prepareBoundaryCommit = (
     );
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
-      continue;
+      if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
 
     const exactCopyFailure = verifyExactCopyRequirements(
@@ -3286,7 +3325,8 @@ export const prepareBoundaryCommit = (
     );
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
-      continue;
+      if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);
@@ -3319,52 +3359,57 @@ export const prepareBoundaryCommit = (
         path: canonicalizeLogicalPath(e.path),
         confidentiality: e.label.confidentiality as readonly unknown[],
       }));
-    const persistedLabelEntries: LabelMapEntry[] = mergedSchemaEntries
-      .flatMap((entry) => {
-        if (
-          !ifcEntryAppliesToAttemptedWrite(
-            tx,
-            target,
-            entry.path,
-            entry.schema,
-            entry.root,
-          )
-        ) {
-          return [];
-        }
-        const derived = gateRuntimeMintedIntegrity(
-          derivePersistedLabel(
-            tx,
-            entry.schema,
-            entry.label,
-            mergedSchemaEntryLabels,
-          ),
-          identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
-        );
-        // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
-        // not drop confidentiality the labelMap already carried beyond the schema
-        // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
-        // matching, so a new child entry shadows an ancestor — merge prior
-        // confidentiality from this path AND every ancestor of it, not just an
-        // exact-path match (audit S9, review follow-up). Integrity is left as
-        // derived (freshly gated) — it must not regrow.
-        const prior = existingConfidentiality
-          .filter((e) => isPrefix(e.path, entry.path))
-          .flatMap((e) => e.confidentiality);
-        const label = prior.length > 0
-          ? {
-            ...derived,
-            confidentiality: mergeLabelValues(derived.confidentiality, prior),
+    // When an ingest target failed verification we keep the runtime's mark
+    // (appended below) but drop the payload's declared policy label — a
+    // non-rejecting commit must not store claims that didn't verify.
+    const persistedLabelEntries: LabelMapEntry[] = ingestVerificationFailed
+      ? []
+      : mergedSchemaEntries
+        .flatMap((entry) => {
+          if (
+            !ifcEntryAppliesToAttemptedWrite(
+              tx,
+              target,
+              entry.path,
+              entry.schema,
+              entry.root,
+            )
+          ) {
+            return [];
           }
-          : derived;
-        return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
-          ? [{
-            path: entry.path,
-            label,
-            origin: "declared" as const,
-          }]
-          : [];
-      });
+          const derived = gateRuntimeMintedIntegrity(
+            derivePersistedLabel(
+              tx,
+              entry.schema,
+              entry.label,
+              mergedSchemaEntryLabels,
+            ),
+            identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
+          );
+          // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
+          // not drop confidentiality the labelMap already carried beyond the schema
+          // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+          // matching, so a new child entry shadows an ancestor — merge prior
+          // confidentiality from this path AND every ancestor of it, not just an
+          // exact-path match (audit S9, review follow-up). Integrity is left as
+          // derived (freshly gated) — it must not regrow.
+          const prior = existingConfidentiality
+            .filter((e) => isPrefix(e.path, entry.path))
+            .flatMap((e) => e.confidentiality);
+          const label = prior.length > 0
+            ? {
+              ...derived,
+              confidentiality: mergeLabelValues(derived.confidentiality, prior),
+            }
+            : derived;
+          return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
+            ? [{
+              path: entry.path,
+              label,
+              origin: "declared" as const,
+            }]
+            : [];
+        });
     const persistedLabelEntryKeys = new Set(
       persistedLabelEntries.map((entry) => pathKey(entry.path)),
     );
@@ -3376,6 +3421,14 @@ export const prepareBoundaryCommit = (
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
+        continue;
+      }
+      // A fresh ingest re-mints the ExternalIngest mark for this doc below, so
+      // never carry the prior one forward — its payload digest is stale. The
+      // anchor is an ancestor of the element-wise-diffed writes, so the
+      // flow-style "written path covers entry" clear never fires for it;
+      // drop it by origin instead.
+      if (isIngestTarget && entry.origin === "external-ingest") {
         continue;
       }
       // Per-value components track the current value: a write at-or-above
@@ -3528,6 +3581,31 @@ export const prepareBoundaryCommit = (
           origin: "structure",
         });
       }
+    }
+
+    if (isIngestTarget && ingestStamp !== undefined) {
+      // The split-mint: a builtin-authored ExternalIngest provenance mark,
+      // derived ONLY from the verified channel metadata the operator-side
+      // helper stamped on this tx — channel, audience, receivedAt, and a digest
+      // of the payload the helper wrote — touching zero attacker bytes. Pushed
+      // with a runtime origin, so it bypasses gateRuntimeMintedIntegrity (the
+      // member-authored payload's `declared` label above is still gated,
+      // stripping any ExternalIngest atom an attacker smuggled into the
+      // payload). Anchored at the declared ingest target path; the stale prior
+      // mark for this doc was dropped from carry-forward above, so this
+      // replaces rather than accumulates.
+      persistedLabelEntries.push({
+        path: canonicalizeLogicalPath(ingestStamp.target.path),
+        label: {
+          integrity: [cfcAtom.externalIngest(
+            ingestStamp.channel,
+            ingestStamp.audience,
+            ingestStamp.receivedAt,
+            ingestStamp.valueDigest,
+          )],
+        },
+        origin: "external-ingest",
+      });
     }
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);

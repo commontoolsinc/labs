@@ -3,8 +3,11 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { ANYONE_USER } from "@commonfabric/memory/acl";
+import {
+  initializePiecesController,
+  PiecesController,
+} from "./pieces-controller.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -23,7 +26,7 @@ testComponents.forEach(({ name, file }) => {
 
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await PiecesController.initialize({
+      cc = await initializePiecesController({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,

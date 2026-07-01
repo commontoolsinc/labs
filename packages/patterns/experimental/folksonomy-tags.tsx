@@ -293,7 +293,7 @@ export const FolksonomyTags = pattern<
     const aggregator = injectedAggregator ?? aggregatorWish.result ?? null;
 
     // Get the aggregator's postEvent stream for telemetry
-    const aggregatorStream = (aggregator?.postEvent as Stream<TagEvent>) ??
+    const aggregatorStream: Stream<TagEvent> | null = aggregator?.postEvent ??
       null;
 
     // Track previous tags for change detection

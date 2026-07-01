@@ -2,7 +2,7 @@ import {
   BuiltInLLMMessage,
   computed,
   Default,
-  fetchData,
+  fetchJsonUnchecked,
   generateObject,
   handler,
   llmDialog,
@@ -180,9 +180,8 @@ export default pattern<ChatInput, ChatOutput>(
       },
     );
 
-    const { result } = fetchData({
+    const { result } = fetchJsonUnchecked({
       url: "/api/ai/llm/models",
-      mode: "json",
     });
 
     const items = computed(() => {

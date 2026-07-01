@@ -309,7 +309,7 @@ function createPatternCallWithParams(
 }
 
 /**
- * Transform an array method callback for OpaqueRef arrays.
+ * Transform an array method callback for Reactive arrays.
  * Always transforms to use pattern + the WithPattern variant, even with no
  * captures, to ensure callback parameters become opaque.
  */

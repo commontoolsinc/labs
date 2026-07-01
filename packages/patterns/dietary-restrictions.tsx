@@ -1417,7 +1417,7 @@ export const DietaryRestrictionsModule = pattern<
   // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
   // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
-    // Access the normalized array - normalizedRestrictions is already a computed OpaqueRef
+    // Access the normalized array - normalizedRestrictions is already a computed Reactive
     const current = (normalizedRestrictions || []) as RestrictionEntry[];
 
     const implied = new Map<

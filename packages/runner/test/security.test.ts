@@ -255,7 +255,7 @@ describe("SES security regressions", () => {
             "    event: { amount?: number } | undefined,",
             "    context: { values: Cell<number[]> },",
             "  ) => {",
-            "    const target = context.values.key(0) as Cell<number>;",
+            "    const target: Cell<number> = context.values.key(0);",
             "    target.set(toInteger(target.get()) + toInteger(event?.amount));",
             "  },",
             ");",

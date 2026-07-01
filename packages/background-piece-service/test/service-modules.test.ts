@@ -1145,6 +1145,10 @@ describe("background piece service entry point", () => {
         IDENTITY: undefined,
         EXPERIMENTAL_MODERN_CELL_REP: true,
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
+        ENV: "test",
+        OTEL_ENABLED: false,
+        OTEL_SERVICE_NAME: "bg-piece-service",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
       },
       identity,
     );
@@ -1174,6 +1178,10 @@ describe("background piece service entry point", () => {
         IDENTITY: undefined,
         EXPERIMENTAL_MODERN_CELL_REP: true,
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
+        ENV: "test",
+        OTEL_ENABLED: false,
+        OTEL_SERVICE_NAME: "bg-piece-service",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
       },
       getIdentity: async () =>
         await Identity.generate({ implementation: "noble" }),
@@ -1210,6 +1218,51 @@ describe("background piece service entry point", () => {
     assertEquals(exitCodes, [0]);
   });
 
+  const failingDeps = (
+    initialize: () => Promise<unknown>,
+  ): MainDependencies => ({
+    env: {
+      API_URL: "http://localhost:8000",
+      OPERATOR_PASS: "operator",
+      IDENTITY: undefined,
+      EXPERIMENTAL_MODERN_CELL_REP: true,
+      EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
+      ENV: "test",
+      OTEL_ENABLED: false,
+      OTEL_SERVICE_NAME: "bg-piece-service",
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
+    },
+    getIdentity: async () =>
+      await Identity.generate({ implementation: "noble" }),
+    createRuntime: (_env, _identity) => ({ fakeRuntime: true } as never),
+    createService: () =>
+      ({ initialize, stop: () => Promise.resolve([]) }) as never,
+    addSignalListener: (() => {}) as typeof Deno.addSignalListener,
+    exit: (() => {}) as typeof Deno.exit,
+    log: () => {},
+  });
+
+  it("records an Error failure on the startup span and rethrows", async () => {
+    await assertRejects(
+      () =>
+        startBackgroundPieceService(
+          [],
+          failingDeps(() => Promise.reject(new Error("initialize boom"))),
+        ),
+      Error,
+      "initialize boom",
+    );
+  });
+
+  it("records a non-Error failure on the startup span and rethrows", async () => {
+    await assertRejects(() =>
+      startBackgroundPieceService(
+        [],
+        failingDeps(() => Promise.reject("string boom")),
+      )
+    );
+  });
+
   it("builds a shutdown callback", async () => {
     const calls: string[] = [];
     const callback = shutdown(
@@ -1229,6 +1282,25 @@ describe("background piece service entry point", () => {
     } catch (_error) {
       // The fake exit throws so the test can observe it.
     }
+    assertEquals(calls, ["stop", "exit:0"]);
+  });
+
+  it("still exits when stop() rejects", async () => {
+    const calls: string[] = [];
+    const callback = shutdown(
+      {
+        stop: () => {
+          calls.push("stop");
+          return Promise.reject(new Error("stop boom"));
+        },
+      },
+      ((code?: number) => {
+        calls.push(`exit:${code}`);
+      }) as typeof Deno.exit,
+    );
+    // A rejected stop()/flush must still reach exit(0) — otherwise the signal
+    // handler hangs until the orchestrator force-kills the process.
+    await callback();
     assertEquals(calls, ["stop", "exit:0"]);
   });
 

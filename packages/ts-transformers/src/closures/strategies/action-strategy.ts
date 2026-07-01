@@ -164,7 +164,7 @@ function transformActionCall(
   //
   // Note: The action call has type `ModuleFactory<T, Stream<void>>`, but the finalCall
   // is `handler(...)({...})` which CALLS the factory. We need the return type of that call,
-  // which is `OpaqueRef<Stream<void>>`.
+  // which is `Reactive<Stream<void>>`.
   const typeRegistry = context.options.state?.typeRegistry;
   if (typeRegistry) {
     // Get the type of the original action call (ModuleFactory<T, Stream<void>>)
@@ -173,7 +173,7 @@ function transformActionCall(
     const callSignatures = actionType.getCallSignatures();
     if (callSignatures.length > 0) {
       const callReturnType = callSignatures[0]!.getReturnType();
-      // This should be OpaqueRef<Stream<void>> - the type of calling handler(...)({...})
+      // This should be Reactive<Stream<void>> - the type of calling handler(...)({...})
       registerSyntheticCallType(finalCall, callReturnType, typeRegistry);
     }
   }

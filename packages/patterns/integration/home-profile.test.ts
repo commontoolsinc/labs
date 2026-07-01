@@ -6,6 +6,7 @@ import {
   clickCfButton,
   clickTrustedAction,
   fillCfInput,
+  submitViaEnter,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
   waitForText,
@@ -62,7 +63,11 @@ async function ensureProfileTabActive(page: any) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function createProfile(page: any, name: string) {
+async function createProfile(
+  page: any,
+  name: string,
+  { viaEnter = false }: { viaEnter?: boolean } = {},
+) {
   await ensureProfileTabActive(page);
   // Each profile lives in its own `inSpace` child space, so appending one is a
   // cross-space commit. `waitForRuntimeIdle` returns once the scheduler queue
@@ -72,7 +77,14 @@ async function createProfile(page: any, name: string) {
   // again after so it reconciles before the caller navigates or appends again.
   await waitForRuntimeSynced(page);
   await fillCfInput(page, "#wish-profile-picker-name-input", name);
-  await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+  // Submit either by clicking the trusted "Create profile" button or by
+  // pressing Enter in the field. Both ride a trusted gesture that carries the
+  // typed name as event.target.value with the surface's UI integrity.
+  if (viaEnter) {
+    await submitViaEnter(page, "#wish-profile-picker-name-input");
+  } else {
+    await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+  }
   await waitForRuntimeSynced(page);
 }
 
@@ -140,5 +152,24 @@ describe("home-space profile creation", () => {
     // Both profiles are now listed in the picker.
     await waitForText(page, "#home-profile-summary", "Ada Lovelace");
     await waitForText(page, "#home-profile-summary", "Alan Turing");
+  });
+
+  it("creates a profile by pressing Enter in the field (keyboard submit)", async () => {
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { builtin: "home" },
+      identity,
+    });
+
+    await clickCfButton(page, 'cf-tab[value="profile"]');
+
+    // Submitting with Enter (no button click) must create the profile too: the
+    // browser's implicit form submission fires a trusted click on the field's
+    // hidden submit button, carrying the typed name to the create handler.
+    await createProfile(page, "Grace Hopper", { viaEnter: true });
+    await waitForRuntimeIdle(page);
+    await waitForText(page, "#home-profile-summary", "Grace Hopper");
   });
 });

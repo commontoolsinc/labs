@@ -91,10 +91,11 @@ Useful references:
 
 ### Files And Media
 
-| Element              | Element               | Element          | Element            |
-| -------------------- | --------------------- | ---------------- | ------------------ |
-| `cf-attachments-bar` | `cf-audio-visualizer` | `cf-canvas`      | `cf-file-download` |
-| `cf-file-input`      | `cf-iframe`           | `cf-image-input` | `cf-svg`           |
+| Element              | Element               | Element     | Element            |
+| -------------------- | --------------------- | ----------- | ------------------ |
+| `cf-attachments-bar` | `cf-audio-visualizer` | `cf-canvas` | `cf-file-download` |
+| `cf-file-input`      | `cf-iframe`           | `cf-image`  | `cf-image-input`   |
+| `cf-svg`             |                       |             |                    |
 
 ### Layout And Structure
 
@@ -135,7 +136,8 @@ Useful references:
 | Element           | Element           | Element            | Element            |
 | ----------------- | ----------------- | ------------------ | ------------------ |
 | `cf-chat`         | `cf-chat-message` | `cf-message-beads` | `cf-message-input` |
-| `cf-prompt-input` | `cf-question`     | `cf-tool-call`     | `cf-tools-chip`    |
+| `cf-prompt-input` | `cf-question`     | `cf-submit-input`  | `cf-tool-call`     |
+| `cf-tools-chip`   |                   |                    |                    |
 
 ### Identity And Integrations
 

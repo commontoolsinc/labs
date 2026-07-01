@@ -16,7 +16,7 @@ import {
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
-import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind } from "../../transformers/cell-type.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {
@@ -33,7 +33,7 @@ import { SchemaFactory } from "../utils/schema-factory.ts";
  * to see the correct unwrapped types for captured variables.
  *
  * Inside a lift-applied callback:
- * - OpaqueRef<T> captures become T parameters (unwrapped)
+ * - Reactive<T> captures become T parameters (unwrapped)
  * - Cell<T> captures remain Cell<T> (NOT unwrapped)
  *
  * We register this before the visitor runs so decisions are made correctly.
@@ -47,7 +47,7 @@ function preRegisterCaptureTypes(
   if (!typeRegistry) return;
 
   // Build map: capture name -> type to register
-  // Only unwrap OpaqueRef types (kind === "opaque"), not Cell types
+  // Only unwrap Reactive types (kind === "opaque"), not Cell types
   const captureTypes = new Map<string, ts.Type>();
   for (const expr of captureExpressions) {
     if (ts.isIdentifier(expr)) {
@@ -55,7 +55,7 @@ function preRegisterCaptureTypes(
       if (exprType) {
         const kind = getCellKind(exprType, checker);
 
-        // Only unwrap if it's an OpaqueRef (kind === "opaque")
+        // Only unwrap if it's a Reactive (kind === "opaque")
         // Cell and Stream types should NOT be unwrapped
         if (kind === "opaque") {
           const unwrapped = unwrapOpaqueLikeType(exprType, checker);

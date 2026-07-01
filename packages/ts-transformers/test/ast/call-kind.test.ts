@@ -11,6 +11,7 @@ import {
   getLiftAppliedInputAndCallback,
   getPatternBuilderCallbackArgument,
 } from "../../src/ast/mod.ts";
+import { getWithPatternHoistablePatternCall } from "../../src/ast/call-kind.ts";
 
 function createProgram(source: string): {
   sourceFile: ts.SourceFile;
@@ -159,16 +160,18 @@ Deno.test("classifyArrayCallbackContainerCall downgrades reactive array callback
 
 Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive when the receiver is reactive", () => {
   const { sourceFile, checker } = createProgram(`
-    interface OpaqueRefMethods<T> {
-      key(path: string): OpaqueRef<T>;
+    declare const CELL_BRAND: unique symbol;
+    type BrandedCell<T, Brand extends string> = {
+      readonly [CELL_BRAND]: Brand;
+    };
+
+    interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {
       mapWithPattern<U>(callback: (value: any) => U): U[];
     }
 
-    type OpaqueRef<T> = T & OpaqueRefMethods<T>;
+    declare const items: OpaqueCell<number[]>;
 
-    declare const items: OpaqueRef<{ values: number[] }>;
-
-    const value = items.key("values").mapWithPattern((n: number) => n + 1);
+    const value = items.mapWithPattern((n: number) => n + 1);
   `);
 
   const expression = findInitializer(sourceFile, "value");
@@ -387,4 +390,75 @@ Deno.test("getLiftAppliedInputAndCallback recognizes lift-applied input position
   assertEquals(secondArgs?.input.getText(), "1");
   assertEquals(secondArgs?.callback.parameters[0]?.name.getText(), "value");
   assertEquals(thirdArgs, undefined);
+});
+
+Deno.test("getWithPatternHoistablePatternCall returns the bare pattern call argument", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare const items: any;
+    declare const make: { pattern(body: () => number): number };
+
+    const value = items.mapWithPattern(make.pattern(() => 1), { p: 1 });
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  const hoistable = getWithPatternHoistablePatternCall(expression, checker);
+  assertEquals(hoistable?.getText(), "make.pattern(() => 1)");
+});
+
+Deno.test("getWithPatternHoistablePatternCall ignores a first argument that is not a pattern call", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare const items: any;
+    declare function plain(body: () => number): number;
+
+    const value = items.mapWithPattern(plain(() => 1), { p: 1 });
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  assertEquals(
+    getWithPatternHoistablePatternCall(expression, checker),
+    undefined,
+  );
+});
+
+Deno.test("detectCallKind resolves a pattern builder imported from commonfabric", () => {
+  const { sourceFile, checker } = createProgram(`
+    import { pattern } from "commonfabric";
+
+    const value = pattern(() => 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  const kind = detectCallKind(expression, checker);
+  assertEquals(kind?.kind, "builder");
+  assertEquals(
+    kind?.kind === "builder" ? kind.builderName : undefined,
+    "pattern",
+  );
+});
+
+Deno.test("detectCallKind ignores a builder-named import from a foreign module", () => {
+  const { sourceFile, checker } = createProgram(`
+    import { pattern } from "other-module";
+
+    const value = pattern(() => 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  assertEquals(detectCallKind(expression, checker), undefined);
 });

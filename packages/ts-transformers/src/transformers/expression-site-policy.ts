@@ -36,7 +36,7 @@ import type { ExpressionContainerKind } from "./expression-site-types.ts";
 import {
   isPatternFactoryCalleeExpression,
   isStructuralReactiveFactoryExpression,
-  returnsOpaqueRefResult,
+  returnsReactiveResult,
 } from "./structural-reactive-factory.ts";
 
 interface ExpressionSiteCallRootPolicyInfo {
@@ -274,7 +274,7 @@ function classifyCallExpressionRoot(
   const callee = expression.expression;
   if (ts.isIdentifier(callee)) {
     if (
-      returnsOpaqueRefResult(expression, context.checker) ||
+      returnsReactiveResult(expression, context.checker) ||
       isStructuralReactiveFactoryExpression(callee, context.checker)
     ) {
       return "other";
@@ -287,7 +287,7 @@ function classifyCallExpressionRoot(
     ts.isElementAccessExpression(callee)
   ) {
     const receiverAnalysis = analyze(callee.expression);
-    if (receiverAnalysis.containsOpaqueRef) {
+    if (receiverAnalysis.containsReactive) {
       return "receiver-method";
     }
 
@@ -318,7 +318,7 @@ function isSharedJsxLocalHelperCallRoot(
     return false;
   }
 
-  return analyze(expression).containsOpaqueRef;
+  return analyze(expression).containsReactive;
 }
 
 function isSharedPostClosureCallRootKind(
@@ -719,7 +719,7 @@ function isDeferredJsxArrayMethodExpression(
     }
 
     const receiverAnalysis = analyze(current.expression.expression);
-    if (receiverAnalysis.containsOpaqueRef) {
+    if (receiverAnalysis.containsReactive) {
       return true;
     }
   }
@@ -755,7 +755,7 @@ function isOwnedDeferredJsxArrayMethodRoot(
   }
 
   const receiverAnalysis = analyze(callee.expression);
-  return receiverAnalysis.containsOpaqueRef;
+  return receiverAnalysis.containsReactive;
 }
 
 export function isDirectArrayMethodRootExpression(
@@ -788,7 +788,7 @@ function isOwnedDynamicElementAccessRoot(
     return false;
   }
 
-  return analyze(current).containsOpaqueRef;
+  return analyze(current).containsReactive;
 }
 
 function isOwnedObjectLiteralRoot(
@@ -797,7 +797,7 @@ function isOwnedObjectLiteralRoot(
 ): boolean {
   const current = unwrapExpression(expression);
   return ts.isObjectLiteralExpression(current) &&
-    analyze(current).containsOpaqueRef;
+    analyze(current).containsReactive;
 }
 
 function getExpressionSitePolicyInfo(
@@ -868,20 +868,20 @@ function isExpressionSiteLowerable(
     (
       containerKind === "jsx-expression" &&
       siteInfo.controlFlowRewriteRoot &&
-      analysis.containsOpaqueRef
+      analysis.containsReactive
     );
 }
 
 /**
  * The lowerable signal shared by the reactive-boundary value-lift classifiers
  * (helper-owned and array-method-owned): the expression reads a reactive value
- * (`containsOpaqueRef`) and the dataflow analysis says it must be rewritten to
+ * (`containsReactive`) and the dataflow analysis says it must be rewritten to
  * resolve those reads (`requiresRewrite`).
  */
 function hasReactiveComputationToLift(
   analysis: ReturnType<AnalyzeFn>,
 ): boolean {
-  return analysis.containsOpaqueRef && analysis.requiresRewrite;
+  return analysis.containsReactive && analysis.requiresRewrite;
 }
 
 function createSharedExpressionSiteDecision(
@@ -1169,7 +1169,7 @@ export function classifyExpressionSiteHandling(
   // position of a reactive map/filter/flatMap callback (lowered to *WithPattern)
   // must be lifted to operate on RESOLVED values, exactly as the same expression is
   // lifted inside a helper body or a JSX value site. Without this it is emitted raw
-  // on OpaqueRef proxies: a filter predicate `v.optionId === oid` becomes
+  // on Reactive proxies: a filter predicate `v.optionId === oid` becomes
   // proxy-vs-proxy `===` → a constant `false`.
   //
   // Two guards keep COLLECTION-valued expressions out, so they stay structurally
@@ -1395,7 +1395,7 @@ export function classifyRestrictedReactiveComputation(
   }
 
   const analysis = analyze(expression);
-  if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+  if (analysis.containsReactive && analysis.requiresRewrite) {
     return { kind: "requires-computed" };
   }
 

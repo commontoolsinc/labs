@@ -4,7 +4,8 @@
   "exports": {
     ".": "./src/mod.ts",
     "./core/context": "./src/core/context.ts",
-    "./core/imports": "./src/core/imports.ts"
+    "./core/imports": "./src/core/imports.ts",
+    "./runtime-registry": "./src/core/commonfabric-runtime-registry.ts"
   },
   "imports": {
     "typescript": "npm:typescript"

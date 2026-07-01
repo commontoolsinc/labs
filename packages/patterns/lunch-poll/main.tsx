@@ -225,7 +225,8 @@ const voteKey = (voterName: string, optionId: string): string =>
 // would then see that stale content and treat the absent vote as present.
 // Removing a vote always pairs the link removal with this clear.
 const clearVoteEntity = (votes: VotesCell, key: string): void => {
-  (votes.elementById(key) as Writable<Vote | undefined>).set(undefined);
+  const vote: Writable<Vote | undefined> = votes.elementById(key);
+  vote.set(undefined);
 };
 
 const getInitials = (name: string): string => {

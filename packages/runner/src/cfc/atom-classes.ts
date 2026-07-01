@@ -27,6 +27,7 @@ const CLASS_BY_TYPE = new Map<string, PropagationClass>([
   [CFC_ATOM_TYPE.Caveat, "value-bound"],
   [CFC_ATOM_TYPE.Resource, "value-bound"],
   [CFC_ATOM_TYPE.Builtin, "provenance"],
+  [CFC_ATOM_TYPE.ExternalIngest, "provenance"],
   [CFC_ATOM_TYPE.Origin, "provenance"],
   [CFC_ATOM_TYPE.PromptSlotInfluence, "provenance"],
   [CFC_ATOM_TYPE.TransformedBy, "provenance"],

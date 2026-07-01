@@ -30,7 +30,7 @@ describe("extractCompiledExports", () => {
     ].join("\n");
     const { names, starTargetSpecs } = extractCompiledExports(compiled);
     expect(new Set(names)).toEqual(new Set(["a", "b", "c"]));
-    expect(names.has("__esModule")).toBe(false);
+    expect(names).not.toContain("__esModule");
     expect(starTargetSpecs).toEqual([]);
   });
 
@@ -141,5 +141,139 @@ describe("buildRecordsFromCompiled (resolve-free, source-free)", () => {
     expect(new Set(built.records.get(entrySpec)!.exports)).toEqual(
       new Set(["z", "default", "a", "b", "c", "__esModule"]),
     );
+  });
+});
+
+describe("buildRecordsFromCompiled parse memo (content-addressed)", () => {
+  // Two modules with unique content-hash identities and hand-written CJS bodies,
+  // so the process-global parse memo is cold for them at first sight. At piece
+  // boot the SAME system-app closure is rebuilt once per system pattern loaded
+  // by identity, so without the memo every module is re-parsed N times; these
+  // fixtures stand in for that shared closure.
+  const modA: CachedCompiledModule = {
+    identity: "memo-test-A-0000000000000000000000000000",
+    filename: "/memo-a.ts",
+    code: [
+      `Object.defineProperty(exports, "__esModule", { value: true });`,
+      `exports.a = void 0;`,
+      `exports.a = 1;`,
+    ].join("\n"),
+    imports: [],
+  };
+  const modB: CachedCompiledModule = {
+    identity: "memo-test-B-0000000000000000000000000000",
+    filename: "/memo-b.ts",
+    code: [
+      `Object.defineProperty(exports, "__esModule", { value: true });`,
+      `exports.b = void 0;`,
+      `exports.b = 2;`,
+    ].join("\n"),
+    imports: [],
+  };
+
+  // Records projected to a comparable, order-stable shape.
+  const exportsBySpecifier = (
+    g: ReturnType<typeof buildRecordsFromCompiled>,
+  ): [string, string[]][] =>
+    [...g.records]
+      .map(([specifier, r]): [string, string[]] => [
+        specifier,
+        [...r.exports].sort(),
+      ])
+      .sort(([a], [b]) => a.localeCompare(b));
+
+  it("is transparent: repeated builds of the same closure produce identical records", () => {
+    const first = buildRecordsFromCompiled([modA, modB]);
+    const second = buildRecordsFromCompiled([modA, modB]);
+    // Reusing a cached parse across calls must not corrupt output via shared
+    // mutable state — each record gets a fresh export Set and import array.
+    expect(exportsBySpecifier(second)).toEqual(exportsBySpecifier(first));
+  });
+
+  it("keys the parse memo on the compiled body, not the source identity (no cross-contamination)", () => {
+    // The memo must key on the compiled body: the same source `identity` can map
+    // to different compiled bytes (different compilation modes / runtime
+    // versions), so serving one body's export surface for another would be a
+    // correctness bug. Feed two DIFFERENT bodies under the SAME identity and
+    // assert each record reflects ITS OWN body — proving the first body's parse
+    // is not reused for the second.
+    const id = "memo-key-identity-000000000000000000000000";
+    const spec = `cf:module/${id}`;
+    const exportsFor = (code: string): Set<string> => {
+      const g = buildRecordsFromCompiled([{
+        identity: id,
+        filename: "/k.ts",
+        code,
+        imports: [],
+      }]);
+      return new Set(g.records.get(spec)!.exports);
+    };
+    const first = exportsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.first = void 0;\nexports.first = 1;`,
+    );
+    expect(first).toEqual(new Set(["first", "__esModule"]));
+    // Same identity, DIFFERENT body → must reflect the second body's exports.
+    const second = exportsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.second = void 0;\nexports.second = 2;`,
+    );
+    expect(second).toEqual(new Set(["second", "__esModule"]));
+  });
+
+  it("keys the import memo on the compiled body too (no cross-contamination)", () => {
+    // Symmetric guard for parseCompiledImports: the runtime `require()`
+    // specifiers are also derived from — and memoized by — the compiled body.
+    // Feed two bodies that require() DIFFERENT specifiers under the SAME
+    // identity and assert each record's imports reflect ITS OWN body, proving
+    // the import memo is body-keyed (not identity-keyed) just like the exports.
+    const id = "memo-imports-identity-00000000000000000000";
+    const spec = `cf:module/${id}`;
+    const importsFor = (code: string): string[] => {
+      const g = buildRecordsFromCompiled([{
+        identity: id,
+        filename: "/imp.ts",
+        code,
+        imports: [],
+      }]);
+      return [...g.records.get(spec)!.imports];
+    };
+    const first = importsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `const alpha = require("./alpha.ts");`,
+    );
+    expect(first).toEqual(["./alpha.ts"]);
+    // Same identity, DIFFERENT body → must reflect the second body's imports.
+    const second = importsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `const beta = require("./beta.ts");`,
+    );
+    expect(second).toEqual(["./beta.ts"]);
+  });
+});
+
+describe("buildRecordsFromCompiled precomputed record surface (Fix B)", () => {
+  it("reads the persisted export/import surface and skips the body parse", () => {
+    // With the precomputed fields present, buildRecordsFromCompiled must use
+    // them and NOT parse the body. Persist a surface that deliberately DISAGREES
+    // with the body (body exports `fromBody` and requires nothing; the doc
+    // claims export `fromDoc` and import `ghost:spec`). If the record reflects
+    // the persisted values, the parse was skipped.
+    const id = "fixb-persisted-000000000000000000000000";
+    const spec = `cf:module/${id}`;
+    const built = buildRecordsFromCompiled([{
+      identity: id,
+      filename: "/persisted.ts",
+      code: `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.fromBody = void 0;\nexports.fromBody = 1;`,
+      imports: [],
+      exportNames: ["fromDoc"],
+      starTargetSpecs: [],
+      importSpecs: ["ghost:spec"],
+    }]);
+    const record = built.records.get(spec)!;
+    expect(new Set(record.exports)).toEqual(new Set(["fromDoc", "__esModule"]));
+    expect(record.exports).not.toContain("fromBody");
+    expect(record.imports).toEqual(["ghost:spec"]);
   });
 });

@@ -51,7 +51,7 @@ deno task cf piece inspect --identity key.json --api-url URL --space SPACE --pie
 | Checkbox not syncing | Use `$checked` not `checked` |
 | Style not applying | Check element type (object vs string syntax) |
 | LLM in handler | Move `generateText` to pattern body |
-| UI blocking | Use `fetchData` instead of `await` in handlers |
+| UI blocking | Use `fetchJson` instead of `await` in handlers |
 
 ## 6. Check Runtime Logs and Stats
 

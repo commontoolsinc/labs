@@ -20,17 +20,13 @@ export default function createApp() {
 
   const app = createRouter();
 
-  // Add OpenTelemetry tracing if enabled
+  // Add OpenTelemetry tracing if enabled.
+  // Note: service.name / service.version are OTel *resource* attributes, already
+  // set on the provider in lib/otel.ts. We intentionally don't re-inject them as
+  // per-span attributes here — doing so duplicated the keys on every span (with a
+  // conflicting default: span-level "toolshed" vs resource-level "toolshed-dev").
   if (env.OTEL_ENABLED) {
-    app.use(
-      "*",
-      otelTracing({
-        additionalAttributes: {
-          "service.name": env.OTEL_SERVICE_NAME || "toolshed",
-          "service.version": "1.0.0",
-        },
-      }),
-    );
+    app.use("*", otelTracing());
   }
 
   app.use(serveEmojiFavicon("🪓"));

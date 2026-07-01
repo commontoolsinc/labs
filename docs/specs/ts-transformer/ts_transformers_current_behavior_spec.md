@@ -142,7 +142,7 @@ worth calling out:
 Current mode-sensitive behavior:
 
 - `JsxExpressionSiteRouterTransformer` in `error` mode reports diagnostics
-  instead of rewriting JSX expressions that would require opaque-ref rewrites in
+  instead of rewriting JSX expressions that would require reactive rewrites in
   non-compute contexts.
 - Other transformers currently do not branch on mode.
 
@@ -168,7 +168,7 @@ list — is the authoritative source. As of this writing it recognizes:
 - `wish`
 - `generateObject` and `generateText`
 - the `runtime-call` family — tagged-call / function runtime origins: `str`,
-  `llm`, `llmDialog`, `fetchData`, `fetchProgram`, `streamData`,
+  `llm`, `llmDialog`, `fetchJson`, `fetchProgram`, `streamData`,
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)
@@ -206,8 +206,8 @@ Validates `as` and angle-bracket assertions:
   - `<X><unknown>expr`
   - parenthesized/mixed equivalents
 - **Error** `cast-validation:forbidden-cast`
-  - casts to `OpaqueRef<...>`
-- **Warning** `cast-validation:cell-cast`
+  - casts to `Reactive<...>`
+- **Error** `cast-validation:cell-cast`
   - casts to cell-like types: `Cell`, `OpaqueCell`, `Stream`, `ComparableCell`,
     `ReadonlyCell`, `WriteonlyCell`, `Writable`, `CellTypeConstructor`
 
@@ -254,7 +254,7 @@ On call `receiver.get()` (no args):
 Deliberate non-coverage of the structural fallback: `lift` / `handler` /
 `action` callback **parameters** are not inferred as opaque from structure
 alone — they keep their declared cell semantics. The structural inference exists
-only for the `OpaqueRef<T> = T` identity-alias case where the cell brand is
+only for the `Reactive<T> = T` identity-alias case where the cell brand is
 gone.
 
 Same-named local helpers are not treated as reactive origins unless the call
@@ -366,7 +366,7 @@ Compute wrappers override restrictions:
 - `computed`, `action`, `lift`, `handler` callbacks
 - inline JSX `on*` handlers
 - standalone function definitions
-- JSX expressions (handled by opaque-ref JSX transformer)
+- JSX expressions (handled by reactive JSX transformer)
 - the SQLite `table(columns, (row) => ({...}))` row-label rule callback —
   classified as the supported `sqlite-row-label-rule` compute boundary
   (`callback-boundary.ts`). `table()` is recognized by name **plus** the
@@ -581,7 +581,7 @@ For each `JsxExpression`:
 - compute-context JSX does not lower `&&` / `||`
 - pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
-  - report `opaque-ref:jsx-expression` for non-compute contexts requiring
+  - report `reactive:jsx-expression` for non-compute contexts requiring
     rewrite
   - no rewrite
 
@@ -1085,7 +1085,7 @@ Special path:
 - arrays of `unknown` emit `items: { type: "unknown" }`
 - synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
   rather than collapsing them away
-- `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
+- `Reactive<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
   markers such as `asCell` / `asStream`
 - CFC-specific wrapper lowering such as `WriteAuthorizedBy`, projection aliases,
   and trusted-UI helper schema metadata is not part of current implemented
@@ -1097,7 +1097,7 @@ Special path:
 Diagnostic message transformers are exported separately from AST transform
 pipeline. Current built-in behavior:
 
-- `OpaqueRefErrorTransformer` rewrites TypeScript messages matching
+- `ReactiveErrorTransformer` rewrites TypeScript messages matching
   `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into user-facing
   guidance about unnecessary `.get()`.
 - optional `verbose` mode appends original TypeScript message.
@@ -1167,7 +1167,7 @@ Additional non-fixture unit suites cover:
 - cast/empty-array/pattern-context/opaque-get/schema-shrink validation
 - diagnostic message transformer behavior
 - event-handler detection heuristics
-- opaque-ref analysis/normalization/runtime-style APIs
+- reactive analysis/normalization/runtime-style APIs
 - pipeline regression and policy/capability-analysis behavior
 - lift-applied call helper and identifier utilities
 

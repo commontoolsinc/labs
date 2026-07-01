@@ -1,8 +1,8 @@
 /**
- * OpaqueRef .get() Validation Transformer
+ * Reactive .get() Validation Transformer
  *
- * Validates that .get() is not called on OpaqueRef types.
- * OpaqueRef values (from pattern inputs, computed(), lift()) can be accessed
+ * Validates that .get() is not called on Reactive types.
+ * Reactive values (from pattern inputs, computed(), lift()) can be accessed
  * directly without .get(). Only Writable<T> (Cell<T>) requires .get().
  *
  * This transformer provides a clear, actionable error message before TypeScript
@@ -31,7 +31,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   }
 
   /**
-   * Checks if a call expression is a .get() call on an OpaqueRef type
+   * Checks if a call expression is a .get() call on a Reactive type
    * and reports a helpful error if so.
    */
   private validateGetCall(
@@ -60,7 +60,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
       return;
     }
 
-    // Check if the receiver is an "opaque" cell kind (OpaqueRef/OpaqueCell)
+    // Check if the receiver is an "opaque" cell kind (Reactive/OpaqueCell)
     // These types don't have .get() - values are accessed directly
     const cellKind = getCellKind(receiverType, checker);
 
@@ -91,7 +91,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   }
 
   /**
-   * Structural fallback for cases where OpaqueRef<T> = T and the brand is gone.
+   * Structural fallback for cases where Reactive<T> = T and the brand is gone.
    *
    * We intentionally only infer reactivity from:
    * - pattern/render callback inputs

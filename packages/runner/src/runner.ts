@@ -76,7 +76,7 @@ import {
   mergeObjects,
   sanitizeDebugLabel,
   setRunnableName,
-  validateAndCheckOpaqueRefs,
+  validateAndCheckReactives,
 } from "./runner-utils.ts";
 import {
   resolveBuiltinImplementationIdentity,
@@ -95,7 +95,7 @@ import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
-  validateAndCheckOpaqueRefs,
+  validateAndCheckReactives,
 } from "./runner-utils.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
@@ -111,8 +111,11 @@ const sourceLocationLogger = getLogger("runner.source-location", {
 });
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
-  "fetchData",
+  "fetchBinary",
+  "fetchJson",
+  "fetchJsonUnchecked",
   "fetchProgram",
+  "fetchText",
   "generateObject",
   "generateText",
   "llm",
@@ -1353,7 +1356,7 @@ export class Runner {
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
     if (rootCell.getRaw() === undefined) {
-      return Promise.resolve(rootCell.sync()).then(() => {
+      return rootCell.sync().then(() => {
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -1823,8 +1826,7 @@ export class Runner {
       const link = parseLink(value, resultCell);
 
       if (link) {
-        const maybePromise = this.runtime.getCellFromLink(link).sync();
-        if (maybePromise instanceof Promise) promises.add(maybePromise);
+        promises.add(this.runtime.getCellFromLink(link).sync());
       } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
       }
@@ -2706,8 +2708,8 @@ export class Runner {
     const receiptsEnabled =
       this.runtime.experimental.commitPreconditions === true;
     if (
-      !validateAndCheckOpaqueRefs(result, name) &&
-      frame.opaqueRefs.size === 0
+      !validateAndCheckReactives(result, name) &&
+      frame.reactives.size === 0
     ) {
       if (receiptsEnabled) {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
@@ -2944,8 +2946,8 @@ export class Runner {
     narrowestReadScope?: CellScope,
   ): any {
     if (
-      !validateAndCheckOpaqueRefs(result, name) &&
-      frame.opaqueRefs.size === 0
+      !validateAndCheckReactives(result, name) &&
+      frame.reactives.size === 0
     ) {
       recordOutputSchemaPolicyInputs(
         tx,
@@ -3246,8 +3248,7 @@ export class Runner {
         const collect = (value: unknown, depth: number): void => {
           if (depth > 16) return;
           if (isCell(value)) {
-            const maybePromise = value.sync();
-            if (maybePromise instanceof Promise) promises.push(maybePromise);
+            promises.push(value.sync());
             return;
           }
           // NOTE: materialized records all carry the back-to-cell symbol, so

@@ -8,7 +8,7 @@ const liftOptional = lift((input: Writable<{ foo: string | undefined; bar: strin
   input.key("foo").get()
 );
 
-const deriveInput = {} as Writable<{ foo: string; bar: string }>;
+const deriveInput: Writable<{ foo: string; bar: string }> = {} as never;
 const computedObserved = computed(() => deriveInput.key("foo").get());
 
 const handlerObserved = handler(

@@ -1,7 +1,9 @@
 import {
+  clearGenerateTextResult,
   clearWishResults,
   findEventHandlers,
   NAME,
+  setGenerateTextResult,
   setWishResult,
   textContent,
   UI,
@@ -53,23 +55,43 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       "archive buttons remove completed items",
     );
 
-    const { default: FetchDataDynamic } = await import(
-      "../../../gideon-tests/test-30-fetchdata-dynamic-instantiation.tsx"
+    const { default: FetchJsonDynamic } = await import(
+      "../../../gideon-tests/test-30-fetchjson-dynamic-instantiation.tsx"
     );
-    const fetchDataDynamic = instantiatePattern(FetchDataDynamic, {
+    const fetchJsonDynamic = instantiatePattern(FetchJsonDynamic, {
       repos: [
         { id: "1", name: "react" },
         { id: "2", name: "vue" },
       ],
     });
-    const repos = fetchDataDynamic.repos;
+    const repos = fetchJsonDynamic.repos;
     assert(
       Array.isArray(repos) && repos.length === 2,
-      "fetch-data dynamic pattern keeps input repos",
+      "fetch-json dynamic pattern keeps input repos",
     );
     assert(
-      textContent(uiOf(fetchDataDynamic)).includes("Stars: 123"),
-      "fetch-data dynamic pattern renders typed star counts",
+      textContent(uiOf(fetchJsonDynamic)).includes("Stars: 123"),
+      "fetch-json dynamic pattern renders typed star counts",
+    );
+
+    const { default: FetchJsonExample } = await import(
+      "../../../examples/fetch-json.tsx"
+    );
+    const fetchJsonExample = instantiatePattern(FetchJsonExample, {
+      repoUrl: new Writable("https://github.com/vercel/next.js"),
+    });
+    assert(
+      textContent(uiOf(fetchJsonExample)).includes("123"),
+      "fetch-json example renders the typed repo star count",
+    );
+
+    const { default: TestAwaitInHandler } = await import(
+      "../../../gideon-tests/test-await-in-handler.tsx"
+    );
+    const testAwaitInHandler = instantiatePattern(TestAwaitInHandler, {});
+    assert(
+      textContent(uiOf(testAwaitInHandler)).includes("Fetched successfully"),
+      "await-in-handler pattern renders the reactive fetchJson result",
     );
 
     const { default: GmailImporter } = await import(
@@ -83,7 +105,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         autoFetchOnAuth: true,
         resolveInlineImages: false,
       },
-      overrideAuth: {
+      overrideAuth: new Writable({
         token: "token",
         tokenType: "Bearer",
         scope: [],
@@ -91,7 +113,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         expiresAt: 4_000_000_000_000,
         refreshToken: "",
         user: { email: "ada@example.com", name: "Ada", picture: "" },
-      },
+      }),
     });
     assert(
       sendCountOf(gmailImporter.bgUpdater) === 1,
@@ -127,5 +149,86 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       textContent(uiOf(journal)).includes("Journal subject"),
       "journal renders entries with typed subject cells",
     );
+
+    const { default: ExtractorModule } = await import(
+      "../../../record/extraction/extractor-module.tsx"
+    );
+    setGenerateTextResult({
+      pending: false,
+      result: undefined,
+      error: "OCR request failed",
+    });
+    const extractor = instantiatePattern(ExtractorModule, {
+      parentSubPieces: new Writable([
+        {
+          type: "photo",
+          pinned: false,
+          piece: {
+            image: {
+              data: "data:image/png;base64,AAAA",
+            },
+            label: "Business card",
+          },
+        },
+      ]),
+      parentTrashedSubPieces: new Writable([]),
+      parentTitle: new Writable(""),
+      sourceSelections: new Writable({}),
+      trashSelections: new Writable({}),
+      selections: new Writable({}),
+      extractPhase: new Writable("select"),
+      extractionPrompt: new Writable(""),
+      cleanupNotesEnabled: new Writable(true),
+      notesContentSnapshot: new Writable({}),
+      cleanupApplyStatus: new Writable("pending"),
+      applyInProgress: new Writable(false),
+      errorDetailsExpanded: new Writable(false),
+    });
+    assert(
+      textContent(uiOf(extractor)).includes(
+        "OCR failed for some photos: OCR request failed.",
+      ),
+      "extractor renders OCR string errors",
+    );
+    clearGenerateTextResult();
+
+    setGenerateTextResult({
+      pending: false,
+      result: "Ada prefers tea.",
+      error: undefined,
+    });
+    const extractorWithoutOcrError = instantiatePattern(ExtractorModule, {
+      parentSubPieces: new Writable([
+        {
+          type: "photo",
+          pinned: false,
+          piece: {
+            image: {
+              data: "data:image/png;base64,BBBB",
+            },
+            label: "Tea note",
+          },
+        },
+      ]),
+      parentTrashedSubPieces: new Writable([]),
+      parentTitle: new Writable(""),
+      sourceSelections: new Writable({}),
+      trashSelections: new Writable({}),
+      selections: new Writable({}),
+      extractPhase: new Writable("select"),
+      extractionPrompt: new Writable(""),
+      cleanupNotesEnabled: new Writable(true),
+      notesContentSnapshot: new Writable({}),
+      cleanupApplyStatus: new Writable("pending"),
+      applyInProgress: new Writable(false),
+      errorDetailsExpanded: new Writable(false),
+    });
+    assert(
+      !textContent(uiOf(extractorWithoutOcrError)).includes(
+        "OCR failed for some photos",
+      ),
+      "extractor omits OCR error text when no OCR error is present",
+    );
+    clearGenerateTextResult();
   });
 }

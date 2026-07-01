@@ -243,6 +243,97 @@ describe("InputTimingController — blur", () => {
 });
 
 // ---------------------------------------------------------------------------
+// flush()
+// ---------------------------------------------------------------------------
+
+describe("InputTimingController — flush", () => {
+  let time: FakeTime;
+
+  beforeEach(() => {
+    time = new FakeTime();
+  });
+  afterEach(() => {
+    time.restore();
+  });
+
+  it("runs a pending debounced callback immediately and cancels the timer", () => {
+    const ctrl = new InputTimingController(createMockHost(), {
+      strategy: "debounce",
+      delay: 500,
+    });
+    const calls: string[] = [];
+    ctrl.schedule(() => calls.push("v"));
+
+    expect(calls).toEqual([]);
+    ctrl.flush();
+    expect(calls).toEqual(["v"]);
+
+    // The scheduled timer must not fire again after a manual flush.
+    time.tick(500);
+    expect(calls).toEqual(["v"]);
+  });
+
+  it("flushes only the latest debounced callback", () => {
+    const ctrl = new InputTimingController(createMockHost(), {
+      strategy: "debounce",
+      delay: 200,
+    });
+    const calls: string[] = [];
+    ctrl.schedule(() => calls.push("first"));
+    ctrl.schedule(() => calls.push("second"));
+    ctrl.flush();
+    expect(calls).toEqual(["second"]);
+  });
+
+  it("runs a pending throttle trailing edge instead of dropping it", () => {
+    const ctrl = new InputTimingController(createMockHost(), {
+      strategy: "throttle",
+      delay: 100,
+    });
+    const calls: string[] = [];
+
+    // Leading edge fires immediately.
+    ctrl.schedule(() => calls.push("leading"));
+    expect(calls).toEqual(["leading"]);
+
+    // A second call within the window queues a trailing-edge write.
+    ctrl.schedule(() => calls.push("trailing"));
+    expect(calls).toEqual(["leading"]);
+
+    // flush() must run the trailing write now, not cancel it.
+    ctrl.flush();
+    expect(calls).toEqual(["leading", "trailing"]);
+
+    // And the scheduled trailing timer must not fire a second time.
+    time.tick(100);
+    expect(calls).toEqual(["leading", "trailing"]);
+  });
+
+  it("runs a pending blur-strategy callback immediately", () => {
+    const ctrl = new InputTimingController(createMockHost(), {
+      strategy: "blur",
+    });
+    let fired = false;
+    ctrl.schedule(() => {
+      fired = true;
+    });
+    ctrl.flush();
+    expect(fired).toBe(true);
+  });
+
+  it("is a no-op when nothing is pending", () => {
+    const ctrl = new InputTimingController(createMockHost(), {
+      strategy: "debounce",
+      delay: 100,
+    });
+    ctrl.flush();
+    time.tick(100);
+    // No callback was scheduled, so nothing fires and flush() does not throw.
+    expect(true).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Lifecycle and configuration
 // ---------------------------------------------------------------------------
 

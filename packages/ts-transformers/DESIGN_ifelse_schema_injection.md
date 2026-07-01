@@ -18,23 +18,22 @@ This document outlines the design for adding schema injection support to the
      condition: Opaque<T>,
      ifTrue: Opaque<U>,
      ifFalse: Opaque<V>,
-   ): OpaqueRef<U | V>;
+   ): Reactive<U | V>;
    function when<T, U>(
      condition: Opaque<T>,
      value: Opaque<U>,
-   ): OpaqueRef<T | U>;
+   ): Reactive<T | U>;
    function unless<T, U>(
      condition: Opaque<T>,
      value: Opaque<U>,
-   ): OpaqueRef<T | U>;
+   ): Reactive<T | U>;
    ```
 
 3. **Schema Injection**: No handlers exist for any of these functions in
    `SchemaInjectionTransformer`.
 
-4. **Transformation Pipeline**: `OpaqueRefJSXTransformer` creates
-   `when`/`unless` calls from `&&`/`||` expressions, but these bypass schema
-   injection entirely.
+4. **Transformation Pipeline**: `ReactiveJSXTransformer` creates `when`/`unless`
+   calls from `&&`/`||` expressions, but these bypass schema injection entirely.
 
 ### Current Generated Output (no schemas)
 
@@ -96,7 +95,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition?: Opaque<T>,
   ifTrue?: Opaque<U>,
   ifFalse?: Opaque<V>,
-): OpaqueRef<U | V> {
+): Reactive<U | V> {
   // Detects signature by checking if later args are provided
   if (
     condition !== undefined && ifTrue !== undefined && ifFalse !== undefined
@@ -114,7 +113,7 @@ export function when<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   value?: Opaque<U>,
-): OpaqueRef<T | U> {
+): Reactive<T | U> {
   // Detects signature by checking if condition and value args are provided
   if (condition !== undefined && value !== undefined) {
     // New signature with schemas
@@ -130,7 +129,7 @@ export function unless<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   fallback?: Opaque<U>,
-): OpaqueRef<T | U> {
+): Reactive<T | U> {
   // Detects signature by checking if condition and fallback args are provided
   if (condition !== undefined && fallback !== undefined) {
     // New signature with schemas

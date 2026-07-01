@@ -50,7 +50,7 @@ const handleFetch = handler(async (_, { url, result }) => {
   result.set(data);
 });
 
-// Use fetchData - reactive, non-blocking
+// Use fetchJson - reactive, non-blocking
 // Handler at module scope - just updates the query
 const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
   ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
@@ -60,12 +60,12 @@ export default pattern(({ searchQuery }) => {
   const searchUrl = computed(() =>
     searchQuery ? `/api/search?q=${encodeURIComponent(searchQuery)}` : ""
   );
-  const { result, error, loading } = fetchData({ url: searchUrl });
+  const { result, error, pending } = fetchJson({ url: searchUrl });
 
   return {
     [UI]: (
       <div>
-        {loading && <span>Loading...</span>}
+        {pending && <span>Loading...</span>}
         {error && <span>Error: {error}</span>}
         {result && <div>{result}</div>}
         <cf-message-input oncf-send={handleSearch({ searchQuery })} />
@@ -75,9 +75,9 @@ export default pattern(({ searchQuery }) => {
 });
 ```
 
-**Rule:** Handlers should be synchronous state changes defined at module scope. Use `fetchData` for async operations.
+**Rule:** Handlers should be synchronous state changes defined at module scope. Use `fetchJson` for async operations.
 
 ## See Also
 
-- @common/concepts/reactivity.md - Reactivity and fetchData patterns
+- @common/concepts/reactivity.md - Reactivity and fetchJson patterns
 - @common/concepts/types-and-schemas/writable.md - Cell and Writable types
