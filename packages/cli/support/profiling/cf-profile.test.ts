@@ -9,6 +9,10 @@ import {
 
 const decoder = new TextDecoder();
 
+type ReleasePortResult =
+  | { found: true; port: number }
+  | { found: false };
+
 async function readTextStream(
   stream: ReadableStream<Uint8Array> | null,
   onText?: (text: string) => void,
@@ -34,28 +38,35 @@ async function readTextStream(
   }
 }
 
+function findReleasePort(text: string): number | undefined {
+  const match = text.match(/profile release port (\d+)/);
+  if (!match) return undefined;
+  return Number(match[1]);
+}
+
 async function stopChildProcess(
   child: Deno.ChildProcess | undefined,
+  releasePort: number,
 ): Promise<Deno.CommandStatus | undefined> {
   if (!child) return undefined;
-  try {
-    await child.stdin.close();
-  } catch {
-    // Already closed.
-  }
+  const connection = await Deno.connect({
+    hostname: "127.0.0.1",
+    port: releasePort,
+  });
+  connection.close();
   return await child.status;
 }
 
 async function terminateChildProcess(
   child: Deno.ChildProcess | undefined,
-): Promise<void> {
-  if (!child) return;
+): Promise<Deno.CommandStatus | undefined> {
+  if (!child) return undefined;
   try {
     child.kill("SIGTERM");
   } catch {
     // Already exited.
   }
-  await child.status;
+  return await child.status;
 }
 
 Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
@@ -116,15 +127,17 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
     target = new Deno.Command(Deno.execPath(), {
       args: [
         "run",
+        "--allow-net=127.0.0.1",
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
-      stdin: "piped",
       stdout: "piped",
       stderr: "piped",
     }).spawn();
     const inspectorUrl = Promise.withResolvers<string>();
+    const releasePort = Promise.withResolvers<ReleasePortResult>();
     let inspectorUrlFound = false;
+    let releasePortFound = false;
     const targetStdoutPromise = readTextStream(target.stdout);
     const targetStderrPromise = readTextStream(target.stderr, (text) => {
       const found = findInspectorWebSocketUrl(text);
@@ -132,9 +145,17 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
         inspectorUrlFound = true;
         inspectorUrl.resolve(found);
       }
+      const foundReleasePort = findReleasePort(text);
+      if (foundReleasePort && !releasePortFound) {
+        releasePortFound = true;
+        releasePort.resolve({ found: true, port: foundReleasePort });
+      }
     }).then((text) => {
       if (!inspectorUrlFound) {
         inspectorUrl.reject(new Error("Inspector WebSocket URL was not found"));
+      }
+      if (!releasePortFound) {
+        releasePort.resolve({ found: false });
       }
       return text;
     });
@@ -153,7 +174,12 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
       stdout: "piped",
       stderr: "piped",
     }).output();
-    const targetStatus = await stopChildProcess(target);
+    const release = captureOutput.code === 0
+      ? await releasePort.promise
+      : { found: false } as const;
+    const targetStatus = release.found
+      ? await stopChildProcess(target, release.port)
+      : await terminateChildProcess(target);
     target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
@@ -206,15 +232,17 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
     target = new Deno.Command(Deno.execPath(), {
       args: [
         "run",
+        "--allow-net=127.0.0.1",
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
-      stdin: "piped",
       stdout: "piped",
       stderr: "piped",
     }).spawn();
     const inspectorUrl = Promise.withResolvers<string>();
+    const releasePort = Promise.withResolvers<ReleasePortResult>();
     let inspectorUrlFound = false;
+    let releasePortFound = false;
     const targetStdoutPromise = readTextStream(target.stdout);
     const targetStderrPromise = readTextStream(target.stderr, (text) => {
       const found = findInspectorWebSocketUrl(text);
@@ -222,9 +250,17 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
         inspectorUrlFound = true;
         inspectorUrl.resolve(found);
       }
+      const foundReleasePort = findReleasePort(text);
+      if (foundReleasePort && !releasePortFound) {
+        releasePortFound = true;
+        releasePort.resolve({ found: true, port: foundReleasePort });
+      }
     }).then((text) => {
       if (!inspectorUrlFound) {
         inspectorUrl.reject(new Error("Inspector WebSocket URL was not found"));
+      }
+      if (!releasePortFound) {
+        releasePort.resolve({ found: false });
       }
       return text;
     });
@@ -244,7 +280,12 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
       stdout: "piped",
       stderr: "piped",
     }).output();
-    const targetStatus = await stopChildProcess(target);
+    const release = captureOutput.code === 0
+      ? await releasePort.promise
+      : { found: false } as const;
+    const targetStatus = release.found
+      ? await stopChildProcess(target, release.port)
+      : await terminateChildProcess(target);
     target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
