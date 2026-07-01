@@ -18,6 +18,18 @@ import "../cf-button/cf-button.ts";
  * keeps a cross-space create handler stable across retries — the event payload
  * is fixed — with nothing to clobber.
  *
+ * Pressing Enter in the field submits as well. The field sits inside a `<form>`
+ * holding a hidden native submit button, so Enter triggers the browser's
+ * implicit form submission: the user agent fires a trusted click on that submit
+ * button, which bubbles to the host exactly like the visible button's click and
+ * carries the same `event.target.value` and UI integrity. A scripted
+ * `button.click()` would be `isTrusted: false` and carry no integrity, so the
+ * keyboard path relies on the browser's own gesture rather than synthesizing
+ * one. The form's native submission is cancelled so the page does not navigate.
+ * Both the visible button click and the Enter-driven submit click pass through a
+ * single click handler on the form, where the in-flight guard lives, so Enter
+ * and a click cannot fire two creates.
+ *
  * Unlike cf-message-input (which emits a `cf-send` CustomEvent — isTrusted is
  * false for those, so they cannot carry UI integrity to a worker handler), the
  * create here flows from the raw, trusted button click.
@@ -104,12 +116,13 @@ export class CFSubmitInput extends BaseElement {
 
   private _seeded = false;
 
-  // Set while a submit click is in flight, between the click and the deferred
-  // field-clear. A second click that arrives in that window is a duplicate
-  // (the field still holds the submitted text), so its propagation to the host
-  // is stopped to suppress a second create. The flag is reset when the clear
-  // runs, including the case where the clear is skipped because the value
-  // changed, so a later submit is never blocked.
+  // Set while a submit is in flight, between the click and the deferred
+  // field-clear. A second submit that arrives in that window — whether a button
+  // click or an Enter keypress — is a duplicate (the field still holds the
+  // submitted text), so its propagation to the host is stopped to suppress a
+  // second create. The flag is reset when the clear runs, including the case
+  // where the clear is skipped because the value changed, so a later submit is
+  // never blocked.
   private _submitting = false;
 
   // Copy `initialValue` into the editable `value` once, the first time it is
@@ -131,29 +144,44 @@ export class CFSubmitInput extends BaseElement {
     this.value = (event.target as HTMLInputElement).value;
   }
 
-  // Only the submit button click should reach a host-level onClick (the create
-  // gesture). Clicks on the field (to focus/edit) or the surrounding gap compose
-  // out of the shadow root and would otherwise bubble to the host and fire a
-  // spurious create. Let only a click whose path runs through the submit button
-  // continue; stop the rest here.
-  private _onContainerClick(event: Event) {
-    const fromButton = event.composedPath().some(
-      (node) => (node as Element)?.tagName === "CF-BUTTON",
-    );
-    if (!fromButton) event.stopPropagation();
+  // True when a click's composed path runs through a control that means "submit"
+  // — the visible cf-button, or the hidden native submit button the browser
+  // clicks for implicit form submission on Enter. Clicks on the field (to
+  // focus/edit) or the surrounding gap are not submits.
+  private _isSubmitGesture(event: Event): boolean {
+    return event.composedPath().some((node) => {
+      const element = node as Element & { type?: string };
+      return element?.tagName === "CF-BUTTON" ||
+        (element?.tagName === "BUTTON" && element.type === "submit");
+    });
   }
 
-  private _onSubmit(event: Event) {
-    // A second click arriving before the deferred clear runs is a duplicate:
+  // Single click handler for the form. The visible button's click and the
+  // Enter-driven implicit-submission click both bubble through here on their way
+  // to the host, so it is the one place the create gesture is gated and the
+  // in-flight guard is enforced — Enter and a click cannot each fire a create.
+  private _onClick(event: Event) {
+    // Only a submit gesture should reach the host's onClick (the create). Stop
+    // field/gap clicks at the shadow boundary so they fire no spurious create.
+    if (!this._isSubmitGesture(event)) {
+      event.stopPropagation();
+      return;
+    }
+    // A second submit arriving before the deferred clear runs is a duplicate:
     // the field still holds the submitted text, so the host would fire a second
-    // create. Stop this click at the shadow boundary so it never reaches the
-    // host.
+    // create. Stop it at the shadow boundary so it never reaches the host.
     if (this._submitting) {
       event.stopPropagation();
       return;
     }
     const submitted = this.value;
-    if (!submitted.trim()) return;
+    if (!submitted.trim()) {
+      // Nothing to submit. Stop the click here so an empty submit — including a
+      // held Enter key that repeats — never reaches the host to spin up a no-op
+      // create.
+      event.stopPropagation();
+      return;
+    }
     this._submitting = true;
     // Clear the field only after the submit click has been handled — the
     // framework's host-level click listener reads `event.target.value` while
@@ -174,27 +202,37 @@ export class CFSubmitInput extends BaseElement {
     }, 0);
   }
 
+  // Enter in the field triggers implicit form submission. The trusted click on
+  // the hidden submit button is what carries the create to the host; the form's
+  // own navigation is cancelled so the page does not reload.
+  private _onFormSubmit(event: Event) {
+    event.preventDefault();
+  }
+
   override render() {
     return html`
-      <div class="container" @click="${this._onContainerClick}">
-        <input
-          id="${this.inputId}"
-          type="text"
-          .value="${this.value}"
-          placeholder="${this.placeholder}"
-          ?disabled="${this.disabled}"
-          @input="${this._onInput}"
-          part="input"
-        />
-        <cf-button
-          data-cf-button
-          ?disabled="${this.disabled}"
-          @click="${this._onSubmit}"
-          part="button"
-        >
-          ${this.buttonText}
-        </cf-button>
-      </div>
+      <form @submit="${this._onFormSubmit}" @click="${this._onClick}">
+        <div class="container">
+          <input
+            id="${this.inputId}"
+            type="text"
+            .value="${this.value}"
+            placeholder="${this.placeholder}"
+            ?disabled="${this.disabled}"
+            @input="${this._onInput}"
+            part="input"
+          />
+          <cf-button
+            data-cf-button
+            type="button"
+            ?disabled="${this.disabled}"
+            part="button"
+          >
+            ${this.buttonText}
+          </cf-button>
+        </div>
+        <button type="submit" ?disabled="${this.disabled}" hidden></button>
+      </form>
     `;
   }
 }

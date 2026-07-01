@@ -11,8 +11,9 @@ import { CFSubmitInput } from "./index.ts";
 
 type Internals = {
   _onInput(event: Event): void;
-  _onContainerClick(event: Event): void;
-  _onSubmit(event: Event): void;
+  _onClick(event: Event): void;
+  _onFormSubmit(event: Event): void;
+  _isSubmitGesture(event: Event): boolean;
   _submitting: boolean;
   _seeded: boolean;
   willUpdate(changed: Map<string, unknown>): void;
@@ -23,11 +24,18 @@ function internals(el: CFSubmitInput): Internals {
   return el as unknown as Internals;
 }
 
-// A click event whose composed path optionally runs through a CF-BUTTON, with a
+// How a click reached the form: through the visible cf-button, through the
+// hidden native submit button (the browser's implicit-submission click on
+// Enter), or through neither (a click on the field or surrounding gap).
+type ClickVia = "button" | "submit" | "none";
+
+// A click event with the composed path for the given route, plus a
 // stopPropagation spy.
-function clickEvent(throughButton: boolean): Event & { stopped: boolean } {
-  const path = throughButton
+function clickEvent(via: ClickVia): Event & { stopped: boolean } {
+  const path = via === "button"
     ? [{ tagName: "INPUT" }, { tagName: "CF-BUTTON" }]
+    : via === "submit"
+    ? [{ tagName: "BUTTON", type: "submit" }, { tagName: "FORM" }]
     : [{ tagName: "INPUT" }, { tagName: "DIV" }];
   const event = {
     stopped: false,
@@ -91,36 +99,90 @@ describe("CFSubmitInput", () => {
     expect(el.value).toBe("typed");
   });
 
-  describe("_onContainerClick", () => {
-    it("stops a click that does not run through the submit button", () => {
+  describe("_isSubmitGesture", () => {
+    it("recognizes a click through the visible cf-button", () => {
       const el = new CFSubmitInput();
-      const event = clickEvent(false);
-      internals(el)._onContainerClick(event);
+      expect(internals(el)._isSubmitGesture(clickEvent("button"))).toBe(true);
+    });
+
+    it("recognizes the implicit-submission click on the hidden submit button", () => {
+      const el = new CFSubmitInput();
+      expect(internals(el)._isSubmitGesture(clickEvent("submit"))).toBe(true);
+    });
+
+    it("does not treat a field or gap click as a submit", () => {
+      const el = new CFSubmitInput();
+      expect(internals(el)._isSubmitGesture(clickEvent("none"))).toBe(false);
+    });
+  });
+
+  describe("_onClick gating", () => {
+    it("stops a click that is not a submit gesture", () => {
+      const el = new CFSubmitInput();
+      const event = clickEvent("none");
+      internals(el)._onClick(event);
       expect(event.stopped).toBe(true);
     });
 
-    it("lets a click through the submit button reach the host", () => {
+    it("lets a button-click submit gesture reach the host", () => {
       const el = new CFSubmitInput();
-      const event = clickEvent(true);
-      internals(el)._onContainerClick(event);
+      el.value = "Ada";
+      const event = clickEvent("button");
+      internals(el)._onClick(event);
+      expect(event.stopped).toBe(false);
+    });
+
+    it("lets an Enter-driven submit-button gesture reach the host", () => {
+      const el = new CFSubmitInput();
+      el.value = "Ada";
+      const event = clickEvent("submit");
+      internals(el)._onClick(event);
       expect(event.stopped).toBe(false);
     });
   });
 
-  describe("_onSubmit", () => {
-    it("ignores an empty submit", async () => {
+  describe("_onFormSubmit", () => {
+    it("cancels the form's native submission so the page does not navigate", () => {
+      const el = new CFSubmitInput();
+      let prevented = false;
+      const event = {
+        preventDefault() {
+          prevented = true;
+        },
+      } as unknown as Event;
+      internals(el)._onFormSubmit(event);
+      expect(prevented).toBe(true);
+    });
+  });
+
+  describe("_onClick submit handling", () => {
+    it("ignores an empty submit and stops it reaching the host", async () => {
       const el = new CFSubmitInput();
       el.value = "   ";
-      internals(el)._onSubmit(clickEvent(true));
+      const event = clickEvent("button");
+      internals(el)._onClick(event);
+      // An empty submit fires no create: the flag stays clear, the value is
+      // untouched, and the click is stopped at the shadow boundary so a held
+      // Enter that repeats cannot spin up no-op creates.
       expect(internals(el)._submitting).toBe(false);
+      expect(event.stopped).toBe(true);
       await tick();
       expect(el.value).toBe("   ");
+    });
+
+    it("stops an empty Enter-driven submit reaching the host", () => {
+      const el = new CFSubmitInput();
+      el.value = "";
+      const event = clickEvent("submit");
+      internals(el)._onClick(event);
+      expect(internals(el)._submitting).toBe(false);
+      expect(event.stopped).toBe(true);
     });
 
     it("clears the field after the submit click is handled", async () => {
       const el = new CFSubmitInput();
       el.value = "Ada";
-      internals(el)._onSubmit(clickEvent(true));
+      internals(el)._onClick(clickEvent("button"));
       // In-flight immediately after the click, before the deferred clear.
       expect(internals(el)._submitting).toBe(true);
       expect(el.value).toBe("Ada");
@@ -129,22 +191,48 @@ describe("CFSubmitInput", () => {
       expect(internals(el)._submitting).toBe(false);
     });
 
+    it("clears the field after an Enter-driven submit", async () => {
+      const el = new CFSubmitInput();
+      el.value = "Ada";
+      // Enter fires the browser's implicit-submission click on the hidden
+      // submit button, which routes through the same handler.
+      internals(el)._onClick(clickEvent("submit"));
+      expect(internals(el)._submitting).toBe(true);
+      await tick();
+      expect(el.value).toBe("");
+      expect(internals(el)._submitting).toBe(false);
+    });
+
     it("stops a re-entrant click and does not schedule a second clear", async () => {
       const el = new CFSubmitInput();
       el.value = "Ada";
-      internals(el)._onSubmit(clickEvent(true));
-      const second = clickEvent(true);
-      internals(el)._onSubmit(second);
+      internals(el)._onClick(clickEvent("button"));
+      const second = clickEvent("button");
+      internals(el)._onClick(second);
       expect(second.stopped).toBe(true);
       await tick();
       // The first submit's clear still runs.
       expect(el.value).toBe("");
     });
 
+    it("stops an Enter submit re-entering on a click before the clear (no duplicate create)", async () => {
+      const el = new CFSubmitInput();
+      el.value = "Ada";
+      // Enter submits first...
+      internals(el)._onClick(clickEvent("submit"));
+      // ...then a button click arrives before the deferred clear. It must be
+      // suppressed so the host fires only one create.
+      const second = clickEvent("button");
+      internals(el)._onClick(second);
+      expect(second.stopped).toBe(true);
+      await tick();
+      expect(el.value).toBe("");
+    });
+
     it("does not wipe a value the user retyped before the clear runs", async () => {
       const el = new CFSubmitInput();
       el.value = "Ada";
-      internals(el)._onSubmit(clickEvent(true));
+      internals(el)._onClick(clickEvent("button"));
       // A new name typed before the deferred clear fires must survive.
       el.value = "Alan";
       await tick();
@@ -161,7 +249,7 @@ describe("CFSubmitInput", () => {
         get: () => fakeInput,
       });
       el.value = "Ada";
-      internals(el)._onSubmit(clickEvent(true));
+      internals(el)._onClick(clickEvent("button"));
       await tick();
       expect(el.value).toBe("");
       expect(fakeInput.value).toBe("");
