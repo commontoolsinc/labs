@@ -111,15 +111,15 @@ what remains.
 Inside `evaluateCachedModules` (~459ms inclusive) → `compartmentImportNow` /
 `populateModuleExports` (SES Compartment module eval):
 
-| bucket                                  | ~ms                    | caller chain (top)                                                                                                                                                                  | lever                                                                                                                                                     |
-| --------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Per-primitive debug-metadata**        | **~100**               | `getLineAndColumnAtOffset` ← `findMappedLocationInSourceRange` ← `resolveLocationFromFunctionSource` ← `annotateFunctionDebugMetadata` ← `lift`/`handler` ← `populateModuleExports` | **#1: precompute locations at transform time, or defer annotation until a trace needs it**                                                                |
-| **Module record extraction (TS parse)** | ~102 → **~22 (Fix A)** | `parseSourceFile`/`createSourceFile2` ← `extractCompiledExports`/`extractRuntimeImports` ← `buildRecordsFromCompiled` ← `evaluateCachedModules`                                     | **RESOLVED — see §9.** The 9-module system-app closure was parsed **4×**/boot; a content-hash-keyed parse memo (Fix A) → 1×; Fix B (persist at build) → 0 |
-| **Per-primitive schema intern+hash**    | ~68                    | `internSchema`/`computeHash`/`joinSchema`×N ← `applyArgumentIfcToResult` ← `createNodeFactory` ← `lift`                                                                             | cache/precompute interned schemas                                                                                                                         |
-| **SES harden + lockdown**               | ~50–67                 | `baseFreezeAndTraverse` ← `harden` ← `hardenExportedValue` ← `populateModuleExports` (per export); `lockdown` ← `ensureSESLockdown` (once)                                          | SES-inherent; per-export harden maybe trimmable                                                                                                           |
-| **Pattern factory build**               | ~60–100                | `factoryFromPattern`/`pattern`/`trustedPattern` + `sanitizeSchemaForLinks`                                                                                                          | only-load-what's-needed                                                                                                                                   |
-| **esbuild CJS→ESM glue**                | ~31                    | `__copyProps` ← `__toESM` ← (root)                                                                                                                                                  | bundling (pure-ESM avoids `__toESM`)                                                                                                                      |
-| **quicksort w/ random pivot**           | ~20                    | `randomIntInRange` ← `doQuickSort` (something sorts a largish list at boot)                                                                                                         | investigate — odd                                                                                                                                         |
+| bucket                                  | ~ms                    | caller chain (top)                                                                                                                                                                  | lever                                                                                                                                                                                                |
+| --------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Per-primitive debug-metadata**        | **~100**               | `getLineAndColumnAtOffset` ← `findMappedLocationInSourceRange` ← `resolveLocationFromFunctionSource` ← `annotateFunctionDebugMetadata` ← `lift`/`handler` ← `populateModuleExports` | **#1: precompute locations at transform time, or defer annotation until a trace needs it**                                                                                                           |
+| **Module record extraction (TS parse)** | ~102 → **0 (Fix A+B)** | `parseSourceFile`/`createSourceFile2` ← `extractCompiledExports`/`extractRuntimeImports` ← `buildRecordsFromCompiled` ← `evaluateCachedModules`                                     | **RESOLVED — see §9.** The 9-module system-app closure was parsed **4×**/boot; a body-keyed parse memo (Fix A, #4441) → 1×; persisting the record surface on the compiled doc (Fix B, #4442) → **0** |
+| **Per-primitive schema intern+hash**    | ~68                    | `internSchema`/`computeHash`/`joinSchema`×N ← `applyArgumentIfcToResult` ← `createNodeFactory` ← `lift`                                                                             | cache/precompute interned schemas                                                                                                                                                                    |
+| **SES harden + lockdown**               | ~50–67                 | `baseFreezeAndTraverse` ← `harden` ← `hardenExportedValue` ← `populateModuleExports` (per export); `lockdown` ← `ensureSESLockdown` (once)                                          | SES-inherent; per-export harden maybe trimmable                                                                                                                                                      |
+| **Pattern factory build**               | ~60–100                | `factoryFromPattern`/`pattern`/`trustedPattern` + `sanitizeSchemaForLinks`                                                                                                          | only-load-what's-needed                                                                                                                                                                              |
+| **esbuild CJS→ESM glue**                | ~31                    | `__copyProps` ← `__toESM` ← (root)                                                                                                                                                  | bundling (pure-ESM avoids `__toESM`)                                                                                                                                                                 |
+| **quicksort w/ random pivot**           | ~20                    | `randomIntInRange` ← `doQuickSort` (something sorts a largish list at boot)                                                                                                         | investigate — odd                                                                                                                                                                                    |
 
 ## 4. The meta-insight
 
@@ -333,15 +333,16 @@ redundant re-parsing of identical content**, not one unavoidable parse:
 | 2nd / 3rd / 4th                | 19.7 / 18.6 / 18.2ms | **0.0 / 0.0 / 0.0ms** (memo hit) |
 | **total**                      | **94.5ms**           | **21.5ms**                       |
 
-**Fix A (shipped).** A content-addressed memo (`exportParseCache` /
-`importParseCache`, keyed by the module's content-hash `identity`) in
-`packages/runner/src/sandbox/module-record-compiler.ts`. The derivation is a
-pure function of the compiled body and `identity` _is_ that body's content hash,
-so the memo is safe across every call, closure, and space with no staleness
-risk. Collapses the boot re-parse to **one parse per distinct module per
-worker** → **~73ms off the cold floor**. Gate: runner suite 728/0 +
-`pattern-tests` (68) + `generated-patterns` (147) green; regression tests in
-`build-from-compiled.test.ts`.
+**Fix A (shipped — PR #4441).** A content-addressed memo (`exportParseCache` /
+`importParseCache`) in `packages/runner/src/sandbox/module-record-compiler.ts`,
+**keyed by the compiled body** (not the source `identity`: the same identity can
+map to different compiled bytes across compilation modes / runtime versions, so
+a body key is exact and cross-contamination is impossible — cf. cubic review).
+The derivation is a pure function of the body, so the memo is safe across every
+call, closure, and space. Collapses the boot re-parse to **one parse per
+distinct body per worker** → **~73ms off the cold floor**. Gate: runner suite
+728/0 + `pattern-tests` (68) + `generated-patterns` (147) green; regression
+tests in `build-from-compiled.test.ts`.
 
 **Why one parse and not zero.** A SES virtual module record is
 `{ imports, exports, execute }` (`sandbox/esm-module-loader.ts`); the linker
@@ -352,13 +353,20 @@ _edges_) but **not** the derived export-name / full-import-specifier lists — s
 the record surface is reconstructed by parsing the body on first sight. The one
 parse is the cost of _not having persisted the derived record_.
 
-**Fix B (next).** Persist the derived
-`{ exportNames, starTargetSpecs, importSpecs }` onto the cache entry
-(`CachedCompiledModule` / `CacheableModule`) at compile time so boot reads them
-→ **zero** parses. Caveat: the compile path derives export names from _TS
-source_ (`collectModuleExports`), the boot path from _compiled JS_
-(`extractCompiledExports`); they can diverge (the `cfc.ts` ambient-exports case
-called out in `build-from-compiled.test.ts`). Persist the _compiled-JS-derived_
-values (run the same scan once at cache-write) so boot reads exactly what it
-would have parsed. Adds a cache-schema field + old-entry migration (missing
-field → fall back to the Fix-A parse).
+**Fix B (shipped — PR #4442, stacked on #4441).** Persist the derived
+`{ exportNames, starTargetSpecs, importSpecs }` onto the compiled document
+(`CompiledDoc` in `compilation-cache/cell-cache.ts`), computed at cache-write by
+`deriveModuleRecordFields` — the _compiled-JS_ scan, so persisted values are
+byte-identical to what the boot parse would produce (handles the `cfc.ts`
+ambient-exports divergence: source-analysis over-declares, the compiled scan
+does not). `buildRecordsFromCompiled` reads them and parses only as a fallback
+for legacy docs → **zero** parses on the warm-cache boot. The fields ride the
+existing compiler **integrity atom** (label-based, not value-hashed), so the
+integrity gate is unchanged. No manual runtime-version bump: `sandbox/` is in
+the compiler fingerprint, so editing `module-record-compiler.ts` moves the
+version → the compiled set recompiles once and every doc is rewritten with the
+fields. Measured end-to-end (offset-4 rig): the 9-module system-app closure goes
+`parsed=9 → parsed=0` on a warm-cache cold boot (the recompile boot writes the
+fields; the next boot reads them). Gate: runner 729/0 + `pattern-tests` (68) +
+`generated-patterns` (147) green; new test asserts a persisted surface that
+disagrees with the body wins.
