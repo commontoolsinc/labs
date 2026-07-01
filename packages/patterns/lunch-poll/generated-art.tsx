@@ -1,7 +1,8 @@
 import {
   computed,
   Default,
-  fetchData,
+  fetchBinary,
+  type FetchBinaryResult,
   NAME,
   pattern,
   UI,
@@ -10,7 +11,7 @@ import {
 
 // Cuisine illustration thumbnail. Callers can disable generation and pass a
 // stored source URL; a parent that owns item state can persist the returned
-// data URL for other viewers.
+// image bytes for other viewers.
 const GENERATE_IMAGE_PATH = "/api/ai/img";
 const GENERATED_IMAGE_SIZE = 128;
 
@@ -82,7 +83,7 @@ export type GeneratedArtFetchState =
  * Inputs for the generated thumbnail sub-pattern.
  *
  * Use JSX when embedding only the UI: `<GeneratedArt prompt={title} />`.
- * Instantiate with a function call when the parent needs `url` or
+ * Instantiate with a function call when the parent needs `image` or
  * `fetchState`.
  */
 export interface GeneratedArtInput {
@@ -100,8 +101,8 @@ export interface GeneratedArtInput {
  * Outputs for the generated thumbnail sub-pattern.
  *
  * `[UI]` is a static VNode. The fallback image remains a static CSS
- * `background-image`; the generated or stored `<img>` overlays it only after
- * `url` resolves to a safe non-empty value.
+ * `background-image`; the generated (`cf-image`) or stored (`<img>`) overlay
+ * shows only once real image data is available.
  */
 export interface GeneratedArtOutput {
   /** Human-readable pattern name. */
@@ -110,8 +111,12 @@ export interface GeneratedArtOutput {
   /** Static VNode rendering the fallback-backed square thumbnail. */
   [UI]: VNode;
 
-  /** Safe persisted or generated image URL; empty while only the fallback shows. */
-  url: string;
+  /**
+   * Generated image bytes + media type once the fetch resolves; `undefined`
+   * while only the fallback shows. A parent that owns item state can persist
+   * these for other viewers.
+   */
+  image: FetchBinaryResult | undefined;
 
   /** Current image source/generation state. */
   fetchState: GeneratedArtFetchState;
@@ -126,25 +131,22 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
       return generatedImageUrlFor(prompt);
     });
 
-    const generatedArt = fetchData<string>({
+    const generatedArt = fetchBinary({
       url: requestUrl,
-      mode: "dataUrl",
       options: {
         mutexTimeoutMs: 30_000,
       },
     });
 
-    const url = computed(() =>
-      safeImageUrl(sourceUrl) || safeImageUrl(generatedArt.result)
-    );
+    const image = computed(() => generatedArt.result);
+    const imageBytes = computed(() => generatedArt.result?.bytes);
+    const imageMediaType = computed(() => generatedArt.result?.mediaType ?? "");
     const hasSourceUrl = computed(() => safeImageUrl(sourceUrl) !== "");
-    const hasGeneratedUrl = computed(() =>
-      safeImageUrl(generatedArt.result) !== ""
-    );
+    const hasGeneratedImage = computed(() => !!generatedArt.result?.bytes);
     const fetchState = computed(() => {
       if (safeImageUrl(sourceUrl)) return "stored";
       if (shouldGenerate === false) return "";
-      if (safeImageUrl(generatedArt.result)) return "generated";
+      if (generatedArt.result?.bytes) return "generated";
       if (generatedArt.pending) return "pending";
       return generatedArt.error ? "error" : "requested";
     });
@@ -181,22 +183,22 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
                 }}
               />
             )
-            : hasGeneratedUrl
+            : hasGeneratedImage
             ? (
-              <img
-                src={generatedArt.result}
+              <cf-image
+                bytes={imageBytes}
+                mediaType={imageMediaType}
                 alt=""
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover",
                 }}
               />
             )
             : null}
         </div>
       ),
-      url,
+      image,
       fetchState,
     };
   },
