@@ -3,15 +3,18 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 /**
  * Content-addressed provenance for verified implementation functions.
  *
- * An entry exists ONLY for a function object recorded through the single
- * runner-owned registration channel: post-evaluation module indexing
- * (`Engine.recordModuleProvenance`, gated by `isTrustedBuilderArtifact`), which
- * records the implementation function of an exported / `__cfReg`-registered
- * builder artifact with the module's content identity and the artifact's
- * export/`__cfReg` symbol. Builder artifacts minted DURING a running action are
- * NOT recorded — they have no content-addressed identity, and the runner
- * fail-closes on the attempt rather than admitting them (see
- * `Runner.invokeJavaScriptImplementation`).
+ * An entry exists ONLY for a function object that became verified through one
+ * of the runner-owned registration channels:
+ *
+ *  1. post-evaluation module indexing (`PatternManager.indexArtifact`): the
+ *     implementation function of an exported / `__cfReg`-registered builder
+ *     artifact, with the module's content identity and the artifact's
+ *     export/`__cfReg` symbol;
+ *  2. the in-action registrar (`Runner.invokeJavaScriptImplementation`): a
+ *     builder artifact created DURING a verified action's execution, with the
+ *     identity derived from the new function's canonical source location and
+ *     `dynamic: true` (in-session only — such artifacts never resolve across
+ *     a reload, unchanged from the legacy behavior).
  *
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
@@ -23,8 +26,10 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 export type VerifiedProvenance = {
   /** Module content identity (prefix-free `cf:module/<hash>` hash). */
   identity: string;
-  /** Export / `__cfReg` symbol of the registered factory. */
+  /** Export / `__cfReg` symbol of the registered factory (absent: dynamic). */
   symbol?: string;
+  /** Created during a verified action's execution (in-session only). */
+  dynamic?: true;
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };
 };

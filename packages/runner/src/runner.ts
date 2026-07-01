@@ -3570,7 +3570,12 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
-      this.applyImplementationHash(action, module.implementation);
+      // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
+      // not `module.implementation`: an `$implRef`-resolved module (reloaded from
+      // a serialized graph) carries the ref, not the live function, so reading
+      // provenance off `module.implementation` would drop the content-addressed
+      // scheduler identity on reload.
+      this.applyImplementationHash(action, fn);
       (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
         schedulerActionInstanceKey({
           process: processCell.getAsNormalizedFullLink(),
