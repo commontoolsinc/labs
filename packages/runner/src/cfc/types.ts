@@ -158,11 +158,22 @@ export type CfcSandboxResult = {
  *   the pointwise per-element split. Update discipline matches `derived`.
  *   Readers that predate this component treat it as covering (over-taint,
  *   fail-safe).
+ * - `external-ingest`: the `ExternalIngest` provenance mark a vouched ingest
+ *   channel mints onto the value it durably appends. Builtin-authored from
+ *   verified channel metadata only (the split-mint), so it bypasses the
+ *   runtime-minted gate; anchored at the ingest target cell and re-minted
+ *   (replacing the prior mark for that doc) on each ingest. Its update
+ *   discipline is replace-per-doc, driven by the ingest stamp.
  * Entries without an origin are legacy (pre-component) entries and are
  * treated as one combined component with the historical update rules.
  * The effective label at a path is the join of all components.
  */
-export type LabelEntryOrigin = "declared" | "link" | "derived" | "structure";
+export type LabelEntryOrigin =
+  | "declared"
+  | "link"
+  | "derived"
+  | "structure"
+  | "external-ingest";
 
 export type LabelMapEntry = {
   path: readonly string[];

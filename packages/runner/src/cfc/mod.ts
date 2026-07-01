@@ -77,6 +77,11 @@ export type {
 } from "./harness-write-policy.ts";
 export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
 export {
+  type CfcExternalIngestMeta,
+  externalIngestStamp,
+  stampExternalIngest,
+} from "./external-ingest.ts";
+export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,
   isInitialSinkInventoryName,

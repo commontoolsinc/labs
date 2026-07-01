@@ -7,6 +7,7 @@ export type {
   CfcBuiltinAtom,
   CfcCanonicalAliasName,
   CfcCaveatAtom,
+  CfcExternalIngestAtom,
   CfcInjectionSafeAtom,
   CfcJsonArray,
   CfcJsonValue,

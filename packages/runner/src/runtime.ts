@@ -67,6 +67,7 @@ import {
   type CfcFlowLabelsMode,
   type CfcLabelView,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  externalIngestStamp,
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
@@ -890,6 +891,18 @@ export class Runtime {
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
+      // A vouched ingest still needs its provenance mark minted even where CFC
+      // enforcement is disabled (e.g. the operator/toolshed runtime). The mint
+      // is a builtin-authored boundary-commit step that never rejects, so run
+      // prepare for it explicitly rather than forcing the enforcement dial up
+      // (which would desync ingest txs from the runtime's real mode). The
+      // stamp already marked the tx relevant; nothing else here applies when
+      // disabled, so fall straight through to prepareCfc.
+      if (externalIngestStamp(tx) !== undefined) {
+        if (state.prepare.status === "unprepared") {
+          tx.prepareCfc();
+        }
+      }
       return;
     }
     // Flow-label relevance is computed, not caller-marked (S16): the
