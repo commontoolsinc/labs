@@ -1015,7 +1015,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   // records nothing, how repeated deltas fold into one intent, and how an intent
   // becomes wire ops are all defined once in ./mergeable-ops.ts — this method
   // just accumulates, deferring the per-op questions to that registry.
-  recordMergeableOp(address: IMemorySpaceAddress, delta: MergeableOpDelta): void {
+  recordMergeableOp(
+    address: IMemorySpaceAddress,
+    delta: MergeableOpDelta,
+  ): void {
     this.assertWritable("recordMergeableOp()");
     const ready = this.editable();
     if (ready.error) throw ready.error;
