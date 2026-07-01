@@ -29,6 +29,53 @@ const TARGET = ts.ScriptTarget.ES2023;
 const logger = getLogger("module-record-compiler");
 
 /**
+ * Content-addressed memo of the two pure derivations
+ * {@link buildRecordsFromCompiled} extracts from a module's compiled body: its
+ * direct export surface (names + `export *` target specifiers) and its runtime
+ * `require()` specifiers. Keyed by the module's content-hash `identity`.
+ *
+ * At piece boot every system pattern loaded by identity rebuilds its record
+ * graph from the SAME shared module closure, so `buildRecordsFromCompiled` runs
+ * once per pattern over an identical module set and re-`createSourceFile`s every
+ * body N times — the dominant cost of the warm boot path. Both derivations are
+ * pure functions of the compiled body, and `identity` is that body's content
+ * hash, so a parse is reusable across every call, closure, and space with no
+ * staleness risk. This collapses the boot re-parse to one parse per distinct
+ * module per worker. Cached arrays are treated as immutable; callers copy
+ * before mutating or handing them to a consumer that might.
+ */
+const exportParseCache = new Map<
+  string,
+  { exportNames: readonly string[]; starTargetSpecs: readonly string[] }
+>();
+const importParseCache = new Map<string, readonly string[]>();
+
+function parseExportsByIdentity(
+  identity: string,
+  code: string,
+): { exportNames: readonly string[]; starTargetSpecs: readonly string[] } {
+  let hit = exportParseCache.get(identity);
+  if (hit === undefined) {
+    const { names, starTargetSpecs } = extractCompiledExports(code);
+    hit = { exportNames: [...names], starTargetSpecs };
+    exportParseCache.set(identity, hit);
+  }
+  return hit;
+}
+
+function parseImportsByIdentity(
+  identity: string,
+  code: string,
+): readonly string[] {
+  let hit = importParseCache.get(identity);
+  if (hit === undefined) {
+    hit = extractRuntimeImports(code);
+    importParseCache.set(identity, hit);
+  }
+  return hit;
+}
+
+/**
  * Create a write-once exports target for a module body. Re-assigning,
  * redefining, or deleting a property that already holds a real (non-`undefined`)
  * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
@@ -753,9 +800,10 @@ export function buildRecordsFromCompiled(
     { names: Set<string>; starTargets: string[] }
   >();
   for (const m of modules) {
-    const { names, starTargetSpecs } = extractCompiledExports(m.code);
+    const parsed = parseExportsByIdentity(m.identity, m.code);
+    const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
-    for (const spec of starTargetSpecs) {
+    for (const spec of parsed.starTargetSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
       if (edge) starTargets.push(edge.targetIdentity);
       else {for (const n of runtimeModules[spec] ?? []) {
@@ -800,7 +848,7 @@ export function buildRecordsFromCompiled(
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
-    const importSpecs = extractRuntimeImports(m.code);
+    const importSpecs = [...parseImportsByIdentity(m.identity, m.code)];
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
