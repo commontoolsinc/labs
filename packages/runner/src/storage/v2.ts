@@ -2212,6 +2212,36 @@ class SpaceReplica implements ISpaceReplica {
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
+    // Emit one commit read for `id`, baselined against the most recent in-flight
+    // local version of that doc below this commit's localSeq if one exists, else
+    // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
+    // carries its own `meta.seq`). Shared by the per-read loop below and the blind
+    // write's structural precondition so the two emission sites stay in lockstep.
+    const pushCommitRead = (
+      id: URI,
+      scope: CellScope | undefined,
+      path: DocumentPath,
+      nonRecursive: boolean,
+      confirmedSeq?: number,
+    ) => {
+      const record = this.#docs.get(docKey(id, scope));
+      const pendingLocalSeq = record?.pending
+        .filter((version) => version.localSeq < localSeq)
+        .at(-1)?.localSeq;
+      const shape = nonRecursive ? { nonRecursive: true } : {};
+      if (pendingLocalSeq !== undefined) {
+        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
+      } else {
+        confirmed.push({
+          id,
+          scope,
+          path,
+          seq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          ...shape,
+        });
+      }
+    };
+
     // A mergeable op resolves against durable state, so it does not depend on
     // the document's prior value. On an entity touched by a mergeable op, the
     // reads the op ITSELF issues are dropped from conflict detection — its own
@@ -2283,29 +2313,13 @@ class SpaceReplica implements ISpaceReplica {
       ) {
         continue;
       }
-      const record = this.#docs.get(docKey(read.id as URI, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
-      if (pendingLocalSeq !== undefined) {
-        pending.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          localSeq: pendingLocalSeq,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
-      } else {
-        confirmed.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          seq: typeof read.meta?.seq === "number"
-            ? read.meta.seq
-            : record?.confirmed.seq ?? 0,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
-      }
+      pushCommitRead(
+        read.id as URI,
+        scope,
+        toCommitReadPath(read.path),
+        read.nonRecursive === true,
+        typeof read.meta?.seq === "number" ? read.meta.seq : undefined,
+      );
     }
     // The blind UI-input write's single structural existence/shape precondition: a
     // nonRecursive read at the cell's PARENT (threaded from handleCellSet). It
@@ -2318,32 +2332,14 @@ class SpaceReplica implements ISpaceReplica {
       structuralTarget !== undefined &&
       structuralTarget.space === this.#space
     ) {
-      const scope = normalizeCellScope(
-        structuralTarget.scope as Parameters<typeof normalizeCellScope>[0],
+      pushCommitRead(
+        structuralTarget.id as URI,
+        normalizeCellScope(
+          structuralTarget.scope as Parameters<typeof normalizeCellScope>[0],
+        ),
+        toCommitReadPath(structuralTarget.path),
+        true,
       );
-      const id = structuralTarget.id as URI;
-      const record = this.#docs.get(docKey(id, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
-      const path = toCommitReadPath(structuralTarget.path);
-      if (pendingLocalSeq !== undefined) {
-        pending.push({
-          id,
-          scope,
-          path,
-          localSeq: pendingLocalSeq,
-          nonRecursive: true,
-        });
-      } else {
-        confirmed.push({
-          id,
-          scope,
-          path,
-          seq: record?.confirmed.seq ?? 0,
-          nonRecursive: true,
-        });
-      }
     }
     // Keep the nonRecursive flag on the reads sent to the engine (it was
     // historically stripped here). The engine applies shallow (shape-only)
