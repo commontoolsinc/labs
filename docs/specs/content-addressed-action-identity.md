@@ -145,9 +145,26 @@ it badly:
    exists to disambiguate equal `implementationRef`s across loads — a problem
    content addressing dissolves (below).
 
-The scheduler is already migrated: persisted observations key on the
-content-addressed `implementationHash` (`cf:module/<hash>:<line>:<col>`,
-`scheduler/action-run.ts`), with no `implementationRef` dependence.
+The scheduler is migrated to content addressing, with a fingerprint/id split:
+
+- The durable implementation **fingerprint** keys on the per-**symbol** content
+  address `impl:cf:module/<hash>:<symbol>` (`schedulerImplementationFingerprint`,
+  `scheduler/action-run.ts`) — it identifies the implementation *code*, with no
+  `implementationRef` dependence.
+- The action **id** — the durable observation lookup key and the in-session
+  `actionStats` key — must stay per-**instance**, so it appends a
+  source-location-independent instance discriminator:
+  `cf:module/<hash>:<symbol>:<instanceKey>`, where `instanceKey` is a
+  reload-stable hash of the action's `{process, reads, writes}` links
+  (`getSchedulerActionId`/`schedulerActionInstanceKey`, `scheduler/diagnostics.ts`
+  + `runner.ts`). Without the instance key, N instances of one hoisted op (one
+  `lift` called twice, a `map`, a repeated sub-pattern) would collide on a single
+  id and observation.
+
+Persisted-data compatibility: observations written under the previous
+`fn.src`-derived id/fingerprint simply miss the new content-addressed lookup on
+first resume, so the action re-runs once (the safe default) and re-persists under
+the new key — no `SchedulerActionObservation.version` bump or re-key is required.
 
 ## The invariant this design stands on
 
