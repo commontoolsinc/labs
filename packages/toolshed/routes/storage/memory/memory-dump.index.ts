@@ -4,8 +4,8 @@
 // Security model (lowest-friction, highest-value; see env.ts MEMORY_DUMP_*):
 //   1. Perimeter   — staging is reachable only on the Tailscale tailnet, so the
 //                    network boundary already provides per-person identity.
-//   2. Opt-in      — disabled unless MEMORY_DUMP_ENABLED; hard-refuses to mount
-//                    under ENV=production unless MEMORY_DUMP_ALLOW_IN_PRODUCTION.
+//   2. Opt-in      — disabled unless MEMORY_DUMP_ENABLED (staging only); it
+//                    hard-refuses to mount under ENV=production with no override.
 //                    When disabled the routes 404 as if they never existed.
 //   3. App gate    — every request must carry a valid CF1 first-party signature
 //                    (reuses @commonfabric/runner/toolshed-http-auth) from a DID
@@ -33,11 +33,7 @@ const errMessage = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
 const dumpEndpointEnabled = (): boolean =>
-  isDumpEnabled({
-    enabled: env.MEMORY_DUMP_ENABLED,
-    env: env.ENV,
-    allowInProduction: env.MEMORY_DUMP_ALLOW_IN_PRODUCTION,
-  });
+  isDumpEnabled({ enabled: env.MEMORY_DUMP_ENABLED, env: env.ENV });
 
 const dumpAllowlist = (): Set<string> =>
   dumpAllowSet({
@@ -83,6 +79,13 @@ router.get(DUMP_BASE, (c) => {
 });
 
 // Download a crash-consistent snapshot of one space's SQLite store.
+//
+// NOTE (staging-only scope): there is deliberately no size or concurrency cap.
+// Each request does a full `VACUUM INTO` copy into a temp dir, so a multi-GB
+// space or several concurrent dumps means real disk + CPU pressure with nothing
+// throttling it. Acceptable behind the tailnet perimeter with an allowlisted
+// caller; a concurrency guard (and possibly a size cap) is a prerequisite before
+// this is ever made more broadly available.
 router.get(`${DUMP_BASE}/:space`, async (c) => {
   const space = c.req.param("space");
   const userDid = c.get("verifiedUserDid");

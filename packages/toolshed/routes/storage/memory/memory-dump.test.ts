@@ -124,4 +124,18 @@ describe("memory dump endpoint", () => {
     await res.body?.cancel();
     expect(res.status).toBe(404);
   });
+
+  it("returns 500 when the snapshot fails (corrupt store file)", async () => {
+    // Seed a file at the canonical store path that is NOT a valid SQLite DB, so
+    // `VACUUM INTO` throws → the route reports 500 rather than serving garbage.
+    const bad = "did:key:z6MkDumpEndpointTestCorrupt00000000000000000000";
+    const badPath = Path.fromFileUrl(
+      resolveSpaceStoreUrl(memoryEngineStoreUrl, bad as MemorySpace),
+    );
+    await Deno.writeTextFile(badPath, "this is not a sqlite database");
+    const path = `${DUMP_BASE}/${encodeURIComponent(bad)}`;
+    const res = await app.request(path, { headers: await sign(path, allowed) });
+    await res.body?.cancel();
+    expect(res.status).toBe(500);
+  });
 });

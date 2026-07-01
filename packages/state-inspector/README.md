@@ -148,11 +148,12 @@ deno task cf inspect pull --all       --remote https://rapids…            # ca
 deno task cf inspect group                                                #   inspect offline
 ```
 
-The dump endpoint is **off by default** and must be enabled per environment on
-the server (`MEMORY_DUMP_ENABLED=true`, allowlist via `MEMORY_DUMP_DIDS` /
-`MEMORY_SERVICE_DIDS`); it refuses to mount under `ENV=production` unless
-`MEMORY_DUMP_ALLOW_IN_PRODUCTION` is also set. Pair it with a network perimeter
-(staging is Tailscale-only). See `packages/toolshed/routes/storage/memory/`.
+The dump endpoint is **off by default** and is a **staging-only** debugging
+tool: enable it per environment on the server (`MEMORY_DUMP_ENABLED=true`,
+allowlist via `MEMORY_DUMP_DIDS` / `MEMORY_SERVICE_DIDS`); it **hard-refuses to
+mount under `ENV=production`** with no override. The real boundary is the
+tailnet perimeter + opt-in-off-by-default (staging is Tailscale-only); the prod
+refusal is belt-and-suspenders. See `packages/toolshed/routes/storage/memory/`.
 
 A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
 `--remote` requires the `cf` CLI for request signing).

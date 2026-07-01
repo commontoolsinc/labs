@@ -6,71 +6,19 @@ import { dumpAllowSet, isDumpEnabled } from "./memory-dump-policy.ts";
 
 Deno.test("isDumpEnabled: off unless explicitly enabled", () => {
   assertEquals(
-    isDumpEnabled({
-      enabled: undefined,
-      env: "development",
-      allowInProduction: undefined,
-    }),
+    isDumpEnabled({ enabled: undefined, env: "development" }),
     false,
   );
-  assertEquals(
-    isDumpEnabled({
-      enabled: false,
-      env: "development",
-      allowInProduction: undefined,
-    }),
-    false,
-  );
-  assertEquals(
-    isDumpEnabled({
-      enabled: true,
-      env: "development",
-      allowInProduction: undefined,
-    }),
-    true,
-  );
-  assertEquals(
-    isDumpEnabled({ enabled: true, env: "test", allowInProduction: undefined }),
-    true,
-  );
+  assertEquals(isDumpEnabled({ enabled: false, env: "development" }), false);
+  assertEquals(isDumpEnabled({ enabled: true, env: "development" }), true);
+  assertEquals(isDumpEnabled({ enabled: true, env: "test" }), true);
 });
 
-Deno.test("isDumpEnabled: production is hard-off unless separately allowed", () => {
-  // Enabled but production, no override → refuses.
-  assertEquals(
-    isDumpEnabled({
-      enabled: true,
-      env: "production",
-      allowInProduction: undefined,
-    }),
-    false,
-  );
-  assertEquals(
-    isDumpEnabled({
-      enabled: true,
-      env: "production",
-      allowInProduction: false,
-    }),
-    false,
-  );
-  // Both switches on → allowed (deliberate, explicit).
-  assertEquals(
-    isDumpEnabled({
-      enabled: true,
-      env: "production",
-      allowInProduction: true,
-    }),
-    true,
-  );
-  // The override alone (without enable) does nothing.
-  assertEquals(
-    isDumpEnabled({
-      enabled: undefined,
-      env: "production",
-      allowInProduction: true,
-    }),
-    false,
-  );
+Deno.test("isDumpEnabled: production is an unconditional hard no", () => {
+  // No override exists — enabled or not, production never mounts the endpoint.
+  assertEquals(isDumpEnabled({ enabled: true, env: "production" }), false);
+  assertEquals(isDumpEnabled({ enabled: false, env: "production" }), false);
+  assertEquals(isDumpEnabled({ enabled: undefined, env: "production" }), false);
 });
 
 Deno.test("dumpAllowSet: union of MEMORY_DUMP_DIDS and MEMORY_SERVICE_DIDS", () => {

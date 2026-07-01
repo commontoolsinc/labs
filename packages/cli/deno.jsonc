@@ -12,6 +12,7 @@
     ".": "./mod.ts"
   },
   "imports": {
-    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.8"
+    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.8",
+    "@db/sqlite": "jsr:@db/sqlite@^0.12.0"
   }
 }

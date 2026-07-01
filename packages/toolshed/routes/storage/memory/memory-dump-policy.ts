@@ -1,20 +1,27 @@
 // Pure access policy for the memory dump endpoint. Kept dependency-free (no env,
-// no server) so the security matrix — opt-in, production defense-in-depth, and
-// the allowlist union — is unit-tested directly rather than only via comments.
+// no server) so the security matrix — opt-in and prod refusal, and the allowlist
+// union — is unit-tested directly rather than only via comments.
 
 const parseDids = (csv: string): string[] =>
   csv.split(",").map((d) => d.trim()).filter((d) => d.length > 0);
 
-/** Whether the dump endpoint should be served in this environment at all. */
+/**
+ * Whether the dump endpoint should be served in this environment at all.
+ *
+ * The REAL boundary is (a) the tailnet perimeter and (b) opt-in being off by
+ * default — the endpoint only mounts when someone deliberately sets
+ * MEMORY_DUMP_ENABLED on a staging host. The `ENV === "production"` refusal is
+ * belt-and-suspenders, NOT load-bearing: `ENV` is a free-form string, so a
+ * deployment that sets `ENV=prod` or leaves it unset would not match here — do
+ * not rely on it as the sole guard. There is intentionally no override to turn
+ * raw whole-space dumps on in production; a prod form is a separate mechanism.
+ */
 export function isDumpEnabled(cfg: {
   enabled: boolean | undefined;
   env: string;
-  allowInProduction: boolean | undefined;
 }): boolean {
   if (!cfg.enabled) return false;
-  // Defense in depth: never expose raw dumps in production unless explicitly
-  // and separately opted in.
-  if (cfg.env === "production" && !cfg.allowInProduction) return false;
+  if (cfg.env === "production") return false;
   return true;
 }
 

@@ -135,8 +135,10 @@ function remoteBaseUrl(options: RemoteOpts): string | null {
 }
 
 // Build a CF1 first-party request signer from --identity / CF_IDENTITY. Returns
-// undefined when no key is configured (requests then go out unsigned, e.g. for a
-// Tailscale-perimeter-only server).
+// undefined when no key is configured; the request then goes out unsigned and
+// the server replies 401 (the dump endpoint has no unauthenticated mode) — we
+// let it fail with the actionable "set CF_IDENTITY" message rather than block
+// here, so the missing-key case is reported the same way as a bad key.
 async function remoteSigner(
   options: RemoteOpts,
 ): Promise<RequestSigner | undefined> {

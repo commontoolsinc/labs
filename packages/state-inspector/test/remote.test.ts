@@ -114,11 +114,13 @@ Deno.test("fetchSpaceDb force re-downloads", async () => {
   });
 });
 
-Deno.test("error mapping is actionable for 401/403", async () => {
+Deno.test("error mapping is actionable across statuses", async () => {
   for (
     const [status, needle] of [
       [401, "set CF_IDENTITY"],
       [403, "allowlist"],
+      [404, "disabled or unknown space"],
+      [500, "request failed (500"],
     ] as const
   ) {
     const stub = stubFetch(() =>
@@ -134,6 +136,18 @@ Deno.test("error mapping is actionable for 401/403", async () => {
       stub.restore();
     }
   }
+});
+
+Deno.test("fetchSpaceDb rejects a space id that isn't a safe filename", async () => {
+  await withCacheDir(async (cacheDir) => {
+    for (const bad of ["a/b", "a\\b"]) {
+      await assertRejects(
+        () => fetchSpaceDb(bad, "http://h:1", { cacheDir }),
+        Error,
+        "invalid space id",
+      );
+    }
+  });
 });
 
 Deno.test("defaultCacheDir namespaces by host", () => {

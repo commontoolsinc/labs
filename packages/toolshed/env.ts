@@ -208,19 +208,18 @@ const EnvSchema = z.object({
   // ===========================================================================
   // State-inspector remote dump endpoint (`cf inspect --remote`).
   // Exposes raw, read-only space SQLite snapshots over HTTP for offline
-  // autopsy. OFF by default — enable ONLY on non-production (e.g. staging)
-  // environments. A space dump is the entire contents of a space, so access is
-  // gated by CF1 first-party signature auth + a DID allowlist, and every dump
-  // is audit-logged. See routes/storage/memory/memory-dump.index.ts.
+  // autopsy. This is a STAGING-ONLY debugging tool: it hard-refuses to mount
+  // under ENV=production with no override (a productionized form is a separate,
+  // access-controlled mechanism — not this endpoint). A space dump is the
+  // entire contents of a space, so access is gated by CF1 first-party signature
+  // auth + a DID allowlist, and every dump is audit-logged. See
+  // routes/storage/memory/memory-dump.index.ts.
   // ===========================================================================
   // Master switch. Unset/"false" => the endpoint 404s as if it did not exist.
   MEMORY_DUMP_ENABLED: flagValue(),
   // Comma-separated DIDs allowed to download dumps, in ADDITION to
   // MEMORY_SERVICE_DIDS. Empty => only MEMORY_SERVICE_DIDS may dump.
   MEMORY_DUMP_DIDS: z.string().default(""),
-  // Defense in depth: refuse to mount the dump endpoint when ENV=production
-  // even if MEMORY_DUMP_ENABLED is set, unless this is explicitly enabled.
-  MEMORY_DUMP_ALLOW_IN_PRODUCTION: flagValue(),
 
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),

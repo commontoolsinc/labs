@@ -1986,7 +1986,8 @@
       },
       "packages/cli": {
         "dependencies": [
-          "jsr:@cliffy/table@^1.0.0-rc.8"
+          "jsr:@cliffy/table@^1.0.0-rc.8",
+          "jsr:@db/sqlite@0.12"
         ]
       },
       "packages/deno-web-test": {

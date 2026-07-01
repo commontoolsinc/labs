@@ -127,6 +127,32 @@ Deno.test("single-file (DB_PATH) mode: literal-%3A filenames round-trip", async 
   }
 });
 
+Deno.test("listSpaceStores: missing store dir is empty, IO error rethrows", async () => {
+  const store = await makeStore(); // exists, but no engine-v3 dir seeded yet
+  try {
+    assertEquals(listSpaceStores(store), []); // NotFound → []
+  } finally {
+    await rm(store);
+  }
+
+  // A store whose engine-v3 "dir" is actually a FILE → readDir throws a
+  // non-NotFound error, which must surface rather than look like "no spaces".
+  const tmp = await Deno.makeTempDir({ prefix: "cf-dump-notdir-" });
+  const fileStore = Path.toFileUrl(`${tmp}/`);
+  try {
+    Deno.writeTextFileSync(Path.join(tmp, "engine-v3"), "not a directory");
+    let threw = false;
+    try {
+      listSpaceStores(fileStore);
+    } catch (e) {
+      threw = !(e instanceof Deno.errors.NotFound);
+    }
+    assertEquals(threw, true);
+  } finally {
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+  }
+});
+
 async function exists(path: string): Promise<boolean> {
   try {
     await Deno.stat(path);

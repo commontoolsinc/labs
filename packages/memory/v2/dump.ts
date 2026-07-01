@@ -107,6 +107,14 @@ export function spaceStorePath(
  * Write a crash-consistent single-file copy of the space store at `sourcePath`
  * to `destPath` via `VACUUM INTO`. Does not mutate the source and runs no
  * migrations. Safe while the server holds the source open in WAL mode.
+ *
+ * Known limitation: opening read-only means a space whose `-wal` still has
+ * un-checkpointed frames AND which no writer currently holds open can fail here,
+ * because WAL recovery needs write access to `-shm`/`-wal`. In practice the
+ * toolshed holds active spaces open (so `-shm` exists and recovery is a no-op);
+ * an idle space with a dirty WAL is the edge that can throw. The caller (the
+ * dump route) turns that into a 500, so it fails safe rather than corrupting or
+ * silently truncating — acceptable for the staging-only debugging use.
  */
 export function snapshotSpaceStore(sourcePath: string, destPath: string): void {
   // `VACUUM INTO` is documented to work against a read-only source connection
