@@ -3,12 +3,26 @@
 A one-line conditional guard — `if (cond) return …;`, `if (cond) throw …;`, or
 `if (cond) continue;` — is reported by `deno coverage` as **0 hits** whenever the
 function runs but the guarded branch is never taken, even though the `cond`
-condition is evaluated on every call. The line is attributed to the (untaken)
-branch statement rather than to the condition that actually ran.
+condition is evaluated on every call.
+
+Most of this is expected. V8 collects coverage at block (byte-range)
+granularity rather than per line: the guard's body (`throw …`, `return …`,
+`continue`) is its own range with its own execution count, and a branch that is
+never taken legitimately has a count of 0. The V8 blog post
+["JavaScript code coverage"](https://v8.dev/blog/javascript-code-coverage)
+describes this directly — "block coverage could detect that the `else` branch …
+is never executed." A whole-line hit count is a projection of those block ranges
+onto lines, and the blog does not specify how that projection should work; it is
+the coverage tool's job. When a single line holds both the executed condition and
+the un-taken body, projecting it to 0 is a defensible choice, not a bug.
+
+One projection behaviour is not defensible, and it is the only part worth
+reporting upstream: a trailing comment on the guard line flips the reported line
+count from 0 to 1, even though a comment changes nothing about what executes. The
+reproduction below isolates it.
 
 This note records the behaviour because several deliberately-unreachable
-invariant guards in the runtime are marked uncovered solely because of it, and
-provides a minimal reproduction to submit upstream.
+invariant guards in the runtime are marked uncovered solely because of it.
 
 ## Where it bites us
 
@@ -36,7 +50,7 @@ These conditions are evaluated on every call, but their branches are not taken
 in single-space, healthy-transaction tests, so deno reports each guard line as
 uncovered.
 
-## Minimal reproduction
+## Isolating the line-attribution quirk
 
 ```ts
 // guard.ts
@@ -78,10 +92,26 @@ comment when one does.
 
 ## Expected vs actual
 
-- Expected: line 2 is covered, because the `if (!x)` condition runs on every
-  call.
-- Actual: line 2 reports 0 hits; adding any trailing token after the statement
-  flips it to 1.
+The block-level fact — the un-taken `throw` executes 0 times — is correct and
+expected. The defect is only in how that projects onto a line count:
+
+- Expected: two lines containing identical executable code report the same line
+  hit count.
+- Actual: line 2 reports 0 hits while line 6 — the same statement with a
+  trailing comment — reports 1. A comment, which does not execute, decides the
+  count.
+
+## Reporting upstream
+
+Only the trailing-comment line-attribution flip is worth reporting; the un-taken
+branch reporting 0 hits is documented V8 block-granularity behaviour and should
+not be filed as a bug. A search of deno's open issues found no existing report of
+comment-sensitive line coverage or `deno coverage` line attribution. The closest
+match, [denoland/deno#9865](https://github.com/denoland/deno/issues/9865)
+("`deno coverage` line and branch counts are incorrect"), is closed and covers a
+different case — off-by-one line and branch counts around an `if`/`else` block,
+not a comment changing a line's hit count — so a focused report on the
+comment-sensitivity would not duplicate it.
 
 ## Impact and handling
 
