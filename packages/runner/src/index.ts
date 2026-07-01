@@ -177,6 +177,12 @@ export {
   type SchedulerGraphNode,
   type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+export {
+  attachRuntimeTelemetryOtelBridge,
+  createRuntimeTelemetryOtelBridge,
+  type OtelBridgeOptions,
+  type RuntimeTelemetryOtelBridge,
+} from "./telemetry-otel-bridge.ts";
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";

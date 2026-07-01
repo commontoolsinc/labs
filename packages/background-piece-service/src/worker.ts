@@ -1,5 +1,6 @@
 import { PieceManager } from "@commonfabric/piece";
 import {
+  attachRuntimeTelemetryOtelBridge,
   Cell,
   type ConsoleHandler,
   type ConsoleMessage,
@@ -11,6 +12,7 @@ import {
   Stream,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { getMeter, getTracer } from "./otel.ts";
 
 import {
   createSession,
@@ -32,6 +34,10 @@ let latestError: Error | null = null;
 let currentSession: Session | null = null;
 let manager: PieceManager | null = null;
 let runtime: Runtime | null = null;
+// Detaches the OpenTelemetry bridge from the runtime's telemetry EventTarget.
+// Set when the runtime is created in initialize(), called on cleanup() so the
+// listener and any in-flight spans are torn down with the runtime.
+let detachOtelBridge: (() => void) | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 let streamValidator = isStream;
 
@@ -127,6 +133,7 @@ export function resetWorkerStateForTesting(): void {
   currentSession = null;
   manager = null;
   runtime = null;
+  detachOtelBridge = null;
   loadedPieces.clear();
   streamValidator = isStream;
 }
@@ -162,6 +169,19 @@ export async function initialize(
     errorHandlers: [errorHandler],
     experimental,
   });
+  // Bridge the runtime's existing telemetry stream to OpenTelemetry. This is a
+  // second, passive consumer of the same event bus the debug tooling uses; it
+  // emits no-op instruments unless a provider is registered (see otel.ts).
+  detachOtelBridge = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
+    tracer: getTracer(),
+    meter: getMeter(),
+    attributes: {
+      "ct.runtime": "bg-piece",
+      "space.did": spaceId,
+      "user.did": identity.did(),
+    },
+  });
+
   manager = new PieceManager(currentSession, runtime);
   await manager.ready;
 
@@ -180,6 +200,13 @@ export async function cleanup(): Promise<void> {
   loadedPieces.clear();
   currentSession = null;
   manager = null;
+
+  // Detach the OTel bridge before tearing down the runtime so its telemetry
+  // listener is removed and any in-flight storage spans are closed.
+  if (detachOtelBridge) {
+    detachOtelBridge();
+    detachOtelBridge = null;
+  }
 
   // Ensure storage is synced before cleanup
   if (runtime) {

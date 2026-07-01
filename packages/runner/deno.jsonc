@@ -9,6 +9,7 @@
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"
   },
   "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
     "ses": "npm:ses@^1.15.0",
     "typescript": "npm:typescript"
   },
