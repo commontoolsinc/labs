@@ -78,10 +78,10 @@ const inspectorUrl = Promise.withResolvers<string>();
 const cliStatusPromise = cliCommand.status;
 let recentOutput = "";
 let inspectorUrlFound = false;
-let capture: Deno.ChildProcess | undefined;
+const captureRef: { current?: Deno.ChildProcess } = {};
 const stopCapture = () => {
-  if (capture) {
-    stopCaptureOnce(captureStopState, capture);
+  if (captureRef.current) {
+    stopCaptureOnce(captureStopState, captureRef.current);
   }
 };
 
@@ -133,18 +133,16 @@ if (profileStopPattern) {
   captureArgs.push(`--profile-stop-pattern=${profileStopPattern}`);
 }
 
-capture = new Deno.Command(Deno.execPath(), {
+const capture = new Deno.Command(Deno.execPath(), {
   args: captureArgs,
   cwd: Deno.cwd(),
   stdin: "null",
   stdout: "inherit",
   stderr: "inherit",
 }).spawn();
+captureRef.current = capture;
 
 const captureStatusPromise = (async () => {
-  if (!capture) {
-    throw new Error("Capture process was not started");
-  }
   const status = await capture.status;
   captureStopState.sent = true;
   return status;
