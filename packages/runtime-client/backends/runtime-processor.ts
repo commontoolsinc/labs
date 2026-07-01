@@ -917,7 +917,12 @@ export class RuntimeProcessor {
   }
 
   async handleIdle(): Promise<void> {
-    await this.runtime.idle();
+    // The client reads "idle" as a safe point to navigate or reload, so it must
+    // include durability of a just-issued event write: idleWithEventCommits()
+    // waits for reactive quiescence and for in-flight user-intent event commits
+    // together (see Scheduler.idleWithEventCommits). Internal callers that only
+    // need reactive quiescence use runtime.idle() and are unaffected.
+    await this.runtime.scheduler.idleWithEventCommits();
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:

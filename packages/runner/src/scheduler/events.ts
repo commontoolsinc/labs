@@ -654,8 +654,10 @@ export async function dispatchQueuedEvent(state: {
     // flight. Downstream dirtying below is based on those locally applied
     // changed writes, not server-confirmed durability. If the server rejects
     // the commit, dependent speculative transactions are rejected as well and
-    // the normal retry path reruns the event.
-    tx.commit().then((result) => {
+    // the normal retry path reruns the event. The promise is registered with
+    // the scheduler (below) so the client-facing idle can wait for it without
+    // blocking the scheduler loop here.
+    const commitPromise = tx.commit().then((result) => {
       const permanentRejection =
         result.error && isPermanentRejection(result.error)
           ? (result.error as IPreconditionFailedError).precondition
@@ -780,6 +782,14 @@ export async function dispatchQueuedEvent(state: {
         error,
       );
     });
+    // A user-intent write (one that changed values) must be durable before the
+    // client treats the runtime as idle. Register the full commit promise so
+    // the client-facing idle waits for server confirmation (or terminal
+    // failure), closing the window where a navigate/reload drops the in-flight
+    // commit. Empty-write commits carry no durable user intent, so skip them.
+    if (changedWrites.length > 0) {
+      state.runtime.scheduler.trackEventCommit(commitPromise);
+    }
   };
 
   try {
