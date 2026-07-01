@@ -418,3 +418,74 @@ the mechanism) is preserved on `origin/scratch/cellset-conflict-probe`.
 | `packages/patterns/integration/cellset-lww.test.ts` | regression test (4 steps: scalar/array blind, push CAS, e2e) |
 | `packages/memory/test/cellset-structural-precondition.test.ts` | engine-level ancestor-reshape guarantee (parent vs root) |
 | `packages/patterns/integration/multi-runtime-{worker,harness}.ts` | `set` (blind) + `push` (CAS) harness commands |
+
+---
+
+## 8. Status & handoff (2026-07-01, session end)
+
+**PR:** [#4245](https://github.com/commontoolsinc/labs/pull/4245), branch
+`fix/cellset-blind-leaf-write`, worktree `labs/.claude/worktrees/cellset-probe`.
+Rebased onto latest main; HEAD `405c07dbd`, 11 ahead / 0 behind. The full design
+is §5.3; §§1–7 describe it in the landed (method-based + parent) form.
+
+### Robin's review
+He **endorsed the direction** on Discord (method-based trigger + a structural
+precondition), is **OK with the array-CAS drop** (a `set` of an array is now blind
+— flagged explicitly; concurrency-safe list edits go through `push` or the
+deferred mergeable-op work), and tagged **Ben** for a second opinion. His **formal
+PR re-review is pending** — that's the next inbound. When it lands, respond on the
+PR (findings-to-chat-first if it's a discussion; direct if it's a code nit).
+
+### CI — one open failure: runner coverage-debt (+2)
+Everything else is green (Runner/Pattern/Generated/CFC/Package integration, Check,
+Test, wall-time). The **Performance Check** fails only on the coverage-debt
+ratchet: `packages/runner` **7864 → 7866 (+2)**. memory (−4) and runtime-client
+(−3) are OK (fixed by the rebase catching up to main's coverage).
+
+**The puzzle to resolve next session:** the `+2` is the new structural-target
+registry — `setBlindStructuralTarget` / `getBlindStructuralTarget`
+([reactivity-log.ts](../../../packages/runner/src/storage/reactivity-log.ts) 160–176)
+and the `buildReads` emission block
+([v2.ts](../../../packages/runner/src/storage/v2.ts) ~2315–2345) — uncovered
+because runner's own suite never marks a tx blind. I added
+`packages/runner/test/blind-write-structural-precondition.test.ts`, and it
+**covers those exact lines locally** (verified DA hits: 160–167, 173, 2317–2340 all
+>0). **But CI still reports +2 on `405c07dbd` (the run that includes the test).**
+So the test's coverage isn't reaching the runner coverage-debt metric. Likely
+causes to check:
+1. **Which job/shard collects `packages/runner` coverage** — see
+   [docs/development/COVERAGE.md](../../development/COVERAGE.md). If my test file
+   isn't in that job's run (or its V8 coverage lands in a shard whose LCOV isn't
+   the runner-debt source), it won't count. Confirm the test is actually executed
+   *by the coverage-collecting runner job*.
+2. **Whether the +2 is different lines** than I covered — run the *full* runner
+   suite locally with `--coverage` and list the still-uncovered new lines in
+   `reactivity-log.ts` / `v2.ts` (my local check ran only the one test file).
+   There may be ~2 uncovered new lines elsewhere (e.g. the `pending`-branch of the
+   emission block, or a `getBlindStructuralTarget` chain edge).
+
+**Fallback if it's genuinely not coverable by the runner job:** the sanctioned
+override — the perf log emits the exact marker
+`NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 7866 lines`
+(placed per [CI_PERFORMANCE.md](../../development/CI_PERFORMANCE.md) §"Coverage Debt
+Baselines"). Prefer real coverage; use the marker only if (1)/(2) show the lines
+can't be reached from the runner coverage job.
+
+### Deferred / follow-ups (not this PR)
+- **Mergeable-op array RMW** (Robin's idea): `ArrayCellController.remove/update`
+  route through `set` and are now blind; the concurrency-safe fix is server-side
+  `remove-by-value`/`splice` mergeable ops. Larger, separate change.
+- **Two-browser** integration not re-run locally on the method-based form (CI
+  covers it).
+
+### Pick-up commands
+```bash
+cd labs/.claude/worktrees/cellset-probe      # branch fix/cellset-blind-leaf-write
+git fetch origin && git log --oneline -3     # confirm HEAD vs origin
+gh pr view 4245 --json state,reviewDecision  # Robin's review state
+gh pr checks 4245                            # CI (Performance Check = the open one)
+gh pr view 4245 --comments                   # cubic / bot / review comments
+# reproduce the runner coverage question:
+deno test --coverage=/tmp/cov -A packages/runner/test/   # full runner suite
+deno coverage /tmp/cov --lcov | awk '/reactivity-log|storage\/v2\.ts/'  # inspect DA
+```
