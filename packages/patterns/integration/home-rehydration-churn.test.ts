@@ -20,10 +20,10 @@ const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 
 // One stable, machine-parseable line per churn measurement, logged before the
 // assertions so a run that exceeds a bound still records its value rather than
-// hiding it behind the failure. The reload bounds below are timing- and
-// hardware-sensitive, so the right value can only be read from the real
-// distribution across CI runs and runners. The `CHURN_METRIC` tag and
-// `key=value` shape are the stable contract — keep them greppable.
+// hiding it behind the failure. The reload bounds below are read from the real
+// distribution across CI runs and runners, which holds at zero. The
+// `CHURN_METRIC` tag and `key=value` shape are the stable contract — keep them
+// greppable.
 //
 // To pull the distribution from the most recent 100 CI runs (this test runs in
 // the "Deno Workflow" / deno.yml `package-integration-test` job; PRs land on
@@ -133,7 +133,7 @@ describe("home rehydration", () => {
     identity = await Identity.generate({ implementation: "noble" });
   });
 
-  it("reloading a populated home re-commits ~nothing already-durable", async () => {
+  it("reloading a populated home re-commits nothing already-durable", async () => {
     const page = shell.page();
 
     await gotoHome(shell, identity);
@@ -161,19 +161,17 @@ describe("home rehydration", () => {
     logChurnMetric("reload", reload.churn);
 
     const c = reload.churn;
-    // Read-mostly reload: re-commits stay near zero rather than scaling into a
+    // Read-mostly reload: re-commits stay at zero rather than scaling into a
     // storm. Resuming reads confirmed-loaded state before re-deriving — owned
     // cells are pre-synced, the manifest probe no longer reads not-yet-loaded
     // derived cells, and the list builtins defer their reconcile until the
-    // durable container lands instead of overwriting it with []. The residual
-    // is a small, bounded number of optimistic re-commits that lose a stale
-    // basis once and settle. The exact count is timing- and hardware-sensitive,
-    // so this bound is a regression sentinel with margin, not the measured
-    // floor — the values logged above are the basis for narrowing it. The
+    // durable container lands instead of overwriting it with []. Across the CI
+    // distribution these counters hold at zero, so the bound is zero: any
+    // conflict, revert, or schedule-run-error on reload is a regression. The
     // durability test below is the precise correctness gate.
-    expect(c.commitConflicts).toBeLessThanOrEqual(12);
-    expect(c.commitReverts).toBeLessThanOrEqual(12);
-    expect(c.scheduleRunErrors).toBeLessThanOrEqual(12);
+    expect(c.commitConflicts).toBeLessThanOrEqual(0);
+    expect(c.commitReverts).toBeLessThanOrEqual(0);
+    expect(c.scheduleRunErrors).toBeLessThanOrEqual(0);
   });
 
   it("a profile created in the post-reload window is durable", async () => {
