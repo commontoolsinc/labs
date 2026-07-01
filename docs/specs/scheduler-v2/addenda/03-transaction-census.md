@@ -33,7 +33,16 @@ This pins the +16% redundancy to **cross-runtime duplication of shared derivatio
 - **Settled — structure**: shared, space-scoped, cross-runtime-duplicated, demand-driven.
 - **Settled — value level** (was blocked, now measured): the duplicate re-derivations are a **legitimate value progression, computed redundantly**, not same-value churn and not (mostly) oscillation. Two compounding redundancies: within-runtime **double-compute** (~2× consecutive, 60% of writes) and cross-runtime **duplication** (63% of distinct values computed by both runtimes). So the "different results that require transactions" are genuinely different *because shared state advances* — the waste is that each shared value is materialised ~4× (2 runtimes × ~2 consecutive) where main folds it inline ~once. The one true flip-flop is the **apex render**, which re-renders through superseded intermediate states.
 - **Implication for remediation**: because the values are a real progression (not stale churn), a naive same-value gate reclaims little; the leverage is (a) **cross-runtime adoption** of the 63% both-runtimes-duplicated values (A6), (b) **coalescing** the within-runtime double-compute and the apex oscillation (A9). The apex oscillation is the only strictly-wasteful component (it renders states that are immediately superseded).
-- **Residual caveat**: single run, two users; the digest is FNV-1a over `JSON.stringify(outputs)` (stable within a run for equal values, adequate for identity but not a cryptographic guarantee). Re-run for N>2 users would show whether the cross-runtime-duplication fraction scales with participant count (expected: yes).
+- **Scaling with participant count — confirmed O(N) duplication per value, ≈O(N²) total** (same digest instrumentation, sequential-chain variants at N=2/3/4, each participant saves a profile + posts one message; all pass):
+
+  | N | mean runtimes producing each distinct value | % of distinct values produced by **all N** runtimes | writes per value (≈2N) | total result-writes | wall |
+  |---|---|---|---|---|---|
+  | 2 | 1.95 | 95% | 4.15 | 170 | 4.8 s |
+  | 3 | 2.88 | 94% | 7.80 | 390 | 7.5 s |
+  | 4 | 3.80 | 93% | 9.59 | 566 | 10.5 s |
+
+  The `realms-per-value` histogram is bimodal and shifts right with N — N=2: `{2→39, 1→2}`; N=3: `{3→47, 1→3}`; N=4: `{4→55, 1→4}` — i.e. **~94% of distinct shared values are computed independently by *every* runtime**, at every N. Mean runtimes-per-value tracks N almost exactly (≈ N−0.1). The genuinely-distinct shared state (`distinctValues`) grows only ~linearly with N (41→50→59, tracking message count), but each value is materialised ≈ 2N times (N runtimes × the ~2× within-runtime double-compute), so **total shared-derivation work ≈ distinctValues × 2N ≈ O(N²)** — the super-linear multi-user cost, quantified. This is exactly what cross-runtime **adoption** (A6) would collapse: compute each shared value once and adopt it, turning the ≈2N multiplier back toward ≈2 (or 1 with in-runtime coalescing too).
+- **Residual caveat**: few runs per point; the digest is FNV-1a over `JSON.stringify(outputs)` (stable within a run for equal values — adequate for identity, not a cryptographic guarantee). `p0` bootstraps the shared setup so it always carries extra writes; the N-scaling is read from the per-value duplication, which is robust to that.
 
 ## Related
 
