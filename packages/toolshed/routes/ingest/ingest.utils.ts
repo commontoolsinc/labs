@@ -4,7 +4,8 @@ import {
   durableSet,
   type VouchedChannel,
 } from "@/lib/custody-ingest.ts";
-import { sha256 } from "@/lib/sha2.ts";
+import { sha256 } from "@commonfabric/content-hash";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 // The `journal` sink of a vouched ingest channel: a durable, append-only,
 // ExternalIngest-marked record log. This is the generic capability — location
@@ -21,7 +22,6 @@ import { sha256 } from "@/lib/sha2.ts";
 // `runtime` explicitly so the operator script can reuse them without booting the
 // server. See docs/development/proposals/ingest-channels-journal-sink.md.
 
-const INGEST_ID_LENGTH = 20;
 const INGEST_SECRET_BYTES = 32;
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -107,24 +107,33 @@ function randomBase62(length: number): string {
   return result;
 }
 
-export function generateIngestId(): string {
-  return `ing_${randomBase62(INGEST_ID_LENGTH)}`;
+// Canonical content-addressed hashing — cf-review: never fork SHA-256 via
+// @std/crypto or a local wrapper; the canonical home is @commonfabric/
+// content-hash (sync, bytes -> bytes). base64url gives a compact string form
+// used only for internal token hashing + the derived channel id.
+const hashSecret = (value: string): string =>
+  toUnpaddedBase64url(sha256(new TextEncoder().encode(value)));
+
+/**
+ * A channel's id is DERIVED from (space, installId), not random — so
+ * re-provisioning the same install rotates the token in place (overwrites the
+ * one registration) instead of leaving a second live token behind. The id is
+ * not a credential (the bearer token is), so a derivable, non-secret id is fine.
+ */
+export function channelId(space: string, installId: string): string {
+  return `ing_${hashSecret(`${space}\n${installId}`)}`;
 }
 
-export function generateIngestSecret(): {
-  secret: string;
-  hashPromise: Promise<string>;
-} {
+export function generateIngestSecret(): { secret: string; secretHash: string } {
   const secret = `ingsec_${randomBase62(INGEST_SECRET_BYTES)}`;
-  return { secret, hashPromise: sha256(secret) };
+  return { secret, secretHash: hashSecret(secret) };
 }
 
-export async function verifyIngestSecret(
+export function verifyIngestSecret(
   provided: string,
   storedHash: string,
-): Promise<boolean> {
-  const providedHash = await sha256(provided);
-  const a = new TextEncoder().encode(providedHash);
+): boolean {
+  const a = new TextEncoder().encode(hashSecret(provided));
   const b = new TextEncoder().encode(storedHash);
   if (a.length !== b.length) return false;
   let result = 0;
@@ -206,7 +215,7 @@ export async function appendToJournal(
   return records.length;
 }
 
-const DUMMY_HASH = "0".repeat(64);
+const DUMMY_HASH = hashSecret("");
 
 /** A minimal logger shape so processIngest is testable without a pino instance. */
 interface IngestLogger {
@@ -249,10 +258,10 @@ export async function processIngest(
   if (!registration || !registration.enabled) {
     // Match the real verification path so missing/disabled channels can't be
     // distinguished from a wrong token by timing.
-    await verifyIngestSecret(token, DUMMY_HASH);
+    verifyIngestSecret(token, DUMMY_HASH);
     return { status: 401, body: { error: "Invalid request" } };
   }
-  if (!(await verifyIngestSecret(token, registration.secretHash))) {
+  if (!verifyIngestSecret(token, registration.secretHash)) {
     return { status: 401, body: { error: "Invalid request" } };
   }
 

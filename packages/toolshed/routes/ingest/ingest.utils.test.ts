@@ -6,6 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   appendToJournal,
+  channelId,
   generateIngestSecret,
   getRegistration,
   type IngestRegistration,
@@ -187,12 +188,21 @@ describe("ingest journal sink", () => {
     }
   });
 
-  it("verifies bearer secrets in constant time", async () => {
-    const { secret, hashPromise } = generateIngestSecret();
-    const hash = await hashPromise;
-    expect(await verifyIngestSecret(secret, hash)).toBe(true);
-    expect(await verifyIngestSecret("ingsec_wrong", hash)).toBe(false);
-    expect(await verifyIngestSecret(secret, "0".repeat(64))).toBe(false);
+  it("verifies bearer secrets in constant time", () => {
+    const { secret, secretHash } = generateIngestSecret();
+    expect(verifyIngestSecret(secret, secretHash)).toBe(true);
+    expect(verifyIngestSecret("ingsec_wrong", secretHash)).toBe(false);
+    expect(verifyIngestSecret(secret, "A".repeat(secretHash.length))).toBe(
+      false,
+    );
+  });
+
+  it("channelId is deterministic per (space, installId) — re-provisioning rotates in place", () => {
+    const a = channelId("did:key:space1", "install-1");
+    expect(channelId("did:key:space1", "install-1")).toBe(a);
+    expect(channelId("did:key:space1", "install-2")).not.toBe(a);
+    expect(channelId("did:key:space2", "install-1")).not.toBe(a);
+    expect(a.startsWith("ing_")).toBe(true);
   });
 
   it("round-trips a registration in the service space", async () => {
@@ -215,8 +225,7 @@ describe("ingest journal sink", () => {
   const savedReg = async (
     overrides: Partial<IngestRegistration> = {},
   ): Promise<{ r: IngestRegistration; secret: string }> => {
-    const { secret, hashPromise } = generateIngestSecret();
-    const secretHash = await hashPromise;
+    const { secret, secretHash } = generateIngestSecret();
     const r = reg({ id: "ing_auth", secretHash, ...overrides });
     await saveRegistration(runtime, space, r);
     return { r, secret };

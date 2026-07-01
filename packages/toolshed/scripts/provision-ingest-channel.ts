@@ -18,7 +18,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
 import {
-  generateIngestId,
+  channelId,
   generateIngestSecret,
   isValidSegment,
   saveRegistration,
@@ -59,9 +59,10 @@ const runtime = new Runtime({
 });
 
 try {
-  const id = generateIngestId();
-  const { secret, hashPromise } = generateIngestSecret();
-  const secretHash = await hashPromise;
+  // Deterministic id: re-running for the same space+install rotates the token in
+  // place (overwrites the one registration) rather than leaving a stale one live.
+  const id = channelId(space, installId);
+  const { secret, secretHash } = generateIngestSecret();
 
   await saveRegistration(runtime, identity.did(), {
     id,
@@ -86,6 +87,10 @@ try {
   console.log(`  URL:         ${url}`);
   console.log(
     `\n  token (shown once — hand to the beacon, sent as 'Authorization: Bearer <token>'):\n\n    ${secret}\n`,
+  );
+  console.log(
+    "  (re-running with the same --space and --install-id rotates this channel's\n" +
+      "   token in place; the previous token stops working.)\n",
   );
 } finally {
   await runtime.dispose();
