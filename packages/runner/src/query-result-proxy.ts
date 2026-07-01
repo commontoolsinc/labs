@@ -437,7 +437,7 @@ export function createQueryResultProxy<T>(
             // against a possibly-stale base. Other mutators (splice, unshift,
             // ...) are not tail appends and keep the read-modify-write path.
             if (prop === "push") {
-              tx.recordArrayAppend?.(link, args.length);
+              tx.recordMergeableOp?.(link, { op: "append", count: args.length });
             }
 
             // CT-1173 FIX: Don't mutate proxy target (value) after writes.

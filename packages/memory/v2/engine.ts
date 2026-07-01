@@ -1,13 +1,12 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { runWrite } from "./sqlite/exec.ts";
-import { applyPatch } from "./patch.ts";
 import {
-  isPrefixPath,
-  parentPath,
-  parsePointer,
-  pathsOverlap,
-} from "./path.ts";
+  applyPatch,
+  patchOpIsStructural,
+  touchedPointerPaths,
+} from "./patch.ts";
+import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
   type BranchName,
   type CellScope,
@@ -3921,26 +3920,13 @@ export const patchOverlapsNonRecursiveRead = (
 };
 
 const touchedPathsForPatch = (patch: PatchOp): string[][] => {
-  switch (patch.op) {
-    case "replace":
-      return [parsePointer(patch.path)];
-    case "add":
-    case "remove": {
-      const path = parsePointer(patch.path);
-      return [path, parentPath(path)];
-    }
-    case "move": {
-      const from = parsePointer(patch.from);
-      const to = parsePointer(patch.path);
-      return [from, to, parentPath(from), parentPath(to)];
-    }
-    case "splice":
-    case "append":
-    case "add-unique":
-    case "remove-by-value":
-    case "increment":
-      return [parsePointer(patch.path)];
-  }
+  const leaves = touchedPointerPaths(patch);
+  // Structural ops (add/remove/move) also touch the parent container's key-set,
+  // so a shape-only reader of the parent must be invalidated. Value-only ops
+  // touch only the leaf/array path, which such a reader already prefixes.
+  return patchOpIsStructural(patch)
+    ? [...leaves, ...leaves.map((path) => parentPath(path))]
+    : leaves;
 };
 
 // The EXACT changed leaf paths of a patch — without the ancestor/parent paths
@@ -3964,22 +3950,8 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
 //     match and drops the spurious sibling match. Keyset/shape (nonRecursive)
 //     readers, which DO need to see key add/remove, are matched by a separate
 //     path that retains `touchedPathsForPatch`'s parent injection.
-const touchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
-  switch (patch.op) {
-    case "replace":
-    case "splice":
-    case "append":
-    case "add-unique":
-    case "remove-by-value":
-    case "increment":
-      return [parsePointer(patch.path)];
-    case "add":
-    case "remove":
-      return [parsePointer(patch.path)];
-    case "move":
-      return [parsePointer(patch.from), parsePointer(patch.path)];
-  }
-};
+const touchedLeafPathsForPatch = (patch: PatchOp): string[][] =>
+  touchedPointerPaths(patch);
 
 const schedulerWriteAddressesForRevisions = (
   space: string,

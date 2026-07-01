@@ -37,6 +37,7 @@ import type {
   CommitPrecondition,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -670,24 +671,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.tx.markCreateOnly?.(link);
   }
 
-  recordArrayAppend(link: NormalizedFullLink, count: number): void {
-    this.assertWritable("recordArrayAppend");
-    this.tx.recordArrayAppend?.(toMemorySpaceAddress(link), count);
-  }
-
-  recordAddUnique(link: NormalizedFullLink, count: number): void {
-    this.assertWritable("recordAddUnique");
-    this.tx.recordAddUnique?.(toMemorySpaceAddress(link), count);
-  }
-
-  recordIncrement(link: NormalizedFullLink, by: number): void {
-    this.assertWritable("recordIncrement");
-    this.tx.recordIncrement?.(toMemorySpaceAddress(link), by);
-  }
-
-  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
-    this.assertWritable("recordRemoveByValue");
-    this.tx.recordRemoveByValue?.(toMemorySpaceAddress(link), value);
+  recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
+    this.assertWritable("recordMergeableOp");
+    this.tx.recordMergeableOp?.(toMemorySpaceAddress(link), delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -1287,20 +1273,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.markCreateOnly?.(link);
   }
 
-  recordArrayAppend(link: NormalizedFullLink, count: number): void {
-    this.wrapped.recordArrayAppend?.(link, count);
-  }
-
-  recordAddUnique(link: NormalizedFullLink, count: number): void {
-    this.wrapped.recordAddUnique?.(link, count);
-  }
-
-  recordIncrement(link: NormalizedFullLink, by: number): void {
-    this.wrapped.recordIncrement?.(link, by);
-  }
-
-  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
-    this.wrapped.recordRemoveByValue?.(link, value);
+  recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
+    this.wrapped.recordMergeableOp?.(link, delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
