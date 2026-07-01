@@ -2,6 +2,8 @@ import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import { stampExternalIngest } from "@commonfabric/runner/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import type { FabricValue } from "@commonfabric/api";
 
 /**
  * The one durable-write path for the fabric's external-ingest edges. An outside
@@ -52,13 +54,16 @@ const digestOf = (payload: unknown): string =>
     )))
   }`;
 
-// A plain, independent deep copy of a cell value, so an in-place `mutate`
-// callback can't touch the transaction's working copy before the explicit
-// `set`. These ingest paths hold JSON data (auth blobs, ingest records);
-// `structuredClone` can't clone the reactive read proxy `cell.get()` returns,
-// so round-trip through JSON (the same serialization the digest already uses).
+// A fresh, independent deep-mutable copy of a cell value, so an in-place
+// `mutate` callback can't touch the transaction's working copy before the
+// explicit `set`. Uses the canonical fabric-value clone (force-copy everything,
+// leave it mutable); never a JSON round-trip, which mangles fabric primitives.
 const cloneValue = <T>(value: T | undefined): T | undefined =>
-  value === undefined ? undefined : JSON.parse(JSON.stringify(value)) as T;
+  value === undefined ? undefined : cloneIfNecessary(value as FabricValue, {
+    frozen: false,
+    deep: true,
+    force: true,
+  }) as T;
 
 /**
  * The one governed write. `mutate` runs INSIDE the retrying transaction, so any
