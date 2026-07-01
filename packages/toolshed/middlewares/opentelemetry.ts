@@ -121,6 +121,14 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
         const route = c.req.routePath || path;
         span.setAttribute("http.route", route);
         span.updateName(`${method} ${route}`);
+        // Attribute the request to its space when the route carries a
+        // `:spaceDid` param (resolved only after `next()`). Defensive: no-op if
+        // absent. `user.did` is set by the auth middleware while this span is
+        // active.
+        const spaceDid = c.req.param("spaceDid");
+        if (spaceDid) {
+          span.setAttribute("space.did", spaceDid);
+        }
         span.end();
       }
     });
