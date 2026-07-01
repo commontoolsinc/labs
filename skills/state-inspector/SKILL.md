@@ -39,9 +39,10 @@ of it all (`entities`/`piece`/`graph`).
   not what any client is showing.
 - _A live or production bug from a local snapshot_ — a clean local store does
   not explain a prod-only misbehaviour; at most it says the local data is
-  healthy, so the cause is concurrency / scale / timing or client-side. To
-  inspect prod you need that space's actual `.sqlite` (no remote mode — copy the
-  file off the box).
+  healthy, so the cause is concurrency / scale / timing or client-side. Staging
+  spaces can be fetched with `--remote` (see below); the dump endpoint is
+  deliberately hard-off in production, so a prod space still means copying the
+  `.sqlite` off the box (ssh+scp).
 - _How long anything took_ — it has logical order (`seq`) plus
   second-granularity commit times ("what happened and when"), never latencies or
   durations.

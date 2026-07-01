@@ -155,4 +155,68 @@ Deno.test("defaultCacheDir namespaces by host", () => {
     defaultCacheDir("https://rapids.example.ts.net/"),
     "rapids.example.ts.net",
   );
+  // An unparseable base falls back to a sanitized literal slug.
+  assertStringIncludes(defaultCacheDir("not a url"), "not_a_url");
+});
+
+Deno.test("a non-JSON error body still maps to an actionable message", async () => {
+  const stub = stubFetch(() =>
+    new Response("<html>nope</html>", { status: 403 })
+  );
+  try {
+    await assertRejects(
+      () => listRemoteSpaces("http://h:1", {}),
+      Error,
+      "allowlist",
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("fetchSpaceDb maps its own HTTP errors", async () => {
+  await withCacheDir(async (cacheDir) => {
+    const stub = stubFetch(() =>
+      new Response(JSON.stringify({ error: "space not found" }), {
+        status: 404,
+      })
+    );
+    try {
+      await assertRejects(
+        () => fetchSpaceDb(SPACE, "http://h:1", { cacheDir }),
+        Error,
+        "disabled or unknown space",
+      );
+    } finally {
+      stub.restore();
+    }
+  });
+});
+
+Deno.test("an interrupted download leaves no partial or torn cache file", async () => {
+  await withCacheDir(async (cacheDir) => {
+    const stub = stubFetch(() =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2]));
+            controller.error(new Error("connection reset"));
+          },
+        }),
+        { status: 200 },
+      )
+    );
+    try {
+      await assertRejects(
+        () => fetchSpaceDb(SPACE, "http://h:1", { cacheDir }),
+        Error,
+        "connection reset",
+      );
+      // Neither the final cache file nor a .partial temp survives.
+      const leftovers = [...Deno.readDirSync(cacheDir)].map((e) => e.name);
+      assertEquals(leftovers, []);
+    } finally {
+      stub.restore();
+    }
+  });
 });

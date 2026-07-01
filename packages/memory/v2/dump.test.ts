@@ -127,6 +127,102 @@ Deno.test("single-file (DB_PATH) mode: literal-%3A filenames round-trip", async 
   }
 });
 
+Deno.test("listSpaceStores skips entries that aren't space stores", async () => {
+  const store = await makeStore();
+  try {
+    seedStore(store, SPACE_A, 1);
+    const dir = Path.dirname(canonicalPath(store, SPACE_A));
+    // Non-sqlite file, a directory with a .sqlite name, and a filename whose
+    // stem is not valid percent-encoding — none of these are stores we wrote.
+    Deno.writeTextFileSync(Path.join(dir, "README.txt"), "not a store");
+    Deno.mkdirSync(Path.join(dir, "subdir.sqlite"));
+    Deno.writeTextFileSync(Path.join(dir, "%zz.sqlite"), "bad encoding");
+    assertEquals(listSpaceStores(store).map((s) => s.space), [SPACE_A]);
+  } finally {
+    await rm(store);
+  }
+});
+
+Deno.test("listSpaceStores: stat races and null mtimes degrade gracefully", async () => {
+  const store = await makeStore();
+  const realStat = Deno.statSync;
+  try {
+    seedStore(store, SPACE_A, 1);
+    seedStore(store, SPACE_B, 1);
+
+    // A file deleted between readdir and stat (TOCTOU) is skipped, not fatal.
+    // (Directory-mode filenames are the LITERAL did — match on that.)
+    Deno.statSync = ((p: string | URL) => {
+      if (String(p).includes(SPACE_B)) {
+        throw new Deno.errors.NotFound("raced");
+      }
+      return realStat(p);
+    }) as typeof Deno.statSync;
+    assertEquals(listSpaceStores(store).map((s) => s.space), [SPACE_A]);
+
+    // A filesystem with no mtime reports 0, not a crash.
+    Deno.statSync = ((p: string | URL) => {
+      const real = realStat(p);
+      return { ...real, isFile: real.isFile, mtime: null };
+    }) as typeof Deno.statSync;
+    for (const s of listSpaceStores(store)) assertEquals(s.mtimeMs, 0);
+
+    // Any other stat error (permissions, IO) surfaces.
+    Deno.statSync = ((p: string | URL) => {
+      if (String(p).endsWith(".sqlite")) {
+        throw new Deno.errors.PermissionDenied("io");
+      }
+      return realStat(p);
+    }) as typeof Deno.statSync;
+    let threw = false;
+    try {
+      listSpaceStores(store);
+    } catch (e) {
+      threw = e instanceof Deno.errors.PermissionDenied;
+    }
+    assertEquals(threw, true);
+  } finally {
+    Deno.statSync = realStat;
+    await rm(store);
+  }
+});
+
+Deno.test("spaceStorePath surfaces non-NotFound stat errors", async () => {
+  // A store whose engine-v3 "dir" is a FILE → stat of engine-v3/<did>.sqlite
+  // fails with NotADirectory, which must rethrow rather than read as "absent".
+  const tmp = await Deno.makeTempDir({ prefix: "cf-dump-nadir-" });
+  const store = Path.toFileUrl(`${tmp}/`);
+  try {
+    Deno.writeTextFileSync(Path.join(tmp, "engine-v3"), "file, not dir");
+    let threw = false;
+    try {
+      spaceStorePath(store, SPACE_A);
+    } catch (e) {
+      threw = !(e instanceof Deno.errors.NotFound);
+    }
+    assertEquals(threw, true);
+  } finally {
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("resolveSpaceStoreUrl rejects an unencodable space id", async () => {
+  // A lone surrogate passes the character guard but encodeURIComponent throws.
+  const store = await makeStore();
+  try {
+    let threw = false;
+    try {
+      resolveSpaceStoreUrl(store, "\uD800bad" as MemorySpace);
+    } catch (e) {
+      threw = e instanceof Error &&
+        e.message.includes("Invalid memory space identifier");
+    }
+    assertEquals(threw, true);
+  } finally {
+    await rm(store);
+  }
+});
+
 Deno.test("listSpaceStores: missing store dir is empty, IO error rethrows", async () => {
   const store = await makeStore(); // exists, but no engine-v3 dir seeded yet
   try {
