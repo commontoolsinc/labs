@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  arrayEqual,
   getValueAtPath,
   hasValueAtPath,
   setValueAtPath,
@@ -24,6 +25,13 @@ describe("Path operations", () => {
       const obj = { x: { y: 1 } };
       setValueAtPath(obj, ["x", "y"], 2);
       expect(obj).toEqual({ x: { y: 2 } });
+    });
+
+    it("should skip writes when the value is unchanged", () => {
+      const obj = { x: { y: 1 } };
+      const changed = setValueAtPath(obj, ["x", "y"], 1);
+      expect(changed).toBe(false);
+      expect(obj).toEqual({ x: { y: 1 } });
     });
   });
 
@@ -92,6 +100,17 @@ describe("Path operations", () => {
       expect(obj.list.length).toBe(3);
       expect(2 in obj.list).toBe(true);
       expect(obj.list[2]).toBeUndefined();
+    });
+  });
+
+  describe("arrayEqual", () => {
+    it("should compare missing arrays by reference equality", () => {
+      expect(arrayEqual(undefined, undefined)).toBe(true);
+      expect(arrayEqual(undefined, [])).toBe(false);
+    });
+
+    it("should return false for arrays with different lengths", () => {
+      expect(arrayEqual(["a"], ["a", "b"])).toBe(false);
     });
   });
 });

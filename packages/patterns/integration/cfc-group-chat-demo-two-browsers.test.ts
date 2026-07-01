@@ -27,13 +27,16 @@
 import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { UI } from "@commonfabric/runner";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import {
+  initializePiecesController,
+  PiecesController,
+} from "./pieces-controller.ts";
 import {
   clickCfButton,
   clickTrustedActionAndWaitForText,
@@ -96,7 +99,7 @@ describe(
           () => Identity.generate({ implementation: "noble" }),
         ),
       );
-      cc = await PiecesController.initialize({
+      cc = await initializePiecesController({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identities[0],
