@@ -13,16 +13,26 @@ the open questions for the area owner (Robin / ubik2).
 
 ## TL;DR
 
-A scalar `$value`/`$checked` UI write was committed as a **compare-and-set**, so
-under concurrent same-user edits it lost an own-write race, was rejected and
-rolled back, and the edit silently vanished — the `cfc-group-chat-demo`
-"Name not set" flake. The fix makes a scalar `$value` write a **precondition-free
-last-write-wins leaf overwrite**: `handleCellSet` marks its transaction so the
-write records no concurrency precondition. Structured (array/object) values are
-left alone (they're often read-modify-write). Verified by a headless
-multi-runtime regression test (fails-without / passes-with) plus a real
-two-browser run, and confirmed to **still add value** after rebasing onto the
-new conflict-handling world (#4220/#4210/#4343/#4366/#4367).
+A `$value`/`$checked` UI write was committed as a **compare-and-set** (the diff
+read of the write target became a commit precondition), so under concurrent
+same-user edits it lost an own-write race, was rejected and rolled back, and the
+edit silently vanished — the `cfc-group-chat-demo` "Name not set" flake.
+
+**The fix (as landed):** decide blind-vs-CAS by **method**, not value type. A
+`CellHandle.set` → `CellSet` is a **blind last-write-wins** write (any value
+type); a `CellHandle.push` → new `CellPush` → `handleCellPush` keeps
+**compare-and-set**. A blind `set` carries no value-equality precondition — in its
+place `handleCellSet` threads **one structural precondition at the cell's parent**,
+so a concurrent whole-doc delete *or ancestor reshape* is a clean `ConflictError`
+rather than a raw "not traversable" throw. Verified headless (multi-runtime +
+engine-level) and green in regression.
+
+> **Reading this doc:** §§1–4 and §6 trace how the fix got here and describe its
+> two *earlier* forms — a precondition-free scalar blind write (value-type
+> narrowing), then an entity-root structural read. The design evolved twice:
+> value-type → **method-based** (per Robin's review) and entity-root → **parent**.
+> Each mechanism section below is written in the current form; **§5** records the
+> investigation and **§5.3 is the authoritative account of the landed design.**
 
 ---
 
@@ -68,43 +78,45 @@ that — it's same-leaf tier-2.)
 
 ## 2. The fix
 
-`RuntimeProcessor.handleCellSet`
-([`runtime-processor.ts:689`](../../../packages/runtime-client/backends/runtime-processor.ts))
-marks its transaction as a **blind-leaf-write**, but only:
+The blind-vs-compare-and-set decision is made by **method** (which request type
+the client sent), not by the value's shape. Both handlers share `applyCellWrite`.
 
-- **for scalar values** (`typeof === "string" | "number" | "boolean"`,
-  line 703), and
-- **around the `cell.set()` call only** — mark at line 705, **unmark at line 707**
-  before `prepareTxForCommit`.
-
-While the tx is marked, `V2StorageTransaction.read()`
-([`v2-transaction.ts:1335`](../../../packages/runner/src/storage/v2-transaction.ts)):
-tags every read with `ignoreReadForCommit` and **skips setting `doc.validated`**;
-and `buildReads` ([`v2.ts:2170`](../../../packages/runner/src/storage/v2.ts))
-**drops** `ignoreReadForCommit` reads from `reads.confirmed`. Net: the write
-carries **no concurrency precondition** on either side → precondition-free
-last-write-wins, which is correct for raw scalar UI input.
+- **`CellHandle.set` → `CellSet` → `RuntimeProcessor.handleCellSet`**
+  ([`runtime-processor.ts`](../../../packages/runtime-client/backends/runtime-processor.ts))
+  is a **blind last-write-wins** write (any value type). It marks its transaction
+  as a blind-leaf-write **around the `cell.set()` call only** (cleared before
+  `prepareTxForCommit`). While marked, `V2StorageTransaction.read()`
+  ([`v2-transaction.ts`](../../../packages/runner/src/storage/v2-transaction.ts))
+  tags every read `ignoreReadForCommit` and **skips `doc.validated`**, so the leaf
+  carries no value-equality precondition. In its place, `handleCellSet` threads
+  the cell's resolved **parent** address (`setBlindStructuralTarget`, via
+  `resolveAsCell().getAsNormalizedFullLink()`), and `buildReads`
+  ([`v2.ts`](../../../packages/runner/src/storage/v2.ts)) emits **one
+  `nonRecursive` read at that parent** — catching a concurrent whole-doc delete or
+  ancestor reshape as a clean `ConflictError` (see §5.3).
+- **`CellHandle.push` → `CellPush` → `handleCellPush`** is read-modify-write: it
+  is *not* marked blind, so the read of the current value stays a commit
+  precondition (compare-and-set) and a concurrent push aborts rather than being
+  clobbered.
 
 The marker registry lives in
 [`reactivity-log.ts`](../../../packages/runner/src/storage/reactivity-log.ts):
-`markUiInputBlindWriteTx` / `unmarkUiInputBlindWriteTx` / `isUiInputBlindWriteTx`
-(lines 122/125/128) + the `ignoreReadForCommit` metadata marker (line 50). The
-mark walks the tx wrapper chain so both the `ExtendedStorageTransaction` and the
-inner `V2StorageTransaction` are marked.
+`markUiInputBlindWriteTx` / `unmark` / `is` + the `ignoreReadForCommit` marker,
+plus `setBlindStructuralTarget` / `getBlindStructuralTarget` (the parent target
+threaded from `handleCellSet` to `buildReads`). The mark walks the tx wrapper
+chain so both the `ExtendedStorageTransaction` and the inner
+`V2StorageTransaction` are covered.
 
 ### Why it's shaped this way (the load-bearing decisions)
 
-These came out of a 3-agent audit that **blocked** the first (whole-transaction)
-prototype:
-
-- **Scalar-only, not all of `handleCellSet`.** `CellHandle.set` is the *sole*
-  `CellSet` sender, but it is *also* the read-modify-write path —
-  `CellHandle.push`, `cf-autocomplete` multi-select, `ArrayCellController`
-  (add/remove/update). Blind LWW on those reintroduces **lost updates** on
-  concurrent array appends. Scalars are full overwrites (LWW-safe); array/object
-  values may be RMW, so they **keep compare-and-set**. The value type is the
-  reliable partition — a flag at `cell-controller.defaultSetValue` does *not*
-  work, because autocomplete's RMW routes through that same setter.
+- **By method, not value type.** `CellHandle.set` is the sole `CellSet` sender,
+  but read-modify-write ops (`CellHandle.push`, `cf-autocomplete` multi-select,
+  `ArrayCellController`) also route through it. The *earlier* form partitioned by
+  value type (scalar → blind, array/object → CAS) as a proxy for "RMW". Per
+  Robin's review this is now explicit: `push` is its own request type (keeps CAS),
+  and `set` is always blind. Trade-off: an array *overwrite* via `set` is now
+  blind, where the value-type form kept it on CAS — the concurrency-safe path for
+  list mutations is `push` (or the deferred server-side mergeable-op work).
 - **Around `set()` only, not the whole tx.** `prepareTxForCommit → prepareCfc →
   prepareBoundaryCommit` persists CFC label / `cid:` schema docs as
   **read-then-write in the same tx**. Marking the whole tx would strip *those*
@@ -129,27 +141,32 @@ prototype:
 ## 3. Coverage / verification
 
 **Regression test:** `packages/patterns/integration/cellset-lww.test.ts`
-(headless multi-runtime: Deno workers + in-process `StandaloneMemoryServer`,
-~6s, no browser, CI-ready). Three steps:
+(headless multi-runtime: Deno workers + in-process `StandaloneMemoryServer`, no
+browser, CI-ready). Four steps:
 
-1. concurrent same-user scalar sets → **0 conflicts**;
-2. structured (array/object) writes → **still hit compare-and-set** (guards the
-   narrowing — proves blind-write does *not* apply to non-scalars);
-3. e2e — a typed name survives the own-write race **through `saveProfile`**
-   (the actual symptom).
+1. concurrent same-user scalar sets → **0 conflicts** (blind);
+2. a structured (array) set → **also 0 conflicts** (the trigger is the method, not
+   the value type);
+3. concurrent `push`es → **still compare-and-set** (guards the method split);
+4. e2e — a typed name survives the own-write race **through `saveProfile`** (the
+   actual symptom).
 
-All three **fail with the fix disabled and pass with it on** (verified by
-toggling the worker mark — fails-without/passes-with). The harness gained a
-`set` command (`multi-runtime-{worker,harness}.ts`) mirroring `handleCellSet`;
-it was previously missing a UI-input `$value` write path and is reusable infra.
+**Ancestor-reshape guarantee:**
+`packages/memory/test/cellset-structural-precondition.test.ts` (engine-level) pins
+that a precondition-free nested patch on a retyped ancestor throws raw "not
+traversable"; an **entity-root** structural read still throws raw (insufficient);
+the **parent** read converts it to a clean `ConflictError`. (The in-process
+harness can't reproduce this end to end — synchronous propagation, no
+stale-but-navigable replica — hence the engine test.)
 
-**Production-fidelity:** the real two-browser integration
+The harness mirrors `handleCellSet`/`handleCellPush` with `set` (always blind) and
+`push` (CAS) commands (`multi-runtime-{worker,harness}.ts`) — reusable infra.
+
+**Production-fidelity (earlier form):** the real two-browser integration
 (`deno task integration patterns two-browsers`, real chromium) ran **13/13 PASS,
-`commitRejected=0`** every run on the fix branch (contention happened —
-`commitConflicts≈25/run` from handler/machinery writes that recover via retry —
-but the `$value` writes were never rejected).
-
-**Diff size:** ~100 lines of fix, ~165 test, ~55 harness infra (8 files).
+`commitRejected=0`** on the original scalar-blind branch. The method-based redesign
+has not been re-run under two-browser locally; the full pattern-integration suite
+runs it in CI.
 
 ---
 
@@ -164,8 +181,9 @@ The branch is rebased onto main as of late June 2026, which includes:
   **leaf-only conflict matcher**. **Complementary, not redundant:** the leaf-only
   matcher *preserves* same-leaf conflicts (our race is same-leaf), and
   `excludeReadFromConflict` is nonRecursive-only while our write-target read is
-  **recursive (by-value)** — so #4220 never drops it. Our `ignoreReadForCommit`
-  is the *first* filter in that same `buildReads` loop, sitting alongside theirs.
+  **recursive (by-value)** — so #4220 never drops it. Our blind reads are the
+  *first* filter in that same `buildReads` loop; they are dropped and replaced by
+  one structural **parent** read (§5.3), sitting alongside #4220's filters.
 - **#4210** *(reactive computes don't re-queue on commit conflict)* and
   **#4343** *(re-queue reactive computes stranded by a commit conflict — Hixie's
   fix for the #4210 strand)*. Both live in `scheduler/action-run.ts` +
@@ -363,15 +381,15 @@ This supersedes the **recovery**-based approaches (#4196 per-key commit queue,
 # Worktree / branch
 cd labs/.claude/worktrees/cellset-probe            # branch: fix/cellset-blind-leaf-write
 
-# Regression test (fast, headless) — should be 3/3
+# Regression test (fast, headless) — should be 4/4
 deno test -A packages/patterns/integration/cellset-lww.test.ts
 
-# See the flake: disable the fix and re-run → steps 1 & 3 fail with
-# "stale confirmed read … conflicted". In multi-runtime-worker.ts set(),
-# change `const blindLeafWrite = …` to `false && (…)`, run, then revert.
+# Ancestor-reshape guarantee (engine-level structural precondition)
+deno test -A packages/memory/test/cellset-structural-precondition.test.ts
 
-# Production-fidelity (real chromium; loop for a flake-rate)
-deno task integration patterns two-browsers
+# See the flake: disable the blind path and re-run → steps 1/2/4 fail with
+# "stale confirmed read … conflicted". In multi-runtime-worker.ts set(), remove
+# the markUiInputBlindWriteTx / setBlindStructuralTarget calls, run, then revert.
 
 # Conflict/commit regression (coexistence with #4220/#4210/#4343)
 deno test -A \
@@ -390,10 +408,13 @@ the mechanism) is preserved on `origin/scratch/cellset-conflict-probe`.
 
 | File | Role |
 |------|------|
-| `packages/runtime-client/backends/runtime-processor.ts` | `handleCellSet` trigger: scalar check + mark/unmark around `set()` |
-| `packages/runner/src/storage/reactivity-log.ts` | `markUiInputBlindWriteTx` / `unmark` / `is` + `ignoreReadForCommit` marker |
+| `packages/runtime-client/protocol/types.ts` | `CellPush` request type + `Commands` entry |
+| `packages/runtime-client/backends/runtime-processor.ts` | `handleCellSet` (blind) / `handleCellPush` (CAS) → shared `applyCellWrite`; threads the parent via `setBlindStructuralTarget` |
+| `packages/runtime-client/cell-handle.ts` | `push` emits `CellPush` (shared `#applyLocalAndSend`) |
+| `packages/runner/src/storage/reactivity-log.ts` | blind-write marker + `ignoreReadForCommit` + `setBlindStructuralTarget` / `getBlindStructuralTarget` (parent-target registry) |
 | `packages/runner/src/storage/v2-transaction.ts` | `read()` tags reads + skips `doc.validated` when blind |
-| `packages/runner/src/storage/v2.ts` | `buildReads` handling of `ignoreReadForCommit` reads — **now downgrades** each to a `nonRecursive` entity-root existence read (was: dropped). See §5.1 |
-| `packages/runner/src/index.ts` | exports the marker fns |
-| `packages/patterns/integration/cellset-lww.test.ts` | regression test (3 steps) |
-| `packages/patterns/integration/multi-runtime-{worker,harness}.ts` | `set` harness command (UI-input write path) |
+| `packages/runner/src/storage/v2.ts` | `buildReads` drops blind reads, emits one `nonRecursive` read at the threaded **parent** (§5.3) |
+| `packages/runner/src/index.ts` | exports the marker + structural-target fns |
+| `packages/patterns/integration/cellset-lww.test.ts` | regression test (4 steps: scalar/array blind, push CAS, e2e) |
+| `packages/memory/test/cellset-structural-precondition.test.ts` | engine-level ancestor-reshape guarantee (parent vs root) |
+| `packages/patterns/integration/multi-runtime-{worker,harness}.ts` | `set` (blind) + `push` (CAS) harness commands |
