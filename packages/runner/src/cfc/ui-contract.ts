@@ -9,7 +9,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
-import { isNormalizedFullLink, type NormalizedLink } from "../link-types.ts";
+import { isNormalizedFullLink } from "../link-types.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;
@@ -567,12 +567,7 @@ const collectContextLinks = (
   if (depth > 16) {
     return;
   }
-  let parsedLink: NormalizedLink | undefined;
-  try {
-    parsedLink = parseLink(value as unknown);
-  } catch {
-    parsedLink = undefined;
-  }
+  const parsedLink = parseLink(value);
   if (parsedLink !== undefined) {
     if (isNormalizedFullLink(parsedLink)) {
       out.push(parsedLink);

@@ -888,6 +888,168 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
+  it("ignores an event-context link that addresses a different document", () => {
+    const writeDocumentId = "of:cfc-ui-contract-context-mismatch-write";
+    const otherDocumentId = "of:cfc-ui-contract-context-mismatch-other";
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    // The `$ctx` link is a full, absolute link, but it points at a DIFFERENT
+    // document than the write target, so it must not contribute a contract.
+    const eventEnvelope = {
+      value: {
+        $ctx: {
+          savedTitle: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: otherDocumentId,
+                path: ["savedTitle"],
+                space,
+                scope: "space",
+                schema: {
+                  $ref: "#/$defs/TrustedAction",
+                  $defs: {
+                    TrustedAction: trustedPatternUiActionSchema,
+                  },
+                },
+              },
+            },
+          },
+        },
+        $event: rawTrustedEvent,
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        scope: "space",
+        id: writeDocumentId,
+        path: ["savedTitle"],
+      }],
+      rendererEvent(eventEnvelope),
+    );
+
+    expect(
+      writePolicyInputs.some((input) => input.kind === "trusted-event"),
+    ).toBe(false);
+  });
+
+  it("walks past primitive, shared, and over-deep $ctx entries to the contract link", () => {
+    const documentId = "of:cfc-ui-contract-context-walk-document";
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    const contractLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: documentId,
+          path: ["savedTitle"],
+          space,
+          scope: "space",
+          schema: {
+            $ref: "#/$defs/TrustedAction",
+            $defs: {
+              TrustedAction: trustedPatternUiActionSchema,
+            },
+          },
+        },
+      },
+    };
+    // The walk must tolerate: a primitive entry (a non-record leaf), the same
+    // object reached twice (`seen` guards re-descent — a DAG, not a cycle, so
+    // the surrounding data-URI inliner stays finite), and a nest deeper than the
+    // recursion cap. The contract-bearing link alongside them must still be
+    // found.
+    const shared = { note: "reached twice" };
+    let buried: unknown = { savedTitle: contractLink };
+    for (let index = 0; index < 20; index++) {
+      buried = { nested: buried };
+    }
+    const eventEnvelope = {
+      value: {
+        $ctx: {
+          plain: "not a link",
+          first: shared,
+          second: shared,
+          tooDeep: buried,
+          savedTitle: contractLink,
+        },
+        $event: rawTrustedEvent,
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        scope: "space",
+        id: documentId,
+        path: ["savedTitle"],
+      }],
+      rendererEvent(eventEnvelope),
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId ===
+          `trusted-event:click:${documentId}:savedTitle` &&
+        input.target.id === documentId &&
+        input.target.path.join("/") === "savedTitle"
+      ),
+    ).toBe(true);
+  });
+
   it("uses a single leaf $defs uiContract hint for exact write schemas", () => {
     const writePolicyInputs: Array<
       ReturnType<
