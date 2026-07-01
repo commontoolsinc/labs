@@ -1,7 +1,7 @@
 import * as Path from "@std/path";
 import type { MemorySpace } from "../interface.ts";
 
-const encodeStoreSubject = (subject: MemorySpace): string => {
+export const encodeStoreSubject = (subject: MemorySpace): string => {
   const value = String(subject);
   if (
     value.length === 0 ||
@@ -21,6 +21,16 @@ const encodeStoreSubject = (subject: MemorySpace): string => {
   }
 };
 
+/** Whether a store URL is a single-file (`*.sqlite` DB_PATH) store, as opposed
+ *  to the default directory-mode store. The two modes realize per-space
+ *  filenames differently — see resolveSpaceStoreUrl. */
+const isSingleFileStore = (store: URL): boolean => {
+  const storePath = store.protocol === "file:"
+    ? Path.fromFileUrl(store)
+    : store.pathname;
+  return Path.extname(storePath) !== "";
+};
+
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: MemorySpace,
@@ -29,13 +39,63 @@ export const resolveSpaceStoreUrl = (
   const storePath = store.protocol === "file:"
     ? Path.fromFileUrl(store)
     : store.pathname;
-  const isFile = Path.extname(storePath) !== "";
 
-  if (!isFile) {
+  // NOTE: the two modes intentionally differ in how the filename is realized on
+  // disk and this MUST NOT change — existing stores depend on it:
+  //   * directory mode resolves the (percent-encoded) filename as a URL segment,
+  //     so the encoding decodes away → `…/engine-v3/did:key:….sqlite` (the stem
+  //     is the LITERAL space id).
+  //   * single-file mode joins it as a literal path component, so the
+  //     percent-encoding is preserved → `<stem>.engine-v3/did%3Akey%3A….sqlite`.
+  // Changing either silently forks data into new per-space files on upgrade.
+  // `spaceFromStoreFilename` below is the mode-aware inverse.
+  if (!isSingleFileStore(store)) {
     return new URL(`./engine-v3/${filename}`, store);
   }
 
   const ext = Path.extname(storePath);
   const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
   return Path.toFileUrl(Path.join(`${stem}.engine-v3`, filename));
+};
+
+/**
+ * The directory that holds per-space sqlite files for a given store. Directory
+ * mode nests under `engine-v3/`; single-file mode (a `*.sqlite` DB_PATH) nests
+ * under a sibling `<stem>.engine-v3/`. The directory itself is unambiguous in
+ * both modes; per-file name encoding differs (see resolveSpaceStoreUrl), so
+ * map filenames back to space ids with `spaceFromStoreFilename` — NOT a blanket
+ * `decodeURIComponent`, which corrupts directory-mode ids containing literal
+ * percent-sequences (e.g. a `did:web:…%3A8080`).
+ */
+export const resolveSpaceStoreDirUrl = (store: URL): URL => {
+  const storePath = store.protocol === "file:"
+    ? Path.fromFileUrl(store)
+    : store.pathname;
+
+  if (!isSingleFileStore(store)) {
+    return new URL("./engine-v3/", store);
+  }
+
+  const ext = Path.extname(storePath);
+  const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
+  return Path.toFileUrl(`${stem}.engine-v3/`);
+};
+
+/**
+ * Mode-aware inverse of the filename encoding in `resolveSpaceStoreUrl`: map an
+ * on-disk `.sqlite` filename stem (from the store's space dir) back to the
+ * space id. Directory-mode stems are the LITERAL id (the URL resolution already
+ * decoded them); single-file-mode stems are still percent-encoded. Returns null
+ * for a stem that cannot be a store filename we wrote (bad encoding).
+ */
+export const spaceFromStoreFilename = (
+  store: URL,
+  stem: string,
+): string | null => {
+  if (!isSingleFileStore(store)) return stem;
+  try {
+    return decodeURIComponent(stem);
+  } catch {
+    return null;
+  }
 };

@@ -39,9 +39,10 @@ of it all (`entities`/`piece`/`graph`).
   not what any client is showing.
 - _A live or production bug from a local snapshot_ — a clean local store does
   not explain a prod-only misbehaviour; at most it says the local data is
-  healthy, so the cause is concurrency / scale / timing or client-side. To
-  inspect prod you need that space's actual `.sqlite` (no remote mode — copy the
-  file off the box).
+  healthy, so the cause is concurrency / scale / timing or client-side. Staging
+  spaces can be fetched with `--remote` (see below); the dump endpoint is
+  deliberately hard-off in production, so a prod space still means copying the
+  `.sqlite` off the box (ssh+scp).
 - _How long anything took_ — it has logical order (`seq`) plus
   second-granularity commit times ("what happened and when"), never latencies or
   durations.
@@ -144,6 +145,12 @@ fixed recipe. The recurring debugging questions and where they resolve:
   file.html` (self-contained: tree + graph + detail pane
   with value, schema, CFC labels, lineage, links, source; `--app-url` adds live
   deep-links).
+- _"The space I need is on staging/a server, not local."_ → add `--remote [url]`
+  (defaults to `CF_API_URL`) to ANY command: it downloads a read-only snapshot
+  into `~/.cache/cf-inspect/<host>/` and inspects it offline. `spaces --remote`
+  lists what's dumpable; `pull --all --remote` caches everything so subsequent
+  commands run offline. Signs with `CF_IDENTITY`/`--identity`; the server gates
+  on a DID allowlist.
 
 ## Gotchas that will mislead you if unflagged
 

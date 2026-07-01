@@ -9,6 +9,7 @@
 import { Identity } from "@commonfabric/identity";
 
 import { openSpace } from "./db.ts";
+import { rootCacheDir } from "./remote.ts";
 
 // A named space's DID is reproducibly derived by the runtime from its name:
 // `Identity.fromPassphrase("common user").derive(<name>)` (see
@@ -69,6 +70,8 @@ export function candidateRoots(cwd: string = Deno.cwd()): string[] {
       dbPath.endsWith(".sqlite") ? (dirname(dbPath) || ".") : dbPath,
     );
   }
+  // Spaces pulled from a remote (`cf inspect --remote` / `pull`) land here.
+  roots.push(rootCacheDir());
   // Walk up from cwd; check both cache layouts at each level.
   let dir = cwd;
   for (let i = 0; i < 8; i++) {

@@ -36,6 +36,7 @@
     "./v2/standalone": "./v2/standalone.ts",
     "./v2/session-open-auth": "./v2/session-open-auth.ts",
     "./v2/storage-path": "./v2/storage-path.ts",
+    "./v2/dump": "./v2/dump.ts",
     "./sqlite": "./v2/sqlite/mod.ts",
     "./sqlite/columns": "./v2/sqlite/columns.ts",
     "./sqlite/guard": "./v2/sqlite/guard.ts",
