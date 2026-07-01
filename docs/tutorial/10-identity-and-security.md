@@ -63,13 +63,22 @@ current (v2) protocol, authorization happens at **session open**
 (`packages/runner/src/storage/v2-remote-session.ts`,
 `packages/toolshed/routes/storage/memory.ts`):
 
-1. The client builds an invocation
-   `{ iss: <user did>, cmd: "session.open", sub: <space did>, args: {protocol, session} }`
-   and signs its hash with the user's key.
-2. The server verifies the signature against the issuer DID and that the
-   signed invocation matches *this exact* session-open request (no replay
-   onto other sessions).
-3. The issuer becomes the session's pinned **principal**: reopening the
+1. The client receives `sessionOpen.audience` and a one-time
+   `sessionOpen.challenge` from the server's `hello.ok`.
+2. The client builds a `session.open` invocation and signs its hash with the
+   user's key. The signed invocation includes:
+   - `iss`: the user DID
+   - `cmd`: `"session.open"`
+   - `sub`: the space DID
+   - `aud`: the server DID from `sessionOpen.audience`
+   - `challenge`: the challenge value from `sessionOpen.challenge`
+   - `iat` and `exp`: the signed time window
+   - `args.protocol` and `args.session`: the protocol and session descriptor
+3. The server verifies the signature against the issuer DID. It also verifies
+   that the signed invocation matches this session-open request, the advertised
+   audience, the current connection challenge, and the allowed time window.
+   That prevents replay onto another server or onto a later connection.
+4. The issuer becomes the session's pinned **principal**: reopening the
    session as someone else fails, a stolen stale token is revoked, and —
    importantly — the principal is what keys the `user:`/`session:` scope
    partitions from Chapter 9. `PerUser` isolation is cryptographic
