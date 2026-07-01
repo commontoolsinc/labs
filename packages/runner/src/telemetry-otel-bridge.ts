@@ -180,14 +180,6 @@ export function createRuntimeTelemetryOtelBridge(
     return out;
   };
 
-  // Cell paths are "space/id/path..." — expose the space dimension per-event so
-  // a runtime that spans multiple spaces is still attributable.
-  const spaceFromPath = (path?: string): Attributes => {
-    if (!path) return {};
-    const slash = path.indexOf("/");
-    return slash > 0 ? { "space.did": path.slice(0, slash) } : {};
-  };
-
   const startStorageOp = (
     id: string,
     kind: "push" | "pull",

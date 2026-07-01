@@ -1571,15 +1571,15 @@ export class Server {
     }
   }
 
-  async transact(
+  transact(
     message: TransactRequest,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return respondTypedError<Engine.AppliedCommit>(
+      return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
-      );
+      ));
     }
 
     return tracer.startActiveSpan(
@@ -2206,7 +2206,7 @@ export class Server {
     };
   }
 
-  async syncSessionForConnection(
+  syncSessionForConnection(
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
@@ -2214,7 +2214,7 @@ export class Server {
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
-      return null;
+      return Promise.resolve(null);
     }
     return tracer.startActiveSpan(
       "memory.subscriber.sync",
