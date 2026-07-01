@@ -2,7 +2,7 @@
 
 *A minted, bearer-authed inbound endpoint whose payload can be durably accumulated as a provenance-marked, append-only record log — the generic capability behind webhooks, the location beacon, and any DID-less external source.*
 
-**Status:** proposed · design-only · **gated on the cross-space-commit authorization check (see [The cross-space commit gate](#the-cross-space-commit-gate-blocker-a))** · **Updated:** 2026-07-01
+**Status:** proposed · design-only · **cross-space gate resolved: buildable under `MEMORY_ACL_MODE=off`/`observe` (today's default); operator-DID-in-`MEMORY_SERVICE_DIDS` (or a per-space grant) is a tracked prerequisite before any enforce flip** · **Updated:** 2026-07-01
 
 Builds directly on the landed vouched-ingest primitive (labs #4392): the runtime-minted `ExternalIngest` mark + `custodyIngest`. See `vouched-ingest-channel-mint-design.md` for the split-mint seam this stands on.
 
@@ -96,15 +96,17 @@ Provenance at rest is the runtime-minted `ExternalIngest` mark — stronger and 
 - **Open gap — confused-deputy on create.** Channel creation is currently unauthed and `createdBy` is self-asserted (inherited from webhooks). Harmless-ish for a `stream` webhook; **not** acceptable for a `journal` sink, which writes *provenance-marked* data into a caller-named user space — anyone reaching create could register a channel targeting *another* user's space and get legitimately-minted marks written there. **v1 must gate `journal`-sink creation on a real authenticated caller principal.**
 - **Honest limit.** The toolshed runtime is `as: identity` and sees plaintext; the split-mint protects the *mark*, not the *bytes*. Estuary now holds and appends over plaintext record data as an operator-trusted process; a signer-key compromise is a cross-user breach + the ability to write marked fabricated records. Document in the custody/data-flow docs; treat the signer key as high-value.
 
-## The cross-space commit gate (blocker A)
+## The cross-space commit gate (blocker A) — resolved: buildable now, latent dependency later
 
-"No laptop in the write path" requires the toolshed operator identity to `merkle-causal-commit` into the **user's** space (a different DID than the operator's own). This is the load-bearing gate for the whole architecture, and it is **being verified** (an investigation is in flight):
+"No laptop in the write path" requires the toolshed operator identity to `merkle-causal-commit` into the **user's** space. An investigation settled this (high confidence, from code + config):
 
-- The toolshed runs CFC `cfcEnforcementMode: "enforce-explicit"` (`runtime.ts:495` default; toolshed passes no override). CFC enforcement is about integrity/confidentiality **labels**, not space ownership — marks mint fine — but it *can* abort a tx.
-- The distinct, decisive gate is the **memory-layer** write authorization (likely a `MEMORY_ACL_MODE` disabled/observe/enforce): does the memory service authorize a non-owner signer to commit into a space?
-- Current expectation (to be confirmed): permissive today — Berni's "webhooks run under a system DID today" implies the system identity is broadly authorized, which is exactly what the deferred grant work was meant to tighten. If a deployment enforces the memory ACL without a grant, the hosted-write path needs that deferred grant/delegation work and no `journal` channel into a user space ships.
+**Buildable today.** Memory-layer write authorization is governed by `MEMORY_ACL_MODE`, which **defaults to `off`** (`env.ts:226`); in `off` mode `#authorizeMessage` allows immediately with no space-ownership check (`server.ts:873`), and `#aclMode()` defaults to `off` (`server.ts:814`). loom's store has **never run enforce** (`share-safety-model.md:164`), and neither `MEMORY_ACL_MODE` nor `MEMORY_SERVICE_DIDS` is set in any deployment visible in the repos. So today any authenticated principal — including the operator — may commit into any space, over the *same* `editWithRetry → transact` path webhooks already use (`sendToStream`, `webhooks.utils.ts:230-240`) and that `custodyIngest` rides (`custody-ingest.ts:79,83`). Note this is the **memory ACL**, distinct from CFC `enforce-explicit` (`runtime.ts:495`), which enforces integrity/confidentiality *labels*, not space ownership — the mark mints fine regardless.
 
-Every `custody-ingest` test writes into `signer.did()` (its own space); there is **zero** cross-space test coverage. The cheapest definitive confirmation is an operator probe against the real Estuary deployment: operator signer `custodyIngest.update` into a different user's space under the deployment's real ACL mode, read back from a third host.
+**Latent dependency on the deferred grant work.** This is the *absence of enforcement*, not an intrinsic property. The moment Estuary sets `MEMORY_ACL_MODE=enforce`, the journal sink is **rejected** unless the operator DID is in `MEMORY_SERVICE_DIDS` (implicit cross-space OWNER, `server.ts:817-835`) or the user's space carries an explicit ACL grant — and `#ensureCreatorSeeded` deliberately does *not* seed the operator (`server.ts:946-948`). This is exactly Berni's "webhooks run under a system DID today, we'll fix that later." **Tracked hard prerequisite for the enforce rollout: the operator DID must be in `MEMORY_SERVICE_DIDS` (or a grant must exist) before the flip** — `observe` mode still *allows* while logging `wouldDeny`, so the flip is the precise moment an un-prepared sink would start failing.
+
+**Two caveats.** (1) The webhook precedent is weaker than it looks: loom currently derives all identities from a shared "common user" passphrase (`link-foreign-cells.ts:107`), so "cross-space" there is degenerate — the off-mode path is proven, but authorization across *genuinely distinct* principals is not. (2) There is **zero** cross-space test coverage (`custody-ingest.test.ts:36` writes to `signer.did()` only, via `StorageManager.emulate` with no ACL layer) — a regression would pass CI silently, so the journal sink's tests must exercise a foreign-space write.
+
+**Cheapest confirmation** (one operator, <1 min, no code): read `MEMORY_ACL_MODE` and `MEMORY_SERVICE_DIDS` from the running Estuary env (GitHub `estuary` environment, `labs-estuary-deploy.md:14-19`). off/observe → authorized today, done. enforce → confirm the operator DID is listed in `MEMORY_SERVICE_DIDS`.
 
 ## Cross-repo contract (loom read side)
 
