@@ -1531,6 +1531,16 @@ describe("RuntimeProcessor CFC commit preparation", () => {
     });
   });
 
+  it("prepares cell push transactions before committing (non-blind path)", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellPush.call(processor, {
+      type: RequestType.CellPush,
+      cell: ref,
+      value: "new value",
+    });
+  });
+
   it("prepares cell send transactions before committing", async () => {
     const { processor } = createProcessor();
 
