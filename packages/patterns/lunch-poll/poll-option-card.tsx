@@ -15,6 +15,7 @@ import type {
   Vote,
   VoteColor,
 } from "./main.tsx";
+import GeneratedArt from "./generated-art.tsx";
 
 /** Shared per-session target cell used for one open option editor at a time. */
 export type PollOptionLinkTargetCell = Writable<string | null>;
@@ -129,6 +130,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             gap: "10px",
           }}
         >
+          {
+            /* Restored #4325 generated-art sub-pattern: each option card
+              instantiates GeneratedArt, which builds an art-director prompt from
+              the title and fetches a hand-drawn cuisine thumbnail from the image
+              endpoint (falling back to a placeholder while pending/on error). */
+          }
+          <GeneratedArt prompt={optionTitle} />
           <span
             style={{
               minWidth: "28px",
