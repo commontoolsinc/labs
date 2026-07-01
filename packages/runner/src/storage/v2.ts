@@ -36,7 +36,11 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
+import { parentPath } from "../../../memory/v2/path.ts";
+import {
+  patchOpIsStructural,
+  touchedPointerPaths,
+} from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -357,28 +361,15 @@ const changedPathsForPendingPatch = (
   patches: readonly PatchOp[],
 ): string[][] =>
   patches.flatMap((patch) => {
-    switch (patch.op) {
-      case "replace":
-      case "splice":
-      case "append":
-      case "add-unique":
-      case "remove-by-value":
-      case "increment":
-        return [parsePointer(patch.path)];
-      case "add":
-      case "remove": {
-        const path = parsePointer(patch.path);
-        return [replayPathForPendingPatchTarget(base, pendingValue, path)];
-      }
-      case "move": {
-        const from = parsePointer(patch.from);
-        const to = parsePointer(patch.path);
-        return [
-          replayPathForPendingPatchTarget(base, pendingValue, from),
-          replayPathForPendingPatchTarget(base, pendingValue, to),
-        ];
-      }
-    }
+    const leaves = touchedPointerPaths(patch);
+    // Structural ops (add/remove/move) may target a slot whose position shifts
+    // as the pending value is rebuilt from `base`, so resolve each against live
+    // state; value-only ops keep their exact leaf path.
+    return patchOpIsStructural(patch)
+      ? leaves.map((path) =>
+        replayPathForPendingPatchTarget(base, pendingValue, path)
+      )
+      : leaves;
   });
 
 // Finds the first existing prefix in `base` that blocks a pending nested write.

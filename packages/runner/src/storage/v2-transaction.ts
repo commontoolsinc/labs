@@ -14,6 +14,10 @@ import {
   parsePointer,
   pathsOverlap,
 } from "../../../memory/v2/path.ts";
+import {
+  patchOpIsStructural,
+  patchOpPointerFields,
+} from "../../../memory/v2/patch.ts";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -79,6 +83,14 @@ import {
   isUiInputBlindWriteTx,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
+import {
+  buildMergeableIntent,
+  foldMergeableIntent,
+  isNoopMergeableDelta,
+  type MergeableOpDelta,
+  type MergeableOpIntent,
+  type OpSuppression,
+} from "./mergeable-ops.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -97,26 +109,6 @@ type ReadDocumentEntry = {
   patchDetails?: Map<string, TransactionWriteDetail>;
 };
 
-// A mergeable-write intent recorded against a document path. `append` and
-// `add-unique` carry the count of elements the caller added at the tail (their
-// values are read back from the working array at commit); `increment` carries
-// the summed delta.
-type MergeableOpIntent =
-  | { op: "append" | "add-unique"; path: readonly string[]; count: number }
-  | { op: "increment"; path: readonly string[]; by: number }
-  | { op: "remove-by-value"; path: readonly string[]; values: FabricValue[] };
-
-// A document path covered by a mergeable op, used to suppress the diff
-// candidates the op replaces. `tailStart` (present for the array ops) is the
-// first covered index; `subtree` (a remove-by-value) suppresses the array path
-// and everything under it; without either only the exact path is suppressed (the
-// scalar an `increment` replaces).
-type OpSuppression = {
-  path: readonly string[];
-  tailStart?: number;
-  subtree?: boolean;
-};
-
 type WritableDocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
@@ -125,11 +117,11 @@ type WritableDocumentEntry = {
   frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
   patchDetails: Map<string, TransactionWriteDetail>;
-  // Mergeable-write intents recorded by recordArrayAppend / recordAddUnique /
-  // recordIncrement, keyed by document path. The commit emits these as the
-  // corresponding mergeable op (which the server resolves against durable state)
-  // instead of a value diffed against a possibly-stale base, and drops the op's
-  // path from the commit's conflict read set.
+  // Mergeable-write intents recorded by recordMergeableOp, keyed by document
+  // path. The commit emits these as the corresponding mergeable op (which the
+  // server resolves against durable state) instead of a value diffed against a
+  // possibly-stale base, and drops the op's path from the commit's conflict read
+  // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
 };
 
@@ -655,15 +647,20 @@ const terminalSegmentIsArrayIndex = (pointer: string): boolean => {
 // §"Array writes and the leaf-only matcher"). The commit-conflict matcher and
 // the scheduler reader-dirty index are both LEAF-ONLY, which is sound only if
 // array element insert/remove/reorder reaches the engine as a `splice` on the
-// array path or a whole-array `replace` — never as an `add`/`remove`/`move` at an
-// array INDEX. Such an op SHIFTS sibling elements, but its leaf path captures
-// only the touched index, so a leaf-only matcher would neither conflict (commit)
-// nor re-trigger (reader-dirty) a reader of a shifted sibling — a silent stale
-// read. `buildArrayPatchCandidates` only ever emits per-index `replace`,
-// array-path `splice`, or whole-array `replace`, so this assertion can never fire
-// for real input; it converts a future regression in the array diff path into a
-// loud failure instead of silent data loss. (A numeric *object* key is flagged
-// too — the generator never emits a structural op on one either.)
+// array path or a whole-array `replace` — never as a STRUCTURAL op (add / remove
+// / move, per the wire-op registry) at an array INDEX. Such an op SHIFTS sibling
+// elements, but its leaf path captures only the touched index, so a leaf-only
+// matcher would neither conflict (commit) nor re-trigger (reader-dirty) a reader
+// of a shifted sibling — a silent stale read. `buildArrayPatchCandidates` only
+// ever emits per-index `replace`, array-path `splice`, or whole-array `replace`,
+// so this assertion can never fire for real input; it converts a future
+// regression in the array diff path into a loud failure instead of silent data
+// loss. (A numeric *object* key is flagged too — the generator never emits a
+// structural op on one either.)
+//
+// The op set and pointer fields checked come from the registry
+// (`patchOpIsStructural` / `patchOpPointerFields`), so a new structural op is
+// covered here automatically rather than escaping a hardcoded list.
 //
 // Exported for direct unit testing: the throw and `move` paths are unreachable
 // through the generator (which is the invariant), so they can only be exercised
@@ -672,27 +669,23 @@ export const assertNoIndexedArrayStructuralOps = (
   patches: readonly PatchOp[],
 ): void => {
   for (const patch of patches) {
-    let offending: string | null = null;
-    if (patch.op === "add" || patch.op === "remove") {
-      if (terminalSegmentIsArrayIndex(patch.path)) offending = patch.path;
-    } else if (patch.op === "move") {
-      if (
-        terminalSegmentIsArrayIndex(patch.path) ||
-        terminalSegmentIsArrayIndex(patch.from)
-      ) {
-        offending = `${patch.from} -> ${patch.path}`;
-      }
+    if (!patchOpIsStructural(patch)) {
+      continue;
     }
-    if (offending !== null) {
-      throw new Error(
-        `v2 patch generator invariant violation: emitted an indexed-array ` +
-          `${patch.op} (${offending}). Array element insert/remove/reorder must ` +
-          `be a splice on the array path or a whole-array replace; an indexed ` +
-          `add/remove/move shifts siblings that the leaf-only conflict and ` +
-          `reader-dirty matchers cannot track (see ` +
-          `docs/specs/memory-v2/08-conflict-granularity.md).`,
-      );
+    const pointers = patchOpPointerFields(patch).map((field) =>
+      (patch as unknown as Record<string, string>)[field]
+    );
+    if (!pointers.some(terminalSegmentIsArrayIndex)) {
+      continue;
     }
+    throw new Error(
+      `v2 patch generator invariant violation: emitted an indexed-array ` +
+        `${patch.op} (${pointers.join(" -> ")}). Array element ` +
+        `insert/remove/reorder must be a splice on the array path or a ` +
+        `whole-array replace; an indexed add/remove/move shifts siblings that ` +
+        `the leaf-only conflict and reader-dirty matchers cannot track (see ` +
+        `docs/specs/memory-v2/08-conflict-granularity.md).`,
+    );
   }
 };
 
@@ -1018,78 +1011,25 @@ export class V2StorageTransaction implements IStorageTransaction {
     });
   }
 
-  recordArrayAppend(address: IMemorySpaceAddress, count: number): void {
-    this.recordTailOp("append", address, count);
-  }
-
-  recordAddUnique(address: IMemorySpaceAddress, count: number): void {
-    this.recordTailOp("add-unique", address, count);
-  }
-
-  private recordTailOp(
-    op: "append" | "add-unique",
-    address: IMemorySpaceAddress,
-    count: number,
-  ): void {
-    this.assertWritable("recordArrayAppend()");
+  // Records one mergeable-op delta at a path. Which ops exist, whether a delta
+  // records nothing, how repeated deltas fold into one intent, and how an intent
+  // becomes wire ops are all defined once in ./mergeable-ops.ts — this method
+  // just accumulates, deferring the per-op questions to that registry.
+  recordMergeableOp(address: IMemorySpaceAddress, delta: MergeableOpDelta): void {
+    this.assertWritable("recordMergeableOp()");
     const ready = this.editable();
     if (ready.error) throw ready.error;
-    if (count <= 0) {
+    if (isNoopMergeableDelta(delta)) {
       return;
     }
     const doc = this.writableMergeableTarget(address);
-    if (!doc) throw new Error("append target is not writable");
+    if (!doc) throw new Error(`${delta.op} target is not writable`);
     doc.mergeableOps ??= new Map();
     const pathKey = encodePointer(address.path);
-    const existing = doc.mergeableOps.get(pathKey);
-    if (existing && existing.op === op) {
-      existing.count += count;
-    } else {
-      doc.mergeableOps.set(pathKey, { op, path: address.path, count });
-    }
-  }
-
-  recordIncrement(address: IMemorySpaceAddress, by: number): void {
-    this.assertWritable("recordIncrement()");
-    const ready = this.editable();
-    if (ready.error) throw ready.error;
-    // Accumulate even a zero `by`: two non-zero increments can sum to zero
-    // (a +1 then a -1), which is a no-op the op builder drops rather than an
-    // error. A single zero call is rejected upstream at `Cell.increment`.
-    const doc = this.writableMergeableTarget(address);
-    if (!doc) throw new Error("increment target is not writable");
-    doc.mergeableOps ??= new Map();
-    const pathKey = encodePointer(address.path);
-    const existing = doc.mergeableOps.get(pathKey);
-    if (existing && existing.op === "increment") {
-      existing.by += by;
-    } else {
-      doc.mergeableOps.set(pathKey, {
-        op: "increment",
-        path: address.path,
-        by,
-      });
-    }
-  }
-
-  recordRemoveByValue(address: IMemorySpaceAddress, value: FabricValue): void {
-    this.assertWritable("recordRemoveByValue()");
-    const ready = this.editable();
-    if (ready.error) throw ready.error;
-    const doc = this.writableMergeableTarget(address);
-    if (!doc) throw new Error("remove-by-value target is not writable");
-    doc.mergeableOps ??= new Map();
-    const pathKey = encodePointer(address.path);
-    const existing = doc.mergeableOps.get(pathKey);
-    if (existing && existing.op === "remove-by-value") {
-      existing.values.push(value);
-    } else {
-      doc.mergeableOps.set(pathKey, {
-        op: "remove-by-value",
-        path: address.path,
-        values: [value],
-      });
-    }
+    doc.mergeableOps.set(
+      pathKey,
+      foldMergeableIntent(doc.mergeableOps.get(pathKey), address.path, delta),
+    );
   }
 
   // The caller wrote through this same transaction, so the entry is writable.
@@ -2501,8 +2441,8 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   // Builds the mergeable ops for a document's recorded intents, plus the paths
   // each covers so the diff candidates the op replaces can be suppressed. The
-  // array ops also report the first covered index, so an edit to an existing
-  // element survives alongside a push/add-unique.
+  // per-op payload/suppression rules live in ./mergeable-ops.ts; here we only
+  // supply each intent the working/initial array state its builder needs.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -2512,58 +2452,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ops, suppress };
     }
     for (const intent of doc.mergeableOps.values()) {
-      if (intent.op === "increment") {
-        // Increments that summed to zero (a +1 and a -1) are a no-op; the
-        // working value already reflects no change, so emit nothing.
-        if (intent.by === 0) {
-          continue;
-        }
-        ops.push({
-          op: "increment",
-          path: encodePointer(intent.path),
-          by: intent.by,
-        });
-        suppress.push({ path: intent.path });
-        continue;
-      }
-      if (intent.op === "remove-by-value") {
-        for (const value of intent.values) {
-          ops.push({
-            op: "remove-by-value",
-            path: encodePointer(intent.path),
-            value,
-          });
-        }
-        // The op rebuilds the array's membership by key; suppress the whole
-        // subtree the local removal produced (a positional splice/shrink).
-        suppress.push({ path: intent.path, subtree: true });
-        continue;
-      }
-      const array = readValueAtPath(doc.current.value, intent.path, {
+      const working = readValueAtPath(doc.current.value, intent.path, {
         allowArrayLength: true,
       });
-      if (!Array.isArray(array)) {
-        continue;
-      }
-      // With a base to diff against, only the recorded tail count is the op's
-      // payload. With no base (the array is absent from the transaction's
-      // initial snapshot — a fresh or not-yet-loaded entity), the whole working
-      // array is the payload, so a stale-empty base does not drop locally
-      // created prefix elements (e.g. schema defaults).
-      const initialArray = doc.initial.value === undefined ? undefined : (
+      const initial = doc.initial.value === undefined ? undefined : (
         readValueAtPath(doc.initial.value, intent.path, {
           allowArrayLength: true,
         })
       );
-      const start = Array.isArray(initialArray)
-        ? Math.max(0, array.length - intent.count)
-        : 0;
-      const values = array.slice(start) as FabricValue[];
-      if (values.length === 0) {
-        continue;
-      }
-      ops.push({ op: intent.op, path: encodePointer(intent.path), values });
-      suppress.push({ path: intent.path, tailStart: start });
+      const built = buildMergeableIntent(intent, {
+        workingArray: Array.isArray(working)
+          ? working as FabricValue[]
+          : undefined,
+        hadInitialArray: Array.isArray(initial),
+      });
+      ops.push(...built.ops);
+      suppress.push(...built.suppress);
     }
     return { ops, suppress };
   }

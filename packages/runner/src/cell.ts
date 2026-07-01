@@ -1466,7 +1466,10 @@ export class CellImpl<T extends FabricValue>
 
     // Record the append intent so the commit emits a tail-relative, mergeable
     // operation instead of a position diffed against a possibly-stale base.
-    this.tx.recordArrayAppend?.(resolvedLink, value.length);
+    this.tx.recordMergeableOp?.(resolvedLink, {
+      op: "append",
+      count: value.length,
+    });
   }
 
   addUnique(
@@ -1547,7 +1550,10 @@ export class CellImpl<T extends FabricValue>
       [...existing, ...toAdd],
       cause,
     );
-    this.tx.recordAddUnique?.(resolvedLink, toAdd.length);
+    this.tx.recordMergeableOp?.(resolvedLink, {
+      op: "add-unique",
+      count: toAdd.length,
+    });
   }
 
   increment(by: number = 1): void {
@@ -1587,7 +1593,7 @@ export class CellImpl<T extends FabricValue>
     // Record the increment intent so the commit emits a mergeable increment the
     // server resolves against durable state instead of a value diffed against a
     // possibly-stale read.
-    this.tx.recordIncrement?.(resolvedLink, by);
+    this.tx.recordMergeableOp?.(resolvedLink, { op: "increment", by });
   }
 
   // Remove every element of this array equal to `ref` by stored value. A cell
@@ -1653,7 +1659,10 @@ export class CellImpl<T extends FabricValue>
       this._frame?.cause,
     );
     for (const element of removed) {
-      this.tx.recordRemoveByValue?.(resolvedLink, element as FabricValue);
+      this.tx.recordMergeableOp?.(resolvedLink, {
+        op: "remove-by-value",
+        value: element as FabricValue,
+      });
     }
   }
 
