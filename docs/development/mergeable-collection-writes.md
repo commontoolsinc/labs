@@ -297,6 +297,52 @@ mergeable methods to stop false-conflicting and clobbering under contention; the
 favorites, spaces, MRU, and pin lists on the owner-protected home space are the
 highest-value remaining candidates.
 
+### Home-space migration outcome
+
+The favorites and spaces lists on the home space are migrated, both to the
+keyed `elementById` form. A favorite is addressed by its piece's identity, and a
+space by its name; adding sets the keyed entity and `addUnique`s it, and removing
+is `removeByValue` of the same entity. The whole-value `addUnique(value)` and
+`removeByValue(value)` do not apply to either list, because a list element that
+is an object is stored as a link to a separate entity: two objects that are equal
+by content are still distinct entities, so a value comparison never matches, an
+`addUnique` of an equal object never dedups, and a `removeByValue` of an equal
+object never removes. Addressing the element by a deterministic key and matching
+by that link is the form that works — the same form the lunch poll uses for its
+votes and options.
+
+Pattern code cannot read a cell's link, so a favorite's key is derived by the
+client that adds or removes it (the client holds the piece's address as strings)
+and passed in as event data. The handler stores that key on the entry, so the
+in-app remove button can address the same entity without introspecting the piece
+cell. A space's key is the space name, which the handler already has from the
+event.
+
+The MRU lists — the profile most-recently-used list and the recent-pieces list —
+stay a read-modify-write `set`. Their write is not a set-membership change: it
+moves an entry to the front of the list and caps the length, so its correctness
+depends on reading the current order and count. That is a condition other than
+uniqueness, which the mergeable ops do not preserve: `addUnique` appends at the
+tail and never reorders, and there is no mergeable "keep only the first N". A
+concurrent pair of most-recently-used stamps conflicts and one retries, which
+only reorders a recency heuristic, so the read-modify-write is acceptable here.
+
+The profile pinned-elements list is owner-protected by a `writeAuthorizedBy`
+claim on its container. A mergeable op is authorized by that claim the same way a
+whole-value `set` is: the authorization runs over the transaction's write log and
+the schema write-policy inputs, and the mergeable ops record those inputs exactly
+as `set` does, so migrating the list would not weaken the owner-write protection.
+A test in `packages/runner/test/profile-owner-cfc.test.ts` confirms this — an
+authorized writer's `addUnique` and `removeByValue` on an owner-protected list
+commit, and an unauthorized writer's are rejected. The list is left unmigrated
+for two other reasons. A pin is addressed by its element cell's identity rather
+than a scalar key, so a keyed migration needs an addressing scheme the entries do
+not yet carry — unlike a space, which is keyed by its name, or a favorite, which
+is keyed by its piece's identity. And a keyed removal takes on the
+add-wins-after-delete ordering, so a pin removed while a stale add is in flight
+would reappear, which is a semantic change worth weighing for an owner-protected
+list.
+
 ## Residual: profile-append-during-rehydration is not fully closed by this change
 
 This work was motivated by profile creates being lost when issued while the home

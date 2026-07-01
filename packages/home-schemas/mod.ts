@@ -18,6 +18,7 @@ import { Schema } from "@commonfabric/api/schema";
 export {
   type FavoriteEntry,
   favoriteEntrySchema,
+  favoriteKey,
   type FavoriteList,
   favoriteListSchema,
 } from "./favorites.ts";

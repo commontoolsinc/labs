@@ -1,6 +1,5 @@
 import {
   computed,
-  equals,
   handler,
   NAME,
   pattern,
@@ -27,6 +26,8 @@ type Favorite = {
   tags: string[];
   userTags: string[];
   spaceName?: string;
+  // Stable key the favorite entity is addressed by (the piece's identity).
+  id?: string;
 };
 
 type JournalEntry = {
@@ -60,31 +61,48 @@ export type HomeOutput = {
 
 // Handler to add a favorite
 const addFavorite = handler<
-  { piece: Writable<{ [NAME]?: string }>; tags?: string[]; spaceName?: string },
+  {
+    piece: Writable<{ [NAME]?: string }>;
+    tags?: string[];
+    spaceName?: string;
+    id?: string;
+  },
   { favorites: Writable<Favorite[]> }
->(({ piece, tags, spaceName }, { favorites }) => {
-  const current = favorites.get();
-  if (!current.some((f) => f && equals(f.cell, piece))) {
-    // Discovery tags are derived by the client (which can see the piece's
-    // schema) and passed in; the handler just stores them.
-    favorites.push({
+>(({ piece, tags, spaceName, id }, { favorites }) => {
+  // The favorite is addressed by the piece's identity (the client-supplied id),
+  // so favoriting the same piece from two sessions resolves to one membership
+  // entry and favorites of distinct pieces merge, without reading the whole
+  // list.
+  if (!id) return;
+  const entry = favorites.elementById(id);
+  // Only seed the entity on a fresh favorite; a re-favorite keeps the existing
+  // userTags. Discovery tags are derived by the client (which can see the
+  // piece's schema) and passed in; the handler just stores them.
+  if (!entry.get()) {
+    entry.set({
       cell: piece,
       tags: tags ?? [],
       userTags: [],
       spaceName,
+      id,
     });
   }
+  favorites.addUnique(entry);
 });
 
 // Handler to remove a favorite
 const removeFavorite = handler<
-  { piece: Writable<unknown> },
+  { piece?: Writable<unknown>; id?: string },
   { favorites: Writable<Favorite[]> }
->(({ piece }, { favorites }) => {
-  const favorite = favorites.get().find((f) => f && equals(f.cell, piece));
-  if (favorite) {
-    favorites.remove(favorite);
-  }
+>(({ id }, { favorites }) => {
+  // Drop the membership entry addressed by the piece's identity; concurrent
+  // unfavorites of distinct pieces merge. Clear the entity too, since it
+  // outlives its link — a later re-favorite reads it back to decide whether to
+  // seed fresh.
+  if (!id) return;
+  favorites.removeByValue(favorites.elementById(id));
+  const entry: Writable<Favorite | undefined> = favorites.elementById(id);
+  entry.set(undefined);
 });
 
 // Handler to add a journal entry (kept for schema compatibility)
@@ -102,10 +120,12 @@ const addSpaceHandler = handler<
 >(({ detail }, { spaces }) => {
   const name = detail?.message?.trim();
   if (!name) return;
-  const current = spaces.get();
-  if (!current.some((s) => s.name === name)) {
-    spaces.push({ name });
-  }
+  // Address the space entity by its name. Setting the entity and add-uniquing
+  // it means two sessions adding the same name resolve to one membership entry,
+  // and adds of distinct names merge, without reading the whole list.
+  const entry = spaces.elementById(name);
+  entry.set({ name });
+  spaces.addUnique(entry);
 });
 
 // Handler to remove a space from the managed list
@@ -113,9 +133,10 @@ const removeSpaceHandler = handler<
   Record<string, never>,
   { name: string; spaces: Writable<SpaceEntry[]> }
 >((_, { name, spaces }) => {
-  const current = spaces.get();
-  const filtered = current.filter((s) => s.name !== name);
-  spaces.set(filtered);
+  // Remove the membership entry addressed by name. removeByValue matches by the
+  // deterministic link, so concurrent removes of distinct spaces merge instead
+  // of clobbering through a whole-list set.
+  spaces.removeByValue(spaces.elementById(name));
 });
 
 export default pattern<Record<string, never>, HomeOutput>((_) => {
