@@ -1,10 +1,17 @@
 # CFC runner future work — prioritized implementation gaps
 
-_Started 2026-07-01. Audit of `~/src/specs/cfc` (the normative CFC prose spec, 18
-chapters + Lean formalization) against the implementation in `packages/runner`
-(primarily `packages/runner/src/cfc/`). Companion to
+_Started 2026-07-01. Audit of the normative CFC prose spec (18 chapters + Lean
+formalization) against the implementation in `packages/runner` (primarily
+`packages/runner/src/cfc/`). Companion to
 [`cfc-spec-changes.md`](./cfc-spec-changes.md) (which tracks edits the **spec**
 needs); this file tracks work the **runner** needs._
+
+> **Spec references.** The CFC prose spec + Lean formalization live in the separate
+> [`commontoolsinc/specs`](https://github.com/commontoolsinc/specs) repo under
+> `cfc/`. References below of the form `§3.1.8`, `04-label-representation.md`,
+> `notes/…`, or `proposals/…` are paths within that repo — e.g.
+> [`cfc/proposals/author-disjunctive-confidentiality.md`](https://github.com/commontoolsinc/specs/blob/main/cfc/proposals/author-disjunctive-confidentiality.md).
+> References of the form `packages/…` and `docs/specs/…` are in this repo.
 
 This list is ordered **big chunks first**: close the load-bearing structural
 gaps, then fill the small holes. Dependency order matters — several small holes
@@ -61,9 +68,9 @@ with a flat/flat fast-path that is byte-for-byte today's check. Then the
 fail-closed test.
 
 - **This is exactly the disjunctive-confidentiality proposal's §9 runtime outline**
-  (`~/src/specs/cfc/proposals/author-disjunctive-confidentiality.md:845-899`), which
-  is Adopted (2026-06-09) into the normative spec (§3.1.8, §4.2.1, §8.10.3, §8.17,
-  §18.5). The design + adversarial pass are already written.
+  (`proposals/author-disjunctive-confidentiality.md` §9), which is Adopted
+  (2026-06-09) into the normative spec (§3.1.8, §4.2.1, §8.10.3, §8.17, §18.5). The
+  design + adversarial pass are already written.
 - **Directly delivers:** author-written OR-clauses — "confidential to A **or** B,
   either can release alone" — which the flat model literally cannot represent (it
   flattens `[[A∨B]]` to conjunctive `{A,B}`, the *stronger* reading: safe, but the
@@ -263,9 +270,6 @@ Each is bounded and mostly independent. Several are fail-safe today.
   classed value-bound vs spec provenance; `IntegritySummary` absent). Code-generate
   the map from a shared registry, or add a parity test that fails when §15 gains a
   hereditary family absent from `CLASS_BY_TYPE`. (SC-10/15/17.)
-- **Atom registry parity.** Register `ExternalIngest` and `UserSurfaceInput` (impl-
-  minted, spec example-only); reconcile the `structure`/`external-ingest`
-  `LabelComponent` enum extensions. (SC-10/20.)
 - **`classification: string[]` shorthand not lowered.** No `classificationToAtoms`
   anywhere in the runner — a silent no-op if it reaches the runner. Confirm the
   schema-generator lowers it first, or add the lowering. (§4.2.1, §4.7.1.)
@@ -307,8 +311,9 @@ Each is bounded and mostly independent. Several are fail-safe today.
 # Tier 3 — Spec promotion, not runner code
 
 Shipped, security-conscious runner mechanisms with **no normative home**. These are
-`~/src/specs/cfc` edits (and belong in `FUTURE-SPEC-WORK.md`), not runner work — but
-they are load-bearing and an implementer could weaken them with no spec test failing.
+`commontoolsinc/specs` edits (they belong in `cfc/notes/FUTURE-SPEC-WORK.md`), not
+runner work — but they are load-bearing and an implementer could weaken them with no
+spec test failing.
 
 - **`ownerPrincipal` / `__ctCurrentPrincipal` write-authority chain** — a fully-built
   owner-binding-to-acting-principal mechanism with `represents-principal` evidence,
@@ -323,6 +328,14 @@ they are load-bearing and an implementer could weaken them with no spec test fai
 - **`ExternalIngest` vouched-ingest provenance mark** — split-mint, module-private
   trigger, bypasses `gateRuntimeMintedIntegrity`, audience recorded-not-enforced —
   defined only in a proposal doc.
+- **Atom registry parity (`ExternalIngest` / `UserSurfaceInput`).** Both are
+  *already* registered in the runtime — `CFC_ATOM_TYPE`
+  ([`packages/api/cfc.ts:35`,`:49`](../../packages/api/cfc.ts)) and the propagation
+  map ([`atom-classes.ts:30`,`:34`](../../packages/runner/src/cfc/atom-classes.ts),
+  both `provenance`) — so no runner code is needed. The residual is spec-side:
+  promote them from spec example-only into the §15 atom registry, and reconcile the
+  `structure`/`external-ingest` `LabelComponent` values that extend the spec's
+  3-value enum. (SC-10/20.)
 
 ---
 
@@ -370,9 +383,10 @@ safety-invariant completeness cross-check, and three focused sweeps
 (docs/specs expressiveness gaps, CFC-spec algebra gaps, exchange-rule epic sizing),
 2026-07-01. Load-bearing claims (vacuous requiredIntegrity gate, flow/enforcement
 defaults, ceiling-fit reader-enumeration hole) were spot-verified against the code.
-Cross-references: `cfc-spec-changes.md` (SC-1..22 + audit queue),
-`~/src/specs/cfc/notes/RUNNER_IMPLEMENTATION_PLAN.md` (12 workstreams),
-`~/src/specs/cfc/notes/FUTURE-SPEC-WORK.md`,
-`~/src/specs/cfc/proposals/author-disjunctive-confidentiality.md` (Adopted; §9 is
-Epic A's runtime outline).
+Cross-references: [`cfc-spec-changes.md`](./cfc-spec-changes.md) (SC-1..22 + audit
+queue), and in [`commontoolsinc/specs`](https://github.com/commontoolsinc/specs):
+`cfc/notes/RUNNER_IMPLEMENTATION_PLAN.md` (12 workstreams),
+`cfc/notes/FUTURE-SPEC-WORK.md`, and
+`cfc/proposals/author-disjunctive-confidentiality.md` (Adopted; §9 is Epic A's
+runtime outline).
 ```
