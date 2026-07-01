@@ -177,11 +177,16 @@ export {
   type SchedulerGraphNode,
   type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
-export {
-  attachRuntimeTelemetryOtelBridge,
-  createRuntimeTelemetryOtelBridge,
-  type OtelBridgeOptions,
-  type RuntimeTelemetryOtelBridge,
+// Export the bridge TYPES from the barrel, but NOT its values. A static value
+// re-export would pull telemetry-otel-bridge.ts -> @opentelemetry/api (whose node
+// platform build does `require("perf_hooks")`) into every bundle that imports the
+// runner barrel, including the browser web-worker — which breaks worker load.
+// Consumers import the values via the dedicated subpath
+// `@commonfabric/runner/telemetry-otel-bridge` (see deno.jsonc) so the OTel
+// dependency only reaches hosts that actually set up a provider.
+export type {
+  OtelBridgeOptions,
+  RuntimeTelemetryOtelBridge,
 } from "./telemetry-otel-bridge.ts";
 
 // Utility functions (split from utils.ts)

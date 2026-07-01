@@ -1,6 +1,5 @@
 import { PieceManager } from "@commonfabric/piece";
 import {
-  attachRuntimeTelemetryOtelBridge,
   Cell,
   type ConsoleHandler,
   type ConsoleMessage,
@@ -11,6 +10,7 @@ import {
   Runtime,
   Stream,
 } from "@commonfabric/runner";
+import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { getMeter, getTracer } from "./otel.ts";
 
