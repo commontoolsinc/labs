@@ -1,7 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
+  captureDenoInspectorProfile,
   markProfilerStarted,
   markProfileStoppedOnce,
   parseArg,
@@ -59,6 +60,171 @@ class FakeWebSocket {
   send(data: string): void {
     this.sent.push(data);
   }
+}
+
+class FakeCelestial {
+  calls: string[] = [];
+  closeError: unknown;
+  starts = 0;
+  stops = 0;
+  removedListeners: string[] = [];
+  runtimeEnableError: unknown;
+  startError: unknown;
+  startPromise: Promise<void> | undefined;
+  profile: unknown = { nodes: [] };
+  samplingIntervals: number[] = [];
+  #listeners = new Map<
+    string,
+    Set<EventListenerOrEventListenerObject>
+  >();
+
+  Runtime = {
+    enable: () => {
+      this.calls.push("Runtime.enable");
+      if (this.runtimeEnableError) {
+        return Promise.reject(this.runtimeEnableError);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  Console = {
+    enable: () => {
+      this.calls.push("Console.enable");
+      return Promise.resolve();
+    },
+  };
+
+  Debugger = {
+    enable: (_params: Record<string, unknown>) => {
+      this.calls.push("Debugger.enable");
+      return Promise.resolve();
+    },
+  };
+
+  Profiler = {
+    enable: () => {
+      this.calls.push("Profiler.enable");
+      return Promise.resolve();
+    },
+    setSamplingInterval: (params: { interval: number }) => {
+      this.samplingIntervals.push(params.interval);
+      return Promise.resolve();
+    },
+    start: () => {
+      this.starts += 1;
+      if (this.startError) return Promise.reject(this.startError);
+      return this.startPromise ?? Promise.resolve();
+    },
+    stop: () => {
+      this.stops += 1;
+      return Promise.resolve({ profile: this.profile });
+    },
+  };
+
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+  ): void {
+    if (!listener) return;
+    const listeners = this.#listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.#listeners.set(type, listeners);
+  }
+
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+  ): void {
+    if (!listener) return;
+    this.removedListeners.push(type);
+    this.#listeners.get(type)?.delete(listener);
+  }
+
+  close(): Promise<void> {
+    this.calls.push("close");
+    if (this.closeError) return Promise.reject(this.closeError);
+    return Promise.resolve();
+  }
+
+  dispatch(type: string, event: Event): void {
+    for (const listener of this.#listeners.get(type) ?? []) {
+      if (typeof listener === "function") {
+        listener(event);
+      } else {
+        listener.handleEvent(event);
+      }
+    }
+  }
+
+  dispatchConsole(...args: Record<string, unknown>[]): void {
+    this.dispatch(
+      "Runtime.consoleAPICalled",
+      new CustomEvent("Runtime.consoleAPICalled", { detail: { args } }),
+    );
+  }
+}
+
+async function withTempDir(
+  run: (tmpDir: string) => Promise<void>,
+): Promise<void> {
+  const tmpDir = await Deno.makeTempDir({ prefix: "profile-lib-test-" });
+  try {
+    await run(tmpDir);
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+}
+
+function createCaptureRuntime(options: {
+  addSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
+  celestial: FakeCelestial;
+  logs: string[];
+  errors?: string[];
+  noSignalSupport?: boolean;
+  resumed?: PromiseWithResolvers<void>;
+  started?: PromiseWithResolvers<void>;
+  signalHandlers?: Partial<Record<Deno.Signal, () => void>>;
+  ws?: FakeWebSocket;
+  removeSignalListener?: (
+    signal: Deno.Signal,
+    handler: () => void,
+  ) => void;
+}) {
+  const ws = options.ws ?? new FakeWebSocket();
+  ws.readyState = WebSocket.OPEN;
+  const errors = options.errors ?? [];
+  return {
+    addSignalListener: options.noSignalSupport
+      ? undefined
+      : (signal: Deno.Signal, handler: () => void) => {
+        if (options.addSignalListener) {
+          options.addSignalListener(signal, handler);
+          return;
+        }
+        if (options.signalHandlers) {
+          options.signalHandlers[signal] = handler;
+        }
+      },
+    console: {
+      log: (message?: unknown, ...optionalParams: unknown[]) => {
+        const text = [message, ...optionalParams].map(String).join(" ");
+        options.logs.push(text);
+        if (text === "profile: resumed target") {
+          options.resumed?.resolve();
+        }
+        if (text === "profile: profiler started") {
+          options.started?.resolve();
+        }
+      },
+      error: (message?: unknown, ...optionalParams: unknown[]) => {
+        errors.push([message, ...optionalParams].map(String).join(" "));
+      },
+    },
+    createCelestial: () => options.celestial,
+    createWebSocket: () => ws as unknown as WebSocket,
+    removeSignalListener: options.removeSignalListener ?? (() => {}),
+  };
 }
 
 describe("capture-deno-inspector-profile helpers", () => {
@@ -230,6 +396,84 @@ describe("capture-deno-inspector-profile helpers", () => {
 
     assertEquals((caught as Error).message, "WebSocket closed");
     assertEquals(ws.removed, ["close", "error"]);
+  });
+
+  it("rejects inspector commands when the websocket is already closed", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.CLOSED;
+
+    let caught: unknown;
+    try {
+      await settleInspectorCommand(
+        ws as unknown as WebSocket,
+        () => Promise.resolve(),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed");
+    assertEquals(ws.added, []);
+  });
+
+  it("rejects inspector commands on websocket errors", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    const settled = settleInspectorCommand(
+      ws as unknown as WebSocket,
+      () => new Promise<void>(() => {}),
+    );
+    const event = ws.dispatch("error");
+
+    let caught: unknown;
+    try {
+      await settled;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals(caught, event);
+    assertEquals(ws.removed, ["close", "error"]);
+  });
+
+  it("rejects inspector commands that throw before returning a promise", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+
+    let caught: unknown;
+    try {
+      await settleInspectorCommand(ws as unknown as WebSocket, () => {
+        throw new Error("boom");
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "boom");
+    assertEquals(ws.removed, ["close", "error"]);
+  });
+
+  it("ignores command completion after a websocket close has settled it", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    const command = Promise.withResolvers<void>();
+    const settled = settleInspectorCommand(
+      ws as unknown as WebSocket,
+      () => command.promise,
+    );
+
+    ws.readyState = WebSocket.CLOSED;
+    ws.dispatch("close", new CloseEvent("close"));
+    command.resolve();
+
+    let caught: unknown;
+    try {
+      await settled;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed");
   });
 
   it("listens for websocket close before sending inspector commands", async () => {
@@ -631,5 +875,409 @@ describe("capture-deno-inspector-profile helpers", () => {
 
     expect(state.profilerActive).toBe(true);
     expect(state.sawProfileStop).toBe(false);
+  });
+
+  it("captures a profile after a summary console message", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
+      const consoleOutputPath = `${tmpDir}/profile.console.log`;
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${outputPath}`,
+          `--console-output=${consoleOutputPath}`,
+          "--summary-pattern=done",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
+      assertEquals(celestial.samplingIntervals, [100]);
+      assertStringIncludes(
+        await Deno.readTextFile(outputPath),
+        '"nodes": []',
+      );
+      assertEquals(await Deno.readTextFile(consoleOutputPath), "done\ndone");
+      assertEquals(logs.includes("profile: summary matched"), true);
+    });
+  });
+
+  it("starts and stops from console profile markers", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${outputPath}`,
+          "--summary-pattern=(?!)",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed, started }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "profile start" });
+      await started.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
+      assertEquals(logs.includes("profile: profile stop matched"), true);
+    });
+  });
+
+  it("stops from a marker that arrives while profiler start is in flight", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const start = Promise.withResolvers<void>();
+      celestial.startPromise = start.promise;
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "profile start" });
+      await Promise.resolve();
+      celestial.dispatchConsole({ value: "done" });
+      start.resolve();
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
+      assertEquals(logs.includes("profile: summary matched"), true);
+    });
+  });
+
+  it("writes a profiler start error and returns failure", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.startError = new Error("closed");
+      const logs: string[] = [];
+      const errors: string[] = [];
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
+
+      const code = await captureDenoInspectorProfile(
+        [
+          `--output=${outputPath}`,
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, errors }),
+      );
+
+      assertEquals(code, 1);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 0);
+      assertStringIncludes(errors.join("\n"), "Profiler.start failed");
+      assertStringIncludes(
+        await Deno.readTextFile(`${tmpDir}/profile.error.txt`),
+        "Profiler.start failed: Error: closed",
+      );
+      assertEquals(logs.includes("profile: profiler-start-failed"), true);
+    });
+  });
+
+  it("ignores profiler start markers after start failure cleanup begins", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.startError = new Error("closed");
+      const logs: string[] = [];
+      const errors: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--profile-start-pattern=profile start",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, errors, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "profile start" });
+      await Promise.resolve();
+      celestial.dispatchConsole({ value: "profile start" });
+
+      assertEquals(await done, 1);
+      assertEquals(celestial.starts, 1);
+      assertEquals(
+        errors.filter((line) => line.includes("Profiler.start failed")).length,
+        1,
+      );
+    });
+  });
+
+  it("stops when the inspector websocket closes", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const ws = new FakeWebSocket();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--profile-start-pattern=profile start",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed, ws }),
+      );
+
+      await resumed.promise;
+      ws.readyState = WebSocket.CLOSED;
+      ws.dispatch("close", new CloseEvent("close"));
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 0);
+      assertEquals(celestial.stops, 0);
+      assertEquals(logs.includes("profile: websocket closed"), true);
+    });
+  });
+
+  it("stops when the websocket closes while resuming the target", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const ws = new FakeWebSocket();
+      ws.send = (data: string) => {
+        ws.sent.push(data);
+        ws.readyState = WebSocket.CLOSED;
+      };
+
+      const code = await captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--profile-start-pattern=profile start",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, ws }),
+      );
+
+      assertEquals(code, 0);
+      assertEquals(logs.includes("profile: websocket closed"), true);
+    });
+  });
+
+  it("continues when signal listeners cannot be registered", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({
+          addSignalListener: () => {
+            throw new Error("unsupported");
+          },
+          celestial,
+          logs,
+          resumed,
+        }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 0);
+      assertEquals(logs.includes("profile: summary matched"), true);
+    });
+  });
+
+  it("does not remove signal handlers when signal support is absent", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const removed: Deno.Signal[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({
+          celestial,
+          logs,
+          noSignalSupport: true,
+          resumed,
+          removeSignalListener: (signal) => {
+            removed.push(signal);
+          },
+        }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 0);
+      assertEquals(removed, []);
+    });
+  });
+
+  it("cleans up listeners and the inspector client when startup fails", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.runtimeEnableError = new Error("runtime unavailable");
+      const logs: string[] = [];
+      const removed: Deno.Signal[] = [];
+
+      let caught: unknown;
+      try {
+        await captureDenoInspectorProfile(
+          [
+            `--output=${tmpDir}/profile.cpuprofile`,
+            "--websocket-url=ws://127.0.0.1:9333/session",
+          ],
+          createCaptureRuntime({
+            celestial,
+            logs,
+            removeSignalListener: (signal) => {
+              removed.push(signal);
+            },
+          }),
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      assertEquals((caught as Error).message, "runtime unavailable");
+      assertEquals(removed, ["SIGINT", "SIGTERM"]);
+      assertEquals(celestial.removedListeners, ["Runtime.consoleAPICalled"]);
+      assertEquals(celestial.calls.includes("close"), true);
+    });
+  });
+
+  it("reports inspector client close failures after successful capture", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.closeError = new Error("close failed");
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+
+      let caught: unknown;
+      try {
+        await done;
+      } catch (error) {
+        caught = error;
+      }
+
+      assertEquals((caught as Error).message, "close failed");
+    });
+  });
+
+  it("preserves startup failures when inspector client close also fails", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.closeError = new Error("close failed");
+      celestial.runtimeEnableError = new Error("runtime unavailable");
+
+      let caught: unknown;
+      try {
+        await captureDenoInspectorProfile(
+          [
+            `--output=${tmpDir}/profile.cpuprofile`,
+            "--websocket-url=ws://127.0.0.1:9333/session",
+          ],
+          createCaptureRuntime({ celestial, logs: [] }),
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      assertEquals((caught as Error).message, "runtime unavailable");
+    });
+  });
+
+  it("stops from a signal and removes registered signal handlers", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const signalHandlers: Partial<Record<Deno.Signal, () => void>> = {};
+      const removed: Deno.Signal[] = [];
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({
+          celestial,
+          logs,
+          resumed,
+          signalHandlers,
+          removeSignalListener: (signal) => {
+            removed.push(signal);
+            if (signal === "SIGTERM") throw new Error("already gone");
+          },
+        }),
+      );
+
+      await resumed.promise;
+      signalHandlers.SIGTERM?.();
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.stops, 1);
+      assertEquals(logs.includes("profile: signal-SIGTERM"), true);
+      assertEquals(removed, ["SIGINT", "SIGTERM"]);
+    });
+  });
+
+  it("loads the capture entry point without running it as main", async () => {
+    await import("./capture-deno-inspector-profile.ts?entrypoint-coverage");
+  });
+
+  it("entry point reports missing arguments before opening a websocket", async () => {
+    const script = new URL(
+      "./capture-deno-inspector-profile.ts",
+      import.meta.url,
+    );
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "-A", script.href],
+      stderr: "piped",
+      stdout: "piped",
+    }).output();
+
+    assertEquals(result.success, false);
+    assertStringIncludes(
+      new TextDecoder().decode(result.stderr),
+      "--output is required",
+    );
   });
 });

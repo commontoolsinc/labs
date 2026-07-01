@@ -27,6 +27,19 @@ type ProfilerController = {
   stop(): Promise<{ profile: unknown }>;
 };
 
+type ProfileCaptureRuntimeApi = {
+  Console: { enable(): Promise<unknown> };
+  Debugger: { enable(params: Record<string, unknown>): Promise<unknown> };
+  Profiler: ProfilerController & {
+    enable(): Promise<unknown>;
+    setSamplingInterval(params: { interval: number }): Promise<unknown>;
+  };
+  Runtime: { enable(): Promise<unknown> };
+  addEventListener: EventTarget["addEventListener"];
+  removeEventListener: EventTarget["removeEventListener"];
+  close(): Promise<void>;
+};
+
 type ProfileFileWriter = {
   mkdir(
     path: string,
@@ -49,6 +62,25 @@ type InspectorCommandWebSocket = Pick<
   WebSocket,
   "readyState" | "addEventListener" | "removeEventListener"
 >;
+
+type ProfileCaptureConsole = {
+  log(message?: unknown, ...optionalParams: unknown[]): void;
+  error(message?: unknown, ...optionalParams: unknown[]): void;
+};
+
+export type ProfileCaptureRuntime = {
+  addSignalListener?: (
+    signal: Deno.Signal,
+    handler: () => void,
+  ) => void;
+  console?: ProfileCaptureConsole;
+  createCelestial(ws: WebSocket): ProfileCaptureRuntimeApi;
+  createWebSocket(url: string): WebSocket;
+  removeSignalListener?: (
+    signal: Deno.Signal,
+    handler: () => void,
+  ) => void;
+};
 
 export function sendInspectorCommand(
   ws: InspectorCommandSocket,
@@ -317,4 +349,236 @@ export async function writeProfileCaptureFiles(
       options.state.consoleMessages.join("\n"),
     );
   }
+}
+
+export async function captureDenoInspectorProfile(
+  args: string[],
+  runtime: ProfileCaptureRuntime,
+): Promise<number> {
+  const outputPath = requireArg(args, "output");
+  const consoleOutputPath = parseArg(args, "console-output");
+  const summaryPattern = parseArg(args, "summary-pattern") ??
+    "\\d+ passed, \\d+ failed";
+  const profileStartPattern = parseArg(args, "profile-start-pattern");
+  const profileStopPattern = parseArg(args, "profile-stop-pattern");
+  const websocketUrl = requireArg(args, "websocket-url");
+  const output = runtime.console ?? console;
+
+  const target = {
+    id: websocketUrl,
+    title: websocketUrl,
+    type: "node",
+    webSocketDebuggerUrl: websocketUrl,
+  };
+  output.log(`profile: target ${target.title ?? target.id}`);
+
+  const ws = runtime.createWebSocket(target.webSocketDebuggerUrl);
+  await waitForWebSocketOpen(ws);
+  output.log("profile: websocket open");
+
+  const celestial = runtime.createCelestial(ws);
+  const summaryRegex = new RegExp(summaryPattern);
+  const profileStartRegex = profileStartPattern
+    ? new RegExp(profileStartPattern)
+    : undefined;
+  const profileStopRegex = profileStopPattern
+    ? new RegExp(profileStopPattern)
+    : undefined;
+  const profileStopState: ProfileStopState = { ended: false };
+  const stopReason = Promise.withResolvers<string>();
+  let stopReasonSent = false;
+  const state: ProfileCaptureState = {
+    consoleMessages: [],
+    profilerActive: false,
+    profilerStarting: false,
+    sawProfileStart: !profileStartRegex,
+    sawProfileStop: false,
+  };
+  let pendingProfilerStopReason: string | undefined;
+  let profilerStartError: string | undefined;
+
+  const requestStop = (reason: string): void => {
+    if (stopReasonSent) return;
+    stopReasonSent = true;
+    stopReason.resolve(reason);
+  };
+  const requestProfilerStop = (reason: string): void => {
+    if (state.profilerStarting) {
+      pendingProfilerStopReason ??= reason;
+      return;
+    }
+    requestStop(reason);
+  };
+  const recordProfilerStartError = (error: unknown): void => {
+    profilerStartError = `Profiler.start failed: ${error}`;
+    output.error(`profile: ${profilerStartError}`);
+    requestStop("profiler-start-failed");
+  };
+  const startProfiler = async (
+    options: { clearStop?: boolean } = {},
+  ): Promise<void> => {
+    let started = false;
+    try {
+      started = await startProfilerIfReady(
+        state,
+        ws,
+        celestial.Profiler,
+        (message) => output.log(message),
+        options,
+      );
+    } catch (error) {
+      recordProfilerStartError(error);
+      return;
+    }
+    if (started && state.sawProfileStop) {
+      pendingProfilerStopReason ??= "profile-stop-matched";
+    }
+    if (started && pendingProfilerStopReason) {
+      const reason = pendingProfilerStopReason;
+      pendingProfilerStopReason = undefined;
+      requestStop(reason);
+    }
+  };
+  const handleConsoleApiCalled = (event: Event): void => {
+    const detail = (event as CustomEvent<{ args: Record<string, unknown>[] }>)
+      .detail;
+    const text = detail.args
+      .map((arg) => stringifyRemoteObject(arg))
+      .join(" ");
+    const profileMessage = recordConsoleProfileMessage(
+      state,
+      text,
+      profileStartRegex,
+      profileStopRegex,
+    );
+    if (profileMessage.startedProfile) {
+      void startProfiler({ clearStop: profileMessage.hadProfileStop });
+    }
+    if (summaryRegex.test(text)) {
+      requestProfilerStop("summary-matched");
+    }
+    if (state.profilerActive && state.sawProfileStop) {
+      requestProfilerStop("profile-stop-matched");
+    }
+  };
+
+  celestial.addEventListener(
+    "Runtime.consoleAPICalled",
+    handleConsoleApiCalled,
+  );
+
+  const signalHandlers: Array<[Deno.Signal, () => void]> = [];
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    try {
+      const handler = () => {
+        requestProfilerStop(`signal-${signal}`);
+      };
+      if (runtime.addSignalListener) {
+        runtime.addSignalListener(signal, handler);
+        signalHandlers.push([signal, handler]);
+      }
+    } catch {
+      // Signals are best-effort here.
+    }
+  }
+
+  const stopProfile = async (reason: string): Promise<void> => {
+    if (markProfileStoppedOnce(profileStopState, reason)) {
+      const { profile, stopError } = await stopActiveProfiler(
+        state,
+        ws,
+        celestial.Profiler,
+      );
+      await writeProfileCaptureFiles({
+        outputPath,
+        consoleOutputPath,
+        state,
+        profile,
+        stopError: profilerStartError ?? stopError,
+      });
+    }
+  };
+
+  const handleClose = () => requestStop("websocket-closed");
+  let caughtError: unknown;
+  let cleanupError: unknown;
+  let hasCaughtError = false;
+  let websocketCloseListenerAdded = false;
+  let stopResumeOnPause: (() => void) | undefined;
+  try {
+    await celestial.Runtime.enable();
+    output.log("profile: runtime enabled");
+    await celestial.Console.enable();
+    await celestial.Debugger.enable({});
+    await celestial.Profiler.enable();
+    await celestial.Profiler.setSamplingInterval({ interval: 100 });
+
+    if (state.sawProfileStart) {
+      await startProfiler();
+    }
+
+    stopResumeOnPause = resumeDebuggerOnPause(celestial, ws, -2);
+    ws.addEventListener("close", handleClose);
+    websocketCloseListenerAdded = true;
+    sendInspectorCommand(ws, -1, "Runtime.runIfWaitingForDebugger");
+    output.log("profile: resumed target");
+
+    if (ws.readyState === WebSocket.CLOSED) {
+      requestStop("websocket-closed");
+    }
+
+    const reason = await stopReason.promise;
+    await stopProfile(reason);
+    if (reason === "profile-stop-matched") {
+      output.log("profile: profile stop matched");
+    } else if (reason === "summary-matched") {
+      output.log("profile: summary matched");
+    } else if (reason === "websocket-closed") {
+      output.log("profile: websocket closed");
+    } else {
+      output.log(`profile: ${reason}`);
+    }
+  } catch (error) {
+    hasCaughtError = true;
+    caughtError = error;
+  } finally {
+    for (const [signal, handler] of signalHandlers) {
+      try {
+        runtime.removeSignalListener?.(signal, handler);
+      } catch {
+        // Listener may already be gone.
+      }
+    }
+
+    if (websocketCloseListenerAdded) {
+      ws.removeEventListener("close", handleClose);
+    }
+    stopResumeOnPause?.();
+    celestial.removeEventListener(
+      "Runtime.consoleAPICalled",
+      handleConsoleApiCalled,
+    );
+    try {
+      await celestial.close();
+    } catch (error) {
+      if (!hasCaughtError) cleanupError = error;
+    }
+  }
+
+  if (hasCaughtError) throw caughtError;
+  if (cleanupError !== undefined) throw cleanupError;
+
+  output.log(
+    JSON.stringify(
+      {
+        reason: profileStopState.reason,
+        outputPath,
+        consoleMessages: state.consoleMessages.length,
+      },
+      null,
+      2,
+    ),
+  );
+
+  return profilerStartError ? 1 : 0;
 }
