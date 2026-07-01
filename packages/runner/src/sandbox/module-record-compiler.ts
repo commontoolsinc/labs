@@ -71,10 +71,10 @@ function parseCompiledExports(
   let hit = exportParseCache.get(code);
   if (hit === undefined) {
     const { names, starTargetSpecs } = extractCompiledExports(code);
-    // Copy both derived arrays into the cache entry so a cached parse can never
-    // be mutated through a reference the extractor might retain (symmetry with
-    // exportNames; the entry is handed out on every hit).
-    hit = { exportNames: [...names], starTargetSpecs: [...starTargetSpecs] };
+    // extractCompiledExports returns fresh `readonly` arrays, so store them
+    // directly: the readonly contract (not a defensive copy) is what keeps the
+    // shared cache entry safe across every call it is handed to.
+    hit = { exportNames: names, starTargetSpecs };
     exportParseCache.set(code, hit);
   }
   return hit;
@@ -87,6 +87,28 @@ function parseCompiledImports(code: string): readonly string[] {
     importParseCache.set(code, hit);
   }
   return hit;
+}
+
+/**
+ * Derive a compiled module's record surface — its direct export names,
+ * `export *` target specifiers, and runtime import specifiers — from its
+ * compiled body in one shot (unmemoized; called once per module at compile
+ * time). Fix B persists this on the compiled doc so
+ * {@link buildRecordsFromCompiled} can read it at boot instead of re-parsing.
+ * Uses the same scans as the boot-time parse, so a persisted value is
+ * byte-identical to what that parse would produce.
+ */
+export function deriveModuleRecordFields(code: string): {
+  exportNames: readonly string[];
+  starTargetSpecs: readonly string[];
+  importSpecs: readonly string[];
+} {
+  const { names, starTargetSpecs } = extractCompiledExports(code);
+  return {
+    exportNames: names,
+    starTargetSpecs,
+    importSpecs: extractRuntimeImports(code),
+  };
 }
 
 /**
@@ -629,7 +651,9 @@ export function compileSourcesToRecords(
     // become record edges — unlike `collectImportSpecifiers`, which includes
     // them for module *identity*.
     compiledBodies.set(specifier, compiled);
-    const importSpecs = extractRuntimeImports(compiled);
+    // Copy the readonly extractor result into a mutable array the record owns
+    // (VirtualModuleRecord.imports is `string[]`); this is the cold compile path.
+    const importSpecs = [...extractRuntimeImports(compiled)];
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
       const resolved = resolveImportSpecifier(spec, source);
@@ -754,6 +778,18 @@ export interface CachedCompiledModule {
   imports: { specifier: string; targetIdentity: string }[];
   /** Per-module source map, if cached. */
   sourceMap?: SourceMap;
+  /**
+   * Precomputed record surface (Fix B), derived from `code` at compile time via
+   * {@link deriveModuleRecordFields} and persisted on the compiled doc: the
+   * module's direct export names, `export *` target specifiers, and runtime
+   * import specifiers. Written all-or-nothing (all three present, or none).
+   * When present, {@link buildRecordsFromCompiled} reads them and skips the
+   * in-worker parse; absent only on the cold/recompile path (and in tests),
+   * which parses and writes the surface back for later warm loads.
+   */
+  exportNames?: readonly string[];
+  starTargetSpecs?: readonly string[];
+  importSpecs?: readonly string[];
 }
 
 /**
@@ -808,13 +844,40 @@ export function buildRecordsFromCompiled(
   const byIdentity = new Map(modules.map((m) => [m.identity, m]));
   const sourceNames = cachedModuleSourceNames(modules);
 
+  // Fix B: use the record surface persisted on the compiled doc; parse the body
+  // only when it wasn't precomputed. A module carries the full surface (a warm
+  // cache read) or none of it — the cold/recompile path builds modules without
+  // the fields and writes them back afterward (plus tests). This is NOT a stale
+  // "legacy" state: runtimeVersion is fingerprinted over the extractor, so a warm
+  // cache read always carries the fields and a fields-less doc is never read from
+  // cache. writeCompiledDocs persists the three fields all-or-nothing, so read
+  // them all-or-nothing here — the export and import surface are taken from the
+  // doc together, or both parsed, never a partial mix.
+  const persistedSurface = (
+    m: CachedCompiledModule,
+  ):
+    | {
+      exportNames: readonly string[];
+      starTargetSpecs: readonly string[];
+      importSpecs: readonly string[];
+    }
+    | undefined =>
+    m.exportNames !== undefined && m.starTargetSpecs !== undefined &&
+      m.importSpecs !== undefined
+      ? {
+        exportNames: m.exportNames,
+        starTargetSpecs: m.starTargetSpecs,
+        importSpecs: m.importSpecs,
+      }
+      : undefined;
+
   // Direct export names + `export *` edges (as dependency identities) per module.
   const direct = new Map<
     string,
     { names: Set<string>; starTargets: string[] }
   >();
   for (const m of modules) {
-    const parsed = parseCompiledExports(m.code);
+    const parsed = persistedSurface(m) ?? parseCompiledExports(m.code);
     const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
     for (const spec of parsed.starTargetSpecs) {
@@ -862,7 +925,10 @@ export function buildRecordsFromCompiled(
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
-    const importSpecs = [...parseCompiledImports(m.code)];
+    const surface = persistedSurface(m);
+    const importSpecs = surface
+      ? [...surface.importSpecs]
+      : [...parseCompiledImports(m.code)];
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
@@ -933,7 +999,7 @@ export function buildRecordsFromCompiled(
  */
 export function extractCompiledExports(
   compiled: string,
-): { names: Set<string>; starTargetSpecs: string[] } {
+): { names: readonly string[]; starTargetSpecs: readonly string[] } {
   const sourceFile = ts.createSourceFile(
     "compiled.js",
     compiled,
@@ -994,7 +1060,7 @@ export function extractCompiledExports(
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  return { names, starTargetSpecs: [...starTargetSpecs] };
+  return { names: [...names], starTargetSpecs: [...starTargetSpecs] };
 }
 
 /**
@@ -1007,7 +1073,7 @@ export function extractCompiledExports(
  * literal, template literal, or comment in the authored source is NOT mistaken
  * for a real dependency edge.
  */
-function extractRuntimeImports(compiled: string): string[] {
+function extractRuntimeImports(compiled: string): readonly string[] {
   const sourceFile = ts.createSourceFile(
     "compiled.js",
     compiled,

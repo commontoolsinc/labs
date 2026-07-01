@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import { computeModuleHashes } from "../harness/module-identity.ts";
+import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -75,6 +76,15 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly kind: "compiled";
   /** Per-module source map, if any (registered for fn.src / CFC resolution). */
   readonly sourceMap?: unknown;
+  /**
+   * Precomputed record surface (Fix B): the direct export names, `export *`
+   * target specifiers, and runtime import specifiers derived from `code` at
+   * compile time. Lets the boot-time record build skip the in-worker TS parse.
+   * Absent on documents written before the field existed (→ parse fallback).
+   */
+  readonly exportNames?: readonly string[];
+  readonly starTargetSpecs?: readonly string[];
+  readonly importSpecs?: readonly string[];
 }
 
 /**
@@ -596,6 +606,9 @@ const compiledDocProperties = {
   code: { type: "string" },
   filename: { type: "string" },
   sourceMap: {},
+  exportNames: { type: "array", items: { type: "string" } },
+  starTargetSpecs: { type: "array", items: { type: "string" } },
+  importSpecs: { type: "array", items: { type: "string" } },
   imports: {
     type: "array",
     items: {
@@ -624,6 +637,9 @@ export const COMPILED_DOC_SCHEMA = {
         code: { type: "string" },
         filename: { type: "string" },
         sourceMap: {},
+        exportNames: { type: "array", items: { type: "string" } },
+        starTargetSpecs: { type: "array", items: { type: "string" } },
+        importSpecs: { type: "array", items: { type: "string" } },
         imports: {
           type: "array",
           items: {
@@ -658,6 +674,9 @@ interface StoredCompiledDoc {
   code: string;
   filename: string;
   sourceMap?: unknown;
+  exportNames?: readonly string[];
+  starTargetSpecs?: readonly string[];
+  importSpecs?: readonly string[];
   imports: { specifier: string; link: unknown }[];
 }
 
@@ -717,11 +736,17 @@ export function writeCompiledDocs(
         schema,
         tx,
       );
+      // Fix B: derive the record surface from the compiled body once, here, so
+      // the boot-time record build reads it instead of re-parsing per load.
+      const derived = deriveModuleRecordFields(module.js);
       cell.set({
         kind: "compiled",
         identity: module.identity,
         code: module.js,
         filename: module.filename,
+        exportNames: derived.exportNames,
+        starTargetSpecs: derived.starTargetSpecs,
+        importSpecs: derived.importSpecs,
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
@@ -819,6 +844,15 @@ export async function loadCompiledClosure(
       code: doc.code,
       filename: doc.filename,
       ...(doc.sourceMap !== undefined ? { sourceMap: doc.sourceMap } : {}),
+      ...(doc.exportNames !== undefined
+        ? { exportNames: doc.exportNames }
+        : {}),
+      ...(doc.starTargetSpecs !== undefined
+        ? { starTargetSpecs: doc.starTargetSpecs }
+        : {}),
+      ...(doc.importSpecs !== undefined
+        ? { importSpecs: doc.importSpecs }
+        : {}),
       imports,
     });
   }

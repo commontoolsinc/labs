@@ -133,6 +133,50 @@ describe("ESM compile via content-addressed cell cache", () => {
     expect(await run(warm, 6)).toEqual({ result: 12 });
   });
 
+  it("persists the derived record surface and reads it back (Fix B round-trip)", async () => {
+    // Guards the Fix B perf win against a SILENT regression: because the parse
+    // fallback yields byte-identical records, a pattern still loads + runs
+    // correctly even if the surface never persisted — so "it runs" is not enough.
+    // Assert the fields actually survive writeCompiledDocs -> storage ->
+    // loadCompiledClosure, i.e. buildRecordsFromCompiled reads them instead of
+    // re-parsing the body at boot.
+    const pm = runtime.patternManager;
+    await pm.compilePattern(PROGRAM, { space, tx });
+    await pm.flushCompileCacheWrites();
+    await tx.commit();
+    tx = runtime.edit();
+
+    const { entryIdentity } = await (runtime.harness as Engine)
+      .compileToRecordGraph(PROGRAM);
+
+    const readTx = runtime.edit();
+    const closure = await loadCompiledClosure(
+      runtime,
+      space,
+      entryIdentity,
+      { runtimeVersion },
+      readTx,
+    );
+    readTx.abort?.("round-trip probe read complete");
+
+    expect(closure.size).toBeGreaterThan(0);
+    // Every loaded compiled doc must carry the persisted surface (never
+    // undefined), else the boot build would silently fall back to parsing.
+    for (const [identity, doc] of closure) {
+      expect(doc.exportNames, `exportNames missing for ${identity}`)
+        .toBeDefined();
+      expect(doc.starTargetSpecs, `starTargetSpecs missing for ${identity}`)
+        .toBeDefined();
+      expect(doc.importSpecs, `importSpecs missing for ${identity}`)
+        .toBeDefined();
+    }
+    // Spot-check the entry doc's surface matches the program: main.tsx exports
+    // `default` and requires ./util.ts.
+    const entry = closure.get(entryIdentity)!;
+    expect(new Set(entry.exportNames)).toEqual(new Set(["default"]));
+    expect(entry.importSpecs).toContain("./util.ts");
+  });
+
   it("surfaces cold writeback failure instead of returning an unloadable pattern", async () => {
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     const failure = {
