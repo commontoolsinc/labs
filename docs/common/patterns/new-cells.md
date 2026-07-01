@@ -84,8 +84,12 @@ becomes a writable cell.
 This makes each state explicit. It also lets TypeScript narrow the value before
 code passes it to a handler or provider client.
 
+Provider pattern files can import `authIsReady` from
+`../auth/auth-types.ts`.
+
 ```typescript
 import { Writable } from "commonfabric";
+import { authIsReady } from "../auth/auth-types.ts";
 
 type AuthData = { token: string };
 
@@ -98,8 +102,20 @@ const availability: AuthAvailability = {
   auth: new Writable({ token: "token" }),
 };
 
+const authReady = authIsReady(availability);
 const auth = availability.state === "ready" ? availability.auth : null;
 ```
 
 This shape is useful for auth managers and follows the same state-machine style
 as `FetchState` in the program fetch cache.
+
+Use `authIsReady()` when code needs a shared boolean, such as a disabled state
+or a status panel. Provider clients still need the writable auth cell. Keep the
+`availability.state === "ready" ? availability.auth : null` selection next to
+the handler or component that uses it.
+
+Do not move the auth cell selection into a plain function. The function can run
+outside the reactive transform and hide the `state` read. Do not use `lift()` to
+return `Writable<AuthData> | null`. `lift()` receives a read-only view of cell
+input, so it is the right tool for the boolean readiness check and the wrong
+tool for exporting write access.

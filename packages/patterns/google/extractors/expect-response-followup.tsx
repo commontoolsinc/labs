@@ -39,6 +39,7 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "../core/util/google-auth-manager.tsx";
+import { authIsReady } from "../../auth/auth-types.ts";
 import {
   type GmailLabel,
   GmailSendClient,
@@ -587,11 +588,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const {
     availability,
     fullUI: authUI,
-    isReady,
     currentEmail,
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+  const authReady = authIsReady(availability);
   const auth = availability.state === "ready" ? availability.auth : null;
 
   // ==========================================================================
@@ -898,7 +899,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
             {authUI}
 
             {/* Refresh button when authenticated */}
-            {isReady
+            {authReady
               ? (
                 <div
                   style={{
@@ -983,7 +984,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
               : null}
 
             {/* Threads list */}
-            {!isReady
+            {!authReady
               ? (
                 <div
                   style={{

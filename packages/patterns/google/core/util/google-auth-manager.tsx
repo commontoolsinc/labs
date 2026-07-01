@@ -13,12 +13,17 @@
  *   requiredScopes: ["gmail", "drive"],
  * });
  *
- * if (availability.state !== "ready") return;
- * const auth = availability.auth;
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Google first.</div>;
  *
  * // In UI: {fullUI} handles all auth states
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * ```
+ *
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
  *
  * Token refresh: Tokens auto-refresh via background-piece-service (when registered).
  * For fallback, a "Refresh Session" button is shown in the expired UI.
@@ -27,6 +32,7 @@
 import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+import { authIsReady } from "../../../auth/auth-types.ts";
 import GoogleAuth, { type Auth } from "../google-auth.tsx";
 
 // Re-export shared types for consumers
@@ -144,7 +150,7 @@ export const GoogleAuthManager = pattern<
     auth: base.auth,
     availability: base.availability,
     authInfo: base.authInfo,
-    isReady: base.isReady,
+    isReady: authIsReady(base.availability),
     currentEmail: base.currentEmail,
     currentState: base.currentState,
     pickerUI: base.pickerUI,

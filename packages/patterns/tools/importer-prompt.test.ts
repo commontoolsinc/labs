@@ -156,6 +156,14 @@ Deno.test("generateImporterPrompt includes auth availability and current JSX gui
   assertStringIncludes(instructions, "`auth ? mainContent : notReadyPanel`");
   assertStringIncludes(
     instructions,
+    "Use `authIsReady(availability)` only for boolean readiness checks",
+  );
+  assertStringIncludes(
+    instructions,
+    'Import `authIsReady` from `"../auth/auth-types.ts"`',
+  );
+  assertStringIncludes(
+    instructions,
     "Each provider call handler takes a non-null",
   );
   assertStringIncludes(

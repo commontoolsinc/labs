@@ -1,7 +1,7 @@
 /**
  * Shared types for OAuth auth patterns and auth managers.
  */
-import type { VNode, Writable } from "commonfabric";
+import { lift, type VNode, type Writable } from "commonfabric";
 
 /**
  * Visual status of auth in preview/consumer UI components.
@@ -68,6 +68,11 @@ export type AuthAvailability<TAuth extends OAuthAuthData = OAuthAuthData> =
   }
   | { state: "token-expired"; auth: AuthCell<TAuth> }
   | { state: "ready"; auth: AuthCell<TAuth> };
+
+/** Reactive readiness check for auth-manager availability. */
+export const authIsReady = lift<AuthAvailability, boolean>(
+  (availability) => availability.state === "ready",
+);
 
 /** Complete auth info bundle returned by auth managers */
 export interface AuthInfo<TAuth extends OAuthAuthData = OAuthAuthData> {
