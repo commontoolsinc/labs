@@ -1,7 +1,11 @@
 # Pattern initial-load — the per-piece runtime **boot floor** (current main, 2026-06-30)
 
-**Status:** measured & attributed on current `main`, no fix applied yet. The #1
-lever is being mapped to source.
+**Status (2026-07-01):** B (identity re-root) is DONE + PR'd as **#4436** (pending
+Berni). The ~83ms lever — C, make `.src` lazy — is NEXT but **gated on re-rooting
+the CFC `.src` fail-closed read first** (see below §6 + the focused seed
+[`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md), and the master
+handoff's STATUS UPDATE). _(Original 2026-06-30 status: measured & attributed on
+`main`, no fix applied; the #1 lever mapped to source.)_
 
 **Supersedes [`SLOW-LOAD-FINDINGS.md`](./SLOW-LOAD-FINDINGS.md)**, which measured
 the *old* lunch-poll (pre web-search/art removal, pre storm/VDOM/resume fixes)
@@ -230,19 +234,26 @@ So the lingering `.src`-derivations are the legacy fallback to retire:
   (today `(state, action)`, no runtime handle). **The CFC slice is security-gated
   (red-team pass per spec line 555).**
 - **C — `.src` lazy/debug-only + remove fallback + error** (Berni's "former" +
-  point 2). Gated on A (cheap path correct) **and** B (no eager identity consumer
-  of `.src`). Then `annotateFunctionDebugMetadata` defers `.src`/`.preview` behind
-  a debug gate → cost 0. This is what fully banks the ~83ms.
+  point 2). Gated on B (done) **AND — the red-team's key addition — re-rooting the
+  CFC `.src` fail-closed read** (`cfc/implementation-identity.ts`
+  `resolveProvenanceImplementationIdentity`, which returns `unsupported` and denies
+  `writeAuthorizedBy` when `.src` doesn't parse-and-match provenance). Without that
+  re-root, lazy `.src` flips CFC `verified → unsupported` → verified writes denied.
+  Then `annotateFunctionDebugMetadata` defers `.src`/`.preview` behind a debug gate
+  → cost 0. This is what fully banks the ~83ms. **Focused seed:
+  [`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md).**
 
 ### Status (updated 2026-06-30, late session)
 **B is now implemented** (action identity re-rooted off `.src` onto
 content-addressed `{ identity, symbol }`) and the **full runner suite is green
 (721/0)**. The `.src`-derived `implementationHash` leak (the subtle part — see
 the handoff's "lesson") is fixed: `applyImplementationHash` now derives from
-provenance, and ids flipped `:line:col` → `:symbol`. Remaining: the
-`.src`-garbled invariant harness, the 68+147 gate, dead-code cleanup
-(`implementationHashForSource`), and the PR (red-team-gated). **Full detail +
-resume mechanics: [`B-IDENTITY-REROOT-HANDOFF.md`](./B-IDENTITY-REROOT-HANDOFF.md).**
+provenance, and ids flipped `:line:col` → `:symbol`. **(2026-07-01) All remaining
+steps are DONE and it is PR'd as #4436** (the harness, the 68+147 gate, the
+dead-code cleanup, the red-team pass, a Cubic/CI round) — plus a red-team-surfaced
+**per-instance action-id collision fix** (`schedulerInstanceKey`). **Full detail +
+resume mechanics: [`B-IDENTITY-REROOT-HANDOFF.md`](./B-IDENTITY-REROOT-HANDOFF.md);
+current status: the master handoff's STATUS UPDATE.**
 
 A (source-map fix) and C (lazy `.src`) remain as separate, follow-on work; A is
 the safe perf win once B makes `.src` non-load-bearing.

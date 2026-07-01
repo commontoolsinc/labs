@@ -1,9 +1,20 @@
 # Handoff — B: content-addressed action identity (re-root off `.src`)
 
-**Branch:** `gideon/lunch-poll-load-investigation` (off `main`).
-**Status:** core re-root **implemented + runner suite green (721/0)**; NOT yet
-PR'd. Merge-gate = adversarial/red-team review (per
-`content-addressed-action-identity.md` §"Red-team pass").
+**Branch:** the PR is `gideon/content-addressed-action-identity` = **#4436** (a
+clean 3-commit carve off `main`; THIS investigation branch has the older, pre-PR B).
+**Status (2026-07-01): DONE + PR'd (#4436), pending Berni's review.** Every
+"remaining to PR-ready" step in §4 below is complete: the `.src`-garble invariant
+harness (built + teeth-verified), the 68+147 gate, dead-code cleanup, and the
+red-team merge-gate. The red-team ALSO caught a **per-instance action-id collision**
+(the re-root made the action id per-*symbol*, but it keys `actionStats` + the
+durable observation and must stay per-*instance*) → FIXED with a source-independent
+`schedulerInstanceKey` (the *fingerprint* stays per-symbol); see
+`docs/specs/action-id-per-instance-decision.md`. And a follow-on finding that gates
+**Part B**: CFC verified-identity (`cfc/implementation-identity.ts`) still reads
+`.src` and fail-closes → [`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md).
+
+_(Original pre-PR status: core re-root implemented + runner suite green (721/0);
+merge-gate = adversarial/red-team review.)_
 
 This is the runtime fix that came out of the lunch-poll **initial-load** perf
 arc. Full background + the boot-floor root cause + why it's a runner (not

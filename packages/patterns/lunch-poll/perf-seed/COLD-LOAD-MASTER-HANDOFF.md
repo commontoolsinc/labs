@@ -7,10 +7,37 @@ ties them together and lays out the three forward workstreams.
 - **[`BOOT-FLOOR-FINDINGS.md`](./BOOT-FLOOR-FINDINGS.md)** — the perf arc, the
   boot-floor root cause, the CPU-profile decomposition, the fix design.
 - **[`B-IDENTITY-REROOT-HANDOFF.md`](./B-IDENTITY-REROOT-HANDOFF.md)** — the
-  implemented fix (B), its exact diff, remaining steps, design flags.
+  identity re-root (B), now PR'd as #4436.
+- **[`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md)** — the NEXT work:
+  pull `.src` off the critical path (the handoff's A + C) → banks the ~83ms.
 
 Branch: `gideon/lunch-poll-load-investigation` (off `main`). Memory pointer:
 `project_lunchpoll_bootfloor_identity.md`.
+
+---
+
+## STATUS UPDATE (2026-07-01)
+
+- **Workstream 1 (identity re-root, "B") — DONE + PR'd as #4436**, branch
+  `gideon/content-addressed-action-identity`, **pending Berni's review**. All the
+  remaining-to-PR steps are done: the `.src`-garble invariant harness (built +
+  teeth-verified), the 68+147 runtime gate, dead-code cleanup, a multi-lens
+  red-team pass, and a Cubic/CI round. The red-team ALSO surfaced a **per-instance
+  action-id collision** — the re-root made the action id per-*symbol*, but it keys
+  `actionStats` + the durable observation and must stay per-*instance* (N instances
+  of one hoisted op otherwise collide). FIXED: it now appends a source-independent
+  `schedulerInstanceKey`; the implementation *fingerprint* stays per-symbol. See
+  `docs/specs/action-id-per-instance-decision.md` (open Q for Berni: is per-instance
+  the intended durable-observation-key granularity?). ⚠️ The full B (collision fix +
+  Cubic fix) is on the **PR branch**, NOT this investigation branch (older B here).
+- **NEXT — Part B (workstream 2 = A + C):** pull `.src` off the critical path →
+  banks the ~83ms. Seed: **[`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md)**.
+  The load-bearing prerequisite the original plan under-called: **CFC
+  verified-identity (`cfc/implementation-identity.ts`) STILL reads `.src` and
+  FAIL-CLOSES `writeAuthorizedBy`** — so making `.src` lazy must re-root that
+  (security-gated) FIRST, else verified writes get denied.
+- **Workstream 3, bucket #2 (TS-parse-in-worker):** in progress on branch
+  `gideon/cold-load-ts-parse` (workspace D) — independent parallel thread.
 
 ---
 
@@ -134,6 +161,10 @@ grinding each bucket individually.
 
 ## 4. WORKSTREAM 1 — Land B (identity re-root)
 
+> **SUPERSEDED (2026-07-01) — see STATUS UPDATE above.** B is DONE + PR'd (#4436),
+> pending Berni; every step below is complete, plus a red-team-surfaced per-instance
+> collision fix. Kept for the original plan of record.
+
 **Status: implemented, full runner suite green (721/0), pre-PR.** Everything is in
 **[`B-IDENTITY-REROOT-HANDOFF.md`](./B-IDENTITY-REROOT-HANDOFF.md)** — the 6-file
 diff, what each change does, what's verified. Remaining, in order:
@@ -157,6 +188,12 @@ diff, what each change does, what's verified. Remaining, in order:
 ---
 
 ## 5. WORKSTREAM 2 — A → C: get `.src` off the cold-load critical path
+
+> **This is now "Part B" — see [`PART-B-LAZY-SRC-HANDOFF.md`](./PART-B-LAZY-SRC-HANDOFF.md)**
+> for the current, focused seed. Key addition since this section was written: the
+> **CFC `.src` fail-closed read** (`cfc/implementation-identity.ts`) is the
+> load-bearing, security-gated prerequisite for making `.src` lazy (C) — the
+> red-team found it; §5 below under-calls it.
 
 This is what actually **banks the ~83ms** (B is the prerequisite that makes it
 safe). The pieces and their dependencies:
