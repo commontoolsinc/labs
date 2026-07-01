@@ -220,4 +220,34 @@ describe("buildRecordsFromCompiled parse memo (content-addressed)", () => {
     );
     expect(second).toEqual(new Set(["second", "__esModule"]));
   });
+
+  it("keys the import memo on the compiled body too (no cross-contamination)", () => {
+    // Symmetric guard for parseCompiledImports: the runtime `require()`
+    // specifiers are also derived from — and memoized by — the compiled body.
+    // Feed two bodies that require() DIFFERENT specifiers under the SAME
+    // identity and assert each record's imports reflect ITS OWN body, proving
+    // the import memo is body-keyed (not identity-keyed) just like the exports.
+    const id = "memo-imports-identity-00000000000000000000";
+    const spec = `cf:module/${id}`;
+    const importsFor = (code: string): string[] => {
+      const g = buildRecordsFromCompiled([{
+        identity: id,
+        filename: "/imp.ts",
+        code,
+        imports: [],
+      }]);
+      return [...g.records.get(spec)!.imports];
+    };
+    const first = importsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `const alpha = require("./alpha.ts");`,
+    );
+    expect(first).toEqual(["./alpha.ts"]);
+    // Same identity, DIFFERENT body → must reflect the second body's imports.
+    const second = importsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `const beta = require("./beta.ts");`,
+    );
+    expect(second).toEqual(["./beta.ts"]);
+  });
 });
