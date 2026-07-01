@@ -24,6 +24,7 @@ import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -672,6 +673,41 @@ describe("link-utils", () => {
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
+    it("memoizes a frozen input per keepAsCell mode and freezes the shared result", () => {
+      // The memo only engages for deep-frozen inputs (a mutable input's identity
+      // could go stale), so it no-ops for the non-frozen literals other tests
+      // pass. A repeated frozen input must return the SAME object (served from
+      // the memo, not recomputed), and that shared object must be frozen so a
+      // consumer cannot corrupt it.
+      const schema = deepFreeze({
+        type: "object",
+        properties: { name: { type: "string", asCell: ["cell"] } },
+      }) as JSONSchema;
+
+      const noneA = sanitizeSchemaForLinks(schema, KeepAsCell.None);
+      const noneB = sanitizeSchemaForLinks(schema, KeepAsCell.None);
+      expect(noneB).toBe(noneA); // same reference ⇒ memo hit
+      expect(Object.isFrozen(noneA)).toBe(true);
+      expect((noneA as { properties: { name: JSONSchema } }).properties.name)
+        .toEqual({ type: "string" }); // asCell stripped
+
+      // A different keepAsCell mode is cached separately (asCell kept here).
+      const allA = sanitizeSchemaForLinks(schema, KeepAsCell.All);
+      expect(allA).not.toBe(noneA);
+      expect((allA as { properties: { name: JSONSchema } }).properties.name)
+        .toEqual({ type: "string", asCell: ["cell"] });
+    });
+
+    it("does not cross-contaminate different frozen inputs", () => {
+      const s1 = deepFreeze({ type: "string", asCell: ["cell"] }) as JSONSchema;
+      const s2 = deepFreeze({ type: "number", asCell: ["cell"] }) as JSONSchema;
+      const o1 = sanitizeSchemaForLinks(s1, KeepAsCell.None);
+      const o2 = sanitizeSchemaForLinks(s2, KeepAsCell.None);
+      expect(o1).not.toBe(o2);
+      expect(o1).toEqual({ type: "string" });
+      expect(o2).toEqual({ type: "number" });
+    });
+
     it("should remove asCell from simple schema", () => {
       const schema = {
         type: "object",

@@ -1,6 +1,7 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -422,6 +423,12 @@ export enum KeepAsCell {
   All = "All",
 }
 
+// Identity-keyed memo for `sanitizeSchemaForLinks` (see the function body).
+const _sanitizeCache = new WeakMap<
+  object,
+  Map<KeepAsCell, JSONSchema | undefined>
+>();
+
 /**
  * Traverse schema and remove all asCell flags.
  * Also handles circular references by using JSON Schema $ref.
@@ -447,6 +454,22 @@ export function sanitizeSchemaForLinks(
     return schema;
   }
 
+  // Memoize by input identity: sanitize is a pure function of
+  // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen
+  // schema is sanitized repeatedly — measured ~46% of calls repeat a frozen
+  // input, carrying ~half of the total strip time. Only deep-frozen inputs are
+  // memoized (a mutable input's identity could go stale), matching the
+  // identity-keyed-memo guard `traverse.ts` uses; `isDeepFrozen` is O(1) for the
+  // already-frozen/cached inputs we hit here. Cached outputs are deep-frozen so a
+  // shared result cannot be mutated by a consumer (all consumers only spread it).
+  const memoizable = isDeepFrozen(schema);
+  if (memoizable) {
+    const byMode = _sanitizeCache.get(schema);
+    if (byMode !== undefined && byMode.has(keepAsCell)) {
+      return byMode.get(keepAsCell);
+    }
+  }
+
   // Collect existing $defs names to avoid collisions
   const existingDefNames = new Set<string>();
   if ("$defs" in schema) {
@@ -468,23 +491,28 @@ export function sanitizeSchemaForLinks(
     keepAsCell,
   };
 
-  const result = recursiveStripAsCellFromSchema(
-    schema,
-    context,
-    0,
-  );
+  const stripped = recursiveStripAsCellFromSchema(schema, context, 0);
 
-  // If we generated any $defs, add them to the root schema
-  if (Object.keys(context.defs).length > 0) {
-    // Merge with any existing $defs
-    const existingDefs = result?.$defs || {};
-    return {
-      ...result,
-      $defs: { ...existingDefs, ...context.defs },
-    };
+  // If we generated any $defs, add them to the root schema (merging existing).
+  const output = Object.keys(context.defs).length > 0
+    ? {
+      ...stripped,
+      $defs: { ...(stripped?.$defs || {}), ...context.defs },
+    }
+    : stripped;
+
+  if (memoizable) {
+    const frozen = deepFreeze(output);
+    let byMode = _sanitizeCache.get(schema);
+    if (byMode === undefined) {
+      byMode = new Map();
+      _sanitizeCache.set(schema, byMode);
+    }
+    byMode.set(keepAsCell, frozen);
+    return frozen;
   }
 
-  return result;
+  return output;
 }
 
 interface SanitizeContext {
