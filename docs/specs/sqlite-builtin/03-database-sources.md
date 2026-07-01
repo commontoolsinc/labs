@@ -97,7 +97,7 @@ Atomicity guarantees (Section [04](./04-server-execution-and-transactions.md))
 are **not** offered for VM sources in v1 — a VM file cannot be ATTACHed to the
 space engine's connection, so writes to it cannot join the space commit
 transaction. When implemented, VM-file writes will run as a post-commit effect
-(like `fetchData`) with at-least-once semantics, not as part of the atomic
+(like `fetchJson`) with at-least-once semantics, not as part of the atomic
 commit. This limitation is intentional and called out so callers don't assume
 cross-store atomicity they won't get.
 

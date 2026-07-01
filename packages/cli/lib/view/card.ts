@@ -248,7 +248,7 @@ function contractDetail(doc: Document, meta: ContractMeta): Line[] {
     out.push(row(["  ↗ contract from its declaration", "comment"]));
   }
   // Type arguments restate the input/output types, so only show them when we
-  // don't already have parsed schemas to display (e.g. fetchData<T>).
+  // don't already have parsed schemas to display (e.g. fetchJson<T>).
   if (
     !contract.input && !contract.output &&
     contract.typeArgs && contract.typeArgs.length > 0

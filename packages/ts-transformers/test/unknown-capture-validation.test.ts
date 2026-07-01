@@ -26,12 +26,12 @@ async function unknownResultDiagnostics(
 
 Deno.test("unknown reactive capture diagnostic", async (t) => {
   await t.step(
-    "errors when an untyped fetchData().result is captured in computed()",
+    "errors when an untyped wish().result is captured in computed()",
     async () => {
       const source = `
-        import { computed, fetchData, pattern } from "commonfabric";
+        import { computed, wish, pattern } from "commonfabric";
         export default pattern<{ token: string }, { n: number }>(({ token }) => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           const pageResultRef = page.result;
           return computed(() => {
             const r: any = pageResultRef;
@@ -49,12 +49,12 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
   );
 
   await t.step(
-    "does not report when the fetchData call is typed",
+    "does not report when the fetchJson call is typed",
     async () => {
       const source = `
-        import { computed, fetchData, pattern } from "commonfabric";
+        import { computed, fetchJson, pattern } from "commonfabric";
         export default pattern<{ token: string }, { n: number }>(({ token }) => {
-          const page = fetchData<{ items: number[] }>({ url: "http://x", mode: "json" });
+          const page = fetchJson<{ items: number[] }>({ url: "http://x" });
           const pageResultRef = page.result;
           return computed(() => {
             const r = pageResultRef;
@@ -119,9 +119,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
     "errors for an unknown `ifElse` condition",
     async () => {
       const source = `
-        import { pattern, ifElse, fetchData, UI } from "commonfabric";
+        import { pattern, ifElse, wish, UI } from "commonfabric";
         export default pattern<{}, { [UI]: any }>(() => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           return { [UI]: ifElse(page.result, "a", "b") };
         });
       `;
@@ -133,9 +133,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
     "errors for an unknown condition in a JSX conditional",
     async () => {
       const source = `
-        import { pattern, fetchData, UI } from "commonfabric";
+        import { pattern, wish, UI } from "commonfabric";
         export default pattern<{}, { [UI]: any }>(() => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           const r = page.result;
           return { [UI]: <div>{r ? "a" : "b"}</div> };
         });
@@ -150,9 +150,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
     "errors for an unknown `when` condition",
     async () => {
       const source = `
-        import { pattern, when, fetchData, UI } from "commonfabric";
+        import { pattern, when, wish, UI } from "commonfabric";
         export default pattern<{}, { [UI]: any }>(() => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           return { [UI]: when(page.result, "shown") };
         });
       `;
@@ -164,9 +164,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
     "errors for an unknown `unless` condition",
     async () => {
       const source = `
-        import { pattern, unless, fetchData, UI } from "commonfabric";
+        import { pattern, unless, wish, UI } from "commonfabric";
         export default pattern<{}, { [UI]: any }>(() => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           return { [UI]: unless(page.result, "fallback") };
         });
       `;
@@ -270,9 +270,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
     "reports each captured expression once even when used repeatedly",
     async () => {
       const source = `
-        import { computed, fetchData, pattern } from "commonfabric";
+        import { computed, wish, pattern } from "commonfabric";
         export default pattern<{ token: string }, { n: number }>(({ token }) => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           const pageResultRef = page.result;
           return computed(() => {
             const a: any = pageResultRef;
@@ -305,9 +305,9 @@ Deno.test("unknown reactive capture diagnostic", async (t) => {
       // the output schema is `true` (any), not `{ type: "unknown" }`. Neither
       // the capture nor the result diagnostic fires.
       const source = `
-        import { pattern, fetchData } from "commonfabric";
+        import { pattern, wish } from "commonfabric";
         export default pattern<{}, { result: any }>(() => {
-          const page = fetchData({ url: "http://x", mode: "json" });
+          const page = wish({ query: "#x" });
           return { result: page.result as any };
         });
       `;

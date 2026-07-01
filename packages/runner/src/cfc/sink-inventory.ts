@@ -1,5 +1,8 @@
 export type InitialSinkName =
-  | "fetchData"
+  | "fetchBinary"
+  | "fetchText"
+  | "fetchJson"
+  | "fetchJsonUnchecked"
   | "fetchProgram"
   | "streamData"
   | "llm"
@@ -8,7 +11,10 @@ export type InitialSinkName =
   | "generateObject";
 
 const INITIAL_SINK_NAMES: readonly InitialSinkName[] = [
-  "fetchData",
+  "fetchBinary",
+  "fetchText",
+  "fetchJson",
+  "fetchJsonUnchecked",
   "fetchProgram",
   "streamData",
   "llm",

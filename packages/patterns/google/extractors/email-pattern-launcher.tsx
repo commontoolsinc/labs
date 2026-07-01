@@ -20,7 +20,7 @@
 import {
   //compileAndRun,
   computed,
-  fetchData,
+  fetchJson,
   //fetchProgram,
   NAME,
   navigateTo,
@@ -142,9 +142,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // FETCH REGISTRY
   // ==========================================================================
 
-  const registryFetch = fetchData<RegistryEntry[]>({
+  const registryFetch = fetchJson<RegistryEntry[]>({
     url: "/api/patterns/google/extractors/email-pattern-registry.json",
-    mode: "json",
   });
 
   const registry = computed<RegistryEntry[]>(() => registryFetch.result || []);

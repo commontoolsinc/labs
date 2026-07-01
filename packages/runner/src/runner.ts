@@ -111,8 +111,11 @@ const sourceLocationLogger = getLogger("runner.source-location", {
 });
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
-  "fetchData",
+  "fetchBinary",
+  "fetchJson",
+  "fetchJsonUnchecked",
   "fetchProgram",
+  "fetchText",
   "generateObject",
   "generateText",
   "llm",

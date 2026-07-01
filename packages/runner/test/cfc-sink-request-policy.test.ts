@@ -27,8 +27,8 @@ describe("CFC sink request policy", () => {
       getCfcState: () => ({
         writePolicyInputs: [{
           kind: "sink-request",
-          effectId: "fetchData:abc123",
-          sink: "fetchData",
+          effectId: "fetchJson:abc123",
+          sink: "fetchJson",
           request,
         }],
       }),
@@ -44,11 +44,11 @@ describe("CFC sink request policy", () => {
     };
 
     expect(
-      verifySinkRequestRelease(tx, "fetchData", "fetchData:abc123", request),
+      verifySinkRequestRelease(tx, "fetchJson", "fetchJson:abc123", request),
     ).toBeUndefined();
 
     expect(
-      verifySinkRequestRelease(tx, "fetchData", "fetchData:abc123", {
+      verifySinkRequestRelease(tx, "fetchJson", "fetchJson:abc123", {
         ...request,
         options: {
           ...request.options,
@@ -75,20 +75,20 @@ describe("CFC sink request policy", () => {
     let flushCount = 0;
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "fetchData",
-      "fetchData:dedupe",
+      "fetchJson",
+      "fetchJson:dedupe",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushCount++;
       },
     );
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "fetchData",
-      "fetchData:dedupe",
+      "fetchJson",
+      "fetchJson:dedupe",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushCount++;
       },
@@ -118,10 +118,10 @@ describe("CFC sink request policy", () => {
     let flushCount = 0;
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "fetchData",
-      "fetchData:prepared-snapshot",
+      "fetchJson",
+      "fetchJson:prepared-snapshot",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushCount++;
       },
@@ -133,8 +133,8 @@ describe("CFC sink request policy", () => {
       writePolicyInputs: ReturnType<typeof createSinkRequestPolicyInput>[];
     };
     state.writePolicyInputs[0] = createSinkRequestPolicyInput(
-      "fetchData",
-      "fetchData:prepared-snapshot",
+      "fetchJson",
+      "fetchJson:prepared-snapshot",
       createFrozenRequestSnapshot({
         url: "https://example.com/mutated-state",
       }),
@@ -166,10 +166,10 @@ describe("CFC sink request policy", () => {
       attempts++;
       enqueueSinkRequestPostCommitEffect(
         tx,
-        "fetchData",
-        "fetchData:retry-effect",
+        "fetchJson",
+        "fetchJson:retry-effect",
         request,
-        "fetchData-start",
+        "fetchJson-start",
         () => {
           flushCount++;
         },

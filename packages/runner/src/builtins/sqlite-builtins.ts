@@ -591,7 +591,7 @@ export function sqliteQuery(
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
-    // in-memory flag — see fetch-data.ts). Re-issue otherwise.
+    // in-memory flag — see fetch.ts). Re-issue otherwise.
     if (result.withTx(tx).get()?.requestHash === hash) return;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 

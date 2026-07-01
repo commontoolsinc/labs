@@ -2,7 +2,7 @@ import {
   type BuiltInLLMMessage,
   computed,
   type Default,
-  fetchData,
+  fetchText,
   handler,
   ifElse,
   llmDialog,
@@ -141,9 +141,8 @@ export default pattern<
     }
   });
 
-  const { result: patternIndex } = fetchData<string>({
+  const { result: patternIndex } = fetchText({
     url: resolvedPatternUrl,
-    mode: "text",
   });
 
   const profileContext = computed(() => {

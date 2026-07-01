@@ -2059,3 +2059,68 @@ function getShrinkErrors(
 function fmtErrors(diagnostics: readonly TransformationDiagnostic[]): string {
   return getShrinkErrors(diagnostics).map((e) => e.message).join("; ");
 }
+
+Deno.test("fetchJson requires an explicit type argument", async (t) => {
+  await t.step("errors when called without a type argument", async () => {
+    const source = [
+      'import { fetchJson } from "commonfabric";',
+      "",
+      'export const x = fetchJson({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertGreater(
+      errors.length,
+      0,
+      "Expected fetch-json:missing-type-argument for untyped fetchJson",
+    );
+    assertStringIncludes(errors[0]!.message, "fetchJsonUnchecked");
+  });
+
+  await t.step("no error when a type argument is given", async () => {
+    const source = [
+      'import { fetchJson } from "commonfabric";',
+      "",
+      "interface Repo { name: string }",
+      'export const x = fetchJson<Repo>({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertEquals(
+      errors.length,
+      0,
+      `Expected no missing-type-argument error but got: ${
+        errors.map((e) => e.message).join("; ")
+      }`,
+    );
+  });
+
+  await t.step("no error for untyped fetchJsonUnchecked", async () => {
+    const source = [
+      'import { fetchJsonUnchecked } from "commonfabric";',
+      "",
+      'export const x = fetchJsonUnchecked({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertEquals(
+      errors.length,
+      0,
+      `Expected no error for fetchJsonUnchecked but got: ${
+        errors.map((e) => e.message).join("; ")
+      }`,
+    );
+  });
+});

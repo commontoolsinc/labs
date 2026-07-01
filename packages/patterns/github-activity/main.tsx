@@ -1,7 +1,7 @@
 import {
   computed,
   Default,
-  fetchData,
+  fetchJson,
   generateText,
   NAME,
   pattern,
@@ -45,9 +45,8 @@ export default pattern<{
   });
 
   // Fetch commits data
-  const commitsData = fetchData<CommitResponse>({
+  const commitsData = fetchJson<CommitResponse>({
     url: apiUrl,
-    mode: "json",
   });
   const commits = commitsData.result;
 

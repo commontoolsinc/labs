@@ -1,19 +1,19 @@
 /**
  * Test Pattern for Superstition #30
  *
- * Tests whether fetchData() can be dynamically instantiated inside .map()
+ * Tests whether fetchJson() can be dynamically instantiated inside .map()
  *
  * Claim:
- * - fetchData() calls cannot be created dynamically inside .map() or reactive callbacks
- * - Framework requires fetchData to be statically defined at pattern evaluation time
+ * - fetchJson() calls cannot be created dynamically inside .map() or reactive callbacks
+ * - Framework requires fetchJson to be statically defined at pattern evaluation time
  * - Dynamic instantiation causes "Frame mismatch" errors or undefined results
  *
  * This pattern tests:
- * 1. Static fetchData at top level (control - should work)
- * 2. fetchData inside .map() with expression callback (claimed to fail)
+ * 1. Static fetchJson at top level (control - should work)
+ * 2. fetchJson inside .map() with expression callback (claimed to fail)
  */
 import { computed, Default, NAME, pattern, UI } from "commonfabric";
-import { fetchData } from "commonfabric";
+import { fetchJson } from "commonfabric";
 
 interface Repo {
   id: string;
@@ -39,22 +39,20 @@ export interface Input {
 }
 
 export default pattern<InputSchema, Input>(({ repos }) => {
-  // Approach 1: Static fetchData at top level (control - should work)
+  // Approach 1: Static fetchJson at top level (control - should work)
   // Uses computed URL that changes based on first repo
   const staticUrl = computed(() =>
     repos[0] ? `https://api.github.com/repos/facebook/${repos[0].name}` : ""
   );
-  const staticFetch = fetchData<GitHubRepoStats>({
+  const staticFetch = fetchJson<{ stargazers_count?: number }>({
     url: staticUrl,
-    mode: "json",
   });
 
-  // Approach 2: fetchData inside .map() - expression callback (no block syntax)
+  // Approach 2: fetchJson inside .map() - expression callback (no block syntax)
   // This is claimed to fail with frame mismatch or return undefined
   const dynamicFetches = repos.map((repo) =>
-    fetchData<GitHubRepoStats>({
+    fetchJson<{ stargazers_count?: number }>({
       url: computed(() => `https://api.github.com/repos/facebook/${repo.name}`),
-      mode: "json",
     })
   );
 
@@ -70,12 +68,12 @@ export default pattern<InputSchema, Input>(({ repos }) => {
   );
 
   return {
-    [NAME]: "Test #30: fetchData Dynamic Instantiation",
+    [NAME]: "Test #30: fetchJson Dynamic Instantiation",
     [UI]: (
       <div
         style={{ fontFamily: "system-ui", padding: "20px", maxWidth: "800px" }}
       >
-        <h2>Superstition #30 Test: fetchData Dynamic Instantiation</h2>
+        <h2>Superstition #30 Test: fetchJson Dynamic Instantiation</h2>
 
         <div
           style={{
@@ -88,7 +86,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
           <h3>Claim Being Tested:</h3>
           <ul>
             <li>
-              <code>fetchData()</code> cannot be created inside{" "}
+              <code>fetchJson()</code> cannot be created inside{" "}
               <code>.map()</code>
             </li>
             <li>
@@ -108,7 +106,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
             marginBottom: "20px",
           }}
         >
-          {/* Static fetchData (Control) */}
+          {/* Static fetchJson (Control) */}
           <div
             style={{
               border: "2px solid #27ae60",
@@ -116,7 +114,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
               padding: "15px",
             }}
           >
-            <h3 style={{ color: "#27ae60" }}>1. Static fetchData (Control)</h3>
+            <h3 style={{ color: "#27ae60" }}>1. Static fetchJson (Control)</h3>
             <code
               style={{
                 fontSize: "11px",
@@ -124,7 +122,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
                 marginBottom: "10px",
               }}
             >
-              fetchData at top level with computed URL
+              fetchJson at top level with computed URL
             </code>
             <div style={{ marginBottom: "10px" }}>
               <strong>URL:</strong> {staticUrl}
@@ -138,7 +136,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
             </div>
           </div>
 
-          {/* Dynamic fetchData */}
+          {/* Dynamic fetchJson */}
           <div
             style={{
               border: "2px solid #e74c3c",
@@ -146,7 +144,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
               padding: "15px",
             }}
           >
-            <h3 style={{ color: "#e74c3c" }}>2. Dynamic fetchData (Test)</h3>
+            <h3 style={{ color: "#e74c3c" }}>2. Dynamic fetchJson (Test)</h3>
             <code
               style={{
                 fontSize: "11px",
@@ -154,7 +152,7 @@ export default pattern<InputSchema, Input>(({ repos }) => {
                 marginBottom: "10px",
               }}
             >
-              fetchData inside .map() callback
+              fetchJson inside .map() callback
             </code>
             <div>
               {dynamicFetches.map((fetch, index) => (

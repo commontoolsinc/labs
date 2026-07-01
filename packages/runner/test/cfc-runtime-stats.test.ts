@@ -62,12 +62,12 @@ describe("CFC runtime stats", () => {
     let preparedFlushCount = 0;
     enqueueSinkRequestPostCommitEffect(
       preparedTx,
-      "fetchData",
-      "fetchData:cfc-runtime-stats-prepared",
+      "fetchJson",
+      "fetchJson:cfc-runtime-stats-prepared",
       createFrozenRequestSnapshot({
         url: "https://example.com/cfc-runtime-stats-prepared",
       }),
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         preparedFlushCount++;
       },
@@ -133,20 +133,20 @@ describe("CFC runtime stats", () => {
     let flushCount = 0;
     enqueueSinkRequestPostCommitEffect(
       sinkTx,
-      "fetchData",
-      "fetchData:cfc-runtime-stats",
+      "fetchJson",
+      "fetchJson:cfc-runtime-stats",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushCount++;
       },
     );
     enqueueSinkRequestPostCommitEffect(
       sinkTx,
-      "fetchData",
-      "fetchData:cfc-runtime-stats",
+      "fetchJson",
+      "fetchJson:cfc-runtime-stats",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushCount++;
       },

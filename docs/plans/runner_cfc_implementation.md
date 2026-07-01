@@ -818,7 +818,7 @@ Acceptance:
 
 Primary files:
 
-- `packages/runner/src/builtins/fetch-data.ts`
+- `packages/runner/src/builtins/fetch.ts`
 - `packages/runner/src/builtins/fetch-program.ts`
 - `packages/runner/src/builtins/stream-data.ts`
 - `packages/runner/src/builtins/llm.ts`
@@ -829,7 +829,7 @@ Tasks:
 
 - [x] Introduce a stable, immutable request snapshot for external sink calls
 - [x] Include `streamData`, `llm`, `llmDialog`, `generateText`, and
-      `generateObject` alongside `fetchData` and `fetchProgram` in the initial
+      `generateObject` alongside `fetchJson` and `fetchProgram` in the initial
       sink inventory and rollout gate
 - [x] Move network side effects behind the transaction outbox
 - [x] Verify sink-specific policy from the prepared request snapshot and
@@ -840,7 +840,7 @@ Tasks:
 Acceptance:
 
 - [x] Failed prepare or failed commit never issues a network call from
-      `fetchData`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
+      `fetchJson`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
       `generateText`, or `generateObject`
 - [x] Retried attempts reuse the winning committed effect and do not double-send
 - [x] Request release rules are evaluated from the prepared request snapshot and

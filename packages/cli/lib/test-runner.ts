@@ -921,7 +921,7 @@ export async function runTestPattern(
   // Fetch mocking: a test opts in by exporting a module-scope `fetchMocks` array.
   // We can't read it until after compile, so the injected fetch closes over a
   // late-populated `fetchMockEntries` and falls through to the real fetch until
-  // (and unless) the test declares mocks. Driving the in-flight fetchData to
+  // (and unless) the test declares mocks. Driving the in-flight fetchJson to
   // completion is the harness's existing job — a `{ settle: true }` step (or any
   // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
   const realFetch = globalThis.fetch.bind(globalThis);
@@ -1011,7 +1011,7 @@ export async function runTestPattern(
     }
 
     // Read the test's opt-in fetch mocks now (after compile, before the run):
-    // a fetchData with a non-empty URL fires during the initial settle, so the
+    // a fetchJson with a non-empty URL fires during the initial settle, so the
     // entries must be in place before `runtime.run(...)` below. `main` is the
     // module namespace, so a named `fetchMocks` export is reachable.
     fetchMockEntries = readFetchMocks(main);

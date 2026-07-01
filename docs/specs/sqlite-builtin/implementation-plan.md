@@ -57,7 +57,7 @@ return `not-implemented`. No behavior yet. De-risks the type design.
   types: branded `SqliteDatabase`, `SqliteDatabaseSource`, `SqliteQueryParams`,
   `SqliteQueryState<Row>`, `SqliteExecuteParams`, `SqliteExecuteState`, and the
   function declarations (`sqliteDatabase`, `sqliteQuery`, `sqliteExecute`).
-  Follow the existing `FetchDataFunction` / `GenerateTextFunction` declaration
+  Follow the existing `FetchJsonFunction` / `GenerateTextFunction` declaration
   style.
 - `packages/api/` — `table(...)` and `cfLink<T>()` helper types (compile to
   `JSONSchema`; `cfLink` emits `{ type: "string", cfLink: true }`).
@@ -125,7 +125,7 @@ builtin plumbing.
      ([`packages/runner/src/back-to-cell.ts`](../../../packages/runner/src/back-to-cell.ts);
      [`query-result-proxy.ts`](../../../packages/runner/src/query-result-proxy.ts)).
    - Allocate `{ pending, result, error }` output cells (model on
-     [`packages/runner/src/builtins/fetch-data.ts`](../../../packages/runner/src/builtins/fetch-data.ts)).
+     [`packages/runner/src/builtins/fetch.ts`](../../../packages/runner/src/builtins/fetch.ts)).
    - Issue the query over the space session (the runner's storage client) and
      write the result back. (Reads are non-mutating, so no post-commit effect is
      needed for the read path itself.)
@@ -363,7 +363,7 @@ remain deferred).
 
 - Wire the `{ vm, path }` descriptor through the handle and server resolver.
 - When implemented, VM-file writes run as a **non-atomic post-commit effect**
-  (like `fetchData`), not part of the commit transaction (Section 03.2).
+  (like `fetchJson`), not part of the commit transaction (Section 03.2).
 
 **Exit:** API stable; explicit `not-implemented` until backend lands.
 
@@ -409,7 +409,7 @@ remain deferred).
   `packages/runner` (builtin behavior), `packages/ts-transformers` (fixtures).
 - **Integration:** `packages/generated-patterns/integration/patterns/` — a
   `sqlite-*.pattern.ts` exercising query + execute + reactivity end to end
-  against a live toolshed, mirroring the `ct-1334-fetchdata-*` patterns.
+  against a live toolshed, mirroring the `ct-1334-fetchjson-*` patterns.
 - Every new workspace package (none expected here) would need a `test` task per
   `AGENTS.md`; this feature extends existing packages only.
 

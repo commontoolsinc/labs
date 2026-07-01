@@ -435,7 +435,7 @@ load-bearing assumption.
   missing cause (`create-ref.ts:25-31,
   66-90`) where the spec requires
   fail-closed; deterministic IDs + open sync = existence probing (§17.1 MUST
-  NOT). `fetchData`'s `inputHash` additionally writes a content- equality oracle
+  NOT). `fetchJson`'s `inputHash` additionally writes a content- equality oracle
   for possibly-confidential inputs into a shared doc.
 - **S15 [hole, adjacent pkg] Render declassification minted by untrusted
   markup.** `declassifyConfidentiality` is read from static VDOM props and

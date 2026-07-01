@@ -55,23 +55,43 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       "archive buttons remove completed items",
     );
 
-    const { default: FetchDataDynamic } = await import(
-      "../../../gideon-tests/test-30-fetchdata-dynamic-instantiation.tsx"
+    const { default: FetchJsonDynamic } = await import(
+      "../../../gideon-tests/test-30-fetchjson-dynamic-instantiation.tsx"
     );
-    const fetchDataDynamic = instantiatePattern(FetchDataDynamic, {
+    const fetchJsonDynamic = instantiatePattern(FetchJsonDynamic, {
       repos: [
         { id: "1", name: "react" },
         { id: "2", name: "vue" },
       ],
     });
-    const repos = fetchDataDynamic.repos;
+    const repos = fetchJsonDynamic.repos;
     assert(
       Array.isArray(repos) && repos.length === 2,
-      "fetch-data dynamic pattern keeps input repos",
+      "fetch-json dynamic pattern keeps input repos",
     );
     assert(
-      textContent(uiOf(fetchDataDynamic)).includes("Stars: 123"),
-      "fetch-data dynamic pattern renders typed star counts",
+      textContent(uiOf(fetchJsonDynamic)).includes("Stars: 123"),
+      "fetch-json dynamic pattern renders typed star counts",
+    );
+
+    const { default: FetchJsonExample } = await import(
+      "../../../examples/fetch-json.tsx"
+    );
+    const fetchJsonExample = instantiatePattern(FetchJsonExample, {
+      repoUrl: new Writable("https://github.com/vercel/next.js"),
+    });
+    assert(
+      textContent(uiOf(fetchJsonExample)).includes("123"),
+      "fetch-json example renders the typed repo star count",
+    );
+
+    const { default: TestAwaitInHandler } = await import(
+      "../../../gideon-tests/test-await-in-handler.tsx"
+    );
+    const testAwaitInHandler = instantiatePattern(TestAwaitInHandler, {});
+    assert(
+      textContent(uiOf(testAwaitInHandler)).includes("Fetched successfully"),
+      "await-in-handler pattern renders the reactive fetchJson result",
     );
 
     const { default: GmailImporter } = await import(

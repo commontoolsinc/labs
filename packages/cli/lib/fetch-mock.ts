@@ -3,11 +3,11 @@
  *
  * A test opts in by exporting a module-scope `fetchMocks: FetchMockEntry[]`. The
  * runner reads it after compile and injects {@link makeMockFetch} as the
- * runtime's `fetch` (`RuntimeOptions.fetch`), so a `fetchData` resolves against
+ * runtime's `fetch` (`RuntimeOptions.fetch`), so a `fetchJson` resolves against
  * the mock instead of the network. Driving the in-flight request to completion
  * stays the harness's job via the `{ settle: true }` step (`runtime.settled()`).
  *
- * This is the generic-HTTP (`fetchData`) seam; LLM calls
+ * This is the generic-HTTP (`fetchJson`) seam; LLM calls
  * (`generateText`/`generateObject`) mock separately at the `LLMClient` layer
  * (`@commonfabric/llm`).
  */
@@ -18,7 +18,7 @@
  * payloads like images).
  *
  * `delayMs` holds the response for a fixed real-time delay before returning, so a
- * `fetchData` isn't resolved instantly — useful for tests that depend on *when* a
+ * `fetchJson` isn't resolved instantly — useful for tests that depend on *when* a
  * fetch resolves. It stays deterministic: `runtime.settled()` awaits the actual
  * (delayed) fetch promise. (Precise, manually-released ordering — a "gate" — needs
  * a SES-clean harness mechanism; tracked as a follow-up, see CT-1768.)

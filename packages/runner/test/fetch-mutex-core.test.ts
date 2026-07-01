@@ -18,10 +18,10 @@ import {
 } from "../src/builtins/fetch-utils.ts";
 import type { Schema } from "../src/builder/types.ts";
 
-const signer = await Identity.fromPassphrase("test fetch-data mutex");
+const signer = await Identity.fromPassphrase("test fetch mutex");
 const space = signer.did();
 
-describe("fetch-data mutex mechanism: core mutex behavior", () => {
+describe("fetch-json mutex mechanism: core mutex behavior", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -83,9 +83,9 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
   });
 
   it("should successfully fetch data", async () => {
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell = runtime.getCell(space, "fetch-test", undefined, tx);
@@ -121,14 +121,14 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
     expect(fetchCalls[0].url).toContain("/api/test");
   });
 
-  it("resolves relative fetchData URLs against the pattern API URL", async () => {
+  it("resolves relative fetchJson URLs against the pattern API URL", async () => {
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local/api/root/"),
     });
 
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell = runtime.getCell(
@@ -155,10 +155,10 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
     );
   });
 
-  it("should enqueue fetchData work behind the post-commit outbox", async () => {
-    const fetchData = byRef("fetchData");
+  it("should enqueue fetchJson work behind the post-commit outbox", async () => {
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const txPrototype = ExtendedStorageTransaction.prototype;
@@ -196,11 +196,10 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
     }
   });
 
-  it("uses a stable fetchData idempotency key for identical inputs", async () => {
-    const fetchData = byRef("fetchData");
+  it("uses a stable fetchJson idempotency key for identical inputs", async () => {
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) =>
-        fetchData({ url, mode: "json", options: { mutexTimeoutMs: 30_000 } }),
+      ({ url }) => fetchJson({ url, options: { mutexTimeoutMs: 30_000 } }),
     );
 
     const txPrototype = ExtendedStorageTransaction.prototype;
@@ -234,16 +233,14 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
 
       const expectedHash = computeInputHashFromValue({
         url: "http://mock-test-server.local/api/idempotency",
-        mode: "json",
       });
 
       expect(computeInputHashFromValue({
         url: "http://mock-test-server.local/api/idempotency",
-        mode: "json",
         options: { mutexTimeoutMs: 30_000 },
       })).toBe(expectedHash);
       expect(outboxIds.length).toBeGreaterThan(0);
-      expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
+      expect(outboxIds[0]).toBe(`fetchJson:${expectedHash}`);
     } finally {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
       wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
@@ -305,9 +302,9 @@ describe("fetch-data mutex mechanism: core mutex behavior", () => {
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     // Create two separate result cells simulating two "tabs"

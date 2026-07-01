@@ -8,10 +8,10 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setPatternEnvironment } from "../src/env.ts";
 
-const signer = await Identity.fromPassphrase("test fetch-data mutex");
+const signer = await Identity.fromPassphrase("test fetch mutex");
 const space = signer.did();
 
-describe("fetch-data mutex mechanism: reactive fetch state", () => {
+describe("fetch-json mutex mechanism: reactive fetch state", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -80,9 +80,9 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
     tx.commit();
     tx = runtime.edit();
 
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell = runtime.getCell(space, "url-change-test", undefined, tx);
@@ -119,12 +119,13 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
     expect(secondCallCount).toBeGreaterThan(0);
   });
 
-  it("should handle mode changes (text vs json)", async () => {
-    const fetchData = byRef("fetchData");
+  it("should handle switching between fetchJson and fetchText", async () => {
+    const fetchJson = byRef("fetchJson");
+    const fetchText = byRef("fetchText");
 
     // First fetch as JSON
     const jsonPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell1 = runtime.getCell(space, "mode-test-json", undefined, tx);
@@ -141,10 +142,11 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
     const jsonCallCount = fetchCalls.length;
     expect(jsonCallCount).toBeGreaterThan(0);
 
-    // Now fetch same URL as text - should trigger new fetch due to different mode
+    // Now fetch same URL as text - should trigger new fetch due to the
+    // different builtin
     tx = runtime.edit();
     const textPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "text" }),
+      ({ url }) => fetchText({ url }),
     );
 
     const resultCell2 = runtime.getCell(space, "mode-test-text", undefined, tx);
@@ -158,53 +160,8 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell2.pull();
 
-    // Should have made additional fetch calls for the different mode
+    // Should have made additional fetch calls for the different builtin
     expect(fetchCalls.length).toBeGreaterThan(jsonCallCount);
-  });
-
-  it("converts dataUrl mode responses into a serializable data URL", async () => {
-    globalThis.fetch = (
-      input: string | URL | Request,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      const url = typeof input === "string"
-        ? input
-        : input instanceof URL
-        ? input.toString()
-        : input.url;
-      fetchCalls.push({ url, init });
-      return Promise.resolve(
-        new Response(new Uint8Array([1, 2, 3, 4]), {
-          status: 200,
-          headers: { "Content-Type": "image/webp" },
-        }),
-      );
-    };
-
-    const fetchData = byRef("fetchData");
-    const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "dataUrl" }),
-    );
-
-    const resultCell = runtime.getCell(space, "data-url-test", undefined, tx);
-    const result = runtime.run(tx, testPattern, {
-      url: "/api/image",
-    }, resultCell);
-    tx.commit();
-
-    await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await result.pull();
-
-    const rawData = result.get() as {
-      pending: boolean;
-      result?: string;
-      error?: unknown;
-    };
-
-    expect(rawData.pending).toBe(false);
-    expect(rawData.error).toBeUndefined();
-    expect(rawData.result).toBe("data:image/webp;base64,AQIDBA==");
   });
 
   it("should set pending to true during fetch and false after", async () => {
@@ -230,9 +187,9 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
       });
     };
 
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell = runtime.getCell(space, "pending-test", undefined, tx);
@@ -282,9 +239,9 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
     });
     const localTx = rt.edit();
     const { commonfabric } = createTrustedBuilder(rt);
-    const fetchData = commonfabric.byRef("fetchData");
+    const fetchJson = commonfabric.byRef("fetchJson");
     const testPattern = commonfabric.pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const resultCell = rt.getCell(
@@ -329,9 +286,9 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
   });
 
   it("should abort and clear state if URL becomes empty while waiting for mutex", async () => {
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
+      ({ url }) => fetchJson({ url }),
     );
 
     const urlCell = runtime.getCell<string>(
@@ -367,7 +324,7 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
   });
 
   it("should include computed options on the first fetch (CT-1246)", async () => {
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
 
     // Options come from a computed — this is the scenario that triggers the bug.
     // Without the fix, the first fetch fires before the computed settles,
@@ -377,7 +334,7 @@ describe("fetch-data mutex mechanism: reactive fetch state", () => {
         const options = computed(() => ({
           headers: { Accept: "application/vnd.github.v3.star+json" },
         }));
-        return fetchData({ url, options });
+        return fetchJson({ url, options });
       },
     );
 

@@ -134,6 +134,25 @@ export interface FabricLinkConstructor {
 export declare const FabricLink: FabricLinkConstructor;
 
 /**
+ * An immutable, frozen sequence of bytes. Extends `FabricPrimitive` --
+ * treated like a primitive in the fabric type system (always frozen, passes
+ * through conversion unchanged). Read the bytes with `slice()` or
+ * `copyInto()`.
+ */
+export interface FabricBytes extends FabricPrimitive {
+  readonly length: number;
+  slice(start?: number, end?: number): Uint8Array;
+  copyInto(target: Uint8Array, offset?: number, length?: number): number;
+}
+
+export interface FabricBytesConstructor {
+  new (bytes: Uint8Array): FabricBytes;
+  prototype: FabricBytes;
+}
+
+export declare const FabricBytes: FabricBytesConstructor;
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
@@ -2184,14 +2203,77 @@ export type FetchOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
   redirect?: "follow" | "error" | "manual";
 };
-export type FetchDataFunction = <T>(
+/** Result shape of fetchBinary: the raw response bytes plus the media type. */
+export type FetchBinaryResult = {
+  /** Response body as a byte buffer; read it with `slice()` / `copyInto()`. */
+  bytes: FabricBytes;
+  /** Media type from the Content-Type response header, e.g. "image/png". */
+  mediaType: string;
+};
+
+/**
+ * Fetch a URL and expose the response body as binary data.
+ *
+ * `result` holds the body as `{ bytes, mediaType }` where `bytes` is a
+ * `FabricBytes` byte buffer. `pending` is true while the request is in
+ * flight; failures land on `error`.
+ */
+export type FetchBinaryFunction = (
   params: FactoryInput<{
     url: string;
-    mode?: "json" | "text" | "dataUrl";
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: FetchBinaryResult; error?: any }>;
+
+/**
+ * Fetch a URL and expose the response body as text.
+ *
+ * `result` holds the body decoded as UTF-8. `pending` is true while the
+ * request is in flight; failures land on `error`.
+ */
+export type FetchTextFunction = (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: string; error?: any }>;
+
+/**
+ * Fetch a URL and expose the response body as parsed JSON.
+ *
+ * An explicit type argument is required (`fetchJson<T>({ url })`); calling
+ * fetchJson without one is a compile error — use fetchJsonUnchecked for JSON
+ * whose shape isn't declared as a type. The compiler derives a JSON schema
+ * from `T` and injects it as the `schema` parameter; the response is verified
+ * against that schema at fetch time, and a verification failure lands on
+ * `error` with `result` left undefined. Verification follows standard JSON
+ * Schema semantics: object properties not named in the schema are allowed
+ * unless the schema declares `additionalProperties` itself. A schema passed
+ * explicitly takes precedence over the derived one.
+ */
+export type FetchJsonFunction = <T>(
+  params: FactoryInput<{
+    url: string;
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
 ) => Reactive<{ pending: boolean; result: T; error?: any }>;
+
+/**
+ * Fetch a URL and expose the response body as parsed JSON, without any
+ * schema verification.
+ *
+ * The escape hatch for responses whose shape isn't declared as a type: the
+ * parsed body is returned as `any` and never verified. Prefer fetchJson with
+ * an explicit type argument where a type exists.
+ */
+export type FetchJsonUncheckedFunction = (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: any; error?: any }>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
@@ -2684,7 +2766,10 @@ export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
-export declare const fetchData: FetchDataFunction;
+export declare const fetchBinary: FetchBinaryFunction;
+export declare const fetchText: FetchTextFunction;
+export declare const fetchJson: FetchJsonFunction;
+export declare const fetchJsonUnchecked: FetchJsonUncheckedFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;

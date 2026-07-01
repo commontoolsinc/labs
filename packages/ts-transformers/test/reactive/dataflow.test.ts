@@ -141,16 +141,30 @@ declare const collection: {
     assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
-  it("recognises fetchData as a reactive origin call", () => {
+  it("recognises fetchJson as a reactive origin call", () => {
     const { call, checker } = getCallExpression(
-      'fetchData({ url: "https://example.com", result: [] })',
+      'fetchJson({ url: "https://example.com", result: [] })',
       {
         prelude:
-          "declare function fetchData<T>(args: { url: string; result: T }): T;",
+          "declare function fetchJson<T>(args: { url: string; result: T }): T;",
       },
     );
 
     assertEquals(detectCallKind(call, checker)?.kind, "runtime-call");
     assertEquals(isReactiveOriginCall(call, checker), true);
   });
+
+  for (const name of ["fetchBinary", "fetchText", "fetchJson"]) {
+    it(`recognises ${name} as a reactive origin call`, () => {
+      const { call, checker } = getCallExpression(
+        `${name}({ url: "https://example.com" })`,
+        {
+          prelude: `declare function ${name}(args: { url: string }): unknown;`,
+        },
+      );
+
+      assertEquals(detectCallKind(call, checker)?.kind, "runtime-call");
+      assertEquals(isReactiveOriginCall(call, checker), true);
+    });
+  }
 });

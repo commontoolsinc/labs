@@ -453,7 +453,7 @@ const result = someFunction();
 const helper = (() => (x: number) => x * 2)();
 
 // ❌ Non-builder side effect at module scope
-const data = fetchData();
+const data = fetchJson();
 
 // ❌ Await expressions (implies side effects)
 const response = await fetch(url);
@@ -883,7 +883,7 @@ These runtime modules may export:
 - cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
   `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
 - graph-construction built-ins: `str`, `ifElse`, `when`, `unless`, `llm`,
-  `llmDialog`, `generateObject`, `generateText`, `fetchData`, `fetchProgram`,
+  `llmDialog`, `generateObject`, `generateText`, `fetchJson`, `fetchProgram`,
   `streamData`, `compileAndRun`, `navigateTo`, `wish`
 - utilities and constants required for graph construction and schema handling
 
@@ -2339,7 +2339,7 @@ await runner.start(resultCell);
 
 2. **No memory limits**: Memory exhaustion possible. Future work: Monitor heap usage.
 
-3. **No egress policy on runtime-managed network nodes**: `fetchData()`,
+3. **No egress policy on runtime-managed network nodes**: `fetchJson()`,
    `fetchProgram()`, and `streamData()` remain allowed graph constructors and
    may still reach arbitrary URLs under runtime control.
 
@@ -2362,7 +2362,7 @@ module surface in v1. Reintroducing them requires separate scoped work.
    SES compartments because existing importer/auth flows still rely on them.
    This currently applies to authored module assembly, `__cfHelpers.__cf_data(...)`
    snapshotting, and lazy callback rehydration. It should be deprecated in
-   favor of runtime-managed graph constructors such as `fetchData()` plus an
+   favor of runtime-managed graph constructors such as `fetchJson()` plus an
    explicit egress policy.
 
 ### 11.4 Escape Hatch Analysis

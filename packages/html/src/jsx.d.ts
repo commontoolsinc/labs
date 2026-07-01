@@ -2891,6 +2891,7 @@ interface CFLinkPreviewElement extends CFHTMLElement {}
 interface CFTextAreaElement extends CFHTMLElement {}
 interface CFFileInputElement extends CFHTMLElement {}
 interface CFImageInputElement extends CFHTMLElement {}
+interface CFImageElement extends CFHTMLElement {}
 interface CFInputLegacyElement extends CFHTMLElement {}
 interface CFCheckboxElement extends CFHTMLElement {}
 interface CFAutocompleteElement extends CFHTMLElement {}
@@ -3864,6 +3865,14 @@ interface CFImageInputAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-change"?: EventHandler<any>;
   "oncf-remove"?: EventHandler<any>;
   "oncf-error"?: EventHandler<any>;
+}
+
+interface CFImageAttributes<T> extends CFHTMLAttributes<T> {
+  "bytes"?: unknown;
+  "$bytes"?: CellLike<unknown>;
+  "mediaType"?: string;
+  "media-type"?: string;
+  "alt"?: string;
 }
 
 interface CFCheckboxAttributes<T> extends CFHTMLAttributes<T> {
@@ -4973,6 +4982,10 @@ declare global {
       "cf-image-input": CFDOM.DetailedHTMLProps<
         CFImageInputAttributes<CFImageInputElement>,
         CFImageInputElement
+      >;
+      "cf-image": CFDOM.DetailedHTMLProps<
+        CFImageAttributes<CFImageElement>,
+        CFImageElement
       >;
       "cf-checkbox": CFDOM.DetailedHTMLProps<
         CFCheckboxAttributes<CFCheckboxElement>,

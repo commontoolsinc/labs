@@ -1,10 +1,10 @@
-import { fetchData, lift, NAME, pattern, UI } from "commonfabric";
+import { fetchJson, lift, NAME, pattern, UI } from "commonfabric";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
  * display a list of pizza descriptions inside the piece.
  *
- * Uses: fetchData, lift, map built-in, toolshed web-read endpoint
+ * Uses: fetchJson, lift, map built-in, toolshed web-read endpoint
  */
 const DATE_LINE_REGEX = /^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}$/;
 
@@ -84,9 +84,8 @@ const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
 export default pattern(() => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
-  const { result } = fetchData<WebReadResult>({
+  const { result } = fetchJson<WebReadResult>({
     url: "/api/agent-tools/web-read",
-    mode: "json",
     options: {
       method: "POST",
       headers: {

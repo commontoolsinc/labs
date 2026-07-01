@@ -747,7 +747,7 @@ Deno.test("parse: a builder call records input/output schemas, config args and c
     '  { type: "string" } as const satisfies __cfHelpers.JSONSchema,',
     "  ({ a }) => `n:${a}`,",
     ");",
-    "const data = fetchData({ url: endpoint, method: verb });",
+    "const data = fetchJson({ url: endpoint, method: verb });",
   ].join("\n");
   const doc = parseDocument(src, "m.ts");
   const builder = findNode(
@@ -770,9 +770,9 @@ Deno.test("parse: a builder call records input/output schemas, config args and c
       "callback parameter captured",
     );
   }
-  // fetchData with a plain object argument records that object's keys as args.
+  // fetchJson with a plain object argument records that object's keys as args.
   const fetch = findNode(doc, (n) => n.name === "data");
-  assert(fetch, "the fetchData binding is a node");
+  assert(fetch, "the fetchJson binding is a node");
 });
 
 // --- inferExprType branches (lines 2007-2053) & describeInitializer ----------

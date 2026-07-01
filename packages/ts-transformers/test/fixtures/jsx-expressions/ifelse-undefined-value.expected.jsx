@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
+import { computed, fetchText, ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -50,9 +50,8 @@ const __cfLift_2 = __cfHelpers.lift<{
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
-    const __cf_destructure_1 = fetchData<string>({
+    const __cf_destructure_1 = fetchText({
         url: "/api/data",
-        mode: "text",
     }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({

@@ -31,10 +31,10 @@ describe("CFC sink-release reject surfacing", () => {
     let flushed = false;
     enqueueSinkRequestPostCommitEffect(
       enqueueTx,
-      "fetchData",
-      "fetchData:release-reject",
+      "fetchJson",
+      "fetchJson:release-reject",
       request,
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         flushed = true;
       },
@@ -46,8 +46,8 @@ describe("CFC sink-release reject surfacing", () => {
     const noted: Array<{ sink: string; effectId: string; detail: string }> = [];
     const mismatchingInputs = [
       createSinkRequestPolicyInput(
-        "fetchData",
-        "fetchData:release-reject",
+        "fetchJson",
+        "fetchJson:release-reject",
         createFrozenRequestSnapshot({ url: "https://evil.example.com" }),
       ),
     ];
@@ -71,8 +71,8 @@ describe("CFC sink-release reject surfacing", () => {
 
     expect(flushed).toBe(false); // fail-closed: send skipped
     expect(noted.length).toBe(1);
-    expect(noted[0].sink).toBe("fetchData");
-    expect(noted[0].effectId).toBe("fetchData:release-reject");
+    expect(noted[0].sink).toBe("fetchJson");
+    expect(noted[0].effectId).toBe("fetchJson:release-reject");
     expect(noted[0].detail).toContain("mismatch");
   });
 });

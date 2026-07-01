@@ -91,10 +91,11 @@ Useful references:
 
 ### Files And Media
 
-| Element              | Element               | Element          | Element            |
-| -------------------- | --------------------- | ---------------- | ------------------ |
-| `cf-attachments-bar` | `cf-audio-visualizer` | `cf-canvas`      | `cf-file-download` |
-| `cf-file-input`      | `cf-iframe`           | `cf-image-input` | `cf-svg`           |
+| Element              | Element               | Element     | Element            |
+| -------------------- | --------------------- | ----------- | ------------------ |
+| `cf-attachments-bar` | `cf-audio-visualizer` | `cf-canvas` | `cf-file-download` |
+| `cf-file-input`      | `cf-iframe`           | `cf-image`  | `cf-image-input`   |
+| `cf-svg`             |                       |             |                    |
 
 ### Layout And Structure
 

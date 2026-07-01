@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { fetchData, pattern, UI } from "commonfabric";
+import { fetchJson, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -58,9 +58,26 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 export default pattern(() => {
-    const __cf_destructure_1 = fetchData<Item[]>({
+    const __cf_destructure_1 = fetchJson<Item[]>({
+        schema: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema,
         url: "https://example.com",
-        result: [],
+        result: []
     }), items = __cf_destructure_1.key("result").for("items", true);
     return {
         [UI]: <div>{items.mapWithPattern(__cfPattern_1, {})}</div>,

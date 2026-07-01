@@ -2,8 +2,9 @@ import {
   BuiltInLLMTool,
   compileAndRun,
   computed,
-  fetchData,
+  fetchJson,
   fetchProgram,
+  fetchText,
   handler,
   ifElse,
   NAME,
@@ -212,9 +213,8 @@ export const searchWeb = pattern<
   SearchQuery,
   SearchWebResult | { error: string }
 >(({ query }) => {
-  const { result, error } = fetchData<SearchWebResult>({
+  const { result, error } = fetchJson<SearchWebResult>({
     url: "/api/agent-tools/web-search",
-    mode: "json",
     options: {
       method: "POST",
       headers: {
@@ -253,9 +253,8 @@ export const readWebpage = pattern<
   ReadWebRequest,
   ReadWebResult | { error: string }
 >(({ url }) => {
-  const { result, error } = fetchData<ReadWebResult>({
+  const { result, error } = fetchJson<ReadWebResult>({
     url: "/api/agent-tools/web-read",
-    mode: "json",
     options: {
       method: "POST",
       headers: {
@@ -309,9 +308,8 @@ export const bash = pattern<BashRequest, BashResult | { error: string }>(
         ...(environment !== undefined && { environment }),
       };
     });
-    const { result, error } = fetchData<BashResult>({
+    const { result, error } = fetchJson<BashResult>({
       url: "/api/sandbox/exec",
-      mode: "json",
       options: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -429,9 +427,8 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
       }
     });
 
-    const { pending, result } = fetchData<string>({
+    const { pending, result } = fetchText({
       url: resolvedUrl,
-      mode: "text",
     });
     return ifElse(computed(() => pending || !result), undefined, { result });
   },

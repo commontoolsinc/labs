@@ -1505,7 +1505,7 @@ them as a clickable card list, and uses an LLM to generate a summary of recent
 development activity. Fully reactive — changing the repo URL re-fetches and
 re-summarizes.
 
-**Keywords:** github, commits, fetchData, generateText, LLM, summary, activity
+**Keywords:** github, commits, fetchJson, generateText, LLM, summary, activity
 
 ### Input Schema
 

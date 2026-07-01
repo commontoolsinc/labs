@@ -168,7 +168,7 @@ list — is the authoritative source. As of this writing it recognizes:
 - `wish`
 - `generateObject` and `generateText`
 - the `runtime-call` family — tagged-call / function runtime origins: `str`,
-  `llm`, `llmDialog`, `fetchData`, `fetchProgram`, `streamData`,
+  `llm`, `llmDialog`, `fetchJson`, `fetchProgram`, `streamData`,
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)

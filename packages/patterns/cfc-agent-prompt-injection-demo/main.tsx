@@ -2,7 +2,7 @@ import {
   type BuiltInLLMMessage,
   Cell,
   computed,
-  fetchData,
+  fetchJsonUnchecked,
   handler,
   llmDialog,
   NAME,
@@ -335,9 +335,8 @@ export default pattern<Record<string, never>>(() => {
     SUB_AGENT_BRIEFING_MESSAGES,
     SUB_AGENT_BRIEFING_MESSAGES_SCHEMA,
   );
-  const { result: modelDirectory } = fetchData({
+  const { result: modelDirectory } = fetchJsonUnchecked({
     url: "/api/ai/llm/models",
-    mode: "json",
   });
   const modelItems = computed(() => {
     if (!modelDirectory) return FALLBACK_MODEL_ITEMS;

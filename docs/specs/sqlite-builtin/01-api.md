@@ -21,7 +21,7 @@ read).
 > path. A free `sqliteQuery<Row>({ db, sql, ... })` function still exists and is
 > equivalent to `db.query<Row>(sql, ...)`.
 
-The runtime's reactive I/O — `fetchData`, `generateText`, `streamData` — is
+The runtime's reactive I/O — `fetchJson`, `generateText`, `streamData` — is
 expressed as built-ins registered in
 [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts)
 and surfaced as builder factories in

@@ -19,7 +19,7 @@ const ignore = !TEST_HTTP;
 // This requires either:
 // 1. Adding a flag to enable network tests in CI with proper mocking
 // 2. Using mock data or fixtures for CI testing
-describe("fetch data integration test", () => {
+describe("fetch json integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -41,7 +41,7 @@ describe("fetch data integration test", () => {
             import.meta.dirname!,
             "..",
             "examples",
-            "fetch-data.tsx",
+            "fetch-json.tsx",
           ),
         ),
         { start: true },

