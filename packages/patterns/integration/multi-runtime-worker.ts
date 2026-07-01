@@ -8,6 +8,11 @@
 
 import type { Cell } from "@commonfabric/runner";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
+import {
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
@@ -164,6 +169,75 @@ const handlers: Record<
     }
     await idle();
     return {};
+  },
+
+  // Faithful mirror of RuntimeProcessor.handleCellSet — the path a UI binding
+  // takes for a plain `set`: ONE fresh edit tx, a single un-retried commit,
+  // marked as a blind leaf write. The blind-vs-CAS choice is by METHOD, not value
+  // shape: a `set` is ALWAYS blind (last-write-wins); read-modify-write goes
+  // through `push` (below), which keeps compare-and-set. We await the commit so
+  // the test can observe the outcome (a conflict surfaces as a Result error).
+  // Pass `idle: false` to leave this runtime un-settled, so its local replica
+  // stays stale (own-write-race repro).
+  async set({ path, value, idle: doIdle }) {
+    const runtime = controller().manager().runtime;
+    const tx = runtime.edit();
+    let cell = result();
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    markUiInputBlindWriteTx(tx);
+    // Mirror handleCellSet: thread the cell's PARENT address as the structural
+    // existence/shape precondition for the blind write.
+    const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
+    setBlindStructuralTarget(tx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    cell.withTx(tx).set(value as never);
+    unmarkUiInputBlindWriteTx(tx);
+    runtime.prepareTxForCommit(tx);
+    const res = await tx.commit() as {
+      error?: { name?: string; message?: string };
+    };
+    if (doIdle !== false) await idle();
+    return sanitizeForTransfer({
+      ok: !res?.error,
+      error: res?.error
+        ? { name: res.error.name, message: res.error.message }
+        : undefined,
+    });
+  },
+
+  // Faithful mirror of RuntimeProcessor.handleCellPush / CellHandle.push: a
+  // read-modify-write append, NOT blind — the set's diff read of the current
+  // array is kept as a commit precondition (compare-and-set), so a concurrent
+  // push aborts rather than being clobbered by a blind overwrite. Reads the
+  // current value from the local replica (no pull), mirroring CellHandle.push
+  // reading its cache.
+  async push({ path, value, idle: doIdle }) {
+    const runtime = controller().manager().runtime;
+    let cell = result();
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never) as Cell<any>;
+    }
+    const currentRaw = cell.get();
+    const current = Array.isArray(currentRaw) ? currentRaw : [];
+    const tx = runtime.edit();
+    cell.withTx(tx).set([...current, value] as never);
+    runtime.prepareTxForCommit(tx);
+    const res = await tx.commit() as {
+      error?: { name?: string; message?: string };
+    };
+    if (doIdle !== false) await idle();
+    return sanitizeForTransfer({
+      ok: !res?.error,
+      error: res?.error
+        ? { name: res.error.name, message: res.error.message }
+        : undefined,
+    });
   },
 
   async read({ path }) {

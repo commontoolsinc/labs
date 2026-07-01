@@ -70,6 +70,12 @@ export {
   writePatternCoverageLcov,
 } from "./pattern-coverage.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
+export {
+  type BlindStructuralTarget,
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "./storage/reactivity-log.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,

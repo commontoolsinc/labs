@@ -85,8 +85,10 @@ import {
   getDirectTransactionReadActivities,
 } from "./transaction-inspection.ts";
 import {
+  getBlindStructuralTarget,
   isMergeableOpRead,
   isReadExcludedFromConflict,
+  isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
 
@@ -2205,6 +2207,41 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
+    // For a blind UI-input write, handleCellSet threads the cell's PARENT address
+    // here; its `ignoreReadForCommit` reads are dropped below and replaced by one
+    // nonRecursive read at this parent (emitted after the loop).
+    const structuralTarget = getBlindStructuralTarget(source);
+
+    // Emit one commit read for `id`, baselined against the most recent in-flight
+    // local version of that doc below this commit's localSeq if one exists, else
+    // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
+    // carries its own `meta.seq`). Shared by the per-read loop below and the blind
+    // write's structural precondition so the two emission sites stay in lockstep.
+    const pushCommitRead = (
+      id: URI,
+      scope: CellScope | undefined,
+      path: DocumentPath,
+      nonRecursive: boolean,
+      confirmedSeq?: number,
+    ) => {
+      const record = this.#docs.get(docKey(id, scope));
+      const pendingLocalSeq = record?.pending
+        .filter((version) => version.localSeq < localSeq)
+        .at(-1)?.localSeq;
+      const shape = nonRecursive ? { nonRecursive: true } : {};
+      if (pendingLocalSeq !== undefined) {
+        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
+      } else {
+        confirmed.push({
+          id,
+          scope,
+          path,
+          seq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          ...shape,
+        });
+      }
+    };
+
     // A mergeable op resolves against durable state, so it does not depend on
     // the document's prior value. On an entity touched by a mergeable op, the
     // reads the op ITSELF issues are dropped from conflict detection — its own
@@ -2232,6 +2269,15 @@ class SpaceReplica implements ISpaceReplica {
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
+        continue;
+      }
+      // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is not
+      // a value-equality concurrency precondition: a blind `set` must not lose the
+      // own-write race on its own write-target read. Drop it from the conflict set.
+      // Its structural replacement — one nonRecursive read at the cell's PARENT — is
+      // emitted once after the loop from the threaded `structuralTarget`, since the
+      // logical write path is known only at handleCellSet, not from this diff.
+      if (isReadIgnoredForCommit(read.meta)) {
         continue;
       }
 
@@ -2267,29 +2313,33 @@ class SpaceReplica implements ISpaceReplica {
       ) {
         continue;
       }
-      const record = this.#docs.get(docKey(read.id as URI, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
-      if (pendingLocalSeq !== undefined) {
-        pending.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          localSeq: pendingLocalSeq,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
-      } else {
-        confirmed.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          seq: typeof read.meta?.seq === "number"
-            ? read.meta.seq
-            : record?.confirmed.seq ?? 0,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
-      }
+      pushCommitRead(
+        read.id as URI,
+        scope,
+        toCommitReadPath(read.path),
+        read.nonRecursive === true,
+        typeof read.meta?.seq === "number" ? read.meta.seq : undefined,
+      );
+    }
+    // The blind UI-input write's single structural existence/shape precondition: a
+    // nonRecursive read at the cell's PARENT (threaded from handleCellSet). It
+    // conflicts with a concurrent whole-doc delete/replace (TIER-1, path-blind) and
+    // with a reshape of the parent or any ancestor (TIER-2 nonRecursive overlap
+    // fires at-or-above the read path), but NOT with a write to the cell's own
+    // value (which sits below the parent, including array elements) — so the
+    // own-write race stays conflict-free.
+    if (
+      structuralTarget !== undefined &&
+      structuralTarget.space === this.#space
+    ) {
+      pushCommitRead(
+        structuralTarget.id as URI,
+        normalizeCellScope(
+          structuralTarget.scope as Parameters<typeof normalizeCellScope>[0],
+        ),
+        toCommitReadPath(structuralTarget.path),
+        true,
+      );
     }
     // Keep the nonRecursive flag on the reads sent to the engine (it was
     // historically stripped here). The engine applies shallow (shape-only)
