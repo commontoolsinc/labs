@@ -34,6 +34,30 @@ async function readTextStream(
   }
 }
 
+async function stopChildProcess(
+  child: Deno.ChildProcess | undefined,
+): Promise<Deno.CommandStatus | undefined> {
+  if (!child) return undefined;
+  try {
+    await child.stdin.close();
+  } catch {
+    // Already closed.
+  }
+  return await child.status;
+}
+
+async function terminateChildProcess(
+  child: Deno.ChildProcess | undefined,
+): Promise<void> {
+  if (!child) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // Already exited.
+  }
+  await child.status;
+}
+
 Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: "cf-profile-test-" });
   try {
@@ -95,6 +119,7 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
+      stdin: "piped",
       stdout: "piped",
       stderr: "piped",
     }).spawn();
@@ -128,19 +153,18 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
       stdout: "piped",
       stderr: "piped",
     }).output();
-    const targetStatus = await target.status;
+    const targetStatus = await stopChildProcess(target);
+    target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
 
     const captureStdout = decoder.decode(captureOutput.stdout);
     const captureStderr = decoder.decode(captureOutput.stderr);
+    const failureOutput =
+      `${captureStdout}\n${captureStderr}\n${targetStdout}\n${targetStderr}`;
 
-    assertEquals(captureOutput.code, 0, `${captureStdout}\n${captureStderr}`);
-    assertEquals(
-      targetStatus.success,
-      true,
-      `${targetStdout}\n${targetStderr}`,
-    );
+    assertEquals(captureOutput.code, 0, failureOutput);
+    assertEquals(targetStatus?.success, true, failureOutput);
     assertStringIncludes(captureStdout, "profile: summary matched");
     assertStringIncludes(targetStdout, "profile start");
     assertStringIncludes(targetStdout, "profile stop");
@@ -159,11 +183,8 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
     assertStringIncludes(consoleLog, "profile start");
     assertStringIncludes(consoleLog, "profile stop");
   } finally {
-    try {
-      target?.kill("SIGTERM");
-    } catch {
-      // Already exited.
-    }
+    await terminateChildProcess(target);
+    target = undefined;
     await Deno.remove(tmpDir, { recursive: true });
   }
 });
@@ -188,6 +209,7 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
+      stdin: "piped",
       stdout: "piped",
       stderr: "piped",
     }).spawn();
@@ -222,19 +244,18 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
       stdout: "piped",
       stderr: "piped",
     }).output();
-    const targetStatus = await target.status;
+    const targetStatus = await stopChildProcess(target);
+    target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
 
     const captureStdout = decoder.decode(captureOutput.stdout);
     const captureStderr = decoder.decode(captureOutput.stderr);
+    const failureOutput =
+      `${captureStdout}\n${captureStderr}\n${targetStdout}\n${targetStderr}`;
 
-    assertEquals(captureOutput.code, 0, `${captureStdout}\n${captureStderr}`);
-    assertEquals(
-      targetStatus.success,
-      true,
-      `${targetStdout}\n${targetStderr}`,
-    );
+    assertEquals(captureOutput.code, 0, failureOutput);
+    assertEquals(targetStatus?.success, true, failureOutput);
     assertStringIncludes(captureStdout, "profile: profile stop matched");
     assertStringIncludes(targetStdout, "profile start");
     assertStringIncludes(targetStdout, "profile stop");
@@ -253,11 +274,7 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
     assertStringIncludes(consoleLog, "profile start");
     assertStringIncludes(consoleLog, "profile stop");
   } finally {
-    try {
-      target?.kill("SIGTERM");
-    } catch {
-      // Already exited.
-    }
+    await terminateChildProcess(target);
     await Deno.remove(tmpDir, { recursive: true });
   }
 });
