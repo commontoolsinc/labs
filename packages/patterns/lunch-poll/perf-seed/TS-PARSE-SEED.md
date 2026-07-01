@@ -1,13 +1,15 @@
 # Seed — Cold-load bucket #2: TS-parse-in-worker at boot (~102ms)
 
-> **STATUS (2026-07-01): Fix A shipped.** The ~102ms was ~99% _redundant_
-> re-parsing — the 9-module system-app closure was parsed 4×/cold-boot. A
-> content-hash-keyed parse memo in `buildRecordsFromCompiled` collapses it to 1×
-> (~94.5ms → ~21.5ms, gated green). Full finding + the "why one parse not zero"
-> reasoning + Fix B (persist at build → 0 parses) plan:
-> **`BOOT-FLOOR-FINDINGS.md` §9**. The measurement-methodology gotchas (worker
-> warm/cold bimodality, `close` nukes auth, in-worker instrumentation self-gates
-> cold) are in that doc's §1.
+> **STATUS (2026-07-01, EOD): bucket #2 DONE — Fix A MERGED (#4441), Fix B open
+> (#4442).** The ~102ms was ~99% _redundant_ re-parsing — the 9-module
+> system-app closure was parsed 4×/cold-boot. A content-hash-keyed parse memo in
+> `buildRecordsFromCompiled` collapsed it to 1× (Fix A); persisting the record
+> surface on the compiled doc (Fix B) → **0**. Full finding + the "why one parse
+> not zero" reasoning: **`BOOT-FLOOR-FINDINGS.md` §9**. The measurement gotchas
+> (worker warm/cold bimodality, `close` nukes auth, in-worker instrumentation
+> self-gates cold) are in that doc's §1. **Broader thread status** (buckets #3
+> parked, #5 landed as #4447, and the cross-cutting "defer eager system-app
+> eval" lever parked for Berni) → **§10**.
 
 **For a fresh session.** This is one independent slice of the Common Fabric
 cold-load (pattern initial-load) investigation: root-cause and remove the

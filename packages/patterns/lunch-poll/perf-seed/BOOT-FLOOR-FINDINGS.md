@@ -115,9 +115,9 @@ Inside `evaluateCachedModules` (~459ms inclusive) → `compartmentImportNow` /
 | --------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Per-primitive debug-metadata**        | **~100**               | `getLineAndColumnAtOffset` ← `findMappedLocationInSourceRange` ← `resolveLocationFromFunctionSource` ← `annotateFunctionDebugMetadata` ← `lift`/`handler` ← `populateModuleExports` | **#1: precompute locations at transform time, or defer annotation until a trace needs it**                                                                                                           |
 | **Module record extraction (TS parse)** | ~102 → **0 (Fix A+B)** | `parseSourceFile`/`createSourceFile2` ← `extractCompiledExports`/`extractRuntimeImports` ← `buildRecordsFromCompiled` ← `evaluateCachedModules`                                     | **RESOLVED — see §9.** The 9-module system-app closure was parsed **4×**/boot; a body-keyed parse memo (Fix A, #4441) → 1×; persisting the record surface on the compiled doc (Fix B, #4442) → **0** |
-| **Per-primitive schema intern+hash**    | ~68                    | `internSchema`/`computeHash`/`joinSchema`×N ← `applyArgumentIfcToResult` ← `createNodeFactory` ← `lift`                                                                             | cache/precompute interned schemas                                                                                                                                                                    |
+| **Per-primitive schema intern+hash**    | ~68                    | `internSchema`/`computeHash`/`joinSchema`×N ← `applyArgumentIfcToResult` ← `createNodeFactory` ← `lift`                                                                             | **PARKED — see §10** (88% redundant hashes, but already-memoized; low ROI)                                                                                                                           |
 | **SES harden + lockdown**               | ~50–67                 | `baseFreezeAndTraverse` ← `harden` ← `hardenExportedValue` ← `populateModuleExports` (per export); `lockdown` ← `ensureSESLockdown` (once)                                          | SES-inherent; per-export harden maybe trimmable                                                                                                                                                      |
-| **Pattern factory build**               | ~60–100                | `factoryFromPattern`/`pattern`/`trustedPattern` + `sanitizeSchemaForLinks`                                                                                                          | only-load-what's-needed                                                                                                                                                                              |
+| **Pattern factory build**               | ~60–100                | `factoryFromPattern`/`pattern`/`trustedPattern` + `sanitizeSchemaForLinks`                                                                                                          | **#5 landed — see §10** (partial-cause O(N) + sanitize memo, #4447)                                                                                                                                  |
 | **esbuild CJS→ESM glue**                | ~31                    | `__copyProps` ← `__toESM` ← (root)                                                                                                                                                  | bundling (pure-ESM avoids `__toESM`)                                                                                                                                                                 |
 | **quicksort w/ random pivot**           | ~20                    | `randomIntInRange` ← `doQuickSort` (something sorts a largish list at boot)                                                                                                         | investigate — odd                                                                                                                                                                                    |
 
@@ -370,3 +370,53 @@ fields. Measured end-to-end (offset-4 rig): the 9-module system-app closure goes
 fields; the next boot reads them). Gate: runner 729/0 + `pattern-tests` (68) +
 `generated-patterns` (147) green; new test asserts a persisted surface that
 disagrees with the body wins.
+
+## 10. Session close (2026-07-01): #3 parked, #5 landed, and THE lever
+
+Remaining floor after the #2 work (sizes from a fresh Fix-A+B cold-boot profile;
+±few-ms single-profile noise):
+
+| bucket                          | ~ms | status                                                                                 |
+| ------------------------------- | --- | -------------------------------------------------------------------------------------- |
+| #1 debug-metadata + source-maps | ~90 | **not ours** — identity/source-map thread (`gideon/content-addressed-action-identity`) |
+| #2 TS-parse                     | 0   | **DONE** (§9): #4441 merged, #4442 open                                                |
+| #3 schema intern+hash           | ~60 | **PARKED** (below)                                                                     |
+| #4 SES harden                   | ~50 | untouched (SES-inherent)                                                               |
+| #5 factory build                | ~40 | **partially landed** (#4447, below)                                                    |
+| #6 esbuild glue                 | ~31 | untouched                                                                              |
+| #7 quicksort                    | ~20 | untouched (still unexplained)                                                          |
+
+**#3 schema intern — PARKED (low ROI).** Cold-boot instrumentation:
+`internSchema` is called **54,806×** (88% object-cache hits); of the **5,081**
+that hash, **4,463 (88%) are structural duplicates** (`hashOf` runs, then the
+`hashToRef` reverse map finds the schema was already interned — same structure,
+different object). ~36ms of ~41ms hash time is redundant. BUT the dups are
+runtime- **constructed** schemas (ref-resolve, asCell-strip spread, ifc-attach),
+not baked literals — so "bake the hash at build" is NOT the lever — and the
+schema system is **already heavily memoized** (`traverse.ts` WeakMap ref-cache +
+10k-capped string caches, non-thrashing at boot). The residual is diffuse
+leakage; the only central lever (a cheaper pre-hash structural dedup in
+`internSchema`) sits on CFC-identity- critical `data-model` code for a modest,
+risky win. (`hashOf` is a deliberate full-tree walk; reusing sub-object hash
+caches would change hash VALUES = identity.)
+
+**#5 factory build — two fixes landed (PR #4447, off `main`).** (1) The
+partial-cause dedup in `factoryFromPattern` was **O(N²)** (`deepEqual` scan over
+every prior cause per internal cell; anonymous `$generated` causes are unique by
+construction, so the scan is pure waste) → replaced with an O(1) `Set` of
+canonical cause keys. ~0 at trivial N; a **scaling** fix for large patterns /
+repeated instantiation. (2) Memoize `sanitizeSchemaForLinks` by frozen input
+identity — deterministically measured **3.4 of 6.7ms** of `recursiveStrip` is on
+frozen+repeated inputs (a single CPU profile's noise had masked it, so it was
+verified by instrumenting the elidable work, not a profile delta). Also nibbles
+#3 (fewer fresh `$defs` schemas to hash). The bigger factory cost —
+`toJSONWithLegacyAliases` (~24ms serialization) — has no obvious quick win.
+
+**THE lever (highest leverage, PARKED for Berni ~mid-July 2026):** #3/#4/#5 are
+all "per-primitive / per-pattern processing of the **eagerly-loaded system
+app**" that a trivial pattern never uses. The root fix is to **defer eager
+system-app eval** — don't parse/hash/harden/factory-build the whole system-app
+graph for a piece that doesn't need it. It cuts across #3+#4+#5 at once.
+Architectural; wants Berni's input on whether eager full-system-app eval is a
+deliberate constraint before it's picked up. **Recommended next-session focus
+once he's back.**
