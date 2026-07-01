@@ -1,4 +1,10 @@
-import { context, trace, type Tracer } from "@opentelemetry/api";
+import {
+  context,
+  type Meter,
+  metrics,
+  trace,
+  type Tracer,
+} from "@opentelemetry/api";
 import { env, type EnvVars } from "./env.ts";
 
 /** The subset of env the tracer setup needs (injectable for tests). */
@@ -14,8 +20,18 @@ let _provider:
   | import("@opentelemetry/sdk-trace-base").BasicTracerProvider
   | undefined;
 
+// The registered metrics provider, mirroring `_provider` for traces. Undefined
+// when telemetry is off or has been shut down, so init/shutdown stay idempotent.
+let _meterProvider:
+  | import("@opentelemetry/sdk-metrics").MeterProvider
+  | undefined;
+
 export function getTracerProvider() {
   return _provider;
+}
+
+export function getMeterProvider() {
+  return _meterProvider;
 }
 
 /** Returns a tracer bound to the registered provider (or the no-op global one). */
@@ -25,26 +41,43 @@ export function getTracer(): Tracer {
     : trace.getTracer("bg-piece-service", "1.0.0");
 }
 
+/** Returns a meter bound to the registered provider (or the no-op global one). */
+export function getMeter(): Meter {
+  return _meterProvider
+    ? _meterProvider.getMeter("bg-piece-service", "1.0.0")
+    : metrics.getMeter("bg-piece-service", "1.0.0");
+}
+
 /**
  * Flush and shut down the tracer provider so buffered spans aren't dropped when
  * the process exits. No-op if telemetry was never initialized.
  */
 export async function shutdownOpenTelemetry(): Promise<void> {
-  if (!_provider) return;
-  // Clear the reference up front so a second call (or a span created after
-  // shutdown) is a no-op rather than touching a torn-down provider.
+  if (!_provider && !_meterProvider) return;
+  // Clear the references up front so a second call (or a span/metric created
+  // after shutdown) is a no-op rather than touching a torn-down provider.
   const provider = _provider;
+  const meterProvider = _meterProvider;
   _provider = undefined;
+  _meterProvider = undefined;
   try {
-    await provider.forceFlush();
-    await provider.shutdown();
+    if (provider) {
+      await provider.forceFlush();
+      await provider.shutdown();
+    }
+    if (meterProvider) {
+      await meterProvider.forceFlush();
+      await meterProvider.shutdown();
+    }
   } finally {
     // Reset the global API state too, so a later initOpenTelemetry() can register
-    // a fresh provider + context manager cleanly, and getTracer() falls back to
-    // the API no-op tracer until then. (We don't swallow flush/shutdown errors —
-    // the caller decides; see main.ts's shutdown handler.)
+    // fresh providers + context manager cleanly, and getTracer()/getMeter() fall
+    // back to the API no-op instruments until then. (We don't swallow
+    // flush/shutdown errors — the caller decides; see main.ts's shutdown
+    // handler.)
     trace.disable();
     context.disable();
+    metrics.disable();
   }
 }
 
@@ -104,6 +137,54 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
     console.log(
       `OpenTelemetry initialized successfully with endpoint: ${cfg.OTEL_EXPORTER_OTLP_ENDPOINT}`,
     );
+
+    // Metrics setup is independently fail-open: a MeterProvider error must not
+    // tear down the tracer that just registered successfully, so it gets its own
+    // try/catch nested inside the outer one.
+    try {
+      const {
+        AggregationTemporality,
+        MeterProvider,
+        PeriodicExportingMetricReader,
+      } = await import(
+        "@opentelemetry/sdk-metrics"
+      );
+      const { OTLPMetricExporter } = await import(
+        "@opentelemetry/exporter-metrics-otlp-proto"
+      );
+
+      const metricExporter = new OTLPMetricExporter({
+        url: `${cfg.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/metrics`,
+        // Delta temporality: without it the exporter sends cumulative points
+        // that SigNoz records as "unspecified", which breaks rate()/increase()
+        // over our counters (only raw per-interval sums work).
+        temporalityPreference: AggregationTemporality.DELTA,
+      });
+      const meterProvider = new MeterProvider({
+        resource: new Resource({
+          "service.name": cfg.OTEL_SERVICE_NAME,
+          "service.version": "1.0.0",
+          "deployment.environment": cfg.ENV,
+        }),
+      });
+      // Periodically export metrics to the local OTLP collector, which forwards
+      // to SigNoz. (This SDK version registers readers post-construction.)
+      meterProvider.addMetricReader(
+        new PeriodicExportingMetricReader({ exporter: metricExporter }),
+      );
+
+      metrics.setGlobalMeterProvider(meterProvider);
+      _meterProvider = meterProvider;
+
+      console.log(
+        `OpenTelemetry metrics initialized successfully with endpoint: ${cfg.OTEL_EXPORTER_OTLP_ENDPOINT}`,
+      );
+    } catch (metricsError) {
+      console.error(
+        "Failed to initialize OpenTelemetry metrics:",
+        metricsError,
+      );
+    }
   } catch (error) {
     console.error("Failed to initialize OpenTelemetry:", error);
   }
