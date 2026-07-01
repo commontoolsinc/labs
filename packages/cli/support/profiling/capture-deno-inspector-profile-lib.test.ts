@@ -102,8 +102,8 @@ describe("capture-deno-inspector-profile helpers", () => {
     ws.dispatch("open");
     await opened;
 
-    assertEquals(ws.added, ["open", "error"]);
-    assertEquals(ws.removed, ["open", "error"]);
+    assertEquals(ws.added, ["open", "error", "close"]);
+    assertEquals(ws.removed, ["open", "error", "close"]);
   });
 
   it("rejects when the websocket reports an error", async () => {
@@ -119,7 +119,38 @@ describe("capture-deno-inspector-profile helpers", () => {
     }
 
     assertEquals(caught, event);
-    assertEquals(ws.removed, ["open", "error"]);
+    assertEquals(ws.removed, ["open", "error", "close"]);
+  });
+
+  it("rejects when the websocket closes before opening", async () => {
+    const ws = new FakeWebSocket();
+    const opened = waitForWebSocketOpen(ws as unknown as WebSocket);
+    const event = ws.dispatch("close", new CloseEvent("close"));
+
+    let caught: unknown;
+    try {
+      await opened;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals(caught, event);
+    assertEquals(ws.removed, ["open", "error", "close"]);
+  });
+
+  it("rejects when the websocket is already closed", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.CLOSED;
+
+    let caught: unknown;
+    try {
+      await waitForWebSocketOpen(ws as unknown as WebSocket);
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed before opening");
+    assertEquals(ws.added, []);
   });
 
   it("resumes once when the debugger pauses", () => {
@@ -291,6 +322,27 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(starts, 1);
     assertEquals(state.profilerStarting, false);
     assertEquals(state.profilerActive, true);
+  });
+
+  it("clears the in-flight start state when profiler start fails", async () => {
+    const state = createState();
+    let caught: unknown;
+
+    try {
+      await startProfilerIfReady(
+        state,
+        { readyState: WebSocket.OPEN },
+        {
+          start: () => Promise.reject(new Error("closed")),
+        },
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "closed");
+    assertEquals(state.profilerStarting, false);
+    assertEquals(state.profilerActive, false);
   });
 
   it("stops an active profiler", async () => {

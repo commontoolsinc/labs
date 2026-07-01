@@ -56,6 +56,7 @@ const state: ProfileCaptureState = {
   sawProfileStop: false,
 };
 let pendingProfilerStopReason: string | undefined;
+let profilerStartError: string | undefined;
 
 function requestStop(reason: string): void {
   if (stopReasonSent) return;
@@ -69,6 +70,13 @@ function requestProfilerStop(reason: string): void {
     return;
   }
   requestStop(reason);
+}
+
+function recordProfilerStartError(error: unknown): void {
+  if (profilerStartError) return;
+  profilerStartError = `Profiler.start failed: ${error}`;
+  console.error(`profile: ${profilerStartError}`);
+  requestStop("profiler-start-failed");
 }
 
 celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
@@ -93,13 +101,19 @@ celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
 });
 
 async function startProfiler(options: { clearStop?: boolean } = {}) {
-  const started = await startProfilerIfReady(
-    state,
-    ws,
-    celestial.Profiler,
-    console.log,
-    options,
-  );
+  let started = false;
+  try {
+    started = await startProfilerIfReady(
+      state,
+      ws,
+      celestial.Profiler,
+      console.log,
+      options,
+    );
+  } catch (error) {
+    recordProfilerStartError(error);
+    return;
+  }
   if (started && state.sawProfileStop) {
     pendingProfilerStopReason ??= "profile-stop-matched";
   }
@@ -135,7 +149,7 @@ async function stopProfile(reason: string) {
       consoleOutputPath,
       state,
       profile,
-      stopError,
+      stopError: profilerStartError ?? stopError,
     });
   }
 }
@@ -196,3 +210,7 @@ console.log(
     2,
   ),
 );
+
+if (profilerStartError) {
+  Deno.exit(1);
+}

@@ -44,7 +44,6 @@ const consolePath = `${profileStem}.console.log`;
 const metaPath = `${profileStem}.meta.json`;
 const summaryPattern = options.summaryPattern ??
   (cliArgs[0] === "test" ? DEFAULT_SUMMARY_PATTERN : DISABLED_SUMMARY_PATTERN);
-const summaryRegex = new RegExp(summaryPattern);
 const profileStopPattern = options.profileStopPattern;
 const cliPath = join(repoRoot, "packages", "cli", "mod.ts");
 const capturePath = join(
@@ -93,10 +92,7 @@ const onCliOutput = (text: string) => {
     inspectorUrlFound = true;
     inspectorUrl.resolve(foundInspectorUrl);
   }
-  if (
-    recentOutput.includes(DEBUGGER_WAITING_MESSAGE) ||
-    summaryRegex.test(recentOutput)
-  ) {
+  if (recentOutput.includes(DEBUGGER_WAITING_MESSAGE)) {
     stopCapture();
   }
 };

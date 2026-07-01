@@ -92,21 +92,32 @@ export function waitForWebSocketOpen(ws: WebSocket): Promise<void> {
   if (ws.readyState === WebSocket.OPEN) {
     return Promise.resolve();
   }
+  if (ws.readyState === WebSocket.CLOSED) {
+    return Promise.reject(new Error("WebSocket closed before opening"));
+  }
 
   return new Promise((resolve, reject) => {
-    const handleOpen = () => {
+    const cleanup = () => {
       ws.removeEventListener("open", handleOpen);
       ws.removeEventListener("error", handleError);
+      ws.removeEventListener("close", handleClose);
+    };
+    const handleOpen = () => {
+      cleanup();
       resolve();
     };
     const handleError = (event: Event) => {
-      ws.removeEventListener("open", handleOpen);
-      ws.removeEventListener("error", handleError);
+      cleanup();
+      reject(event);
+    };
+    const handleClose = (event: CloseEvent) => {
+      cleanup();
       reject(event);
     };
 
     ws.addEventListener("open", handleOpen);
     ws.addEventListener("error", handleError);
+    ws.addEventListener("close", handleClose);
   });
 }
 
