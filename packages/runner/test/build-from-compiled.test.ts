@@ -30,7 +30,7 @@ describe("extractCompiledExports", () => {
     ].join("\n");
     const { names, starTargetSpecs } = extractCompiledExports(compiled);
     expect(new Set(names)).toEqual(new Set(["a", "b", "c"]));
-    expect(names.has("__esModule")).toBe(false);
+    expect(names).not.toContain("__esModule");
     expect(starTargetSpecs).toEqual([]);
   });
 
