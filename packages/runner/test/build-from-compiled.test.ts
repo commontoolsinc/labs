@@ -143,3 +143,82 @@ describe("buildRecordsFromCompiled (resolve-free, source-free)", () => {
     );
   });
 });
+
+describe("buildRecordsFromCompiled parse memo (content-addressed)", () => {
+  // Two modules with unique content-hash identities and hand-written CJS bodies,
+  // so the process-global parse memo is cold for them at first sight. At piece
+  // boot the SAME system-app closure is rebuilt once per system pattern loaded
+  // by identity, so without the memo every module is re-parsed N times; these
+  // fixtures stand in for that shared closure.
+  const modA: CachedCompiledModule = {
+    identity: "memo-test-A-0000000000000000000000000000",
+    filename: "/memo-a.ts",
+    code: [
+      `Object.defineProperty(exports, "__esModule", { value: true });`,
+      `exports.a = void 0;`,
+      `exports.a = 1;`,
+    ].join("\n"),
+    imports: [],
+  };
+  const modB: CachedCompiledModule = {
+    identity: "memo-test-B-0000000000000000000000000000",
+    filename: "/memo-b.ts",
+    code: [
+      `Object.defineProperty(exports, "__esModule", { value: true });`,
+      `exports.b = void 0;`,
+      `exports.b = 2;`,
+    ].join("\n"),
+    imports: [],
+  };
+
+  // Records projected to a comparable, order-stable shape.
+  const exportsBySpecifier = (
+    g: ReturnType<typeof buildRecordsFromCompiled>,
+  ): [string, string[]][] =>
+    [...g.records]
+      .map(([specifier, r]): [string, string[]] => [
+        specifier,
+        [...r.exports].sort(),
+      ])
+      .sort(([a], [b]) => a.localeCompare(b));
+
+  it("is transparent: repeated builds of the same closure produce identical records", () => {
+    const first = buildRecordsFromCompiled([modA, modB]);
+    const second = buildRecordsFromCompiled([modA, modB]);
+    // Reusing a cached parse across calls must not corrupt output via shared
+    // mutable state — each record gets a fresh export Set and import array.
+    expect(exportsBySpecifier(second)).toEqual(exportsBySpecifier(first));
+  });
+
+  it("memoizes the parse by content-hash identity (equal identity ⇒ reused parse)", () => {
+    // The memo keys on `identity`, which is a content hash of the compiled body:
+    // a repeated identity is guaranteed to carry an identical body, so reusing
+    // the first parse is safe — and is exactly what elides the redundant boot
+    // re-parse of the shared system-app closure. Feeding a DIFFERENT body under
+    // an already-seen identity is not a real state (it violates the
+    // content-address invariant); it is used here only to make the reuse
+    // observable.
+    const id = "memo-reuse-identity-000000000000000000000000";
+    const spec = `cf:module/${id}`;
+    const exportsFor = (code: string): Set<string> => {
+      const g = buildRecordsFromCompiled([{
+        identity: id,
+        filename: "/reuse.ts",
+        code,
+        imports: [],
+      }]);
+      return new Set(g.records.get(spec)!.exports);
+    };
+    const seen = exportsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.first = void 0;\nexports.first = 1;`,
+    );
+    expect(seen).toEqual(new Set(["first", "__esModule"]));
+    // Same identity, different body → the memo returns the first parse.
+    const reused = exportsFor(
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.second = void 0;\nexports.second = 2;`,
+    );
+    expect(reused).toEqual(new Set(["first", "__esModule"]));
+  });
+});
