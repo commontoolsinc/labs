@@ -8,9 +8,13 @@
 import { assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import type { MemorySpace } from "../interface.ts";
-import { listSpaceStores, snapshotSpaceStore, spaceStorePath } from "./dump.ts";
+import {
+  listSpaceStores,
+  snapshotSpaceStore,
+  spaceStorePath,
+} from "../v2/dump.ts";
 
 const SPACE_A = "did:key:z6MkDumpHelperSpaceAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const SPACE_B = "did:key:z6MkDumpHelperSpaceBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
