@@ -10,13 +10,16 @@ await Deno.stderr.write(
   new TextEncoder().encode(`profile release port ${releaseAddr.port}\n`),
 );
 
-console.log("profile start");
-console.log("profile stop");
-
-// Wait for the test to open the release socket.
-try {
+async function acceptRelease(): Promise<void> {
   const releaseConnection = await releaseListener.accept();
   releaseConnection.close();
+}
+
+try {
+  console.log("profile start");
+  await acceptRelease();
+  console.log("profile stop");
+  await acceptRelease();
 } finally {
   releaseListener.close();
 }

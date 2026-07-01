@@ -45,6 +45,10 @@ type ProfileWriteOptions = {
 };
 
 type InspectorCommandSocket = Pick<WebSocket, "readyState" | "send">;
+type InspectorCommandWebSocket = Pick<
+  WebSocket,
+  "readyState" | "addEventListener" | "removeEventListener"
+>;
 
 export function sendInspectorCommand(
   ws: InspectorCommandSocket,
@@ -55,6 +59,65 @@ export function sendInspectorCommand(
   if (ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify({ id, method, params }));
   return true;
+}
+
+export function settleInspectorCommand<T>(
+  ws: InspectorCommandWebSocket,
+  command: () => Promise<T>,
+): Promise<T> {
+  if (ws.readyState === WebSocket.CLOSED) {
+    return Promise.reject(new Error("WebSocket closed"));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      ws.removeEventListener("close", handleClose);
+      ws.removeEventListener("error", handleError);
+    };
+    const beginSettle = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      return true;
+    };
+    const settleResolve = (value: T) => {
+      if (!beginSettle()) return;
+      resolve(value);
+    };
+    const settleReject = (error: unknown) => {
+      if (!beginSettle()) return;
+      reject(error);
+    };
+    const handleClose = () => {
+      settleReject(new Error("WebSocket closed"));
+    };
+    const handleError = (event: Event) => {
+      settleReject(event);
+    };
+
+    ws.addEventListener("close", handleClose);
+    ws.addEventListener("error", handleError);
+    let commandPromise: Promise<T>;
+    try {
+      commandPromise = command();
+    } catch (error) {
+      settleReject(error);
+      return;
+    }
+    if (ws.readyState === WebSocket.CLOSED) {
+      settleReject(new Error("WebSocket closed"));
+      return;
+    }
+    commandPromise.then(
+      (value) => {
+        settleResolve(value);
+      },
+      (error) => {
+        settleReject(error);
+      },
+    );
+  });
 }
 
 export function resumeDebuggerOnPause(
@@ -181,7 +244,7 @@ export function markProfileStoppedOnce(
 
 export async function startProfilerIfReady(
   state: ProfileCaptureState,
-  ws: Pick<WebSocket, "readyState">,
+  ws: InspectorCommandWebSocket,
   profiler: Pick<ProfilerController, "start">,
   log: (message: string) => void = () => {},
   options: { clearStop?: boolean } = {},
@@ -194,7 +257,7 @@ export async function startProfilerIfReady(
   }
   state.profilerStarting = true;
   try {
-    await profiler.start();
+    await settleInspectorCommand(ws, () => profiler.start());
     markProfilerStarted(state, options);
     log("profile: profiler started");
     return true;
@@ -205,14 +268,15 @@ export async function startProfilerIfReady(
 
 export async function stopActiveProfiler(
   state: ProfileCaptureState,
-  ws: Pick<WebSocket, "readyState">,
+  ws: InspectorCommandWebSocket,
   profiler: Pick<ProfilerController, "stop">,
 ): Promise<{ profile: unknown; stopError?: string }> {
   let profile: unknown = null;
   let stopError: string | undefined;
   if (state.profilerActive && ws.readyState === WebSocket.OPEN) {
     try {
-      profile = (await profiler.stop()).profile;
+      profile = (await settleInspectorCommand(ws, () => profiler.stop()))
+        .profile;
       state.profilerActive = false;
     } catch (error) {
       stopError = `Profiler.stop failed: ${error}`;

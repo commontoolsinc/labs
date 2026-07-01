@@ -12,6 +12,7 @@ import {
   requireArg,
   resumeDebuggerOnPause,
   sendInspectorCommand,
+  settleInspectorCommand,
   startProfilerIfReady,
   stopActiveProfiler,
   stringifyRemoteObject,
@@ -208,6 +209,52 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(ws.sent, []);
   });
 
+  it("settles inspector commands when the websocket closes", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    const command = new Promise<void>(() => {});
+    const settled = settleInspectorCommand(
+      ws as unknown as WebSocket,
+      () => command,
+    );
+
+    ws.readyState = WebSocket.CLOSED;
+    ws.dispatch("close", new CloseEvent("close"));
+
+    let caught: unknown;
+    try {
+      await settled;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed");
+    assertEquals(ws.removed, ["close", "error"]);
+  });
+
+  it("listens for websocket close before sending inspector commands", async () => {
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    const settled = settleInspectorCommand(
+      ws as unknown as WebSocket,
+      () => {
+        ws.readyState = WebSocket.CLOSED;
+        ws.dispatch("close", new CloseEvent("close"));
+        return new Promise<void>(() => {});
+      },
+    );
+
+    let caught: unknown;
+    try {
+      await settled;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed");
+    assertEquals(ws.removed, ["close", "error"]);
+  });
+
   it("formats remote console values", () => {
     assertEquals(stringifyRemoteObject({ value: 0 }), "0");
     assertEquals(stringifyRemoteObject({ unserializableValue: "NaN" }), "NaN");
@@ -218,12 +265,14 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("starts the profiler when the websocket is open", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     const logs: string[] = [];
     let starts = 0;
 
     const started = await startProfilerIfReady(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         start: () => {
           starts += 1;
@@ -242,11 +291,13 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("can preserve a stop latch when the profiler starts", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     state.sawProfileStop = true;
 
     const started = await startProfilerIfReady(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       { start: () => Promise.resolve() },
       () => {},
       { clearStop: false },
@@ -267,12 +318,14 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("does not start the profiler twice", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     state.profilerActive = true;
     let starts = 0;
 
     const started = await startProfilerIfReady(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         start: () => {
           starts += 1;
@@ -287,12 +340,14 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("does not start the profiler while a start is already in flight", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     let resolveStart: (() => void) | undefined;
     let starts = 0;
 
     const firstStart = startProfilerIfReady(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         start: () => {
           starts += 1;
@@ -306,7 +361,7 @@ describe("capture-deno-inspector-profile helpers", () => {
 
     const secondStarted = await startProfilerIfReady(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         start: () => {
           starts += 1;
@@ -326,12 +381,14 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("clears the in-flight start state when profiler start fails", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     let caught: unknown;
 
     try {
       await startProfilerIfReady(
         state,
-        { readyState: WebSocket.OPEN },
+        ws as unknown as WebSocket,
         {
           start: () => Promise.reject(new Error("closed")),
         },
@@ -345,13 +402,43 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(state.profilerActive, false);
   });
 
+  it("clears the in-flight start state when the websocket closes during profiler start", async () => {
+    const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    const started = startProfilerIfReady(
+      state,
+      ws as unknown as WebSocket,
+      {
+        start: () => new Promise<void>(() => {}),
+      },
+    );
+    assertEquals(state.profilerStarting, true);
+
+    ws.readyState = WebSocket.CLOSED;
+    ws.dispatch("close", new CloseEvent("close"));
+
+    let caught: unknown;
+    try {
+      await started;
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals((caught as Error).message, "WebSocket closed");
+    assertEquals(state.profilerStarting, false);
+    assertEquals(state.profilerActive, false);
+  });
+
   it("stops an active profiler", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     state.profilerActive = true;
 
     const result = await stopActiveProfiler(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         stop: () => Promise.resolve({ profile: { nodes: [] } }),
       },
@@ -363,11 +450,13 @@ describe("capture-deno-inspector-profile helpers", () => {
 
   it("records profiler stop failures", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     state.profilerActive = true;
 
     const result = await stopActiveProfiler(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         stop: () => Promise.reject(new Error("closed")),
       },
@@ -378,13 +467,42 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(state.profilerActive, true);
   });
 
+  it("records profiler stop failures when the websocket closes during stop", async () => {
+    const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
+    state.profilerActive = true;
+
+    const stopped = stopActiveProfiler(
+      state,
+      ws as unknown as WebSocket,
+      {
+        stop: () => new Promise<{ profile: unknown }>(() => {}),
+      },
+    );
+
+    ws.readyState = WebSocket.CLOSED;
+    ws.dispatch("close", new CloseEvent("close"));
+
+    const result = await stopped;
+
+    assertEquals(result.profile, null);
+    assertEquals(
+      result.stopError,
+      "Profiler.stop failed: Error: WebSocket closed",
+    );
+    assertEquals(state.profilerActive, true);
+  });
+
   it("skips stopping when the profiler is inactive", async () => {
     const state = createState();
+    const ws = new FakeWebSocket();
+    ws.readyState = WebSocket.OPEN;
     let stops = 0;
 
     const result = await stopActiveProfiler(
       state,
-      { readyState: WebSocket.OPEN },
+      ws as unknown as WebSocket,
       {
         stop: () => {
           stops += 1;

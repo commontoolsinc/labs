@@ -42,6 +42,14 @@ export function inspectWaitFlag(host: string, port: number): string {
   return `--inspect-wait=${host}:${port}`;
 }
 
+export function profilingChildEnv(
+  source: Record<string, string> = Deno.env.toObject(),
+): Record<string, string> {
+  const env = { ...source };
+  delete env.DENO_COVERAGE_DIR;
+  return env;
+}
+
 export function findInspectorWebSocketUrl(text: string): string | undefined {
   return text.match(/Debugger listening on (ws:\/\/\S+)/)?.[1];
 }

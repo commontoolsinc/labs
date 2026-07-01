@@ -9,6 +9,7 @@ import {
   parseProfileArgs,
   pickInspectPort,
   profileTimestamp,
+  profilingChildEnv,
   slugifyProfileName,
   stopCaptureOnce,
   waitForCliStatusOrStopOnCaptureFailure,
@@ -45,6 +46,7 @@ const metaPath = `${profileStem}.meta.json`;
 const summaryPattern = options.summaryPattern ??
   (cliArgs[0] === "test" ? DEFAULT_SUMMARY_PATTERN : DISABLED_SUMMARY_PATTERN);
 const profileStopPattern = options.profileStopPattern;
+const childEnv = profilingChildEnv();
 const cliPath = join(repoRoot, "packages", "cli", "mod.ts");
 const capturePath = join(
   profilingDir,
@@ -67,7 +69,8 @@ const cliCommand = new Deno.Command(Deno.execPath(), {
     ...cliArgs,
   ],
   cwd: Deno.cwd(),
-  env: Deno.env.toObject(),
+  clearEnv: true,
+  env: childEnv,
   stdin: "inherit",
   stdout: "piped",
   stderr: "piped",
@@ -136,6 +139,8 @@ if (profileStopPattern) {
 const capture = new Deno.Command(Deno.execPath(), {
   args: captureArgs,
   cwd: Deno.cwd(),
+  clearEnv: true,
+  env: childEnv,
   stdin: "null",
   stdout: "inherit",
   stderr: "inherit",

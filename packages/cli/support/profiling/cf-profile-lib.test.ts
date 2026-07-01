@@ -7,6 +7,7 @@ import {
   parseProfileArgs,
   pickInspectPort,
   profileTimestamp,
+  profilingChildEnv,
   slugifyProfileName,
   stopCaptureOnce,
   waitForCliStatusOrStopOnCaptureFailure,
@@ -42,6 +43,16 @@ Deno.test("inspectWaitFlag pauses the profiled process until capture attaches", 
   assertEquals(
     inspectWaitFlag("127.0.0.1", 9333),
     "--inspect-wait=127.0.0.1:9333",
+  );
+});
+
+Deno.test("profilingChildEnv removes Deno coverage collection", () => {
+  assertEquals(
+    profilingChildEnv({
+      DENO_COVERAGE_DIR: "coverage/raw/workspace",
+      KEEP_ME: "yes",
+    }),
+    { KEEP_ME: "yes" },
   );
 });
 

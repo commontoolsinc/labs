@@ -1,16 +1,19 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
-import { profileErrorOutputPath } from "./capture-deno-inspector-profile-lib.ts";
 import {
   findInspectorWebSocketUrl,
   inspectWaitFlag,
   pickInspectPort,
+  profilingChildEnv,
 } from "./cf-profile-lib.ts";
 
 const decoder = new TextDecoder();
 
 type ReleasePortResult =
   | { found: true; port: number }
+  | { found: false };
+type CaptureProfilerStartResult =
+  | { found: true }
   | { found: false };
 
 async function readTextStream(
@@ -44,16 +47,43 @@ function findReleasePort(text: string): number | undefined {
   return Number(match[1]);
 }
 
-async function stopChildProcess(
-  child: Deno.ChildProcess | undefined,
-  releasePort: number,
-): Promise<Deno.CommandStatus | undefined> {
-  if (!child) return undefined;
+async function releaseChildProcess(releasePort: number): Promise<void> {
   const connection = await Deno.connect({
     hostname: "127.0.0.1",
     port: releasePort,
   });
   connection.close();
+}
+
+async function releaseChildProcessAfterProfilerStart(
+  releasePortPromise: Promise<ReleasePortResult>,
+  captureProfilerStartPromise: Promise<CaptureProfilerStartResult>,
+): Promise<boolean> {
+  const [releasePort, captureProfilerStart] = await Promise.all([
+    releasePortPromise,
+    captureProfilerStartPromise,
+  ]);
+  if (!releasePort.found || !captureProfilerStart.found) {
+    return false;
+  }
+  await releaseChildProcess(releasePort.port);
+  return true;
+}
+
+async function waitForReleasedChildProcess(
+  child: Deno.ChildProcess | undefined,
+  releaseDone: Promise<boolean>,
+  releasePortPromise: Promise<ReleasePortResult>,
+): Promise<Deno.CommandStatus | undefined> {
+  if (!child) return undefined;
+  if (!await releaseDone) {
+    return await terminateChildProcess(child);
+  }
+  const releasePort = await releasePortPromise;
+  if (!releasePort.found) {
+    return await terminateChildProcess(child);
+  }
+  await releaseChildProcess(releasePort.port);
   return await child.status;
 }
 
@@ -131,6 +161,8 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
+      clearEnv: true,
+      env: profilingChildEnv(),
       stdout: "piped",
       stderr: "piped",
     }).spawn();
@@ -159,8 +191,19 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
       }
       return text;
     });
-
-    const captureOutput = await new Deno.Command(Deno.execPath(), {
+    const captureProfilerStart = Promise
+      .withResolvers<CaptureProfilerStartResult>();
+    let captureProfilerStartFound = false;
+    let captureProfilerStartSettled = false;
+    const resolveCaptureProfilerStart = (
+      result: CaptureProfilerStartResult,
+    ) => {
+      if (captureProfilerStartSettled) return;
+      captureProfilerStartSettled = true;
+      captureProfilerStartFound = result.found;
+      captureProfilerStart.resolve(result);
+    };
+    const capture = new Deno.Command(Deno.execPath(), {
       args: [
         "run",
         "-A",
@@ -171,40 +214,64 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
         "--profile-start-pattern=profile start",
         `--websocket-url=${await inspectorUrl.promise}`,
       ],
+      clearEnv: true,
+      env: profilingChildEnv(),
       stdout: "piped",
       stderr: "piped",
-    }).output();
-    const release = captureOutput.code === 0
-      ? await releasePort.promise
-      : { found: false } as const;
-    const targetStatus = release.found
-      ? await stopChildProcess(target, release.port)
+    }).spawn();
+    const captureStdoutPromise = readTextStream(capture.stdout, (text) => {
+      if (
+        text.includes("profile: profiler started") &&
+        !captureProfilerStartFound
+      ) {
+        resolveCaptureProfilerStart({ found: true });
+      }
+    }).then((text) => {
+      if (!captureProfilerStartSettled) {
+        resolveCaptureProfilerStart({ found: false });
+      }
+      return text;
+    });
+    const captureStderrPromise = readTextStream(capture.stderr, (text) => {
+      if (text.includes("Profiler.start failed")) {
+        resolveCaptureProfilerStart({ found: false });
+      }
+    });
+    const releaseDone = releaseChildProcessAfterProfilerStart(
+      releasePort.promise,
+      captureProfilerStart.promise,
+    );
+    const targetStartFailureCleanup = releaseDone.then(async (released) => {
+      if (!released) {
+        await terminateChildProcess(target);
+      }
+    });
+
+    const captureStatus = await capture.status;
+    const targetStatus = captureStatus.success
+      ? await waitForReleasedChildProcess(
+        target,
+        releaseDone,
+        releasePort.promise,
+      )
       : await terminateChildProcess(target);
+    await targetStartFailureCleanup;
     target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
-
-    const captureStdout = decoder.decode(captureOutput.stdout);
-    const captureStderr = decoder.decode(captureOutput.stderr);
+    const captureStdout = await captureStdoutPromise;
+    const captureStderr = await captureStderrPromise;
     const failureOutput =
       `${captureStdout}\n${captureStderr}\n${targetStdout}\n${targetStderr}`;
 
-    assertEquals(captureOutput.code, 0, failureOutput);
+    assertEquals(captureStatus.code, 0, failureOutput);
     assertEquals(targetStatus?.success, true, failureOutput);
     assertStringIncludes(captureStdout, "profile: summary matched");
     assertStringIncludes(targetStdout, "profile start");
     assertStringIncludes(targetStdout, "profile stop");
 
-    try {
-      const profileInfo = await Deno.stat(profilePath);
-      assert(profileInfo.size > 0);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      const stopError = await Deno.readTextFile(
-        profileErrorOutputPath(profilePath),
-      );
-      assertStringIncludes(stopError, "Profiler.stop failed");
-    }
+    const profileInfo = await Deno.stat(profilePath);
+    assert(profileInfo.size > 0);
     const consoleLog = await Deno.readTextFile(consolePath);
     assertStringIncludes(consoleLog, "profile start");
     assertStringIncludes(consoleLog, "profile stop");
@@ -236,6 +303,8 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
         inspectWaitFlag("127.0.0.1", inspectPort),
         targetPath,
       ],
+      clearEnv: true,
+      env: profilingChildEnv(),
       stdout: "piped",
       stderr: "piped",
     }).spawn();
@@ -264,8 +333,19 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
       }
       return text;
     });
-
-    const captureOutput = await new Deno.Command(Deno.execPath(), {
+    const captureProfilerStart = Promise
+      .withResolvers<CaptureProfilerStartResult>();
+    let captureProfilerStartFound = false;
+    let captureProfilerStartSettled = false;
+    const resolveCaptureProfilerStart = (
+      result: CaptureProfilerStartResult,
+    ) => {
+      if (captureProfilerStartSettled) return;
+      captureProfilerStartSettled = true;
+      captureProfilerStartFound = result.found;
+      captureProfilerStart.resolve(result);
+    };
+    const capture = new Deno.Command(Deno.execPath(), {
       args: [
         "run",
         "-A",
@@ -277,40 +357,64 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
         "--profile-stop-pattern=profile stop",
         `--websocket-url=${await inspectorUrl.promise}`,
       ],
+      clearEnv: true,
+      env: profilingChildEnv(),
       stdout: "piped",
       stderr: "piped",
-    }).output();
-    const release = captureOutput.code === 0
-      ? await releasePort.promise
-      : { found: false } as const;
-    const targetStatus = release.found
-      ? await stopChildProcess(target, release.port)
+    }).spawn();
+    const captureStdoutPromise = readTextStream(capture.stdout, (text) => {
+      if (
+        text.includes("profile: profiler started") &&
+        !captureProfilerStartFound
+      ) {
+        resolveCaptureProfilerStart({ found: true });
+      }
+    }).then((text) => {
+      if (!captureProfilerStartSettled) {
+        resolveCaptureProfilerStart({ found: false });
+      }
+      return text;
+    });
+    const captureStderrPromise = readTextStream(capture.stderr, (text) => {
+      if (text.includes("Profiler.start failed")) {
+        resolveCaptureProfilerStart({ found: false });
+      }
+    });
+    const releaseDone = releaseChildProcessAfterProfilerStart(
+      releasePort.promise,
+      captureProfilerStart.promise,
+    );
+    const targetStartFailureCleanup = releaseDone.then(async (released) => {
+      if (!released) {
+        await terminateChildProcess(target);
+      }
+    });
+
+    const captureStatus = await capture.status;
+    const targetStatus = captureStatus.success
+      ? await waitForReleasedChildProcess(
+        target,
+        releaseDone,
+        releasePort.promise,
+      )
       : await terminateChildProcess(target);
+    await targetStartFailureCleanup;
     target = undefined;
     const targetStdout = await targetStdoutPromise;
     const targetStderr = await targetStderrPromise;
-
-    const captureStdout = decoder.decode(captureOutput.stdout);
-    const captureStderr = decoder.decode(captureOutput.stderr);
+    const captureStdout = await captureStdoutPromise;
+    const captureStderr = await captureStderrPromise;
     const failureOutput =
       `${captureStdout}\n${captureStderr}\n${targetStdout}\n${targetStderr}`;
 
-    assertEquals(captureOutput.code, 0, failureOutput);
+    assertEquals(captureStatus.code, 0, failureOutput);
     assertEquals(targetStatus?.success, true, failureOutput);
     assertStringIncludes(captureStdout, "profile: profile stop matched");
     assertStringIncludes(targetStdout, "profile start");
     assertStringIncludes(targetStdout, "profile stop");
 
-    try {
-      const profileInfo = await Deno.stat(profilePath);
-      assert(profileInfo.size > 0);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      const stopError = await Deno.readTextFile(
-        profileErrorOutputPath(profilePath),
-      );
-      assertStringIncludes(stopError, "Profiler.stop failed");
-    }
+    const profileInfo = await Deno.stat(profilePath);
+    assert(profileInfo.size > 0);
     const consoleLog = await Deno.readTextFile(consolePath);
     assertStringIncludes(consoleLog, "profile start");
     assertStringIncludes(consoleLog, "profile stop");
