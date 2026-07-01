@@ -34,6 +34,30 @@ export interface CapabilityAnalysisOptions {
    * capability summary mis-shapes or drops inputs. Consulted before the checker.
    */
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+  /**
+   * Optional sink for the read-then-mergeable-`push` misuse check. When set,
+   * the analysis reports every `Cell.push` whose receiver collection path the
+   * same function also reads explicitly (a `.get()` or an iteration). A handler
+   * that reads a collection and then mergeable-`push`es to it keeps
+   * conflicting-and-retrying under write contention; the intent is usually
+   * better expressed as an identity-addressed `addUnique` or a read-modify-write
+   * `set`. Left unset (the default), the analysis records no push sites.
+   */
+  readonly mergeablePushMisuseSink?: (finding: MergeablePushMisuse) => void;
+}
+
+/**
+ * A `Cell.push(...)` whose receiver collection is also read explicitly within
+ * the same analyzed function. Reported through
+ * {@link CapabilityAnalysisOptions.mergeablePushMisuseSink}.
+ */
+export interface MergeablePushMisuse {
+  /** The `push(...)` call to point the diagnostic at. */
+  readonly node: ts.Node;
+  /** The collection path that is both read and pushed, relative to its root. */
+  readonly path: readonly string[];
+  /** The analyzed parameter/root the collection belongs to. */
+  readonly rootName: string;
 }
 
 interface MutableCapabilityState {
@@ -125,6 +149,12 @@ const ARRAY_IDENTITY_WRITER_METHODS = new Set([
   "removeByValue",
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
+// The mergeable tail-append op. Only `push` commits as a mergeable `append`
+// that drops the op's own array read from conflict detection; a handler that
+// also reads the same collection then has a fragile read-then-push shape. The
+// other identity writers either dedup/remove by value (the recommended
+// replacements) or are ordinary read-modify-writes, so they are not flagged.
+const MERGEABLE_APPEND_METHODS = new Set(["push"]);
 const READER_METHODS = new Set(["get"]);
 const OPAQUE_DERIVATION_METHODS = new Set([
   "map",
@@ -1101,6 +1131,16 @@ export function analyzeFunctionCapabilities(
     const interprocedural = !!options?.interprocedural && !!checker;
     const includeNestedCallbacks = !!options?.includeNestedCallbacks;
     const summarySourceFile = fn.getSourceFile();
+
+    // Mergeable `push` call sites, collected only when a misuse sink is given.
+    // After the walk, a site whose receiver path the function also reads is a
+    // read-then-push and is reported through the sink.
+    const mergeablePushMisuseSink = options?.mergeablePushMisuseSink;
+    const mergeablePushSites: Array<{
+      readonly root: string;
+      readonly encodedPath: string;
+      readonly node: ts.Node;
+    }> = [];
 
     if (!fn.body) {
       const empty = { params: [] };
@@ -2530,6 +2570,17 @@ export function analyzeFunctionCapabilities(
               trackWriteRef(receiver);
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
+              if (
+                mergeablePushMisuseSink &&
+                MERGEABLE_APPEND_METHODS.has(methodName) &&
+                !receiver.dynamic
+              ) {
+                mergeablePushSites.push({
+                  root: receiver.root,
+                  encodedPath: encodePath(receiver.path),
+                  node,
+                });
+              }
               let hasIdentityArgument = false;
               for (const argument of node.arguments) {
                 const argumentRef = resolveSourceRef(argument);
@@ -2777,6 +2828,18 @@ export function analyzeFunctionCapabilities(
       }
     } else {
       visit(fn.body);
+    }
+
+    if (mergeablePushMisuseSink) {
+      for (const site of mergeablePushSites) {
+        if (states.get(site.root)?.reads.has(site.encodedPath)) {
+          mergeablePushMisuseSink({
+            node: site.node,
+            path: decodePath(site.encodedPath),
+            rootName: site.root,
+          });
+        }
+      }
     }
 
     const params: CapabilityParamSummary[] = [];
