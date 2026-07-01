@@ -3,7 +3,8 @@
     "dev": "deno run --unstable-otel -A --watch --env-file=.env index.ts",
     "production": "deno run --unstable-otel -A --env-file=.env index.ts",
     "test": "ENV=test deno test -A --env-file=.env.test",
-    "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts"
+    "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts",
+    "provision-ingest-channel": "deno run -A --env-file=.env scripts/provision-ingest-channel.ts"
   },
   "fmt": {
     "exclude": ["./llm_documentation/*"]
