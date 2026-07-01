@@ -4,7 +4,10 @@
  * frames to `Deno.stdout`, and restores the terminal on every exit path.
  *
  * All state and key handling live in {@link Session} (testable, no I/O); this
- * driver just wires it to the terminal and the {@link renderFrame} renderer.
+ * driver wires it to the terminal and the {@link renderFrame} renderer. The raw
+ * terminal and process operations are reached through an injectable {@link
+ * PagerDeps} so the driver's control flow can be exercised without a real TTY;
+ * {@link realPagerDeps} supplies the genuine Deno calls.
  */
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
@@ -24,15 +27,58 @@ const REPARSE_DEBOUNCE_MS = 150;
 
 export type PagerOptions = SessionOptions;
 
+/** The keyboard handle the pager reads from — satisfied by a `Deno.FsFile`. */
+export interface PagerTty {
+  read(buffer: Uint8Array): Promise<number | null>;
+  setRaw(mode: boolean): void;
+  close(): void;
+}
+
+/** The terminal/process operations the pager performs, injected so the driver
+ * is testable without a real terminal. */
+export interface PagerDeps {
+  /** Open the controlling terminal for reading; throws when there is none. */
+  openTty(): PagerTty;
+  write(text: string): void;
+  /** The terminal size; may throw when there is no console. */
+  consoleSize(): { columns: number; rows: number };
+  env(key: string): string | undefined;
+  addSignalListener(signal: Deno.Signal, handler: () => void): void;
+  removeSignalListener(signal: Deno.Signal, handler: () => void): void;
+  exit(code: number): never;
+  /** Schedule `handler` after `ms`; returns a function that cancels it. */
+  setTimer(handler: () => void, ms: number): () => void;
+}
+
+/** The real terminal and process operations. */
+export function realPagerDeps(): PagerDeps {
+  return {
+    openTty: () => Deno.openSync("/dev/tty", { read: true }),
+    write: (text) => {
+      Deno.stdout.writeSync(encoder.encode(text));
+    },
+    consoleSize: Deno.consoleSize,
+    env: (key) => Deno.env.get(key),
+    addSignalListener: Deno.addSignalListener,
+    removeSignalListener: Deno.removeSignalListener,
+    exit: Deno.exit,
+    setTimer: (handler, ms) => {
+      const id = setTimeout(handler, ms);
+      return () => clearTimeout(id);
+    },
+  };
+}
+
 export async function runPager(
   doc: Document,
   options: PagerOptions,
   semanticsIn?: Semantics,
   editSource?: EditableSource,
+  deps: PagerDeps = realPagerDeps(),
 ): Promise<void> {
-  let tty: Deno.FsFile;
+  let tty: PagerTty;
   try {
-    tty = Deno.openSync("/dev/tty", { read: true });
+    tty = deps.openTty();
   } catch (error) {
     throw new ViewError(
       `cf view: cannot open /dev/tty for keyboard input (${
@@ -53,7 +99,7 @@ export async function runPager(
   const session = new Session(
     doc,
     options,
-    consoleSize(),
+    consoleSize(deps),
     semantics,
     editSource,
     realFileGateway(),
@@ -71,17 +117,19 @@ export async function runPager(
     // terminal cursor stays hidden.
     const cur = cursorScreenPos(session.doc, view);
     if (cur) out += term.moveTo(cur.row, cur.col) + term.showCursor;
-    write(out);
+    deps.write(out);
   };
 
   // The session re-highlights on every keystroke but defers the full parse;
   // run it once typing pauses so the structure tree and cross-references catch
   // up without making each keystroke pay for the whole-AST build.
-  let reparseTimer: ReturnType<typeof setTimeout> | undefined;
+  let cancelReparse: (() => void) | undefined;
   const scheduleReparse = () => {
-    if (reparseTimer !== undefined) clearTimeout(reparseTimer);
-    reparseTimer = setTimeout(() => {
-      reparseTimer = undefined;
+    if (cancelReparse) {
+      cancelReparse();
+    }
+    cancelReparse = deps.setTimer(() => {
+      cancelReparse = undefined;
       session.reparse();
       draw();
     }, REPARSE_DEBOUNCE_MS);
@@ -94,20 +142,20 @@ export async function runPager(
     try {
       tty.setRaw(false);
     } catch { /* ignore */ }
-    write(`${CSI}?7h${term.showCursor}${term.leaveAltScreen}`);
+    deps.write(`${CSI}?7h${term.showCursor}${term.leaveAltScreen}`);
     try {
       tty.close();
     } catch { /* ignore */ }
   };
 
   const onResize = () => {
-    const s = consoleSize();
+    const s = consoleSize(deps);
     session.resize(s.width, s.height);
     draw();
   };
   const terminate = (code: number) => {
     cleanup();
-    Deno.exit(code);
+    deps.exit(code);
   };
   // A SIGINT (Ctrl+C reaching us as a signal rather than the in-band 0x03 byte,
   // e.g. a forwarded interrupt) routes through the save prompt when there are
@@ -120,13 +168,13 @@ export async function runPager(
   const onTerminate = () => terminate(143);
 
   try {
-    Deno.addSignalListener("SIGWINCH", onResize);
+    deps.addSignalListener("SIGWINCH", onResize);
   } catch { /* not on this platform */ }
-  Deno.addSignalListener("SIGINT", onInterrupt);
-  Deno.addSignalListener("SIGTERM", onTerminate);
+  deps.addSignalListener("SIGINT", onInterrupt);
+  deps.addSignalListener("SIGTERM", onTerminate);
 
   tty.setRaw(true);
-  write(`${term.enterAltScreen}${term.hideCursor}`);
+  deps.write(`${term.enterAltScreen}${term.hideCursor}`);
 
   const buf = new Uint8Array(4096);
   let leftover: Uint8Array = new Uint8Array(0);
@@ -135,10 +183,12 @@ export async function runPager(
     // Warm the TypeScript program after the first frame is on screen, while the
     // user is reading it and before any keypress arrives, so the first info card
     // does not pay the one-time build cost on the interactive path.
-    if (semantics) setTimeout(() => semantics.prewarm(), 0);
+    if (semantics) deps.setTimer(() => semantics.prewarm(), 0);
     while (!session.quit) {
       const n = await tty.read(buf);
-      if (n === null) break;
+      if (n === null) {
+        break;
+      }
       const chunk = concat(leftover, buf.subarray(0, n));
       const { keys, rest } = decodeKeys(chunk);
       leftover = rest;
@@ -152,27 +202,25 @@ export async function runPager(
       }
     }
   } finally {
-    if (reparseTimer !== undefined) clearTimeout(reparseTimer);
+    if (cancelReparse) {
+      cancelReparse();
+    }
     try {
-      Deno.removeSignalListener("SIGINT", onInterrupt);
-      Deno.removeSignalListener("SIGTERM", onTerminate);
-      Deno.removeSignalListener("SIGWINCH", onResize);
+      deps.removeSignalListener("SIGINT", onInterrupt);
+      deps.removeSignalListener("SIGTERM", onTerminate);
+      deps.removeSignalListener("SIGWINCH", onResize);
     } catch { /* ignore */ }
     cleanup();
   }
 }
 
-function write(s: string): void {
-  Deno.stdout.writeSync(encoder.encode(s));
-}
-
-function consoleSize(): { width: number; height: number } {
+function consoleSize(deps: PagerDeps): { width: number; height: number } {
   try {
-    const { columns, rows } = Deno.consoleSize();
+    const { columns, rows } = deps.consoleSize();
     if (columns > 0 && rows > 0) return { width: columns, height: rows };
   } catch { /* fall through to env / defaults */ }
-  const envW = Number.parseInt(Deno.env.get("COLUMNS") ?? "", 10);
-  const envH = Number.parseInt(Deno.env.get("LINES") ?? "", 10);
+  const envW = Number.parseInt(deps.env("COLUMNS") ?? "", 10);
+  const envH = Number.parseInt(deps.env("LINES") ?? "", 10);
   return {
     width: Number.isFinite(envW) && envW > 0 ? envW : 80,
     height: Number.isFinite(envH) && envH > 0 ? envH : 24,
