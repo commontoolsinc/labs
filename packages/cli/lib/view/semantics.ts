@@ -123,15 +123,12 @@ export function createSemantics(
   return {
     prewarm,
     typeAt(offset: number): string | null {
-      try {
-        const prog = build();
-        if (!prog) return null;
-        const section = sectionAt(offset);
-        if (!section) return null;
-        return typeStringAt(prog, section.name, offset - section.start);
-      } catch {
-        return null;
-      }
+      return typeQuery(build, (o) => {
+        const section = sectionAt(o);
+        return section
+          ? { path: section.name, offset: o - section.start }
+          : null;
+      }, offset);
     },
     definitionOf(offset: number): DefTarget[] {
       const cached = defCache.get(offset);
@@ -224,15 +221,7 @@ export function createDiffSemantics(
   return {
     prewarm,
     typeAt(offset: number): string | null {
-      try {
-        const prog = build();
-        if (!prog) return null;
-        const at = maps.toFile(offset);
-        if (!at) return null;
-        return typeStringAt(prog, at.path, at.offset);
-      } catch {
-        return null;
-      }
+      return typeQuery(build, maps.toFile, offset);
     },
     definitionOf(offset: number): DefTarget[] {
       const cached = defCache.get(offset);
@@ -677,5 +666,25 @@ function lazyProgram(
   return { build, prewarm: () => void build() };
 }
 
+/** Read the type string at `offset`: build the program, map `offset` to a
+ * (file, offset) with `locate`, and ask the program there. Null when the
+ * program is unavailable, the offset does not map, or any step throws. Shared
+ * by the blob and diff factories' typeAt. */
+function typeQuery(
+  build: () => ts.Program | undefined,
+  locate: (offset: number) => { path: string; offset: number } | null,
+  offset: number,
+): string | null {
+  try {
+    const prog = build();
+    if (!prog) return null;
+    const at = locate(offset);
+    if (!at) return null;
+    return typeStringAt(prog, at.path, at.offset);
+  } catch {
+    return null;
+  }
+}
+
 /** Internals exposed for tests only. */
-export const _internal = { lazyProgram };
+export const _internal = { lazyProgram, makeHost };

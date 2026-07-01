@@ -242,3 +242,21 @@ Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   assertEquals(none.build(), undefined);
   assertEquals(nullCalls, 1, "a program-less build latches and is not retried");
 });
+
+// makeHost's readReal memoises real-file reads. Under the pager's module
+// resolution TypeScript reads each file once, so the cache hit never fires
+// there; reading the same path twice through the host exercises it directly.
+Deno.test("makeHost: a repeated read of the same file is served from the cache", () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = join(dir, "dep.ts");
+    Deno.writeTextFileSync(file, "export const dep = 1;\n");
+    const host = _internal.makeHost([], {}, undefined, dir, dir);
+    const first = host.readFile!(file);
+    const second = host.readFile!(file); // returned from fileCache
+    assertEquals(first, "export const dep = 1;\n");
+    assertEquals(second, first);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
