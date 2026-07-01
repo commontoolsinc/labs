@@ -139,7 +139,9 @@ const buildTailOp = (
   if (!array) {
     return { ops: [], suppress: [] };
   }
-  const start = ctx.hadInitialArray ? Math.max(0, array.length - intent.count) : 0;
+  const start = ctx.hadInitialArray
+    ? Math.max(0, array.length - intent.count)
+    : 0;
   const values = array.slice(start) as FabricValue[];
   if (values.length === 0) {
     return { ops: [], suppress: [] };

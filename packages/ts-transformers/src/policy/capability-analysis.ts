@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { MERGEABLE_OP_METHODS, type MergeableOpMethodKind } from "@commonfabric/api";
+import {
+  MERGEABLE_OP_METHODS,
+  type MergeableOpMethodKind,
+} from "@commonfabric/api";
 import {
   classifyArrayCallbackContainerCall,
   isCellLikeType,

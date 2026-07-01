@@ -86,9 +86,10 @@ If you are developing runtime code, read the following documentation:
   and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
 - `docs/development/LLM_TESTING.md` - Testing patterns and server routes that
   call the LLM (test-environment guard, mocks, conversation fixtures)
-- `docs/development/patch-operations.md` - The patch-operation family (the single
-  logical changes a commit carries), the registries that define each op once, and
-  how to add a new one across the memory / runner / api / transformer layers
+- `docs/development/patch-operations.md` - The patch-operation family (the
+  single logical changes a commit carries), the registries that define each op
+  once, and how to add a new one across the memory / runner / api / transformer
+  layers
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/debugging/` - Runtime errors, type errors, and
