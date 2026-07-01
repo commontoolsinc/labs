@@ -1,7 +1,7 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -460,13 +460,17 @@ export function sanitizeSchemaForLinks(
   // input, carrying ~half of the total strip time. Only deep-frozen inputs are
   // memoized (a mutable input's identity could go stale), matching the
   // identity-keyed-memo guard `traverse.ts` uses; `isDeepFrozen` is O(1) for the
-  // already-frozen/cached inputs we hit here. Cached outputs are deep-frozen so a
-  // shared result cannot be mutated by a consumer (all consumers only spread it).
+  // already-frozen/cached inputs we hit here. The cache holds the canonical strip
+  // result; every call returns a fresh SHALLOW CLONE of it. The clone matters:
+  // the reactive graph keys on the sanitized schema's top-level object identity
+  // (returning a shared object changes recomputation), so each call needs its own
+  // top — while still reusing the (expensive) stripped sub-tree from the cache.
   const memoizable = isDeepFrozen(schema);
   if (memoizable) {
     const byMode = _sanitizeCache.get(schema);
     if (byMode !== undefined && byMode.has(keepAsCell)) {
-      return byMode.get(keepAsCell);
+      const hit = byMode.get(keepAsCell);
+      return hit !== null && typeof hit === "object" ? { ...hit } : hit;
     }
   }
 
@@ -502,14 +506,15 @@ export function sanitizeSchemaForLinks(
     : stripped;
 
   if (memoizable) {
-    const frozen = deepFreeze(output);
     let byMode = _sanitizeCache.get(schema);
     if (byMode === undefined) {
       byMode = new Map();
       _sanitizeCache.set(schema, byMode);
     }
-    byMode.set(keepAsCell, frozen);
-    return frozen;
+    byMode.set(keepAsCell, output);
+    return output !== null && typeof output === "object"
+      ? { ...output }
+      : output;
   }
 
   return output;

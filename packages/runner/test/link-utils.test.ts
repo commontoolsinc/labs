@@ -673,29 +673,36 @@ describe("link-utils", () => {
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
-    it("memoizes a frozen input per keepAsCell mode and freezes the shared result", () => {
+    it("memoizes a frozen input per keepAsCell mode, handing out a fresh top that shares the cached sub-tree", () => {
       // The memo only engages for deep-frozen inputs (a mutable input's identity
       // could go stale), so it no-ops for the non-frozen literals other tests
-      // pass. A repeated frozen input must return the SAME object (served from
-      // the memo, not recomputed), and that shared object must be frozen so a
-      // consumer cannot corrupt it.
+      // pass. On a repeat it must return a FRESH top-level object (the reactive
+      // graph keys on the sanitized schema's identity — a shared top changes
+      // recomputation), while reusing the cached stripped sub-tree (⇒ memo hit,
+      // no recompute).
       const schema = deepFreeze({
         type: "object",
         properties: { name: { type: "string", asCell: ["cell"] } },
       }) as JSONSchema;
 
-      const noneA = sanitizeSchemaForLinks(schema, KeepAsCell.None);
-      const noneB = sanitizeSchemaForLinks(schema, KeepAsCell.None);
-      expect(noneB).toBe(noneA); // same reference ⇒ memo hit
-      expect(Object.isFrozen(noneA)).toBe(true);
-      expect((noneA as { properties: { name: JSONSchema } }).properties.name)
-        .toEqual({ type: "string" }); // asCell stripped
+      const noneA = sanitizeSchemaForLinks(schema, KeepAsCell.None) as {
+        properties: Record<string, JSONSchema>;
+      };
+      const noneB = sanitizeSchemaForLinks(schema, KeepAsCell.None) as {
+        properties: Record<string, JSONSchema>;
+      };
+      expect(noneB).not.toBe(noneA); // fresh top-level object each call
+      expect(noneB.properties).toBe(noneA.properties); // cached sub-tree reused
+      expect(noneA.properties.name).toEqual({ type: "string" }); // asCell stripped
 
       // A different keepAsCell mode is cached separately (asCell kept here).
-      const allA = sanitizeSchemaForLinks(schema, KeepAsCell.All);
-      expect(allA).not.toBe(noneA);
-      expect((allA as { properties: { name: JSONSchema } }).properties.name)
-        .toEqual({ type: "string", asCell: ["cell"] });
+      const allA = sanitizeSchemaForLinks(schema, KeepAsCell.All) as {
+        properties: Record<string, JSONSchema>;
+      };
+      expect(allA.properties.name).toEqual({
+        type: "string",
+        asCell: ["cell"],
+      });
     });
 
     it("does not cross-contaminate different frozen inputs", () => {
