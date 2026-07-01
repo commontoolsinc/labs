@@ -299,17 +299,56 @@ the leaf value read, **keep a structural parent/root read** — closes Q1 *and*
 moves the trigger toward #4220's **per-read** vocabulary, partially answering the
 unification question. The two questions are not independent.
 
-### 5.3 Status (2026-06-29)
+### 5.3 Redesign after Robin's review (2026-06-30) — LANDED
 
-The §5.1 mitigation is **committed on `fix/cellset-blind-leaf-write` and pushed**
-to PR [#4245](https://github.com/commontoolsinc/labs/pull/4245) so Robin can
-review the final form — it is **not merged**; the tradeoff above is his call. It
-**supersedes the "drop-all" framing** still used narratively in §§2/4 and the §7
-table: blind `$value` reads are now **downgraded to a structural entity-root
-existence read**, not dropped, so the write is *structural-precondition-only*
-rather than fully *precondition-free*. The original drop-all form is recoverable
-from history (the `fix(runtime-client): precondition-free…` commit) if the
-tradeoff is rejected.
+Robin reviewed the entity-root form and endorsed the "semi-blind write" direction
+(value-blind + a structural precondition), with two changes now on
+`fix/cellset-blind-leaf-write`. Both **supersede** the "value-type narrowing" /
+"entity-root" framing in §§2/4/7 and the §5.1 mitigation.
+
+1. **Trigger by METHOD, not value type.** The scalar-vs-structured heuristic is
+   replaced by an explicit request type: `CellHandle.set` → `CellSet` → always a
+   blind last-write-wins write (any value type); `CellHandle.push` → new
+   **`CellPush`** → `handleCellPush` → read-modify-write that keeps
+   compare-and-set. The value-type check in `handleCellSet` is gone; both handlers
+   share `applyCellWrite(request, blind)`. Intent-explicit, and it lets an array
+   *overwrite* be blind while an array *push* captures reads. (Robin: push stays
+   CAS-retry at the browser→worker seam; a mergeable `append` is a deferred larger
+   change — index-shift surprises.) Files: `protocol/types.ts` (CellPush +
+   Commands), `runtime-processor.ts`, `cell-handle.ts`. Test: `cellset-lww.test.ts`
+   now covers scalar-set-blind, array-set-blind (trigger is the method),
+   push-keeps-CAS, and the e2e save.
+
+2. **Structural read anchored at the cell's PARENT, not the entity root.** Robin
+   wanted a write to `["notes","today"]` to fail if someone wrote `false` to
+   `["notes"]` (an ancestor *reshape*, à la Ian's
+   [#4406](https://github.com/commontoolsinc/labs/pull/4406)). The entity-root read
+   only caught a whole-doc delete (TIER-1); an intermediate-ancestor reshape (a
+   TIER-2 patch) slipped past and threw a raw "not traversable" at
+   commit-materialization. Now `handleCellSet` threads the cell's resolved PARENT
+   address (`setBlindStructuralTarget`, via
+   `resolveAsCell().getAsNormalizedFullLink()` — the logical write path is known
+   only there; `buildReads` sees the optimized element-level diff), and
+   `buildReads` emits one nonRecursive read at that parent. A concurrent ancestor
+   reshape is now a clean ConflictError; a same-/sibling-leaf value write (below
+   the parent) stays conflict-free; array element writes (below the parent) keep
+   array-set blind. For a linked/scalar cell the parent *is* the entity root, so
+   this reduces to the earlier form. Files: `reactivity-log.ts` (persistent target
+   registry), `runtime-processor.ts`, `index.ts`, `v2.ts`.
+
+**Verification.** cellset-lww 4/4; conflict/commit/runtime-processor/precondition
+regression + broader sweep green (109 tests); fmt/lint/type-check clean. The
+ancestor-reshape guarantee is a dedicated ENGINE-level test,
+`packages/memory/test/cellset-structural-precondition.test.ts`: precondition-free →
+raw throw; entity-root read → *still* raw throw (root is insufficient); PARENT read
+→ clean ConflictError. The in-process multi-runtime harness can't reproduce this
+end to end — it propagates shared state synchronously, so a session can't hold a
+*stale-but-navigable* replica (navigation into a retyped ancestor fails locally
+before any commit) — hence the engine-level test.
+
+**Not merged**; still PR [#4245](https://github.com/commontoolsinc/labs/pull/4245)
+for Robin's review. The array-CAS drop (a `set` of an array is now blind, unlike
+the old value-type form) is the one behavior change to flag to him explicitly.
 
 ---
 
