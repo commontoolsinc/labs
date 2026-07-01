@@ -152,7 +152,7 @@ browser, CI-ready). Four steps:
    actual symptom).
 
 **Ancestor-reshape guarantee:**
-`packages/memory/test/cellset-structural-precondition.test.ts` (engine-level) pins
+`packages/memory/test/cellset-structural-precondition-test.ts` (engine-level) pins
 that a precondition-free nested patch on a retyped ancestor throws raw "not
 traversable"; an **entity-root** structural read still throws raw (insufficient);
 the **parent** read converts it to a clean `ConflictError`. (The in-process
@@ -221,7 +221,7 @@ load-bearing reads). The original framing, then what we found.
 > (entity/parent-present) precondition even when dropping the value-equality one?
 
 **Reproduced at the engine level** (crafted set→delete→blind-patch commits via
-`applyCommit`, mirroring `packages/memory/test/v2-commit-preconditions.test.ts`):
+`applyCommit`, mirroring `packages/memory/test/v2-commit-preconditions-test.ts`):
 
 - **The edge is real.** A precondition-free nested-scalar `replace` patch whose
   doc was concurrently whole-doc-deleted throws **`Error: missing path
@@ -357,7 +357,7 @@ Robin reviewed the entity-root form and endorsed the "semi-blind write" directio
 **Verification.** cellset-lww 4/4; conflict/commit/runtime-processor/precondition
 regression + broader sweep green (109 tests); fmt/lint/type-check clean. The
 ancestor-reshape guarantee is a dedicated ENGINE-level test,
-`packages/memory/test/cellset-structural-precondition.test.ts`: precondition-free →
+`packages/memory/test/cellset-structural-precondition-test.ts`: precondition-free →
 raw throw; entity-root read → *still* raw throw (root is insufficient); PARENT read
 → clean ConflictError. The in-process multi-runtime harness can't reproduce this
 end to end — it propagates shared state synchronously, so a session can't hold a
@@ -385,7 +385,7 @@ cd labs/.claude/worktrees/cellset-probe            # branch: fix/cellset-blind-l
 deno test -A packages/patterns/integration/cellset-lww.test.ts
 
 # Ancestor-reshape guarantee (engine-level structural precondition)
-deno test -A packages/memory/test/cellset-structural-precondition.test.ts
+deno test -A packages/memory/test/cellset-structural-precondition-test.ts
 
 # See the flake: disable the blind path and re-run → steps 1/2/4 fail with
 # "stale confirmed read … conflicted". In multi-runtime-worker.ts set(), remove
@@ -416,7 +416,7 @@ the mechanism) is preserved on `origin/scratch/cellset-conflict-probe`.
 | `packages/runner/src/storage/v2.ts` | `buildReads` drops blind reads, emits one `nonRecursive` read at the threaded **parent** (§5.3) |
 | `packages/runner/src/index.ts` | exports the marker + structural-target fns |
 | `packages/patterns/integration/cellset-lww.test.ts` | regression test (4 steps: scalar/array blind, push CAS, e2e) |
-| `packages/memory/test/cellset-structural-precondition.test.ts` | engine-level ancestor-reshape guarantee (parent vs root) |
+| `packages/memory/test/cellset-structural-precondition-test.ts` | engine-level ancestor-reshape guarantee (parent vs root) |
 | `packages/patterns/integration/multi-runtime-{worker,harness}.ts` | `set` (blind) + `push` (CAS) harness commands |
 
 ---
