@@ -177,6 +177,24 @@ export class MultiRuntimeSession {
     }) as { ok: boolean; error?: { name?: string; message?: string } };
   }
 
+  /**
+   * Append `value` to the array cell reached by `path`, exactly like a
+   * `CellHandle.push`: read-modify-write that keeps its read as a compare-and-set
+   * precondition (the `handleCellPush` path), so a concurrent push conflicts
+   * rather than being clobbered — unlike the blind `set` above.
+   */
+  async push(
+    path: (string | number)[],
+    value: unknown,
+    opts: { idle?: boolean } = {},
+  ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
+    return await this.#client.call("push", {
+      path,
+      value,
+      idle: opts.idle,
+    }) as { ok: boolean; error?: { name?: string; message?: string } };
+  }
+
   /** Read a value from the piece result, pulling fresh state first. */
   async read(path: (string | number)[] = []): Promise<unknown> {
     return await this.#client.call("read", { path });

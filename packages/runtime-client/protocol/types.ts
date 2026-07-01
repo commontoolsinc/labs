@@ -39,6 +39,7 @@ export enum RequestType {
   // Cell operations (main -> worker)
   CellGet = "cell:get",
   CellSet = "cell:set",
+  CellPush = "cell:push",
   CellSend = "cell:send",
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
@@ -207,6 +208,16 @@ export interface CellGetRequest extends BaseRequest {
 
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
+  cell: CellRef;
+  value: JSONValue;
+}
+
+// A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
+// it carries the whole already-appended array — but routed as its own request so
+// the runtime keeps the read-target as a commit precondition (compare-and-set),
+// rather than the blind last-write-wins of CellSet.
+export interface CellPushRequest extends BaseRequest {
+  type: RequestType.CellPush;
   cell: CellRef;
   value: JSONValue;
 }
@@ -685,6 +696,7 @@ export type IPCClientRequest =
   | DisposeRequest
   | CellGetRequest
   | CellSetRequest
+  | CellPushRequest
   | CellSendRequest
   | CellSubscribeRequest
   | CellUnsubscribeRequest
@@ -984,6 +996,10 @@ export type Commands = {
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.CellPush]: {
+    request: CellPushRequest;
     response: EmptyResponse;
   };
   [RequestType.CellSend]: {

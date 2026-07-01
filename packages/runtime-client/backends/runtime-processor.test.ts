@@ -1486,9 +1486,21 @@ describe("RuntimeProcessor CFC commit preparation", () => {
       send: (value: unknown) => {
         expect(value).toBe("new value");
       },
+      // A blind `set` resolves the write target to thread its parent as the
+      // structural precondition (see applyCellWrite).
+      resolveAsCell: () => ({
+        getAsNormalizedFullLink: () => ({
+          id: ref.id,
+          space: ref.space,
+          scope: ref.scope,
+          path: ref.path,
+        }),
+      }),
     };
     return {
       processor: {
+        // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
+        applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
         runtime: {
           edit: () => tx,
           prepareTxForCommit: (candidate: unknown) => {

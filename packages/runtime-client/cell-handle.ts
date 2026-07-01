@@ -113,24 +113,44 @@ export class CellHandle<T = unknown> {
    */
   async set(value: T): Promise<void> {
     this.#requireSchema("set");
+    // A plain set is a blind last-write-wins overwrite (CellSet).
+    await this.#applyLocalAndSend(value, RequestType.CellSet);
+  }
+
+  // Optimistic local update (mirrors the old set()) plus the remote write. The
+  // request TYPE encodes the intent: CellSet is a blind overwrite, CellPush is a
+  // read-modify-write append that the runtime keeps as compare-and-set.
+  #applyLocalAndSend(
+    value: T,
+    type: RequestType.CellSet | RequestType.CellPush,
+  ): Promise<void> {
     this.#value = value;
 
     for (const callback of this.#callbacks.values()) {
       try {
-        // Optimistic local set doesn't change the label; carry the current one.
+        // Optimistic local update doesn't change the label; carry the current one.
         callback(value as Readonly<T>, this.#cfcLabel);
       } catch (error) {
         console.error("[CellHandle] Callback error:", error);
       }
     }
 
-    await this.#conn.request<RequestType.CellSet>({
-      type: RequestType.CellSet,
-      cell: this.ref(),
-      value: CellHandle.serialize(value),
-    }).catch((error) => {
+    const cell = this.ref();
+    const serialized = CellHandle.serialize(value);
+    const request = type === RequestType.CellPush
+      ? this.#conn.request<RequestType.CellPush>({
+        type: RequestType.CellPush,
+        cell,
+        value: serialized,
+      })
+      : this.#conn.request<RequestType.CellSet>({
+        type: RequestType.CellSet,
+        cell,
+        value: serialized,
+      });
+    return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
-        console.error("[CellHandle] Set failed:", error);
+        console.error("[CellHandle] Write failed:", error);
       }
     });
   }
@@ -168,6 +188,10 @@ export class CellHandle<T = unknown> {
     return child;
   }
 
+  // A push is read-modify-write: build the appended array locally, then send it
+  // as a CellPush (not CellSet) so the runtime keeps the read-target as a commit
+  // precondition (compare-and-set) — a concurrent push aborts rather than being
+  // clobbered by a blind overwrite.
   push<U>(
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
@@ -176,7 +200,10 @@ export class CellHandle<T = unknown> {
     if (!Array.isArray(current)) {
       throw new Error("push() can only be used on array cells");
     }
-    this.set([...current, ...values] as unknown as U[]);
+    void this.#applyLocalAndSend(
+      [...current, ...values] as unknown as U[],
+      RequestType.CellPush,
+    );
   }
 
   /**

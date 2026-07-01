@@ -136,6 +136,45 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
 }
 
+// The structural existence/shape precondition for a blind UI-input write: the
+// PARENT address of the cell being set. handleCellSet computes it from the cell's
+// resolved write link — where the LOGICAL write path is known — because buildReads
+// only sees the optimized, sometimes element-level diff and cannot recover it.
+// Stored persistently (NOT cleared by unmark, unlike the blind mark) so buildReads
+// can read it at commit time and emit one nonRecursive read there: that conflicts
+// with a concurrent whole-doc delete (TIER-1, path-blind) and with a reshape of
+// the parent or any ancestor (TIER-2 nonRecursive overlap fires at-or-above the
+// read path) as a clean ConflictError, while a write to the cell's own subtree
+// (its value, including array elements) sits BELOW the parent and does not
+// conflict — keeping the own-write race conflict-free.
+export type BlindStructuralTarget = {
+  id: string;
+  space: string;
+  scope?: unknown;
+  // The cell's parent path (the leaf path with its last segment dropped); `[]`
+  // for a write at the entity root.
+  path: readonly (string | number)[];
+};
+const blindStructuralTargets = new WeakMap<object, BlindStructuralTarget>();
+
+export function setBlindStructuralTarget(
+  tx: object,
+  target: BlindStructuralTarget,
+): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    blindStructuralTargets.set(layer, target);
+  }
+}
+export function getBlindStructuralTarget(
+  tx: object,
+): BlindStructuralTarget | undefined {
+  for (const layer of blindWriteTxChain(tx)) {
+    const target = blindStructuralTargets.get(layer);
+    if (target !== undefined) return target;
+  }
+  return undefined;
+}
+
 export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {
   return meta?.[markReadAsAttemptedWriteMarker] === true;
 }

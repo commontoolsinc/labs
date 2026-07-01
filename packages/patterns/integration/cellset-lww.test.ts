@@ -1,16 +1,17 @@
 /**
- * Regression test: scalar `$value` UI input is a precondition-free
- * last-write-wins leaf write (supersedes the #4126 cellset-silent-rollback
- * queue work).
+ * Regression test: a UI `set` is a blind last-write-wins leaf write; a `push` is
+ * read-modify-write and keeps compare-and-set. The blind-vs-CAS choice is made by
+ * METHOD (the request type the client sends), not by the value's shape.
  *
- * A scalar `$value`/`$checked` edit is a full leaf overwrite. `handleCellSet`
- * marks its transaction as a blind-leaf-write (around the `set` only), so the
- * write carries no concurrency precondition. Under concurrent same-user edits it
- * therefore no longer hits the "stale confirmed read" conflict that rolled the
- * write back and silently dropped a profile/draft edit — the cfc-group-chat-demo
- * "Name not set" flake. Structured (array/object) writes are NOT marked blind —
- * they may be read-modify-write (CellHandle.push, multi-select, list edits) — and
- * retain compare-and-set so concurrent list mutations still cannot lose updates.
+ * `handleCellSet` marks its transaction as a blind-leaf-write, so the set's reads
+ * carry no value-equality precondition (only a structural existence read at the
+ * entity root survives, to catch a concurrent whole-doc delete/replace). Under
+ * concurrent same-user edits a `set` therefore no longer hits the
+ * "stale confirmed read" conflict that rolled the write back and silently dropped
+ * a profile/draft edit — the cfc-group-chat-demo "Name not set" flake. A `push`
+ * routes through `handleCellPush`, which is NOT blind, so concurrent list
+ * mutations still cannot lose updates. (Supersedes the #4126 cellset-silent-
+ * rollback queue work.)
  *
  * profileDraft is PerUser, so two sessions of the same identity share the doc
  * (≈ two browser tabs of one user): the own-write race.
@@ -89,23 +90,52 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
     }
   });
 
-  it("structured (non-scalar) writes retain compare-and-set", async () => {
-    // The narrowing that keeps read-modify-write safe: an array/object value is
-    // not a blind leaf write, so concurrent same-user structured writes still
-    // hit the own-write-race conflict (compare-and-set), preventing lost updates.
-    let conflicts = 0;
+  it("a structured (array) set is blind too — trigger is the method, not the value type", async () => {
+    // Pre-redesign this compare-and-set: a value-type heuristic kept array/object
+    // values on the CAS path. With the method-based trigger, ANY `set` is blind,
+    // so concurrent same-user array-value sets no longer conflict either — only
+    // `push` keeps compare-and-set (next test).
     for (let i = 0; i < 8; i++) {
       await harness.settle();
       const [a, b] = await Promise.all([
         alice.set([...DRAFT], [`alice-${i}`], { idle: false }),
         aliceTab2.set([...DRAFT], [`tab2-${i}`], { idle: false }),
       ]);
+      assert(
+        a.ok,
+        `alice array set ${i} should be a blind write (no conflict): ${
+          JSON.stringify(a.error)
+        }`,
+      );
+      assert(
+        b.ok,
+        `tab2 array set ${i} should be a blind write (no conflict): ${
+          JSON.stringify(b.error)
+        }`,
+      );
+    }
+  });
+
+  it("concurrent pushes retain compare-and-set (push keeps its read precondition)", async () => {
+    // A `push` is read-modify-write: it routes through CellPush/handleCellPush,
+    // which is NOT blind, so the read of the current array stays a commit
+    // precondition. Concurrent same-user pushes against the shared draft therefore
+    // still conflict (compare-and-set), guarding against lost updates — the safety
+    // the old value-type narrowing approximated, now keyed on the method.
+    await alice.set([...DRAFT], [], {}); // array baseline (itself a blind set)
+    let conflicts = 0;
+    for (let i = 0; i < 8; i++) {
+      await harness.settle();
+      const [a, b] = await Promise.all([
+        alice.push([...DRAFT], `alice-${i}`, { idle: false }),
+        aliceTab2.push([...DRAFT], `tab2-${i}`, { idle: false }),
+      ]);
       if (isConflict(a.error) || isConflict(b.error)) conflicts++;
     }
     assert(
       conflicts > 0,
-      "concurrent structured writes must still hit compare-and-set conflicts " +
-        "(blind-leaf-write must not apply to non-scalar values)",
+      "concurrent pushes must still hit compare-and-set conflicts " +
+        "(push must keep its read precondition, unlike a blind set)",
     );
   });
 
