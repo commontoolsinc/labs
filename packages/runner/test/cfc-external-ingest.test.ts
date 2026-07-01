@@ -218,7 +218,10 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
           properties: {
             field: {
               type: "string",
-              ifc: { transformation: true },
+              // A valid confidentiality claim (would produce a declared label)
+              // plus `transformation`, which the runner does not implement (so
+              // verifyInputRequirements fails for this target).
+              ifc: { confidentiality: ["secret"], transformation: true },
             },
           },
           required: ["field"],
@@ -246,6 +249,12 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
       expect(marks).toContainEqual(
         externalIngestAtom("sha256:despite-failure"),
       );
+
+      // ...but the payload's own (unverified) declared policy label did NOT
+      // persist — a failed write must not store unverified policy metadata.
+      const declared = entriesOf(storageManager, id)
+        .filter((e) => e.origin === "declared");
+      expect(declared.length).toBe(0);
     } finally {
       await runtime.dispose();
       await storageManager.close();

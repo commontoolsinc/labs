@@ -3297,10 +3297,15 @@ export const prepareBoundaryCommit = (
     // non-rejecting modes the ingest path runs in (the mint runs even under
     // `disabled`, see runtime.ts). So the ingest target is exempt from the
     // skip: enforcing modes still abort the tx via the recorded reason (nothing
-    // persists), while `disabled`/`observe` commit with the mark intact.
+    // persists), while `disabled`/`observe` commit with the mark intact. The
+    // DECLARED label is still skipped for a failed ingest target (see
+    // ingestVerificationFailed below), so a non-rejecting commit stores only the
+    // runtime's mark, never the payload's unverified policy metadata.
+    let ingestVerificationFailed = false;
     if (requirementFailure) {
       reasons.push(requirementFailure);
       if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
     const trustedEventFailure = verifyTrustedEventRequirements(
       tx,
@@ -3310,6 +3315,7 @@ export const prepareBoundaryCommit = (
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
       if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
 
     const exactCopyFailure = verifyExactCopyRequirements(
@@ -3320,6 +3326,7 @@ export const prepareBoundaryCommit = (
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
       if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);
@@ -3352,52 +3359,57 @@ export const prepareBoundaryCommit = (
         path: canonicalizeLogicalPath(e.path),
         confidentiality: e.label.confidentiality as readonly unknown[],
       }));
-    const persistedLabelEntries: LabelMapEntry[] = mergedSchemaEntries
-      .flatMap((entry) => {
-        if (
-          !ifcEntryAppliesToAttemptedWrite(
-            tx,
-            target,
-            entry.path,
-            entry.schema,
-            entry.root,
-          )
-        ) {
-          return [];
-        }
-        const derived = gateRuntimeMintedIntegrity(
-          derivePersistedLabel(
-            tx,
-            entry.schema,
-            entry.label,
-            mergedSchemaEntryLabels,
-          ),
-          identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
-        );
-        // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
-        // not drop confidentiality the labelMap already carried beyond the schema
-        // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
-        // matching, so a new child entry shadows an ancestor — merge prior
-        // confidentiality from this path AND every ancestor of it, not just an
-        // exact-path match (audit S9, review follow-up). Integrity is left as
-        // derived (freshly gated) — it must not regrow.
-        const prior = existingConfidentiality
-          .filter((e) => isPrefix(e.path, entry.path))
-          .flatMap((e) => e.confidentiality);
-        const label = prior.length > 0
-          ? {
-            ...derived,
-            confidentiality: mergeLabelValues(derived.confidentiality, prior),
+    // When an ingest target failed verification we keep the runtime's mark
+    // (appended below) but drop the payload's declared policy label — a
+    // non-rejecting commit must not store claims that didn't verify.
+    const persistedLabelEntries: LabelMapEntry[] = ingestVerificationFailed
+      ? []
+      : mergedSchemaEntries
+        .flatMap((entry) => {
+          if (
+            !ifcEntryAppliesToAttemptedWrite(
+              tx,
+              target,
+              entry.path,
+              entry.schema,
+              entry.root,
+            )
+          ) {
+            return [];
           }
-          : derived;
-        return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
-          ? [{
-            path: entry.path,
-            label,
-            origin: "declared" as const,
-          }]
-          : [];
-      });
+          const derived = gateRuntimeMintedIntegrity(
+            derivePersistedLabel(
+              tx,
+              entry.schema,
+              entry.label,
+              mergedSchemaEntryLabels,
+            ),
+            identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
+          );
+          // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
+          // not drop confidentiality the labelMap already carried beyond the schema
+          // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+          // matching, so a new child entry shadows an ancestor — merge prior
+          // confidentiality from this path AND every ancestor of it, not just an
+          // exact-path match (audit S9, review follow-up). Integrity is left as
+          // derived (freshly gated) — it must not regrow.
+          const prior = existingConfidentiality
+            .filter((e) => isPrefix(e.path, entry.path))
+            .flatMap((e) => e.confidentiality);
+          const label = prior.length > 0
+            ? {
+              ...derived,
+              confidentiality: mergeLabelValues(derived.confidentiality, prior),
+            }
+            : derived;
+          return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
+            ? [{
+              path: entry.path,
+              label,
+              origin: "declared" as const,
+            }]
+            : [];
+        });
     const persistedLabelEntryKeys = new Set(
       persistedLabelEntries.map((entry) => pathKey(entry.path)),
     );

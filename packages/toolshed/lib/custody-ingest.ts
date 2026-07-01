@@ -52,6 +52,14 @@ const digestOf = (payload: unknown): string =>
     )))
   }`;
 
+// A plain, independent deep copy of a cell value, so an in-place `mutate`
+// callback can't touch the transaction's working copy before the explicit
+// `set`. These ingest paths hold JSON data (auth blobs, ingest records);
+// `structuredClone` can't clone the reactive read proxy `cell.get()` returns,
+// so round-trip through JSON (the same serialization the digest already uses).
+const cloneValue = <T>(value: T | undefined): T | undefined =>
+  value === undefined ? undefined : JSON.parse(JSON.stringify(value)) as T;
+
 /**
  * The one governed write. `mutate` runs INSIDE the retrying transaction, so any
  * read-modify-write it does re-reads the current value on every retry (no
@@ -112,7 +120,9 @@ export const durableUpdate = <T>(
   mutate: (current: T | undefined) => T,
 ): Promise<T> =>
   durableEdit(cell, (bound) => {
-    const next = mutate(bound.get() as T | undefined);
+    // Clone before handing the value to `mutate`: an in-place mutate must not
+    // touch the transaction's working copy before the explicit `set`.
+    const next = mutate(cloneValue(bound.get() as T | undefined));
     bound.set(next);
     return next;
   });
@@ -157,7 +167,8 @@ export const custodyIngest = {
     channel: VouchedChannel,
   ): Promise<T> {
     return durableEdit(cell, (bound) => {
-      const next = mutate(bound.get() as T | undefined);
+      // Clone before handing the value to `mutate` (see durableUpdate).
+      const next = mutate(cloneValue(bound.get() as T | undefined));
       bound.set(next);
       return next;
     }, channel);
