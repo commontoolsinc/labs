@@ -1,58 +1,16 @@
 /**
- * Second-round coverage tests for `lib/view/parse.ts`. The first round
- * (`view-parse.test.ts`, `view-parse-cov.test.ts`) left a handful of lines
- * uncovered. This file targets those specific lines.
- *
- * Each was investigated by reading the source around the line and by feeding a
- * broad battery of crafted snippets through the public API
- * (`parseDocument`, `highlightDocument`, `createHighlighter`) under coverage
- * instrumentation. Every one of the targeted lines turned out to be a defensive
- * guard or a dead branch that the public API cannot reach. The tests below
- * exercise the *reachable* neighbour of each target line and assert the real
- * behaviour there, so the surrounding logic stays covered and the reasoning for
- * why the target itself is unreachable is recorded against a live assertion.
- *
- * Unreachable targets (and why), verified empirically:
- *
- *   - classifyIdentifier line 836 (`if (!p) …`): every leaf identifier token
- *     comes from a source file parsed with setParentNodes, so `node.parent` is
- *     always set. The neighbouring identifier classifications (lines 838-894)
- *     are exercised below.
- *   - isTypePosition line 913 (`if (!p) return false`): reached only after
- *     climbing qualified names; the top of any qualified-name chain in a real
- *     parse always has a parent (a type reference, import type, etc.), so `p`
- *     is never undefined. Qualified names in type position are exercised below.
- *   - isTypePosition lines 916, 917, 919, 920 (TypeQuery /
- *     ExpressionWithTypeArguments): both of those parent node kinds are also
- *     TypeNodes, so the `ts.isTypeNode(p)` check on line 914 returns first;
- *     these more-specific branches are never reached. `typeof` types and
- *     heritage clauses (which produce exactly those node kinds) are exercised
- *     below and resolve as type names via line 914.
- *   - mergeByStart line 1215 (`if (additions.length === 0) return`): the only
- *     caller builds each batch by pushing at least one comment node before
- *     merging, so the additions array is never empty. Comment merging is
- *     exercised below.
- *   - registerDefinition line 1260 (`if (!desc.name) return`): the only caller
- *     guards the call with `if (desc.name)`, so the function never runs with an
- *     empty name. Definition registration is exercised below.
- *   - controlLabel line 1674 (final fallback): controlLabel runs only for the
- *     eight control-statement kinds, each handled by an earlier branch
- *     (lines 1666-1673). All eight are exercised below.
- *   - safe() catch lines 1725-1727: the wrapped metadata extractors read text
- *     and fields off already-parsed nodes. `getText` does not throw even on
- *     error-recovery nodes (TypeScript gives missing nodes valid zero-width
- *     ranges), so the catch is never taken. Malformed-but-parseable inputs are
- *     exercised below and still produce metadata without throwing.
- *   - describeInitializer lines 2051-2053 (arrow/function → "closure"):
- *     describeInitializer is reached only from variableMeta, which bindingDesc
- *     calls only after peeling the initializer and routing any arrow or
- *     function expression to a dedicated closure node first. A raw arrow
- *     initializer therefore never reaches describeInitializer. The closure
- *     routing and the non-closure describeInitializer outputs are exercised
- *     below.
+ * Second-round coverage tests for `lib/view/parse.ts`, extending
+ * `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and duplicate
+ * branches these originally documented were removed or folded away at the
+ * source; the tests here exercise the reachable behaviour around them:
+ * identifier classification, type-position resolution (qualified names,
+ * `typeof`, heritage types), comment merging, definition registration, control
+ * labels, and metadata extraction on malformed input, plus `safe`'s
+ * degrade-to-undefined fallback via the test-only `_internal` handle.
  */
 import { assert, assertEquals } from "@std/assert";
 import {
+  _internal,
   createHighlighter,
   highlightDocument,
   parseDocument,
@@ -323,4 +281,18 @@ Deno.test("incremental highlighter updates a line that adds a closure", () => {
     .map((l) => l.spans.map((s) => s.text).join(""))
     .join("\n");
   assert(/=>/.test(joined), "updated text should contain the arrow");
+});
+
+// safe() wraps the best-effort metadata extractors. The public API never feeds
+// them a node that throws, so the catch is exercised directly through the
+// test-only handle: a throwing extractor degrades to undefined, a succeeding
+// one returns its value.
+Deno.test("safe(): a throwing extractor degrades to undefined", () => {
+  assertEquals(
+    _internal.safe(() => {
+      throw new Error("boom");
+    }),
+    undefined,
+  );
+  assertEquals(_internal.safe(() => 42), 42);
 });

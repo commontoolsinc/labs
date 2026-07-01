@@ -783,8 +783,6 @@ function glyph(kind: StructureNode["kind"]): string {
       return "⎇";
     case "hunk":
       return "±";
-    case "comment":
-      return "#";
     default:
       return "·";
   }

@@ -833,7 +833,6 @@ function classifyIdentifier(
 ): TokenClass {
   const name = node.text;
   const p = node.parent;
-  if (!p) return isSyntheticName(name) ? "cfHelper" : "identifier";
 
   if (isTypePosition(node)) {
     return isSyntheticName(name) ? "cfHelper" : "typeName";
@@ -903,21 +902,15 @@ function isCalleeOfCall(node: ts.Node): boolean {
 
 /** True when `node` sits inside a type annotation/argument (vs an expression). */
 function isTypePosition(node: ts.Node): boolean {
-  let cur: ts.Node = node;
   let p = node.parent;
   // Climb through qualified/entity names so `a.B` in a type resolves.
-  while (p && ts.isQualifiedName(p)) {
-    cur = p;
+  while (ts.isQualifiedName(p)) {
     p = p.parent;
   }
-  if (!p) return false;
+  // ts.isTypeNode covers type references, `typeof X` queries, and heritage-
+  // clause expression types (e.g. `extends Foo`), so they need no separate arm.
   if (ts.isTypeNode(p)) return true;
   if (ts.isTypeParameterDeclaration(p)) return true;
-  if (ts.isTypeQueryNode(p)) return true;
-  if (ts.isExpressionWithTypeArguments(p) && p.expression === cur) {
-    // Heritage clause type, e.g. `extends Foo`.
-    return true;
-  }
   return false;
 }
 
@@ -1222,7 +1215,6 @@ function containingChild(
 /** Merge `additions` (sorted by startOffset) into `list` (also sorted) in place,
  * one pass. */
 function mergeByStart(list: StructureNode[], additions: StructureNode[]): void {
-  if (additions.length === 0) return;
   const merged: StructureNode[] = [];
   let a = 0;
   let b = 0;
@@ -1267,17 +1259,18 @@ function registerDefinition(
   desc: Desc,
   node: StructureNode,
 ): void {
-  if (!desc.name) return;
-  const list = ctx.definitions.get(desc.name) ?? [];
+  // The sole caller invokes this only when desc.name is set.
+  const name = desc.name!;
+  const list = ctx.definitions.get(name) ?? [];
   list.push({
-    name: desc.name,
+    name,
     kind: desc.kind,
     startLine: node.startLine,
     endLine: node.endLine,
     startOffset: node.startOffset,
     endOffset: node.endOffset,
   });
-  ctx.definitions.set(desc.name, list);
+  ctx.definitions.set(name, list);
 }
 
 /**
@@ -1664,8 +1657,8 @@ function controlLabel(node: ts.Node, sf: ts.SourceFile): string {
   if (ts.isForStatement(node)) return "for (…)";
   if (ts.isForOfStatement(node)) return "for (… of …)";
   if (ts.isForInStatement(node)) return "for (… in …)";
-  if (ts.isTryStatement(node)) return "try";
-  return nodeFirstLine(node, sf, 32);
+  // The only remaining control kind (see isControlStatement) is try/catch.
+  return "try";
 }
 
 /** A compact tail for a `return` label, e.g. ` { url }` or ` value`. */
@@ -2042,9 +2035,6 @@ function describeInitializer(
   sf: ts.SourceFile,
 ): string {
   if (!init) return "(uninitialised)";
-  if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
-    return "closure";
-  }
   return nodeFirstLine(init, sf, 56);
 }
 
@@ -2287,3 +2277,7 @@ function spansToLines(
   }
   return rawLines.map((t, i) => ({ text: t, spans: lineSpans[i] }));
 }
+
+/** Internals exposed for tests only. `safe` wraps the best-effort metadata
+ * extractors so a throw degrades to `undefined` rather than failing the parse. */
+export const _internal = { safe };

@@ -39,8 +39,8 @@ export class EditBuffer {
 
   constructor(text: string) {
     this.original = text;
+    // split("\n") always yields at least one element (`""` for an empty string).
     this.lines = text.split("\n");
-    if (this.lines.length === 0) this.lines = [""];
   }
 
   // --- state ----------------------------------------------------------------
@@ -79,8 +79,8 @@ export class EditBuffer {
     this.endKill();
     this.endYank();
     this.mark = null;
+    // split("\n") always yields at least one element.
     this.lines = text.split("\n");
-    if (this.lines.length === 0) this.lines = [""];
     this.row = clamp(row, 0, this.lines.length - 1);
     this.col = clamp(col, 0, this.lineLen(this.row));
   }

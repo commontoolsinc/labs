@@ -164,15 +164,15 @@ function renderContentRow(
 
   let guide = "";
   if (guideWidth > 0) {
-    guide = paintIf(guideChar(view.selected, lineIdx), ui.guide, view.color);
+    // guideWidth > 0 only when view.selected is set (see guideWidth above).
+    guide = paintIf(guideChar(view.selected!, lineIdx), ui.guide, view.color);
   }
 
   const content = composeContent(line, view, lineIdx, contentWidth, sel);
   return gutter + guide + content;
 }
 
-function guideChar(selected: StructureNode | null, lineIdx: number): string {
-  if (!selected) return " ";
+function guideChar(selected: StructureNode, lineIdx: number): string {
   if (lineIdx < selected.startLine || lineIdx > selected.endLine) return " ";
   if (selected.startLine === selected.endLine) return "▶";
   if (lineIdx === selected.startLine) return "╭";

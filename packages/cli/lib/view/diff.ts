@@ -235,7 +235,8 @@ export function parseDiff(text: string): DiffModel | null {
         oldCount,
         newStart,
         newCount,
-        context: hunkMatch[5]?.trim() ?? "",
+        // Group 5 is `(.*)`, so it always matches (at least the empty string).
+        context: hunkMatch[5]!.trim(),
       });
       file.endLine = i - 1;
       continue;

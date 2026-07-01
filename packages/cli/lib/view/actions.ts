@@ -74,9 +74,12 @@ function foldHaystack(original: string): Haystack {
     folded += lower;
     col += 1;
   }
+  // One entry past the last code unit, so an offset at the end maps to the
+  // column past the line's end.
+  origColAt.push(col);
   return {
     folded,
-    colOf: (offset) => offset < origColAt.length ? origColAt[offset] : col,
+    colOf: (offset) => origColAt[offset],
   };
 }
 

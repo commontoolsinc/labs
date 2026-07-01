@@ -377,7 +377,6 @@ export class Session {
     if (!o || o.mode !== "info" || o.targets.length === 0) return;
     if (delta > 0) {
       o.cardSel = Math.min(o.cardSel + 1, o.targets.length - 1);
-      if (o.cardSel < 0) o.cardSel = 0;
     } else {
       if (o.cardSel <= 0) {
         o.cardSel = -1;
@@ -386,8 +385,7 @@ export class Session {
       }
       o.cardSel -= 1;
     }
-    const line = o.targets[o.cardSel]?.cardLine;
-    if (line === undefined) return;
+    const line = o.targets[o.cardSel].cardLine;
     const innerH = overlayBox(this.width, this.height).innerH;
     if (line < this.overlayScroll) this.overlayScroll = line;
     else if (line >= this.overlayScroll + innerH) {
@@ -1702,7 +1700,6 @@ export class Session {
     } else if (this.pickerSel >= this.overlayScroll + innerH) {
       this.overlayScroll = this.pickerSel - innerH + 1;
     }
-    if (this.overlayScroll < 0) this.overlayScroll = 0;
   }
 
   private handleFilePicker(key: Key): void {

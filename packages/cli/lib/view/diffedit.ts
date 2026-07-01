@@ -283,7 +283,8 @@ function applyExpansion(
       }
     }
   }
-  if (h < 0) return null;
+  // `index` is a hunk index from parseDiff, whose HUNK_RE is strictly stronger
+  // than the `/^@@ -\d/` scan above, so the scan always reaches it; h is set.
   const m = lines[h].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
   if (!m) return null;
   let oldStart = parseInt(m[1], 10);

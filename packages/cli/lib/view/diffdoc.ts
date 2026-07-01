@@ -65,11 +65,9 @@ export function realWorkspace(cwd: string): DiffWorkspace {
       for (const base of bases) {
         const abs = join(base, path);
         if (!bounded(abs)) continue; // `..` escapes and symlinks out: blocked
-        try {
-          if (Deno.statSync(abs).isFile) return abs;
-        } catch {
-          // try the next base
-        }
+        // bounded() canonicalised abs via realPathSync, so statSync resolves;
+        // only the file-vs-directory check remains. read() guards the contents.
+        if (Deno.statSync(abs).isFile) return abs;
       }
       return null;
     },

@@ -88,32 +88,19 @@ export function createSemantics(
   } catch {
     return null;
   }
-  if (sections.length === 0) return null;
 
   const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
     { importMap: {}, root: options.cwd };
   const libDir = safe(() => defaultLibDir());
 
-  // Lazily-built, cached program state. `failed` latches so a broken setup is
-  // not retried on every keystroke.
+  // The program is built lazily and cached (see lazyProgram). The
+  // LanguageService it creates stays reachable here for definition lookups.
   let service: ts.LanguageService | undefined;
-  let program: ts.Program | undefined;
-  let failed = false;
-
-  const build = (): ts.Program | undefined => {
-    if (program) return program;
-    if (failed) return undefined;
-    try {
-      const host = makeHost(sections, importMap, libDir, options.cwd, root);
-      service = ts.createLanguageService(host, ts.createDocumentRegistry());
-      program = service.getProgram();
-      if (!program) failed = true;
-      return program;
-    } catch {
-      failed = true;
-      return undefined;
-    }
-  };
+  const { build, prewarm } = lazyProgram(() => {
+    const host = makeHost(sections, importMap, libDir, options.cwd, root);
+    service = ts.createLanguageService(host, ts.createDocumentRegistry());
+    return service.getProgram();
+  });
 
   const sectionAt = (offset: number): SectionFile | undefined =>
     sections.find((s) => offset >= s.start && offset < s.end);
@@ -134,13 +121,7 @@ export function createSemantics(
   };
 
   return {
-    prewarm(): void {
-      try {
-        build();
-      } catch {
-        // best-effort warm-up; a failed build latches and stays silent
-      }
-    },
+    prewarm,
     typeAt(offset: number): string | null {
       try {
         const prog = build();
@@ -223,29 +204,11 @@ export function createDiffSemantics(
   if (rootFiles.length === 0) return null;
 
   let service: ts.LanguageService | undefined;
-  let program: ts.Program | undefined;
-  let failed = false;
-  const build = (): ts.Program | undefined => {
-    if (program) return program;
-    if (failed) return undefined;
-    try {
-      const host = makeHost(
-        [],
-        importMap,
-        libDir,
-        options.cwd,
-        root,
-        rootFiles,
-      );
-      service = ts.createLanguageService(host, ts.createDocumentRegistry());
-      program = service.getProgram();
-      if (!program) failed = true;
-      return program;
-    } catch {
-      failed = true;
-      return undefined;
-    }
-  };
+  const { build, prewarm } = lazyProgram(() => {
+    const host = makeHost([], importMap, libDir, options.cwd, root, rootFiles);
+    service = ts.createLanguageService(host, ts.createDocumentRegistry());
+    return service.getProgram();
+  });
 
   const defCache = new Map<number, DefTarget[]>();
   const realFiles = new Map<string, string | undefined>();
@@ -259,13 +222,7 @@ export function createDiffSemantics(
   };
 
   return {
-    prewarm(): void {
-      try {
-        build();
-      } catch {
-        // best-effort warm-up; a failed build latches and stays silent
-      }
-    },
+    prewarm,
     typeAt(offset: number): string | null {
       try {
         const prog = build();
@@ -640,17 +597,14 @@ function lexicallyWithin(child: string, parent: string): boolean {
 function within(child: string, parent: string): boolean {
   if (!lexicallyWithin(child, parent)) return false;
   try {
-    return lexicallyWithin(Deno.realPathSync(child), realDir(parent));
+    // child resolves first; parent is always an ancestor of it, so it resolves
+    // too. A throw from either (a missing path) means "not within".
+    return lexicallyWithin(
+      Deno.realPathSync(child),
+      Deno.realPathSync(parent),
+    );
   } catch {
     return false;
-  }
-}
-
-function realDir(path: string): string {
-  try {
-    return Deno.realPathSync(path);
-  } catch {
-    return path;
   }
 }
 
@@ -696,3 +650,32 @@ function safe<T>(fn: () => T): T | undefined {
     return undefined;
   }
 }
+
+/**
+ * A TypeScript program built lazily from `make` and cached. A `make` that throws
+ * or yields no program latches `failed`, so a broken setup is not retried on
+ * every keystroke. `prewarm` builds eagerly (and silently, since `build`
+ * already swallows its own failure). Shared by the blob and diff factories.
+ */
+function lazyProgram(
+  make: () => ts.Program | undefined,
+): { build: () => ts.Program | undefined; prewarm: () => void } {
+  let program: ts.Program | undefined;
+  let failed = false;
+  const build = (): ts.Program | undefined => {
+    if (program) return program;
+    if (failed) return undefined;
+    try {
+      program = make();
+      if (!program) failed = true;
+      return program;
+    } catch {
+      failed = true;
+      return undefined;
+    }
+  };
+  return { build, prewarm: () => void build() };
+}
+
+/** Internals exposed for tests only. */
+export const _internal = { lazyProgram };
