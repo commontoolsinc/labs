@@ -564,6 +564,10 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
+  // The one deliberate `data:application/json` example: an event delivered as a
+  // sigil link to a data-URI envelope is the exceptional shape we verify is still
+  // decoded and handled. Other event-context tests use the plain in-memory
+  // envelope so they don't imply the input is always a data-URI link.
   it("records trusted event policy inputs from linked handler event envelopes", () => {
     const writePolicyInputs: Array<
       ReturnType<
@@ -675,37 +679,31 @@ describe("CFC trusted UI event enforcement", () => {
       },
     };
     // At handler-execution time the `$ctx` entry is a bound sigil link that
-    // already addresses the write's document, not a symbolic `$alias`.
-    const eventEnvelopeLink = {
-      "/": {
-        [LINK_V1_TAG]: {
-          id: `data:application/json,${
-            encodeURIComponent(JSON.stringify({
-              value: {
-                $ctx: {
-                  savedTitle: {
-                    "/": {
-                      [LINK_V1_TAG]: {
-                        id: documentId,
-                        path: ["savedTitle"],
-                        space,
-                        schema: {
-                          $ref: "#/$defs/TrustedAction",
-                          $defs: {
-                            TrustedAction: trustedPatternUiActionSchema,
-                          },
-                        },
-                      },
-                    },
+    // already addresses the write's document, not a symbolic `$alias`. The event
+    // value is a plain in-memory envelope here; the `data:`-URI link form is the
+    // exceptional case, covered once by "records trusted event policy inputs from
+    // linked handler event envelopes".
+    const eventEnvelope = {
+      value: {
+        $ctx: {
+          savedTitle: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: documentId,
+                path: ["savedTitle"],
+                space,
+                scope: "space",
+                schema: {
+                  $ref: "#/$defs/TrustedAction",
+                  $defs: {
+                    TrustedAction: trustedPatternUiActionSchema,
                   },
                 },
-                $event: rawTrustedEvent,
               },
-            }))
-          }`,
-          path: ["$event"],
-          space,
+            },
+          },
         },
+        $event: rawTrustedEvent,
       },
     };
 
@@ -717,7 +715,7 @@ describe("CFC trusted UI event enforcement", () => {
         id: documentId,
         path: ["savedTitle"],
       }],
-      rendererEvent(eventEnvelopeLink),
+      rendererEvent(eventEnvelope),
     );
 
     expect(
@@ -761,39 +759,30 @@ describe("CFC trusted UI event enforcement", () => {
         },
       },
     };
-    const eventEnvelopeLink = {
-      "/": {
-        [LINK_V1_TAG]: {
-          id: `data:application/json,${
-            encodeURIComponent(JSON.stringify({
-              value: {
-                $ctx: {
-                  messages: {
-                    "/": {
-                      [LINK_V1_TAG]: {
-                        id: documentId,
-                        path: ["messages"],
-                        space,
-                        schema: {
-                          type: "array",
-                          items: {
-                            $ref: "#/$defs/TrustedAction",
-                          },
-                          $defs: {
-                            TrustedAction: trustedPatternUiActionSchema,
-                          },
-                        },
-                      },
-                    },
+    const eventEnvelope = {
+      value: {
+        $ctx: {
+          messages: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: documentId,
+                path: ["messages"],
+                space,
+                scope: "space",
+                schema: {
+                  type: "array",
+                  items: {
+                    $ref: "#/$defs/TrustedAction",
+                  },
+                  $defs: {
+                    TrustedAction: trustedPatternUiActionSchema,
                   },
                 },
-                $event: rawTrustedEvent,
               },
-            }))
-          }`,
-          path: ["$event"],
-          space,
+            },
+          },
         },
+        $event: rawTrustedEvent,
       },
     };
 
@@ -805,7 +794,7 @@ describe("CFC trusted UI event enforcement", () => {
         scope: "space",
         path: ["messages", "0"],
       }],
-      rendererEvent(eventEnvelopeLink),
+      rendererEvent(eventEnvelope),
     );
 
     expect(
@@ -851,38 +840,29 @@ describe("CFC trusted UI event enforcement", () => {
     };
     // Binding preserves nesting, so the contract-bearing sigil link can sit
     // below the top level of a `$ctx` entry (e.g. `{ config: { savedTitle } }`).
-    const eventEnvelopeLink = {
-      "/": {
-        [LINK_V1_TAG]: {
-          id: `data:application/json,${
-            encodeURIComponent(JSON.stringify({
-              value: {
-                $ctx: {
-                  config: {
-                    savedTitle: {
-                      "/": {
-                        [LINK_V1_TAG]: {
-                          id: documentId,
-                          path: ["savedTitle"],
-                          space,
-                          schema: {
-                            $ref: "#/$defs/TrustedAction",
-                            $defs: {
-                              TrustedAction: trustedPatternUiActionSchema,
-                            },
-                          },
-                        },
-                      },
+    const eventEnvelope = {
+      value: {
+        $ctx: {
+          config: {
+            savedTitle: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: documentId,
+                  path: ["savedTitle"],
+                  space,
+                  scope: "space",
+                  schema: {
+                    $ref: "#/$defs/TrustedAction",
+                    $defs: {
+                      TrustedAction: trustedPatternUiActionSchema,
                     },
                   },
                 },
-                $event: rawTrustedEvent,
               },
-            }))
-          }`,
-          path: ["$event"],
-          space,
+            },
+          },
         },
+        $event: rawTrustedEvent,
       },
     };
 
@@ -894,7 +874,7 @@ describe("CFC trusted UI event enforcement", () => {
         id: documentId,
         path: ["savedTitle"],
       }],
-      rendererEvent(eventEnvelopeLink),
+      rendererEvent(eventEnvelope),
     );
 
     expect(

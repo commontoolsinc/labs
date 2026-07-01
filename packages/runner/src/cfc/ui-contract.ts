@@ -9,6 +9,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
+import { isNormalizedFullLink, type NormalizedLink } from "../link-types.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;
@@ -545,15 +546,20 @@ const eventEnvelopePayloads = (
   return payloads;
 };
 
-// Binding lowers handler context props one level at a time but preserves the
-// surrounding object/array structure (see `unwrapOneLevelAndBindtoDoc`), so a
+// Helper for the (dormant — see `contractCandidatesFromEventContext`) `$ctx`
+// path. Binding lowers handler context props one level at a time but preserves
+// the surrounding object/array structure (see `unwrapOneLevelAndBindtoDoc`), so a
 // contract-bearing link can sit nested inside a `$ctx` entry (e.g.
 // `myHandler({ config: { savedTitle: state.x } })`) rather than at its top
-// level. Walk plain objects/arrays to collect every reachable bound link,
-// treating a parsed link as a leaf (do not descend into its sigil envelope).
+// level. Walk plain objects/arrays to collect every reachable bound link. A
+// link (sigil or legacy alias) is always a leaf: never descend into its
+// envelope, even when it is rejected below — its internals are not addressable
+// `$ctx` links. Only an absolute (full) link contributes a candidate; parse
+// WITHOUT a base so a relative link stays relative and fails the full-link
+// check, rather than inheriting the write target's id/space/scope (which would
+// make the same-document guard vacuous).
 const collectContextLinks = (
   value: unknown,
-  write: NormalizedFullLink,
   seen: Set<unknown>,
   depth: number,
   out: NormalizedFullLink[],
@@ -561,14 +567,16 @@ const collectContextLinks = (
   if (depth > 16) {
     return;
   }
-  let link: NormalizedFullLink | undefined;
+  let parsedLink: NormalizedLink | undefined;
   try {
-    link = parseLink(value as unknown, write);
+    parsedLink = parseLink(value as unknown);
   } catch {
-    link = undefined;
+    parsedLink = undefined;
   }
-  if (link !== undefined) {
-    out.push(link);
+  if (parsedLink !== undefined) {
+    if (isNormalizedFullLink(parsedLink)) {
+      out.push(parsedLink);
+    }
     return;
   }
   if (!isRecord(value) && !Array.isArray(value)) {
@@ -579,14 +587,28 @@ const collectContextLinks = (
   }
   seen.add(value);
   for (const child of Object.values(value as Record<string, unknown>)) {
-    collectContextLinks(child, write, seen, depth + 1, out);
+    collectContextLinks(child, seen, depth + 1, out);
   }
 };
 
-// A `$ctx` link that addresses the write target carries the schema (and thus
-// any uiContract) for that write. At handler-execution time these are bound
-// sigil links that already address an absolute document, so a link only
-// contributes a contract when it points into the same document as `write`.
+// DORMANT / forward-looking: no production caller currently reaches this.
+// `recordTrustedEventPolicyInputs` is invoked with the bare sent event value
+// (the handler's `$event`), never the `{ $ctx, $event }` argument envelope — the
+// handler's `$ctx` is read separately by the action (see `runner.ts`, the
+// `$ctx`/`$event` split in `invokeJavaScriptImplementation`) and is never handed
+// to enforcement. So `payload.value.$ctx` is empty on every live path, and this
+// function returns no contracts in production; it is exercised only by unit
+// tests that hand-build a context envelope. It is kept as scaffolding for a
+// future path that would feed the argument envelope here (which would let a
+// contract be discovered via a contract-bearing `$ctx` link rather than only via
+// the write's own schema). Until such a caller exists, a UI contract reachable
+// ONLY through `$ctx` is NOT enforced at runtime.
+//
+// The shape it assumes: a `$ctx` link that addresses the write target carries
+// the schema (and thus any uiContract) for that write. At handler-execution time
+// these would be bound sigil links that already address an absolute document, so
+// a link only contributes a contract when it points into the same document as
+// `write`.
 const contractCandidatesFromEventContext = (
   event: unknown,
   write: NormalizedFullLink,
@@ -597,7 +619,7 @@ const contractCandidatesFromEventContext = (
       continue;
     }
     const links: NormalizedFullLink[] = [];
-    collectContextLinks(payload.value.$ctx, write, new Set(), 0, links);
+    collectContextLinks(payload.value.$ctx, new Set(), 0, links);
     for (const link of links) {
       if (
         link.id !== write.id ||
