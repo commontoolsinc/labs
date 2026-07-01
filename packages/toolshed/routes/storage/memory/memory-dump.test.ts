@@ -138,4 +138,38 @@ describe("memory dump endpoint", () => {
     await res.body?.cancel();
     expect(res.status).toBe(500);
   });
+
+  it("cleans the snapshot temp dir when serving fails after VACUUM", async () => {
+    // Force the post-VACUUM open to fail; the (potentially large) snapshot in
+    // the temp dir must not leak.
+    const probe = Deno.makeTempDirSync();
+    const tmpRoot = Path.dirname(probe);
+    Deno.removeSync(probe);
+    const dumpDirs = () =>
+      new Set(
+        [...Deno.readDirSync(tmpRoot)]
+          .map((e) => e.name).filter((n) => n.startsWith("cf-dump-")),
+      );
+    const before = dumpDirs();
+    const realOpen = Deno.open;
+    Deno.open = ((p: string | URL, o?: Deno.OpenOptions) => {
+      if (String(p).includes("cf-dump-")) {
+        return Promise.reject(new Deno.errors.PermissionDenied("forced"));
+      }
+      return realOpen(p, o);
+    }) as typeof Deno.open;
+    try {
+      const path = `${DUMP_BASE}/${encodeURIComponent(SPACE)}`;
+      const res = await app.request(path, {
+        headers: await sign(path, allowed),
+      });
+      await res.body?.cancel();
+      expect(res.status).toBe(500);
+    } finally {
+      Deno.open = realOpen;
+    }
+    // No new cf-dump-* temp dir survives the failed request.
+    const leaked = [...dumpDirs()].filter((d) => !before.has(d));
+    expect(leaked).toEqual([]);
+  });
 });

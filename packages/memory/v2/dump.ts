@@ -21,6 +21,7 @@ import * as Path from "@std/path";
 import {
   resolveSpaceStoreDirUrl,
   resolveSpaceStoreUrl,
+  spaceFromStoreFilename,
 } from "./storage-path.ts";
 import type { MemorySpace } from "../interface.ts";
 
@@ -53,13 +54,12 @@ export function listSpaceStores(store: URL): SpaceStoreInfo[] {
   const out: SpaceStoreInfo[] = [];
   for (const entry of entries) {
     if (!entry.isFile || !entry.name.endsWith(SQLITE_SUFFIX)) continue;
-    const encoded = entry.name.slice(0, -SQLITE_SUFFIX.length);
-    let space: string;
-    try {
-      space = decodeURIComponent(encoded);
-    } catch {
-      continue; // not a store filename we wrote
-    }
+    const stem = entry.name.slice(0, -SQLITE_SUFFIX.length);
+    // Mode-aware inverse of the store's filename encoding: directory-mode stems
+    // are already the literal id (a blanket decodeURIComponent would corrupt
+    // ids containing percent-sequences); single-file stems decode once.
+    const space = spaceFromStoreFilename(store, stem);
+    if (space === null) continue; // not a store filename we wrote
     let stat: Deno.FileInfo;
     try {
       stat = Deno.statSync(Path.join(dir, entry.name));

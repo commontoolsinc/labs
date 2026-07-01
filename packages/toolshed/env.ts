@@ -240,6 +240,9 @@ export const EnvSchema = z.object({
   // routes/storage/memory/memory-dump.index.ts.
   // ===========================================================================
   // Master switch. Unset/"false" => the endpoint 404s as if it did not exist.
+  // Mounting ALSO requires ENV to be a recognized non-production value
+  // (development | test | staging) — unknown/alias envs fail closed. See
+  // routes/storage/memory/memory-dump-policy.ts.
   MEMORY_DUMP_ENABLED: flagValue(),
   // Comma-separated DIDs allowed to download dumps, in ADDITION to
   // MEMORY_SERVICE_DIDS. Empty => only MEMORY_SERVICE_DIDS may dump.

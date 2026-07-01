@@ -131,19 +131,48 @@ Deno.test("single-file (DB_PATH) mode: literal-%3A filenames round-trip", async 
   }
 });
 
+Deno.test("directory mode: an id with a literal percent-sequence round-trips", async () => {
+  // e.g. a did:web with an encoded port. Directory-mode stems are the LITERAL
+  // id, so listing must NOT decodeURIComponent them (that corrupted `%3A`→`:`
+  // and made the listed id unresolvable).
+  const id = "did:web:example.com%3A8080";
+  const store = await makeStore();
+  try {
+    seedStore(store, id, 1);
+    assertEquals(listSpaceStores(store).map((s) => s.space), [id]);
+    assertEquals(spaceStorePath(store, id), canonicalPath(store, id));
+  } finally {
+    await rm(store);
+  }
+});
+
 Deno.test("listSpaceStores skips entries that aren't space stores", async () => {
   const store = await makeStore();
   try {
     seedStore(store, SPACE_A, 1);
     const dir = Path.dirname(canonicalPath(store, SPACE_A));
-    // Non-sqlite file, a directory with a .sqlite name, and a filename whose
-    // stem is not valid percent-encoding — none of these are stores we wrote.
+    // A non-sqlite file and a directory with a .sqlite name are never stores.
     Deno.writeTextFileSync(Path.join(dir, "README.txt"), "not a store");
     Deno.mkdirSync(Path.join(dir, "subdir.sqlite"));
-    Deno.writeTextFileSync(Path.join(dir, "%zz.sqlite"), "bad encoding");
     assertEquals(listSpaceStores(store).map((s) => s.space), [SPACE_A]);
   } finally {
     await rm(store);
+  }
+});
+
+Deno.test("single-file mode: an undecodable stem is skipped", async () => {
+  // In single-file mode stems are percent-ENCODED, so a stem that fails to
+  // decode cannot be a store we wrote. (In directory mode stems are literal,
+  // so the same name would be a valid literal id — no decode happens there.)
+  const tmp = await Deno.makeTempDir({ prefix: "cf-dump-badenc-" });
+  const store = Path.toFileUrl(Path.join(tmp, "cluster.sqlite"));
+  try {
+    seedStore(store, SPACE_A, 1);
+    const dir = Path.dirname(canonicalPath(store, SPACE_A));
+    Deno.writeTextFileSync(Path.join(dir, "%zz.sqlite"), "bad encoding");
+    assertEquals(listSpaceStores(store).map((s) => s.space), [SPACE_A]);
+  } finally {
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
   }
 });
 

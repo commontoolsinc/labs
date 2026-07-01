@@ -110,10 +110,27 @@ router.get(`${DUMP_BASE}/:space`, async (c) => {
   // POSIX unlink-after-open: removing the file keeps its data alive via the open
   // fd until the response stream finishes, then the OS reclaims it. This streams
   // the (potentially large) snapshot without buffering it in memory and needs no
-  // post-response cleanup hook.
-  const file = await Deno.open(snapshot, { read: true });
-  await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
-  const { size } = await file.stat();
+  // post-response cleanup hook. A failure between VACUUM and the unlink must
+  // still clean the temp dir, or failed downloads leak full snapshots in /tmp.
+  let file: Deno.FsFile;
+  let size: number;
+  try {
+    file = await Deno.open(snapshot, { read: true });
+    try {
+      ({ size } = await file.stat());
+    } catch (error) {
+      file.close();
+      throw error;
+    }
+  } catch (error) {
+    c.get("logger").error(
+      { space, error: errMessage(error) },
+      "memory dump: could not serve snapshot",
+    );
+    return c.json({ error: "snapshot failed" }, 500);
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
+  }
 
   c.get("logger").info(
     { space, userDid, sizeBytes: size },

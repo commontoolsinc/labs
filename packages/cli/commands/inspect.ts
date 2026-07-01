@@ -149,14 +149,15 @@ async function remoteSigner(
     signFirstPartyHttpRequest({ url: new URL(url), method, signer: identity });
 }
 
-// Map a token (full DID, prefix, or substring) to a full space DID on a remote.
-// A `did:`-prefixed token is taken as-is (no list round-trip).
+// Map a token (full DID, prefix, or substring) to a full space DID on a remote,
+// via the remote listing — exact match wins, else unique substring. A full DID
+// resolves exactly; a `did:key:z6Mk…` PREFIX resolves like any other prefix
+// (mirroring local resolution) instead of being sent verbatim and 404ing.
 async function resolveRemoteDid(
   token: string,
   base: string,
   sign: RequestSigner | undefined,
 ): Promise<string> {
-  if (token.startsWith("did:")) return token;
   const spaces = await listRemoteSpaces(base, { sign });
   const exact = spaces.filter((s) => s.space === token);
   const matches = exact.length

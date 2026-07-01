@@ -214,6 +214,20 @@ describe("cf inspect --remote", () => {
     assertEquals(JSON.parse(out).entities, 1);
   });
 
+  it("resolveRemoteDid: a did:-prefixed PREFIX resolves like any prefix", async () => {
+    // Regression: a partial DID (`did:key:z6Mk…` copied short) used to be sent
+    // verbatim and 404 instead of prefix-resolving against the remote listing.
+    stubFetch({ spaces: [{ space: DID_A, sizeBytes: 10, mtimeMs: 1 }] });
+    const out = await run([
+      "summary",
+      DID_A.slice(0, 20), // "did:key:z6MkCliRemot"
+      "--remote",
+      BASE,
+      "--json",
+    ]);
+    assertEquals(JSON.parse(out).entities, 1);
+  });
+
   it("resolveRemoteDid: an ambiguous token errors", async () => {
     stubFetch({
       spaces: [

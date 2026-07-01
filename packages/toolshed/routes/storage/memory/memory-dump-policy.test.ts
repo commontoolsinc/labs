@@ -12,13 +12,23 @@ Deno.test("isDumpEnabled: off unless explicitly enabled", () => {
   assertEquals(isDumpEnabled({ enabled: false, env: "development" }), false);
   assertEquals(isDumpEnabled({ enabled: true, env: "development" }), true);
   assertEquals(isDumpEnabled({ enabled: true, env: "test" }), true);
+  assertEquals(isDumpEnabled({ enabled: true, env: "staging" }), true);
+  // Case-insensitive on the recognized values.
+  assertEquals(isDumpEnabled({ enabled: true, env: "Staging" }), true);
 });
 
-Deno.test("isDumpEnabled: production is an unconditional hard no", () => {
+Deno.test("isDumpEnabled: production (and any alias/unknown env) is a hard no", () => {
   // No override exists — enabled or not, production never mounts the endpoint.
   assertEquals(isDumpEnabled({ enabled: true, env: "production" }), false);
   assertEquals(isDumpEnabled({ enabled: false, env: "production" }), false);
   assertEquals(isDumpEnabled({ enabled: undefined, env: "production" }), false);
+  // FAIL-CLOSED: aliases, typos, and unrecognized envs refuse too — only the
+  // explicit non-production allowlist mounts the endpoint.
+  assertEquals(isDumpEnabled({ enabled: true, env: "prod" }), false);
+  assertEquals(isDumpEnabled({ enabled: true, env: "Production" }), false);
+  assertEquals(isDumpEnabled({ enabled: true, env: "stagin" }), false);
+  assertEquals(isDumpEnabled({ enabled: true, env: "" }), false);
+  assertEquals(isDumpEnabled({ enabled: true, env: "rapids" }), false);
 });
 
 Deno.test("dumpAllowSet: union of MEMORY_DUMP_DIDS and MEMORY_SERVICE_DIDS", () => {
