@@ -1,0 +1,153 @@
+/**
+ * Where the editor's changes come from and go back to. A view is editable only
+ * when it has an underlying file (or set of files, for a diff); a pipe of
+ * transformed output, or a diff that does not match any file on disk, is not.
+ *
+ * For a plain file the editable text IS the document text, so re-highlighting is
+ * a re-parse and saving is a write. The diff source (in `diffedit.ts`) maps the
+ * single editable text back onto the files it touches.
+ */
+import type { Document, Line } from "./model.ts";
+import {
+  createHighlighter,
+  highlightDocument,
+  type Highlighter,
+  parseDocument,
+} from "./parse.ts";
+import { createMarkdownHighlighter, isMarkdownPath } from "./markdown.ts";
+
+/** How much a revert restores: the cursor's hunk, the cursor's file, or all. */
+export type RevertScope = "chunk" | "file" | "all";
+
+/** The outcome of revealing more context (a diff only): the grown diff and its
+ * matching grown baseline, where the cursor moves, and — so the pager can hold
+ * its viewport and selection steady across the change — where the revealed lines
+ * were inserted (`insertedAt`, a line index into the pre-expansion text) and how
+ * many there are (`inserted`). Lines at or below `insertedAt` shift down by
+ * `inserted`; lines above it do not move. */
+export interface ExpandResult {
+  text: string;
+  baseline: string;
+  cursorLine: number;
+  insertedAt: number;
+  inserted: number;
+}
+
+export interface EditableSource {
+  /** A short label for the editable target (the filename), or null. */
+  readonly label: string | null;
+  /** False when there is no underlying file to edit. `reason` is shown when a
+   * cursor move is attempted on a non-editable view. */
+  readonly editable: boolean;
+  readonly reason?: string;
+  /** Re-parse edited text into a Document — lines, structure and definitions. */
+  parse(text: string): Document;
+  /** Re-highlight the edited text into rendered lines only (no structure tree),
+   * for live highlighting on every keystroke. A fraction of a full {@link
+   * parse}; the structure is refreshed separately when typing pauses. When
+   * absent, the session falls back to a full parse. */
+  highlight?(text: string): readonly Line[];
+  /** Build an incremental highlighter seeded with `text`, for live highlighting
+   * whose cost tracks the size of each edit rather than the whole document. The
+   * session re-baselines it on the deferred re-parse. When present it is used in
+   * preference to {@link highlight}. `seedLines` is the already-rendered colour
+   * of `text` (the current document's lines): a source that cannot recompute a
+   * line's colour cheaply on its own — a diff, whose colouring needs the
+   * workspace files — reuses it for the unchanged lines so only edited lines are
+   * recoloured. */
+  createHighlighter?(
+    text: string,
+    seedLines?: readonly Line[],
+  ): Highlighter;
+  /** Persist the edited text. Returns a status message. Throws on I/O failure. */
+  save(text: string): string;
+  /** The labels (filenames) of the targets that differ between `original` and
+   * `current` — what a save would actually write. A plain file is its one label
+   * when changed; a diff reports just the files whose lines an edit touched, so
+   * the quit prompt names them instead of every file the diff spans. Absent →
+   * the caller falls back to the single {@link label}. */
+  dirtyLabels?(original: string, current: string): string[];
+  /** Restore part of the text to its `original` form: the hunk or file the
+   * cursor (`cursorLine`) is in, or everything. Returns the new full text and
+   * where to place the cursor, or null when there is nothing to revert at that
+   * scope. A plain file reverts wholesale at any scope. */
+  revert?(
+    original: string,
+    current: string,
+    cursorLine: number,
+    scope: RevertScope,
+  ): { text: string; cursorLine: number } | null;
+  /** Reveal more of the underlying file around the cursor's hunk (a diff only).
+   * Returns the grown diff text, the matching grown baseline (so revealing
+   * context is not itself an edit), and where the cursor moves — or null when
+   * there is nothing to expand. */
+  expandContext?(
+    current: string,
+    baseline: string,
+    cursorLine: number,
+  ): ExpandResult | null;
+  /** Constrains where editing may happen. Present only for a diff, whose lines
+   * map to fixed file lines: edits stay within a line, past the diff marker. A
+   * plain file has no policy and is edited freely. */
+  readonly policy?: EditPolicy;
+  /** The path of the backing file, when there is a single one. The file picker
+   * opens in its directory. */
+  readonly path?: string;
+}
+
+/**
+ * The editing constraints of a diff view. A line is editable past its marker
+ * when it is a context or added line; removed lines and hunk/file headers are
+ * not. Editability is decided from the line's own text, so it survives lines
+ * being added or removed above it.
+ */
+export interface EditPolicy {
+  /** The first editable column on a line given its text (just past the diff
+   * marker), or null when the line is not editable. */
+  editStart(lineText: string): number | null;
+  /** The marker a newly inserted line is given (a diff adds an added line, so
+   * `"+"`), keeping the diff well-formed as the user adds lines. */
+  readonly insertPrefix: string;
+}
+
+/** An on-disk file: the document text is the file, edits write straight back. */
+export function fileSource(path: string): EditableSource {
+  return {
+    label: shortName(path),
+    editable: true,
+    path,
+    parse: (text) => parseDocument(text, path),
+    highlight: (text) => highlightDocument(text, path),
+    createHighlighter: (text) =>
+      isMarkdownPath(path)
+        ? createMarkdownHighlighter(text)
+        : createHighlighter(text, path),
+    dirtyLabels: (original, current) =>
+      original === current ? [] : [shortName(path)],
+    // A plain file has no hunks, so any scope reverts the whole file.
+    revert: (original, current, cursorLine) =>
+      original === current ? null : {
+        text: original,
+        cursorLine: Math.min(cursorLine, original.split("\n").length - 1),
+      },
+    save: (text) => {
+      Deno.writeTextFileSync(path, text);
+      return `Saved ${shortName(path)}`;
+    },
+  };
+}
+
+/** A non-file view (a pipe / a diff matching nothing): readable, not editable. */
+export function readonlySource(reason: string): EditableSource {
+  return {
+    label: null,
+    editable: false,
+    reason,
+    parse: (text) => parseDocument(text),
+    save: () => reason,
+  };
+}
+
+export function shortName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}

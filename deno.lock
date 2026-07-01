@@ -1995,7 +1995,8 @@
       },
       "packages/cli": {
         "dependencies": [
-          "jsr:@cliffy/table@^1.0.0-rc.8"
+          "jsr:@cliffy/table@^1.0.0-rc.8",
+          "npm:typescript@*"
         ]
       },
       "packages/deno-web-test": {

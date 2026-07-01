@@ -10,6 +10,7 @@ import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
+import { view } from "./view.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { cliName, cliText } from "../lib/cli-name.ts";
 
@@ -76,6 +77,7 @@ export const main = new Command()
   .command("deps", deps)
   // @ts-ignore for the above type issue
   .command("inspect", inspect)
+  .command("view", view)
   .command("exec", exec)
   // @ts-ignore for the above type issue
   .command("fuse", fuse)
