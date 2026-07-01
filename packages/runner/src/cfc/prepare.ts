@@ -3290,9 +3290,17 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
+    // A verification failure records a reason (which rejects the whole commit
+    // in enforcing modes) and skips persisting this target's declared label.
+    // But the external-ingest MARK is runtime-authored provenance, orthogonal
+    // to whether the payload satisfies its schema — it must still persist in the
+    // non-rejecting modes the ingest path runs in (the mint runs even under
+    // `disabled`, see runtime.ts). So the ingest target is exempt from the
+    // skip: enforcing modes still abort the tx via the recorded reason (nothing
+    // persists), while `disabled`/`observe` commit with the mark intact.
     if (requirementFailure) {
       reasons.push(requirementFailure);
-      continue;
+      if (!isIngestTarget) continue;
     }
     const trustedEventFailure = verifyTrustedEventRequirements(
       tx,
@@ -3301,7 +3309,7 @@ export const prepareBoundaryCommit = (
     );
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
-      continue;
+      if (!isIngestTarget) continue;
     }
 
     const exactCopyFailure = verifyExactCopyRequirements(
@@ -3311,7 +3319,7 @@ export const prepareBoundaryCommit = (
     );
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
-      continue;
+      if (!isIngestTarget) continue;
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);

@@ -7,6 +7,7 @@ import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   custodyIngest,
   durableSet,
+  durableUpdate,
   type VouchedChannel,
 } from "./custody-ingest.ts";
 
@@ -88,6 +89,41 @@ describe("custodyIngest", () => {
     const marks = ingestMarks(id);
     expect(marks.length).toBe(1);
     expect(markType(marks[0])).toBe(CFC_ATOM_TYPE.ExternalIngest);
+  });
+
+  it("update read-modify-writes off the CURRENT value and mints the mark", async () => {
+    const cell = runtime.getCell<{ items: number[] }>(space, "upsert-cell");
+    const id = cell.getAsNormalizedFullLink().id;
+    await custodyIngest.set(cell, { items: [1] }, channel);
+
+    // The merge is driven by the value read inside the transaction, not a
+    // stale snapshot passed in — this is the atomic read-modify-write.
+    await custodyIngest.update(
+      cell,
+      (current) => ({ items: [...(current?.items ?? []), 2] }),
+      channel,
+    );
+    expect(cell.get()).toEqual({ items: [1, 2] });
+
+    // Re-mint replaced: still exactly one mark on the doc.
+    const marks = ingestMarks(id);
+    expect(marks.length).toBe(1);
+    expect(markType(marks[0])).toBe(CFC_ATOM_TYPE.ExternalIngest);
+  });
+
+  it("durableUpdate read-modify-writes atomically WITHOUT a mark", async () => {
+    const cell = runtime.getCell<{ items: number[] }>(space, "remove-cell");
+    const id = cell.getAsNormalizedFullLink().id;
+
+    await durableUpdate(cell, (current) => ({
+      items: [...(current?.items ?? []), 7],
+    }));
+    await durableUpdate(cell, (current) => ({
+      items: (current?.items ?? []).filter((n) => n !== 7),
+    }));
+    expect(cell.get()).toEqual({ items: [] });
+    // Operator read-modify-writes are not ingest — no mark.
+    expect(ingestMarks(id).length).toBe(0);
   });
 
   it("durableSet writes durably WITHOUT a provenance mark (non-ingest path)", async () => {

@@ -1,6 +1,7 @@
 import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import { stampExternalIngest } from "@commonfabric/runner/cfc";
-import { sha256 } from "@/lib/sha2.ts";
+import { sha256 } from "@commonfabric/content-hash";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 /**
  * The one durable-write path for the fabric's external-ingest edges. An outside
@@ -13,9 +14,9 @@ import { sha256 } from "@/lib/sha2.ts";
  * non-retry `plaid-oauth.utils.ts` saveAuthData) and the webhook's
  * fire-and-forget `sendToStream` (a transient overwrite, not a durable append)
  * with a single governed write. `custodyIngest.*` adds the provenance mark for
- * the ingest edges; `durableSet` is the same governed write for operator
- * actions that are NOT ingest (clearing tokens, removing an item), which must
- * not carry the mark.
+ * the ingest edges; `durableSet` / `durableUpdate` are the same governed write
+ * for operator actions that are NOT ingest (clearing tokens, removing an item),
+ * which must not carry the mark.
  *
  * The split-mint runs here: the payload is written under the ordinary member
  * identity (so the runtime gate strips any provenance atom an attacker smuggled
@@ -40,29 +41,41 @@ export type VouchedChannel = {
   readonly audience: string;
 };
 
-// A digest of the payload bytes the mark binds to. v1 hashes the JSON
-// serialization of the parsed value; binding to the exact received bytes is a
-// future hardening.
-const digestOf = async (payload: unknown): Promise<string> =>
-  `sha256:${await sha256(JSON.stringify(payload ?? null))}`;
+// A digest of the payload bytes the mark binds to, computed with the canonical
+// shared SHA-256 (sync, so it can run inside the retry loop — see durableEdit).
+// v1 hashes the JSON serialization of the parsed value; binding to the exact
+// received bytes is a future hardening.
+const digestOf = (payload: unknown): string =>
+  `sha256:${
+    toUnpaddedBase64url(sha256(new TextEncoder().encode(
+      JSON.stringify(payload ?? null),
+    )))
+  }`;
 
-const durableEdit = async <T>(
+/**
+ * The one governed write. `mutate` runs INSIDE the retrying transaction, so any
+ * read-modify-write it does re-reads the current value on every retry (no
+ * stale-snapshot lost update). It returns the value the mark's digest binds to.
+ * When `channel` is set, the ExternalIngest mark is minted from that value.
+ */
+const durableEdit = async <T, W>(
   cell: Cell<T>,
-  mutate: (tx: IExtendedStorageTransaction) => void,
-  ingest?: { channel: VouchedChannel; valueDigest: string },
-): Promise<void> => {
+  mutate: (bound: Cell<T>) => W,
+  channel?: VouchedChannel,
+): Promise<W> => {
   const link = cell.getAsNormalizedFullLink();
   // Operator wall-clock, captured BEFORE the write: retries must not re-stamp
   // the time, and it must never come from the payload.
   const receivedAt = new Date().toISOString();
-  const { error } = await cell.runtime.editWithRetry(
-    (tx: IExtendedStorageTransaction) => {
-      if (ingest !== undefined) {
+  const { ok, error } = await cell.runtime.editWithRetry(
+    (tx: IExtendedStorageTransaction): W => {
+      const written = mutate(cell.withTx(tx));
+      if (channel !== undefined) {
         stampExternalIngest(tx, {
-          channel: ingest.channel.channel,
-          audience: ingest.channel.audience,
+          channel: channel.channel,
+          audience: channel.audience,
           receivedAt,
-          valueDigest: ingest.valueDigest,
+          valueDigest: digestOf(written),
           target: {
             space: link.space,
             id: link.id,
@@ -71,20 +84,37 @@ const durableEdit = async <T>(
           },
         });
       }
-      mutate(tx);
+      return written;
     },
   );
   if (error) throw error;
+  return ok as W;
 };
 
 /**
  * Governed durable write with NO ingest mark — the factored replacement for the
  * hand-rolled per-route `editWithRetry` set blocks, for writes that are operator
- * actions rather than external ingest (clearing OAuth tokens, removing an item).
+ * actions rather than external ingest (clearing OAuth tokens).
  */
-export const durableSet = <T>(cell: Cell<T>, value: T): Promise<void> =>
-  durableEdit(cell, (tx) => {
-    cell.withTx(tx).set(value);
+export const durableSet = <T>(cell: Cell<T>, value: T): Promise<T> =>
+  durableEdit(cell, (bound) => {
+    bound.set(value);
+    return value;
+  });
+
+/**
+ * Governed durable read-modify-write with NO ingest mark — for operator actions
+ * that must re-read the current value on each retry (e.g. removing one item
+ * from a list), but are not external ingest.
+ */
+export const durableUpdate = <T>(
+  cell: Cell<T>,
+  mutate: (current: T | undefined) => T,
+): Promise<T> =>
+  durableEdit(cell, (bound) => {
+    const next = mutate(bound.get() as T | undefined);
+    bound.set(next);
+    return next;
   });
 
 /**
@@ -93,32 +123,43 @@ export const durableSet = <T>(cell: Cell<T>, value: T): Promise<void> =>
  */
 export const custodyIngest = {
   /** Durably replace the cell's value (e.g. an OAuth token refresh). */
-  async set<T>(
-    cell: Cell<T>,
-    value: T,
-    channel: VouchedChannel,
-  ): Promise<void> {
-    const valueDigest = await digestOf(value);
-    await durableEdit(cell, (tx) => {
-      cell.withTx(tx).set(value);
-    }, { channel, valueDigest });
+  set<T>(cell: Cell<T>, value: T, channel: VouchedChannel): Promise<T> {
+    return durableEdit(cell, (bound) => {
+      bound.set(value);
+      return value;
+    }, channel);
   },
 
   /**
    * Durably append one external record to a list cell (e.g. a webhook event or
-   * a location point). The mark binds to the appended element — the external
-   * bytes — not the whole accumulated array.
+   * a location point). The read-append-write runs inside the retry, so
+   * concurrent appends don't lose each other; the mark binds to the appended
+   * element — the external bytes — not the whole accumulated array.
    */
-  async append<E>(
-    cell: Cell<E[]>,
-    element: E,
-    channel: VouchedChannel,
-  ): Promise<void> {
-    const valueDigest = await digestOf(element);
-    await durableEdit(cell, (tx) => {
-      const bound = cell.withTx(tx);
+  append<E>(cell: Cell<E[]>, element: E, channel: VouchedChannel): Promise<E> {
+    return durableEdit(cell, (bound) => {
       const current = (bound.get() as E[] | undefined) ?? [];
       bound.set([...current, element]);
-    }, { channel, valueDigest });
+      return element;
+    }, channel);
+  },
+
+  /**
+   * Durably read-modify-write a cell under a vouched channel (e.g. upsert one
+   * item into an accumulated auth blob). The read-merge-write runs inside the
+   * retry — each attempt re-reads the current value — so concurrent updates
+   * don't overwrite each other with a stale snapshot. The mark binds to the
+   * written result.
+   */
+  update<T>(
+    cell: Cell<T>,
+    mutate: (current: T | undefined) => T,
+    channel: VouchedChannel,
+  ): Promise<T> {
+    return durableEdit(cell, (bound) => {
+      const next = mutate(bound.get() as T | undefined);
+      bound.set(next);
+      return next;
+    }, channel);
   },
 } as const;

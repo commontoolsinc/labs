@@ -202,6 +202,56 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
     }
   });
 
+  it("persists the mark even when the payload fails schema verification", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      // A field carrying an ifc claim the runner does not implement makes
+      // verifyInputRequirements fail for this write target. Before the fix that
+      // failure `continue`d past the ingest mint, silently dropping the mark on
+      // a committing (disabled/observe) tx. The mark is runtime-authored
+      // provenance, orthogonal to whether the payload satisfies its schema, so
+      // it must still persist here (enforcing modes still abort the whole tx via
+      // the recorded reason, so nothing — payload or mark — lands there).
+      const unsupported = internSchema(
+        {
+          type: "object",
+          properties: {
+            field: {
+              type: "string",
+              ifc: { transformation: true },
+            },
+          },
+          required: ["field"],
+        } as JSONSchema,
+        true,
+      );
+
+      const id = runtime.getCell(space, "ingest-unsupported")
+        .getAsNormalizedFullLink().id;
+      const { error } = await runtime.editWithRetry((tx) => {
+        stampExternalIngest(tx, meta(id, "sha256:despite-failure"));
+        const cell = runtime.getCell(
+          space,
+          "ingest-unsupported",
+          unsupported.schema,
+          tx,
+        );
+        cell.set({ field: "hello" });
+      });
+      // Disabled mode commits despite the recorded verification reason.
+      expect(error).toBeUndefined();
+
+      const marks = entriesOf(storageManager, id)
+        .flatMap((e) => e.label.integrity ?? []);
+      expect(marks).toContainEqual(
+        externalIngestAtom("sha256:despite-failure"),
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not mint a mark when the tx is not stamped", async () => {
     const { storageManager, runtime } = makeRuntime();
     try {
