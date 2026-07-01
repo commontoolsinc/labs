@@ -165,10 +165,33 @@ describe("memory dump endpoint", () => {
       });
       await res.body?.cancel();
       expect(res.status).toBe(500);
+
+      // And the sibling failure: open succeeds but stat fails — the fd must be
+      // closed and the temp dir still cleaned before the 500.
+      let closed = false;
+      Deno.open = ((p: string | URL, o?: Deno.OpenOptions) => {
+        if (String(p).includes("cf-dump-")) {
+          return Promise.resolve(
+            {
+              stat: () => Promise.reject(new Deno.errors.NotFound("forced")),
+              close: () => {
+                closed = true;
+              },
+            } as unknown as Deno.FsFile,
+          );
+        }
+        return realOpen(p, o);
+      }) as typeof Deno.open;
+      const res2 = await app.request(path, {
+        headers: await sign(path, allowed),
+      });
+      await res2.body?.cancel();
+      expect(res2.status).toBe(500);
+      expect(closed).toBe(true);
     } finally {
       Deno.open = realOpen;
     }
-    // No new cf-dump-* temp dir survives the failed request.
+    // No new cf-dump-* temp dir survives the failed requests.
     const leaked = [...dumpDirs()].filter((d) => !before.has(d));
     expect(leaked).toEqual([]);
   });
