@@ -693,6 +693,17 @@ export class PatternManager {
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
           : {}),
+        // Fix B: carry the precomputed record surface so the boot record build
+        // skips the in-worker parse (absent on legacy docs → parse fallback).
+        ...(doc.exportNames !== undefined
+          ? { exportNames: doc.exportNames }
+          : {}),
+        ...(doc.starTargetSpecs !== undefined
+          ? { starTargetSpecs: doc.starTargetSpecs }
+          : {}),
+        ...(doc.importSpecs !== undefined
+          ? { importSpecs: doc.importSpecs }
+          : {}),
         // Drop the synthetic entry→root links (cfc.ts etc.); only real
         // require/export-* edges resolve module records.
         imports: doc.imports
@@ -799,6 +810,16 @@ export class PatternManager {
         code: doc.code,
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
+          : {}),
+        // Fix B: carry the precomputed record surface (parse fallback if absent).
+        ...(doc.exportNames !== undefined
+          ? { exportNames: doc.exportNames }
+          : {}),
+        ...(doc.starTargetSpecs !== undefined
+          ? { starTargetSpecs: doc.starTargetSpecs }
+          : {}),
+        ...(doc.importSpecs !== undefined
+          ? { importSpecs: doc.importSpecs }
           : {}),
         imports: doc.imports
           .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))

@@ -251,3 +251,29 @@ describe("buildRecordsFromCompiled parse memo (content-addressed)", () => {
     expect(second).toEqual(["./beta.ts"]);
   });
 });
+
+describe("buildRecordsFromCompiled precomputed record surface (Fix B)", () => {
+  it("reads the persisted export/import surface and skips the body parse", () => {
+    // With the precomputed fields present, buildRecordsFromCompiled must use
+    // them and NOT parse the body. Persist a surface that deliberately DISAGREES
+    // with the body (body exports `fromBody` and requires nothing; the doc
+    // claims export `fromDoc` and import `ghost:spec`). If the record reflects
+    // the persisted values, the parse was skipped.
+    const id = "fixb-persisted-000000000000000000000000";
+    const spec = `cf:module/${id}`;
+    const built = buildRecordsFromCompiled([{
+      identity: id,
+      filename: "/persisted.ts",
+      code: `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+        `exports.fromBody = void 0;\nexports.fromBody = 1;`,
+      imports: [],
+      exportNames: ["fromDoc"],
+      starTargetSpecs: [],
+      importSpecs: ["ghost:spec"],
+    }]);
+    const record = built.records.get(spec)!;
+    expect(new Set(record.exports)).toEqual(new Set(["fromDoc", "__esModule"]));
+    expect(record.exports).not.toContain("fromBody");
+    expect(record.imports).toEqual(["ghost:spec"]);
+  });
+});

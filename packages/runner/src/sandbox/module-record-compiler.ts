@@ -90,6 +90,28 @@ function parseCompiledImports(code: string): readonly string[] {
 }
 
 /**
+ * Derive a compiled module's record surface — its direct export names,
+ * `export *` target specifiers, and runtime import specifiers — from its
+ * compiled body in one shot (unmemoized; called once per module at compile
+ * time). Fix B persists this on the compiled doc so
+ * {@link buildRecordsFromCompiled} can read it at boot instead of re-parsing.
+ * Uses the same scans as the boot-time parse, so a persisted value is
+ * byte-identical to what that parse would produce.
+ */
+export function deriveModuleRecordFields(code: string): {
+  exportNames: string[];
+  starTargetSpecs: string[];
+  importSpecs: string[];
+} {
+  const { names, starTargetSpecs } = extractCompiledExports(code);
+  return {
+    exportNames: [...names],
+    starTargetSpecs,
+    importSpecs: extractRuntimeImports(code),
+  };
+}
+
+/**
  * Create a write-once exports target for a module body. Re-assigning,
  * redefining, or deleting a property that already holds a real (non-`undefined`)
  * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
@@ -754,6 +776,16 @@ export interface CachedCompiledModule {
   imports: { specifier: string; targetIdentity: string }[];
   /** Per-module source map, if cached. */
   sourceMap?: SourceMap;
+  /**
+   * Precomputed record surface (Fix B), derived from `code` at compile time via
+   * {@link deriveModuleRecordFields} and persisted on the compiled doc: the
+   * module's direct export names, `export *` target specifiers, and runtime
+   * import specifiers. When present, {@link buildRecordsFromCompiled} reads them
+   * and skips the in-worker parse; absent on legacy docs → parse fallback.
+   */
+  exportNames?: readonly string[];
+  starTargetSpecs?: readonly string[];
+  importSpecs?: readonly string[];
 }
 
 /**
@@ -814,7 +846,11 @@ export function buildRecordsFromCompiled(
     { names: Set<string>; starTargets: string[] }
   >();
   for (const m of modules) {
-    const parsed = parseCompiledExports(m.code);
+    // Fix B: prefer the record surface persisted on the compiled doc; fall back
+    // to parsing the body only for legacy docs that predate the persisted field.
+    const parsed = m.exportNames !== undefined
+      ? { exportNames: m.exportNames, starTargetSpecs: m.starTargetSpecs ?? [] }
+      : parseCompiledExports(m.code);
     const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
     for (const spec of parsed.starTargetSpecs) {
@@ -862,7 +898,9 @@ export function buildRecordsFromCompiled(
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
-    const importSpecs = [...parseCompiledImports(m.code)];
+    const importSpecs = m.importSpecs !== undefined
+      ? [...m.importSpecs]
+      : [...parseCompiledImports(m.code)];
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
