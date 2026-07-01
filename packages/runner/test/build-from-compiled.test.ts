@@ -190,35 +190,34 @@ describe("buildRecordsFromCompiled parse memo (content-addressed)", () => {
     expect(exportsBySpecifier(second)).toEqual(exportsBySpecifier(first));
   });
 
-  it("memoizes the parse by content-hash identity (equal identity ⇒ reused parse)", () => {
-    // The memo keys on `identity`, which is a content hash of the compiled body:
-    // a repeated identity is guaranteed to carry an identical body, so reusing
-    // the first parse is safe — and is exactly what elides the redundant boot
-    // re-parse of the shared system-app closure. Feeding a DIFFERENT body under
-    // an already-seen identity is not a real state (it violates the
-    // content-address invariant); it is used here only to make the reuse
-    // observable.
-    const id = "memo-reuse-identity-000000000000000000000000";
+  it("keys the parse memo on the compiled body, not the source identity (no cross-contamination)", () => {
+    // The memo must key on the compiled body: the same source `identity` can map
+    // to different compiled bytes (different compilation modes / runtime
+    // versions), so serving one body's export surface for another would be a
+    // correctness bug. Feed two DIFFERENT bodies under the SAME identity and
+    // assert each record reflects ITS OWN body — proving the first body's parse
+    // is not reused for the second.
+    const id = "memo-key-identity-000000000000000000000000";
     const spec = `cf:module/${id}`;
     const exportsFor = (code: string): Set<string> => {
       const g = buildRecordsFromCompiled([{
         identity: id,
-        filename: "/reuse.ts",
+        filename: "/k.ts",
         code,
         imports: [],
       }]);
       return new Set(g.records.get(spec)!.exports);
     };
-    const seen = exportsFor(
+    const first = exportsFor(
       `Object.defineProperty(exports, "__esModule", { value: true });\n` +
         `exports.first = void 0;\nexports.first = 1;`,
     );
-    expect(seen).toEqual(new Set(["first", "__esModule"]));
-    // Same identity, different body → the memo returns the first parse.
-    const reused = exportsFor(
+    expect(first).toEqual(new Set(["first", "__esModule"]));
+    // Same identity, DIFFERENT body → must reflect the second body's exports.
+    const second = exportsFor(
       `Object.defineProperty(exports, "__esModule", { value: true });\n` +
         `exports.second = void 0;\nexports.second = 2;`,
     );
-    expect(reused).toEqual(new Set(["first", "__esModule"]));
+    expect(second).toEqual(new Set(["second", "__esModule"]));
   });
 });

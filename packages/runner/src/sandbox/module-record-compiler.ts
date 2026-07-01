@@ -29,20 +29,26 @@ const TARGET = ts.ScriptTarget.ES2023;
 const logger = getLogger("module-record-compiler");
 
 /**
- * Content-addressed memo of the two pure derivations
- * {@link buildRecordsFromCompiled} extracts from a module's compiled body: its
- * direct export surface (names + `export *` target specifiers) and its runtime
- * `require()` specifiers. Keyed by the module's content-hash `identity`.
+ * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
+ * from a module's compiled body: its direct export surface (names + `export *`
+ * target specifiers) and its runtime `require()` specifiers. **Keyed by the
+ * compiled body itself** — both derivations are pure functions of that body.
  *
  * At piece boot every system pattern loaded by identity rebuilds its record
  * graph from the SAME shared module closure, so `buildRecordsFromCompiled` runs
  * once per pattern over an identical module set and re-`createSourceFile`s every
- * body N times — the dominant cost of the warm boot path. Both derivations are
- * pure functions of the compiled body, and `identity` is that body's content
- * hash, so a parse is reusable across every call, closure, and space with no
- * staleness risk. This collapses the boot re-parse to one parse per distinct
- * module per worker. Cached arrays are treated as immutable; callers copy
- * before mutating or handing them to a consumer that might.
+ * body N times — the dominant cost of the warm boot path. This collapses that to
+ * one parse per distinct body per worker.
+ *
+ * Keying on the body (not the module's source `identity`) is deliberate: a
+ * content-hash identity is a hash of the *authored source*, and the same
+ * identity can map to *different* compiled bytes across compilation modes /
+ * runtime versions (cf. the `recordCache` note in `compileSourcesToRecords`,
+ * where a precompiled body and a bare-transpiled body share a content-hash key).
+ * An identity key could therefore serve one body's parse for another; the body
+ * fully determines the parse, so a body key is exact and cross-contamination is
+ * impossible. Cached arrays are treated as immutable; callers copy before
+ * mutating or handing them to a consumer that might.
  */
 const exportParseCache = new Map<
   string,
@@ -50,27 +56,23 @@ const exportParseCache = new Map<
 >();
 const importParseCache = new Map<string, readonly string[]>();
 
-function parseExportsByIdentity(
-  identity: string,
+function parseCompiledExports(
   code: string,
 ): { exportNames: readonly string[]; starTargetSpecs: readonly string[] } {
-  let hit = exportParseCache.get(identity);
+  let hit = exportParseCache.get(code);
   if (hit === undefined) {
     const { names, starTargetSpecs } = extractCompiledExports(code);
     hit = { exportNames: [...names], starTargetSpecs };
-    exportParseCache.set(identity, hit);
+    exportParseCache.set(code, hit);
   }
   return hit;
 }
 
-function parseImportsByIdentity(
-  identity: string,
-  code: string,
-): readonly string[] {
-  let hit = importParseCache.get(identity);
+function parseCompiledImports(code: string): readonly string[] {
+  let hit = importParseCache.get(code);
   if (hit === undefined) {
     hit = extractRuntimeImports(code);
-    importParseCache.set(identity, hit);
+    importParseCache.set(code, hit);
   }
   return hit;
 }
@@ -800,7 +802,7 @@ export function buildRecordsFromCompiled(
     { names: Set<string>; starTargets: string[] }
   >();
   for (const m of modules) {
-    const parsed = parseExportsByIdentity(m.identity, m.code);
+    const parsed = parseCompiledExports(m.code);
     const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
     for (const spec of parsed.starTargetSpecs) {
@@ -848,7 +850,7 @@ export function buildRecordsFromCompiled(
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
 
-    const importSpecs = [...parseImportsByIdentity(m.identity, m.code)];
+    const importSpecs = [...parseCompiledImports(m.code)];
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
