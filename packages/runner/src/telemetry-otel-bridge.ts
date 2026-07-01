@@ -39,6 +39,15 @@ export interface OtelBridgeOptions {
    *   { "user.did": principal, "space.did": space, "ct.runtime": "bg-piece" }
    */
   attributes?: Attributes;
+  /**
+   * Attributes stamped on METRICS ONLY, merged over `attributes`. Backends
+   * don't map OTel resource attributes onto metric datapoint labels, so pass
+   * service.name / deployment.environment here to make metrics scopable by
+   * service and environment. Kept off spans deliberately: spans already carry
+   * these on their resource, and duplicating them as span attributes makes the
+   * bare key ambiguous (resource vs attribute context) in SigNoz queries.
+   */
+  metricAttributes?: Attributes;
 }
 
 export interface RuntimeTelemetryOtelBridge {
@@ -80,6 +89,12 @@ export function createRuntimeTelemetryOtelBridge(
   const base = options.attributes ?? {};
   const attrs = (extra?: Attributes): Attributes =>
     extra ? { ...base, ...extra } : base;
+  // Metric datapoints get the extra scoping labels; spans keep `base` only.
+  const mbase = options.metricAttributes
+    ? { ...base, ...options.metricAttributes }
+    : base;
+  const mattrs = (extra?: Attributes): Attributes =>
+    extra ? { ...mbase, ...extra } : mbase;
 
   // --- Instruments (created once; no-ops when no MeterProvider is set) --------
   const runs = meter.createCounter("ct.scheduler.runs", {
@@ -141,9 +156,12 @@ export function createRuntimeTelemetryOtelBridge(
     unit: "ms",
     description: "Storage push/pull duration",
   });
-  const storageConnection = meter.createCounter("ct.storage.connection.updates", {
-    description: "Storage connection status transitions",
-  });
+  const storageConnection = meter.createCounter(
+    "ct.storage.connection.updates",
+    {
+      description: "Storage connection status transitions",
+    },
+  );
   const subscriptions = meter.createUpDownCounter("ct.storage.subscriptions", {
     description: "Active storage subscriptions",
   });
@@ -176,7 +194,10 @@ export function createRuntimeTelemetryOtelBridge(
     operation: string,
   ) => {
     const span = tracer.startSpan(`storage.${kind}`, {
-      attributes: attrs({ "ct.storage.kind": kind, "ct.storage.operation": operation }),
+      attributes: attrs({
+        "ct.storage.kind": kind,
+        "ct.storage.operation": operation,
+      }),
     });
     openOps.set(id, { span, startMs: nowMs() });
   };
@@ -192,42 +213,52 @@ export function createRuntimeTelemetryOtelBridge(
       open.span.end();
       openOps.delete(id);
     }
-    storageOps.add(1, attrs({ "ct.storage.kind": kind, "ct.storage.error": !!error }));
+    storageOps.add(
+      1,
+      mattrs({ "ct.storage.kind": kind, "ct.storage.error": !!error }),
+    );
     if (durationMs !== undefined) {
-      storageDuration.record(durationMs, attrs({ "ct.storage.kind": kind }));
+      storageDuration.record(durationMs, mattrs({ "ct.storage.kind": kind }));
     }
   };
 
   const handleMarker = (marker: RuntimeTelemetryMarkerResult): void => {
     switch (marker.type) {
       case "scheduler.run":
-        runs.add(1, attrs({ ...patternAttrs(marker.actionInfo), "ct.error": !!marker.error }));
+        runs.add(
+          1,
+          mattrs({
+            ...patternAttrs(marker.actionInfo),
+            "ct.error": !!marker.error,
+          }),
+        );
         break;
       case "scheduler.invocation":
-        invocations.add(1, attrs(patternAttrs(marker.handlerInfo)));
+        invocations.add(1, mattrs(patternAttrs(marker.handlerInfo)));
         break;
       case "cell.update":
-        cellUpdates.add(1, attrs());
+        cellUpdates.add(1, mattrs());
         break;
       case "scheduler.event.commit": {
         commits.add(
           1,
-          attrs({
+          mattrs({
             ...patternAttrs(marker.handlerInfo),
             "ct.commit.terminal": marker.terminal ?? "none",
             "ct.error": !!marker.error,
           }),
         );
-        commitChangedWrites.record(marker.changedWriteCount, attrs());
+        commitChangedWrites.record(marker.changedWriteCount, mattrs());
         if (marker.retryAttempt && marker.retryAttempt > 1) {
-          commitRetries.add(1, attrs(patternAttrs(marker.handlerInfo)));
+          commitRetries.add(1, mattrs(patternAttrs(marker.handlerInfo)));
         }
         break;
       }
       case "scheduler.event.preflight": {
-        const total = marker.populateMs + marker.txToLogMs + marker.depCommitMs +
+        const total = marker.populateMs + marker.txToLogMs +
+          marker.depCommitMs +
           marker.collectMs + marker.scheduleMs;
-        const a = attrs(patternAttrs(marker.handlerInfo));
+        const a = mattrs(patternAttrs(marker.handlerInfo));
         preflightPhase.populate.record(marker.populateMs, a);
         preflightPhase.txToLog.record(marker.txToLogMs, a);
         preflightPhase.depCommit.record(marker.depCommitMs, a);
@@ -259,8 +290,8 @@ export function createRuntimeTelemetryOtelBridge(
         break;
       }
       case "scheduler.non-settling":
-        busyRatio.record(marker.busyRatio, attrs());
-        nonSettling.add(1, attrs());
+        busyRatio.record(marker.busyRatio, mattrs());
+        nonSettling.add(1, mattrs());
         break;
       case "storage.push.start":
         startStorageOp(marker.id, "push", marker.operation);
@@ -283,14 +314,17 @@ export function createRuntimeTelemetryOtelBridge(
       case "storage.connection.update":
         storageConnection.add(
           1,
-          attrs({ "ct.connection.status": marker.status, "ct.connection.attempt": marker.attempt }),
+          mattrs({
+            "ct.connection.status": marker.status,
+            "ct.connection.attempt": marker.attempt,
+          }),
         );
         break;
       case "storage.subscription.add":
-        subscriptions.add(1, attrs());
+        subscriptions.add(1, mattrs());
         break;
       case "storage.subscription.remove":
-        subscriptions.add(-1, attrs());
+        subscriptions.add(-1, mattrs());
         break;
       case "scheduler.dependencies.update":
         // Dependency-graph churn is high-volume and mainly of interest to the

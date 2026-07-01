@@ -142,7 +142,11 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
     // tear down the tracer that just registered successfully, so it gets its own
     // try/catch nested inside the outer one.
     try {
-      const { MeterProvider, PeriodicExportingMetricReader } = await import(
+      const {
+        AggregationTemporality,
+        MeterProvider,
+        PeriodicExportingMetricReader,
+      } = await import(
         "@opentelemetry/sdk-metrics"
       );
       const { OTLPMetricExporter } = await import(
@@ -151,6 +155,10 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
 
       const metricExporter = new OTLPMetricExporter({
         url: `${cfg.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/metrics`,
+        // Delta temporality: without it the exporter sends cumulative points
+        // that SigNoz records as "unspecified", which breaks rate()/increase()
+        // over our counters (only raw per-interval sums work).
+        temporalityPreference: AggregationTemporality.DELTA,
       });
       const meterProvider = new MeterProvider({
         resource: new Resource({

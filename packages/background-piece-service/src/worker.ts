@@ -12,7 +12,13 @@ import {
 } from "@commonfabric/runner";
 import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { getMeter, getTracer } from "./otel.ts";
+import { env } from "./env.ts";
+import {
+  getMeter,
+  getTracer,
+  initOpenTelemetry,
+  shutdownOpenTelemetry,
+} from "./otel.ts";
 
 import {
   createSession,
@@ -169,6 +175,11 @@ export async function initialize(
     errorHandlers: [errorHandler],
     experimental,
   });
+  // Each worker is its own isolate: the provider main.ts registers doesn't
+  // exist here, so initialize OTel in-worker (idempotent, fail-open) or the
+  // bridge below would attach to no-op instruments.
+  await initOpenTelemetry();
+
   // Bridge the runtime's existing telemetry stream to OpenTelemetry. This is a
   // second, passive consumer of the same event bus the debug tooling uses; it
   // emits no-op instruments unless a provider is registered (see otel.ts).
@@ -179,6 +190,14 @@ export async function initialize(
       "ct.runtime": "bg-piece",
       "space.did": spaceId,
       "user.did": identity.did(),
+    },
+    // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
+    // the scoping labels explicitly (metrics only — on spans these live on the
+    // resource, and duplicating them as span attributes makes the bare key
+    // ambiguous in queries).
+    metricAttributes: {
+      "service.name": env.OTEL_SERVICE_NAME,
+      "deployment.environment": env.ENV,
     },
   });
 
@@ -213,6 +232,14 @@ export async function cleanup(): Promise<void> {
     await runtime.storageManager.synced();
     await runtime.dispose();
     runtime = null;
+  }
+
+  // Flush buffered spans/metrics before the controller terminates this worker;
+  // fail-open — telemetry teardown must never block cleanup.
+  try {
+    await shutdownOpenTelemetry();
+  } catch (error) {
+    console.error("Failed to shut down OpenTelemetry:", error);
   }
 
   initialized = false;
