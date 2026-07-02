@@ -222,9 +222,14 @@ const handlers: Record<
         args.root as string | undefined,
       ),
     );
-    const { main } = await engine.compileAndEvaluateModules(program, {
-      patternCoverage,
-    });
+    // `compileAndRegisterModules` seals compile + evaluate + register (see
+    // test-runner.ts): map/filter/flatMap ops resolve via their content-addressed
+    // canonical artifact instead of the defer-corrupted embedded graph (CT-1811).
+    const evalResult = await runtime.patternManager.compileAndRegisterModules(
+      program,
+      { patternCoverage },
+    );
+    const { main } = evalResult;
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.
     loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     consoleCaptureActive = true;

@@ -750,6 +750,14 @@ export class Engine extends EventTarget implements Harness {
   /**
    * Compile + evaluate a program through the ESM module-record path,
    * returning `{ main, exportMap }` plus the per-identity namespaces.
+   *
+   * Low-level: this does NOT register the evaluated artifacts in the pattern
+   * index, so anonymous map/filter/flatMap ops from the returned namespace have
+   * no content-addressed entry ref and would resolve via their embedded graph.
+   * To RUN a pattern from the returned namespace, use
+   * `PatternManager.compileAndRegisterModules`, which fuses registration in (see
+   * CT-1811). Reach for this bare form only to inspect serialized/verified output
+   * without running.
    */
   async compileAndEvaluateModules(
     program: RuntimeProgram,
