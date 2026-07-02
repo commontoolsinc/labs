@@ -19,6 +19,7 @@ import {
   lift,
   parseStackFrame,
   resolveSourceLocationFromStack,
+  setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -422,6 +423,11 @@ describe("module", () => {
   });
 
   describe("source location tracking", () => {
+    // Eager source-location resolution is off by default (debug-only; the boot
+    // lever). This block tests that resolution, so enable it here.
+    beforeEach(() => setEagerSourceAnnotation(true));
+    afterEach(() => setEagerSourceAnnotation(false));
+
     const compileMain = async (source: string) => {
       const program = {
         main: "/main.tsx",
