@@ -13,6 +13,7 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
+import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -252,15 +253,6 @@ function getParameterAtArgument(
     : undefined;
 }
 
-type SignatureCellKind =
-  | "opaque"
-  | "cell"
-  | "stream"
-  | "comparable"
-  | "readonly"
-  | "writeonly"
-  | "sqlite";
-
 // Read the capability an imported callee declares for a parameter from its
 // Common Fabric cell wrapper type. `Writable<T>` is a structural alias of
 // `Cell<T>` (an identical type), so the two are distinguished only by the
@@ -297,7 +289,7 @@ function getExplicitCellKindFromTypeNode(
   typeNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
   depth = 0,
-): SignatureCellKind | undefined {
+): CellBrand | undefined {
   // The depth guard bounds the type-parameter-constraint recursion below
   // against a circular constraint on ill-typed input.
   if (!typeNode || depth > 16) return undefined;
@@ -307,7 +299,7 @@ function getExplicitCellKindFromTypeNode(
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
-    const kinds = new Set<SignatureCellKind>();
+    const kinds = new Set<CellBrand>();
     for (const member of typeNode.types) {
       if (isNullOrUndefinedTypeNode(member)) {
         continue;
@@ -380,7 +372,7 @@ function getEffectiveParameterTypeNode(
 function getParameterDeclaredCellKind(
   parameter: ts.Symbol | undefined,
   checker: ts.TypeChecker,
-): SignatureCellKind | undefined {
+): CellBrand | undefined {
   return getExplicitCellKindFromTypeNode(
     getEffectiveParameterTypeNode(parameter),
     checker,
