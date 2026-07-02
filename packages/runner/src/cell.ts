@@ -36,7 +36,7 @@ import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { getTopFrame } from "./builder/pattern.ts";
+import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
@@ -753,6 +753,9 @@ export class CellImpl<T extends FabricValue>
    * Set a cause for this cell. This is used to create a link when the cell doesn't have one yet.
    * This affects all sibling cells (created via .key(), .asSchema(), .withTx()) since they
    * share the same container.
+   *
+   * Record causes may not use the top-level key `$generated` — it is
+   * reserved for system-generated causes.
    * @param cause - The cause to associate with this cell
    * @param allowIfSet - If true, treat as suggestion and silently ignore if cause already set. If false (default), throw error if cause already set.
    * @returns This cell for method chaining
@@ -770,6 +773,11 @@ export class CellImpl<T extends FabricValue>
         );
       }
     }
+
+    // Reject reserved keys before the cause can take effect: a user cause
+    // carrying a top-level `$generated` key would mimic the pattern builder's
+    // generated-cause namespace.
+    assertNoReservedCauseKeys(cause);
 
     // Store the cause in the shared container - all siblings will see this
     this._causeContainer.cause = cause;

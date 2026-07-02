@@ -890,6 +890,9 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
   /**
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
+   *
+   * Record causes may not use the top-level key `$generated` — it is
+   * reserved for system-generated causes and setting one throws.
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
