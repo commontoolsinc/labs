@@ -7,10 +7,10 @@ measured numbers (OFF vs ON, same commit) once W3 exists.
 
 | WO | Status | Measured outcome |
 | --- | --- | --- |
-| W0 — plan + decisions | 🟡 in progress | — |
-| W1 — IR v2 core | ⬜ | — |
-| W2 — builder-born ROG | ⬜ | — |
-| W3 — flag-on dispatch + measurement harness | ⬜ | — |
+| W0 — plan + decisions | ✅ done (`804f881b7`) | — |
+| W1 — IR v2 core | ✅ done (`667ecf1bd`) | rog.ts + unit tests; internals table-indexed; normalized control tags |
+| W2 — builder-born ROG | ✅ done (`b01b75554`) | Zero-recognition front-end at pattern() finalization (WeakMap side-table); str→interpolate native; unknown refs fail-closed to effect boundaries; full runner suite 738/0 with construction ALWAYS-ON (baseline parity) |
+| W3 — flag-on dispatch + measurement harness | 🟡 in progress | W3a evaluator landed (`88d139fba`): v1 semantics ported to IR v2, end-to-end green over builder-born ROGs (control falsy-operands, str coercion, error isolation, probe, nested inline). Next: partition port + dispatch seam + census/measure harness |
 | W4 — collections Option A | ⬜ | — |
 | W5 — transformer native ops | ⬜ | — |
 | W6 — function lowering | ⬜ | — |

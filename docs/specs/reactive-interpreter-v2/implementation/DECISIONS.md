@@ -78,3 +78,22 @@ v1 keyed internal cells by `JSON.stringify`ed partialCause strings. v2: each
 Rog carries `internals: InternalDecl[]` ({partialCause, schema?}) and
 `internal` ValueRefs point by INDEX. Nested Rogs have their own table (frames
 fall out structurally; no FrameId needed).
+
+## D-V2-F4-DEFER — no write-back cut edges in the first partition (2026-07-02)
+
+The v2 partition ships WITHOUT F4 (boundary write-back) cut edges, despite
+the IR carrying `effect.writeTargets`. Three reasons: (1) v1 reached CI-ON
+green without them (F4 stayed an open finding); (2) naive edges create a
+false cycle — a handler's input CONSTRUCT references the very cell the
+handler writes (a binding, not a read-after-write), so every handler pattern
+would fail-closed; (3) under pull scheduling the hazard is re-run churn /
+conflict surface, not value correctness. Plan: measure lunch-poll conflicts
+once dispatch lands (the user's watch-carefully directive), then add edges
+that EXCLUDE each boundary's own binding constructs if the ratchet appears.
+
+## D-V2-PURE-PATTERN-INLINE — pure nested patterns are segment-resident (2026-07-02)
+
+A nested `pattern` op whose child BuiltRog is complete and recursively pure
+is NOT a boundary: it stays inside its segment and evalRog inlines the child
+(v1's W5a win, now by construction at partition time). Only effectful /
+incomplete / plain-JSON children remain `pattern` boundaries.
