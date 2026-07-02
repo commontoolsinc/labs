@@ -17,6 +17,8 @@ import {
 import { getIdentity } from "./src/utils.ts";
 import type { Identity, Session } from "@commonfabric/identity";
 
+type CastAdminPieceManager = Pick<PieceManager, "ready" | "runPersistent">;
+
 export interface CastAdminDependencies {
   args: string[];
   envGet: typeof Deno.env.get;
@@ -31,18 +33,8 @@ export interface CastAdminDependencies {
   createPieceManager: (
     session: Session,
     runtime: Runtime,
-  ) => {
-    ready: Promise<unknown>;
-    runPersistent: (
-      pattern: unknown,
-      inputs: Record<string, unknown>,
-    ) => Promise<{ entityId: unknown }>;
-  };
-  compileAndSavePattern: (
-    runtime: Runtime,
-    patternSrc: string,
-    options: { space: string },
-  ) => Promise<unknown>;
+  ) => CastAdminPieceManager;
+  compileAndSavePattern: typeof compileAndSavePattern;
   exit: typeof Deno.exit;
   log: typeof console.log;
   error: typeof console.error;
@@ -163,12 +155,8 @@ export function defaultCastAdminDependencies(): CastAdminDependencies {
     readTextFile: Deno.readTextFile,
     createSession,
     createPieceManager: (session, runtime) =>
-      new PieceManager(session, runtime) as unknown as ReturnType<
-        CastAdminDependencies["createPieceManager"]
-      >,
-    compileAndSavePattern: compileAndSavePattern as CastAdminDependencies[
-      "compileAndSavePattern"
-    ],
+      new PieceManager(session, runtime),
+    compileAndSavePattern,
     exit: Deno.exit,
     log: console.log,
     error: console.error,

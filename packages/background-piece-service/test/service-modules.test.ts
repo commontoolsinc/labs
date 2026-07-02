@@ -1350,7 +1350,8 @@ describe("cast admin entry point", () => {
       createSession: () => Promise.resolve({ fakeSession: true } as never),
       createPieceManager: () => ({
         ready: Promise.resolve(),
-        runPersistent: () => Promise.resolve({ entityId: "fid1:cast" }),
+        runPersistent:
+          (() => Promise.resolve({ entityId: "fid1:cast" })) as never,
       }),
       compileAndSavePattern: () =>
         Promise.resolve({ fakePattern: true } as never),
