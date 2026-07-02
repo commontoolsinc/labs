@@ -8,6 +8,235 @@ import { LRUCache } from "@commonfabric/utils/cache";
 
 export type { MappedPosition };
 
+// ---------------------------------------------------------------------------
+// VLQ-level composition (the fast path of `composeBundleSourceMap`)
+// ---------------------------------------------------------------------------
+
+/** Input shape the textual transcoder cannot prove position-equivalent for. */
+class FastPathUnsupported extends Error {}
+
+const BASE64_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_VALUES = (() => {
+  const table = new Int8Array(128).fill(-1);
+  for (let i = 0; i < BASE64_CHARS.length; i++) {
+    table[BASE64_CHARS.charCodeAt(i)] = i;
+  }
+  return table;
+})();
+
+/** Decode one signed base64-VLQ value starting at `cursor.i`; advances it. */
+function decodeVLQ(mappings: string, cursor: { i: number }): number {
+  let result = 0;
+  let shift = 0;
+  for (;;) {
+    const code = mappings.charCodeAt(cursor.i++);
+    const digit = code < 128 ? BASE64_VALUES[code] : -1;
+    if (digit === -1) throw new FastPathUnsupported("malformed VLQ");
+    result += (digit & 0x1f) << shift;
+    if ((digit & 0x20) === 0) break;
+    shift += 5;
+  }
+  const negative = (result & 1) === 1;
+  result >>>= 1;
+  return negative ? -result : result;
+}
+
+/** Encode one signed value as base64 VLQ. */
+function encodeVLQ(value: number): string {
+  let vlq = value < 0 ? ((-value) << 1) + 1 : value << 1;
+  let out = "";
+  do {
+    let digit = vlq & 0x1f;
+    vlq >>>= 5;
+    if (vlq > 0) digit |= 0x20;
+    out += BASE64_CHARS[digit];
+  } while (vlq > 0);
+  return out;
+}
+
+const atSegmentEnd = (mappings: string, i: number): boolean =>
+  i >= mappings.length || mappings[i] === "," || mappings[i] === ";";
+
+/**
+ * Textual `composeBundleSourceMap`: transcode each module's `mappings` stream
+ * directly — one decode+re-encode pass per segment, no mapping objects, no
+ * sort, no generator, no JSON round-trip. Segment fields 2–5 are deltas that
+ * run across the whole stream, so each module's stream is rebased onto the
+ * running output state (plus its source/name index base) as it is appended;
+ * per-line field 1 restarts at every `;` exactly as in the inputs.
+ *
+ * Position-equivalent to the legacy path, with one benign divergence: modules
+ * contribute their declared `sources`/`names` arrays wholesale (indices stay
+ * valid), where the generator collects only first-use entries — lookups
+ * resolve identically, the arrays may just carry unused entries. Mappings
+ * without an original position (1-field segments) are dropped, matching the
+ * legacy `m.source == null` filter. Throws {@link FastPathUnsupported} on
+ * shapes whose equivalence would need the full decode: a `source` override
+ * over a multi-source map (the legacy path collapses every mapping onto the
+ * override), a non-empty `sourceRoot` (legacy resolves sources against it),
+ * and unsorted or malformed streams (the generator re-sorts).
+ */
+function composeBundleSourceMapTextual(
+  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+  bundleFilename: string,
+  startLineOffset = 0,
+): SourceMap | undefined {
+  const sources: string[] = [];
+  const names: string[] = [];
+  const contents: (string | null)[] = [];
+  let anyContent = false;
+  const out: string[] = [];
+  // Running absolutes of the emitted stream (fields 2–5 are stream-global).
+  let prevSrc = 0;
+  let prevOrigLine = 0;
+  let prevOrigCol = 0;
+  let prevName = 0;
+  // Line index (0-based) the next emitted `;` would move past.
+  let emittedLines = 0;
+  let any = false;
+  let lineOffset = startLineOffset;
+
+  for (const { body, map, source } of modules) {
+    if (map) {
+      if (typeof map.sourceRoot === "string" && map.sourceRoot !== "") {
+        throw new FastPathUnsupported("sourceRoot");
+      }
+      // Materialize every map field into plain locals ONCE. On the cached
+      // boot path these maps are storage-backed proxies whose property reads
+      // run a transaction read each — per-segment `.length` checks against
+      // the live objects turn the hot loop into tens of ms of storage reads
+      // (measured: ~9ms → ~87ms per boot). One shallow copy per module keeps
+      // the loop on plain data for proxies and plain maps alike.
+      const mapSources = [...(map.sources ?? [])];
+      if (source !== undefined && mapSources.length > 1) {
+        throw new FastPathUnsupported("source override over multi-source map");
+      }
+      const effectiveSources = source !== undefined ? [source] : mapSources;
+      const mapNames = [...(map.names ?? [])];
+      const rawContents =
+        (map as { sourcesContent?: (string | null)[] }).sourcesContent;
+      const mapContents = rawContents ? [...rawContents] : undefined;
+      const sourceCount = mapSources.length;
+      const nameCount = mapNames.length;
+      const sourceBase = sources.length;
+      const nameBase = names.length;
+
+      // In-module absolutes (every stream starts its deltas from 0).
+      let mSrc = 0;
+      let mOrigLine = 0;
+      let mOrigCol = 0;
+      let mName = 0;
+      let moduleLine = 0;
+      let genColAbs = 0;
+      let linePrevGen = 0;
+      let lineOpen = false; // an output segment exists for the current line
+      let emitted = false;
+      const s = map.mappings ?? "";
+      const cursor = { i: 0 };
+      while (cursor.i < s.length) {
+        const ch = s[cursor.i];
+        if (ch === ";") {
+          moduleLine++;
+          genColAbs = 0;
+          linePrevGen = 0;
+          lineOpen = false;
+          cursor.i++;
+          continue;
+        }
+        if (ch === ",") {
+          cursor.i++;
+          continue;
+        }
+        genColAbs += decodeVLQ(s, cursor);
+        if (genColAbs < 0) throw new FastPathUnsupported("negative column");
+        if (atSegmentEnd(s, cursor.i)) continue; // 1-field segment: dropped
+        mSrc += decodeVLQ(s, cursor);
+        mOrigLine += decodeVLQ(s, cursor);
+        mOrigCol += decodeVLQ(s, cursor);
+        let hasName = false;
+        if (!atSegmentEnd(s, cursor.i)) {
+          mName += decodeVLQ(s, cursor);
+          hasName = true;
+          if (!atSegmentEnd(s, cursor.i)) {
+            throw new FastPathUnsupported("oversized segment");
+          }
+        }
+        if (
+          mSrc < 0 || mSrc >= sourceCount || mOrigLine < 0 ||
+          mOrigCol < 0 || (hasName && (mName < 0 || mName >= nameCount))
+        ) {
+          throw new FastPathUnsupported("index out of range");
+        }
+        if (lineOpen) {
+          if (genColAbs < linePrevGen) {
+            throw new FastPathUnsupported("unsorted mappings");
+          }
+          out.push(",");
+        } else {
+          const bundleLine = lineOffset + moduleLine;
+          if (bundleLine < emittedLines) {
+            throw new FastPathUnsupported("module maps beyond its body");
+          }
+          out.push(";".repeat(bundleLine - emittedLines));
+          emittedLines = bundleLine;
+          lineOpen = true;
+        }
+        const srcGlobal = sourceBase + (source !== undefined ? 0 : mSrc);
+        let segment = encodeVLQ(genColAbs - linePrevGen) +
+          encodeVLQ(srcGlobal - prevSrc) +
+          encodeVLQ(mOrigLine - prevOrigLine) +
+          encodeVLQ(mOrigCol - prevOrigCol);
+        linePrevGen = genColAbs;
+        prevSrc = srcGlobal;
+        prevOrigLine = mOrigLine;
+        prevOrigCol = mOrigCol;
+        if (hasName) {
+          const nameGlobal = nameBase + mName;
+          segment += encodeVLQ(nameGlobal - prevName);
+          prevName = nameGlobal;
+        }
+        out.push(segment);
+        emitted = true;
+        any = true;
+      }
+
+      if (emitted) {
+        sources.push(...effectiveSources);
+        names.push(...mapNames);
+        if (source !== undefined) {
+          // Overridden single source: its content is the first non-null entry
+          // (per-module compiler maps carry exactly one source).
+          const content = mapContents?.find((c) => c != null) ?? null;
+          contents.push(content);
+          if (content != null) anyContent = true;
+        } else {
+          for (let i = 0; i < effectiveSources.length; i++) {
+            const content = mapContents?.[i] ?? null;
+            contents.push(content);
+            if (content != null) anyContent = true;
+          }
+        }
+      }
+    }
+    // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.
+    // Robust to trailing newlines, unlike split().length.
+    lineOffset += (body.match(/\n/g)?.length ?? 0) + 1;
+  }
+  if (!any) return undefined;
+  const composed = {
+    version: 3,
+    file: bundleFilename,
+    sources,
+    names,
+    mappings: out.join(""),
+    ...(anyContent ? { sourcesContent: contents } : {}),
+  };
+  // Same `version` shape as the legacy path's `JSON.parse(generator.toString())`
+  // (a numeric 3 behind the RawSourceMap string type).
+  return composed as unknown as SourceMap;
+}
+
 /**
  * Compose a single bundle source map for the concatenated module bodies
  * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
@@ -35,6 +264,42 @@ export function composeBundleSourceMap(
   // loader's `(function (exports, require, module) {\n` factory wrapper adds 1
   // line before the compiled body), so coordinates from `new Error().stack`
   // (1-based, relative to the eval'd string) map correctly.
+  startLineOffset = 0,
+): SourceMap | undefined {
+  // Compose at the VLQ text level when possible. The composition runs inside
+  // the runtime worker at every piece boot (once for the eval bundle plus once
+  // per module, for every record-graph evaluation), and the
+  // consumer→generator round-trip below decodes every mapping into an object,
+  // re-sorts, re-encodes, and JSON-parses — tens of ms per cold boot for the
+  // system-app closure. The textual transcoder produces position-equivalent
+  // output in one allocation-free pass; anything it cannot prove equivalent
+  // falls back to the legacy path.
+  try {
+    return composeBundleSourceMapTextual(
+      modules,
+      bundleFilename,
+      startLineOffset,
+    );
+  } catch (error) {
+    if (!(error instanceof FastPathUnsupported)) throw error;
+    return composeBundleSourceMapLegacy(
+      modules,
+      bundleFilename,
+      startLineOffset,
+    );
+  }
+}
+
+/**
+ * Reference composition via `SourceMapConsumer`/`SourceMapGenerator`. Kept as
+ * the fallback for input shapes the textual fast path rejects (multi-source
+ * maps under a `source` override, non-empty `sourceRoot`, unsorted or
+ * malformed mappings) — rare in practice: per-module compiler maps are
+ * single-source, rootless, and sorted.
+ */
+function composeBundleSourceMapLegacy(
+  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+  bundleFilename: string,
   startLineOffset = 0,
 ): SourceMap | undefined {
   const generator = new SourceMapGenerator({ file: bundleFilename });
@@ -106,16 +371,20 @@ export function composeBundleSourceMap(
  * map only re-labels the bundle coordinate with the per-module source name.
  */
 export function identitySourceMap(body: string, source: string): SourceMap {
-  const generator = new SourceMapGenerator({ file: source });
   const lineCount = (body.match(/\n/g)?.length ?? 0) + 1;
-  for (let line = 1; line <= lineCount; line++) {
-    generator.addMapping({
-      generated: { line, column: 0 },
-      original: { line, column: 0 },
-      source,
-    });
-  }
-  return JSON.parse(generator.toString()) as SourceMap;
+  // Synthesized directly — the stream is a fixed token per line: line 1 maps
+  // column 0 to source 0, line 1, column 0 (`AAAA`); every following line
+  // advances only the original line by one (`AACA`). Byte-identical to what a
+  // SourceMapGenerator loop over the same mappings emits, without paying the
+  // per-line addMapping/serialize round-trip on the boot path.
+  const mappings = "AAAA" + ";AACA".repeat(lineCount - 1);
+  return {
+    version: 3,
+    file: source,
+    sources: [source],
+    names: [],
+    mappings,
+  } as unknown as SourceMap;
 }
 
 /**

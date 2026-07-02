@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
+  identitySourceMap,
   InMemoryProgram,
   type SourceMap,
   SourceMapParser,
@@ -393,5 +394,359 @@ describe("composeBundleSourceMap", () => {
       composed.sourcesContent?.[composed.sources.indexOf("/id/dir/main.tsx")],
     )
       .toBe("const authored = 1;");
+  });
+});
+
+describe("composeBundleSourceMap textual fast path (vs consumer/generator)", () => {
+  /**
+   * The pre-fast-path implementation, verbatim: consumer → generator →
+   * JSON.parse. The public function must stay position-equivalent to this for
+   * every input shape (taking the fast path or falling back).
+   */
+  function legacyCompose(
+    modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+    bundleFilename: string,
+    startLineOffset = 0,
+  ): SourceMap | undefined {
+    const generator = new SourceMapGenerator({ file: bundleFilename });
+    let lineOffset = startLineOffset;
+    let any = false;
+    for (const { body, map, source } of modules) {
+      if (map) {
+        const consumer = new SourceMapConsumer(map);
+        consumer.eachMapping((m) => {
+          if (
+            m.source == null || m.originalLine == null ||
+            m.originalColumn == null
+          ) return;
+          generator.addMapping({
+            generated: {
+              line: m.generatedLine + lineOffset,
+              column: m.generatedColumn,
+            },
+            original: { line: m.originalLine, column: m.originalColumn },
+            source: source ?? m.source,
+            name: m.name ?? undefined,
+          });
+          any = true;
+        });
+        const contents =
+          (map as { sourcesContent?: (string | null)[] }).sourcesContent;
+        if (source) {
+          const content = contents?.find((c) => c != null);
+          if (content != null) generator.setSourceContent(source, content);
+        } else {
+          const sources = map.sources ?? [];
+          if (contents) {
+            sources.forEach((src, i) => {
+              const content = contents[i];
+              if (src != null && content != null) {
+                generator.setSourceContent(src, content);
+              }
+            });
+          }
+        }
+      }
+      lineOffset += (body.match(/\n/g)?.length ?? 0) + 1;
+    }
+    if (!any) return undefined;
+    return JSON.parse(generator.toString()) as SourceMap;
+  }
+
+  /** Every mapping as an ordered position tuple — the equivalence currency. */
+  function mappingTuples(map: SourceMap): string[] {
+    const out: string[] = [];
+    new SourceMapConsumer(map).eachMapping((m) => {
+      out.push(
+        [
+          m.generatedLine,
+          m.generatedColumn,
+          m.source,
+          m.originalLine,
+          m.originalColumn,
+          m.name ?? "",
+        ].join("|"),
+      );
+    });
+    return out;
+  }
+
+  function expectEquivalent(
+    modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+    bundleFilename: string,
+    startLineOffset = 0,
+    { minMappings = 1 }: { minMappings?: number } = {},
+  ) {
+    const fast = composeBundleSourceMap(
+      modules,
+      bundleFilename,
+      startLineOffset,
+    );
+    const legacy = legacyCompose(modules, bundleFilename, startLineOffset);
+    expect(fast === undefined).toBe(legacy === undefined);
+    if (fast === undefined || legacy === undefined) return;
+    const fastTuples = mappingTuples(fast);
+    expect(fastTuples.length).toBeGreaterThanOrEqual(minMappings);
+    expect(fastTuples).toEqual(mappingTuples(legacy));
+    expect(fast.file).toBe(legacy.file);
+    // Content must resolve identically under every mapped source name.
+    const legacyConsumer = new SourceMapConsumer(legacy);
+    const fastConsumer = new SourceMapConsumer(fast);
+    for (const source of legacy.sources) {
+      expect(fastConsumer.sourceContentFor(source, true)).toBe(
+        legacyConsumer.sourceContentFor(source, true),
+      );
+    }
+  }
+
+  /** Compile a real multi-module program and return each module's js + map. */
+  async function compileTwoModules(): Promise<
+    Array<{ js: string; sourceMap?: SourceMap }>
+  > {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+import { helper, tag } from "./util.ts";
+
+export function test(n: number) {
+  return helper(n) + tag.length;
+}
+
+export default test;
+`,
+      "/util.ts": `
+export function helper(n: number): number {
+  const doubled = n * 2;
+  return doubled + 1;
+}
+
+export const tag = "util";
+`,
+    });
+    const resolved = await compiler.resolveProgram(program);
+    const emitted = compiler.compileToModules(resolved);
+    return [emitted.get("/main.tsx")!, emitted.get("/util.ts")!];
+  }
+
+  it("matches on real compiler maps with overrides (the eval-bundle shape)", async () => {
+    const [main, util] = await compileTwoModules();
+    expectEquivalent(
+      [
+        { body: main.js, map: main.sourceMap, source: "/id/main.tsx" },
+        { body: util.js, map: util.sourceMap, source: "/id/util.ts" },
+      ],
+      "load1.js",
+      0,
+      { minMappings: 10 },
+    );
+  });
+
+  it("matches on a single module with the wrapper offset (the per-module shape)", async () => {
+    const [main] = await compileTwoModules();
+    expectEquivalent(
+      [{ body: "", map: main.sourceMap, source: "/id/main.tsx" }],
+      "/main.tsx",
+      1,
+      { minMappings: 5 },
+    );
+  });
+
+  it("matches on identity maps mixed with real maps and mapless modules", async () => {
+    const [main, util] = await compileTwoModules();
+    expectEquivalent(
+      [
+        { body: main.js, map: identitySourceMap(main.js, "/id/main.tsx") },
+        { body: "no map\nfor me" },
+        { body: util.js, map: util.sourceMap, source: "/id/util.ts" },
+      ],
+      "mixed.js",
+      0,
+      { minMappings: 10 },
+    );
+  });
+
+  it("matches when mappings carry names across module boundaries", () => {
+    // This compiler config emits empty `names`, so exercise the cross-stream
+    // name-index rebasing with generator-built maps that do carry names.
+    const named = (
+      file: string,
+      entries: Array<{ line: number; col: number; name: string }>,
+    ) => {
+      const g = new SourceMapGenerator({ file });
+      for (const e of entries) {
+        g.addMapping({
+          generated: { line: e.line, column: e.col },
+          original: { line: e.line, column: 0 },
+          source: `${file}.ts`,
+          name: e.name,
+        });
+      }
+      return JSON.parse(g.toString()) as SourceMap;
+    };
+    const mapA = named("a", [
+      { line: 1, col: 0, name: "alpha" },
+      { line: 1, col: 8, name: "beta" },
+      { line: 2, col: 0, name: "alpha" },
+    ]);
+    const mapB = named("b", [
+      { line: 1, col: 4, name: "gamma" },
+      { line: 2, col: 2, name: "delta" },
+    ]);
+    expect(mapA.names.length).toBeGreaterThan(0);
+    expectEquivalent(
+      [
+        { body: "x\ny", map: mapA },
+        { body: "p\nq", map: mapB },
+      ],
+      "names.js",
+      0,
+      { minMappings: 5 },
+    );
+  });
+
+  it("drops generated-only (1-field) segments like the legacy filter", () => {
+    const g = new SourceMapGenerator({ file: "a.js" });
+    g.addMapping({
+      generated: { line: 1, column: 0 },
+      original: { line: 3, column: 0 },
+      source: "a.ts",
+    });
+    // A mapping with no original position — serialized as a 1-field segment.
+    g.addMapping({ generated: { line: 1, column: 8 } });
+    g.addMapping({
+      generated: { line: 1, column: 12 },
+      original: { line: 4, column: 2 },
+      source: "a.ts",
+    });
+    const map = JSON.parse(g.toString());
+    expect(map.mappings).toContain(","); // the 1-field segment is really there
+    expectEquivalent([{ body: "x", map }], "drop.js", 0, { minMappings: 2 });
+  });
+
+  it("falls back on a source override over a multi-source map", () => {
+    const g = new SourceMapGenerator({ file: "a.js" });
+    g.addMapping({
+      generated: { line: 1, column: 0 },
+      original: { line: 1, column: 0 },
+      source: "one.ts",
+    });
+    g.addMapping({
+      generated: { line: 2, column: 0 },
+      original: { line: 1, column: 0 },
+      source: "two.ts",
+    });
+    const map = JSON.parse(g.toString());
+    expect(map.sources.length).toBe(2);
+    // The override collapses both mappings onto one source — only the legacy
+    // path can do that, so the public function must match it via fallback.
+    expectEquivalent(
+      [{ body: "x\ny", map, source: "/override.ts" }],
+      "multi.js",
+      0,
+      { minMappings: 2 },
+    );
+  });
+
+  it("falls back on non-empty sourceRoot and on unsorted mappings", () => {
+    const rooted: SourceMap = {
+      version: "3",
+      file: "a.js",
+      sourceRoot: "/root",
+      sources: ["a.ts"],
+      names: [],
+      mappings: "AAAA",
+    } as SourceMap;
+    expectEquivalent([{ body: "x", map: rooted }], "rooted.js");
+    // genCol 4 then genCol 2 on the same line — the generator re-sorts.
+    const unsorted: SourceMap = {
+      version: "3",
+      file: "a.js",
+      sourceRoot: "",
+      sources: ["a.ts"],
+      names: [],
+      mappings: "IAAA,FAAC",
+    } as SourceMap;
+    expectEquivalent([{ body: "x", map: unsorted }], "unsorted.js", 0, {
+      minMappings: 2,
+    });
+  });
+
+  it("takes the fast path on compiler-shaped inputs (observable via kept declared names)", () => {
+    // The generator collects only first-USE names; the textual path carries the
+    // declared array wholesale. An unused declared name surviving into the
+    // composed map proves the fast path ran (tuple equivalence above proves the
+    // divergence is benign).
+    const map: SourceMap = {
+      version: "3",
+      file: "a.js",
+      sourceRoot: "",
+      sources: ["a.ts"],
+      names: ["used", "unused"],
+      // line 1, col 0 -> a.ts:1:0 with name index 0.
+      mappings: "AAAAA",
+    } as SourceMap;
+    const composed = composeBundleSourceMap([{ body: "x", map }], "fast.js")!;
+    expect(composed.names).toContain("unused");
+    expect(mappingTuples(composed)).toEqual(
+      mappingTuples(legacyCompose([{ body: "x", map }], "fast.js")!),
+    );
+  });
+
+  it("keeps the hot loop off live map objects (proxy-backed maps)", async () => {
+    const [main, util] = await compileTwoModules();
+    let gets = 0;
+    const proxied = (map: SourceMap): SourceMap =>
+      new Proxy(map, {
+        get(t, p, r) {
+          gets++;
+          return Reflect.get(t, p, r);
+        },
+      }) as SourceMap;
+    const composed = composeBundleSourceMap(
+      [
+        {
+          body: main.js,
+          map: proxied(main.sourceMap!),
+          source: "/id/main.tsx",
+        },
+        { body: util.js, map: proxied(util.sourceMap!), source: "/id/util.ts" },
+      ],
+      "prox.js",
+    )!;
+    // Correctness: identical to composing the plain maps.
+    expect(mappingTuples(composed)).toEqual(mappingTuples(
+      composeBundleSourceMap(
+        [
+          { body: main.js, map: main.sourceMap, source: "/id/main.tsx" },
+          { body: util.js, map: util.sourceMap, source: "/id/util.ts" },
+        ],
+        "prox.js",
+      )!,
+    ));
+    // On the cached boot path these maps are storage-backed proxies whose every
+    // property read is a transaction read. The transcoder must materialize the
+    // handful of fields once per module — not consult the live object
+    // per-segment (measured as a ~9ms → ~87ms per-boot regression).
+    expect(gets).toBeLessThan(24);
+  });
+
+  it("identitySourceMap synthesizes the generator-equivalent map", () => {
+    for (const body of ["one line", "a\nb\nc", "trailing\n", ""]) {
+      const direct = identitySourceMap(body, "/id/main.tsx");
+      const g = new SourceMapGenerator({ file: "/id/main.tsx" });
+      const lineCount = (body.match(/\n/g)?.length ?? 0) + 1;
+      for (let line = 1; line <= lineCount; line++) {
+        g.addMapping({
+          generated: { line, column: 0 },
+          original: { line, column: 0 },
+          source: "/id/main.tsx",
+        });
+      }
+      const viaGenerator = JSON.parse(g.toString()) as SourceMap;
+      expect(direct.mappings).toBe(viaGenerator.mappings);
+      expect([...direct.sources]).toEqual([...viaGenerator.sources]);
+      expect(direct.file).toBe(viaGenerator.file);
+      expect(mappingTuples(direct)).toEqual(mappingTuples(viaGenerator));
+    }
   });
 });
