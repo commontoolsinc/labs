@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/background-piece-service/test/otel.test.ts": [
-    "38:45:zjpzly",
-  ],
   "packages/background-piece-service/test/service-modules.test.ts": [
     "267:14:1cjelcj",
     "268:15:a0i7ae",

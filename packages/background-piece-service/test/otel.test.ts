@@ -32,12 +32,11 @@ describe("OpenTelemetry setup", () => {
   it("fails open when setup throws (telemetry must not block startup)", async () => {
     // A malformed endpoint makes the exporter URL construction throw inside
     // init; init should swallow it and leave telemetry off rather than crash.
-    await initOpenTelemetry({
-      OTEL_ENABLED: true,
-      OTEL_SERVICE_NAME: "bg-piece-test",
-      OTEL_EXPORTER_OTLP_ENDPOINT: undefined as unknown as string,
-      ENV: "test",
+    const malformedEndpointConfig = cfg(true);
+    Object.assign(malformedEndpointConfig, {
+      OTEL_EXPORTER_OTLP_ENDPOINT: undefined,
     });
+    await initOpenTelemetry(malformedEndpointConfig);
     assertEquals(getTracerProvider(), undefined);
   });
 
