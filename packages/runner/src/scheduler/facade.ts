@@ -29,8 +29,8 @@ import type {
 } from "../telemetry.ts";
 import {
   DEFAULT_RETRIES_FOR_EVENTS,
-  MAX_SETTLE_STATS_HISTORY,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
+  MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
 import {
   getPieceMetadataFromFrame,
