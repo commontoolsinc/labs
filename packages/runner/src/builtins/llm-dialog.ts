@@ -28,6 +28,7 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -1977,6 +1978,75 @@ function toolAllowsObservedConfidentiality(
   return cfcObservationFitsCeiling(observedConfidentiality, maxConfidentiality);
 }
 
+// The integrity a model-supplied tool-input value carries (Epic D2). A value
+// the model passed BY REFERENCE (a `{"@link":…}` to a cell) carries that
+// cell's stored integrity; a value the model emitted as a plain literal
+// carries none — it is model output (stamped at most `LlmDerived`, D1), which
+// by construction lacks any endorsement family. `traverseAndCellify` is the
+// same resolver the invoke path uses, so a reference is read identically here.
+function toolInputValueIntegrity(
+  runtime: Runtime,
+  space: MemorySpace,
+  value: unknown,
+): unknown[] {
+  const cellified = traverseAndCellify(runtime, space, value);
+  if (!isCell(cellified)) {
+    return [];
+  }
+  const view = cfcLabelViewForCellFailClosed(cellified);
+  return (view?.entries ?? []).flatMap((entry) => entry.label.integrity ?? []);
+}
+
+// Walk a tool's `inputSchema` for fields declaring `ifc.requiredIntegrity` and
+// verify the model-supplied value at each carries every required atom (Epic D2,
+// docs/specs/cfc-trusted-agent-tool-integrity.md piece A/C). A control/routing
+// field (e.g. `sendMail.recipient`) declaring the agent-kernel integrity floor
+// can only be satisfied by an integrity-bearing reference the model passed, not
+// by a string it copied out of a hostile briefing — that fails closed. Returns
+// the first failing field's reason, or undefined if all floors are satisfied.
+function toolInputRequiredIntegrityFailure(
+  runtime: Runtime,
+  space: MemorySpace,
+  schema: unknown,
+  value: unknown,
+  path: string,
+): string | undefined {
+  if (!isRecord(schema)) {
+    return undefined;
+  }
+  const ifc = schema.ifc;
+  if (isRecord(ifc) && Array.isArray(ifc.requiredIntegrity)) {
+    const required = ifc.requiredIntegrity;
+    if (required.length > 0) {
+      const integrity = toolInputValueIntegrity(runtime, space, value);
+      const satisfied = required.every((req) =>
+        integrity.some((have) => deepEqual(have, req))
+      );
+      if (!satisfied) {
+        return `field "${path || "(root)"}" requires integrity the ` +
+          `model-supplied value does not carry (pass an integrity-bearing ` +
+          `reference, not a literal)`;
+      }
+    }
+  }
+  if (isRecord(schema.properties)) {
+    for (const [key, childSchema] of Object.entries(schema.properties)) {
+      const childValue = isRecord(value) ? value[key] : undefined;
+      const failure = toolInputRequiredIntegrityFailure(
+        runtime,
+        space,
+        childSchema,
+        childValue,
+        path ? `${path}.${key}` : key,
+      );
+      if (failure !== undefined) {
+        return failure;
+      }
+    }
+  }
+  return undefined;
+}
+
 async function executeToolCalls(
   runtime: Runtime,
   space: MemorySpace,
@@ -1989,6 +2059,30 @@ async function executeToolCalls(
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
+      // Epic D2: gate the model-supplied input against the tool's
+      // requiredIntegrity floors before the handler runs, so an injected
+      // control-field value (e.g. a recipient copied from a hostile briefing)
+      // is refused rather than executed. Only fires for tools whose
+      // inputSchema declares requiredIntegrity — no behavior change otherwise
+      // — and is skipped entirely when CFC enforcement is disabled.
+      if (runtime.cfcEnforcementMode !== "disabled") {
+        const integrityFailure = toolInputRequiredIntegrityFailure(
+          runtime,
+          space,
+          toolCatalog.llmTools[part.toolName]?.inputSchema,
+          part.input,
+          "",
+        );
+        if (integrityFailure !== undefined) {
+          results.push({
+            id: part.toolCallId,
+            toolName: part.toolName,
+            error: `Tool call denied: ${integrityFailure}`,
+          });
+          continue;
+        }
+      }
+
       if (
         !toolAllowsObservedConfidentiality(
           toolCatalog,
