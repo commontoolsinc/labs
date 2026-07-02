@@ -2332,3 +2332,50 @@ describe("CFC trusted UI event enforcement", () => {
     cancel();
   });
 });
+
+// Host-embedding contract seam 6 (docs/development/HOST_EMBEDDING.md §6): the
+// trusted-event mark certifies that an event flow ORIGINATED FROM THE RENDERED
+// SURFACE — an anti-confused-deputy defense against in-runtime pattern code
+// exercising delegated authority it wasn't handed through the real UI. What it
+// certifies is *surface origin*, not *human intent*: it cannot distinguish a
+// human from a key-holding CLI or an agent-driven browser (CDP-synthesized DOM
+// events are `isTrusted === true`). Consequence: first-class headless issuance
+// for key-holding principals is consistent with the threat model, and the
+// in-runtime surface-origin defense must NOT be weakened to accommodate it.
+//
+// The load-bearing code fact is that `trustedEventMatchesUiContract` checks the
+// renderer mark (a WeakSet membership set only on the trusted render path)
+// BEFORE it inspects provenance. So pattern code that assembles a perfect
+// lookalike `provenance` object — but never went through the render path — fails
+// the contract. This test pins that ordering; weakening the mark check to accept
+// unmarked events turns it red.
+describe("host embedding contract: trusted-mark threat model", () => {
+  const contract = uiContractFromSchema({ ...uiActionSchema });
+
+  const lookalikeProvenance = {
+    type: "click",
+    provenance: {
+      origin: "dom",
+      trusted: true,
+      ui: { uiContractDataset: { uiAction: "SubmitDirectCommand" } },
+    },
+  } as const;
+
+  it("rejects an UNMARKED event even with a perfect lookalike provenance", () => {
+    // The confused-deputy case: pattern code fabricating the provenance shape
+    // without the renderer mark. Surface origin is not attested → rejected.
+    expect(
+      trustedEventMatchesUiContract({ ...lookalikeProvenance }, contract),
+    ).toBe(false);
+  });
+
+  it("accepts the SAME provenance once it carries the renderer mark", () => {
+    // Same bytes, but marked as originating from the trusted render path.
+    expect(
+      trustedEventMatchesUiContract(
+        rendererEvent({ ...lookalikeProvenance }),
+        contract,
+      ),
+    ).toBe(true);
+  });
+});

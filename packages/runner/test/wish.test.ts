@@ -3438,6 +3438,157 @@ describe("wish built-in", () => {
         expect("count" in pieceData).toBe(true);
       }
     });
+
+    // Host-embedding contract seam 1 (docs/development/HOST_EMBEDDING.md §1):
+    // the well-known profile wish targets an embedder binds to, and the
+    // zero-profile `result ?? fallback` idiom. This describe pins the
+    // load-bearing embedder guarantees in one place; the broader profile suite
+    // above covers ordering/picker/headless behavior in depth.
+    describe("host embedding contract: profile wish targets", () => {
+      it("resolves all five well-known targets from the default profile", async () => {
+        const profileSpaceDid = (await Identity.fromPassphrase(
+          "host-embedding-wish-profile-space",
+        )).did();
+        const profileDefaultCell = runtime.getCell(
+          profileSpaceDid,
+          "host-embedding-profile-default",
+          undefined,
+          tx,
+        );
+        profileDefaultCell.set({
+          name: "Ada Lovelace",
+          initialNameApplied: "Ada Lovelace",
+          avatar: "ada.png",
+          bio: "Mathematician & first programmer.",
+          elements: [],
+        });
+        const profileSpaceCell = runtime.getSpaceCell(
+          profileSpaceDid,
+          undefined,
+          tx,
+        );
+        profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-link",
+          undefined,
+          tx,
+        );
+        homeDefaultCell.key("profiles").set([profileDefaultCell]);
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+          profileName: wish({ query: "#profileName" }),
+          profileAvatar: wish({ query: "#profileAvatar" }),
+          profileBio: wish({ query: "#profileBio" }),
+          profileSpace: wish({ query: "#profileSpace" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-wish-targets-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
+        expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
+        expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+        expect(result.key("profileBio").get()?.result).toBe(
+          "Mathematician & first programmer.",
+        );
+        expect(
+          result.key("profileSpace").get()?.result?.defaultPattern?.name,
+        ).toBe("Ada Lovelace");
+      });
+
+      it("leaves #profileName result undefined at zero profiles (the result ?? fallback idiom)", async () => {
+        // No profile linked. A scalar target lands a WishError and `result`
+        // stays undefined, so every embedder consumer must use
+        // `wish.result ?? fallback` — this asserts the `undefined` half.
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-empty",
+          undefined,
+          tx,
+        );
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profileName: wish<string>({ query: "#profileName" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-empty-profile-name-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        const state = result.key("profileName").get();
+        expect(state?.result).toBeUndefined();
+        // The `?? fallback` idiom an embedder must use:
+        expect(state?.result ?? "Anonymous").toBe("Anonymous");
+      });
+
+      it("renders the create surface (result undefined) for #profile at zero profiles", async () => {
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-create-ui",
+          undefined,
+          tx,
+        );
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-empty-profile-create-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        const state = result.key("profile").get();
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(state?.result).toBeUndefined();
+        expect(String(state?.error)).toContain("profile");
+        expect(ui?.name).toBe("cf-render");
+        expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      });
+    });
   });
 });
 
