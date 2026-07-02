@@ -7,7 +7,11 @@ import {
   clearMockResponses,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage, JSONSchema } from "@commonfabric/api";
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  JSONSchema,
+} from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
@@ -132,11 +136,19 @@ const RESULT_SCHEMA = {
 
 type SentEmail = { route: string; recipient: string; subject: string };
 
+// Same widening the demo uses (packages/patterns/cfc/prompt-injection/
+// tools.ts PromptInjectionTool): a dialog tool that also declares its LLM
+// inputSchema.
+type DemoTool = BuiltInLLMTool & { inputSchema?: JSONSchema };
+
 // One demo agent (the unsafe raw reader or the safe direct-command path),
 // wired like main.tsx: logEmail-shaped sendMail + readRawBriefing tools on a
 // real llmDialog. `briefingBody` selects the variant (raw hostile text vs the
 // redacted marker the safe agent sees).
-async function setupDemoAgent(route: string, briefingBody: unknown) {
+async function setupDemoAgent(
+  route: string,
+  briefingBody: string | Record<string, unknown>,
+) {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -217,30 +229,31 @@ async function setupDemoAgent(route: string, briefingBody: unknown) {
     () => {
       const emails = Writable.of<SentEmail[]>([]);
       const messages = Writable.of<BuiltInLLMMessage[]>([]);
+      const tools: Record<string, DemoTool> = {
+        readRawBriefing: {
+          description: "Read the vendor briefing.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          handler: readRawBriefing({
+            title: "Acme Atlas release briefing",
+            source: "https://partner.example.invalid/briefing",
+            body: briefingBody,
+          }),
+        },
+        sendMail: {
+          description: "Send an email.",
+          inputSchema: SEND_MAIL_INPUT_SCHEMA,
+          handler: logEmail({ emails, route }),
+        },
+      };
       const dialog = llmDialog({
         system: "Prompt-injection demo agent.",
         messages,
         builtinTools: false,
-        tools: {
-          readRawBriefing: {
-            description: "Read the vendor briefing.",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              additionalProperties: false,
-            },
-            handler: readRawBriefing({
-              title: "Acme Atlas release briefing",
-              source: "https://partner.example.invalid/briefing",
-              body: briefingBody,
-            }),
-          },
-          sendMail: {
-            description: "Send an email.",
-            inputSchema: SEND_MAIL_INPUT_SCHEMA,
-            handler: logEmail({ emails, route }),
-          },
-        },
+        tools,
       });
       return {
         addMessage: dialog.addMessage,
