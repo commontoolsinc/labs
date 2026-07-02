@@ -104,6 +104,33 @@ reader — the shape it observed changed. A disjoint deep-value `replace` strict
 subset of the recursive one, so it can only remove spurious conflicts, never miss
 a genuine one.
 
+### Known limitation: mergeable creates and parent shape readers
+
+Parent injection is keyed off the wire op's static `structural` flag (`add` /
+`remove` / `move`), which marks ops that restructure a container's key set on
+*every* apply. The mergeable ops `append` / `add-unique` / `increment` are not
+structural, because on an existing target they only change a value (an
+already-present array's contents, or a number) and marking them structural would
+over-conflict every parent shape reader against an ordinary append — the
+write-contention the mergeable ops exist to avoid.
+
+But those three ops also change the parent's key set in one case: when their
+apply **materializes a previously-absent path** (creating the array/scalar and
+the path to it — e.g. a first `push` to a not-yet-existing list). Whether a
+create happened depends on the pre-state, which the static touched-path matcher
+does not see, so a **cross-session shape-only reader of the parent is not
+invalidated** by such a create. (The creating session's own reactivity is
+unaffected — `buildReactivityPathsForChange` emits the parent path when a key is
+added — and recursive readers of the parent still conflict via the leaf-only
+matcher, since the read path prefixes the created leaf. Only cross-session
+nonRecursive readers of the parent are affected, and only on create-from-absent,
+which schema `Default<[]>` usually preempts.)
+
+The correct fix is a **state-aware** matcher that injects the parent path only
+when the committed op actually created the key — determined from the revision's
+pre-state at apply time (comparing before/after at `parentPath(op.path)`) rather
+than from the op tag alone. That is a follow-up beyond the static registry.
+
 ## 3. asCell reference-resolution reads are not value dependencies
 
 Materializing an `asCell` argument **resolves a reference**: it follows the arg's
