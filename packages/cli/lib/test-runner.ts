@@ -999,10 +999,19 @@ export async function runTestPattern(
           new FileSystemProgramResolver(testPath, options.root),
         ),
     );
-    const { main } = await withPhase(
+    const evalResult = await withPhase(
       ["runTestPattern", "compile"],
-      () => engine.compileAndEvaluateModules(program, { patternCoverage }),
+      // `compileAndRegisterModules` seals compile + evaluate + register, so the
+      // evaluated artifacts are indexed exactly as the deployed runtime's load
+      // path does (`patternFromEvaluation`). Without registration, anonymous
+      // map/filter/flatMap ops fall back to a defer-corrupted embedded graph and a
+      // grandchild derived-internal output throws at bind time (CT-1811).
+      () =>
+        runtime.patternManager.compileAndRegisterModules(program, {
+          patternCoverage,
+        }),
     );
+    const { main } = evalResult;
 
     if (!main?.default) {
       throw new Error(

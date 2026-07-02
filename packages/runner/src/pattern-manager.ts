@@ -22,6 +22,7 @@ import type {
   CompiledModuleArtifact,
   EvaluateResult,
   Exports,
+  TypeScriptHarnessProcessOptions,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
@@ -467,6 +468,37 @@ export class PatternManager {
       program.files,
     );
     return this.patternFromEvaluation(result, program);
+  }
+
+  /**
+   * Compile + evaluate a program's modules AND register the evaluated artifacts,
+   * returning the full module namespace (`EvaluateResult`).
+   *
+   * This is the load seam for callers that need the raw evaluated namespace —
+   * `main.default`, a named `fetchMocks` export, multi-user descriptors — rather
+   * than the single `Pattern` that `compilePattern` returns. It is the reason the
+   * CLI pattern-test harness and the multi-user worker previously reached for the
+   * lower-level `Engine.compileAndEvaluateModules` directly and skipped
+   * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
+   * entry ref and fell back to a defer-corrupted embedded graph instead of their
+   * canonical `$patternRef` artifact.
+   *
+   * Registration is fused with evaluation here on purpose, so it cannot be
+   * forgotten — mirroring what the runtime's own `compilePattern` /
+   * `patternFromEvaluation` load path does. Reach for the bare
+   * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
+   * *without running* (engine unit tests), where stamping entry refs is unwanted.
+   */
+  async compileAndRegisterModules(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<EvaluateResult> {
+    const result = await this.runtime.harness.compileAndEvaluateModules(
+      program,
+      options,
+    );
+    this.registerEvaluatedModules(result);
+    return result;
   }
 
   /**
@@ -993,8 +1025,22 @@ export class PatternManager {
    * Index every module of a just-evaluated ESM bundle by its content identity
    * (CT-1623). Lets `loadPatternByIdentity` reuse a sub-pattern module already
    * evaluated as part of its parent's bundle — no storage read, no SES re-eval.
+   *
+   * Public because it is the shared indexing step every path that RUNS a
+   * just-evaluated pattern must perform: the runtime's own load path calls it via
+   * `patternFromEvaluation`, and the namespace load seam `compileAndRegisterModules`
+   * (used by the CLI test harness and the multi-user worker) calls it too.
+   * Skipping it leaves anonymous map/filter/flatMap ops un-indexed, so
+   * `getArtifactEntryRef` misses and the op falls back to its embedded graph
+   * instead of the content-addressed canonical artifact — the CT-1811 defer
+   * corruption. It is deliberately NOT folded into `Engine.compileAndEvaluateModules`,
+   * since that primitive is also used to inspect serialized/verified output
+   * without running (engine unit tests), where the side effect of stamping entry
+   * refs is unwanted — `compileAndRegisterModules` is the fused seam callers use to
+   * run. Idempotent per identity (re-registering refreshes the LRU), so paths that
+   * already registered are unaffected.
    */
-  private registerEvaluatedModules(result: EvaluateResult): void {
+  registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {
