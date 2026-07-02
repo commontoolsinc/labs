@@ -218,9 +218,9 @@ export function createPreviewUI(
  *
  * ⚠️ CRITICAL: When consuming this auth from another pattern, DO NOT use derive()!
  * Use direct property access: `googleAuthPiece.auth`.
- * If selecting between auth sources, use a bare ternary such as
- * `availability.state === "ready" ? availability.auth : null`; this preserves
- * the underlying writable cell reference needed for token refresh.
+ * If auth comes through an auth manager, use `authIsReady(availability)` for
+ * shared readiness checks. Keep the writable auth cell access explicit at the
+ * call site that needs it.
  */
 export type Auth = {
   token: Secret<string> | Default<"">;

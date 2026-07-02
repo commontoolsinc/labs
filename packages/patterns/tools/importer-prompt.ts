@@ -219,9 +219,9 @@ export function createPreviewUI(
  *
  * CRITICAL: When consuming from another pattern, DO NOT use derive()!
  * Use direct property access: \`airtableAuthPiece.auth\`.
- * If selecting between auth sources, use a bare ternary such as
- * \`availability.state === "ready" ? availability.auth : null\`; this preserves
- * the underlying writable cell reference needed for token refresh.
+ * If auth comes through an auth manager, use \`authIsReady(availability)\` for
+ * shared readiness checks. Keep the writable auth cell access explicit at the
+ * call site that needs it.
  */
 export type AirtableAuth = {
   accessToken: Secret<string> | Default<"">;
@@ -1068,16 +1068,22 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
  *
- * if (availability.state !== "ready") return;
- * const auth = availability.auth;
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Airtable first.</div>;
  *
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * \`\`\`
+ *
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
  */
 
 import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+import { authIsReady } from "../../../auth/auth-types.ts";
 import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
 import AirtableAuth, {
   type AirtableAuth as AirtableAuthData,
@@ -1195,7 +1201,7 @@ export const AirtableAuthManager = pattern<
     auth: base.auth,
     availability: base.availability,
     authInfo: base.authInfo,
-    isReady: base.isReady,
+    isReady: authIsReady(base.availability),
     currentEmail: base.currentEmail,
     currentState: base.currentState,
     pickerUI: base.pickerUI,
@@ -2597,6 +2603,7 @@ Main importer pattern. Follow the Airtable importer reference:
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
+- Import \`authIsReady\` from \`"../auth/auth-types.ts"\` if the importer needs a shared readiness boolean
 - Define module-scope \`handler()\` functions for each API call:
   - Each provider call handler takes a non-null \`auth\` cell and the relevant state cells (\`loading\`, \`error\`, result cells)
   - Each uses \`try/catch/finally\` with \`loading.set(true/false)\`
@@ -2608,6 +2615,7 @@ Main importer pattern. Follow the Airtable importer reference:
   4. Uses one terminal return statement; do not return early from the pattern body
   5. Renders \`auth ? mainContent : notReadyPanel\` so provider handlers are bound only in the authenticated branch where \`auth\` is non-null
   6. Returns [NAME], [UI], and data outputs. Type \`[UI]\` as \`VNode\` in the Output interface.
+- Keep the auth cell selection at the call site. Do not wrap it in a plain helper or \`lift()\`. Use \`authIsReady(availability)\` only for boolean readiness checks.
 - UI structure:
   1. Title header
   2. \`{authUI}\` for auth status/picker

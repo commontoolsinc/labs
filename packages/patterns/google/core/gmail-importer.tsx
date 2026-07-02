@@ -38,8 +38,9 @@ type SyncableWritable<T> = Writable<T> & {
  * reference - do NOT copy it into a read-only projection. Token refresh
  * mutates the auth cell in place, so any consumer that reads a detached
  * snapshot will see refresh silently fail.
- * Use direct property access (piece.auth) or select it with a ternary
- * (which lowers to ifElse and preserves the underlying cell reference).
+ * Use direct property access (piece.auth). If auth comes through an auth
+ * manager, use `authIsReady(availability)` for readiness and keep writable auth
+ * cell access explicit at the call site that needs it.
  */
 export type Auth = {
   token: Secret<string> | Default<"">;

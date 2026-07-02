@@ -37,6 +37,7 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "../core/util/google-auth-manager.tsx";
+import { authIsReady } from "../../auth/auth-types.ts";
 import ProcessingStatus from "../core/processing-status.tsx";
 import type { Stream } from "commonfabric";
 
@@ -214,10 +215,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const {
     availability,
     fullUI: authUI,
-    isReady,
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+  const authReady = authIsReady(availability);
   const auth = availability.state === "ready" ? availability.auth : null;
 
   // NOTE: Auto-fetch labels was removed because having side effects (writes to
@@ -343,7 +344,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
             {authUI}
 
             {/* Connection status and refresh */}
-            {isReady
+            {authReady
               ? (
                 <div
                   style={{
@@ -436,7 +437,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
               : null}
 
             {/* Notes list */}
-            {!isReady
+            {!authReady
               ? (
                 <div
                   style={{

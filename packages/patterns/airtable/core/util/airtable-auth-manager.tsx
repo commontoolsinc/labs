@@ -13,16 +13,22 @@
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
  *
- * if (availability.state !== "ready") return;
- * const auth = availability.auth;
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Airtable first.</div>;
  *
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * ```
+ *
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
  */
 
 import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+import { authIsReady } from "../../../auth/auth-types.ts";
 import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
 import AirtableAuth, {
   type AirtableAuth as AirtableAuthData,
@@ -140,7 +146,7 @@ export const AirtableAuthManager = pattern<
     auth: base.auth,
     availability: base.availability,
     authInfo: base.authInfo,
-    isReady: base.isReady,
+    isReady: authIsReady(base.availability),
     currentEmail: base.currentEmail,
     currentState: base.currentState,
     pickerUI: base.pickerUI,
