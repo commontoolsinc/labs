@@ -108,3 +108,32 @@ consumed-as-value children, which the dispatch cannot yet distinguish. The
 partition keeps the capability behind `inlinePurePatterns` (default false);
 evalRog's pattern case stays for that future. Engagement cost recorded by
 census as `boundaries_pending:pattern`.
+
+## D-V2-STR-DIRECT — interpolation is a transformer concern, not the str pseudo-builtin (user, 2026-07-02)
+
+`str` is transformer-emitted for regular backtick interpolation. The
+interpreter should support backtick interpolation DIRECTLY (the transformer
+emits the native interpolate form) rather than recognizing the `str`
+pseudo-builtin's lift. The current WeakSet closure-marking of
+`interpolatedString` is an acceptable INTERIM (green, zero serialization
+risk) for builder-authored `str` calls, but the track is: W5's transformer
+emission lowers template literals straight to the interpolate op (a
+dedicated builder call), and the str-pseudo-builtin recognition path stops
+being load-bearing.
+
+## D-V2-CONTROL-MODERNIZE — explicit ifElse/when/unless are outdated style (user, 2026-07-02)
+
+Explicit `ifElse`/`when`/`unless` builtin calls were once REQUIRED; that
+constraint is gone and plain JS ternaries/logical operators are the modern
+form (the transformer lowers them). Consequences: (a) where tests/examples
+assert explicit-builtin quirks that feel spurious, patterns may be
+modernized to the JS form instead of chasing perfect builtin fidelity;
+(b) the control_reference_semantics work should not over-invest in
+reproducing the explicit-builtin write-shape — in multi-segment emission
+control ops stay preserved legacy boundary nodes, and the native-control
+path targets the transformer-lowered ternary form.
+
+## D-V2-NEXT — multi-segment emission confirmed as the next work order (user, 2026-07-02)
+
+Segments coalescing around preserved legacy boundary nodes (handlers,
+effects, control) — the engagement unlock and the architecturally deep win.
