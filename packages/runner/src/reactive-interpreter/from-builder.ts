@@ -36,6 +36,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isStrInterpolation } from "./builtin-markers.ts";
+import { computeLeafCaps } from "./leaf-caps.ts";
 import {
   type InternalDecl,
   type Op,
@@ -451,25 +452,23 @@ function buildRog(input: RogBuildInput): BuiltRog {
       }
       if (typeof mod.implementation === "function") {
         leafImpls.set(id, mod.implementation as (input: unknown) => unknown);
+        // Fail-closed capability annotations from the LIVE source + declared
+        // schemas (leaf-caps.ts — the v1 static scans at capture time).
+        const caps = computeLeafCaps(
+          mod.implementation,
+          (mod as { argumentSchema?: unknown }).argumentSchema,
+          mod.resultSchema,
+        );
+        const detail = caps ? { kind: "leaf" as const, caps } : {
+          kind: "leaf" as const,
+        };
         const dataInput = refForValue(node.inputs);
         if (!dataInput) {
           // Input not representable: keep the leaf but mark the graph
           // incomplete (dispatch falls back; reason already recorded).
-          return {
-            id,
-            kind: "leaf",
-            inputs: [],
-            outSchema,
-            detail: { kind: "leaf" },
-          };
+          return { id, kind: "leaf", inputs: [], outSchema, detail };
         }
-        return {
-          id,
-          kind: "leaf",
-          inputs: [dataInput],
-          outSchema,
-          detail: { kind: "leaf" },
-        };
+        return { id, kind: "leaf", inputs: [dataInput], outSchema, detail };
       }
       incomplete.push("javascript_without_function");
       return boundaryOp(id, outSchema, "io", undefined, node);

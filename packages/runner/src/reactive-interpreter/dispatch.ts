@@ -27,7 +27,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "../cell.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Module, Pattern } from "../builder/types.ts";
+import type { Frame, Module, Pattern } from "../builder/types.ts";
+import { popFrame } from "../builder/pattern.ts";
 import { type BuiltRog, getBuiltRog } from "./from-builder.ts";
 import { partition, type Segment } from "./partition.ts";
 import { evalRog } from "./interpret.ts";
@@ -86,11 +87,53 @@ function fallback(reason: string): DispatchPlan {
   return { kind: "fallback", reason };
 }
 
+export interface DispatchOptions {
+  /** SECURITY gate (the legacy `resolveJavaScriptFunction` liveTrusted test,
+   * runner-supplied): a captured live leaf impl may run in the interpreter
+   * ONLY if it passes — an untrusted callback must take the legacy path,
+   * where the SES fallback sandboxes it. */
+  leafTrust: (fn: (input: unknown) => unknown) => boolean;
+  /** Create the pattern frame the segment action runs in (the legacy
+   * `createPatternFrame`): gives leaf bodies the runtime context legacy
+   * actions have AND carries the piece metadata `handleSchedulerError`
+   * reads off `error.frame`. The dispatch pops it via `popFrame`. */
+  actionFrame: (tx: IExtendedStorageTransaction, cause: unknown) => Frame;
+}
+
+/** Recursively find the first gating leaf problem in a BuiltRog: an untrusted
+ * captured impl (SECURITY) or a capability bit the single-node interpreter
+ * cannot honor (needs handles / builder frame / instantiates patterns /
+ * async). Fail-closed reasons feed the census. */
+function findLeafGate(
+  built: BuiltRog,
+  leafTrust: DispatchOptions["leafTrust"],
+): string | undefined {
+  for (const op of built.rog.ops) {
+    if (op.detail.kind === "leaf") {
+      const impl = built.leafImpls.get(op.id);
+      if (impl && !leafTrust(impl)) return "untrusted_leaf";
+      const caps = op.detail.caps;
+      if (caps) {
+        const bits = Object.keys(caps).sort().join("+");
+        return `leaf_caps:${bits}`;
+      }
+    }
+  }
+  for (const child of built.children.values()) {
+    const inner = findLeafGate(child, leafTrust);
+    if (inner) return inner;
+  }
+  return undefined;
+}
+
 /**
  * Plan the interpreter instantiation for one pattern, or fall back.
  * Pure decision + closure construction; no runtime side effects.
  */
-export function planInterpreterDispatch(pattern: Pattern): DispatchPlan {
+export function planInterpreterDispatch(
+  pattern: Pattern,
+  options: DispatchOptions,
+): DispatchPlan {
   census.attempted++;
 
   const built = getBuiltRog(pattern);
@@ -98,6 +141,9 @@ export function planInterpreterDispatch(pattern: Pattern): DispatchPlan {
   if (built.rog.incomplete?.length) {
     return fallback(`incomplete:${built.rog.incomplete.join(",")}`);
   }
+
+  const leafGate = findLeafGate(built, options.leafTrust);
+  if (leafGate) return fallback(leafGate);
 
   const part = partition({ built });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
@@ -110,7 +156,7 @@ export function planInterpreterDispatch(pattern: Pattern): DispatchPlan {
     return fallback(`multi_segment_pending:${part.segments.length}`);
   }
 
-  const node = buildSegmentNode(pattern, built, part.segments[0]);
+  const node = buildSegmentNode(pattern, built, part.segments[0], options);
   if (typeof node === "string") return fallback(node);
 
   census.interpreted++;
@@ -133,6 +179,7 @@ function buildSegmentNode(
   pattern: Pattern,
   built: BuiltRog,
   segment: Segment,
+  options: DispatchOptions,
 ): SyntheticNode | string {
   const rog = built.rog;
   const outputOpIds = nodeDerivedOpIds(pattern, rog);
@@ -172,6 +219,8 @@ function buildSegmentNode(
   const implementation = makeSegmentImplementation(
     built,
     outputOpIds,
+    segment.id,
+    options,
   );
 
   return {
@@ -192,6 +241,8 @@ function buildSegmentNode(
 function makeSegmentImplementation(
   built: BuiltRog,
   outputOpIds: OpId[],
+  segmentId: string,
+  options: DispatchOptions,
 ) {
   return function reactiveInterpreterSegment(
     inputsCell: Cell<{
@@ -207,26 +258,53 @@ function makeSegmentImplementation(
     _awaitSync?: boolean,
   ) {
     return (tx: IExtendedStorageTransaction) => {
-      const bound = inputsCell.withTx(tx).get() ?? {};
-      const seedByInternal = new Map<number, unknown>();
-      for (const [key, value] of Object.entries(bound.internals ?? {})) {
-        seedByInternal.set(Number(key), value);
+      // The pattern frame gives leaf bodies the same runtime context legacy
+      // actions run in, and carries the piece metadata the scheduler's
+      // handleSchedulerError reads off `error.frame`.
+      const frame = options.actionFrame(tx, { ri2Segment: segmentId });
+      let firstError: unknown;
+      try {
+        const bound = inputsCell.withTx(tx).get() ?? {};
+        const seedByInternal = new Map<number, unknown>();
+        for (const [key, value] of Object.entries(bound.internals ?? {})) {
+          seedByInternal.set(Number(key), value);
+        }
+        const { opValues, errors } = evalRog(built.rog, {
+          argument: bound.argument,
+          leafImpls: built.leafImpls,
+          children: built.children,
+          seedByInternal,
+        });
+        const out: Record<string, unknown> = {};
+        for (const opId of outputOpIds) {
+          out[String(opId)] = opValues.get(opId);
+        }
+        // Per-op containment parity: the throwing op's slot is written as
+        // `undefined` (evalRog isolated it), siblings keep their values —
+        // exactly what N legacy node actions produce.
+        sendResult(tx, out);
+        if (errors.length > 0) {
+          firstError = errors[0].error;
+          for (const { opId, error } of errors.slice(1)) {
+            // Legacy fires onError once per throwing node; a single action
+            // can only throw once — surface the rest via the logger.
+            logger.warn("op-error", () => [`op ${opId} also threw`, error]);
+          }
+        }
+      } finally {
+        popFrame(frame);
       }
-      const { opValues, errors } = evalRog(built.rog, {
-        argument: bound.argument,
-        leafImpls: built.leafImpls,
-        children: built.children,
-        seedByInternal,
-      });
-      const out: Record<string, unknown> = {};
-      for (const opId of outputOpIds) {
-        out[String(opId)] = opValues.get(opId);
-      }
-      sendResult(tx, out);
-      for (const { opId, error } of errors) {
-        // Value parity holds (op isolated to undefined); onError-channel
-        // parity is a tracked follow-up (see module doc).
-        logger.warn("op-error", () => [`op ${opId} threw`, error]);
+      if (firstError !== undefined) {
+        // Legacy protocol (handleErrorOutput): attach the frame, then throw —
+        // the scheduler catches, maps the stack, builds ErrorWithContext from
+        // `error.frame`, and notifies onError handlers. Writes above survive.
+        if (
+          firstError !== null &&
+          (typeof firstError === "object" || typeof firstError === "function")
+        ) {
+          (firstError as Error & { frame?: Frame }).frame = frame;
+        }
+        throw firstError;
       }
     };
   };

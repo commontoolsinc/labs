@@ -1214,7 +1214,30 @@ export class Runner {
         // per-node legacy loop. Any fallback reason → legacy, side-effect-free
         // (planning is pure; nothing is written before the decision).
         const interpreterPlan = this.runtime.experimental.experimentalInterpreter
-          ? planInterpreterDispatch(pattern)
+          ? planInterpreterDispatch(pattern, {
+            // The exact liveTrusted test from resolveJavaScriptFunction: a
+            // live fn is trusted iff it carries module-eval provenance or an
+            // entry ref THIS runtime's engine resolves back to the same
+            // function. Untrusted → legacy (its SES fallback sandboxes it).
+            leafTrust: (fn) =>
+              getVerifiedProvenance(fn) !== undefined ||
+              (() => {
+                const ref = getArtifactEntryRef(fn);
+                return ref !== undefined &&
+                  this.runtime.harness.getVerifiedImplementation?.(
+                      ref.identity,
+                      ref.symbol,
+                    ) === fn;
+              })(),
+            actionFrame: (frameTx, cause) =>
+              this.createPatternFrame(
+                cause,
+                pattern,
+                resultCell,
+                frameTx,
+                false,
+              ),
+          })
           : undefined;
         const nodesToInstantiate = interpreterPlan?.kind === "interpret"
           ? interpreterPlan.nodes
