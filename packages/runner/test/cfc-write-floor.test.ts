@@ -352,7 +352,160 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("a write elsewhere on the doc does not trip an untouched floor path", async () => {
+  it("a floor-less ifc entry on the same schema is skipped", async () => {
+    // A confidentiality-only sibling declares an ifc entry with NO
+    // requiredIntegrity — the floor loop skips it (floor.length === 0) and
+    // still enforces the real floor field.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          pub: { type: "string", ifc: { confidentiality: ["c"] } },
+          out: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
+        },
+        required: ["pub", "out"],
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-floorless-sink",
+        schema,
+        tx,
+      );
+      sink.set({ pub: "visible", out: "unendorsed" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      // The floor field still rejects; the confidentiality-only field is inert.
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed at /out",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("a wildcard (*) floor entry is not enforced by the write floor (read-gate only, v1)", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      // Array items produce a `*` floor entry path (walkIfcSchema), which the
+      // write floor skips in v1 — the per-element read gate still covers it.
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "string",
+              ifc: { requiredIntegrity: [ADMIN_ATOM] },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-wildcard-sink",
+        schema,
+        tx,
+      );
+      sink.set({ items: ["unendorsed"] });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      // The wildcard floor is skipped by verifyWriteFloor (v1 scope), so no
+      // write-floor rejection.
+      expect(
+        String((result.error as Error | undefined)?.message ?? ""),
+      ).not.toContain("write floor failed");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("a link with no derivable source label is skipped by the floor (reason recorded elsewhere)", async () => {
+    // A link whose source has no stored metadata and no candidate schema is
+    // underivable: derivePersistedLinkLabel returns a reason (the persist loop
+    // reports it), and the floor does not double-count it as a contribution.
+    // The whole commit still rejects — via that missing-source reason.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const tx = runtime.edit();
+      const src = runtime.getCell(
+        signer.did(),
+        "wf-link-nometa-src",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-link-nometa-sink",
+        FLOOR_SCHEMA,
+        tx,
+      );
+      sink.set({ out: src as unknown as string });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      // Underivable link source => the commit rejects (missing link source
+      // metadata), and the floor contributes nothing spurious.
+      expect(result.error).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("clearing a floor-declaring path (delete) is not a floored write", async () => {
+    // Establish the floor field with an endorsed value, then delete it. A
+    // delete writes no value at the path, so the floor (which governs values,
+    // not absence) does not reject.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "string",
+            ifc: {
+              requiredIntegrity: [ADMIN_ATOM],
+              addIntegrity: [ADMIN_ATOM],
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const seedTx = runtime.edit();
+      const seeded = runtime.getCell(
+        signer.did(),
+        "wf-delete-sink",
+        schema,
+        seedTx,
+      );
+      seeded.set({ out: "endorsed" });
+      seedTx.prepareCfc();
+      expect((await seedTx.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const sink = runtime.getCell(signer.did(), "wf-delete-sink", schema, tx);
+      sink.set({});
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("an unwritten floor path on the same schema is not enforced (only touched paths)", async () => {
+    // The schema declares a floor at /out but only the unprotected /note is
+    // written. `out` is absent from the attempted writes, so the floor entry
+    // does not apply (ifcEntryAppliesToAttemptedWrite=false) and no rejection
+    // follows — the floor governs paths this commit actually wrote.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {
@@ -362,40 +515,11 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
           out: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
           note: { type: "string" },
         },
+        required: ["note"],
       } as const satisfies JSONSchema;
-      // Establish the doc with the floor path present (via the minting shape),
-      // then touch only the unprotected sibling.
-      const seedTx = runtime.edit();
-      const seeded = runtime.getCell(
-        signer.did(),
-        "wf-sibling-sink",
-        {
-          type: "object",
-          properties: {
-            out: {
-              type: "string",
-              ifc: {
-                requiredIntegrity: [ADMIN_ATOM],
-                addIntegrity: [ADMIN_ATOM],
-              },
-            },
-            note: { type: "string" },
-          },
-        } as const satisfies JSONSchema,
-        seedTx,
-      );
-      seeded.set({ out: "endorsed", note: "a" });
-      seedTx.prepareCfc();
-      expect((await seedTx.commit()).ok).toBeDefined();
-
       const tx = runtime.edit();
-      const sink = runtime.getCell(
-        signer.did(),
-        "wf-sibling-sink",
-        schema,
-        tx,
-      );
-      sink.key("note").set("b");
+      const sink = runtime.getCell(signer.did(), "wf-sibling-sink", schema, tx);
+      sink.set({ note: "b" });
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();

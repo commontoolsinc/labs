@@ -3157,40 +3157,6 @@ const verifySinkRequestCeilings = (
   return reasons;
 };
 
-// Attempted write paths strictly at/under `path` on this target — the same two
-// enumeration sources `ifcEntryAppliesToAttemptedWrite` quantifies over.
-const attemptedWritePathsUnder = (
-  tx: IExtendedStorageTransaction,
-  target: {
-    space: MemorySpace;
-    id: URI;
-    scope: ReturnType<typeof normalizeCellScope>;
-  },
-  path: readonly string[],
-): (readonly string[])[] => {
-  const out: (readonly string[])[] = [];
-  for (const write of tx.getWriteDetails?.(target.space) ?? []) {
-    if (write.address.id !== target.id) continue;
-    if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") continue;
-    const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    if (concretePathHasPrefix(writePath, path)) out.push(writePath);
-  }
-  for (
-    const write of [
-      ...(tx.getReactivityLog?.().writes ?? []),
-      ...(tx.getReactivityLog?.().attemptedWrites ?? []),
-    ]
-  ) {
-    if (write.space !== target.space) continue;
-    if (write.id !== target.id) continue;
-    if (normalizeCellScope(write.scope) !== target.scope) continue;
-    const writePath = canonicalizeLogicalPath(write.path);
-    if (concretePathHasPrefix(writePath, path)) out.push(writePath);
-  }
-  return out;
-};
-
 /**
  * Epic D3 — the write-side `requiredIntegrity` FLOOR (§8.12.4.1 / SC-18),
  * dual of the read-side gate in `verifyInputRequirements`: where that gate
@@ -3212,10 +3178,11 @@ const attemptedWritePathsUnder = (
  *   carry the per-tx derived integrity).
  *
  * Scope (v1, exact-match membership — D5 upgrades to pattern/concept):
- * wildcard (`*`) floor entries stay read-gate-only; the same pattern-setup
- * escape as `writeAuthorizedBy` applies (a pattern's declared initialization
- * must be able to bootstrap the doc it protects); a pure delete (no written
- * value) is not a floored write — the floor governs values, not absence.
+ * wildcard (`*`) floor entries stay read-gate-only; unlike `writeAuthorizedBy`
+ * there is NO pattern-setup escape — the floor is a value requirement, so a
+ * setup that writes a floored path must itself mint the required integrity
+ * (`addIntegrity`), fail-closed; a pure delete (no written value) is not a
+ * floored write — the floor governs values, not absence.
  */
 const verifyWriteFloor = (
   tx: IExtendedStorageTransaction,
@@ -3260,13 +3227,6 @@ const verifyWriteFloor = (
     ) {
       continue;
     }
-    const setupProjection = setupProjectionSourceMatchesValue(
-      tx,
-      target,
-      entry.path,
-    ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
-      writeIsSeedMaterialization(tx, target);
-    if (setupProjection) continue;
 
     // The label this commit persists at the path: schema integrity +
     // `addIntegrity` mints + `exactCopyOf` carry, evidence-gated so a pattern
@@ -3293,29 +3253,25 @@ const verifyWriteFloor = (
         ctx.candidateSchemas,
         ctx.identityForInput(input),
       );
-      // An underivable link label already records its own fail-closed reason
-      // in the persist loop — the floor does not double-report it.
-      if (derived.reason !== undefined) continue;
+      // An underivable link (`reason` set, `label` undefined) contributes empty
+      // integrity — it fails the floor, fail-closed, alongside the persist
+      // loop's own missing-source reason (both reject).
       contributions.push(derived.label?.integrity ?? []);
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
-    const valueWritten = written !== undefined
-      // A pure-link value at the path is judged by its link contributions —
-      // unless none were recorded, which fails closed as a value write.
-      ? !isPureLinkStructure(written) || contributions.length === 0
-      // Only descendant writes touched the region: any of them not covered by
-      // a link input is plain data.
-      : attemptedWritePathsUnder(tx, target, entry.path).some((writePath) =>
-        !linksHere.some((input) =>
-          concretePathHasPrefix(
-            writePath,
-            canonicalizeLogicalPath(input.target.path),
-          )
-        )
-      );
+    // A pure-link value at the path is judged by its per-link contributions
+    // alone. Anything else — plain/mixed data, or an unreconstructable
+    // descendant-only write (value undefined ⇒ `isPureLinkStructure` true, so
+    // this fires only when no link contribution was recorded) — is a value
+    // write that must satisfy the floor from base + the flow meet. Fail-closed:
+    // a container floor whose links ride alongside plain siblings is treated as
+    // a value write (over-enforcing, never under).
+    // `valueWritten` is true whenever this isn't a pure-link write — including
+    // the no-contribution case (no links recorded), so `contributions` is
+    // always non-empty past this point and the floor is always evaluated.
+    const valueWritten = !isPureLinkStructure(written) ||
+      contributions.length === 0;
     if (valueWritten) contributions.push(ctx.flowIntegrity);
-    // No contribution at all: a delete/clear — absence is not a floored value.
-    if (contributions.length === 0) continue;
 
     const misses = contributions.some((extra) =>
       !cfcIntegritySatisfiesFloor([...base, ...extra], floor)
