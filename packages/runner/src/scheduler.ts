@@ -2368,9 +2368,13 @@ export class Scheduler {
   // ============================================================
 
   /**
-   * Gets a stable identifier for an action based on its source location.
-   * Prefers .src (set as backup) over .name, falls back to a generated ID.
-   * This ID is used for stats tracking to persist across action recreation.
+   * A stable, content-addressed, per-INSTANCE identifier for an action:
+   * `cf:module/<hash>:<symbol>:<instanceKey>` — the per-symbol content address
+   * plus a reload-stable hash of the action's reads/writes. It keys
+   * `actionStats` and the durable observation, so it must distinguish two
+   * instances of the same hoisted op (the per-symbol content address alone would
+   * collide them). `.src` is not consulted (debug-only). Falls back to `.name` /
+   * a generated id for actions without provenance.
    */
   private getActionId(action: Action | EventHandler): string {
     return getSchedulerActionId(this.actionIdentityState, action);

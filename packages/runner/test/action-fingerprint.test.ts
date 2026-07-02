@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import { schedulerImplementationFingerprint } from "../src/scheduler/action-run.ts";
 import type { Action } from "../src/scheduler/types.ts";
+import { recordVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 
 function makeAction(props: Record<string, unknown>): Action {
   const fn = (() => {}) as unknown as Action;
@@ -21,20 +22,32 @@ describe("schedulerImplementationFingerprint", () => {
     );
   });
 
-  it("falls back to src when no implementationHash is present", () => {
-    const action = makeAction({ src: "/abc123/pattern.tsx:1:1" });
+  it("derives a content-addressed impl: id from provenance, NOT from src", () => {
+    const impl = (() => {}) as () => void;
+    recordVerifiedProvenance(impl, { identity: "HASH", symbol: "__cfLift_1" });
+    const action = makeAction({
+      src: "/abc123/pattern.tsx:1:1", // present but must be ignored
+      module: { implementation: impl },
+    });
     expect(schedulerImplementationFingerprint(action, "id", undefined)).toBe(
-      "src:/abc123/pattern.tsx:1:1",
+      "impl:cf:module/HASH:__cfLift_1",
     );
   });
 
-  it("ignores a non-string or empty implementationHash and falls back to src", () => {
+  it("does NOT consult src for identity (debug-only); falls to the telemetry id", () => {
+    const action = makeAction({ src: "/abc123/pattern.tsx:1:1" });
+    expect(schedulerImplementationFingerprint(action, "id", undefined)).toBe(
+      "action:action:id:id",
+    );
+  });
+
+  it("ignores an empty implementationHash and still does not consult src", () => {
     const action = makeAction({
       src: "/abc123/pattern.tsx:1:1",
       implementationHash: "",
     });
     expect(schedulerImplementationFingerprint(action, "id", undefined)).toBe(
-      "src:/abc123/pattern.tsx:1:1",
+      "action:action:id:id",
     );
   });
 
