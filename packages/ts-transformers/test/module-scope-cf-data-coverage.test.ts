@@ -1,9 +1,64 @@
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { ModuleScopeCfDataTransformer } from "../src/transformers/module-scope-cf-data.ts";
 import { TransformationContext } from "../src/core/mod.ts";
+import {
+  calleeName,
+  callsNamed,
+  collect,
+  parseModule,
+} from "./transformed-ast.ts";
+
+/**
+ * True when the module imports `{ <imported> as <local> }` from `<module>`.
+ */
+function hasNamedImport(
+  root: ts.SourceFile,
+  imported: string,
+  local: string,
+  moduleSpecifier: string,
+): boolean {
+  return collect(root, ts.isImportDeclaration).some((decl) => {
+    if (
+      !ts.isStringLiteral(decl.moduleSpecifier) ||
+      decl.moduleSpecifier.text !== moduleSpecifier
+    ) {
+      return false;
+    }
+    const bindings = decl.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) return false;
+    return bindings.elements.some((element) =>
+      element.name.text === local &&
+      (element.propertyName?.text ?? element.name.text) === imported
+    );
+  });
+}
+
+/**
+ * The bare-identifier argument of the sole `__cfDataHelper(...)` wrap call, or
+ * undefined if there is no such call. Asserts there is at most one.
+ */
+function cfDataHelperArgText(root: ts.SourceFile): string | undefined {
+  const calls = callsNamed(root, "__cfDataHelper");
+  assert(
+    calls.length <= 1,
+    `expected at most one wrap call, got ${calls.length}`,
+  );
+  const call = calls[0];
+  return call?.arguments[0]?.getText(root);
+}
+
+/** The expression of `export default <expr>`, or undefined if there is none. */
+function defaultExportExpression(
+  root: ts.SourceFile,
+): ts.Expression | undefined {
+  const assignment = collect(root, ts.isExportAssignment).find((node) =>
+    !node.isExportEquals
+  );
+  return assignment?.expression;
+}
 
 // The module-scope cf-data transformer wraps top-level data expressions with a
 // `__cf_data` helper call. The existing `module-scope-cf-data.test.ts` drives
@@ -74,11 +129,12 @@ Deno.test(
     );
     // With no `__cfHelpers` import present the transformer prepends its own
     // named import and wraps the snapshot call with the bare identifier form.
-    assertStringIncludes(
-      output,
-      'import { __cf_data as __cfDataHelper } from "commonfabric"',
+    const root = parseModule(output);
+    assert(
+      hasNamedImport(root, "__cf_data", "__cfDataHelper", "commonfabric"),
+      "expected the injected __cf_data import",
     );
-    assertStringIncludes(output, "const z = __cfDataHelper(n())");
+    assertEquals(cfDataHelperArgText(root), "n()");
   },
 );
 
@@ -90,7 +146,7 @@ Deno.test(
     );
     // A union return type is classified as primitive-like when every member is
     // primitive-like, so the snapshot call is wrapped.
-    assertStringIncludes(output, "const z = __cfDataHelper(u())");
+    assertEquals(cfDataHelperArgText(parseModule(output)), "u()");
   },
 );
 
@@ -101,7 +157,7 @@ Deno.test(
       `type A = string;\ntype B = string;\ndeclare function u(): A & B;\nconst z = u();\n`,
     );
     // An intersection is primitive-like when every member is primitive-like.
-    assertStringIncludes(output, "const z = __cfDataHelper(u())");
+    assertEquals(cfDataHelperArgText(parseModule(output)), "u()");
   },
 );
 
@@ -113,8 +169,9 @@ Deno.test(
     );
     // The object member is not primitive-like, so the intersection fails the
     // `every` check and the call is not treated as a snapshot.
-    assert(
-      !output.includes("__cfDataHelper"),
+    assertEquals(
+      callsNamed(parseModule(output), "__cfDataHelper").length,
+      0,
       "expected the non-primitive intersection to be left unwrapped",
     );
   },
@@ -129,10 +186,15 @@ Deno.test(
     // `callableMayReturnCallResult` returns false for a declaration without a
     // body, so the ambient callable is not classified as a default-exported
     // data callable.
-    assert(
-      !output.includes("__cfDataHelper"),
+    const root = parseModule(output);
+    assertEquals(
+      callsNamed(root, "__cfDataHelper").length,
+      0,
       "expected the body-less declared callable to be left unwrapped",
     );
+    // The default export stays the bare identifier, not a wrap call.
+    const exported = defaultExportExpression(root);
+    assert(exported && ts.isIdentifier(exported) && exported.text === "helper");
   },
 );
 
@@ -147,7 +209,11 @@ Deno.test(
     // The nested-expression walk skips the leading class boundary, finds the
     // `factory()()` call-on-call, then short-circuits over the trailing member,
     // classifying `nested` as a default-exported data callable.
-    assertStringIncludes(output, "export default __cfDataHelper(nested)");
+    const root = parseModule(output);
+    const exported = defaultExportExpression(root);
+    assert(exported && ts.isCallExpression(exported), "expected a wrap call");
+    assertEquals(calleeName(exported), "__cfDataHelper");
+    assertEquals(exported.arguments[0]?.getText(root), "nested");
   },
 );
 
@@ -167,9 +233,17 @@ Deno.test(
     );
     // The block traversal finds the call-on-call return inside the branch, then
     // short-circuits the visit over the remaining statements.
-    assertStringIncludes(
-      output,
-      "export default __cfHelpers.__cf_data(helper)",
+    const root = parseModule(output);
+    const exported = defaultExportExpression(root);
+    assert(exported && ts.isCallExpression(exported), "expected a wrap call");
+    const callee = exported.expression;
+    assert(
+      ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === "__cfHelpers" &&
+        callee.name.text === "__cf_data",
+      "expected __cfHelpers.__cf_data callee",
     );
+    assertEquals(exported.arguments[0]?.getText(root), "helper");
   },
 );
