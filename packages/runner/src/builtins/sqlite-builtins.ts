@@ -560,7 +560,19 @@ export function sqliteQuery(
         typeof (inputs.db as SqliteDbRef).id === "string")
       ? (inputs.db as SqliteDbRef).scope
       : undefined;
-    const scope = narrowestScope([outputBinding?.scope, dbScope]);
+    // CFC Phase 3.b: a read-time-clearance result is filtered to the ACTING
+    // READER, so it must never be shared across readers. Force it to (at least)
+    // per-`user` scope so each reader gets an isolated result cell — otherwise a
+    // space-scoped result cell would let one reader observe another's filtered
+    // rows (the shared cell + reader-independent request hash both leak).
+    const clearanceScope: CellScope | undefined = inputs?.readClearance
+      ? "user"
+      : undefined;
+    const scope = narrowestScope([
+      outputBinding?.scope,
+      dbScope,
+      clearanceScope,
+    ]);
 
     if (!initialized || resultScope !== scope) {
       result = makeResultCell<QueryState>(
@@ -597,6 +609,13 @@ export function sqliteQuery(
       maxConfidentiality: inputs.maxConfidentiality ?? null,
       onExceed: inputs.onExceed ?? null,
       readClearance: inputs.readClearance ?? null,
+      // Phase 3.b: a cleared result depends on WHO is asking, so the acting
+      // reader is part of the query identity (belt-and-suspenders with the
+      // per-user result scope above — a cleared result is never keyed only by
+      // the boolean). Absent for non-clearance queries so they do not re-hash.
+      clearanceReader: inputs.readClearance
+        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
+        : null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
