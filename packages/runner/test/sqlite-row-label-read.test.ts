@@ -16,6 +16,7 @@ import {
   all,
   any,
   authoredBy,
+  constant,
   dbOwner,
   match,
   principal,
@@ -232,6 +233,66 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
       ceiling: ["did:key:someone-else"],
     });
     expectError(missed, "ceiling");
+  });
+
+  it("an aggregate over an integrity-only table is public — no label, not a refusal (Epic E2)", () => {
+    // A rule declaring ONLY integrity imposes no confidentiality, so a COUNT(*)
+    // over it is readable by everyone: the aggregate carries no label rather
+    // than refusing for "no common reader" (a confidentiality notion). This is
+    // the "no confidentiality constraint" vs "constrained but no shared reader"
+    // distinction that ruleCommonAlternatives returning [] alone cannot make.
+    const integrityOnly = {
+      notes: table(
+        { id: "integer", from: "text", body: "text" },
+        (f) => ({
+          integrity: authoredBy(
+            principal("mailto", match(f.from, ADDR, { min: 1 })),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: integrityOnly,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 5 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [undefined]);
+
+    // ...and carrying no confidentiality it fits even an empty ceiling.
+    const kept = expectOk(computeRowLabelRead({
+      tables: integrityOnly,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 5 }],
+      owner: OWNER,
+      ceiling: [],
+    }));
+    assertEquals(kept.keep, [true]);
+  });
+
+  it("the common-alternative intersection matches object constants regardless of key order (Epic E2)", () => {
+    // Two confidentiality-bearing tables whose only common reader is the SAME
+    // object-valued constant, written with keys in different order. The
+    // aggregate must intersect them by canonical atom key, not refuse as if
+    // they were distinct atoms (the non-canonical JSON.stringify bug).
+    const reader = { org: "acme", team: "research" };
+    const readerReordered = { team: "research", org: "acme" };
+    const twoTables = {
+      a: table({ id: "integer", x: "text" }, () => ({
+        confidentiality: all(constant(reader)),
+      })),
+      b: table({ id: "integer", y: "text" }, () => ({
+        confidentiality: all(constant(readerReordered)),
+      })),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: twoTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 3 }],
+      owner: OWNER,
+    }));
+    // Kept as one shared reader, NOT dropped to a refusal.
+    assertEquals(res.labels, [{ confidentiality: [reader] }]);
   });
 
   it("a well-formed anyOf wire spec is accepted; a malformed one refuses (Epic E1)", () => {

@@ -7,9 +7,11 @@
 // attach, ceiling"; "Fail-closed rules").
 
 import {
+  atomKey,
   evaluateRowLabel,
   type RowLabelSpec,
   ruleCommonAlternatives,
+  ruleConstrainsConfidentiality,
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
@@ -59,29 +61,48 @@ export type RowLabelReadResult =
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
 
-const commonAltKey = (a: unknown): string =>
-  typeof a === "string" ? `s:${a}` : `j:${JSON.stringify(a)}`;
+// The common-alternative outcome for a null-origin (aggregate) projection over
+// the rule-bearing tables. `unconstrained`: no rule imposes any confidentiality
+// (all integrity-only or degenerate), so the aggregate is public — carry no
+// label. `readers`: every confidentiality-bearing table shares this non-empty
+// set of guaranteed readers, so the aggregate is readable by them (an
+// OR-clause). `refuse`: some confidentiality-bearing table has no reader in the
+// intersection, so no principal is guaranteed to read every contributing row.
+type AggregateCommon =
+  | { kind: "unconstrained" }
+  | { kind: "readers"; atoms: unknown[] }
+  | { kind: "refuse" };
 
-// The atoms that are a common alternative of EVERY rule-bearing table — the
-// intersection of each rule's `ruleCommonAlternatives`. A reader in this set is
-// a guaranteed reader of every row of every such table, so it soundly reads an
-// aggregate no matter which of them it ranged over (Epic E2).
+// Intersect the common alternatives of every CONFIDENTIALITY-BEARING
+// rule-bearing table (CFC spec §8.17.4, Epic E2). A reader in the intersection
+// is a guaranteed reader of every row of every such table, so it soundly reads
+// an aggregate no matter which of them it ranged over. Integrity-only rules
+// impose no confidentiality, so they are skipped rather than treated as a
+// refusal (an aggregate over an integrity-only table is public) — the
+// distinction `ruleCommonAlternatives` returning `[]` alone cannot make. Uses
+// the canonical `atomKey` so structurally-equal atoms (e.g. object constants
+// whose keys differ only in order across two rules) intersect correctly.
 function intersectCommonAlternatives(
   rules: readonly { spec: RowLabelSpec }[],
   owner: string | undefined,
-): unknown[] {
+): AggregateCommon {
   let acc: Map<string, unknown> | undefined;
+  let anyConfidentiality = false;
   for (const r of rules) {
+    if (!ruleConstrainsConfidentiality(r.spec)) continue; // integrity-only
+    anyConfidentiality = true;
     const alts = new Map<string, unknown>();
     for (const a of ruleCommonAlternatives(r.spec, { dbOwner: owner })) {
-      alts.set(commonAltKey(a), a);
+      alts.set(atomKey(a), a);
     }
+    if (alts.size === 0) return { kind: "refuse" }; // constrains, no reader
     acc = acc === undefined
       ? alts
       : new Map([...acc].filter(([k]) => alts.has(k)));
-    if (acc.size === 0) return [];
+    if (acc.size === 0) return { kind: "refuse" }; // no shared reader
   }
-  return acc === undefined ? [] : [...acc.values()];
+  if (!anyConfidentiality) return { kind: "unconstrained" };
+  return { kind: "readers", atoms: acc === undefined ? [] : [...acc.values()] };
 }
 
 /**
@@ -145,16 +166,18 @@ export function computeRowLabelRead(
       // Epic E2 (common-alternative property, CFC spec §8.17.4): an
       // aggregate/expression column has no single source, so its per-row
       // contributors cannot be attributed. But a reader that is a COMMON
-      // ALTERNATIVE of every rule-bearing table — a static, unconditional
-      // reader of every row of every such table (e.g. an unconditional
-      // `dbOwner()` alternative) — satisfies the join of all those rows, so it
-      // soundly reads the aggregate with NO declassification. Intersect the
-      // common alternatives across all rule-bearing tables; if non-empty,
-      // label the aggregate rows by that set (an OR-clause) and let the
-      // declared output ceiling decide. Otherwise there is no guaranteed
-      // reader and we still refuse.
+      // ALTERNATIVE of every confidentiality-bearing table — a static,
+      // unconditional reader of every row of every such table (e.g. an
+      // unconditional `dbOwner()` alternative) — satisfies the join of all
+      // those rows, so it soundly reads the aggregate with NO declassification.
+      // Intersect the common alternatives across the rule-bearing tables and
+      // let the declared output ceiling decide:
+      //   - unconstrained: no table imposes confidentiality (all integrity-only
+      //     or degenerate) — the aggregate is public, carry no per-row label.
+      //   - readers: label the aggregate rows by that reader set (an OR-clause).
+      //   - refuse: some table constrains but shares no guaranteed reader.
       const common = intersectCommonAlternatives(rules, owner);
-      if (common.length === 0) {
+      if (common.kind === "refuse") {
         return {
           error: "sqlite: an aggregate/expression column has no single " +
             "source and the rule has no common reader — its per-row " +
@@ -164,10 +187,15 @@ export function computeRowLabelRead(
             "by, or move the aggregate to a rule-less table",
         };
       }
-      const clause = common.length === 1 ? common[0] : { anyOf: common };
-      labels = rows.map(() => ({ confidentiality: [clause] }));
-      // No per-row eval (no origins to attribute); fall through to the
-      // shared ceiling check below.
+      if (common.kind === "readers") {
+        const clause = common.atoms.length === 1
+          ? common.atoms[0]
+          : { anyOf: common.atoms };
+        labels = rows.map(() => ({ confidentiality: [clause] }));
+      }
+      // kind === "unconstrained": no confidentiality on the aggregate — leave
+      // labels undefined. Either way no per-row eval (no origins to attribute);
+      // fall through to the shared ceiling check below.
     } else {
       const applicable = rules.filter((r) =>
         columns.some((c) => c.table === r.name)

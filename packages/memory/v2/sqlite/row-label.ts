@@ -504,8 +504,11 @@ const fail = (msg: string): never => {
   throw new RowLabelEvalError(msg);
 };
 
-/** Stable structural key for dedup (atoms are small plain JSON). */
-function atomKey(v: unknown): string {
+/** Stable structural key for dedup / set membership (atoms are small plain
+ *  JSON). Canonical: object keys are sorted, so two atoms that differ only in
+ *  key insertion order share a key. Exported so cross-module callers (the
+ *  read-side common-alternative intersection) compare atoms the same way. */
+export function atomKey(v: unknown): string {
   if (typeof v === "string") return `s:${v}`;
   return `j:${
     JSON.stringify(v, (_k, val) =>
@@ -827,6 +830,26 @@ export function ruleCommonAlternatives(
     if (common.size === 0) return [];
   }
   return common === undefined ? [] : [...common.values()];
+}
+
+/**
+ * Whether a rule imposes any confidentiality constraint on its rows — its
+ * confidentiality expression has at least one conjunctive clause. An
+ * integrity-only rule (no `confidentiality`) or a degenerate empty conjunction
+ * (`all()` — readable by everyone) constrains nothing, so an aggregate over
+ * such a table carries no confidentiality (E2, CFC spec §8.17.4). This is the
+ * distinction `ruleCommonAlternatives` alone cannot make: it returns `[]` both
+ * here (no constraint → aggregate is public) AND when a rule DOES constrain but
+ * shares no guaranteed reader (that case must refuse). Callers intersecting
+ * across tables must skip unconstrained rules, not treat them as a refusal.
+ */
+export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
+  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  if (conf === undefined) return false;
+  const conjuncts = isRecord(conf) && Array.isArray(conf.allOf)
+    ? conf.allOf
+    : [conf];
+  return conjuncts.length > 0;
 }
 
 /** The rule attached to a (possibly wire-supplied) table schema, or undefined.
