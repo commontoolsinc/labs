@@ -1,5 +1,6 @@
 export {
   createCompileByteCache,
+  flushCompileByteCache,
   ProcessModuleByteCache,
 } from "./compile-byte-cache.ts";
 export {

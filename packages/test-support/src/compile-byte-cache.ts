@@ -6,15 +6,13 @@ import { dirname } from "@std/path";
 // place an instance is created. So the cache is, by construction, a single
 // feature that exists only when tests install it — never in production.
 //
-// `createCompileByteCache` returns the instance to inject into the runtimes a
-// test builds. The in-memory cache is always created (cross-runtime reuse within
-// the process). Disk persistence is added only when `CF_COMPILE_CACHE_FILE` is
-// set — which only the CI workflow sets — so a run reuses bytes it compiled on a
-// previous run. Cross-run correctness rests on the CI cache key (see the
-// workflow): the persisted bytes are a function of the compiler / transformer
-// build, which a module's content identity does not cover, so the key folds in a
-// hash of the compiler sources + lockfile and invalidates the whole file when
-// the code that emits the bytes changes.
+// `createCompileByteCache` returns the instance to inject into test runtimes.
+// The in-memory cache is always created for cross-runtime reuse within the
+// process. Disk persistence is added only when `CF_COMPILE_CACHE_FILE` is set,
+// so a run can reuse bytes it compiled on a previous run. Cross-run correctness
+// rests on the cache key used by the caller: the persisted bytes are a function
+// of the compiler and transformer build, which a module's content identity does
+// not cover.
 
 /** A serialized {@link ProcessModuleByteCache} entry (for disk persistence). */
 export interface SerializedModuleBytes {
@@ -39,6 +37,8 @@ export interface ModuleByteCache {
     modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
   ): void;
 }
+
+const cacheFiles = new WeakMap<ProcessModuleByteCache, string>();
 
 /**
  * Process-level, content-addressed cache of compiled module bytes. An entry is
@@ -187,11 +187,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
 }
 
 /**
- * Create the compiled-module-byte cache and return it for injection into the
- * runtimes a test builds (via `PiecesController.initialize`'s `moduleByteCache`).
- * When `CF_COMPILE_CACHE_FILE` is set, the cache is also seeded from that file
- * now and written back at process exit. Unset everywhere but CI, so locally the
- * cache is in-memory only.
+ * Create the compiled-module-byte cache and return it for injection into test
+ * runtimes. When `CF_COMPILE_CACHE_FILE` is set, the cache is seeded from that
+ * file now and written back at process exit.
  */
 export function createCompileByteCache(): ModuleByteCache {
   const cache = new ProcessModuleByteCache();
@@ -205,9 +203,10 @@ export function createCompileByteCache(): ModuleByteCache {
     );
   }
 
+  cacheFiles.set(cache, cacheFile);
   globalThis.addEventListener("unload", () => {
     try {
-      const written = writeCompileByteCache(cache, cacheFile);
+      const written = flushCompileByteCache(cache);
       console.log(
         `[compile-byte-cache] wrote ${written} modules to ${cacheFile}`,
       );
@@ -220,6 +219,15 @@ export function createCompileByteCache(): ModuleByteCache {
   });
 
   return cache;
+}
+
+export function flushCompileByteCache(
+  cache: ModuleByteCache,
+): number | undefined {
+  if (!(cache instanceof ProcessModuleByteCache)) return undefined;
+  const cacheFile = cacheFiles.get(cache);
+  if (cacheFile === undefined) return undefined;
+  return writeCompileByteCache(cache, cacheFile);
 }
 
 function restoreCompileByteCache(

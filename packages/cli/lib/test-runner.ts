@@ -28,6 +28,7 @@
 import { Identity } from "@commonfabric/identity";
 import {
   ConsoleMethod,
+  type ModuleByteCache,
   PatternCoverageCollector,
   patternCoverageOutputPath,
   Runtime,
@@ -61,6 +62,7 @@ import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   type FetchMockEntry,
   makeMockFetch,
@@ -271,6 +273,8 @@ export interface TestRunnerOptions {
   storageStatsLimit?: number;
   /** Directory for pattern runtime coverage LCOV artifacts. */
   patternCoverageDir?: string;
+  /** Shared compiled-module-byte cache for direct harness compiles. */
+  moduleByteCache?: ModuleByteCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -883,6 +887,8 @@ export async function runTestPattern(
     ? new PatternCoverageCollector()
     : undefined;
   let writeLocalPatternCoverage = patternCoverage !== undefined;
+  const moduleByteCache = options.moduleByteCache ??
+    getDefaultModuleByteCache();
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
   // console event) and logger-level error/warn activity (channel 2: logger count
@@ -943,6 +949,7 @@ export async function runTestPattern(
         cfcEnforcementMode: options.cfcEnforcementMode ?? "enforce-explicit",
         experimental: experimentalOptionsFromEnv(),
         apiUrl: new URL(import.meta.url),
+        moduleByteCache,
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
         navigateCallback: (target) => {
           const name = (target.key("$NAME") as Cell<string | undefined>).get();

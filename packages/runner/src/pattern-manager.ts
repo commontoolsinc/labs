@@ -505,9 +505,33 @@ export class PatternManager {
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult> {
-    const result = await this.runtime.harness.compileAndEvaluateModules(
-      program,
-      options,
+    const byteCache = options?.patternCoverage === undefined
+      ? this.runtime.moduleByteCache
+      : undefined;
+    const runtimeVersion = byteCache === undefined
+      ? undefined
+      : await getCompileCacheRuntimeVersion();
+    if (byteCache === undefined || runtimeVersion === undefined) {
+      const result = await this.runtime.harness.compileAndEvaluateModules(
+        program,
+        options,
+      );
+      this.registerEvaluatedModules(result);
+      return result;
+    }
+
+    const { id, graph, mainSpecifier, modules } = await this.runtime.harness
+      .compileToRecordGraph(program, {
+        ...options,
+        precompiledModulesFor: ({ identities }) =>
+          Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
+      });
+    byteCache.putAll(runtimeVersion, modules);
+    const result = this.runtime.harness.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
     );
     this.registerEvaluatedModules(result);
     return result;

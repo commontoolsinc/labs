@@ -118,6 +118,16 @@ The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
 `cf test` in-process. The two integration jobs run browser-driven `deno test`
 files against a running Toolshed server.
 
+The compile byte cache is available to `cf test` through
+`CF_COMPILE_CACHE_FILE` when authored-pattern coverage is not active. The
+`pattern-unit-test` job still leaves that cache unwired because it sets
+`CF_PATTERN_COVERAGE_DIR`. Coverage compiles must transform the TypeScript
+source so the current collector can register spans and emit hit calls. Reusing
+restored module bytes would skip that registration, so the `cf test` cache path
+does not read or write byte-cache entries for those direct coverage compiles.
+If CI later separates a non-coverage pattern unit lane, that lane can set
+`CF_COMPILE_CACHE_FILE`.
+
 ## Why the two integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
 
 Adding `CF_PATTERN_COVERAGE_DIR` to `pattern-integration-test` or
