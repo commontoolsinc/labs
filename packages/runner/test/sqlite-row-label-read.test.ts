@@ -190,19 +190,33 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     expectError(res, "aggregate");
   });
 
-  it("an invalid wire-supplied spec refuses (smuggled anyOf — never flattened)", () => {
-    const tables = JSON.parse(JSON.stringify(emailTables)) as Record<
+  it("a well-formed anyOf wire spec is accepted; a malformed one refuses (Epic E1)", () => {
+    // A well-formed OR-clause validates and produces per-row labels...
+    const okTables = JSON.parse(JSON.stringify(emailTables)) as Record<
       string,
       { rowLabel?: { confidentiality?: unknown } }
     >;
-    tables.emails.rowLabel!.confidentiality = { anyOf: [{ dbOwner: true }] };
-    const res = computeRowLabelRead({
-      tables,
+    okTables.emails.rowLabel!.confidentiality = { anyOf: [{ dbOwner: true }] };
+    const ok = computeRowLabelRead({
+      tables: okTables,
       columns: FULL_COLUMNS,
       rows: ROWS,
       owner: OWNER,
     });
-    expectError(res, "any");
+    assert(!("error" in ok), "a well-formed anyOf should be accepted");
+    // ...but an empty anyOf (no alternatives) still refuses.
+    const badTables = JSON.parse(JSON.stringify(emailTables)) as Record<
+      string,
+      { rowLabel?: { confidentiality?: unknown } }
+    >;
+    badTables.emails.rowLabel!.confidentiality = { anyOf: [] };
+    const bad = computeRowLabelRead({
+      tables: badTables,
+      columns: FULL_COLUMNS,
+      rows: ROWS,
+      owner: OWNER,
+    });
+    expectError(bad, "any");
   });
 
   it("a query joining TWO rule-bearing tables refuses (cross-rule joins deferred)", () => {

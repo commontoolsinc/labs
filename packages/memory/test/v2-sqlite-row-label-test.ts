@@ -131,17 +131,64 @@ Deno.test("match() forces the global flag so split-on-match works", () => {
 // Fail-closed at authoring (table() throws)
 // ---------------------------------------------------------------------------
 
-Deno.test("any() errors at table() time until the clause-aware profile lands", () => {
+Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
+  // any() no longer throws at table() time — it produces an authored OR-clause
+  // the runner's clause-aware profile enforces by subsumption.
+  const schema = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  }));
+  const spec = schema.rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(spec, Object.keys(EMAIL_COLUMNS)),
+    undefined,
+  );
+  // An any() with no alternatives is rejected.
+  assert(
+    typeof validateRowLabelSpec(
+      { version: 1, confidentiality: { anyOf: [] } } as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ) === "string",
+  );
+});
+
+Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B∨C widening (Epic E1)", () => {
+  // A direct all() as an any() alternative is rejected: union-flattening it
+  // would make the row readable by A alone even though the author required
+  // A AND B.
   assertThrows(
     () =>
       table(EMAIL_COLUMNS, (f) => ({
         confidentiality: any(
-          principal("mailto", match(f.from, ADDR)),
+          all(
+            principal("mailto", match(f.from, ADDR)),
+            principal("mailto", match(f.to, ADDR)),
+          ),
           dbOwner(),
         ),
       })),
-    TypeError,
-    "any(",
+    Error,
+    "all()/any()",
+  );
+  // ...and a when() gating an all() is rejected too (recursive check).
+  assertThrows(
+    () =>
+      table(EMAIL_COLUMNS, (f) => ({
+        confidentiality: any(
+          whenMatches(
+            f.auth,
+            /dmarc=pass/,
+            all(
+              principal("mailto", match(f.from, ADDR)),
+              principal("mailto", match(f.to, ADDR)),
+            ),
+          ),
+          dbOwner(),
+        ),
+      })),
+    Error,
   );
 });
 
@@ -235,13 +282,34 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
     validateRowLabelSpec(good, Object.keys(EMAIL_COLUMNS)),
     undefined,
   );
-  // anyOf smuggled over the wire is rejected, not silently flattened.
-  const smuggled = JSON.parse(JSON.stringify(good)) as RowLabelSpec;
-  (smuggled as { confidentiality: unknown }).confidentiality = {
-    anyOf: [{ dbOwner: true }],
-  };
+  // A well-formed anyOf over the wire now validates (Epic E1)...
+  const withClause = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(
+      JSON.parse(JSON.stringify(withClause)) as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ),
+    undefined,
+  );
+  // ...but a malformed alternative (unknown column) is still rejected.
+  const badClause = {
+    version: 1,
+    confidentiality: {
+      anyOf: [{
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "nonesuch", source: ADDR.source, flags: "g" } },
+        },
+      }],
+    },
+  } as unknown as RowLabelSpec;
   assert(
-    typeof validateRowLabelSpec(smuggled, Object.keys(EMAIL_COLUMNS)) ===
+    typeof validateRowLabelSpec(badClause, Object.keys(EMAIL_COLUMNS)) ===
       "string",
   );
   // Unknown column in a wire spec is rejected.
@@ -469,12 +537,74 @@ Deno.test("dbOwner() with no owner in ctx fails closed", () => {
   );
 });
 
-Deno.test("an anyOf node reaching the evaluator fails closed (never silently flattened)", () => {
-  const spec: RowLabelSpec = {
+Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
+  // any(dbOwner ∨ from-participants): the row is readable by the owner OR any
+  // sender — ONE OR-clause, not flattened into bare atoms.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(spec, { from: "alice@a.example" }, {
+    dbOwner: OWNER,
+  });
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+  ]);
+});
+
+Deno.test("evalConf fails closed on a conjunctive any() alternative that bypassed validation (Epic E1)", () => {
+  // A raw wire spec (not built through table(), so validation was skipped)
+  // with a conjunction as an any() alternative must fail closed at eval —
+  // never union-flatten (A∧B)∨C into A∨B∨C. Both the direct all() and the
+  // when()-wrapped all() shapes are rejected.
+  const direct: RowLabelSpec = {
     version: 1,
-    confidentiality: { anyOf: [{ dbOwner: true }] } as never,
+    confidentiality: {
+      anyOf: [
+        { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        { dbOwner: true },
+      ],
+    } as never,
   };
-  expectError(spec, {}, { dbOwner: OWNER }, "anyOf");
+  const dRes = evaluateRowLabel(direct, {}, { dbOwner: OWNER });
+  assert("error" in dRes && dRes.error.includes("conjunction"));
+
+  const gated: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      anyOf: [
+        {
+          when: { match: { field: "from", source: ADDR.source, flags: "" } },
+          then: { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        },
+        { dbOwner: true },
+      ],
+    } as never,
+  };
+  const gRes = evaluateRowLabel(gated, { from: "a@b.example" }, {
+    dbOwner: OWNER,
+  });
+  assert("error" in gRes && gRes.error.includes("conjunction"));
+});
+
+Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
+  // all(any(owner ∨ from), to-participants) → (owner∨from) ∧ to.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      principal("mailto", match(f.to, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(
+    spec,
+    { from: "alice@a.example", to: "bob@example.com" },
+    { dbOwner: OWNER },
+  );
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+    "did:mailto:bob@example.com",
+  ]);
 });
 
 Deno.test("an unknown op reaching the evaluator fails closed", () => {
