@@ -972,6 +972,44 @@ describe("capture-deno-inspector-profile helpers", () => {
     });
   });
 
+  it("fails when a required profile start marker is missing before summary", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const logs: string[] = [];
+      const errors: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
+      const consoleOutputPath = `${tmpDir}/profile.console.log`;
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${outputPath}`,
+          `--console-output=${consoleOutputPath}`,
+          "--summary-pattern=done",
+          "--profile-start-pattern=profile start",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, errors, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 1);
+      assertEquals(celestial.starts, 0);
+      assertEquals(celestial.stops, 0);
+      assertStringIncludes(
+        errors.join("\n"),
+        "Profile start pattern was not observed: profile start",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(profileErrorOutputPath(outputPath)),
+        "Profile start pattern was not observed: profile start",
+      );
+      assertEquals(await Deno.readTextFile(consoleOutputPath), "done");
+      assertEquals(logs.includes("profile: summary matched"), true);
+    });
+  });
+
   it("writes a profiler start error and returns failure", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
@@ -1030,37 +1068,49 @@ describe("capture-deno-inspector-profile helpers", () => {
     });
   });
 
-  it("stops when the inspector websocket closes", async () => {
+  it("fails when the inspector websocket closes before a required profile start marker", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
       const logs: string[] = [];
+      const errors: string[] = [];
       const resumed = Promise.withResolvers<void>();
       const ws = new FakeWebSocket();
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
       const done = captureDenoInspectorProfile(
         [
-          `--output=${tmpDir}/profile.cpuprofile`,
+          `--output=${outputPath}`,
           "--profile-start-pattern=profile start",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, resumed, ws }),
+        createCaptureRuntime({ celestial, logs, errors, resumed, ws }),
       );
 
       await resumed.promise;
       ws.readyState = WebSocket.CLOSED;
       ws.dispatch("close", new CloseEvent("close"));
 
-      assertEquals(await done, 0);
+      assertEquals(await done, 1);
       assertEquals(celestial.starts, 0);
       assertEquals(celestial.stops, 0);
+      assertStringIncludes(
+        errors.join("\n"),
+        "Profile start pattern was not observed: profile start",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(profileErrorOutputPath(outputPath)),
+        "Profile start pattern was not observed: profile start",
+      );
       assertEquals(logs.includes("profile: websocket closed"), true);
     });
   });
 
-  it("stops when the websocket closes while resuming the target", async () => {
+  it("fails when the websocket closes while resuming before a required profile start marker", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
       const logs: string[] = [];
+      const errors: string[] = [];
       const ws = new FakeWebSocket();
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
       ws.send = (data: string) => {
         ws.sent.push(data);
         ws.readyState = WebSocket.CLOSED;
@@ -1068,14 +1118,24 @@ describe("capture-deno-inspector-profile helpers", () => {
 
       const code = await captureDenoInspectorProfile(
         [
-          `--output=${tmpDir}/profile.cpuprofile`,
+          `--output=${outputPath}`,
           "--profile-start-pattern=profile start",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, ws }),
+        createCaptureRuntime({ celestial, logs, errors, ws }),
       );
 
-      assertEquals(code, 0);
+      assertEquals(code, 1);
+      assertEquals(celestial.starts, 0);
+      assertEquals(celestial.stops, 0);
+      assertStringIncludes(
+        errors.join("\n"),
+        "Profile start pattern was not observed: profile start",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(profileErrorOutputPath(outputPath)),
+        "Profile start pattern was not observed: profile start",
+      );
       assertEquals(logs.includes("profile: websocket closed"), true);
     });
   });

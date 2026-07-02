@@ -396,6 +396,7 @@ export async function captureDenoInspectorProfile(
   };
   let pendingProfilerStopReason: string | undefined;
   let profilerStartError: string | undefined;
+  let missingProfileStartError: string | undefined;
 
   const requestStop = (reason: string): void => {
     if (stopReasonSent) return;
@@ -489,12 +490,17 @@ export async function captureDenoInspectorProfile(
         ws,
         celestial.Profiler,
       );
+      if (profileStartPattern && !state.sawProfileStart) {
+        missingProfileStartError =
+          `Profile start pattern was not observed: ${profileStartPattern}`;
+        output.error(`profile: ${missingProfileStartError}`);
+      }
       await writeProfileCaptureFiles({
         outputPath,
         consoleOutputPath,
         state,
         profile,
-        stopError: profilerStartError ?? stopError,
+        stopError: profilerStartError ?? stopError ?? missingProfileStartError,
       });
     }
   };
@@ -580,5 +586,5 @@ export async function captureDenoInspectorProfile(
     ),
   );
 
-  return profilerStartError ? 1 : 0;
+  return profilerStartError || missingProfileStartError ? 1 : 0;
 }
