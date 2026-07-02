@@ -1,9 +1,6 @@
-import ts from "typescript";
 import type { Program } from "@commonfabric/js-compiler";
-import {
-  collectImportSpecifiers,
-  resolveImportSpecifier,
-} from "@commonfabric/js-compiler";
+import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+import { compilerStack } from "./deferred-compiler-stack.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 /**
@@ -29,7 +26,6 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
  * See docs/specs/module-loading.md for the full rationale.
  */
 
-const TARGET = ts.ScriptTarget.ES2023;
 const VERSION_TAG = "cf/module-id/v1";
 
 // Candidate suffixes used to match a resolved bare path (which usually omits an
@@ -90,12 +86,20 @@ export interface ModuleImportEdges {
 export function resolveModuleImports(
   program: Program,
 ): Map<string, ModuleImportEdges> {
+  // Deferred compiler stack: import scanning parses with the TS parser, so
+  // every flow reaching this must have awaited ensureCompilerStack().
+  const { collectImportSpecifiers, ts } = compilerStack();
   const fileNames = new Set(program.files.map((f) => f.name));
   const edges = new Map<string, ModuleImportEdges>();
   for (const file of program.files) {
     const internalDeps: { specifier: string; target: string }[] = [];
     const externalDeps: string[] = [];
-    for (const specifier of collectImportSpecifiers(file, TARGET)) {
+    for (
+      const specifier of collectImportSpecifiers(
+        file,
+        ts.ScriptTarget.ES2023,
+      )
+    ) {
       const resolved = resolveImportSpecifier(specifier, file);
       const target = findInternalTarget(fileNames, resolved);
       if (target !== undefined && target !== file.name) {

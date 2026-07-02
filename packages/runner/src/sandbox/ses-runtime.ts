@@ -1,9 +1,8 @@
+import type { JsScript, SourceMap } from "@commonfabric/js-compiler";
 import {
-  JsScript,
-  MappedPosition,
-  SourceMap,
+  type MappedPosition,
   SourceMapParser,
-} from "@commonfabric/js-compiler";
+} from "@commonfabric/js-compiler/source-map";
 import { getLogger } from "@commonfabric/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";

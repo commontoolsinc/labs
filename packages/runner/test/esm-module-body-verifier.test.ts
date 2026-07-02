@@ -3,6 +3,11 @@ import { expect } from "@std/expect";
 
 import { compileSourcesToRecords } from "../src/sandbox/module-record-compiler.ts";
 import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync transpile/record internals directly (below the
+// async flow boundaries that normally load the deferred compiler stack).
+await ensureCompilerStack();
 
 // D2: the ESM verifier front-end classifies each module's compiled-CommonJS
 // body. Unlike the AMD factory (deps are params), the CJS body has a

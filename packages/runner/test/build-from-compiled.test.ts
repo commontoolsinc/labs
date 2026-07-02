@@ -12,6 +12,12 @@ import {
   extractCompiledExports,
 } from "../src/sandbox/module-record-compiler.ts";
 
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync parse internals directly (below the async flow
+// boundaries that normally load the deferred compiler stack), so load it here.
+await ensureCompilerStack();
+
 const signer = await Identity.fromPassphrase("build-from-compiled");
 
 // The warm load path builds records directly from cached compiled bodies — no

@@ -1,9 +1,5 @@
-import ts from "typescript";
-import {
-  collectImportSpecifiers,
-  type ProgramResolver,
-  type Source,
-} from "@commonfabric/js-compiler";
+import type { ProgramResolver, Source } from "@commonfabric/js-compiler";
+import { compilerStack } from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   loadVerifiedSourceClosure,
@@ -21,7 +17,6 @@ import {
 import { resolveFabricRefToIdentity } from "../fabric-ref-resolution.ts";
 import type { FabricImportOptions, ResolvedFabricPin } from "./types.ts";
 
-const TARGET = ts.ScriptTarget.ES2023;
 const MAX_FABRIC_MOUNTS = 32;
 const DID_RE = /^did:[a-z0-9]+:.+$/;
 const logger = getLogger("fabric-resolver");
@@ -177,9 +172,18 @@ export class FabricAwareResolver implements ProgramResolver {
     identity: string,
     docs: ReadonlyMap<string, SourceDoc>,
   ): void {
+    // Deferred compiler stack (parses): this runs under resolveSource, whose
+    // flows load source closures and compile — ensureCompilerStack() is
+    // awaited by loadVerifiedSourceClosure before any doc reaches here.
+    const { collectImportSpecifiers, ts } = compilerStack();
     for (const doc of docs.values()) {
       const source = { name: doc.filename, contents: doc.code };
-      for (const specifier of collectImportSpecifiers(source, TARGET)) {
+      for (
+        const specifier of collectImportSpecifiers(
+          source,
+          ts.ScriptTarget.ES2023,
+        )
+      ) {
         if (specifier.startsWith("/")) {
           throw new Error(
             `imported pattern ${identity} uses root-absolute imports; not supported`,

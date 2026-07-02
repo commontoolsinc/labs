@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import { computeModuleHashes } from "../harness/module-identity.ts";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
@@ -571,6 +572,11 @@ export async function loadVerifiedSourceClosure(
 ): Promise<Map<string, SourceDoc> | undefined> {
   const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
   if (closure === undefined) return undefined;
+  // Identity verification parses source (module hashing scans imports), and
+  // every source-closure consumer parses further downstream (fabric-import
+  // scans, recompiles) — this is the shared entry those flows funnel through,
+  // so load the deferred compiler stack here, once.
+  await ensureCompilerStack();
   const verification = verifySourceDocs(
     entryIdentity,
     closure,
