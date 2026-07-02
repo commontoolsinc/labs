@@ -6,6 +6,7 @@ import {
   cfcObservationFitsCeiling,
   meetCfcObservationCeilings,
 } from "../src/cfc/observation.ts";
+import { normalizeClause } from "../src/cfc/clause.ts";
 
 // Epic A2 (docs/plans/cfc-future-work-implementation.md): the ceiling-fit
 // check becomes CNF clause subsumption (spec §8.10.3). The load-bearing case
@@ -109,18 +110,25 @@ describe("CFC clause-aware ceiling fit", () => {
     });
   });
 
-  describe("meet stays conservative for clauses", () => {
-    it("flat meet is set intersection (unchanged)", () => {
-      expect(meetCfcObservationCeilings([A, B], [B, C])).toEqual([B]);
+  describe("meet is the pairwise alternative-set union (decision 6)", () => {
+    // Full coverage (incl. the both-direction property test) lives in
+    // cfc-clause-meet.test.ts; these pin the fit-facing behavior.
+    it("flat meet keeps flat-label decisions of the old atom intersection", () => {
+      const met = meetCfcObservationCeilings([A, B], [B, C]);
+      expect(cfcObservationFitsCeiling([B], met)).toBe(true);
+      expect(cfcObservationFitsCeiling([A], met)).toBe(false);
+      expect(cfcObservationFitsCeiling([C], met)).toBe(false);
       expect(meetCfcObservationCeilings(undefined, [A])).toEqual([A]);
       expect(meetCfcObservationCeilings([A], undefined)).toEqual([A]);
     });
 
-    it("an OR-clause survives meet only if both sides list it identically", () => {
+    it("an OR-clause met with itself or a member atom yields the OR-clause", () => {
       const clause = { anyOf: [A, B] };
-      expect(meetCfcObservationCeilings([clause], [clause])).toEqual([clause]);
-      // present on only one side → dropped (more restrictive, fail-safe).
-      expect(meetCfcObservationCeilings([clause], [A])).toEqual([]);
+      expect(meetCfcObservationCeilings([clause], [clause]))
+        .toEqual([normalizeClause(clause)]);
+      // {A,B} ⊆ alts(l) ∧ A ∈ alts(l) ⟺ {A,B} ⊆ alts(l).
+      expect(meetCfcObservationCeilings([clause], [A]))
+        .toEqual([normalizeClause(clause)]);
     });
   });
 });
