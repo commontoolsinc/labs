@@ -23,6 +23,9 @@
     "exclude": ["test/fixtures/"]
   },
   "lint": {
-    "exclude": ["test/fixtures/"]
+    "exclude": ["test/fixtures/"],
+    "plugins": [
+      "../../tools/lint/no-as-unknown-as.ts"
+    ]
   }
 }

@@ -5,6 +5,9 @@
     "test": "echo 'No tests defined.'"
   },
   "lint": {
+    "plugins": [
+      "../../tools/lint/no-as-unknown-as.ts"
+    ],
     "rules": {
       "exclude": ["ban-types"]
     }

@@ -43,7 +43,7 @@ jobs:
         run: deno fmt --check
 
       - name: 🧹 Lint codebase
-        run: deno lint
+        run: deno task lint
 
       # This is the only type check for the paths listed in tasks/check.sh:
       # the test jobs in this workflow and the package test tasks run with

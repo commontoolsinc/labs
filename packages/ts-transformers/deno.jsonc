@@ -26,6 +26,7 @@
       "./test/fixtures/**/*.expected.tsx"
     ],
     "plugins": [
+      "../../tools/lint/no-as-unknown-as.ts",
       "./lint-plugins/no-node-get-text.ts"
     ]
   }
