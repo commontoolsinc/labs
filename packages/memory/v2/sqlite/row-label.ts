@@ -9,10 +9,12 @@
 // commit, and read re-derivation. There is deliberately NO acting-principal
 // term (a read-time `currentUser()` would resolve to the *reader* — in an
 // OR-clause that self-grants access; the acting user belongs in the result
-// ceiling). `any(...)` (one authored OR-clause) serializes but is REJECTED by
-// validation until the runtime ships the clause-aware label profile (CFC spec
-// §18.5.3 rule 3) — authored OR semantics is never silently lowered to the
-// conjunctive form, and a smuggled `anyOf` fails closed at evaluation too.
+// ceiling). `any(...)` evaluates to one authored OR-clause `{anyOf:[…]}` — any
+// single alternative can read (CFC spec §18.5.3 / §3.1.8, Epic E1). The
+// runner's clause-aware label profile enforces subsumption at the boundary and
+// rejects non-principal-like alternatives (Caveat/Expires); this evaluator
+// keeps the disjunction structural, never silently lowered to conjunctive
+// atoms.
 //
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
@@ -243,10 +245,24 @@ function regexLintReason(source: string): string | undefined {
   return undefined;
 }
 
-const ANY_REJECTION =
-  "any() requires the clause-aware label profile (CFC spec §18.5.3 rule 3) " +
-  "— an authored OR-clause is not enforceable on this runtime and is never " +
-  "silently lowered to the conjunctive form; use all() for now";
+// Validate an `any(...)` node: every alternative must be a valid confidentiality
+// term (Epic E1). Atom-shape restrictions on alternatives (principal-like only;
+// no Caveat/Expires) are enforced runner-side at the boundary (§3.1.8), so this
+// only checks structural well-formedness of each alternative.
+function validateConfAnyOf(
+  node: Record<string, unknown>,
+  columns: ReadonlySet<string>,
+): string | undefined {
+  const terms = node.anyOf;
+  if (!Array.isArray(terms) || terms.length === 0) {
+    return "any() needs at least one alternative";
+  }
+  for (const t of terms) {
+    const r = validateConfTerm(t, columns);
+    if (r) return r;
+  }
+  return undefined;
+}
 
 function validateMatchNode(
   node: unknown,
@@ -308,7 +324,7 @@ function validateConfTerm(
   columns: ReadonlySet<string>,
 ): string | undefined {
   if (!isRecord(node)) return "malformed confidentiality term";
-  if ("anyOf" in node) return ANY_REJECTION;
+  if ("anyOf" in node) return validateConfAnyOf(node, columns);
   if ("intersect" in node) {
     return "intersect() is integrity-only (the trust-floor meet); " +
       "confidentiality combines by all() — and any() once OR-clauses land";
@@ -340,7 +356,7 @@ function validateConfExpr(
   columns: ReadonlySet<string>,
 ): string | undefined {
   if (!isRecord(node)) return "malformed confidentiality expression";
-  if ("anyOf" in node) return ANY_REJECTION;
+  if ("anyOf" in node) return validateConfAnyOf(node, columns);
   if ("allOf" in node) {
     const terms = node.allOf;
     if (!Array.isArray(terms) || terms.length === 0) {
@@ -580,10 +596,16 @@ function evalConf(
 ): unknown[] {
   if (!isRecord(node)) return fail("malformed confidentiality term");
   if ("anyOf" in node) {
-    return fail(
-      "anyOf (authored OR-clause) is not evaluable on this runtime — " +
-        "fail closed, never flattened (CFC spec §18.5.3 rule 4)",
-    );
+    const terms = node.anyOf;
+    if (!Array.isArray(terms)) return fail("malformed any()");
+    // One OR-clause: the alternatives are the union of what each term
+    // evaluates to (a `principal(match)` may yield several). The clause is
+    // ONE element of the row's conjunctive confidentiality list, so an
+    // enclosing `all(...)` concatenates it with sibling clauses
+    // (`all(any(A,B), C)` → `[{anyOf:[A,B]}, C]` = (A∨B)∧C). Kept structural,
+    // never flattened into bare atoms (Epic E1, CFC spec §3.1.8).
+    const alternatives = terms.flatMap((t) => evalConf(t, row, ctx));
+    return [{ anyOf: alternatives }];
   }
   if ("allOf" in node) {
     const terms = node.allOf;

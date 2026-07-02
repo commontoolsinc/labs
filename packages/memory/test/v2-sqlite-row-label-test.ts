@@ -131,17 +131,26 @@ Deno.test("match() forces the global flag so split-on-match works", () => {
 // Fail-closed at authoring (table() throws)
 // ---------------------------------------------------------------------------
 
-Deno.test("any() errors at table() time until the clause-aware profile lands", () => {
-  assertThrows(
-    () =>
-      table(EMAIL_COLUMNS, (f) => ({
-        confidentiality: any(
-          principal("mailto", match(f.from, ADDR)),
-          dbOwner(),
-        ),
-      })),
-    TypeError,
-    "any(",
+Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
+  // any() no longer throws at table() time — it produces an authored OR-clause
+  // the runner's clause-aware profile enforces by subsumption.
+  const schema = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  }));
+  const spec = schema.rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(spec, Object.keys(EMAIL_COLUMNS)),
+    undefined,
+  );
+  // An any() with no alternatives is rejected.
+  assert(
+    typeof validateRowLabelSpec(
+      { version: 1, confidentiality: { anyOf: [] } } as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ) === "string",
   );
 });
 
@@ -235,13 +244,34 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
     validateRowLabelSpec(good, Object.keys(EMAIL_COLUMNS)),
     undefined,
   );
-  // anyOf smuggled over the wire is rejected, not silently flattened.
-  const smuggled = JSON.parse(JSON.stringify(good)) as RowLabelSpec;
-  (smuggled as { confidentiality: unknown }).confidentiality = {
-    anyOf: [{ dbOwner: true }],
-  };
+  // A well-formed anyOf over the wire now validates (Epic E1)...
+  const withClause = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(
+      JSON.parse(JSON.stringify(withClause)) as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ),
+    undefined,
+  );
+  // ...but a malformed alternative (unknown column) is still rejected.
+  const badClause = {
+    version: 1,
+    confidentiality: {
+      anyOf: [{
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "nonesuch", source: ADDR.source, flags: "g" } },
+        },
+      }],
+    },
+  } as unknown as RowLabelSpec;
   assert(
-    typeof validateRowLabelSpec(smuggled, Object.keys(EMAIL_COLUMNS)) ===
+    typeof validateRowLabelSpec(badClause, Object.keys(EMAIL_COLUMNS)) ===
       "string",
   );
   // Unknown column in a wire spec is rejected.
@@ -469,12 +499,39 @@ Deno.test("dbOwner() with no owner in ctx fails closed", () => {
   );
 });
 
-Deno.test("an anyOf node reaching the evaluator fails closed (never silently flattened)", () => {
-  const spec: RowLabelSpec = {
-    version: 1,
-    confidentiality: { anyOf: [{ dbOwner: true }] } as never,
-  };
-  expectError(spec, {}, { dbOwner: OWNER }, "anyOf");
+Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
+  // any(dbOwner ∨ from-participants): the row is readable by the owner OR any
+  // sender — ONE OR-clause, not flattened into bare atoms.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(spec, { from: "alice@a.example" }, {
+    dbOwner: OWNER,
+  });
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+  ]);
+});
+
+Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
+  // all(any(owner ∨ from), to-participants) → (owner∨from) ∧ to.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      principal("mailto", match(f.to, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(
+    spec,
+    { from: "alice@a.example", to: "bob@example.com" },
+    { dbOwner: OWNER },
+  );
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+    "did:mailto:bob@example.com",
+  ]);
 });
 
 Deno.test("an unknown op reaching the evaluator fails closed", () => {
