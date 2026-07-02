@@ -126,11 +126,17 @@ export function createRuntimeClientOptions({
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
-  // Epic H1 (docs/plans/cfc-future-work-implementation.md): shell hosts run
-  // the flow-label dial at "observe" — derive the per-tx conservative join
-  // and emit diagnostics without persisting — as the measurement stage
-  // before flipping to "persist" (H2).
-  cfcFlowLabels = "observe",
+  // Epic H2 (docs/plans/cfc-future-work-implementation.md): shell hosts run the
+  // flow-label dial at "persist" — the per-tx conservative join is derived AND
+  // written as a `derived` label component on every value write. This
+  // activates inv-9 (flow-path confidentiality) in real shell deployments:
+  // reading labeled data and writing a derived value no longer launders the
+  // label away. Safe to persist because re-derivation is idempotent (SC-11:
+  // an unchanged label writes no envelope — see prepare.ts) so a rerun that
+  // reads the same inputs does not churn the ["cfc"] doc; replace-on-overwrite
+  // (§8.12.8) keeps the derived component tracking the current value rather
+  // than ratcheting forever. H1 shipped "observe" as the measurement stage.
+  cfcFlowLabels = "persist",
   trustSnapshot,
   forwardWorkerConsole,
 }: {

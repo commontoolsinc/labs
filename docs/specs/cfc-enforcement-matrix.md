@@ -94,10 +94,9 @@ dial is not yet producing. The states a deployment is expected to pass through:
 | State | enforcement | flow | write-floor | Meaning |
 |---|---|---|---|---|
 | **Operator / toolshed** | `disabled` | `off` | `off` | CFC descriptive only; provenance mints run, nothing rejects. |
-| **Shell today** | `enforce-explicit` | `observe` | `off` | Explicit checks enforce; flow derivation measured (H1), not persisted; floor not yet dialed. |
-| **Shell + floor observe** | `enforce-explicit` | `observe` | `observe` | Add the write floor as diagnostics (D3 dial-up step). |
-| **Shell + floor enforce** | `enforce-explicit` | `observe` | `enforce` | Floor rejects; sound at flow-observe (floor credits no flow meet). |
-| **Flow persist** | `enforce-explicit` | `persist` | `enforce` | Derived labels now stored (H2); inv-9 active; floor now also *complete* on flow-endorsed writes. |
+| **Shell today** | `enforce-explicit` | `persist` | `off` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
+| **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | Add the write floor as diagnostics (D3 dial-up step). |
+| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | Floor rejects; complete on flow-endorsed writes (flow persists). |
 | **Strict** | `enforce-strict` | `persist` | `enforce` | Missing-policy and writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b). The end state. |
 
 **Non-conforming** examples (a linter/deploy-check should reject): any
@@ -142,4 +141,4 @@ Grounded in the three implemented dials — `cfcEnforcementMode`
 `cfcWriteFloor` (D3, #4479) — plus the SC-13 rollout constraint in
 `cfc-spec-changes.md` and the current shell posture
 ([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
-`enforce-explicit` + flow `observe`).
+`enforce-explicit` + flow `persist`, H2).

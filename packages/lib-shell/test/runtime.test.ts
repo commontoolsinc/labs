@@ -297,9 +297,11 @@ describe("RuntimeInternals", () => {
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-    // Epic H1: shell hosts run the flow-label dial at "observe" by default —
-    // the measurement stage before "persist" (H2).
-    expect(options.cfcFlowLabels).toBe("observe");
+    // Epic H2: shell hosts run the flow-label dial at "persist" by default —
+    // derived label components are written on every value write, activating
+    // inv-9. H1 shipped "observe" (measurement); H2 flips to "persist" now that
+    // re-derivation is idempotent (SC-11).
+    expect(options.cfcFlowLabels).toBe("persist");
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

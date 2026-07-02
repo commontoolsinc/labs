@@ -355,6 +355,96 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
+  it("SC-11: re-deriving an unchanged label writes no envelope (idempotent)", async () => {
+    // The load-bearing prereq for cfcFlowLabels:"persist" — a rerun that reads
+    // the same inputs derives the same labels and must NOT rewrite the ["cfc"]
+    // doc (which would bump the revision and churn sync/conflict every
+    // recompute). Observed directly: the second, identical derivation records
+    // no write to the target's ["cfc"] path.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["secret"], label: { confidentiality: ["x"] } }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const deriveOnce = () => {
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const target = runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-target",
+          undefined,
+          tx,
+        );
+        target.set({ note: raw.secret });
+        tx.prepareCfc();
+        const targetId = target.getAsNormalizedFullLink().id;
+        const wroteCfc = [...(tx.getWriteDetails?.(signer.did()) ?? [])].some(
+          (w) => w.address.id === targetId && w.address.path[0] === "cfc",
+        );
+        return { tx, targetId, wroteCfc };
+      };
+
+      // First derivation: the envelope IS written (a real derived component).
+      const first = deriveOnce();
+      expect(first.wroteCfc).toBe(true);
+      expect((await first.tx.commit()).ok).toBeDefined();
+      expect(
+        replicaEntries(storageManager, first.targetId).find((e) =>
+          e.origin === "derived"
+        )?.label.confidentiality,
+      ).toContainEqual("x");
+
+      // Identical re-derivation: the envelope write is SKIPPED (idempotent).
+      const second = deriveOnce();
+      expect(second.wroteCfc).toBe(false);
+      expect((await second.tx.commit()).ok).toBeDefined();
+      // ...and the stored label is unchanged.
+      expect(
+        replicaEntries(storageManager, second.targetId).find((e) =>
+          e.origin === "derived"
+        )?.label.confidentiality,
+      ).toContainEqual("x");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   // A2: trigger reads (§8.9.2). The decision to run was influenced by the
   // triggering change even when the run never reads the changed value, so
   // its labels join the derivation.
