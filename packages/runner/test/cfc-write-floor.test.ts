@@ -595,6 +595,57 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
+  it("a plain sibling write next to an endorsed link child still fails the container floor", async () => {
+    // Descendant-only mixed write under a floored CONTAINER: one child gets an
+    // endorsed link, a sibling gets plain data in the same tx. The endorsed
+    // link contribution must not launder the plain sibling — the value
+    // contribution (empty integrity) fails the floor (cubic review: the
+    // pure-link classification must not skip the value credit here).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(runtime, "wf-mixed-src", "endorsed-child", {
+        integrity: [ADMIN_ATOM],
+      });
+      const containerFloor = {
+        type: "object",
+        properties: {
+          out: {
+            type: "object",
+            ifc: { requiredIntegrity: [ADMIN_ATOM] },
+            properties: {
+              a: { type: "string" },
+              b: { type: "string" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const src = runtime.getCell(signer.did(), "wf-mixed-src", undefined, tx);
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-mixed-sink",
+        containerFloor,
+        tx,
+      );
+      sink.set({
+        out: { a: src as unknown as string, b: "plain-unendorsed" },
+      });
+      // An unrelated doc written in the same tx: the floor's write enumeration
+      // must scope to the floored target, not sweep the whole transaction.
+      runtime.getCell(signer.did(), "wf-mixed-unrelated", undefined, tx)
+        .set("elsewhere");
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed at /out",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("clearing a floor-declaring path (delete) is not a floored write", async () => {
     // Establish the floor field with an endorsed value, then delete it. A
     // delete writes no value at the path, so the floor (which governs values,

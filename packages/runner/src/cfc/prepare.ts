@@ -3157,6 +3157,37 @@ const verifySinkRequestCeilings = (
   return reasons;
 };
 
+// Applied write paths at/under `path` on this target, from the storage-level
+// write details. Used by the write floor to detect plain-data descendant
+// writes that link contributions do not cover. Deliberately NOT the
+// reactivity log (`ifcEntryAppliesToAttemptedWrite`'s second source): an
+// attempted-but-unapplied write lands no value — the floor's per-path value
+// probe excludes it anyway — and the structural skip decision still falls
+// back to `ifcEntryAppliesToAttemptedWrite`, which consults the log.
+const attemptedWritePathsUnder = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): (readonly string[])[] => {
+  const out: (readonly string[])[] = [];
+  for (const write of tx.getWriteDetails?.(target.space) ?? []) {
+    if (
+      write.address.id !== target.id ||
+      normalizeCellScope(write.address.scope) !== target.scope ||
+      write.address.path[0] !== "value"
+    ) {
+      continue;
+    }
+    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+    if (concretePathHasPrefix(writePath, path)) out.push(writePath);
+  }
+  return out;
+};
+
 /**
  * Epic D3 — the write-side `requiredIntegrity` FLOOR (§8.12.4.1 / SC-18),
  * dual of the read-side gate in `verifyInputRequirements`: where that gate
@@ -3216,20 +3247,34 @@ const verifyWriteFloor = (
       : [];
     if (floor.length === 0) continue;
     if (entry.path.includes("*")) continue;
-    // A link written at a strict ANCESTOR of the floor path swaps the whole
-    // container: the value now living at the floor path is the linked source's
-    // value at the corresponding nested path. This case must be checked even
-    // when `ifcEntryAppliesToAttemptedWrite` is false — for a fresh doc the
-    // nested value reconstructs as `undefined` through the link and the entry
-    // would otherwise be SKIPPED, letting an unendorsed linked child enter a
-    // floor-protected slot unchecked (codex/cubic review).
+    // Floor applicability is STRUCTURAL — did anything land at/under the floor
+    // path, or does a link cover it? It must never hinge solely on the
+    // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
+    // matcher can return false for values that genuinely landed (e.g. a nested
+    // link sigil at a typed slot) and would silently skip the floor — letting
+    // unendorsed data through (review). The value-conditioned check remains
+    // only as a widening fallback for ancestor-write shapes the structural
+    // sources miss; over-applying a floor to a non-matching union arm
+    // over-rejects (fail-closed), never leaks.
+    const linksHere = ctx.linkWriteInputs.filter((input) =>
+      concretePathHasPrefix(
+        canonicalizeLogicalPath(input.target.path),
+        entry.path,
+      )
+    );
+    // A link written at a strict ANCESTOR swaps the whole container: the value
+    // now living at the floor path is the linked source's value at the
+    // corresponding nested path (for a fresh doc it reconstructs as
+    // `undefined`, so this must not depend on the value matcher either).
     const ancestorLinks = ctx.linkWriteInputs.filter((input) => {
       const linkPath = canonicalizeLogicalPath(input.target.path);
       return linkPath.length < entry.path.length &&
         concretePathHasPrefix(entry.path, linkPath);
     });
+    const writesUnder = attemptedWritePathsUnder(tx, target, entry.path);
     if (
-      ancestorLinks.length === 0 &&
+      linksHere.length === 0 && ancestorLinks.length === 0 &&
+      writesUnder.length === 0 &&
       !ifcEntryAppliesToAttemptedWrite(
         tx,
         target,
@@ -3252,12 +3297,6 @@ const verifyWriteFloor = (
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    const linksHere = ctx.linkWriteInputs.filter((input) =>
-      concretePathHasPrefix(
-        canonicalizeLogicalPath(input.target.path),
-        entry.path,
-      )
-    );
     const contributions: (readonly unknown[])[] = [];
     for (const input of linksHere) {
       const derived = derivePersistedLinkLabel(
@@ -3297,17 +3336,39 @@ const verifyWriteFloor = (
       contributions.push(derived.label?.integrity ?? []);
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
-    // A pure-link value at the path is judged by its per-link contributions
-    // alone. Anything else — plain/mixed data, or an unreconstructable
-    // descendant-only write (value undefined ⇒ `isPureLinkStructure` true, so
-    // this fires only when no link contribution was recorded) — is a value
-    // write that must satisfy the floor from base + the flow meet. Fail-closed:
-    // a container floor whose links ride alongside plain siblings is treated as
-    // a value write (over-enforcing, never under).
-    // `valueWritten` is true whenever this isn't a pure-link write — including
-    // the no-contribution case (no links recorded), so `contributions` is
-    // always non-empty past this point and the floor is always evaluated.
-    const valueWritten = !isPureLinkStructure(written) ||
+    // A value contribution exists when plain data lands at/under the floor
+    // path, judged three ways (any one suffices, fail-closed):
+    // - the reconstructed value at the path is not pure link structure
+    //   (plain/mixed data written at or above the path);
+    // - some attempted write at/under the path carries a value and is not
+    //   covered by a link input — the descendant-only mixed case (one child a
+    //   link, a sibling plain data) where the parent may reconstruct as
+    //   pure-link or undefined and would otherwise be judged by the link
+    //   contributions alone (review). The per-path value probe keeps DELETE
+    //   details (no value) out;
+    // - nothing else contributed at all (a value-shaped write with no link
+    //   inputs — e.g. a raw sigil smuggled without link policy inputs), so the
+    //   floor is still evaluated, fail-closed.
+    const descendantValueWrite = writesUnder.some((writePath) =>
+      !linksHere.some((input) =>
+        concretePathHasPrefix(
+          writePath,
+          canonicalizeLogicalPath(input.target.path),
+        )
+      ) &&
+      writeValueForTarget(tx, { ...target, path: writePath }) !== undefined
+    );
+    // Nothing landed anywhere: a pure delete/clear — absence is not a floored
+    // value (the floor governs values written, not removals).
+    if (
+      written === undefined && !descendantValueWrite &&
+      contributions.length === 0
+    ) {
+      continue;
+    }
+    const valueWritten =
+      (written !== undefined && !isPureLinkStructure(written)) ||
+      descendantValueWrite ||
       contributions.length === 0;
     if (valueWritten) contributions.push(ctx.flowIntegrity);
 
