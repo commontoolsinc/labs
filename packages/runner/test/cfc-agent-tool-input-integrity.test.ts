@@ -1,12 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { enableMockMode } from "@commonfabric/llm/client";
 import type { JSONSchema } from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 
@@ -190,6 +192,64 @@ async function setupSendMail(
     };
   };
 
+  // Reproduce the D1 stamp exactly as llm-dialog mints it: a builtin-identity
+  // push of a message object through an item schema carrying ifc.addIntegrity
+  // [LlmDerived] (see cfc-llm-derived-stamp.test.ts). The stored tool-result
+  // message ends up with REAL, positive integrity — just not the kernel atom.
+  // Returns a by-reference link to the stamped message element itself (the
+  // label view surfaces the stamp at the element node, not its children — a
+  // child-path reference would carry an empty view and be refused as an
+  // unlabeled reference, which the plain-ref test already covers).
+  const seedLlmDerivedRecipient = async (name: string, value: string) => {
+    const messageSchema = {
+      type: "object",
+      properties: {
+        role: { type: "string" },
+        content: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+    const stampingSchema = {
+      type: "array",
+      items: {
+        ...messageSchema,
+        ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+      },
+    } as const satisfies JSONSchema;
+    const seedTx = runtime.edit();
+    seedTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "llm-dialog",
+    });
+    const list = runtime.getCell(space, name, stampingSchema, seedTx);
+    list.push({ role: "tool", content: value });
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+
+    // Premise check ON THE LINKED CELL: the stamp really landed — the refusal
+    // the caller asserts must come from atom MISMATCH, not from an
+    // accidentally-empty label (which the plain-literal tests already cover).
+    const readTx = runtime.edit();
+    const messageCell = runtime.getCell(
+      space,
+      name,
+      { type: "array", items: messageSchema } as const satisfies JSONSchema,
+      readTx,
+    ).key(0);
+    const view = cfcLabelViewForCell(messageCell);
+    const integrity = (view?.entries ?? []).flatMap(
+      (entry) => entry.label.integrity ?? [],
+    );
+    expect(integrity).toContainEqual(cfcAtom.llmDerived());
+    const link = createLLMFriendlyLink(
+      messageCell.getAsNormalizedFullLink(),
+      space,
+    );
+    readTx.commit();
+    return { "@link": link };
+  };
+
   // The integrity-less twin of seedKernelRecipient: a plain stored value with
   // no label at all, referenced the same way.
   const seedPlainRecipient = async (name: string, value: string) => {
@@ -221,6 +281,7 @@ async function setupSendMail(
     sentEmails,
     injectedWasSent,
     seedKernelRecipient,
+    seedLlmDerivedRecipient,
     seedPlainRecipient,
     dispose,
   };
@@ -257,6 +318,30 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       });
       const emails = await t.sentEmails();
       expect(emails.map((e) => e.recipient)).toEqual(["john@example.org"]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("a tool result stamped LlmDerived cannot satisfy a requiredIntegrity floor (D1↔D2)", async () => {
+    // The composition guard (spec test-plan item 3): D1 gives model output
+    // POSITIVE integrity — the LlmDerived provenance stamp — and that stamp
+    // must not satisfy a D2 floor. Guards against the gate degrading into
+    // "carries any integrity" membership: a model-laundered value passed by
+    // reference to its own stamped tool-result doc is refused exactly like a
+    // literal, because LlmDerived is not the required kernel atom.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const llmDerivedRef = await t.seedLlmDerivedRecipient(
+        "llm-derived-tool-result",
+        "bob@evil.org",
+      );
+      await t.sendCall({
+        recipient: llmDerivedRef,
+        subject: "exfil",
+        body: "stuff",
+      });
+      expect(await t.sentEmails()).toEqual([]);
     } finally {
       await t.dispose();
     }
