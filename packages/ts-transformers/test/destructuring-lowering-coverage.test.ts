@@ -105,6 +105,36 @@ function printType(node: ts.TypeNode, sourceFile: ts.SourceFile): string {
   ).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Assert that `node` is a type-literal with a single property signature whose
+ * name (as `.text`) and numeric-literal value match. Pins the lowered default
+ * type on the returned AST node rather than on its printed text.
+ */
+function assertSingleNumericProp(
+  node: ts.TypeNode,
+  name: string,
+  value: string,
+): void {
+  assert(ts.isTypeLiteralNode(node), "expected a type literal");
+  assertEquals(node.members.length, 1);
+  const member = node.members[0]!;
+  assert(ts.isPropertySignature(member), "expected a property signature");
+  assert(
+    ts.isNumericLiteral(member.name) || ts.isStringLiteral(member.name),
+    "expected a numeric or string property name",
+  );
+  assertEquals(member.name.text, name);
+  assert(
+    member.type && ts.isLiteralTypeNode(member.type),
+    "expected a literal type",
+  );
+  assert(
+    ts.isNumericLiteral(member.type.literal),
+    "expected a numeric literal type value",
+  );
+  assertEquals(member.type.literal.text, value);
+}
+
 Deno.test("getStaticDefaultTypeNode lowers a bare bigint literal to its literal type", () => {
   const { sourceFile, checker } = createProgram("const big = 7n;");
   const context = testContext(checker);
@@ -163,7 +193,7 @@ Deno.test("getStaticDefaultTypeNode lowers a numeric object key and rejects a co
     context,
   );
   assert(numeric);
-  assertStringIncludes(printType(numeric, sourceFile), "3: 1;");
+  assertSingleNumericProp(numeric, "3", "1");
 
   // Computed property name is not a supported key kind, so the object is
   // rejected wholesale.
@@ -193,8 +223,7 @@ Deno.test("getStaticDefaultTypeNode lowers a no-substitution-template object key
 
   const typeNode = getStaticDefaultTypeNode(objectLiteral, context);
   assert(typeNode);
-  const blank = ts.createSourceFile("/x.ts", "", ts.ScriptTarget.ES2020, true);
-  assertStringIncludes(printType(typeNode, blank), '"tpl": 2;');
+  assertSingleNumericProp(typeNode, "tpl", "2");
 });
 
 Deno.test("getStaticDefaultTypeNode rejects an object whose property value is non-static", () => {

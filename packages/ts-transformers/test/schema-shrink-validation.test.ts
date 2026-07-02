@@ -1,60 +1,66 @@
-import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertGreater,
+  assertStringIncludes,
+} from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { emittedSchemas, parseModule } from "./transformed-ast.ts";
+
+/** Evaluated emitted schema object literals from transformed output, in order. */
+function schemasOf(output: string): Record<string, unknown>[] {
+  return emittedSchemas(parseModule(output));
+}
 
 /**
- * Extracts JSON schema literals from transformed output.
- * Schemas appear as either:
- * - `{ type: "object", ... } as const satisfies __cfHelpers.JSONSchema`
- * - `true as const satisfies __cfHelpers.JSONSchema`
- * - `false as const satisfies __cfHelpers.JSONSchema`
- * Returns them in order of appearance.
+ * Every property key that appears anywhere in a JSON schema, walking into
+ * `properties`, `items`, `additionalProperties`, `anyOf`/`allOf`/`oneOf`, and
+ * `$defs`. Lets a test assert that a field survived (or was dropped from)
+ * schema shrinking without matching printed text.
  */
-function extractSchemas(output: string): string[] {
-  const schemas: string[] = [];
-  const marker = "as const satisfies __cfHelpers.JSONSchema";
-  let searchFrom = 0;
-  while (true) {
-    const markerIdx = output.indexOf(marker, searchFrom);
-    if (markerIdx === -1) break;
-    // Walk backwards from marker to find the schema literal.
-    let start = markerIdx - 1;
-    // Skip whitespace before marker
-    while (start >= 0 && /\s/.test(output[start]!)) start--;
-
-    let schemaText: string | undefined;
-    if (output[start] === "}") {
-      let depth = 1;
-      start--;
-      while (start >= 0 && depth > 0) {
-        if (output[start] === "}") depth++;
-        else if (output[start] === "{") depth--;
-        start--;
-      }
-      start++; // back to the opening brace
-      schemaText = output.slice(start, markerIdx).trim();
-    } else {
-      let tokenStart = start;
-      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
-        tokenStart--;
-      }
-      tokenStart++;
-      const token = output.slice(tokenStart, start + 1).trim();
-      if (token === "true" || token === "false") {
-        schemaText = token;
-      }
+function schemaPropertyNames(schema: unknown): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const element of node) visit(element);
+      return;
     }
-
-    if (!schemaText) {
-      searchFrom = markerIdx + marker.length;
-      continue;
+    if (typeof node !== "object" || node === null) return;
+    const record = node as Record<string, unknown>;
+    const properties = record.properties;
+    if (typeof properties === "object" && properties !== null) {
+      for (const key of Object.keys(properties)) names.add(key);
     }
+    for (const value of Object.values(record)) visit(value);
+  };
+  visit(schema);
+  return names;
+}
 
-    schemas.push(schemaText);
-    searchFrom = markerIdx + marker.length;
-  }
-  return schemas;
+/**
+ * True when a schema preserves `undefined` as a union member — either as an
+ * `anyOf` entry `{ type: "undefined" }` or as `"undefined"` inside a
+ * `type: [...]` array.
+ */
+function hasUndefinedMember(schema: unknown): boolean {
+  let found = false;
+  const visit = (node: unknown): void => {
+    if (found) return;
+    if (Array.isArray(node)) {
+      for (const element of node) visit(element);
+      return;
+    }
+    if (typeof node !== "object" || node === null) return;
+    const record = node as Record<string, unknown>;
+    const type = record.type;
+    if (type === "undefined") found = true;
+    if (Array.isArray(type) && type.includes("undefined")) found = true;
+    for (const value of Object.values(record)) visit(value);
+  };
+  visit(schema);
+  return found;
 }
 
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
@@ -737,8 +743,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
       assertEquals(
         schemasTA,
         schemasInline,
@@ -789,17 +795,15 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
-      // Both event schemas should contain "undefined" (not stripped)
-      assertEquals(
-        schemasTA[0]!.includes('"undefined"'),
-        true,
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
+      // Both event schemas should preserve `undefined` as a union member.
+      assert(
+        hasUndefinedMember(schemasTA[0]!),
         "type-arg event schema should preserve undefined",
       );
-      assertEquals(
-        schemasInline[0]!.includes('"undefined"'),
-        true,
+      assert(
+        hasUndefinedMember(schemasInline[0]!),
         "inline event schema should preserve undefined",
       );
       // State schemas (second schema) should match exactly
@@ -854,17 +858,15 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
-      // Both event schemas should contain "undefined" (not stripped)
-      assertEquals(
-        schemasTA[0]!.includes('"undefined"'),
-        true,
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
+      // Both event schemas should preserve `undefined` as a union member.
+      assert(
+        hasUndefinedMember(schemasTA[0]!),
         "type-arg event schema should preserve undefined",
       );
-      assertEquals(
-        schemasInline[0]!.includes('"undefined"'),
-        true,
+      assert(
+        hasUndefinedMember(schemasInline[0]!),
         "inline event schema should preserve undefined",
       );
       // State schemas (second schema) should match exactly
@@ -909,8 +911,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         `lift inline had shrink errors: ${fmtErrors(rInline.diagnostics)}`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
       assertEquals(
         schemasTA,
         schemasInline,
@@ -955,17 +957,15 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
-      // Both input schemas should contain "undefined" (not stripped)
-      assertEquals(
-        schemasTA[0]!.includes('"undefined"'),
-        true,
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
+      // Both input schemas should preserve `undefined` as a union member.
+      assert(
+        hasUndefinedMember(schemasTA[0]!),
         "type-arg input schema should preserve undefined",
       );
-      assertEquals(
-        schemasInline[0]!.includes('"undefined"'),
-        true,
+      assert(
+        hasUndefinedMember(schemasInline[0]!),
         "inline input schema should preserve undefined",
       );
       // Result schemas (second schema) should match exactly
@@ -1016,8 +1016,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
       assertEquals(
         schemasTA,
         schemasInline,
@@ -1059,8 +1059,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         `pattern inline had shrink errors: ${fmtErrors(rInline.diagnostics)}`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
       assertGreater(
         schemasTA.length,
         0,
@@ -1118,8 +1118,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      const schemasTA = extractSchemas(rTA.output);
-      const schemasInline = extractSchemas(rInline.output);
+      const schemasTA = schemasOf(rTA.output);
+      const schemasInline = schemasOf(rInline.output);
       assertGreater(
         schemasTA.length,
         0,
@@ -1179,14 +1179,19 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      assertStringIncludes(result.output, "stage: {");
-      assertStringIncludes(result.output, "attempts: {");
-      assertStringIncludes(result.output, "accepted: {");
-      assertStringIncludes(result.output, "rejected: {");
-      assertEquals(result.output.includes("stage: true"), false);
-      assertEquals(result.output.includes("attempts: true"), false);
-      assertEquals(result.output.includes("accepted: true"), false);
-      assertEquals(result.output.includes("rejected: true"), false);
+      const snapshotSchema = schemasOf(result.output).find((schema) =>
+        (schema.properties as Record<string, unknown> | undefined)?.stage !==
+          undefined
+      );
+      const props = snapshotSchema?.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      // Each object-literal input property carries its own value schema, not
+      // the widened `true` schema.
+      assertEquals(props?.stage, { type: "string" });
+      assertEquals(props?.attempts, { type: "number" });
+      assertEquals(props?.accepted, { type: "number" });
+      assertEquals(props?.rejected, { type: "number" });
     },
   );
 
@@ -1228,12 +1233,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "stage");
-      assertStringIncludes(inputSchema, "owner");
-      assertEquals(inputSchema.includes("unused"), false);
-      assertEquals(inputSchema.includes("nested"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("id"));
+      assert(names.has("stage"));
+      assert(names.has("owner"));
+      assert(!names.has("unused"));
+      assert(!names.has("nested"));
     },
   );
 
@@ -1269,9 +1274,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "score");
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("id"));
+      assert(names.has("score"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1310,11 +1316,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "score");
-      assertEquals(inputSchema.includes("name"), false);
-      assertEquals(inputSchema.includes("unused"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("id"));
+      assert(names.has("score"));
+      assert(!names.has("name"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1346,11 +1352,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "label");
-      assertStringIncludes(inputSchema, "capacity");
-      assertEquals(inputSchema.includes("unused"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("id"));
+      assert(names.has("label"));
+      assert(names.has("capacity"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1380,11 +1386,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "components");
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "name");
-      assertEquals(inputSchema.includes("unused"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("components"));
+      assert(names.has("id"));
+      assert(names.has("name"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1418,10 +1424,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "age");
-      assertEquals(inputSchema.includes("unused"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("id"));
+      assert(names.has("age"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1454,11 +1460,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "eligible");
-      assertStringIncludes(inputSchema, "candidate");
-      assertStringIncludes(inputSchema, "id");
-      assertEquals(inputSchema.includes("unused"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("eligible"));
+      assert(names.has("candidate"));
+      assert(names.has("id"));
+      assert(!names.has("unused"));
     },
   );
 
@@ -1494,12 +1500,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "list");
-      assertStringIncludes(inputSchema, "id");
-      assertStringIncludes(inputSchema, "title");
-      assertStringIncludes(inputSchema, "active");
-      assertEquals(inputSchema.includes("owner"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("list"));
+      assert(names.has("id"));
+      assert(names.has("title"));
+      assert(names.has("active"));
+      assert(!names.has("owner"));
     },
   );
 
@@ -1531,11 +1537,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "people");
-      assertStringIncludes(inputSchema, "name");
-      assertStringIncludes(inputSchema, "priorityRank");
-      assertEquals(inputSchema.includes("defaultSpot"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("people"));
+      assert(names.has("name"));
+      assert(names.has("priorityRank"));
+      assert(!names.has("defaultSpot"));
     },
   );
 
@@ -1568,13 +1574,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "people");
-      assertStringIncludes(inputSchema, "active");
-      assertStringIncludes(inputSchema, "name");
-      assertStringIncludes(inputSchema, "priorityRank");
-      assertStringIncludes(inputSchema, "defaultSpot");
-      assertEquals(inputSchema.includes("other"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("people"));
+      assert(names.has("active"));
+      assert(names.has("name"));
+      assert(names.has("priorityRank"));
+      assert(names.has("defaultSpot"));
+      assert(!names.has("other"));
     },
   );
 
@@ -1610,12 +1616,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "people");
-      assertStringIncludes(inputSchema, "active");
-      assertStringIncludes(inputSchema, "name");
-      assertStringIncludes(inputSchema, "priorityRank");
-      assertStringIncludes(inputSchema, "defaultSpot");
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("people"));
+      assert(names.has("active"));
+      assert(names.has("name"));
+      assert(names.has("priorityRank"));
+      assert(names.has("defaultSpot"));
     },
   );
 
@@ -1648,10 +1654,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "notes");
-      assertStringIncludes(inputSchema, "title");
-      assertEquals(inputSchema.includes("body"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("notes"));
+      assert(names.has("title"));
+      assert(!names.has("body"));
     },
   );
 
@@ -1690,11 +1696,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "overloaded");
-      assertStringIncludes(inputSchema, "key");
-      assertEquals(inputSchema.includes("title"), false);
-      assertEquals(inputSchema.includes("limit"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("overloaded"));
+      assert(names.has("key"));
+      assert(!names.has("title"));
+      assert(!names.has("limit"));
     },
   );
 
@@ -1722,9 +1728,9 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "name");
-      assertStringIncludes(inputSchema, "firstItem");
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("name"));
+      assert(names.has("firstItem"));
     },
   );
 
@@ -1750,9 +1756,9 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
-      assertEquals(inputSchema.includes("asOpaque: true"), false);
+      const inputSchema = schemasOf(result.output)[0]!;
+      assertEquals(inputSchema.asCell, ["readonly"]);
+      assertEquals(inputSchema.asOpaque, undefined);
     },
   );
 
@@ -1778,9 +1784,9 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
-      assertEquals(inputSchema.includes("asOpaque: true"), false);
+      const inputSchema = schemasOf(result.output)[0]!;
+      assertEquals(inputSchema.asCell, ["readonly"]);
+      assertEquals(inputSchema.asOpaque, undefined);
     },
   );
 
@@ -1812,14 +1818,21 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertEquals(
-        inputSchema === "true",
-        false,
-        "event schema should not widen to true",
+      const inputSchema = schemasOf(result.output)[0]!;
+      // The event schema keeps its union structure rather than widening to the
+      // `true` schema.
+      assert(
+        Array.isArray(inputSchema.anyOf),
+        "event schema should retain its anyOf union",
       );
-      assertStringIncludes(inputSchema, '"undefined"');
-      assertStringIncludes(inputSchema, "value");
+      assert(
+        hasUndefinedMember(inputSchema),
+        "event schema should preserve undefined",
+      );
+      assert(
+        schemaPropertyNames(inputSchema).has("value"),
+        "event schema should keep the object member's `value` field",
+      );
     },
   );
 
@@ -1849,10 +1862,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "$NAME");
-      assertEquals(inputSchema.includes("metadata"), false);
-      assertEquals(inputSchema.includes("author"), false);
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("$NAME"));
+      assert(!names.has("metadata"));
+      assert(!names.has("author"));
     },
   );
 
@@ -1883,9 +1896,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, "$NAME");
-      assertStringIncludes(inputSchema, '"default": "Untitled"');
+      const inputSchema = schemasOf(result.output)[0]!;
+      const props = inputSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      assert(props?.$NAME !== undefined, "input schema should keep $NAME");
+      assertEquals(props?.$NAME.default, "Untitled");
     },
   );
 
@@ -1911,9 +1927,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'type: "undefined"');
-      assertStringIncludes(inputSchema, 'asCell: ["comparable"]');
+      const inputSchema = schemasOf(result.output)[0]!;
+      assert(
+        hasUndefinedMember(inputSchema),
+        "input schema should preserve undefined",
+      );
+      assertEquals(inputSchema.asCell, ["comparable"]);
     },
   );
 
@@ -1942,9 +1961,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      assertStringIncludes(result.output, 'asCell: ["readonly"]');
-      assertStringIncludes(result.output, '"foo"');
-      assertStringIncludes(result.output, '"bar"');
+      const inputSchema = schemasOf(result.output)[0]!;
+      assertEquals(inputSchema.asCell, ["readonly"]);
+      const names = schemaPropertyNames(inputSchema);
+      assert(names.has("foo"));
+      assert(names.has("bar"));
     },
   );
 
@@ -1972,9 +1993,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      assertStringIncludes(result.output, 'asCell: ["readonly"]');
-      assertStringIncludes(result.output, '"foo"');
-      assertStringIncludes(result.output, '"bar"');
+      const stateSchema = schemasOf(result.output)[1]!;
+      assertEquals(stateSchema.asCell, ["readonly"]);
+      const names = schemaPropertyNames(stateSchema);
+      assert(names.has("foo"));
+      assert(names.has("bar"));
     },
   );
 

@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 import {
   CommonFabricTransformerPipeline,
@@ -7,6 +7,64 @@ import {
 } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { transformSource } from "./utils.ts";
+import { collect, parseModule, patternSchemas } from "./transformed-ast.ts";
+
+/** Every JSX tag name (opening/self-closing) appearing under `root`. */
+function jsxTagNames(root: ts.Node): string[] {
+  const names: string[] = [];
+  const add = (tagName: ts.JsxTagNameExpression): void => {
+    if (ts.isIdentifier(tagName)) names.push(tagName.text);
+  };
+  for (const element of collect(root, ts.isJsxElement)) {
+    add(element.openingElement.tagName);
+  }
+  for (const element of collect(root, ts.isJsxSelfClosingElement)) {
+    add(element.tagName);
+  }
+  return names;
+}
+
+/**
+ * A JSX opening or self-closing element under `root` whose tag is `tag`.
+ * Fails when the count is not exactly one.
+ */
+function soleJsxElement(
+  root: ts.Node,
+  tag: string,
+): ts.JsxOpeningElement | ts.JsxSelfClosingElement {
+  const openings = collect(root, ts.isJsxElement)
+    .map((element) => element.openingElement)
+    .filter((opening) =>
+      ts.isIdentifier(opening.tagName) && opening.tagName.text === tag
+    );
+  const selfClosing = collect(root, ts.isJsxSelfClosingElement).filter((
+    element,
+  ) => ts.isIdentifier(element.tagName) && element.tagName.text === tag);
+  const all = [...openings, ...selfClosing];
+  assertEquals(all.length, 1, `expected exactly one <${tag}>`);
+  return all[0]!;
+}
+
+/**
+ * The value of attribute `name` on a JSX element. Returns `{ literal }` for a
+ * string-literal value, `{ dynamic: true }` for a `{...}` expression value, and
+ * `{}` when the attribute is absent — so a missing, literal, and dynamic
+ * attribute are all distinguishable.
+ */
+function jsxAttr(
+  element: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+  name: string,
+): { literal: string } | { dynamic: true } | Record<string, never> {
+  for (const attr of element.attributes.properties) {
+    if (!ts.isJsxAttribute(attr) || attr.name.getText() !== name) continue;
+    const initializer = attr.initializer;
+    if (initializer && ts.isStringLiteral(initializer)) {
+      return { literal: initializer.text };
+    }
+    return { dynamic: true };
+  }
+  return {};
+}
 
 function createProgram(source: string): {
   program: ts.Program;
@@ -100,20 +158,29 @@ Deno.test(
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(
-      output,
-      '<ct-button data-ui-action="SubmitDirectCommand"',
+    assertEquals(
+      jsxAttr(soleJsxElement(root, "ct-button"), "data-ui-action"),
+      { literal: "SubmitDirectCommand" },
     );
-    assertStringIncludes(
-      output,
-      '<ct-textarea data-ui-surface="PromptPane" data-ui-role="assistant"',
+    const textarea = soleJsxElement(root, "ct-textarea");
+    assertEquals(jsxAttr(textarea, "data-ui-surface"), {
+      literal: "PromptPane",
+    });
+    assertEquals(jsxAttr(textarea, "data-ui-role"), { literal: "assistant" });
+    const card = soleJsxElement(root, "ct-card");
+    assertEquals(jsxAttr(card, "data-ui-disclosure-kind"), {
+      literal: "warning",
+    });
+    const cardChild = (card as ts.JsxOpeningElement).parent as ts.JsxElement;
+    assertEquals(
+      cardChild.children.map((child) => child.getText()).join(""),
+      "Heads up",
     );
-    assertStringIncludes(
-      output,
-      '<ct-card data-ui-disclosure-kind="warning">Heads up</ct-card>',
-    );
-    assertEquals(output.includes("<UiAction"), false);
+    for (const helper of ["UiAction", "UiPromptSlot", "UiDisclosure"]) {
+      assertEquals(jsxTagNames(root).includes(helper), false);
+    }
   },
 );
 
@@ -195,9 +262,12 @@ Deno.test(
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const { output: outputSchema } = patternSchemas(parseModule(output));
 
-    assertStringIncludes(output, "uiContract");
-    assertStringIncludes(output, "SubmitDirectCommand");
+    assertEquals((outputSchema.ifc as Record<string, unknown>).uiContract, {
+      helper: "UiAction",
+      action: "SubmitDirectCommand",
+    });
   },
 );
 
@@ -218,10 +288,18 @@ Deno.test(
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(output, 'data-ui-surface="PromptPane"');
-    assertStringIncludes(output, "data-ui-role={dynamicRole}");
-    assertEquals(output.includes("uiContract"), false);
+    const textarea = soleJsxElement(root, "ct-textarea");
+    assertEquals(jsxAttr(textarea, "data-ui-surface"), {
+      literal: "PromptPane",
+    });
+    assertEquals(jsxAttr(textarea, "data-ui-role"), { dynamic: true });
+    const { output: outputSchema } = patternSchemas(root);
+    assertEquals(
+      (outputSchema.ifc as Record<string, unknown> | undefined)?.uiContract,
+      undefined,
+    );
   },
 );
 
@@ -242,8 +320,11 @@ Deno.test(
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const { output: outputSchema } = patternSchemas(parseModule(output));
 
-    assertStringIncludes(output, "uiContract");
-    assertStringIncludes(output, "SubmitDirectCommand");
+    assertEquals((outputSchema.ifc as Record<string, unknown>).uiContract, {
+      helper: "UiAction",
+      action: "SubmitDirectCommand",
+    });
   },
 );

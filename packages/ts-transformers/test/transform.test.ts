@@ -1,13 +1,42 @@
+import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
-import {
-  assert,
-  assertMatch,
-  assertNotMatch,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { transformFiles } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import {
+  callsMatching,
+  callsNamed,
+  collect,
+  forCauses,
+  hasKeyPathRead,
+  literalToValue,
+  parseModule,
+} from "./transformed-ast.ts";
+
+/**
+ * True when some emitted `.for(...)` call is attached directly to a
+ * `<receiver>.key("<key>")` reactive read — the shape the transformer must
+ * avoid, since a stable cause belongs on the lowered result, not on the raw
+ * property read.
+ */
+function hasForOnKeyRead(root: ts.Node, key: string): boolean {
+  return callsNamed(root, "for").some((call) => {
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return false;
+    const receiver = callee.expression;
+    if (!ts.isCallExpression(receiver)) return false;
+    const receiverCallee = receiver.expression;
+    if (
+      !ts.isPropertyAccessExpression(receiverCallee) ||
+      receiverCallee.name.text !== "key"
+    ) {
+      return false;
+    }
+    const firstArg = receiver.arguments[0];
+    return !!firstArg && ts.isStringLiteralLike(firstArg) &&
+      firstArg.text === key;
+  });
+}
 
 const fixture = `
 import { toSchema } from "commonfabric";
@@ -44,13 +73,24 @@ export function make() {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(
-      main,
-      'const foo = Writable.of(1, {\n        type: "number"\n    } as const satisfies __cfHelpers.JSONSchema).for("foo", true);',
+    const root = parseModule(main);
+    const causes = forCauses(root);
+    assert(causes.includes("foo"));
+    assert(causes.includes("bar"));
+    assert(causes.includes("baz"));
+    assert(!causes.includes("already"));
+
+    // The fresh `Writable.of(1, …)` initializer gains an inferred schema; the
+    // `.for("foo", true)` cause hangs off that `Writable.of` call.
+    const fooFor = callsNamed(root, "for").find((c) =>
+      literalToValue(c.arguments[0]!) === "foo"
     );
-    assertStringIncludes(main, '.for("bar", true);');
-    assertStringIncludes(main, '.for("baz", true);');
-    assert(!main.includes('.for("already", true)'));
+    assert(fooFor);
+    const receiver = (fooFor.expression as ts.PropertyAccessExpression)
+      .expression;
+    assert(ts.isCallExpression(receiver));
+    assertEquals(receiver.arguments.length, 2);
+    assertEquals(literalToValue(receiver.arguments[1]!), { type: "number" });
   });
 
   it("registers cast-wrapped non-exported builder consts in __cfReg (CT-1743)", async () => {
@@ -88,10 +128,18 @@ const openNoCast = handler<
     });
     const main = output["/main.ts"]!;
 
-    const reg = main.match(/__cfReg\(\{([\s\S]*?)\}\)/);
-    assert(reg, "expected a __cfReg registration call in the output");
-    assertStringIncludes(reg[1], "openNoCast"); // positive control
-    assertStringIncludes(reg[1], "openWithCast"); // CT-1743 regression guard
+    const root = parseModule(main);
+    const regCalls = callsNamed(root, "__cfReg");
+    assertEquals(regCalls.length, 1);
+    const arg = regCalls[0]!.arguments[0]!;
+    assert(ts.isObjectLiteralExpression(arg));
+    const keys = arg.properties.map((p) =>
+      p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name))
+        ? p.name.text
+        : undefined
+    );
+    assert(keys.includes("openNoCast")); // positive control
+    assert(keys.includes("openWithCast")); // CT-1743 regression guard
   });
 
   it("adds stable property causes to pattern-owned lowered derives", async () => {
@@ -113,10 +161,11 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     // After CT-1615 Phase 1 the pattern-owned synthesized derive lowers to
     // lift-applied; after CT-1644 Phase 2 the lift call is hoisted to a
     // module-scope const and the result reads as `doubled: __cfLift_N(input)`.
-    assertStringIncludes(main, "const __cfLift_1 = __cfHelpers.lift<");
-    assertMatch(main, /doubled: __cfLift_\d+\(/);
-    assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
-    assertNotMatch(main, /state\.key\("count"\)\.for/);
+    const root = parseModule(main);
+    assertEquals(callsNamed(root, "lift").length, 1);
+    assert(callsMatching(root, /^__cfLift/).length >= 1);
+    assertEquals(forCauses(root), [["__patternResult", "doubled"]]);
+    assert(!hasForOnKeyRead(root, "count"));
   });
 
   it("adds stable nested causes to pattern result cells", async () => {
@@ -139,16 +188,23 @@ export default pattern<{ count: number }>((state) => ({
     });
     const main = output["/main.tsx"]!;
 
-    assertStringIncludes(main, '.for(["__patternResult", "foo"], true)');
-    assertStringIncludes(
-      main,
-      '.for(["__patternResult", "nested", "bar"], true)',
+    const root = parseModule(main);
+    const causes = forCauses(root);
+    assertEquals(
+      causes.find((c) =>
+        Array.isArray(c) && c[0] === "__patternResult" && c[1] === "foo"
+      ),
+      ["__patternResult", "foo"],
     );
-    assertStringIncludes(
-      main,
-      '.for(["__patternResult", "tuple", 0], true)',
+    assertEquals(
+      causes.find((c) => Array.isArray(c) && c[1] === "nested"),
+      ["__patternResult", "nested", "bar"],
     );
-    assertNotMatch(main, /state\.key\("count"\)\.for/);
+    assertEquals(
+      causes.find((c) => Array.isArray(c) && c[1] === "tuple"),
+      ["__patternResult", "tuple", 0],
+    );
+    assert(!hasForOnKeyRead(root, "count"));
   });
 
   it("uses stream-scoped causes for handler result streams", async () => {
@@ -175,15 +231,28 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assertMatch(main, /\.for\(\{\s*stream: "save"\s*\}, true\)/s);
-    assertMatch(
-      main,
-      /\.for\(\{\s*stream: \[\s*"__patternResult",\s*"nested",\s*"cancel"\s*\]\s*\}, true\)/s,
+    const causes = forCauses(parseModule(main));
+    assertEquals(
+      causes.find((c) =>
+        typeof c === "object" && c !== null && !Array.isArray(c) &&
+        (c as Record<string, unknown>).stream === "save"
+      ),
+      { stream: "save" },
     );
-    assertNotMatch(main, /\.for\("save", true\)/);
-    assertNotMatch(
-      main,
-      /\.for\(\["__patternResult", "nested", "cancel"\], true\)/,
+    assertEquals(
+      causes.find((c) =>
+        typeof c === "object" && c !== null && !Array.isArray(c) &&
+        Array.isArray((c as Record<string, unknown>).stream)
+      ),
+      { stream: ["__patternResult", "nested", "cancel"] },
+    );
+    // Streams keep a stream-scoped cause, never a bare string or array path.
+    assert(!causes.includes("save"));
+    assert(
+      !causes.some((c) =>
+        Array.isArray(c) && c[0] === "__patternResult" && c[1] === "nested" &&
+        c[2] === "cancel"
+      ),
     );
   });
 
@@ -207,14 +276,25 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assertStringIncludes(main, '.for("foo", true);');
-    assertStringIncludes(
-      main,
-      'foo: foo.for(["__patternResult", "foo"], true)',
+    const root = parseModule(main);
+    const causes = forCauses(root);
+    assert(causes.includes("foo")); // variable-declaration cause
+    // Both result members re-root onto the `foo` identifier with a nested cause.
+    const rerooted = callsNamed(root, "for").filter((call) => {
+      const callee = call.expression;
+      return ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) && callee.expression.text === "foo";
+    });
+    const rerootedCauses = rerooted.map((c) => literalToValue(c.arguments[0]!));
+    assert(
+      rerootedCauses.some((c) =>
+        Array.isArray(c) && c[0] === "__patternResult" && c[1] === "foo"
+      ),
     );
-    assertStringIncludes(
-      main,
-      'explicit: foo.for(["__patternResult", "explicit"], true)',
+    assert(
+      rerootedCauses.some((c) =>
+        Array.isArray(c) && c[0] === "__patternResult" && c[1] === "explicit"
+      ),
     );
   });
 
@@ -244,10 +324,14 @@ export function make() {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(main, '.for(["foo", "param"], true)');
-    assertStringIncludes(main, '.for(["foo", "nested", "result"], true)');
-    assertStringIncludes(main, '.for(["foo", "tuple", 0], true)');
-    assert(!main.includes('.for(["foo", "already"], true)'));
+    const causes = forCauses(parseModule(main));
+    const arrayEq = (a: unknown, b: unknown[]) =>
+      Array.isArray(a) && a.length === b.length &&
+      a.every((x, i) => x === b[i]);
+    assert(causes.some((c) => arrayEq(c, ["foo", "param"])));
+    assert(causes.some((c) => arrayEq(c, ["foo", "nested", "result"])));
+    assert(causes.some((c) => arrayEq(c, ["foo", "tuple", 0])));
+    assert(!causes.some((c) => arrayEq(c, ["foo", "already"])));
   });
 
   it("does not add positional cause segments for wrapped single object arguments", async () => {
@@ -270,8 +354,12 @@ export function make() {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(main, '.for(["foo", "param"], true)');
-    assert(!main.includes('.for(["foo", 0, "param"], true)'));
+    const causes = forCauses(parseModule(main));
+    const arrayEq = (a: unknown, b: unknown[]) =>
+      Array.isArray(a) && a.length === b.length &&
+      a.every((x, i) => x === b[i]);
+    assert(causes.some((c) => arrayEq(c, ["foo", "param"])));
+    assert(!causes.some((c) => arrayEq(c, ["foo", 0, "param"])));
   });
 
   it("does not retarget plain handler params inside local object initializers", async () => {
@@ -303,8 +391,27 @@ export { runBoth };
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(main, "text: prompt");
-    assertNotMatch(main, /prompt\.for\(/);
+    const root = parseModule(main);
+    // The `text` message field stays bound to the bare `prompt` identifier,
+    // not to a reactive read.
+    const textAssign = collect(root, ts.isPropertyAssignment).find((p) =>
+      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
+      p.name.text === "text" && ts.isIdentifier(p.initializer) &&
+      p.initializer.text === "prompt"
+    );
+    assert(
+      textAssign,
+      "expected `text: prompt` to survive as a bare identifier",
+    );
+    // No stable cause is attached to `prompt`.
+    assert(
+      !callsNamed(root, "for").some((call) => {
+        const callee = call.expression;
+        return ts.isPropertyAccessExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          callee.expression.text === "prompt";
+      }),
+    );
   });
 
   it("does not duplicate stable causes on asserted reactive initializers", async () => {
@@ -328,11 +435,9 @@ export default pattern<{ entries: Default<Entry[], []> }>(({ entries }) => {
     });
     const main = output["/main.tsx"]!;
 
-    const treeCauseCount = main.match(/\.for\("tree", true\)/g)?.length ?? 0;
-    assert(
-      treeCauseCount === 1,
-      `expected one tree cause, found ${treeCauseCount}`,
-    );
+    const treeCauseCount =
+      forCauses(parseModule(main)).filter((c) => c === "tree").length;
+    assertEquals(treeCauseCount, 1);
   });
 
   it("does not add causes to plain array methods in lift callbacks", async () => {
@@ -362,9 +467,14 @@ export const summarize = lift((summaries: Summary[]) => {
     });
     const main = output["/main.ts"]!;
 
-    assert(!main.includes('.for("labels", true)'));
-    assert(!main.includes('.for("active", true)'));
-    assert(!main.includes('.for(["labels"], true)'));
+    const causes = forCauses(parseModule(main));
+    assert(!causes.includes("labels"));
+    assert(!causes.includes("active"));
+    assert(
+      !causes.some((c) =>
+        Array.isArray(c) && c.length === 1 && c[0] === "labels"
+      ),
+    );
   });
 
   it("does not add causes to plain array methods in lowered handler callbacks", async () => {
@@ -392,7 +502,19 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assert(!main.includes('.filter(() => true).for("handlers", true)'));
+    const root = parseModule(main);
+    // No stable cause is attached to a plain `.filter(...)` array read.
+    assert(
+      !callsNamed(root, "for").some((call) => {
+        if (literalToValue(call.arguments[0]!) !== "handlers") return false;
+        const callee = call.expression;
+        if (!ts.isPropertyAccessExpression(callee)) return false;
+        const receiver = callee.expression;
+        return ts.isCallExpression(receiver) &&
+          ts.isPropertyAccessExpression(receiver.expression) &&
+          receiver.expression.name.text === "filter";
+      }),
+    );
   });
 
   it("does not add causes to receiver calls in property access chains", async () => {
@@ -417,8 +539,22 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assert(!main.includes('.for("mentionable", true).result'));
-    assertStringIncludes(main, '.for(["picked", "param"], true)');
+    const root = parseModule(main);
+    // No `.for("mentionable", …)` is inserted mid-chain before `.result`.
+    assert(
+      !callsNamed(root, "for").some((call) => {
+        if (literalToValue(call.arguments[0]!) !== "mentionable") return false;
+        const parent = call.parent;
+        return ts.isPropertyAccessExpression(parent) &&
+          parent.expression === call && parent.name.text === "result";
+      }),
+    );
+    const causes = forCauses(root);
+    assert(
+      causes.some((c) =>
+        Array.isArray(c) && c[0] === "picked" && c[1] === "param"
+      ),
+    );
   });
 
   it("lowers local reactive roots in zero-input pattern bodies", async () => {
@@ -443,11 +579,9 @@ export default pattern<Record<string, never>>(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assertStringIncludes(main, '.for("mentionableWish", true)');
-    assertStringIncludes(
-      main,
-      'const mentionable = mentionableWish.key("result")',
-    );
+    const root = parseModule(main);
+    assert(forCauses(root).includes("mentionableWish"));
+    assert(hasKeyPathRead(root, "result", "mentionableWish"));
   });
 
   it("does not add root causes to pattern factory outputs", async () => {
@@ -471,8 +605,13 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assert(!main.includes('.for("child", true)'));
-    assertStringIncludes(main, '.for(["child", "value"], true)');
+    const causes = forCauses(parseModule(main));
+    assert(!causes.includes("child"));
+    assert(
+      causes.some((c) =>
+        Array.isArray(c) && c[0] === "child" && c[1] === "value"
+      ),
+    );
   });
 
   it("does not re-root pattern factory identifiers in tool descriptors", async () => {
@@ -501,9 +640,36 @@ export default pattern(() => {
     });
     const main = output["/main.tsx"]!;
 
-    assertStringIncludes(main, "pattern: searchWeb");
-    assertStringIncludes(main, "wrappedSearch: patternTool(searchWeb)");
-    assert(!main.includes("searchWeb.for("));
+    const root = parseModule(main);
+    const props = collect(root, ts.isPropertyAssignment);
+    const patternProp = props.find((p) =>
+      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
+      p.name.text === "pattern"
+    );
+    assert(patternProp && ts.isIdentifier(patternProp.initializer));
+    assertEquals(patternProp.initializer.text, "searchWeb");
+    const wrappedProp = props.find((p) =>
+      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
+      p.name.text === "wrappedSearch"
+    );
+    assert(wrappedProp && ts.isCallExpression(wrappedProp.initializer));
+    const wrapCall = wrappedProp.initializer;
+    assert(ts.isIdentifier(wrapCall.expression));
+    assertEquals(wrapCall.expression.text, "patternTool");
+    assert(
+      wrapCall.arguments.length === 1 &&
+        ts.isIdentifier(wrapCall.arguments[0]!) &&
+        wrapCall.arguments[0].text === "searchWeb",
+    );
+    // The pattern factory identifier is never given a stable cause.
+    assert(
+      !callsNamed(root, "for").some((call) => {
+        const callee = call.expression;
+        return ts.isPropertyAccessExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          callee.expression.text === "searchWeb";
+      }),
+    );
   });
 
   it("does not add shared property causes inside dynamic array callbacks", async () => {
@@ -524,7 +690,7 @@ export const build = lift((values: number[]) =>
     });
     const main = output["/main.ts"]!;
 
-    assert(!main.includes('.for("token", true)'));
+    assert(!forCauses(parseModule(main)).includes("token"));
   });
 
   it("transforms by default and supports cf-disable-transform opt-out", async () => {
@@ -538,17 +704,17 @@ export { value };
     const enabledByDefault = await transformFiles({
       "/main.ts": source,
     });
-    assertStringIncludes(
-      enabledByDefault["/main.ts"]!,
-      "__cfHelpers.lift(",
-    );
+    const enabledRoot = parseModule(enabledByDefault["/main.ts"]!);
+    assert(callsNamed(enabledRoot, "lift").length >= 1);
+    assertEquals(callsNamed(enabledRoot, "computed").length, 0);
 
     const disabled = await transformFiles({
       "/main.ts": `/// <cf-disable-transform />\n${source}`,
     });
 
-    assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
-    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.lift/);
+    const disabledRoot = parseModule(disabled["/main.ts"]!);
+    assertEquals(callsNamed(disabledRoot, "computed").length, 1);
+    assertEquals(callsNamed(disabledRoot, "lift").length, 0);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {
@@ -580,41 +746,34 @@ export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(
-      main,
-      'const model = __cfHelpers.__cf_data(schema({ type: "string" } as const));',
+    const root = parseModule(main);
+    // The variable names whose top-level initializer is a `__cf_data(...)` wrap.
+    const wrapped = new Set(
+      collect(root, ts.isVariableDeclaration).filter((d) =>
+        d.initializer && ts.isCallExpression(d.initializer) &&
+        ts.isPropertyAccessExpression(d.initializer.expression) &&
+        d.initializer.expression.name.text === "__cf_data"
+      ).map((d) => ts.isIdentifier(d.name) ? d.name.text : undefined),
     );
-    assertStringIncludes(
-      main,
-      'const lookup = __cfHelpers.__cf_data((() => ({ open: "Open" }))());',
-    );
-    assertStringIncludes(
-      main,
-      "const days = __cfHelpers.__cf_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
-    );
-    assertStringIncludes(
-      main,
-      "const matcher = __cfHelpers.__cf_data(/^[a-z]+$/);",
-    );
-    assertStringIncludes(
-      main,
-      "const scopes = __cfHelpers.__cf_data(Object.fromEntries(",
-    );
-    assertStringIncludes(
-      main,
-      "const years = __cfHelpers.__cf_data(buildYears());",
-    );
-    assertStringIncludes(
-      main,
-      'const tags = __cfHelpers.__cf_data(new Set(["a", "b"]));',
-    );
+    for (
+      const name of ["model", "lookup", "days", "matcher", "scopes", "years"]
+    ) {
+      assert(wrapped.has(name), `expected ${name} to be __cf_data-wrapped`);
+    }
+    // `tags` (a `new Set(...)`) is wrapped; the wrapped inner is the NewExpression.
+    assert(wrapped.has("tags"));
+    // Proxy snapshots stay unsupported until Proxy is re-enabled in SES
+    // compartments, and top-level builder calls are never wrapped.
+    assert(!wrapped.has("proxied"));
+    assert(!wrapped.has("passthrough"));
+    // No `__cf_data` wrap takes a `lift(...)` call as its argument.
     assert(
-      !main.includes('__cfHelpers.__cf_data(new Proxy({ open: "Open" }, {}));'),
-      "Proxy snapshots stay unsupported until Proxy is re-enabled in SES compartments",
-    );
-    assert(
-      !main.includes("__cfHelpers.__cf_data(lift("),
-      "top-level builder calls should not be wrapped",
+      !callsNamed(root, "__cf_data").some((c) => {
+        const inner = c.arguments[0];
+        return !!inner && ts.isCallExpression(inner) &&
+          ts.isIdentifier(inner.expression) &&
+          inner.expression.text === "lift";
+      }),
     );
   });
 
@@ -631,12 +790,30 @@ export default function next(value: number) {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(main, "function __cfHardenFn");
-    assertStringIncludes(
-      main,
-      "const step = __cfHardenFn((value: number) => value + 1);",
+    const root = parseModule(main);
+    // The canonical hardening helper is declared as a function.
+    assert(
+      collect(root, ts.isFunctionDeclaration).some((f) =>
+        f.name?.text === "__cfHardenFn"
+      ),
     );
-    assertStringIncludes(main, "__cfHardenFn(next);");
+    // `step`'s initializer wraps its arrow in `__cfHardenFn(...)`.
+    const stepDecl = collect(root, ts.isVariableDeclaration).find((d) =>
+      ts.isIdentifier(d.name) && d.name.text === "step"
+    );
+    assert(stepDecl?.initializer && ts.isCallExpression(stepDecl.initializer));
+    assert(
+      ts.isIdentifier(stepDecl.initializer.expression) &&
+        stepDecl.initializer.expression.text === "__cfHardenFn",
+    );
+    assert(ts.isArrowFunction(stepDecl.initializer.arguments[0]!));
+    // The exported default function `next` is hardened by identifier.
+    assert(
+      callsNamed(root, "__cfHardenFn").some((c) =>
+        c.arguments.length === 1 && ts.isIdentifier(c.arguments[0]!) &&
+        c.arguments[0].text === "next"
+      ),
+    );
   });
 
   it("wraps explicit snapshot helpers with __cfHelpers.__cf_data", async () => {
@@ -656,21 +833,31 @@ export default function probe() {
     });
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(
-      main,
-      "const startedAt = __cfHelpers.__cf_data(safeDateNow());",
-    );
-    assertStringIncludes(
-      main,
-      "const seed = __cfHelpers.__cf_data(nonPrivateRandom());",
-    );
+    const root = parseModule(main);
+    const wrapsCall = (variableName: string, callee: string) => {
+      const decl = collect(root, ts.isVariableDeclaration).find((d) =>
+        ts.isIdentifier(d.name) && d.name.text === variableName
+      );
+      assert(decl?.initializer && ts.isCallExpression(decl.initializer));
+      const outer = decl.initializer;
+      assert(
+        ts.isPropertyAccessExpression(outer.expression) &&
+          outer.expression.name.text === "__cf_data",
+      );
+      const inner = outer.arguments[0];
+      assert(inner && ts.isCallExpression(inner));
+      assert(
+        ts.isIdentifier(inner.expression) && inner.expression.text === callee,
+      );
+    };
+    wrapsCall("startedAt", "safeDateNow");
+    wrapsCall("seed", "nonPrivateRandom");
+    // Explicit helper calls stay bare, not rewritten onto `__cfHelpers`.
     assert(
-      !main.includes("__cfHelpers.safeDateNow"),
-      "explicit helper calls should not be rewritten",
-    );
-    assert(
-      !main.includes("__cfHelpers.nonPrivateRandom"),
-      "explicit helper calls should not be rewritten",
+      !collect(root, ts.isPropertyAccessExpression).some((p) =>
+        ts.isIdentifier(p.expression) && p.expression.text === "__cfHelpers" &&
+        (p.name.text === "safeDateNow" || p.name.text === "nonPrivateRandom")
+      ),
     );
   });
 
@@ -687,12 +874,15 @@ export default pow(5);
 
     const main = output["/main.ts"]!;
 
-    assertStringIncludes(
-      main,
-      "export default pow(5);",
-    );
-    assertNotMatch(main, /__cfHelpers\.__ct_data/);
-    assertNotMatch(main, /__cfDataHelper/);
+    const root = parseModule(main);
+    // The default export stays the bare `pow(5)` call, untouched by wrapping.
+    const defaultExport = collect(root, ts.isExportAssignment)[0];
+    assert(defaultExport && ts.isCallExpression(defaultExport.expression));
+    const call = defaultExport.expression;
+    assert(ts.isIdentifier(call.expression) && call.expression.text === "pow");
+    assertEquals(literalToValue(call.arguments[0]!), 5);
+    // No snapshot wrapping was inserted.
+    assertEquals(callsNamed(root, "__cf_data").length, 0);
   });
 });
 
