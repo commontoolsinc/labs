@@ -999,10 +999,20 @@ export async function runTestPattern(
           new FileSystemProgramResolver(testPath, options.root),
         ),
     );
-    const { main } = await withPhase(
+    const evalResult = await withPhase(
       ["runTestPattern", "compile"],
       () => engine.compileAndEvaluateModules(program, { patternCoverage }),
     );
+    // Index the evaluated artifacts, exactly as the deployed runtime does via
+    // `PatternManager.patternFromEvaluation` (and the generated-patterns harness
+    // via `compilePattern`). Using the evaluated namespace directly without this
+    // step leaves anonymous map/filter/flatMap ops un-indexed, so they fall back
+    // to their embedded pattern graph — whose nested output-alias `defer` levels
+    // are corrupted one step by the `getImmutableCell` round-trip (CT-1811), so a
+    // grandchild derived-internal output resolves one level too early and throws
+    // "Unknown derived internal cell with partial cause". Idempotent per identity.
+    runtime.patternManager.registerEvaluatedModules(evalResult);
+    const { main } = evalResult;
 
     if (!main?.default) {
       throw new Error(

@@ -993,8 +993,22 @@ export class PatternManager {
    * Index every module of a just-evaluated ESM bundle by its content identity
    * (CT-1623). Lets `loadPatternByIdentity` reuse a sub-pattern module already
    * evaluated as part of its parent's bundle — no storage read, no SES re-eval.
+   *
+   * Public because it is the shared indexing step every path that RUNS a
+   * just-evaluated pattern must perform: the runtime's own load path calls it via
+   * `patternFromEvaluation`, and the CLI test harness (`test-runner`) and the
+   * multi-user worker call it after `Engine.compileAndEvaluateModules` (which they
+   * use to keep the evaluated module namespace). Skipping it leaves anonymous
+   * map/filter/flatMap ops un-indexed, so `getArtifactEntryRef` misses and the op
+   * falls back to its embedded graph instead of the content-addressed canonical
+   * artifact — the CT-1811 defer corruption. It is deliberately NOT folded into
+   * `compileAndEvaluateModules`, since that primitive is also used to inspect
+   * serialized/verified output without running (engine unit tests), where the
+   * side effect of stamping entry refs is unwanted. Idempotent per identity
+   * (re-registering refreshes the LRU), so paths that already registered are
+   * unaffected.
    */
-  private registerEvaluatedModules(result: EvaluateResult): void {
+  registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {
