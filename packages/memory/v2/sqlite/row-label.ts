@@ -247,8 +247,8 @@ function regexLintReason(source: string): string | undefined {
 
 // Validate an `any(...)` node: every alternative must be a valid confidentiality
 // term (Epic E1). Atom-shape restrictions on alternatives (principal-like only;
-// no Caveat/Expires) are enforced runner-side at the boundary (§3.1.8), so this
-// only checks structural well-formedness of each alternative.
+// no Caveat/Expires) are enforced runner-side at the boundary (§3.1.8); here we
+// check structural well-formedness AND that no alternative is a conjunction.
 function validateConfAnyOf(
   node: Record<string, unknown>,
   columns: ReadonlySet<string>,
@@ -258,10 +258,38 @@ function validateConfAnyOf(
     return "any() needs at least one alternative";
   }
   for (const t of terms) {
-    const r = validateConfTerm(t, columns);
+    const r = validateAnyOfAlternative(t, columns);
     if (r) return r;
   }
   return undefined;
+}
+
+// An `any()` alternative is one INDEPENDENT reader (a disjunct), so it must be
+// a leaf that evaluates to reader atoms — `principal()`, `dbOwner()`,
+// `constant()`, or a `whenMatches(...)` gating one of those. A CONJUNCTION
+// (`all()`) or a nested `any()` is rejected: the evaluator's union-flatten
+// would turn `any(all(A,B), C)` into `A ∨ B ∨ C`, silently widening
+// `(A ∧ B) ∨ C` so a row becomes readable by A alone (CFC spec §3.1.8:
+// alternatives are principal-like atoms, not clauses). The `when` gate is
+// checked recursively so `whenMatches(…, all(A,B))` is rejected too.
+function validateAnyOfAlternative(
+  node: unknown,
+  columns: ReadonlySet<string>,
+): string | undefined {
+  if (isRecord(node) && ("allOf" in node || "anyOf" in node)) {
+    return "an any() alternative must be a single principal-like term, not " +
+      "all()/any() — a conjunction or nested disjunction cannot be an " +
+      "OR-clause alternative (CFC spec §3.1.8)";
+  }
+  if (isRecord(node) && "when" in node) {
+    const test = (node as { when?: unknown }).when;
+    const gate = isRecord(test) && "match" in test
+      ? validateMatchNode(test.match, columns, "when")
+      : "malformed when gate (use whenMatches())";
+    if (gate) return gate;
+    return validateAnyOfAlternative((node as { then?: unknown }).then, columns);
+  }
+  return validateConfTerm(node, columns);
 }
 
 function validateMatchNode(
@@ -599,12 +627,25 @@ function evalConf(
     const terms = node.anyOf;
     if (!Array.isArray(terms)) return fail("malformed any()");
     // One OR-clause: the alternatives are the union of what each term
-    // evaluates to (a `principal(match)` may yield several). The clause is
-    // ONE element of the row's conjunctive confidentiality list, so an
-    // enclosing `all(...)` concatenates it with sibling clauses
-    // (`all(any(A,B), C)` → `[{anyOf:[A,B]}, C]` = (A∨B)∧C). Kept structural,
-    // never flattened into bare atoms (Epic E1, CFC spec §3.1.8).
-    const alternatives = terms.flatMap((t) => evalConf(t, row, ctx));
+    // evaluates to (a `principal(match)` may yield several INDEPENDENT
+    // readers — a disjunction, which flattens correctly). The clause is ONE
+    // element of the row's conjunctive confidentiality list, so an enclosing
+    // `all(...)` concatenates it with sibling clauses (`all(any(A,B), C)` →
+    // `[{anyOf:[A,B]}, C]` = (A∨B)∧C). Kept structural, never flattened into
+    // bare atoms (Epic E1, CFC spec §3.1.8). Defense in depth against a wire
+    // spec that bypassed validation: reject a CONJUNCTION (`all()`) or nested
+    // `any()` as an alternative — union-flattening it would silently widen
+    // `(A∧B)∨C` into `A∨B∨C` (readable by A alone).
+    const alternatives: unknown[] = [];
+    for (const t of terms) {
+      if (isRecord(t) && ("allOf" in t || "anyOf" in t)) {
+        return fail(
+          "an any() alternative must not be all()/any() — a conjunction " +
+            "cannot be an OR-clause alternative (CFC spec §3.1.8)",
+        );
+      }
+      alternatives.push(...evalConf(t, row, ctx));
+    }
     return [{ anyOf: alternatives }];
   }
   if ("allOf" in node) {

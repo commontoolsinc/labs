@@ -154,6 +154,44 @@ Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
   );
 });
 
+Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B∨C widening (Epic E1)", () => {
+  // A direct all() as an any() alternative is rejected: union-flattening it
+  // would make the row readable by A alone even though the author required
+  // A AND B.
+  assertThrows(
+    () =>
+      table(EMAIL_COLUMNS, (f) => ({
+        confidentiality: any(
+          all(
+            principal("mailto", match(f.from, ADDR)),
+            principal("mailto", match(f.to, ADDR)),
+          ),
+          dbOwner(),
+        ),
+      })),
+    Error,
+    "all()/any()",
+  );
+  // ...and a when() gating an all() is rejected too (recursive check).
+  assertThrows(
+    () =>
+      table(EMAIL_COLUMNS, (f) => ({
+        confidentiality: any(
+          whenMatches(
+            f.auth,
+            /dmarc=pass/,
+            all(
+              principal("mailto", match(f.from, ADDR)),
+              principal("mailto", match(f.to, ADDR)),
+            ),
+          ),
+          dbOwner(),
+        ),
+      })),
+    Error,
+  );
+});
+
 Deno.test("a rule referencing an unknown column throws", () => {
   assertThrows(
     () =>
