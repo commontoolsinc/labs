@@ -211,6 +211,17 @@ export type TrustedProfileMru = Cfc<
 export type ProfileCreateInput = {
   profiles: Writable<ProfileHomeOutput[]>;
   inputId?: string;
+  // Optional prefill for the create field. Embedders often already know the
+  // user's name (e.g. Loom asks at setup) — without this, first-run re-asks a
+  // question the product already knows the answer to. UI PREFILL ONLY: it
+  // seeds cf-submit-input's `initialValue`, which the component copies into
+  // its own editable field state once, on first render (see
+  // cf-submit-input.ts `willUpdate` / `_seeded`), and the field stays
+  // uncontrolled after that. The create still flows through the same trusted
+  // click — `submitProfileCreation` reads the name from the event at gesture
+  // time exactly as before — so a prefilled value is a head start on typing,
+  // never a shortcut around the gesture.
+  defaultName?: string;
 };
 
 export type ProfileCreateOutput = {
@@ -220,7 +231,7 @@ export type ProfileCreateOutput = {
 };
 
 export default pattern<ProfileCreateInput, ProfileCreateOutput>(
-  ({ profiles, inputId }) => {
+  ({ profiles, inputId, defaultName }) => {
     const createProfile = submitProfileCreation({
       profiles: profiles as any,
     });
@@ -237,13 +248,17 @@ export default pattern<ProfileCreateInput, ProfileCreateOutput>(
           {
             /* The submit-button click carries the typed name as
               event.target.value with this surface's trusted UI integrity, so
-              the create needs no draft cell and the field self-clears. */
+              the create needs no draft cell and the field self-clears.
+              `initialValue` only seeds the field's starting text (a one-time,
+              uncontrolled copy inside cf-submit-input) — it does not touch the
+              trusted-click path. */
           }
           <cf-submit-input
             inputId={inputId ?? "profile-name-input"}
             data-ui-action={TRUSTED_PROFILE_CREATE_ACTION}
             placeholder="Your name..."
             buttonText="Create profile"
+            initialValue={defaultName ?? ""}
             onClick={createProfile}
           />
         </cf-vstack>
