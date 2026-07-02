@@ -33,6 +33,11 @@ export interface InitBrowserOtelOptions {
 export interface BrowserTelemetry {
   /** Feed one RuntimeTelemetry marker into the OTel bridge. */
   handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  /**
+   * Update the space.did stamped on subsequent spans. The runtime (and this
+   * sink) lives across space navigations, so the host must keep this current.
+   */
+  setSpace(spaceDid: string | undefined): void;
   /** Close open spans and flush + shut down the tracer provider. */
   shutdown(): Promise<void>;
 }
@@ -77,13 +82,15 @@ export async function initBrowserOtel(
       url: `${base}/api/telemetry/v1/traces`,
     });
 
+    // Resource attributes are fixed for the provider's lifetime, so only
+    // session-stable values belong here; space.did changes on navigation and
+    // is stamped per-span by the bridge below instead.
     const provider = new WebTracerProvider({
       resource: new Resource({
         "service.name": SERVICE_NAME,
         "service.version": SERVICE_VERSION,
         "deployment.environment": options.environment,
         "user.did": options.userDid,
-        "space.did": options.spaceDid,
       }),
     });
     provider.addSpanProcessor(new BatchSpanProcessor(exporter));
@@ -97,18 +104,28 @@ export async function initBrowserOtel(
     // is the API no-op meter. The bridge's metric instruments become no-ops.
     const meter = metrics.getMeter(SERVICE_NAME);
 
+    // The bridge holds this object by reference and reads it per marker, so
+    // mutating it (see setSpace below) updates attribution for later spans.
+    const attributes: Record<string, string> = {
+      "ct.runtime": "browser",
+      "user.did": options.userDid,
+      "space.did": options.spaceDid,
+    };
     const bridge = createRuntimeTelemetryOtelBridge({
       tracer,
       meter,
-      attributes: {
-        "ct.runtime": "browser",
-        "user.did": options.userDid,
-        "space.did": options.spaceDid,
-      },
+      attributes,
     });
 
     return {
       handleMarker: (marker) => bridge.handleMarker(marker),
+      setSpace: (spaceDid) => {
+        if (spaceDid === undefined) {
+          delete attributes["space.did"];
+        } else {
+          attributes["space.did"] = spaceDid;
+        }
+      },
       shutdown: async () => {
         // Close any spans the bridge left open, then flush + tear down the SDK.
         try {

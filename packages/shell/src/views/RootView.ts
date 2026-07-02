@@ -30,7 +30,7 @@ import {
 } from "../lib/theme-preference.ts";
 import { ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
 import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
-import { initBrowserOtel } from "../lib/otel.ts";
+import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -101,15 +101,16 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
+          this.#telemetry = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
         }
 
         // Browser OpenTelemetry (Phase 3): self-gated + lazy — returns null
         // (and imports no OTel SDK) unless telemetryEnabled is set. Attributes
-        // use the identity's DID and the currently resolved space (home space
-        // as the coarse default; the bridge also derives per-marker space.did
-        // from cell paths).
+        // use the identity's DID and the currently resolved space; the runtime
+        // (and this sink) outlives navigations, so #resolveViewSpace keeps the
+        // sink's space.did current via setSpace.
         const userDid = app.identity.did();
         const telemetry = await initBrowserOtel({
           apiUrl: app.apiUrl,
@@ -117,6 +118,7 @@ export class XRootView extends BaseView {
           spaceDid: this.space ?? userDid,
           environment: ENVIRONMENT,
         });
+        this.#telemetry = telemetry ?? undefined;
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
@@ -200,6 +202,10 @@ export class XRootView extends BaseView {
     }
   }
 
+  // The active browser telemetry sink (undefined when telemetry is disabled
+  // or no runtime); kept only so space.did attribution can track navigation.
+  #telemetry: BrowserTelemetry | undefined;
+
   // Resolve the current view to a space DID — view state, independent of
   // the runtime's lifecycle.
   #resolveSpaceToken = 0;
@@ -224,6 +230,9 @@ export class XRootView extends BaseView {
     }
     if (token !== this.#resolveSpaceToken) return;
     this.space = space;
+    // Keep browser OTel span attribution in sync with the resolved space —
+    // the telemetry sink lives across navigations.
+    this.#telemetry?.setSpace(space);
   }
 
   private _onThemeChanged = (e: Event) => {

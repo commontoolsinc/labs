@@ -2579,20 +2579,27 @@ export class Server {
         if (dirtyOrigins !== undefined) {
           this.#dirtyOriginsBySpace.delete(space);
         }
-        // Fan-out is a scheduled/batched timer decoupled from transact, so this
-        // is a separate root span (not parented under memory.transact).
-        await tracer.startActiveSpan("memory.fanout", async (span) => {
-          span.setAttribute("space.did", space);
-          span.setAttribute("subscriber.count", this.#connections.size);
-          span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
-          try {
-            for (const connection of this.#connections.values()) {
-              await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+        // Fan-out is a scheduled/batched timer decoupled from transact, so it
+        // must be its own root span. `root: true` makes that explicit — the
+        // context manager propagates the active context into timer callbacks,
+        // so without it this span could parent under whichever memory.transact
+        // happened to schedule the refresh.
+        await tracer.startActiveSpan(
+          "memory.fanout",
+          { root: true },
+          async (span) => {
+            span.setAttribute("space.did", space);
+            span.setAttribute("subscriber.count", this.#connections.size);
+            span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
+            try {
+              for (const connection of this.#connections.values()) {
+                await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+              }
+            } finally {
+              span.end();
             }
-          } finally {
-            span.end();
-          }
-        });
+          },
+        );
       }
 
       if (initial !== undefined) {

@@ -180,8 +180,12 @@ function otelBrowserPlatformPlugin(): esbuild.Plugin {
         const browserIndex = joinPath(platformDir, "browser", "index.js");
         try {
           Deno.statSync(browserIndex);
-        } catch {
-          return undefined; // no browser split in this package — default resolution
+        } catch (error) {
+          // Only "file doesn't exist" means "no browser split in this
+          // package"; a real I/O error must fail the build, not silently
+          // fall back to bundling the node platform path.
+          if (error instanceof Deno.errors.NotFound) return undefined;
+          throw error;
         }
         return { path: browserIndex };
       });

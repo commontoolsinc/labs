@@ -34,19 +34,40 @@ export async function forwardOtlp(
     return c.body(null, 413);
   }
 
-  let body: ArrayBuffer;
+  // Stream the body and enforce the cap as bytes arrive, so a chunked upload
+  // (no Content-Length) can never buffer more than the limit before being
+  // rejected — `arrayBuffer()` would buffer the whole body first.
+  let body: Uint8Array<ArrayBuffer>;
   try {
-    body = await c.req.arrayBuffer();
+    const stream = c.req.raw.body;
+    if (!stream) {
+      body = new Uint8Array(new ArrayBuffer(0));
+    } else {
+      const reader = stream.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_TELEMETRY_BYTES) {
+          await reader.cancel();
+          return c.body(null, 413);
+        }
+        chunks.push(value);
+      }
+      body = new Uint8Array(new ArrayBuffer(total));
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
   } catch (error) {
     // Reading the body failed — log and still answer 202 so the exporter's
     // retry/backoff doesn't hammer us and nothing bubbles to the app.
     console.error("[telemetry-proxy] failed to read request body:", error);
     return c.body(null, 202);
-  }
-
-  // Enforce the cap for chunked uploads that omit Content-Length.
-  if (body.byteLength > MAX_TELEMETRY_BYTES) {
-    return c.body(null, 413);
   }
 
   const contentType = c.req.header("content-type") ?? "application/json";

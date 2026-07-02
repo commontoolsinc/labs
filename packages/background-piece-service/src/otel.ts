@@ -60,14 +60,32 @@ export async function shutdownOpenTelemetry(): Promise<void> {
   const meterProvider = _meterProvider;
   _provider = undefined;
   _meterProvider = undefined;
+  // Flush/shutdown each provider independently: a failure tearing down traces
+  // must not silently skip the metrics flush (or vice versa). The first error
+  // is rethrown after both have been attempted — callers decide (see main.ts).
+  const errors: unknown[] = [];
   try {
     if (provider) {
-      await provider.forceFlush();
-      await provider.shutdown();
+      try {
+        await provider.forceFlush();
+        await provider.shutdown();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (meterProvider) {
-      await meterProvider.forceFlush();
-      await meterProvider.shutdown();
+      try {
+        await meterProvider.forceFlush();
+        await meterProvider.shutdown();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      if (errors.length > 1) {
+        console.error("OpenTelemetry shutdown: additional error:", errors[1]);
+      }
+      throw errors[0];
     }
   } finally {
     // Reset the global API state too, so a later initOpenTelemetry() can register

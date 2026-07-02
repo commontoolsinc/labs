@@ -220,18 +220,19 @@ export async function cleanup(): Promise<void> {
   currentSession = null;
   manager = null;
 
-  // Detach the OTel bridge before tearing down the runtime so its telemetry
-  // listener is removed and any in-flight storage spans are closed.
-  if (detachOtelBridge) {
-    detachOtelBridge();
-    detachOtelBridge = null;
-  }
-
   // Ensure storage is synced before cleanup
   if (runtime) {
     await runtime.storageManager.synced();
     await runtime.dispose();
     runtime = null;
+  }
+
+  // Detach the OTel bridge only after the runtime is fully torn down, so the
+  // final sync/dispose telemetry (storage completions, subscription removals)
+  // is still observed; detaching closes any spans left in flight.
+  if (detachOtelBridge) {
+    detachOtelBridge();
+    detachOtelBridge = null;
   }
 
   // Flush buffered spans/metrics before the controller terminates this worker;
