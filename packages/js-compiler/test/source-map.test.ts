@@ -730,6 +730,67 @@ export const tag = "util";
     expect(gets).toBeLessThan(24);
   });
 
+  it("matches legacy on hostile streams via the guard fallbacks", () => {
+    // Each shape trips a distinct transcoder guard (malformed VLQ, negative
+    // column, oversized segment, out-of-range index, module mapping past its
+    // body); the public function must still behave exactly like the legacy
+    // composer — same result or same throw.
+    const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
+      ({
+        version: "3",
+        file: "a.js",
+        sourceRoot: "",
+        sources,
+        names: [],
+        mappings,
+      }) as SourceMap;
+    const expectSameOutcome = (
+      modules: ReadonlyArray<
+        { body: string; map?: SourceMap; source?: string }
+      >,
+    ) => {
+      let fast: SourceMap | undefined;
+      let fastErr: unknown;
+      let legacy: SourceMap | undefined;
+      let legacyErr: unknown;
+      try {
+        fast = composeBundleSourceMap(modules, "hostile.js");
+      } catch (e) {
+        fastErr = e;
+      }
+      try {
+        legacy = legacyCompose(modules, "hostile.js");
+      } catch (e) {
+        legacyErr = e;
+      }
+      expect(fastErr === undefined).toBe(legacyErr === undefined);
+      if (fast !== undefined && legacy !== undefined) {
+        expect(mappingTuples(fast)).toEqual(mappingTuples(legacy));
+      } else {
+        expect(fast === undefined).toBe(legacy === undefined);
+      }
+    };
+    // Malformed VLQ characters.
+    expectSameOutcome([{ body: "x", map: raw("!!invalid!!") }]);
+    // Negative generated column (VLQ -1 = "D").
+    expectSameOutcome([{ body: "x", map: raw("DAAA") }]);
+    // Oversized segment (6 VLQ fields).
+    expectSameOutcome([{ body: "x", map: raw("AAAAAA") }]);
+    // Source index out of range (delta +1 with a single source).
+    expectSameOutcome([{ body: "x", map: raw("ACAA") }]);
+    // First module's map claims more lines than its 1-line body occupies, so
+    // the second module's offset falls behind the emitted line cursor.
+    expectSameOutcome([
+      { body: "x", map: raw("AAAA;AACA;AACA") },
+      { body: "y", map: raw("AAAA", ["b.ts"]) },
+    ]);
+    // Empty mappings alongside a real module (contributes nothing).
+    expectSameOutcome([
+      { body: "x", map: raw("") },
+      { body: "y", map: raw("AAAA", ["b.ts"]) },
+    ]);
+  });
+
   it("identitySourceMap synthesizes the generator-equivalent map", () => {
     for (const body of ["one line", "a\nb\nc", "trailing\n", ""]) {
       const direct = identitySourceMap(body, "/id/main.tsx");
