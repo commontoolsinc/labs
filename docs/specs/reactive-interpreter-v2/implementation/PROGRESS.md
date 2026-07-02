@@ -78,3 +78,20 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   Strategy (v1's proven move): add capture/dispatch gates so classes 1/2/4
   fall back fail-closed → drives flag-ON green while census keeps honest
   engagement; then re-admit classes with proper support.
+- (2026-07-02) **Triage complete: flag-ON 27→15→4→1** (W3d `fb12b5f98`,
+  W3e `87c28a75e`, W3f `886ee0a8b`, stdout fix `3e9388741`). Landed: trust
+  gate; leaf caps (v1 schema-suppression DROPPED as unsound — a typed
+  factory-application lift is a silent wrong value); scope: narrowest-read-
+  scope threading behind an opt-in raw-module marker + per-run reset
+  (pattern-scope 39/0); control_reference_semantics gate (legacy ifElse
+  writes a resolved LINK with onlyIfDifferent through its own minted cell —
+  faithful emission deferred; in multi-segment emission control ops can stay
+  legacy BOUNDARY nodes, recovering those patterns without link-emission);
+  no_node_ops cost gate; pattern-inline reverted to opt-in (a handler-built
+  child pushed into a list must be an addressable PIECE — value-inlining
+  broke it). Remaining 1: reload-sibling-overdirty (legacy-topology
+  introspection + interpreter-node rehydration identity — real follow-up).
+  Env-flag stdout pollution fixed (override log = caller-passed only, on
+  stderr; cli dev green both flags). NEXT: multi-segment emission (segments
+  + preserved boundary nodes — the engagement unlock for handler/control/
+  effect patterns), then W4 collections.
