@@ -50,6 +50,22 @@ describe("CFC clause-aware ceiling fit", () => {
         ]),
       ).toEqual([CFC_LABEL_READ_FAILED_ATOM]);
     });
+
+    it("a marker WRAPPED in an OR-clause stays ungrantable (no subsumption bypass)", () => {
+      // Defense in depth: a clause carrying the marker as an alternative must
+      // never fit, even when the ceiling names the marker — otherwise
+      // subsumption would admit the wrapping clause and reopen the bypass.
+      const wrapped = { anyOf: [CFC_LABEL_READ_FAILED_ATOM, A] };
+      const markerCeiling = [{ anyOf: [CFC_LABEL_READ_FAILED_ATOM, A] }];
+      expect(cfcObservationFitsCeiling([wrapped], markerCeiling)).toBe(false);
+      expect(atomsOutsideCeiling([wrapped], markerCeiling)).toEqual([wrapped]);
+      // Also the singleton-wrapped form against a marker-naming flat ceiling.
+      expect(
+        cfcObservationFitsCeiling([{ anyOf: [CFC_LABEL_READ_FAILED_ATOM] }], [
+          CFC_LABEL_READ_FAILED_ATOM,
+        ]),
+      ).toBe(false);
+    });
   });
 
   describe("reader-enumeration ceiling (the §8.10.3 soundness fix)", () => {

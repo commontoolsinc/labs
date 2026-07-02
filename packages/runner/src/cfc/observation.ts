@@ -5,7 +5,7 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
-import { clauseSubsumes } from "./clause.ts";
+import { clauseAlternatives, clauseSubsumes } from "./clause.ts";
 
 export type CfcObservedConfidentiality = readonly unknown[];
 export type CfcObservationMaxConfidentiality =
@@ -20,6 +20,17 @@ export type CfcObservationMaxConfidentiality =
 // UNGRANTABLE — an observation carrying it never fits a ceiling, even one that
 // names the marker, so it cannot be allow-listed by an author-supplied ceiling.
 export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
+
+// A clause "bears" the ungrantable read-failed marker if the marker is the
+// clause itself OR any of its alternatives. Checking alternatives (not just
+// whole-clause equality) is load-bearing: a marker wrapped in an OR-clause —
+// `{anyOf:[MARKER, …]}` — must still be ungrantable, otherwise a ceiling that
+// names the marker would subsume the wrapping clause and admit it, reopening
+// the allow-list bypass the marker exists to prevent (audit item 22).
+const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
+  clauseAlternatives(clause).some((alternative) =>
+    deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM)
+  );
 
 export interface CfcOpaqueLink {
   "@link": string;
@@ -95,12 +106,10 @@ export const cfcObservationFitsCeiling = (
   // exported string, so an author-supplied ceiling could otherwise allow-list it
   // and defeat the fail-closed redaction (audit item 22). atomsOutsideCeiling
   // already forces the marker outside every declared ceiling; keep this explicit
-  // rejection too as defense in depth for the redaction path.
-  if (
-    confidentiality.some((value) =>
-      deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
-    )
-  ) {
+  // rejection too as defense in depth for the redaction path. Inspect clause
+  // alternatives, not just whole-clause equality, so a wrapped marker
+  // (`{anyOf:[MARKER]}`) cannot slip past into subsumption.
+  if (confidentiality.some(clauseBearsReadFailedMarker)) {
     return false;
   }
 
@@ -143,7 +152,7 @@ export const atomsOutsideCeiling = (
     return [];
   }
   return confidentiality.filter((clause) =>
-    deepEqual(clause, CFC_LABEL_READ_FAILED_ATOM) ||
+    clauseBearsReadFailedMarker(clause) ||
     !ceiling.some((allowed) => clauseSubsumes(allowed, clause))
   ) as ImmutableJSONValue[];
 };
