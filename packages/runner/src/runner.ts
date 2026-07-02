@@ -4,6 +4,7 @@ import {
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import type { EntityKind } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
@@ -126,6 +127,12 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 
 type InternalCellDescriptor = {
   partialCause: JSONValue;
+  /**
+   * Entity kind of the materialized cell's id. Part of the manifest match
+   * key alongside `partialCause`: a kind flip across pattern versions must
+   * re-materialize the cell under its new id rather than reuse the old link.
+   */
+  kind?: EntityKind;
   link: SigilLink;
 };
 
@@ -910,7 +917,8 @@ export class Runner {
         tx,
       );
       const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
-        deepEqual(existingDescriptor.partialCause, descriptor.partialCause)
+        deepEqual(existingDescriptor.partialCause, descriptor.partialCause) &&
+        existingDescriptor.kind === descriptor.kind
       );
       if (manifestMatch === -1) {
         // this cell isn't in our manifest yet. Create it, and add it to the manifest
@@ -920,6 +928,7 @@ export class Runner {
         });
         manifest.push({
           partialCause: descriptor.partialCause,
+          ...(descriptor.kind !== undefined && { kind: descriptor.kind }),
           link: derivedSigilLink,
         });
         setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));

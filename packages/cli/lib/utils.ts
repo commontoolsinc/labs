@@ -29,6 +29,7 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
     persistentSchedulerState: read(
       "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
     ),
+    computedCellIds: read("EXPERIMENTAL_COMPUTED_CELL_IDS"),
   };
 
   // Log any overridden experimental flags.

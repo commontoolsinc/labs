@@ -1,7 +1,9 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   BaseFabricPrimitive,
+  type EntityKind,
   FabricHash,
+  withEntityKind,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
@@ -39,6 +41,19 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 }
 
 /**
+ * Options for {@link createRef}.
+ */
+export type CreateRefOptions = {
+  /**
+   * Entity kind minted into BOTH the hash preimage and the visible tag
+   * (`fid2:computed:<hash>`), so the two representations cannot diverge and
+   * a kind change necessarily names a different entity. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  kind?: EntityKind;
+};
+
+/**
  * Generates an entity ID.
  *
  * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
@@ -48,6 +63,7 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
  *
  * @param source - The source object.
  * @param cause - Optional causal source. If omitted, a random id is minted.
+ * @param options - Optional kind; see {@link CreateRefOptions}.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
@@ -58,6 +74,7 @@ export function createRef(
     );
     return crypto.randomUUID();
   })(),
+  options?: CreateRefOptions,
 ): EntityId {
   const seen = new Set<any>();
 
@@ -140,7 +157,17 @@ export function createRef(
     else return obj;
   }
 
-  return entityIdFrom(hashOf(traverse({ ...source, causal: cause })));
+  const kind = options?.kind;
+  // The kind changes the preimage SHAPE, not just a key: an untagged preimage
+  // always carries a top-level `causal` key, while the kind envelope never
+  // does, so no untagged id can collide bytes-for-bytes with a kind-tagged one
+  // (guards code paths that compare `hashString`/bytes instead of the full
+  // tagged form).
+  const preimage = kind === undefined
+    ? { ...source, causal: cause }
+    : { entityKind: kind, inner: { ...source, causal: cause } };
+  const hash = hashOf(traverse(preimage));
+  return entityIdFrom(kind === undefined ? hash : withEntityKind(hash, kind));
 }
 
 /**

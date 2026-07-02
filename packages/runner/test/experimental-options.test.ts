@@ -8,6 +8,10 @@ import {
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getComputedCellIdsConfig,
+  resetComputedCellIdsConfig,
+} from "@commonfabric/data-model/fabric-primitives";
+import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
@@ -26,6 +30,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
+    resetComputedCellIdsConfig();
   });
 
   describe("Runtime construction", () => {
@@ -42,6 +47,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        computedCellIds: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -60,6 +66,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        computedCellIds: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -76,6 +83,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        computedCellIds: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -128,6 +136,23 @@ describe("ExperimentalOptions", () => {
       expect(getCommitPreconditionsConfig()).toBe(true);
 
       await runtime.dispose();
+      await sm.close();
+    });
+
+    it("constructing Runtime with computedCellIds sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          computedCellIds: true,
+        },
+      });
+
+      expect(getComputedCellIdsConfig()).toBe(true);
+
+      await runtime.dispose();
+      expect(getComputedCellIdsConfig()).toBe(false);
       await sm.close();
     });
 

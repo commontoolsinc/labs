@@ -9,6 +9,7 @@ various major features.
 |------|---------|-------------|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` | Enables new "cell representation" classes |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | Enables durable scheduler observations, dirty state, and scheduler rehydration through memory-v2. |
+| `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` | Mints kind-tagged entity ids (`fid2:computed:`) for internal cells provably written only by compute nodes. Gates minting only; readers accept both forms. See `docs/specs/computed-cell-identity.md`. |
 | `schedulerHistoricalMightWrite` | n/a (`RuntimeOptions` only) | Preserves the scheduler's legacy cumulative write history for dependency scheduling instead of the default current-known write set. |
 
 All flags default to `undefined` which means they take on the default value

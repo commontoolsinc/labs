@@ -28,6 +28,7 @@ const initializeRuntime = () => {
       experimental: {
         modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
         persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
+        computedCellIds: env.EXPERIMENTAL_COMPUTED_CELL_IDS,
       },
     });
     console.log("Runtime initialized successfully");

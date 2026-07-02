@@ -2,9 +2,12 @@
 
 ## Status
 
-Proposal. No implementation yet. Derived from a design discussion on
-2026-06-30/07-01 about avoiding needless commit conflicts when multiple
-clients recompute the same derived values.
+Phase 1 (minting) implemented behind `EXPERIMENTAL_COMPUTED_CELL_IDS`:
+`createRef`/`FabricHash` kind support (preimage + `fid2:computed:` format),
+conservative builder classifier, kind-aware descriptor/manifest matching.
+Server-side conflict policy (phases 2-4) not started. Derived from a design
+discussion on 2026-06-30/07-01 about avoiding needless commit conflicts when
+multiple clients recompute the same derived values.
 
 ## Summary
 
@@ -19,7 +22,7 @@ again — protocol churn that exists purely to converge on a value both sides
 would have derived anyway.
 
 This proposal makes the derived/authoritative distinction visible to the
-memory server by embedding a role in the entity id of computed internal
+memory server by embedding a kind in the entity id of computed internal
 cells, and relaxes the server's conflict handling for writes that target
 those entities: a computed write whose reads are stale is acknowledged and
 dropped instead of rejected, because reactivity guarantees the writer
@@ -27,7 +30,7 @@ recomputes from the newer inputs once they sync down. Clients keep sending
 every commit — the database stays current for tools like `cf inspect`,
 `localSeq`-based read resolution keeps working, and speculation lineage
 preconditions stay satisfiable. Only the server's *response* to staleness
-changes, and only for entities whose ids carry the computed role.
+changes, and only for entities whose ids carry the computed kind.
 
 ## Goals
 
@@ -57,11 +60,11 @@ changes, and only for entities whose ids carry the computed role.
 - Do not change conflict semantics for authoritative state cells, stream
   cells, or builtin result cells (`fetch`, `llm`, `generateText`, …). Their
   writes are not re-derivable and keep strict semantics.
-- Do not retrofit visible role tags onto existing roles. Stream cells
+- Do not retrofit visible kind tags onto existing kinds. Stream cells
   already carry `$kind: "stream"` in their id preimage but not in their
   visible form; adding a visible tag would re-identify every existing stream
-  cell. Visible role tags apply to newly introduced roles only.
-- Do not treat the role tag as a security boundary. Conflict semantics are a
+  cell. Visible kind tags apply to newly introduced kinds only.
+- Do not treat the kind tag as a security boundary. Conflict semantics are a
   convergence mechanism; authorization is unchanged.
 
 ## Current System Overview
@@ -136,39 +139,44 @@ is an opaque hash.
 
 ## Proposed Model
 
-### Role-tagged entity ids
+### Kind-tagged entity ids
 
-Embed the role in the id's visible tag segment. The current parser
-(`FabricHash.fromString`) splits at the **first** colon and base64url-decodes
-the remainder, so a literal three-segment `fid1:computed:<hash>` form fails
-to parse. Instead, fold the role into the tag with a non-colon separator:
+Embed the kind as a proper segment of a **versioned** id format:
 
 ```
-fid1+computed:<base64urlHash>
+fid2:computed:<base64urlHash>
 ```
 
-This is drop-in compatible: `fromString`, `toString`, the `{tag, hash}`
-codec, and the `of:` URI layer round-trip it unchanged, and nothing in the
-codebase asserts specific tag values. The `tag` field's meaning widens from
-"algorithm identifier" to "format tag" (algorithm + role); this spec is the
-documentation of that widening.
+`fid1:<hash>` remains the untagged form. `fid2` is a format version, not a
+new hash algorithm — the bytes are produced by the same fid1 hashing — and
+the version bump exists so the first segment stays a pure format
+discriminator: a parser that only knows fid1 fails loudly on a kinded id
+instead of silently mis-handling it.
 
-Alternative considered: segment-aware parsing for a true three-part form.
-Rejected for version 1 because every independent parser of the string form
-(client, memory engine, offline SQLite readers) would need to agree on the
-new grammar simultaneously; the folded tag requires no coordination.
+Parsing: `FabricHash.fromString` splits at the **last** colon. The hash
+segment is base64url and never contains a colon, so this is unambiguous,
+parses every existing two-segment id identically, and yields
+`tag = "fid2:<kind>"` for kinded ids. The `{tag, hash}` codec and the `of:`
+URI layer round-trip the form unchanged, and nothing in the codebase asserts
+specific tag values.
+
+Alternative considered: folding the kind into the tag with a non-colon
+separator (`fid1+computed:<hash>`), which keeps first-colon parsing working
+untouched. Rejected because it overloads `fid1` — the format-version
+identifier should stay clean before the first colon, and version-dispatching
+parsers get the failure-on-unknown-format property for free.
 
 Rules:
 
-- **The role is also minted into the hash preimage.** `createRef` gains a
-  role input that is injected into the cause (following the
-  `$kind: "stream"` precedent) *and* selects the visible tag suffix, from
+- **The kind is also minted into the hash preimage.** `createRef` gains a
+  kind input that is injected into the cause (following the
+  `$kind: "stream"` precedent) *and* selects the visible tag, from
   the same argument at the same call. The two representations cannot
-  diverge, and two cells identical except for role differ in hash bytes as
+  diverge, and two cells identical except for kind differ in hash bytes as
   well as string form — so code paths that compare by `hashString` or raw
   bytes rather than the full tagged form cannot alias a computed cell with
   a state cell.
-- **Identity keys are the full tagged string form.** `fid1+computed:H` and
+- **Identity keys are the full tagged string form.** `fid2:computed:H` and
   `fid1:H` are distinct entities everywhere, unconditionally.
 - **Absence means strict.** Untagged ids — every existing entity — keep
   authoritative conflict semantics. There is no migration; only newly minted
@@ -197,7 +205,7 @@ widen as capability analysis improves.
 ### Server conflict policy
 
 At commit-apply time the engine classifies each semantic operation by
-parsing the role from its entity id string. Policy:
+parsing the kind from its entity id string. Policy:
 
 - **All-computed commits** (every semantic operation targets a
   computed-tagged entity):
@@ -234,28 +242,28 @@ write optimistically, the server acks, and the authoritative value arrives
 through the normal subscription path exactly as a lost conflict does today —
 minus the rejection, the action re-run, and the second commit.
 
-### Role flips across pattern versions
+### Kind flips across pattern versions
 
-A cell whose role changes between pattern versions (e.g. a `computed(...)`
+A cell whose kind changes between pattern versions (e.g. a `computed(...)`
 refactored into handler-managed state) mints a different partial cause and
 therefore a different entity id. This is semantically correct, not a
 migration problem: in the computed→state direction the orphaned value was
 derived garbage; in the state→computed direction the old value is superseded
 by derivation. Either way the old contents are meaningless under the new
-role, and the manifest's `deepEqual(partialCause)` matching materializes the
+kind, and the manifest's `deepEqual(partialCause)` matching materializes the
 new cell and drops the stale entry naturally.
 
 Internal-cell identity is already refactor-fragile — anonymous cells re-mint
-on reorder via the `$generated` counter, named cells on rename — so role
+on reorder via the `$generated` counter, named cells on rename — so kind
 flips add a trigger to an existing hazard class (durable cross-piece links
 pointing at an orphaned entity), not a new class.
 
 ### Trust model
 
-The role tag is client-asserted; the server cannot verify purity without
+The kind tag is client-asserted; the server cannot verify purity without
 executing code. What the design guarantees instead:
 
-- **Immutability.** The role is part of identity. There is no retag
+- **Immutability.** The kind is part of identity. There is no retag
   operation, no migration case, and no surface where a buggy or malicious
   client demotes an existing state cell to computed to get its writes
   stale-dropped: changing the tag necessarily changes the id, i.e. names a
@@ -310,13 +318,13 @@ this proposal onto persistent-scheduler-state:
 
 ## Phased Plan
 
-1. **Minting.** Thread a role input through `createRef`/`hashOf` (preimage +
+1. **Minting.** Thread a kind input through `createRef`/`hashOf` (preimage +
    visible tag from one argument). Builder classifier, starting with the
    narrowest provable-pure rule. Gate minting behind an experimental flag in
    the `EXPERIMENTAL_MODERN_DATA_MODEL` mold — new-form ids are a data
    compatibility event, so the flag controls id creation, and readers accept
    both forms unconditionally from the start.
-2. **Server policy, drop-on-stale.** Engine-side role parse at commit-apply;
+2. **Server policy, drop-on-stale.** Engine-side kind parse at commit-apply;
    ack-and-drop for all-computed stale commits, with dropped-replay rows for
    inspectability, reusing the persistent-scheduler-state keep/drop path.
 3. **Lineage integration.** Verify `origin-committed` and
@@ -333,7 +341,7 @@ this proposal onto persistent-scheduler-state:
   equal hash bytes are distinct everywhere).
 - Builder: classifier coverage for each exclusion (handler-writable, stream,
   builtin result, result-surface exposure); a pattern refactor that flips a
-  cell's role mints a new id and re-materializes via the manifest.
+  cell's kind mints a new id and re-materializes via the manifest.
 - Engine: all-computed stale commit is acked, dropped, recorded as a dropped
   replay row, satisfies a dependent `origin-committed` precondition, and
   resolves a later commit's pending read; mixed commit keeps strict
@@ -348,9 +356,9 @@ this proposal onto persistent-scheduler-state:
   effects, or as computations? The classifier's exclusion list must be
   grounded in what the graph actually reports, not the builtin registry
   alone.
-- Exact separator and vocabulary for the tag segment (`fid1+computed` vs
-  `fid1.computed`; whether the role set is a closed registry from day one).
-- Should the engine cache per-entity role or parse per operation? Parsing a
+- Whether the kind vocabulary is a closed registry from day one (the format
+  question itself is resolved: `fid2:<kind>:<hash>`, last-colon parsing).
+- Should the engine cache per-entity kind or parse per operation? Parsing a
   string prefix is likely cheap enough to skip the cache.
 - Is value-equality dedupe on current-read commits worth the comparison
   cost, or does drop-on-stale capture nearly all of the win?
@@ -362,3 +370,12 @@ this proposal onto persistent-scheduler-state:
   re-reading against ack-and-drop.
 - Whether CFC flow-label derivation needs to observe dropped writes, or is
   indifferent to them.
+- Preimage embedding shape: the current implementation wraps the preimage in
+  a `{ entityKind, inner }` envelope inside `createRef` (guaranteeing an
+  untagged preimage — which always has a top-level `causal` key — can never
+  collide bytes-for-bytes with a kind-tagged one). An alternative is to bake
+  `$kind: "computed"` into the `partialCause` itself, mirroring the existing
+  `$kind: "stream"` convention for generated stream cells; that would also
+  let manifest matching collapse back to plain `deepEqual(partialCause)`
+  instead of the current `(partialCause, kind)` pair. Deferred for now; the
+  envelope approach stands.

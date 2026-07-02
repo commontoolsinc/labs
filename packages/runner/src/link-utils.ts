@@ -761,11 +761,15 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    id: toURI(createRef({}, {
-      parent,
-      type: "internal",
-      cause: descriptor.partialCause,
-    })),
+    id: toURI(createRef(
+      {},
+      {
+        parent,
+        type: "internal",
+        cause: descriptor.partialCause,
+      },
+      descriptor.kind !== undefined ? { kind: descriptor.kind } : undefined,
+    )),
     path: [],
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),

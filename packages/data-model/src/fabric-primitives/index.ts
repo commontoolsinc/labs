@@ -6,6 +6,16 @@ import { FabricHash } from "./FabricHash.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+export {
+  type EntityKind,
+  entityKindOfIdString,
+  entityKindOfTag,
+  getComputedCellIdsConfig,
+  isEntityKind,
+  resetComputedCellIdsConfig,
+  setComputedCellIdsConfig,
+  withEntityKind,
+} from "./entity-kind.ts";
 export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";

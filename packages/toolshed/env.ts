@@ -259,6 +259,7 @@ export const EnvSchema = z.object({
   // ===========================================================================
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
+  EXPERIMENTAL_COMPUTED_CELL_IDS: flagValue(),
 
   // Git SHA of the deployed commit. Set at deploy time; takes priority over
   // the build-baked SHA (see lib/build-info.ts).

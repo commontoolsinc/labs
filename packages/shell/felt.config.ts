@@ -49,6 +49,9 @@ const config: Config = {
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
+      "$EXPERIMENTAL_COMPUTED_CELL_IDS": Deno.env.get(
+        "EXPERIMENTAL_COMPUTED_CELL_IDS",
+      ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

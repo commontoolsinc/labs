@@ -4,6 +4,7 @@ declare global {
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
+  var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -20,6 +21,10 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
 const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
   typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
     ? $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE
+    : undefined;
+const EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE =
+  typeof $EXPERIMENTAL_COMPUTED_CELL_IDS === "string"
+    ? $EXPERIMENTAL_COMPUTED_CELL_IDS
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -45,4 +50,5 @@ export const EXPERIMENTAL = {
   persistentSchedulerState: flagValue(
     EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
   ),
+  computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
 };

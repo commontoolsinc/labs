@@ -20,6 +20,11 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getComputedCellIdsConfig,
+  resetComputedCellIdsConfig,
+  setComputedCellIdsConfig,
+} from "@commonfabric/data-model/fabric-primitives";
+import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
@@ -172,6 +177,13 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Mint kind-tagged entity ids (`fid2:computed:`) for internal cells the
+   * builder proves are written only by compute nodes. Gates minting only;
+   * readers accept both forms unconditionally. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  computedCellIds?: boolean | undefined;
 }
 
 /**
@@ -428,6 +440,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      computedCellIds: undefined,
       ...options.experimental,
     };
 
@@ -455,6 +468,8 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    setComputedCellIdsConfig(this.experimental.computedCellIds);
+    this.experimental.computedCellIds = getComputedCellIdsConfig();
 
     this.commitBackpressure = resolveCommitBackpressure(
       options.commitBackpressure,
@@ -715,6 +730,7 @@ export class Runtime {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetComputedCellIdsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

@@ -109,10 +109,13 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
   /**
    * Parses an instance from its string representation
-   * (`<tag>:<base64urlHash>`).
+   * (`<tag>:<base64urlHash>`). Splits at the LAST colon: the hash segment is
+   * base64url and never contains one, while the tag segment may (entity-kind
+   * formats such as `fid2:computed:<hash>` carry the kind inside the tag; see
+   * `entity-kind.ts`).
    */
   static fromString(source: string): FabricHash {
-    const colonIndex = source.indexOf(":");
+    const colonIndex = source.lastIndexOf(":");
     if (colonIndex === -1) {
       throw new ReferenceError(`Invalid content hash string: ${source}`);
     }

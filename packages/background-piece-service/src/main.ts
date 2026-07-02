@@ -51,6 +51,7 @@ export function createRuntime(env: EnvVars, identity: Identity): Runtime {
     experimental: {
       modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
       persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
+      computedCellIds: env.EXPERIMENTAL_COMPUTED_CELL_IDS,
     },
   });
 }
