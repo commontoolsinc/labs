@@ -13,9 +13,19 @@
 ./scripts/restart-local-dev.sh --force       # Force kill first
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
-./scripts/restart-local-dev.sh --bg-updater  # Also start background-charm-service
+./scripts/restart-local-dev.sh --bg-updater  # Also start background-piece-service
 ./scripts/check-local-dev.sh          # Health check both servers
+./scripts/share-pattern-via-tailscale.sh packages/patterns/lunch-poll/main.tsx  # Host a pattern + share on your tailnet
+./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
+
+To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
+`<pattern>` locally with `--inspect` and export it over Tailscale"), use
+`share-pattern-via-tailscale.sh`. It starts an isolated toolshed (with
+`--inspect`) + shell on offset ports, deploys the pattern, and `tailscale serve`s
+it (tailnet-only). It launches the shell with `API_URL` set to your MagicDNS name
+— the standard `dev-local` task bakes in `localhost`, which breaks remote
+browsers.
 
 `start-local-dev.sh` validates required commands before launching anything and
 waits for both servers to bind their ports and return HTTP 200 before reporting
@@ -56,11 +66,16 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 - `packages/toolshed/local-dev-toolshed.log`
 
 **CLI identity for local dev:** The local toolshed uses an identity derived from
-the passphrase `"implicit trust"`. To create a matching key for CLI operations:
+the passphrase `"implicit trust"`. To create a key matching the local server (so
+the CLI can act as its operator/admin):
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
+This is a shared, publicly-derivable key — every developer who derives it gets
+the same DID. Use it only against your own localhost. For a personal identity, or
+any shared/remote server, use `id new` instead (see
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md)).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
@@ -215,11 +230,7 @@ When editing `cf-*` components in `packages/ui/`, restart the local dev server t
 
 ## Background Piece Service (Optional)
 
-> **Note:** This package is still named `background-charm-service` in the
-> codebase. "Charm" is the legacy name for "piece"; they refer to the same
-> concept.
-
-The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
+The background-piece-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
 
 ### Quick Setup (Recommended)
 
@@ -231,7 +242,7 @@ Use the `--bg-updater` flag with the local dev scripts:
 ./scripts/restart-local-dev.sh --bg-updater
 ```
 
-This waits for toolshed to be healthy, then starts the background service. The service log is at `packages/background-charm-service/local-dev-bg.log`. The stop script will also clean up the background service process. The system space cell is auto-created when a piece is first registered (e.g., during Google OAuth).
+This waits for toolshed to be healthy, then starts the background service. The service log is at `packages/background-piece-service/local-dev-bg.log`. The stop script will also clean up the background service process. The system space cell is auto-created when a piece is first registered (e.g., during Google OAuth).
 
 ### Manual Setup
 
@@ -242,19 +253,19 @@ If you prefer manual control:
 ./scripts/restart-local-dev.sh
 
 # 2. Start the background service from source
-cd packages/background-charm-service
+cd packages/background-piece-service
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 ```
 
-> **Optional:** The `add-admin-charm` task deploys an admin dashboard piece
+> **Optional:** The `add-admin-piece` task deploys an admin dashboard piece
 > into the system space. It is **not** required for normal background-service
 > operation -- the system space cell is bootstrapped automatically by
-> `setBGCharm()` during the OAuth callback when a piece is first registered.
+> `setBGPiece()` during the OAuth callback when a piece is first registered.
 > Run it only if you want the admin dashboard:
 >
 > ```bash
-> cd packages/background-charm-service
-> OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
+> cd packages/background-piece-service
+> OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-piece
 > ```
 
 ### Registering a Piece for Background Updates
@@ -282,7 +293,7 @@ Or use the `<cf-updater>` component in your piece's UI.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `CompilerError: no exported member 'pattern'` | Binary version mismatch | Run `deno task build-binaries` |
-| `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-charm` |
+| `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-piece` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
-See `packages/background-charm-service/CLAUDE.md` for more details.
+See `packages/background-piece-service/CLAUDE.md` for more details.

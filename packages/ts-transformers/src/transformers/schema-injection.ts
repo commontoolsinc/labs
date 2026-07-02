@@ -3,8 +3,8 @@ import {
   cloneTypeNode,
   createRegisteredTypeLiteral,
   getDeclaredTypeNodeForBindingElement,
+  reportUnknownReactiveType,
   shouldPreserveBindingDeclaredTypeNode,
-  warnIfUnknownReactiveType,
 } from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
@@ -930,7 +930,7 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
  * an `asScope(scope)` method (the lowering target). This covers the schema-built
  * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
  * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
- * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * type is just `(...) => Reactive<...>` with an `asScope` method and so lacks
  * the `argumentSchema`/`resultSchema` shape that check keys on.
  */
 function calleeExposesAsScope(
@@ -1521,8 +1521,8 @@ function visitReactiveConditional(
   // so an unknown condition silently reads back as undefined at this boundary.
   // The branches are result values that flow outward unmaterialized — an unknown
   // branch is not lost here; it propagates as the call's unknown result and is
-  // warned about where that result is consumed (captured).
-  warnIfUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
+  // reported where that result is consumed (captured).
+  reportUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
 
   return visitPrependedWidenedSchemaCall(
     node,
@@ -2598,7 +2598,7 @@ function reportAnyResultSchema(
 /**
  * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
  * result is an error (the whole output is permissive). A concrete result that
- * nests `unknown` fields is a warning: those fields lower to
+ * nests `unknown` fields is also an error: those fields lower to
  * `{ type: "unknown" }`, which a consumer reading them back materializes as
  * `undefined` — the producer-side form of the unknown-capture bug.
  */
@@ -2617,7 +2617,7 @@ function reportUnknownPatternResult(
   if (paths.length === 0) return;
   const fields = paths.map((p) => `\`${p}\``).join(", ");
   context.reportDiagnosticOnce({
-    severity: "warning",
+    severity: "error",
     type: "pattern-result:unknown-type",
     message:
       `pattern() output ${paths.length > 1 ? "fields" : "field"} ${fields} ` +
@@ -3980,6 +3980,99 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      // fetchJson<T>({ url, ... }) - lowers the T type argument to an
+      // injected `schema` property (mirrors generate-object's `schema` and
+      // sqliteQuery's `rowSchema`). The runtime builtin verifies the fetched
+      // JSON against it at fetch time. A type argument is required;
+      // fetchJsonUnchecked is the untyped escape hatch.
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "fetchJson"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        if (!typeArgs || typeArgs.length !== 1) {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "fetch-json:missing-type-argument",
+            message: "fetchJson requires an explicit type argument, e.g. " +
+              "fetchJson<MyResult>({ url }). Use fetchJsonUnchecked for JSON " +
+              "whose shape isn't declared as a type.",
+            node,
+          });
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        {
+          const paramsArg = args[0];
+
+          // An explicit `schema` property takes precedence over injection.
+          const hasExplicitSchema = paramsArg &&
+            ts.isObjectLiteralExpression(paramsArg) &&
+            paramsArg.properties.some(
+              (p: ts.ObjectLiteralElementLike) =>
+                p.name && ts.isIdentifier(p.name) && p.name.text === "schema",
+            );
+
+          if (!hasExplicitSchema) {
+            const resolved = resolveInjectableSchemaType(
+              typeArgs[0],
+              checker,
+              sourceFile,
+              factory,
+              typeRegistry,
+              () => undefined,
+            );
+            const schemaCall = createRegisteredSchemaCallFromResolvedType(
+              context,
+              resolved,
+              checker,
+              typeRegistry,
+            );
+
+            if (schemaCall) {
+              // The derived `schema` is emitted FIRST so any caller-written
+              // property wins by later-property-wins semantics. The up-front
+              // check only catches an identifier `schema` key on an object
+              // literal; emitting first also lets a `schema` reached through
+              // a spread or a computed key override the derived one, matching
+              // the documented "explicit schema takes precedence" contract.
+              const schemaProp = factory.createPropertyAssignment(
+                "schema",
+                schemaCall,
+              );
+              let newParams: ts.Expression;
+              if (paramsArg && ts.isObjectLiteralExpression(paramsArg)) {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp, ...paramsArg.properties],
+                  true,
+                );
+              } else if (paramsArg) {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp, factory.createSpreadAssignment(paramsArg)],
+                  true,
+                );
+              } else {
+                newParams = factory.createObjectLiteralExpression(
+                  [schemaProp],
+                  true,
+                );
+              }
+
+              const updated = factory.createCallExpression(
+                node.expression,
+                node.typeArguments,
+                [newParams, ...args.slice(1)],
+              );
+              context.markSchemaInjected(updated);
+              return ts.visitEachChild(updated, visit, transformation);
+            }
+          }
         }
       }
 

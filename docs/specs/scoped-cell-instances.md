@@ -477,7 +477,7 @@ shape has stronger semantics.
 | `flatMap` | Narrowest scope of the inputs, because output cardinality depends on callback results. |
 | `ifElse` | Same scope as the condition. Branch values may be narrower links. The chosen link structure is condition-scoped; following the link can produce scoped data. |
 | `when` / `unless` | Same scope as the condition. |
-| `fetchData` / `fetchProgram` / `streamData` | Narrowest scope of inputs. |
+| `fetchJson` / `fetchProgram` / `streamData` | Narrowest scope of inputs. |
 | `llm` / `llmDialog` / `generateText` / `generateObject` | Narrowest scope of inputs. |
 | `compileAndRun` | Narrowest scope of inputs. |
 | `str` | Narrowest scope of interpolation inputs. |

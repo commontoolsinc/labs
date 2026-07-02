@@ -2,7 +2,12 @@ import { raw } from "../module.ts";
 import { map } from "./map.ts";
 import { filter } from "./filter.ts";
 import { flatMap } from "./flatmap.ts";
-import { fetchData } from "./fetch-data.ts";
+import {
+  fetchBinary,
+  fetchJson,
+  fetchJsonUnchecked,
+  fetchText,
+} from "./fetch.ts";
 import { fetchProgram } from "./fetch-program.ts";
 import { streamData } from "./stream-data.ts";
 import { generateObject, generateText, llm } from "./llm.ts";
@@ -32,7 +37,13 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));
-  moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
+  moduleRegistry.addModuleByRef("fetchBinary", raw(fetchBinary));
+  moduleRegistry.addModuleByRef("fetchText", raw(fetchText));
+  moduleRegistry.addModuleByRef("fetchJson", raw(fetchJson));
+  moduleRegistry.addModuleByRef(
+    "fetchJsonUnchecked",
+    raw(fetchJsonUnchecked),
+  );
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
@@ -58,6 +69,7 @@ export function registerBuiltins(runtime: Runtime) {
     raw<BuiltInGenerateObjectParams, {
       pending: Cell<boolean>;
       result: Cell<Record<string, unknown> | undefined>;
+      error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
     }>(generateObject, { isEffect: true }),
@@ -67,6 +79,7 @@ export function registerBuiltins(runtime: Runtime) {
     raw<BuiltInGenerateTextParams, {
       pending: Cell<boolean>;
       result: Cell<string | undefined>;
+      error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
     }>(generateText, { isEffect: true }),

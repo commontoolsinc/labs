@@ -4,6 +4,7 @@ import {
   CompiledJsParseError,
   findTopLevelArrow,
   findTopLevelEquals,
+  isStringLiteralRange,
   locationFromOffset,
   parseCompiledBundleSource,
   parseFunctionText,
@@ -211,8 +212,74 @@ describe("scanner helpers", () => {
     expect(parseStringLiteralValue(source, 0, source.length)).toBe('a"b');
   });
 
+  it("recognizes exact string literal ranges", () => {
+    const literalWithTrivia = ` /* before */ "a\\\"b" /* after */ `;
+    expect(isStringLiteralRange(
+      literalWithTrivia,
+      0,
+      literalWithTrivia.length,
+    )).toBe(true);
+    const literalWithLineComment = ` /* before */ "a" // after`;
+    expect(isStringLiteralRange(
+      literalWithLineComment,
+      0,
+      literalWithLineComment.length,
+    )).toBe(true);
+    expect(isStringLiteralRange(`"a" + value`, 0, 11)).toBe(false);
+    expect(isStringLiteralRange(`"a\n"`, 0, 4)).toBe(false);
+    expect(isStringLiteralRange(`"a"b`, 0, 4)).toBe(false);
+  });
+
+  it("matches JavaScript string literal token boundaries", () => {
+    const escapedClosingQuote = '"' + 'a\\"b' + '"';
+    const loneBackslash = '"a\\';
+    const escapedBackslash = '"' + "a" + "\\\\" + '"';
+    const unicodeEscape = '"' + "\\u0061" + '"';
+    const adjacentStrings = '"a""b"';
+
+    expect(isStringLiteralRange(
+      escapedClosingQuote,
+      0,
+      escapedClosingQuote.length,
+    )).toBe(true);
+    expect(isStringLiteralRange(
+      loneBackslash,
+      0,
+      loneBackslash.length,
+    )).toBe(false);
+    expect(isStringLiteralRange(
+      escapedBackslash,
+      0,
+      escapedBackslash.length,
+    )).toBe(true);
+    expect(isStringLiteralRange(
+      unicodeEscape,
+      0,
+      unicodeEscape.length,
+    )).toBe(true);
+    expect(isStringLiteralRange(
+      adjacentStrings,
+      0,
+      adjacentStrings.length,
+    )).toBe(false);
+
+    expect(() => new Function(`return ${escapedClosingQuote};`)).not.toThrow();
+    expect(() => new Function(`return ${loneBackslash};`)).toThrow();
+    expect(() => new Function(`return ${escapedBackslash};`)).not.toThrow();
+    expect(() => new Function(`return ${unicodeEscape};`)).not.toThrow();
+    expect(() => new Function(`return ${adjacentStrings};`)).toThrow();
+  });
+
   it("rejects non-string literal values", () => {
     const source = `value`;
+
+    expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
+      "Expected a string literal",
+    );
+  });
+
+  it("rejects malformed string literal ranges", () => {
+    const source = `"a\n"`;
 
     expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
       "Expected a string literal",

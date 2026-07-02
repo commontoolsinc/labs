@@ -11,7 +11,7 @@ of each section.
 |---|---|
 | Toolshed (server) | [`packages/toolshed/env.ts`](../../packages/toolshed/env.ts) |
 | Shell (browser, build-time) | [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts), [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts) |
-| Background charm service | [`packages/background-charm-service/src/env.ts`](../../packages/background-charm-service/src/env.ts) |
+| Background piece service | [`packages/background-piece-service/src/env.ts`](../../packages/background-piece-service/src/env.ts) |
 | CLI | [`packages/cli/launcher.ts`](../../packages/cli/launcher.ts), [`packages/cli/mod.ts`](../../packages/cli/mod.ts) |
 | Integration tests | [`packages/integration/env.ts`](../../packages/integration/env.ts) |
 | Experimental flags | [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) |
@@ -139,18 +139,22 @@ process you're configuring.
 | Process | Path-to-keyfile var | Passphrase var | Default fallback |
 |---|---|---|---|
 | Toolshed | `IDENTITY` | `IDENTITY_PASSPHRASE` _(deprecated)_ | `"implicit trust"` (dev only) |
-| Background charm service | `IDENTITY` | `OPERATOR_PASS` | `"implicit trust"` (dev only) |
+| Background piece service | `IDENTITY` | `OPERATOR_PASS` | `"implicit trust"` (dev only) |
 | CF CLI | `CF_IDENTITY` env or `--identity <path>` | _(none)_ | _(none — error if remote)_ |
 
 For local dev, all three default to the implicit-trust passphrase so they
-share an identity automatically. To match the CLI to the local server:
+share an identity automatically. To match the CLI to the local server (only
+needed for operator/admin tasks on your own localhost):
 
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
 
-See [`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
+`"implicit trust"` is a shared, publicly-derivable identity — never use it
+against a shared or remote server (everyone who derives it becomes the same
+principal). For a personal or unique identity, use `id new`. See
+[`docs/development/SHARED_IDENTITY.md`](./SHARED_IDENTITY.md) for the
 browser-import flow.
 
 ---
@@ -209,7 +213,7 @@ longer exist.
 ## Experimental flags
 
 See [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) for
-the full table, propagation paths (server / shell / bg-charm / CLI), and
+the full table, propagation paths (server / shell / bg-piece / CLI), and
 verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
@@ -279,13 +283,13 @@ Passed before the CLI args; rarely needed:
 |---|---|---|
 | `--deno <path>` | system `deno` | Use a specific Deno binary. |
 | `--labs-root <path>` | auto-detected from launcher location | Override the labs checkout root. |
-| `--config <path>` | `<labs-root>/deno.json` | Override the Deno config. |
+| `--config <path>` | `<labs-root>/deno.jsonc` | Override the Deno config. |
 | `--cli-entrypoint <path>` | `<labs-root>/packages/cli/mod.ts` | Override the CLI entry. |
 | `--cwd <path>` | `INIT_CWD` env or `process.cwd()` | Override the working directory passed to the CLI. |
 
 ---
 
-## Background charm service
+## Background piece service
 
 | Var | Default | Notes |
 |---|---|---|
@@ -312,7 +316,7 @@ when you run `deno task integration`:
 Additionally, [`tasks/integration.ts`](../../tasks/integration.ts) sets
 `INTEGRATION_TEST_FLAGS` (default: unset; populated with `--junit-path=…` when
 `--junit-dir` is passed, or passed through from the environment otherwise).
-Per-package `deno.json` `integration` scripts pick it up via `$INTEGRATION_TEST_FLAGS`
+Per-package `deno.jsonc` `integration` scripts pick it up via `$INTEGRATION_TEST_FLAGS`
 shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 
 ---
@@ -326,7 +330,7 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `check` | Type-check all packages (`./tasks/check.sh`). |
 | `test` | Run all package tests (`./tasks/test.ts`). |
 | `integration` | Run integration tests (`./tasks/integration.ts`). |
-| `build-binaries` | Build standalone binaries (`cf`, `bg-charm-service`, etc.). |
+| `build-binaries` | Build standalone binaries (`cf`, `bg-piece-service`, etc.). |
 | `cf` | Run the CLI via the launcher. |
 | `initialize-db` | Initialize the local development database. |
 | `install-hooks` | Install git pre-commit hooks. |
@@ -362,14 +366,16 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `test` | Unit tests. |
 | `integration`, `fuse-integration`, `acl-integration` | Integration suites against a local toolshed. |
 
-### Background charm service (`packages/background-charm-service`)
+### Background piece service (`packages/background-piece-service`)
 
 | Task | What it does |
 |---|---|
 | `start` | Run from source. |
-| `add-admin-charm` | One-time setup: cast the admin charm into the system space. |
-| `initialize`, `initialize:gmail`, `initialize:gcal` | Bootstrap integration cells. |
-| `gmail`, `gmail:kv` | Run with Gmail integration enabled. |
+| `add-admin-piece` | One-time setup: cast the admin piece into the system space. |
+| `test` | Run unit tests. |
+| `check` | Type-check source files. |
+| `lint` | Lint source files. |
+| `fmt` | Format package files. |
 | `help` | Service help. |
 
 ---

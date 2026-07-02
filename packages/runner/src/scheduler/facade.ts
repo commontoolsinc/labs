@@ -30,6 +30,7 @@ import type {
 import {
   DEFAULT_RETRIES_FOR_EVENTS,
   MAX_SETTLE_STATS_HISTORY,
+  INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
 } from "./constants.ts";
 import {
   getPieceMetadataFromFrame,
@@ -180,6 +181,10 @@ type SchedulerRegisterOptions = {
   throttle?: number;
   changeGroup?: ChangeGroup;
   rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
+  // Hold the action's initial run until its space finishes syncing (bounded by
+  // timeoutMs), so a resumed re-derivation reads confirmed-loaded inputs
+  // instead of racing the data. The flag-off resume path; see runner.ts.
+  awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -495,8 +500,59 @@ export class Scheduler {
         action,
         rehydrateFromStorage.snapshotsByActionId,
       );
+    } else if (options.awaitSyncBeforeInitialRun) {
+      this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
     return cancel;
+  }
+
+  // Hold a resumed action's initial run until its space finishes syncing. The
+  // hold is a bounded time gate (worst case the timeout releases it); the sync
+  // completing releases it early. The awaiting task joins backgroundTasks so
+  // idle() waits for the release decision.
+  private holdInitialRunUntilSynced(
+    action: Action,
+    options: { space: MemorySpace; timeoutMs?: number },
+  ): void {
+    const timeoutMs = Math.max(
+      0,
+      options.timeoutMs ?? INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
+    );
+    this.gates.holdInitialRun(action, performance.now() + timeoutMs);
+    const task = (async () => {
+      const provider = this.runtime.storageManager.open(options.space);
+      const synced = provider?.synced?.bind(provider);
+      if (!synced) return;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<void>((resolve) => {
+        timeoutId = setTimeout(resolve, timeoutMs);
+      });
+      const syncedPromise = synced();
+      // If the timeout wins the race the sync promise is left pending; swallow
+      // a later rejection so it doesn't surface as unhandled.
+      syncedPromise.catch(() => {});
+      try {
+        await Promise.race([syncedPromise, timeout]);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      }
+    })().catch((error) => {
+      logger.warn("scheduler-initial-sync-hold", () => [
+        "Failed to await sync before initial run; releasing the hold",
+        this.getActionId(action),
+        error,
+      ]);
+    }).finally(() => {
+      // Release even on error/timeout: the gate exists to sequence the common
+      // case, not to block the action forever behind a stuck sync.
+      if (this.nodes.get(action)) {
+        this.gates.releaseInitialRunHold(action);
+      }
+    });
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+    });
   }
 
   /**
@@ -1670,6 +1726,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
+      backpressure: this.runtime.commitBackpressure,
       nodes: this.nodes,
       pending: this.pending,
       get eventPreflightTelemetryEnabled() {

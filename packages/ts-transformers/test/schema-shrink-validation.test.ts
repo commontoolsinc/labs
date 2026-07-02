@@ -1734,7 +1734,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, type Writable } from "commonfabric";',
-        "const value = {} as Writable<number>;",
+        "declare const value: Writable<number>;",
         "const doubled = lift((v) => v.get() * 2)(value);",
       ].join("\n");
 
@@ -1762,7 +1762,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, type Writable } from "commonfabric";',
-        "const value = {} as Writable<number>;",
+        "declare const value: Writable<number>;",
         "const copy = lift((v) => v.get())(value);",
       ].join("\n");
 
@@ -1895,7 +1895,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const source = [
         "/// <cts-enable />",
         'import { lift, equals, type Writable } from "commonfabric";',
-        "const state = {} as (Writable<number> | undefined);",
+        "declare const state: Writable<number> | undefined;",
         "const same = lift((state) => equals(state, state))(state);",
       ].join("\n");
 
@@ -1922,7 +1922,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         'import { lift, type Writable } from "commonfabric";',
-        "const input = {} as Writable<{ foo: string; bar: string }>;",
+        "declare const input: Writable<{ foo: string; bar: string }>;",
         "const d = lift((v: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = v.key("foo").get();',
         "  Object.keys(v.get());",
@@ -1977,6 +1977,72 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assertStringIncludes(result.output, '"bar"');
     },
   );
+
+  await t.step(
+    "errors when an array item access names a property the element type lacks",
+    async () => {
+      // The shrink-coverage check recurses through the array into its element
+      // type to validate item-level property reads.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: { id: string }[]) =>",
+        "  items.map((item) => item.missing));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "errors when a readonly array item access names a missing property",
+    async () => {
+      // Same recursion, but the element type is reached through a readonly
+      // array node.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: readonly { id: string }[]) =>",
+        "  items.map((item) => item.missing));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "validates array item reads alongside an array-root length read",
+    async () => {
+      // Reading both an array-root property (`length`) and item-level fields
+      // exercises the array-root path branch of the coverage check.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "const d = lift((items: { id: string }[]) => {",
+        "  const count = items.length;",
+        "  const ids = items.map((item) => item.missing);",
+        "  return { count, ids };",
+        "});",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const shrinkErrors = getErrors(diagnostics).filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(shrinkErrors.length, 0);
+    },
+  );
 });
 
 function getShrinkErrors(
@@ -1993,3 +2059,68 @@ function getShrinkErrors(
 function fmtErrors(diagnostics: readonly TransformationDiagnostic[]): string {
   return getShrinkErrors(diagnostics).map((e) => e.message).join("; ");
 }
+
+Deno.test("fetchJson requires an explicit type argument", async (t) => {
+  await t.step("errors when called without a type argument", async () => {
+    const source = [
+      'import { fetchJson } from "commonfabric";',
+      "",
+      'export const x = fetchJson({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertGreater(
+      errors.length,
+      0,
+      "Expected fetch-json:missing-type-argument for untyped fetchJson",
+    );
+    assertStringIncludes(errors[0]!.message, "fetchJsonUnchecked");
+  });
+
+  await t.step("no error when a type argument is given", async () => {
+    const source = [
+      'import { fetchJson } from "commonfabric";',
+      "",
+      "interface Repo { name: string }",
+      'export const x = fetchJson<Repo>({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertEquals(
+      errors.length,
+      0,
+      `Expected no missing-type-argument error but got: ${
+        errors.map((e) => e.message).join("; ")
+      }`,
+    );
+  });
+
+  await t.step("no error for untyped fetchJsonUnchecked", async () => {
+    const source = [
+      'import { fetchJsonUnchecked } from "commonfabric";',
+      "",
+      'export const x = fetchJsonUnchecked({ url: "https://example.com" });',
+    ].join("\n");
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics).filter(
+      (e) => e.type === "fetch-json:missing-type-argument",
+    );
+    assertEquals(
+      errors.length,
+      0,
+      `Expected no error for fetchJsonUnchecked but got: ${
+        errors.map((e) => e.message).join("; ")
+      }`,
+    );
+  });
+});

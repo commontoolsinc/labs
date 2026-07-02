@@ -654,7 +654,7 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
 }
 
 /**
- * Warns when a reactive value consumed across a boundary has inferred type
+ * Reports when a reactive value consumed across a boundary has inferred type
  * `unknown`. That type lowers to `{ type: "unknown" }`, which the runner reads
  * back as `undefined` rather than materializing the value (see
  * `runner/src/traverse.ts`, `_traverseWithSchemaInner`: a
@@ -665,9 +665,9 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
  * leaves below — `computed`/`lift`, `handler`/`action`, reactive array methods,
  * `patternTool`) and the condition of `ifElse`/`when`/`unless` (checked where
  * their schemas are built). `reportDiagnosticOnce` keeps the same value from
- * being warned about twice when more than one stage walks it.
+ * being reported twice when more than one stage walks it.
  */
-export function warnIfUnknownReactiveType(
+export function reportUnknownReactiveType(
   context: TransformationContext,
   expression: ts.Expression,
   type: ts.Type | undefined,
@@ -677,14 +677,14 @@ export function warnIfUnknownReactiveType(
     return;
   }
   context.reportDiagnosticOnce({
-    severity: "warning",
+    severity: "error",
     type: "reactive-capture:unknown-type",
     message:
       `Reactive value \`${describeCapture(expression, label)}\` has inferred ` +
       `type \`unknown\`, so its schema is \`{ type: "unknown" }\`, which the ` +
       `runner reads back as \`undefined\` instead of materializing it. Add an ` +
       `explicit type so it can be inferred (e.g. ` +
-      `\`fetchData<{ /* result shape */ }>({ ... })\`).`,
+      `\`fetchJson<{ /* result shape */ }>({ ... })\`).`,
     node: expression,
   });
 }
@@ -744,7 +744,7 @@ export function buildTypeElementsFromCaptureTree(
       // same one expressionToTypeNode uses. A bare getTypeAtLocation would skip
       // the typeRegistry lookup and initializer fallback; literal widening here
       // can't change whether the type is unknown.
-      warnIfUnknownReactiveType(
+      reportUnknownReactiveType(
         context,
         childNode.expression,
         inferWidenedTypeFromExpression(
@@ -763,6 +763,57 @@ export function buildTypeElementsFromCaptureTree(
         ) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
+      } else if (
+        ts.isIdentifier(childNode.expression) &&
+        childNode.expression.getSourceFile()
+      ) {
+        // A bare-identifier capture (e.g. a field destructured from the
+        // pattern's typed parameter). Determine optionality the standard-TS way
+        // — the `?` flag on the SOURCE PROPERTY of the destructured aggregate,
+        // mirroring the intermediate-node branch below. The capture's own symbol
+        // doesn't carry it: a `{ x }` shorthand resolves to a value symbol, and
+        // the destructured binding element doesn't inherit `SymbolFlags.Optional`
+        // from the aggregate's property. So resolve to the binding element, then
+        // read the aggregate property's flag. A field declared `x?: T` is
+        // optional; `x: T | undefined` (no `?`) stays required (a required key
+        // whose value may be undefined), faithful to TS.
+        let symbol = checker.getSymbolAtLocation(childNode.expression);
+        if (
+          symbol?.valueDeclaration &&
+          ts.isShorthandPropertyAssignment(symbol.valueDeclaration)
+        ) {
+          symbol = checker.getShorthandAssignmentValueSymbol(
+            symbol.valueDeclaration,
+          ) ??
+            symbol;
+        }
+        const binding = symbol?.valueDeclaration;
+        if (
+          binding && ts.isBindingElement(binding) &&
+          ts.isObjectBindingPattern(binding.parent)
+        ) {
+          const host = binding.parent.parent;
+          const aggregateType = ts.isParameter(host)
+            ? checker.getTypeAtLocation(host)
+            : ts.isVariableDeclaration(host) && host.initializer
+            ? checker.getTypeAtLocation(host.initializer)
+            : undefined;
+          // For a renamed binding (`{ source: local }`) the optionality lives on
+          // the SOURCE property, not the local capture name. The source key may
+          // be an identifier, string, or numeric literal (`{ "k": local }`,
+          // `{ 0: local }`); computed keys (`{ [expr]: local }`) aren't
+          // statically resolvable and fall back to the local name.
+          const sourceName = binding.propertyName &&
+              (ts.isIdentifier(binding.propertyName) ||
+                ts.isStringLiteralLike(binding.propertyName) ||
+                ts.isNumericLiteral(binding.propertyName))
+            ? binding.propertyName.text
+            : propName;
+          const sourceProp = aggregateType?.getProperty(sourceName);
+          if (sourceProp && isOptionalSymbol(sourceProp)) {
+            questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+          }
+        }
       }
     } else {
       // Intermediate node - need to get type to check optionality. Every node
@@ -780,8 +831,9 @@ export function buildTypeElementsFromCaptureTree(
           // Get Type for this property to pass to children
           currentType = checker.getTypeOfSymbol(propSymbol);
 
-          // Check optionality using centralized logic
-          // This checks both `?` flag AND `T | undefined` union
+          // Check optionality from the source property's `?` flag
+          // (SymbolFlags.Optional). This is the standard-TS distinction:
+          // `x?: T` is optional; `x: T | undefined` (no `?`) stays required.
           if (isOptionalSymbol(propSymbol)) {
             questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
           }

@@ -75,3 +75,47 @@ const items = new Writable<Item[]>([]);                  // Empty array with typ
 const user = new Writable<User>();                       // Optional value
 const config = new Writable<Config>({ theme: "dark" });  // Object with initial value
 ```
+
+### Representing values that are not available yet
+
+Use a discriminated union when a value is not available at first and later
+becomes a writable cell.
+
+This makes each state explicit. It also lets TypeScript narrow the value before
+code passes it to a handler or provider client.
+
+Provider pattern files can import `authIsReady` from their relative path to
+`packages/patterns/auth/auth-types.ts`.
+
+```typescript
+import { Writable } from "commonfabric";
+import { authIsReady } from "../../../packages/patterns/auth/auth-types.ts";
+
+type AuthData = { token: string };
+
+type AuthAvailability =
+  | { state: "loading"; auth: null }
+  | { state: "ready"; auth: Writable<AuthData> };
+
+const availability: AuthAvailability = {
+  state: "ready",
+  auth: new Writable({ token: "token" }),
+};
+
+const authReady = authIsReady(availability);
+const auth = availability.state === "ready" ? availability.auth : null;
+```
+
+This shape is useful for auth managers and follows the same state-machine style
+as `FetchState` in the program fetch cache.
+
+Use `authIsReady()` when code needs a shared boolean, such as a disabled state
+or a status panel. Provider clients still need the writable auth cell. Keep the
+`availability.state === "ready" ? availability.auth : null` selection next to
+the handler or component that uses it.
+
+Do not move the auth cell selection into a plain function. The function can run
+outside the reactive transform and hide the `state` read. Do not use `lift()` to
+return `Writable<AuthData> | null`. `lift()` receives a read-only view of cell
+input, so it is the right tool for the boolean readiness check and the wrong
+tool for exporting write access.

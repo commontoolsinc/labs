@@ -1,25 +1,34 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
 import { exists } from "@std/fs";
 import * as path from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
+import {
+  computeCompilerVersion,
+  renderVersionModule,
+} from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 
-interface BuildConfigInitializer {
+export interface BuildConfigInitializer {
   root: string;
   toolshedFlags: string[];
   cliOnly?: boolean;
 }
 
-class BuildConfig {
+export class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
   readonly cliOnly: boolean;
-  private _manifest: object;
+  private _manifestOriginal: string;
+  private _compileCacheVersionOriginal: string;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
     this.toolshedFlags = options.toolshedFlags;
     this.cliOnly = !!options.cliOnly;
-    this._manifest = JSON.parse(
-      Deno.readTextFileSync(this.workspaceManifestPath()),
+    this._manifestOriginal = Deno.readTextFileSync(
+      this.workspaceManifestPath(),
+    );
+    this._compileCacheVersionOriginal = Deno.readTextFileSync(
+      this.compileCacheVersionPath(),
     );
   }
 
@@ -27,12 +36,33 @@ class BuildConfig {
     return path.join(this.root, ...args);
   }
 
-  manifest() {
-    return JSON.parse(JSON.stringify(this._manifest));
+  // A fresh, mutable copy of the workspace manifest, parsed from its original
+  // bytes. The build mutates this copy; the original bytes stay untouched so
+  // the revert can restore the file exactly.
+  manifest(): Record<string, any> {
+    return parseJsonc(this._manifestOriginal) as Record<string, any>;
+  }
+
+  manifestOriginal() {
+    return this._manifestOriginal;
+  }
+
+  compileCacheVersionOriginal() {
+    return this._compileCacheVersionOriginal;
   }
 
   workspaceManifestPath() {
-    return this.path("deno.json");
+    return this.path("deno.jsonc");
+  }
+
+  compileCacheVersionPath() {
+    return this.path(
+      "packages",
+      "runner",
+      "src",
+      "compilation-cache",
+      "compile-cache-version.ts",
+    );
   }
 
   workspaceLockPath() {
@@ -63,14 +93,14 @@ class BuildConfig {
     return this.path("packages", "toolshed", "index.ts");
   }
 
-  bgCharmServiceEntryPath() {
-    return this.path("packages", "background-charm-service", "src", "main.ts");
+  bgPieceServiceEntryPath() {
+    return this.path("packages", "background-piece-service", "src", "main.ts");
   }
 
-  bgCharmServiceWorkerPath() {
+  bgPieceServiceWorkerPath() {
     return this.path(
       "packages",
-      "background-charm-service",
+      "background-piece-service",
       "src",
       "worker.ts",
     );
@@ -126,7 +156,7 @@ async function build(config: BuildConfig): Promise<void> {
     if (!config.cliOnly) await buildShell(config);
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
-    if (!config.cliOnly) await buildBgCharmService(config);
+    if (!config.cliOnly) await buildBgPieceService(config);
     await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
@@ -165,9 +195,7 @@ async function buildShell(config: BuildConfig): Promise<void> {
       },
     }).output();
     if (!success) {
-      console.error("Failed to build shell app");
-      Deno.exit(1);
-      return;
+      throw new Error("Failed to build shell app");
     }
 
     // Shell now serves at root path
@@ -216,14 +244,13 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build toolshed binary");
-    Deno.exit(1);
+    throw new Error("Failed to build toolshed binary");
   }
   console.log("Toolshed binary built successfully");
 }
 
-async function buildBgCharmService(config: BuildConfig): Promise<void> {
-  console.log("Building background charm service binary...");
+async function buildBgPieceService(config: BuildConfig): Promise<void> {
+  console.log("Building background piece service binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
       ...lockedCompileArgs(config),
@@ -233,24 +260,23 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
       // prior to building.
       "--no-check",
       "--output",
-      config.distPath("bg-charm-service"),
+      config.distPath("bg-piece-service"),
       "--include",
-      config.bgCharmServiceWorkerPath(),
+      config.bgPieceServiceWorkerPath(),
       "--include",
       config.staticAssetsPath(),
       "-A", // All permissions
-      "--unstable-worker-options", // Required by bg-charm-service
-      config.bgCharmServiceEntryPath(),
+      "--unstable-worker-options", // Required by bg-piece-service
+      config.bgPieceServiceEntryPath(),
     ],
     cwd: config.root,
     stdout: "inherit",
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build background charm service binary");
-    Deno.exit(1);
+    throw new Error("Failed to build background piece service binary");
   }
-  console.log("Background charm service binary built successfully");
+  console.log("Background piece service binary built successfully");
 }
 
 async function buildCli(config: BuildConfig): Promise<void> {
@@ -315,8 +341,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
-    console.error("Failed to build background charm service binary");
-    Deno.exit(1);
+    throw new Error("Failed to build CLI binary");
   }
   console.log("CLI binary built successfully");
 }
@@ -335,7 +360,7 @@ function lockedCompileArgs(config: BuildConfig): string[] {
 // Some frontend types in the workspace manifest
 // must be removed from the compiler options
 // that do not work with toolshed.
-async function prepareWorkspace(
+export async function prepareWorkspace(
   config: BuildConfig,
 ): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
@@ -345,6 +370,15 @@ async function prepareWorkspace(
       `Cannot build binaries without ${config.workspaceLockPath()}`,
     );
   }
+
+  // Write the current compile-cache version before compiling binaries. The value
+  // is computed before `deno.jsonc` changes so it reflects the committed
+  // compiler options.
+  const compileCacheVersion = await computeCompilerVersion(config.root);
+  await Deno.writeTextFile(
+    config.compileCacheVersionPath(),
+    renderVersionModule(compileCacheVersion),
+  );
 
   // Remove `compilerOptions.types`
   const manifest = config.manifest();
@@ -366,14 +400,18 @@ async function prepareWorkspace(
   );
 }
 
-async function revertWorkspace(config: BuildConfig): Promise<void> {
+export async function revertWorkspace(config: BuildConfig): Promise<void> {
   const denoJsonPath = config.workspaceManifestPath();
   const toolshedEnvPath = config.toolshedEnvPath();
 
-  // Restore the workspace manifest
+  // Restore the workspace manifest from its original bytes, keeping any
+  // comments and formatting intact.
+  await Deno.writeTextFile(denoJsonPath, config.manifestOriginal());
+
+  // Restore the checked-in compile-cache version module.
   await Deno.writeTextFile(
-    denoJsonPath,
-    `${JSON.stringify(config.manifest(), null, 2)}\n`,
+    config.compileCacheVersionPath(),
+    config.compileCacheVersionOriginal(),
   );
 
   // Remove the COMPILED env file
@@ -382,21 +420,73 @@ async function revertWorkspace(config: BuildConfig): Promise<void> {
   }
 }
 
-const config = new BuildConfig({
-  root: Deno.cwd(),
-  toolshedFlags: [
-    "--allow-env",
-    "--allow-sys",
-    "--allow-read",
-    "--allow-ffi",
-    "--allow-net",
-    "--allow-write",
-  ],
-  cliOnly: Deno.args.includes("--cli-only"),
-});
+export interface BuildSignalApi {
+  addSignalListener(
+    signal: "SIGINT" | "SIGTERM",
+    handler: () => void,
+  ): void;
+  removeSignalListener(
+    signal: "SIGINT" | "SIGTERM",
+    handler: () => void,
+  ): void;
+  exit(code: number): void;
+}
 
-Deno.addSignalListener("SIGINT", async () => {
-  await revertWorkspace(config);
-});
+export function installBuildSignalCleanup(
+  config: BuildConfig,
+  signalApi: BuildSignalApi = Deno,
+): () => void {
+  let exiting = false;
+  const onSignal = (exitCode: number) => async () => {
+    if (exiting) return;
+    exiting = true;
+    try {
+      await revertWorkspace(config);
+    } finally {
+      signalApi.exit(exitCode);
+    }
+  };
+  const onSigint = onSignal(130);
+  const onSigterm = onSignal(143);
+  signalApi.addSignalListener("SIGINT", onSigint);
+  signalApi.addSignalListener("SIGTERM", onSigterm);
+  return () => {
+    signalApi.removeSignalListener("SIGINT", onSigint);
+    signalApi.removeSignalListener("SIGTERM", onSigterm);
+  };
+}
 
-await build(config);
+export async function runBuildWithSignalCleanup(
+  config: BuildConfig,
+  options: {
+    build?: (config: BuildConfig) => Promise<void>;
+    signalApi?: BuildSignalApi;
+  } = {},
+): Promise<void> {
+  const cleanup = installBuildSignalCleanup(config, options.signalApi);
+  try {
+    await (options.build ?? build)(config);
+  } finally {
+    cleanup();
+  }
+}
+
+// Only run the build when invoked directly (`deno task build-binaries`), not
+// when imported by tests, which exercise BuildConfig / prepareWorkspace /
+// revertWorkspace against a temporary tree.
+if (import.meta.main) {
+  const config = new BuildConfig({
+    root: Deno.cwd(),
+    toolshedFlags: [
+      "--allow-env",
+      "--allow-sys",
+      "--allow-read",
+      "--allow-ffi",
+      "--allow-net",
+      "--allow-write",
+    ],
+    cliOnly: Deno.args.includes("--cli-only"),
+  });
+
+  await runBuildWithSignalCleanup(config);
+}

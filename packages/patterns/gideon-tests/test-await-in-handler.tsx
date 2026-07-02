@@ -2,7 +2,7 @@
  * TEST PATTERN: Verify "Never use await in handlers" claim
  *
  * CLAIM FROM DEBUGGING.md:
- * "Never use await in handlers (use fetchData instead)"
+ * "Never use await in handlers (use fetchJson instead)"
  *
  * This pattern tests whether await in handlers actually blocks the UI.
  *
@@ -17,14 +17,14 @@
  *
  * 3. Wait for the operation to complete
  * 4. Click "Test WITHOUT await (Good)" button
- *    - This uses fetchData with the same 3-second delay
+ *    - This uses fetchJson with the same 3-second delay
  *    - While waiting, try clicking the counter increment button
  *    - EXPECTED: Counter button works, UI responsive
  *    - OBSERVED: [Record your findings here after testing]
  *
  * 5. Compare the two approaches
  *    - Does await actually block the UI?
- *    - Is fetchData actually non-blocking?
+ *    - Is fetchJson actually non-blocking?
  *
  * WHAT TO LOOK FOR:
  * - Can you increment the counter while "Awaiting..." is displayed?
@@ -39,7 +39,7 @@
 import {
   computed,
   Default,
-  fetchData,
+  fetchJson,
   handler,
   NAME,
   pattern,
@@ -76,7 +76,7 @@ const testWithAwait = handler<
 
 // Handler WITHOUT await (triggers reactive flow by changing state)
 // This demonstrates the correct pattern: handler is synchronous,
-// async work happens in the reactive layer via fetchData
+// async work happens in the reactive layer via fetchJson
 const testWithoutAwait = handler<
   unknown,
   {
@@ -88,7 +88,7 @@ const testWithoutAwait = handler<
   state.fetchCount.set(state.fetchCount.get() + 1);
 
   // Trigger by updating a cell - handler returns IMMEDIATELY
-  // The actual async work happens in fetchData in the pattern body
+  // The actual async work happens in fetchJson in the pattern body
   state.fetchTrigger.set(safeDateNow());
 });
 
@@ -125,7 +125,7 @@ interface PatternState {
   awaitResult: string | Default<"">;
   awaitCount: number | Default<0>;
 
-  // State for reactive/fetchData test
+  // State for reactive/fetchJson test
   fetchTrigger: number | Default<0>;
   fetchCount: number | Default<0>;
 
@@ -139,22 +139,21 @@ export default pattern<PatternState>((state) => {
     ? `/_health?delay=3000&_=${state.fetchTrigger}`
     : "";
 
-  // fetchData runs in the reactive layer - doesn't block the handler
-  const fetchDataResult = fetchData<Record<string, unknown>>({
+  // fetchJson runs in the reactive layer - doesn't block the handler
+  const fetchJsonResult = fetchJson<Record<string, unknown>>({
     url: fetchUrl,
-    mode: "json",
   });
 
   const fetchStatus = computed(() => {
-    if (fetchDataResult.pending) return "Fetching...";
-    if (fetchDataResult.error) return "Error";
+    if (fetchJsonResult.pending) return "Fetching...";
+    if (fetchJsonResult.error) return "Error";
     if (state.fetchTrigger) return "Completed";
     return "Ready";
   });
 
   const fetchResultText = computed(() => {
-    if (fetchDataResult.error) return String(fetchDataResult.error);
-    if (fetchDataResult.result) {
+    if (fetchJsonResult.error) return String(fetchJsonResult.error);
+    if (fetchJsonResult.result) {
       return `Fetched successfully (${state.fetchCount} triggers)`;
     }
     return "(none)";
@@ -269,7 +268,7 @@ export default pattern<PatternState>((state) => {
               is shown.
             </li>
             <li>
-              <strong>WITHOUT await (fetchData):</strong>{" "}
+              <strong>WITHOUT await (fetchJson):</strong>{" "}
               UI should stay responsive. Counter button works while
               "Fetching..." is shown.
             </li>

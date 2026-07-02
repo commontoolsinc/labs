@@ -1,6 +1,6 @@
 import {
   computed,
-  fetchData,
+  fetchText,
   handler,
   NAME,
   navigateTo,
@@ -127,7 +127,7 @@ export default pattern<OmniboxFABInput>(
     const profile = wish<string>({ query: "#learnedSummary" });
 
     const patternIndexUrl = wish<{ url: Writable<string> }>({
-      query: "#pattern-index",
+      query: "#patternIndex",
     });
     const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
     computed(() => {
@@ -140,9 +140,8 @@ export default pattern<OmniboxFABInput>(
       }
     });
 
-    const { result: patternIndex } = fetchData({
+    const { result: patternIndex } = fetchText({
       url: resolvedPatternUrl,
-      mode: "text",
     });
 
     const profileContext = computed(() => {

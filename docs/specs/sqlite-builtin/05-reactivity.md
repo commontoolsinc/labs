@@ -67,7 +67,7 @@ They therefore **conflict on the handle cell's optimistic-concurrency revision**
 and serialize: one commit wins, the other is rejected on the seq/revision check
 and retries against the new value. This is the "multi-tab write mutex" — folding
 `exec` into the cell commit provides it **for free**, with no separate mutex
-primitive (contrast `fetchData`, which needs `tryClaimMutex` because it has no
+primitive (contrast `fetchJson`, which needs `tryClaimMutex` because it has no
 transactional backstop).
 
 ## What does *not* trigger re-run

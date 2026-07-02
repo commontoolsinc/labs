@@ -11,14 +11,20 @@ import type {
   IExtendedStorageTransaction,
 } from "../src/storage/interface.ts";
 import {
-  COMPILE_CACHE_RUNTIME_VERSION,
+  getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
+  setCompileCacheRuntimeVersionForTesting,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+const resolvedRuntimeVersion = await getCompileCacheRuntimeVersion();
+if (resolvedRuntimeVersion === undefined) {
+  throw new Error("compile-cache runtime version unavailable in Deno test");
+}
+const runtimeVersion = resolvedRuntimeVersion;
 
 // Step 5: PatternManager drives the content-addressed cell cache on the ESM
 // path — cold compiles write the module set back (CFC-stamped), warm compiles
@@ -127,6 +133,50 @@ describe("ESM compile via content-addressed cell cache", () => {
     expect(await run(warm, 6)).toEqual({ result: 12 });
   });
 
+  it("persists the derived record surface and reads it back (Fix B round-trip)", async () => {
+    // Guards the Fix B perf win against a SILENT regression: because the parse
+    // fallback yields byte-identical records, a pattern still loads + runs
+    // correctly even if the surface never persisted — so "it runs" is not enough.
+    // Assert the fields actually survive writeCompiledDocs -> storage ->
+    // loadCompiledClosure, i.e. buildRecordsFromCompiled reads them instead of
+    // re-parsing the body at boot.
+    const pm = runtime.patternManager;
+    await pm.compilePattern(PROGRAM, { space, tx });
+    await pm.flushCompileCacheWrites();
+    await tx.commit();
+    tx = runtime.edit();
+
+    const { entryIdentity } = await (runtime.harness as Engine)
+      .compileToRecordGraph(PROGRAM);
+
+    const readTx = runtime.edit();
+    const closure = await loadCompiledClosure(
+      runtime,
+      space,
+      entryIdentity,
+      { runtimeVersion },
+      readTx,
+    );
+    readTx.abort?.("round-trip probe read complete");
+
+    expect(closure.size).toBeGreaterThan(0);
+    // Every loaded compiled doc must carry the persisted surface (never
+    // undefined), else the boot build would silently fall back to parsing.
+    for (const [identity, doc] of closure) {
+      expect(doc.exportNames, `exportNames missing for ${identity}`)
+        .toBeDefined();
+      expect(doc.starTargetSpecs, `starTargetSpecs missing for ${identity}`)
+        .toBeDefined();
+      expect(doc.importSpecs, `importSpecs missing for ${identity}`)
+        .toBeDefined();
+    }
+    // Spot-check the entry doc's surface matches the program: main.tsx exports
+    // `default` and requires ./util.ts.
+    const entry = closure.get(entryIdentity)!;
+    expect(new Set(entry.exportNames)).toEqual(new Set(["default"]));
+    expect(entry.importSpecs).toContain("./util.ts");
+  });
+
   it("surfaces cold writeback failure instead of returning an unloadable pattern", async () => {
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     const failure = {
@@ -193,6 +243,179 @@ describe("ESM compile via content-addressed cell cache", () => {
     } finally {
       runtime2.editWithRetry = originalEditWithRetry;
       await runtime2.dispose();
+    }
+  });
+
+  it("source-only runtimes write source docs and cold-reload by identity", async () => {
+    const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
+      undefined,
+    );
+    try {
+      const pm = runtime.patternManager;
+      const cold = await pm.compilePattern(PROGRAM, { space, tx });
+      const entryRef = pm.getArtifactEntryRef(cold);
+      expect(entryRef).toBeDefined();
+      expect(await run(cold, 4)).toEqual({ result: 8 });
+      await pm.flushCompileCacheWrites();
+
+      const replicatedSpace =
+        (await Identity.fromPassphrase("source-only replicated space")).did();
+      pm.replicatePatternToSpace(cold, replicatedSpace, space);
+      await pm.flushCompileCacheWrites();
+
+      const readTx = runtime.edit();
+      try {
+        const source = await loadVerifiedSourceClosure(
+          runtime,
+          space,
+          entryRef!.identity,
+          readTx,
+        );
+        expect(source?.has(entryRef!.identity)).toBe(true);
+
+        const compiled = await loadCompiledClosure(
+          runtime,
+          space,
+          entryRef!.identity,
+          { runtimeVersion },
+          readTx,
+        );
+        expect(compiled.size).toBe(0);
+
+        const replicatedSource = await loadVerifiedSourceClosure(
+          runtime,
+          replicatedSpace,
+          entryRef!.identity,
+          readTx,
+        );
+        expect(replicatedSource?.has(entryRef!.identity)).toBe(true);
+        const replicatedCompiled = await loadCompiledClosure(
+          runtime,
+          replicatedSpace,
+          entryRef!.identity,
+          { runtimeVersion },
+          readTx,
+        );
+        expect(replicatedCompiled.size).toBe(0);
+      } finally {
+        readTx.abort?.("source-only cache assertion complete");
+      }
+
+      const runtime2 = newRuntime();
+      const tx2 = runtime2.edit();
+      try {
+        const loaded = await runtime2.patternManager.loadPatternByIdentity(
+          entryRef!.identity,
+          entryRef!.symbol,
+          space,
+        );
+        expect(typeof loaded).toBe("function");
+        const resultCell = runtime2.getCell<{ result: number }>(
+          space,
+          "source-only by-identity run",
+          undefined,
+          tx2,
+        );
+        const result = runtime2.run(tx2, loaded!, { value: 7 }, resultCell);
+        await tx2.commit();
+        await result.pull();
+        expect(result.getAsQueryResult()).toEqual({ result: 14 });
+        await runtime2.patternManager.flushCompileCacheWrites();
+
+        const readTx2 = runtime2.edit();
+        try {
+          const compiled = await loadCompiledClosure(
+            runtime2,
+            space,
+            entryRef!.identity,
+            { runtimeVersion },
+            readTx2,
+          );
+          expect(compiled.size).toBe(0);
+        } finally {
+          readTx2.abort?.("source-only reload assertion complete");
+        }
+      } finally {
+        await runtime2.dispose();
+      }
+    } finally {
+      restoreRuntimeVersion();
+    }
+  });
+
+  it("source-only compile surfaces source writeback failure", async () => {
+    const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
+      undefined,
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = {
+      name: "StorageTransactionAborted" as const,
+      message: "forced source cache writeback failure",
+      reason: "synthetic source writeback failure",
+    } satisfies CommitError;
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: failure })) as typeof runtime.editWithRetry;
+
+    try {
+      let thrown: unknown;
+      try {
+        await runtime.patternManager.compilePattern(PROGRAM, { space, tx });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(
+        "forced source cache writeback failure",
+      );
+      expect((thrown as Error & { cause?: unknown }).cause).toBe(failure);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+      restoreRuntimeVersion();
+    }
+  });
+
+  it("does not replicate an incomplete compiled closure", async () => {
+    const compiled = await (runtime.harness as Engine).compileToRecordGraph(
+      PROGRAM,
+    );
+    const sourceTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      sourceTx,
+    );
+    runtime.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
+    runtime.patternManager.associatePatternIdentity(pattern, {
+      identity: compiled.entryIdentity,
+      symbol: "default",
+    });
+
+    const replicatedSpace =
+      (await Identity.fromPassphrase("incomplete compiled replication")).did();
+    runtime.patternManager.replicatePatternToSpace(
+      pattern,
+      replicatedSpace,
+      space,
+    );
+    await runtime.patternManager.flushCompileCacheWrites();
+
+    const readTx = runtime.edit();
+    try {
+      const replicatedSource = await loadVerifiedSourceClosure(
+        runtime,
+        replicatedSpace,
+        compiled.entryIdentity,
+        readTx,
+      );
+      expect(replicatedSource).toBeUndefined();
+    } finally {
+      readTx.abort?.("incomplete replication assertion complete");
     }
   });
 
@@ -291,7 +514,7 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
     });
     const tx = runtime.edit();
     const cacheOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      runtimeVersion,
     };
     try {
       // The entry identity is loader-internal; recover it via a no-cache compile.

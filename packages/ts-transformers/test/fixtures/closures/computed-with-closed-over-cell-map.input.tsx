@@ -3,7 +3,7 @@ import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → lift(({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))({ numbers, multiplier })
-// Context: Unlike OpaqueRef arrays, Cell arrays still need reactive mapping even
+// Context: Unlike Reactive arrays, Cell arrays still need reactive mapping even
 //   inside a lift-applied callback. The .map() callback's closed-over `multiplier` cell
 //   is passed as a params object to mapWithPattern.
 export default pattern(() => {

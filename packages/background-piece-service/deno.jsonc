@@ -1,0 +1,23 @@
+{
+  "name": "@commonfabric/background-piece",
+  "tasks": {
+    "start": "deno run -A --unstable-worker-options src/main.ts",
+    "help": "deno run -A src/main.ts --help",
+    "add-admin-piece": "deno run -A cast-admin.ts --patternPath=bgAdmin.tsx",
+    "test": "deno test --allow-env --allow-ffi --allow-read --allow-run --allow-write --allow-sys test/*.test.ts",
+    "check": "deno check src/**/*.ts",
+    "lint": "deno lint",
+    "fmt": "deno fmt"
+  },
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^1.19.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.46.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^1.19.0",
+    "@opentelemetry/context-async-hooks": "npm:@opentelemetry/context-async-hooks@^1.19.0"
+  },
+  "exports": {
+    ".": "./src/lib.ts",
+    "./schema": "./src/schema.ts"
+  }
+}

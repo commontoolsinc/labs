@@ -15,7 +15,7 @@ concurrency:
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service cf"
+  BINARIES: "toolshed bg-piece-service cf"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -24,6 +24,7 @@ jobs:
   check:
     name: "Check"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -59,6 +60,7 @@ jobs:
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +85,7 @@ jobs:
     name: "Test"
     runs-on:
       group: labs
+    timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -129,11 +132,12 @@ jobs:
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3, 4, 5]
+        total: [5]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -184,6 +188,7 @@ jobs:
     name: "Build Binaries"
     runs-on:
       group: labs
+    timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -206,12 +211,13 @@ jobs:
           name: common-binaries
           path: |
             ./dist/toolshed
-            ./dist/bg-charm-service
+            ./dist/bg-piece-service
             ./dist/cf
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -227,12 +233,21 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: ♻️ Restore/save generated pattern compile byte cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
+          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
+          restore-keys: |
+            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
         env:
+          CF_COMPILE_CACHE_FILE: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           DENO_COVERAGE_DIR: ../../coverage/raw/generated-patterns-${{ matrix.shard }}
         run: |
           TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})
@@ -276,6 +291,7 @@ jobs:
   package-integration-test:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: ["build-binaries"]
     strategy:
       fail-fast: false
@@ -499,6 +515,7 @@ jobs:
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: ["build-binaries"]
     strategy:
       fail-fast: false
@@ -514,6 +531,30 @@ jobs:
 
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
+
+      # Cross-run compile cache: persist the per-shard compiled-module-byte cache
+      # so unchanged patterns reuse last run's emitted bytes (skip the
+      # type-check + transform + emit). The key folds in a hash of everything
+      # that shapes the emitted bytes — the js-compiler, the CF transformer, the
+      # schema-generator it bakes schemas from, runner code that prepares and
+      # verifies compiled module records, static type assets loaded by the
+      # in-memory compiler, the api types lowered into schemas, the root
+      # deno.jsonc compiler options (jsx/jsxImportSource), and the lockfile — so
+      # any change to what emits or trusts the bytes invalidates the whole file
+      # even when it leaves module identity and the runtime-version tag untouched.
+      # This input list mirrors COMPILE_FINGERPRINT_INPUTS in
+      # packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts, which
+      # fingerprints the same set for the durable runtime cache; the
+      # compiler-fingerprint test fails if the two drift. The pattern-source hash
+      # rolls the key while `restore-keys` still seeds from the most recent prior
+      # cache.
+      - name: ♻️ Restore/save compile byte cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          restore-keys: |
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -538,6 +579,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
@@ -548,6 +593,7 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
+          CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
@@ -578,6 +624,7 @@ jobs:
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -593,6 +640,10 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      # These tests run with `deno test`, so they collect V8 runtime coverage
+      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
+      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
+      # pattern-unit-test job. See docs/development/COVERAGE.md.
       - name: 🧩 Run pattern reload integration tests
         run: |
           mkdir -p test-results
@@ -627,6 +678,7 @@ jobs:
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: ["build-binaries"]
     strategy:
       matrix:
@@ -654,8 +706,11 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/cf
-          mkdir -p test-results
-          DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          mkdir -p test-results coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }}
+          DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} \
+          CF_PATTERN_COVERAGE_DIR=coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }} \
+          CF_BINARY=./common-binaries/cf \
+          deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
       - name: 🧾 Write coverage report
         if: always()
@@ -666,7 +721,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-unit-${{ matrix.chunk }}
-          path: coverage/lcov/pattern-unit-${{ matrix.chunk }}.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 
@@ -687,6 +742,7 @@ jobs:
     name: "Performance Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - check
       - test
@@ -754,6 +810,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on:
       group: labs
+    timeout-minutes: 30
     needs:
       [
         "test",
@@ -764,6 +821,7 @@ jobs:
         "pattern-unit-test",
         "package-integration-test",
         "cli-integration-test",
+        "generated-patterns-integration-test",
       ]
     environment: ci
     permissions:
@@ -780,6 +838,29 @@ jobs:
         with:
           name: common-binaries
           path: common-binaries
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      # Merge every job's LCOV report into one line-coverage file with
+      # repository-relative paths, so IDE users can download a single artifact
+      # covering the whole repository. Uploaded to Cloud Storage below alongside
+      # the signed binaries. Best-effort: a coverage problem must not block
+      # binary attestation or the deploys that depend on it.
+      - name: 📥 Download coverage reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+
+      - name: 🧬 Combine coverage LCOV
+        continue-on-error: true
+        run: |
+          deno run --allow-read --allow-write tasks/combine-coverage-lcov.ts \
+            --input-dir=coverage-artifacts \
+            --output=release/labs-${{ github.sha }}.lcov \
+            --repo-name=${{ github.event.repository.name }}
 
       - name: 🔐 Process & sign binaries
         run: |
@@ -802,19 +883,19 @@ jobs:
           cp ./dist/toolshed ./signed/
           cp ./dist/toolshed.sig ./signed/
 
-          # Process bg-charm-service binary
-          echo "Processing binary: bg-charm-service"
-          sha256sum ./dist/bg-charm-service > ./dist/bg-charm-service.hash.txt
-          BG_CHARM_SERVICE_HASH=$(cat ./dist/bg-charm-service.hash.txt | awk '{print $1}')
-          echo "bg-charm-service hash: $BG_CHARM_SERVICE_HASH"
-          echo "bg_charm_service_hash=$BG_CHARM_SERVICE_HASH" >> $GITHUB_OUTPUT
+          # Process bg-piece-service binary
+          echo "Processing binary: bg-piece-service"
+          sha256sum ./dist/bg-piece-service > ./dist/bg-piece-service.hash.txt
+          BG_PIECE_SERVICE_HASH=$(cat ./dist/bg-piece-service.hash.txt | awk '{print $1}')
+          echo "bg-piece-service hash: $BG_PIECE_SERVICE_HASH"
+          echo "bg_piece_service_hash=$BG_PIECE_SERVICE_HASH" >> $GITHUB_OUTPUT
 
-          # Sign the bg-charm-service binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-charm-service.sig ./dist/bg-charm-service
+          # Sign the bg-piece-service binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-piece-service.sig ./dist/bg-piece-service
 
           # Copy to signed directory
-          cp ./dist/bg-charm-service ./signed/
-          cp ./dist/bg-charm-service.sig ./signed/
+          cp ./dist/bg-piece-service ./signed/
+          cp ./dist/bg-piece-service.sig ./signed/
 
           # Process cf binary
           echo "Processing binary: cf"
@@ -847,12 +928,12 @@ jobs:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: 📝 Generate attestation for bg-charm-service binary
-        id: attest_bg_charm_service
+      - name: 📝 Generate attestation for bg-piece-service binary
+        id: attest_bg_piece_service
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ./dist/bg-charm-service
-          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
+          subject-name: ./dist/bg-piece-service
+          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_piece_service_hash }}
 
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
@@ -875,7 +956,7 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
-            ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
+            ${{ steps.attest_bg_piece_service.outputs.bundle-path }}
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
@@ -905,14 +986,14 @@ jobs:
             exit 1
           fi
 
-          # Verify bg-charm-service binary attestation
-          echo "::group::bg-charm-service attestation details"
-          gh attestation verify ./dist/bg-charm-service -R ${{ github.repository }} --format json | jq
+          # Verify bg-piece-service binary attestation
+          echo "::group::bg-piece-service attestation details"
+          gh attestation verify ./dist/bg-piece-service -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ bg-charm-service attestation verified successfully\033[0m"
+            echo -e "\033[32m✓ bg-piece-service attestation verified successfully\033[0m"
           else
-            echo -e "\033[31m✗ bg-charm-service attestation verification failed\033[0m"
+            echo -e "\033[31m✗ bg-piece-service attestation verification failed\033[0m"
             exit 1
           fi
 
@@ -944,6 +1025,14 @@ jobs:
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
+
+          # The combined coverage report is best-effort; upload it only if the
+          # combine step produced it. To download it for a given commit:
+          #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
+          if [ -f release/labs-${{ github.sha }}.lcov ]; then
+            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
+          fi
           echo "::endgroup::"
 
   # Automatic deployment to staging (toolshed)
@@ -1053,6 +1142,7 @@ jobs:
     if: false # Disabled - was: github.ref == 'refs/heads/main'
     needs: ["deploy-toolshed"]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: toolshed
     continue-on-error: true # Don't fail the workflow if tests fail
     steps:

@@ -9,6 +9,7 @@ import {
   Stream,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -216,7 +217,10 @@ export function createPreviewUI(
  * Auth data structure for Google OAuth tokens.
  *
  * ⚠️ CRITICAL: When consuming this auth from another pattern, DO NOT use derive()!
- * Use direct property access: `googleAuthPiece.auth`
+ * Use direct property access: `googleAuthPiece.auth`.
+ * If auth comes through an auth manager, use `authIsReady(availability)` for
+ * shared readiness checks. Keep the writable auth cell access explicit at the
+ * call site that needs it.
  */
 export type Auth = {
   token: Secret<string> | Default<"">;
@@ -231,6 +235,8 @@ export type Auth = {
     picture: string;
   } | Default<{ email: ""; name: ""; picture: "" }>;
 };
+
+export type GoogleAuthCell = Writable<Auth>;
 
 // Selected scopes configuration - exported for wrapper patterns
 export type SelectedScopes = {
@@ -257,33 +263,24 @@ interface Input {
       docs: true;
       contacts: true;
     }>;
-  auth:
-    | Auth
-    | Default<{
-      token: "";
-      tokenType: "";
-      scope: [];
-      expiresIn: 0;
-      expiresAt: 0;
-      refreshToken: "";
-      user: { email: ""; name: ""; picture: "" };
-    }>;
+  auth: GoogleAuthCell;
 }
 
 /** Google OAuth authentication for Google APIs. #googleAuth */
 export interface Output {
-  auth: Auth;
+  [UI]: VNode;
+  auth: GoogleAuthCell;
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display with avatar, name, and email */
-  userChip: unknown;
+  userChip: VNode;
   /** Minimal preview for picker display with scope summary */
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
   /**
    * Refresh the OAuth token. Call this from other pieces when the token expires.
    */
   refreshToken: Stream<Record<string, never>>;
-  /** Background updater for proactive token refresh via background-charm-service */
+  /** Background updater for proactive token refresh via background-piece-service */
   bgUpdater: Stream<Record<string, never>>;
 }
 
@@ -410,11 +407,12 @@ export default pattern<Input, Output>(
     const hasSelectedScopes = computed(() =>
       Object.values(selectedScopes).some(Boolean)
     );
+    const authValue = computed(() => auth.get());
 
     // Check if re-auth is needed (selected scopes differ from granted scopes)
     const needsReauth = computed(() => {
-      if (!auth?.token) return false;
-      const grantedScopes: string[] = auth?.scope || [];
+      if (!authValue?.token) return false;
+      const grantedScopes: string[] = authValue?.scope || [];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
         const scopeUrl = SCOPE_MAP[key as keyof typeof SCOPE_MAP];
         if (enabled && scopeUrl && !grantedScopes.includes(scopeUrl)) {
@@ -428,16 +426,16 @@ export default pattern<Input, Output>(
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
-      if (!auth?.token || !auth?.expiresAt) return false;
-      return auth.expiresAt < now.get();
+      if (!authValue?.token || !authValue?.expiresAt) return false;
+      return authValue.expiresAt < now.get();
     });
 
     const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
     );
 
     // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
-    const checkboxesDisabled = computed(() => !!auth?.user?.email);
+    const checkboxesDisabled = computed(() => !!authValue?.user?.email);
 
     const refreshInProgress = new Writable(false);
     const refreshing = new Writable(false);
@@ -446,14 +444,14 @@ export default pattern<Input, Output>(
     const scopesDisplay = computed(() => scopes.join(", "));
 
     // Compact user chip for display in other patterns
-    const hasEmail = computed(() => !!auth?.user?.email);
-    const hasPicture = computed(() => !!auth?.user?.picture);
-    const hasUserName = computed(() => !!auth?.user?.name);
+    const hasEmail = computed(() => !!authValue?.user?.email);
+    const hasPicture = computed(() => !!authValue?.user?.picture);
+    const hasUserName = computed(() => !!authValue?.user?.name);
 
     const userChipAvatar = hasPicture
       ? (
         <img
-          src={auth.user.picture}
+          src={authValue.user.picture}
           alt=""
           style={{ width: "24px", height: "24px", borderRadius: "50%" }}
         />
@@ -473,7 +471,7 @@ export default pattern<Input, Output>(
     const userChipEmailLine = hasUserName
       ? (
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {auth.user.email}
+          {authValue.user.email}
         </div>
       )
       : null;
@@ -484,7 +482,7 @@ export default pattern<Input, Output>(
           {userChipAvatar}
           <div>
             <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {auth.user.name || auth.user.email}
+              {authValue.user.name || authValue.user.email}
             </div>
             {userChipEmailLine}
           </div>
@@ -507,7 +505,7 @@ export default pattern<Input, Output>(
 
     // Minimal preview chip for picker display using shared helper
     const previewUI = computed(() =>
-      createPreviewUI(auth, {
+      createPreviewUI(authValue, {
         gmail: selectedScopes.gmail,
         gmailSend: selectedScopes.gmailSend,
         gmailModify: selectedScopes.gmailModify,
@@ -519,16 +517,16 @@ export default pattern<Input, Output>(
       })
     );
 
-    const loggedIn = computed(() => !!auth?.user?.email);
+    const loggedIn = computed(() => !!authValue?.user?.email);
 
     // Compound conditions for conditional UI
     const showScopePreview = computed(() => !loggedIn && hasSelectedScopes);
     const showTokenStatus = computed(() =>
-      !!auth?.user?.email && !isTokenExpired
+      !!authValue?.user?.email && !isTokenExpired
     );
 
     const grantedScopesUI = computed(() => {
-      const scopes = auth.scope;
+      const scopes = authValue.scope;
       if (!scopes || scopes.length === 0) {
         return <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }} />;
       }
@@ -543,7 +541,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return `Google Auth (${auth.user.email})`;
+          return `Google Auth (${authValue.user.email})`;
         }
         return "Google Auth";
       }),
@@ -577,10 +575,10 @@ export default pattern<Input, Output>(
               ? (
                 <div>
                   <p style={{ margin: "8px 0" }}>
-                    <strong>Email:</strong> {auth.user.email}
+                    <strong>Email:</strong> {authValue.user.email}
                   </p>
                   <p style={{ margin: "8px 0" }}>
-                    <strong>Name:</strong> {auth.user.name}
+                    <strong>Name:</strong> {authValue.user.name}
                   </p>
                 </div>
               )
@@ -595,7 +593,7 @@ export default pattern<Input, Output>(
           <div
             style={{
               padding: "20px",
-              backgroundColor: auth?.user?.email ? "#e5e7eb" : "#f0f4f8",
+              backgroundColor: authValue?.user?.email ? "#e5e7eb" : "#f0f4f8",
               borderRadius: "8px",
               border: "1px solid #d0d7de",
               opacity: loggedIn ? 0.7 : 1,

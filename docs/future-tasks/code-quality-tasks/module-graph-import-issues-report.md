@@ -48,7 +48,7 @@ library → external → internal):
 // Shown for illustration only.
 // Current (internal packages mixed without grouping)
 import { JSONSchema7 } from "json-schema";
-import { isOpaqueRef, OpaqueRef } from "./spell.js";
+import { isReactive, Reactive } from "./spell.js";
 import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
 
 // Should be:
@@ -60,7 +60,7 @@ import { JSONSchema7 } from "json-schema";
 
 // Internal
 import { diffAndUpdate, maybeGetCellLink } from "@commonfabric/runner";
-import { isOpaqueRef, OpaqueRef } from "./spell.js";
+import { isReactive, Reactive } from "./spell.js";
 ```
 
 ### `packages/identity/src/ed25519/index.ts`
@@ -74,13 +74,13 @@ The codebase correctly follows the guideline for module-specific dependencies:
 
 ### Good Examples
 
-- `packages/llm/deno.json` - Correctly declares `json5` dependency
-- `packages/ui/deno.json` - Correctly declares `@shoelace-style/shoelace`
+- `packages/llm/deno.jsonc` - Correctly declares `json5` dependency
+- `packages/ui/deno.jsonc` - Correctly declares `@shoelace-style/shoelace`
   dependency
-- Most packages don't have unnecessary dependencies in their `deno.json`
+- Most packages don't have unnecessary dependencies in their `deno.jsonc`
 
 **This is a positive finding** - the codebase correctly avoids adding
-package-specific dependencies to the workspace `deno.json`.
+package-specific dependencies to the workspace `deno.jsonc`.
 
 ## Recommendations
 

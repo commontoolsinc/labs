@@ -16,11 +16,11 @@ interface State {
   votes: VoteEvent[];
 }
 
-const castVote = handler<unknown, { votes: Cell<VoteEvent[]> }>(
-  (_event, { votes }) => {
+const castVote = handler<VoteEvent, { votes: Cell<VoteEvent[]> }>(
+  (event, { votes }) => {
     votes.set([
       ...votes.get(),
-      { id: "module", step: "single" },
+      event,
     ]);
   },
 );

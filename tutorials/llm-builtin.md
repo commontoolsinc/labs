@@ -178,11 +178,11 @@ You can see on line 5-8 that our shape is
 `{system: string, messages: Array<{role: "user", content: msg}>}`. So what's the `derive` all about here?
 This gets a bit technical. The parameters to a built-in like `llm()` are
 passed as an `Opaque` object. Opaque objects mirror the expected type, and
-any property you pass in as an `OpaqueRef` (such as `Cell`, `derive`)
+any property you pass in as a `Reactive` (such as `Cell`, `derive`)
 stays reactive. Plain values still stay static. We want the
 `messages` property to be reactive so it updates whenever `userMessage`
 changes. The easiest way to do that here is to wrap the transformation in
-`derive`, which returns an `OpaqueRef`.
+`derive`, which returns a `Reactive`.
 
 We are calling `derive(userMessage, (msg) => function_body())` on line 7. This means that the reactive node depends on `userMessage`; it will be called each time userMessage is updated. `userMessage` is passed in as the first arg to the anonymous function here, as `msg`.
 

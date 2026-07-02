@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -59,13 +60,7 @@ class SharedServerStorageManager extends EmulatedStorageManager {
 }
 
 const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-  });
+  new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
 
 const newRuntime = (storageManager: SharedServerStorageManager) =>
   new Runtime({

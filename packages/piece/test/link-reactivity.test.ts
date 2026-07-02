@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parseLink, resolveCellPath, Runtime } from "@commonfabric/runner";
+import {
+  KeepAsCell,
+  parseLink,
+  resolveCellPath,
+  Runtime,
+} from "@commonfabric/runner";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -105,7 +110,7 @@ describe("PieceManager.link() reactivity", () => {
         source.key("data").getAsLink({
           base: target,
           includeSchema: true,
-          keepStreams: true,
+          keepAsCell: KeepAsCell.OnlyStream,
         }),
       );
     });
@@ -197,7 +202,7 @@ describe("PieceManager.link() reactivity", () => {
         source.getAsLink({
           base: targetArgument,
           includeSchema: true,
-          keepStreams: true,
+          keepAsCell: KeepAsCell.OnlyStream,
         }),
       );
     });

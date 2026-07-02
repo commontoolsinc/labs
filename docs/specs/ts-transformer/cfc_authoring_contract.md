@@ -132,14 +132,14 @@ type OpaqueInput<
     schema?: unknown;
     allowPassThrough?: boolean;
   } = true,
-> = Cfc<OpaqueRef<T>, { opaque: Spec }>;
+> = Cfc<Reactive<T>, { opaque: Spec }>;
 ```
 
 Normative behavior:
 
-- `OpaqueRef<T>` supplies the handler-side reference/read restriction shape.
-- `OpaqueRef<T>` by itself does not emit `ifc.opaque`.
-- `Cfc<OpaqueRef<T>, { opaque: Spec }>` emits the base schema of `T` plus
+- `Reactive<T>` supplies the handler-side reference/read restriction shape.
+- `Reactive<T>` by itself does not emit `ifc.opaque`.
+- `Cfc<Reactive<T>, { opaque: Spec }>` emits the base schema of `T` plus
   `ifc.opaque = Spec`.
 - `Spec = true` means the field is opaque with default runtime handling.
 - `Spec = { schema, allowPassThrough? }` lowers that object verbatim into
@@ -225,7 +225,7 @@ Required capabilities:
 - substitute type parameters through alias expansion
 - evaluate literal, tuple, array, and type-literal payloads
 - preserve the base type when stripping the `Cfc` carrier intersection
-- preserve wrapper erasure rules for `OpaqueRef<T>` so `OpaqueInput<T, ...>`
+- preserve wrapper erasure rules for `Reactive<T>` so `OpaqueInput<T, ...>`
   lowers to the schema shape of `T` rather than inventing a separate opaque
   runtime value shape
 
@@ -253,7 +253,7 @@ Required failure modes:
 - The supported alias set is closed by name. New sugar needs explicit formatter
   support.
 - `OpaqueInput<T, Spec>` only declares schema-level opacity. The compile-time
-  read restrictions on opaque values still come from the existing `OpaqueRef`
+  read restrictions on opaque values still come from the existing `Reactive`
   type/runtime contract.
 
 ## Acceptance Coverage

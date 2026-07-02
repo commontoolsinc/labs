@@ -19,11 +19,11 @@ rewrite. In particular:
   declaration
 - request messages are plain JSON envelopes; transport-level UCAN framing
   remains deferred for this pass
-- the toolshed v2 websocket route currently requires a signed `session.open`
-  payload whose invocation issuer / subject match the requested space DID and
-  requested session descriptor
-- broader route-level ACL / `Origin` enforcement remains deferred, so the
-  endpoint should still be treated as trusted-only
+- the toolshed v2 websocket route requires a signed `session.open`
+  invocation whose subject, challenge, audience, and session descriptor match
+  the current request
+- the server ACL policy gates session opens and commands when enabled
+- route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
 - the public one-shot read surface is currently `graph.query`
@@ -62,6 +62,13 @@ If the server accepts the protocol, it returns:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true
+  },
+  "sessionOpen": {
+    "audience": "did:key:z6Mk...",
+    "challenge": {
+      "value": "64 hex characters",
+      "expiresAt": 1760000000
+    }
   }
 }
 ```
@@ -69,6 +76,45 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
+`hello.ok`. The audience is the server DID the client must sign for. Toolshed
+uses its service identity DID. The standalone memory host uses a stable
+deterministic DID. The public memory client rejects a server that omits either
+field.
+
+#### Server Audience Ownership
+
+The audience value identifies the memory server or service that may accept the
+signed `session.open`. It is part of the signed invocation, so changing it
+invalidates signatures made for the old value.
+
+Production toolshed deployments own this value through the toolshed service
+identity. That DID must be stable across restarts and across horizontally scaled
+instances that serve the same logical memory endpoint. All instances behind one
+toolshed memory endpoint must advertise the same audience. Otherwise a client
+can sign for one instance and fail when routing sends it to another instance.
+
+Changing the toolshed service DID is an audience rotation. During rotation,
+clients must discover the new value from `hello.ok` and sign new `session.open`
+requests for it. Existing open sessions can continue only while their
+connection remains alive and keeps using challenges issued by the server that
+accepted them. Reconnects and new sessions must use the new audience. Operators
+should coordinate rotation with deployment routing and client reconnect
+behavior.
+
+Standalone and test memory hosts may use a deterministic local DID, but they
+still need to advertise an audience. The public client treats a missing audience
+as a protocol error.
+
+The challenge is scoped to this WebSocket connection. The current
+implementation generates 32 cryptographically random bytes and encodes them as
+64 hexadecimal characters. The challenge expires at `expiresAt`, in unix
+seconds. The client signs the challenge and audience into the next
+`session.open` invocation. The server accepts the current challenge only once.
+After a successful `session.open`, the response includes a new
+`sessionOpen.challenge`. The client uses that new challenge for the next
+`session.open` on the same connection.
 
 `persistentSchedulerState` advertises whether the runner and memory server are
 allowed to write and serve internal scheduler observations. It defaults to
@@ -88,6 +134,7 @@ logical session per space rather than to one TCP connection.
 ```typescript
 // Shown at module scope.
 type SessionId = string;
+type SignatureBytes = Uint8Array;
 
 interface SessionOpenRequest {
   type: "session.open";
@@ -98,6 +145,28 @@ interface SessionOpenRequest {
     seenSeq?: number;
     sessionToken?: string;
   };
+  invocation?: SessionOpenInvocation;
+  authorization?: {
+    signature: SignatureBytes;
+  };
+}
+
+interface SessionOpenInvocation {
+  iss: DID;
+  cmd: "session.open";
+  sub: SpaceId;
+  aud: DID;
+  args: {
+    protocol: "memory/v2";
+    session: {
+      sessionId?: SessionId;
+      seenSeq?: number;
+      sessionToken?: string;
+    };
+  };
+  challenge: string;
+  iat: number;
+  exp: number;
 }
 
 interface SessionOpenResult {
@@ -106,6 +175,13 @@ interface SessionOpenResult {
   serverSeq: number;
   resumed?: boolean;
   sync?: SessionSync;
+  sessionOpen: {
+    challenge: {
+      value: string;
+      expiresAt: number;
+    };
+    audience: string;
+  };
 }
 ```
 
@@ -127,6 +203,8 @@ Rules:
 - a successful resume transfers ownership to the new connection, invalidates the
   old owner for that session, and MAY emit `session/revoked` to the previous
   owner with reason `"taken-over"`
+- a successful `session.open` rotates the one-time connection challenge and
+  returns the next challenge in `sessionOpen`
 - a stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
@@ -429,21 +507,48 @@ Write-class requests may carry `invocation` / `authorization` payloads so they
 can be persisted alongside accepted commits, but the current wire protocol
 still uses plain JSON envelopes rather than full UCAN message framing.
 
-On the current toolshed websocket route, `session.open` itself is
-authenticated:
+On memory WebSocket routes, `session.open` itself is authenticated:
 
 - the request must carry `invocation` and `authorization`
 - `invocation.cmd` must be `"session.open"`
-- `invocation.iss` and `invocation.sub` must match the requested `space`
+- `invocation.iss` must be a DID whose signature verifies
+- `invocation.sub` must match the requested `space`
 - `invocation.args.session` must match the requested session descriptor
-- the signature must verify against the requested space DID
+- `invocation.args.protocol` must be the memory protocol
+- `invocation.challenge` must match the current connection challenge
+- the challenge must still be live
+- the challenge must not have been used already on this connection
+- `invocation.aud` must match the server audience from `hello.ok`
+- `invocation.iat` and `invocation.exp` are signed into the invocation
+- `invocation.exp` must not be expired beyond the server clock-skew grace
+- the signature must verify against `invocation.iss` for the hash of
+  `invocation`
 
 Opening a previously unused space may initialize empty backing storage, but
 `session.open` is not itself a logical write or claim.
 
-Broader ACL-based read opens, non-owner session opens, and `Origin` checks are
-still future work on the v2 websocket route, so the endpoint remains
-trusted-only for now.
+The challenge protects against replay of a captured signed `session.open` after
+the original WebSocket handshake has moved on.
+It also limits a captured open to the connection that received the challenge.
+Audience binding protects against replaying an open signed for one memory host
+to another memory host.
+
+This does not prevent every relay attack.
+A fully interactive relay can still forward the server challenge to a signer
+and forward the signed result back to the same server.
+The user or calling code still needs to intend the operation it signs.
+Transport security, origin checks, and product-level signing prompts remain
+part of the complete security boundary.
+
+The memory protocol does not add encryption above WebSocket.
+Remote deployments must expose the route over `wss` or another TLS-protected
+transport.
+Plain `ws` is only appropriate for local development or a trusted private
+transport.
+
+Broader ACL-based read opens and non-owner session opens are implemented by the
+server ACL policy when enabled.
+Route-level `Origin` checks remain future work on the v2 websocket route.
 
 ### 4.5.2 Future Target
 

@@ -6,7 +6,7 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
-  isOpaqueRef,
+  isReactive,
   type JSONSchema,
   type Module,
   type Pattern,
@@ -72,22 +72,22 @@ export function describePatternOrModule(
 /**
  * Validates an action result and checks if it contains opaque refs.
  * Throws if result contains invalid types (Map, Set, functions, etc.).
- * Returns true if the result contains any OpaqueRefs.
+ * Returns true if the result contains any Reactives.
  */
-export function validateAndCheckOpaqueRefs(
+export function validateAndCheckReactives(
   value: unknown,
   actionName?: string,
   path: string[] = [],
 ): boolean {
   if (value === null || value === undefined) return false;
-  if (isOpaqueRef(value)) return true;
+  if (isReactive(value)) return true;
   if (isCellLink(value)) return false;
 
   const formatError = (typeName: string, hint?: string) => {
     const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
     const actionStr = actionName ? `\n  in action: ${actionName}` : "";
     const hintStr = hint ? ` ${hint}` : "";
-    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, OpaqueRefs, or Cells.${hintStr}`;
+    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, Reactives, or Cells.${hintStr}`;
   };
 
   if (typeof value === "function") {
@@ -134,7 +134,7 @@ export function validateAndCheckOpaqueRefs(
 
   if (Array.isArray(obj)) {
     return obj.some((item: unknown, index: number) =>
-      validateAndCheckOpaqueRefs(item, actionName, [...path, `[${index}]`])
+      validateAndCheckReactives(item, actionName, [...path, `[${index}]`])
     );
   }
 
@@ -145,7 +145,7 @@ export function validateAndCheckOpaqueRefs(
   }
 
   return Object.entries(obj as Record<string, unknown>).some(
-    ([key, val]) => validateAndCheckOpaqueRefs(val, actionName, [...path, key]),
+    ([key, val]) => validateAndCheckReactives(val, actionName, [...path, key]),
   );
 }
 

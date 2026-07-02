@@ -48,7 +48,7 @@ From a vendored consumer such as Loom:
 ```bash
 deno run --allow-run --allow-env --allow-read vendor/labs/packages/cli/launcher.ts \
   --labs-root vendor/labs \
-  --config deno.json \
+  --config deno.jsonc \
   -- check .ops/patterns/example.tsx --no-run
 ```
 

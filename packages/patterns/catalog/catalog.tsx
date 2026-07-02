@@ -50,6 +50,7 @@ interface CatalogInput {
           { id: "toggle"; label: "Toggle" },
           { id: "toggle-group"; label: "Toggle Group" },
           { id: "message-input"; label: "Message Input" },
+          { id: "submit-input"; label: "Submit Input" },
           { id: "calendar"; label: "Calendar" },
           { id: "radio"; label: "Radio" },
           { id: "autocomplete"; label: "Autocomplete" },

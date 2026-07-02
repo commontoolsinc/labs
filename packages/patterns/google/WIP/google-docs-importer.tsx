@@ -24,6 +24,7 @@ import {
 
 // Import Google Docs client
 import {
+  type Auth,
   extractFileId,
   type GoogleComment,
   GoogleDocsClient,
@@ -39,7 +40,7 @@ import Note from "../../notes/note.tsx";
 //
 // This pattern requires Google OAuth with specific scopes and APIs enabled:
 //
-// 1. GOOGLE AUTH CHARM
+// 1. GOOGLE AUTH PIECE
 //    - Create and favorite a Google Auth piece with these scopes enabled:
 //      - Drive (read/write files & comments) - for fetching comments
 //      - Docs (read document content) - for fetching document content
@@ -81,7 +82,7 @@ const importDocument = handler<
   unknown,
   {
     docUrl: Cell<string>;
-    auth: Cell<unknown>;
+    auth: Cell<Auth>;
     markdown: Cell<string>;
     docTitle: Cell<string>;
     isFetching: Cell<boolean>;
@@ -115,7 +116,7 @@ const importDocument = handler<
       return;
     }
 
-    const authData = auth.get() as { token?: string } | null;
+    const authData = auth.get();
     const token = authData?.token;
     if (!token) {
       lastError.set("Please authenticate with Google first");
@@ -127,7 +128,7 @@ const importDocument = handler<
 
     try {
       // Create client with auth Cell for automatic token refresh
-      const client = new GoogleDocsClient(auth as Cell<any>, {
+      const client = new GoogleDocsClient(auth, {
         debugMode: true,
       });
 
@@ -227,7 +228,7 @@ export default pattern<Input, Output>(
 
     // Auth via createGoogleAuth utility (requires Drive and Docs scopes)
     const {
-      auth,
+      availability,
       authInfo,
       fullUI: authFullUI,
       isReady: isAuthenticated,
@@ -243,6 +244,37 @@ export default pattern<Input, Output>(
 
     // Has error
     const hasError = computed(() => !!lastErrorCell.get());
+
+    const importButton = computed(() => {
+      if (availability.state !== "ready") return null;
+
+      return (
+        <cf-button
+          variant="primary"
+          type="button"
+          disabled={isFetchingCell}
+          onClick={importDocument({
+            docUrl: docUrlCell,
+            auth: availability.auth,
+            markdown: markdownCell,
+            docTitle: docTitleCell,
+            isFetching: isFetchingCell,
+            lastError: lastErrorCell,
+            includeComments: includeCommentsCell,
+            embedImages: embedImagesCell,
+          })}
+        >
+          {ifElse(
+            isFetchingCell,
+            <cf-hstack align="center" gap={1}>
+              <cf-loader />
+              <span>Importing...</span>
+            </cf-hstack>,
+            "Import",
+          )}
+        </cf-button>
+      );
+    });
 
     // Computed name based on doc title
     const pieceName = computed(() => {
@@ -291,34 +323,7 @@ export default pattern<Input, Output>(
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
-                  {ifElse(
-                    isAuthenticated,
-                    <cf-button
-                      variant="primary"
-                      type="button"
-                      disabled={isFetchingCell}
-                      onClick={importDocument({
-                        docUrl: docUrlCell,
-                        auth,
-                        markdown: markdownCell,
-                        docTitle: docTitleCell,
-                        isFetching: isFetchingCell,
-                        lastError: lastErrorCell,
-                        includeComments: includeCommentsCell,
-                        embedImages: embedImagesCell,
-                      })}
-                    >
-                      {ifElse(
-                        isFetchingCell,
-                        <cf-hstack align="center" gap={1}>
-                          <cf-loader />
-                          <span>Importing...</span>
-                        </cf-hstack>,
-                        "Import",
-                      )}
-                    </cf-button>,
-                    null,
-                  )}
+                  {importButton}
                 </cf-hstack>
 
                 {/* Options */}

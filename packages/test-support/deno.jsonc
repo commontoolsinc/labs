@@ -1,0 +1,33 @@
+{
+  "name": "@commonfabric/test-support",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./compile-byte-cache": "./src/compile-byte-cache.ts",
+    "./fixture-runner": "./src/fixture-runner.ts",
+    "./isolated-deno": "./src/isolated-deno.ts"
+  },
+  "imports": {
+    "typescript": "npm:typescript"
+  },
+  "tasks": {
+    "test": "deno test --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write src/*.test.ts",
+    "check": "deno check src/**/*.ts",
+    "fmt": "deno fmt src/",
+    "lint": "deno lint src/"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true
+  }
+}

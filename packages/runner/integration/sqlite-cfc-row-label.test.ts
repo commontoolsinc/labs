@@ -67,9 +67,12 @@ async function runTest(base: URL) {
         const countPending = result.key("qCount").key("pending").get() as
           | boolean
           | unknown;
+        const clearPending = result.key("qClear").key("pending").get() as
+          | boolean
+          | unknown;
         if (
           qPending === false && skimPending === false &&
-          countPending === false
+          countPending === false && clearPending === false
         ) {
           const arr = result.key("q").key("result").getRaw() as
             | unknown[]
@@ -217,10 +220,37 @@ async function runTest(base: URL) {
         );
       }
 
+      // --- Read-time clearance (Phase 3.b): the owner satisfies no row's
+      // conjunctive rule (the did:mailto participants are required too), so a
+      // cleared query returns zero rows and reports withheld: 2. ---
+      const clearErr = result.key("qClear").key("error").getRaw();
+      const cleared = result.key("qClear").key("result").get() as
+        | unknown[]
+        | undefined;
+      const withheld = result.key("qClear").key("withheld").get() as unknown;
+      if (clearErr !== undefined) {
+        throw new Error(
+          `qClear should not error; got ${JSON.stringify(clearErr)}`,
+        );
+      }
+      if (!Array.isArray(cleared) || cleared.length !== 0) {
+        throw new Error(
+          `qClear should withhold every row for the owner; got ${
+            JSON.stringify(cleared)
+          }`,
+        );
+      }
+      if (withheld !== 2) {
+        throw new Error(
+          `qClear should report withheld: 2; got ${JSON.stringify(withheld)}`,
+        );
+      }
+
       console.log(
         "=== TEST PASSED: per-row data-derived labels (distinct per row, " +
           "origin-resolved, integrity-gated); aggregate failed closed; " +
-          "ceiling+skip returned exactly the fitting row ===",
+          "ceiling+skip returned exactly the fitting row; read-time clearance " +
+          "withheld all rows the owner cannot read ===",
       );
     } finally {
       cancelSink();

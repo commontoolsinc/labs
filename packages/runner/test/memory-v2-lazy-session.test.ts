@@ -6,7 +6,10 @@ import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { type Options as V2StorageOptions } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { TestStorageManager } from "./memory-v2-test-utils.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  TestStorageManager,
+} from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-lazy-session");
 const space = signer.did();
@@ -211,7 +214,7 @@ describe("Memory v2 lazy emulated server creation", () => {
       { as: signer },
       () => {
         serverCreates += 1;
-        return new MemoryV2Server.Server();
+        return new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
       },
     );
 
@@ -248,7 +251,7 @@ describe("Memory v2 lazy emulated server creation", () => {
       { as: signer },
       () => {
         serverCreates += 1;
-        return new MemoryV2Server.Server();
+        return new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
       },
     );
 

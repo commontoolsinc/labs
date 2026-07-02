@@ -8,7 +8,10 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
-import { isPermanentRejection } from "../storage/rejection.ts";
+import {
+  isConflictRejection,
+  isPermanentRejection,
+} from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -112,61 +115,86 @@ export function watchReactiveActionCommit(state: {
   readonly restoreInvalidCauses: () => void;
 }): void {
   state.commitPromise.then(async ({ error }) => {
-    // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-    // on every attempt we still call the re-subscribe below, so that
-    // even after we run out of retries, this will be re-triggered when
-    // input data changes.
-    if (error) {
-      logger.info(
-        "schedule-run-error",
-        "Error committing transaction",
-        error,
-      );
-
-      const retries = (state.retries.get(state.action) ?? 0) + 1;
-      state.retries.set(state.action, retries);
-      if (
-        retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)
-      ) {
-        const readyToRetry = readyToRetryPromise(error);
-        if (readyToRetry !== undefined) {
-          // The readiness gate rejects by design when the session is closed,
-          // revoked, or replaced (new sessionId) while we are waiting — an
-          // expected control-flow signal, not an error. Swallow it and fall
-          // through to the re-arm below: re-subscribing keeps the action live
-          // so it re-triggers on the next input change. Letting the rejection
-          // escape would skip restoreCfcTriggerReads/resubscribe (stranding the
-          // action) and surface as a spurious console.error from the trailing
-          // .catch.
-          try {
-            await readyToRetry;
-          } catch (readyError) {
-            logger.debug(
-              "retry-readiness-aborted",
-              () => [
-                "conflict retry readiness aborted; re-arming action anyway",
-                readyError,
-              ],
-            );
-          }
-        }
-        // Re-schedule the action to run again on conflict failure.
-        // Use resubscribe to set up dependencies/triggers from the log,
-        // then mark as invalid/pending to ensure it runs again.
-        // The retry run still exists only because of the consumed trigger
-        // reads (§8.9.2), so restore them for its transaction.
-        state.restoreInvalidCauses();
-        state.resubscribe(state.action, state.log);
-        state.markInvalid(state.action);
-        state.pending.add(state.action);
-        state.queueExecution();
-      } else {
-        // WATCH(scheduler-v2): exhausted retries can leave a piece registered
-        // against rolled-back data (accepted zombie — spec §15 decision 9).
-      }
-    } else {
+    if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      return;
+    }
+
+    logger.info(
+      "schedule-run-error",
+      "Error committing transaction",
+      error,
+    );
+
+    // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
+    // means one of its inputs moved: the authoritative version is ahead of this
+    // replica, and the action's read set is stale until the replica catches up
+    // (the conflict's `readyToRetry` gates exactly that catch-up). Re-arm the
+    // subscription, wait for the catch-up, then re-run the action against the
+    // fresh state. A conflict is a WAIT, not a failure, so it does NOT consume
+    // the retry budget — otherwise sustained contention would exhaust the budget
+    // and strand the compute as a zombie against rolled-back data.
+    //
+    // Reader-dirty propagation also re-triggers the action when the catch-up
+    // write lands as a fresh notification, but that does not cover every
+    // conflict: when the write that caused the conflict has already been
+    // delivered (it is what triggered this run), no further dirty arrives, and
+    // relying on reader-dirty alone would leave the action stranded with its
+    // stale committed value. So the re-queue here is the recovery mechanism;
+    // reader-dirty is a redundant fast path (the re-dirty/pending/queue calls
+    // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
+    // transaction still carries their flow labels.
+    if (isConflictRejection(error)) {
+      // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
+      // resubscribe) so the subscription stays fresh and a concurrent
+      // reader-dirty can re-trigger the action while we wait for the catch-up.
+      state.restoreInvalidCauses();
+      state.resubscribe(state.action, state.log);
+      const readyToRetry =
+        (error as { readyToRetry?: () => unknown }).readyToRetry;
+      if (typeof readyToRetry === "function") {
+        // The readiness gate rejects by design when the session is closed,
+        // revoked, or replaced while we wait — an expected control-flow signal,
+        // not an error. Swallow it and re-queue anyway: the action stays live
+        // and re-runs on the next input change or pull. A `readyToRetry` that
+        // throws synchronously is handled the same way.
+        try {
+          await readyToRetry();
+        } catch (readyError) {
+          logger.debug(
+            "conflict-retry-readiness-aborted",
+            "conflict catch-up readiness aborted; re-queuing action anyway",
+            readyError,
+          );
+        }
+      }
+      state.markInvalid(state.action);
+      state.pending.add(state.action);
+      state.queueExecution();
+      return;
+    }
+
+    // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
+    // transport error, or the path-blind local StorageTransactionInconsistent
+    // guard that fires before the engine's granular matcher — so they still
+    // warrant a bounded retry. Permanent (precondition) rejections are never
+    // retried. On every attempt we still resubscribe, so even after the budget
+    // is exhausted the action is re-triggered when its input data changes.
+    const retries = (state.retries.get(state.action) ?? 0) + 1;
+    state.retries.set(state.action, retries);
+    if (retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)) {
+      // Resubscribe sets up dependencies/triggers from the log so the action
+      // re-runs when its inputs change. The run still exists only because of the
+      // consumed trigger reads (§8.9.2), so restore them for its tx.
+      state.restoreInvalidCauses();
+      state.resubscribe(state.action, state.log);
+      state.markInvalid(state.action);
+      state.pending.add(state.action);
+      state.queueExecution();
+    } else {
+      // WATCH(scheduler-v2): exhausted retries can leave a piece registered
+      // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
   }).catch((error) => {
     logger.error(
@@ -175,23 +203,6 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
-}
-
-function readyToRetryPromise(error: unknown): Promise<unknown> | undefined {
-  if (typeof error !== "object" || error === null) {
-    return undefined;
-  }
-  const candidate = (error as { readyToRetry?: unknown }).readyToRetry;
-  if (typeof candidate !== "function") {
-    return undefined;
-  }
-  try {
-    return Promise.resolve(candidate.call(error));
-  } catch (thrown) {
-    // A readyToRetry that throws synchronously is treated the same as one that
-    // returns a rejected promise; the caller swallows the rejection.
-    return Promise.reject(thrown);
-  }
 }
 
 export function appendActionRunTrace(state: {
@@ -567,7 +578,7 @@ function warnOnWriteSurfaceViolations(
     }
     // Declaration-gap diagnostics, not enforcement (work order 05 step 5) —
     // debug level because known gaps remain (builtins minting cause-keyed
-    // internal docs inside their run, e.g. ifElse/unless/fetchData) and
+    // internal docs inside their run, e.g. ifElse/unless/fetchJson) and
     // cf test fails tests on console warnings. Counted regardless of level:
     // assert via getLoggerCountsBreakdown().scheduler["write-surface-violation"].
     logger.debug("write-surface-violation", () => [

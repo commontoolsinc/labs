@@ -4,14 +4,17 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
+import { identity } from "@/lib/identity.ts";
 
-// Session.open verification is shared with the standalone server — see
-// @commonfabric/memory/v2/session-open-auth. Audience binding is opt-in; the
-// toolshed does not yet configure an audience identity (federation PR5 design
-// doc), so this enforces signature + expiry today.
+const memoryAudience = identity.did();
+
+// Session.open verification is shared with the standalone server. Toolshed
+// requires the signed invocation to carry its audience DID and the challenge
+// issued to this WebSocket connection.
 const authorizeSessionOpen = (
   message: Parameters<typeof verifySessionOpenAuthorization>[0],
-): Promise<string> => verifySessionOpenAuthorization(message);
+  context: Parameters<typeof verifySessionOpenAuthorization>[1],
+): Promise<string> => verifySessionOpenAuthorization(message, context);
 
 // Determine store URL: DB_PATH (single-file mode) or MEMORY_DIR (directory mode)
 let storeUrl: URL;
@@ -26,7 +29,7 @@ if (env.DB_PATH) {
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
+export const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
   singleFileMode: Boolean(env.DB_PATH),
 });
 await FS.ensureDir(memoryEngineStoreUrl);
@@ -34,6 +37,9 @@ await FS.ensureDir(memoryEngineStoreUrl);
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
+  sessionOpenAuth: {
+    audience: memoryAudience,
+  },
   acl: {
     mode: env.MEMORY_ACL_MODE,
     serviceDids: env.MEMORY_SERVICE_DIDS

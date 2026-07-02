@@ -2,7 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { isBrandedCellType } from "./opaque-ref/opaque-ref.ts";
+import { isBrandedCellType } from "./cell-type.ts";
 
 export function isPatternFactoryCalleeExpression(
   expression: ts.Expression,
@@ -34,7 +34,7 @@ export function isPatternFactoryCalleeExpression(
   }
 }
 
-export function returnsOpaqueRefResult(
+export function returnsReactiveResult(
   expression: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
@@ -90,7 +90,7 @@ export function isStructuralReactiveFactoryExpression(
         return false;
       }
 
-      if (returnsOpaqueRefResult(target, checker)) {
+      if (returnsReactiveResult(target, checker)) {
         return true;
       }
 

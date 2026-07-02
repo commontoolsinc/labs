@@ -18,7 +18,7 @@ behavior and open follow-up work.
 ## Implementation Snapshot (March 17, 2026)
 
 - Landed:
-  - single transform pipeline (legacy `useLegacyOpaqueRefSemantics`
+  - single transform pipeline (legacy `useLegacyReactiveSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
   - provenance-first Common Fabric call detection with shadowed-helper rejection
@@ -34,7 +34,7 @@ behavior and open follow-up work.
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
   - structural reactive-origin detection for `.get()` validation and opaque-root
-    classification even when `OpaqueRef<T>` is an identity alias
+    classification even when `Reactive<T>` is an identity alias
   - static destructuring default initializer lowering to schema defaults
   - array destructuring lowering in pattern/map callbacks
   - wildcard classification includes `for...of` over tracked sources
@@ -181,15 +181,15 @@ contract support).
 7. Synthetic compute-owned branches/calls must not retain stale pattern
    ownership after earlier rewrites.
 
-## D-004 Replace OpaqueRef-Heuristic Typing With Capability Dataflow + Type Shrinking
+## D-004 Replace Reactive-Heuristic Typing With Capability Dataflow + Type Shrinking
 
 **Status:** Mostly landed
 
 **Policy target:**
 
-- Move away from relying on complex proxy-heavy `OpaqueRef<T>` surface types as
+- Move away from relying on complex proxy-heavy `Reactive<T>` surface types as
   the primary decision source for transform policy.
-- `OpaqueRef<T>` surface typing can simplify toward ordinary `T` so long as
+- `Reactive<T>` surface typing can simplify toward ordinary `T` so long as
   reactive-origin detection remains available structurally to validation and
   lowering passes.
 - Build a flow-aware capability model from normal parameters/locals and
@@ -234,7 +234,7 @@ contract support).
 
 - Current context/type heuristics are increasingly brittle for nested/synthetic
   boundaries.
-- `OpaqueRef` type complexity leaks into policy in ways that are hard to reason
+- `Reactive` type complexity leaks into policy in ways that are hard to reason
   about and hard to maintain.
 - Least-capability boundary types make behavior and contracts explicit while
   reducing accidental overexposure.
@@ -242,7 +242,7 @@ contract support).
 **Acceptance criteria:**
 
 1. Rewrite decisions for collection and conditional operators can be explained
-   from `{context, receiver capability summary}`, not `OpaqueRef` heuristics.
+   from `{context, receiver capability summary}`, not `Reactive` heuristics.
 2. Boundary schemas/types for compute-oriented boundaries (`lift`,
    `handler`, compute-like callbacks) can be shrunk to used paths when no
    wildcard operations are present.
@@ -256,7 +256,7 @@ contract support).
 6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
    for key-lowering until modeled separately.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
-   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; the single
+   (Completed: `useLegacyReactiveSemantics` gate has been removed; the single
    transform pipeline is the only path.)
 8. Destructured callback parameters in pattern-style contexts are lowered to
    non-destructured receiver parameters with explicit `key(...)` bindings.
@@ -279,7 +279,7 @@ contract support).
 15. Schema shrink validation: unresolvable property paths produce hard errors
     rather than silently falling back to broader schemas (see D-005).
 16. `.get()` validation and opaque-root discovery continue to work when
-    `OpaqueRef<T>` is no longer represented by a dedicated schema marker.
+    `Reactive<T>` is no longer represented by a dedicated schema marker.
 
 ## D-005 Validate Schema Shrink Coverage
 
@@ -716,7 +716,7 @@ logic.
 **Status:** Landed
 
 1. ~~Remove superseded heuristic branches.~~
-   Done — `useLegacyOpaqueRefSemantics` and all legacy heuristic branches removed.
+   Done — `useLegacyReactiveSemantics` and all legacy heuristic branches removed.
 2. Delete or deprecate old context helper names once all consumers migrate.
 3. ~~Update behavior and goals specs to final terminology/policy.~~
    Done.
@@ -798,7 +798,7 @@ produce hard errors rather than silently degrading.
 **Status:** Partially landed
 
 1. Replace map/logical receiver classification inputs with capability summaries.
-2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
+2. Remove remaining `Reactive`-specific heuristic branches where superseded.
 3. ~~Start routing pattern-context validation diagnostics through lowering
    eligibility checks.~~ Done for restricted-reactive computation diagnostics:
    validation now consults shared expression-site lowerability before
@@ -863,8 +863,8 @@ without major compile-time regression.
 
 1. ~~Flip `capabilityDataflowV1` to default after stabilization window.~~
    Done — the single transform pipeline is the only path.
-2. ~~Remove legacy branches tied to old `OpaqueRef` heuristics.~~
-   Done — `useLegacyOpaqueRefSemantics` flag and all legacy branches removed.
+2. ~~Remove legacy branches tied to old `Reactive` heuristics.~~
+   Done — `useLegacyReactiveSemantics` flag and all legacy branches removed.
 3. ~~Update behavior spec to reflect new default behavior.~~
    Done.
 4. Retire or reduce legacy pattern-context validation passes once lowerability

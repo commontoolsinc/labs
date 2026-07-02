@@ -158,6 +158,43 @@ export class MultiRuntimeSession {
     await this.#client.call("send", { handler, event, trustedUi });
   }
 
+  /**
+   * Set a cell reached from the piece result by `path`, exactly like a UI
+   * `$value` binding: one fresh edit tx and a single un-retried commit (the
+   * `handleCellSet` path). Returns the commit outcome so tests can observe
+   * conflicts. Pass `idle: false` to leave this runtime un-settled (preserves
+   * a stale local replica for own-write-race / no-op repros).
+   */
+  async set(
+    path: (string | number)[],
+    value: unknown,
+    opts: { idle?: boolean } = {},
+  ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
+    return await this.#client.call("set", {
+      path,
+      value,
+      idle: opts.idle,
+    }) as { ok: boolean; error?: { name?: string; message?: string } };
+  }
+
+  /**
+   * Append `value` to the array cell reached by `path`, exactly like a
+   * `CellHandle.push`: read-modify-write that keeps its read as a compare-and-set
+   * precondition (the `handleCellPush` path), so a concurrent push conflicts
+   * rather than being clobbered — unlike the blind `set` above.
+   */
+  async push(
+    path: (string | number)[],
+    value: unknown,
+    opts: { idle?: boolean } = {},
+  ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
+    return await this.#client.call("push", {
+      path,
+      value,
+      idle: opts.idle,
+    }) as { ok: boolean; error?: { name?: string; message?: string } };
+  }
+
   /** Read a value from the piece result, pulling fresh state first. */
   async read(path: (string | number)[] = []): Promise<unknown> {
     return await this.#client.call("read", { path });

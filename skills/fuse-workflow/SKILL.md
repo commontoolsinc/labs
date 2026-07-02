@@ -28,8 +28,8 @@ change a cell in the browser, the file updates within ~1 second.
 # Prerequisites
 brew install --cask fuse-t          # macOS only, requires sudo
 
-# Identity (reuse existing or create one)
-ls cf.key || deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
+# Identity (reuse existing, or create a unique one with `id new`)
+ls cf.key || deno run -A packages/cli/mod.ts id new > cf.key
 
 # Environment
 export CF_API_URL=http://localhost:8000

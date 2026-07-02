@@ -36,6 +36,26 @@ export class SchedulerGates {
     },
   ) {}
 
+  /**
+   * Hold a just-registered action's initial run until `notBefore` (used for
+   * the resume-from-synced-state hold, bounded by its timeout). Expressed as a
+   * backoff gate so every eligibility check (seeds, settle skip, preflight
+   * parking, idle) already honors it (P8: policies are time gates). The hold
+   * is released early via releaseInitialRunHold when the space sync completes.
+   */
+  holdInitialRun(action: Action, notBefore: number): void {
+    const gate = this.mutableGate(action);
+    gate.backoffUntil = Math.max(gate.backoffUntil ?? 0, notBefore);
+    this.scheduleWake(notBefore);
+  }
+
+  releaseInitialRunHold(action: Action): void {
+    const record = this.state.nodes.get(action);
+    if (!record?.gate?.backoffUntil) return;
+    record.gate.backoffUntil = 0;
+    this.state.queueExecution();
+  }
+
   adopt(action: Action): void {
     const record = this.state.nodes.get(action);
     const staged = this.stagedGates.get(action);

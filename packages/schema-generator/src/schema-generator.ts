@@ -896,8 +896,8 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
-    // Resolve by name from source scope as a fallback (e.g., CharmEntry in
-    // Cell<CharmEntry[]>).
+    // Resolve by name from source scope as a fallback (e.g., PieceEntry in
+    // Cell<PieceEntry[]>).
     if (ts.isTypeReferenceNode(typeNode)) {
       if (detectWrapperViaNode(typeNode, checker)) {
         const wrapperType = typeRegistry?.get(typeNode) ??

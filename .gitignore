@@ -10,7 +10,7 @@ artifact
 coverage
 _deno.lock
 .claude-prompt.tmp
-.bg-charm-service.pid
+.bg-piece-service.pid
 .pr-desc.tmp
 dist/
 .claude/settings.local.json
@@ -22,6 +22,8 @@ dist/
 .cf-harness-artifacts/
 claude-research.key
 *.key
+# Exported PKCS8/PEM identity keys (e.g. cf.pem) — never commit private keys
+*.pem
 .passphrase
 *passphrase*
 .page-agent-config.json

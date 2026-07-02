@@ -51,11 +51,19 @@ When `activeView` changes, the `computed` re-runs and returns a different sub-pa
 Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<cf-render $cell={...} />` to display whatever cell is currently selected:
 
 ```tsx
-import { computed, equals, handler, pattern, UI, Writable } from "commonfabric";
+import {
+  computed,
+  equals,
+  handler,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 import ItemView from "./item-view.tsx";
 
 // ItemView produces cells with [UI]; this type captures what we need for the list
-interface ItemCell { title: string; [UI]: unknown }
+interface ItemCell { title: string; [UI]: VNode }
 
 export default pattern<{
   items: Writable<ItemCell[]>;

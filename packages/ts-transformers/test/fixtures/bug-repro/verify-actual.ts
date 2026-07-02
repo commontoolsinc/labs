@@ -5,13 +5,16 @@
 
 import ts from "typescript";
 import { dirname, fromFileUrl, join } from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 
 // Derive project root from this file's location (6 levels up: bug-repro → fixtures → test → ts-transformers → packages → labs)
 const projectRoot = dirname(dirname(dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url)))))));
 const testFile = join(projectRoot, "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts");
 
-// Parse deno.json for import mappings
-const denoJson = JSON.parse(Deno.readTextFileSync(join(projectRoot, "deno.json")));
+// Parse deno.jsonc for import mappings
+const denoJson = parseJsonc(
+  Deno.readTextFileSync(join(projectRoot, "deno.jsonc")),
+) as { imports?: Record<string, string> };
 const imports: Record<string, string> = denoJson.imports || {};
 
 const compilerOptions: ts.CompilerOptions = {

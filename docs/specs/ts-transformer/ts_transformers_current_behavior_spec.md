@@ -92,7 +92,7 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
-in this order (18 stages):
+in this order (19 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -111,7 +111,8 @@ in this order (18 stages):
 15. `ReactiveVariableForTransformer`
 16. `ModuleScopeShadowingTransformer`
 17. `ModuleScopeCfDataTransformer`
-18. `ModuleScopeFunctionHardeningTransformer`
+18. `PatternCoverageTransformer`
+19. `ModuleScopeFunctionHardeningTransformer`
 
 The order is behaviorally significant (invariant C-002). Two ordering facts
 worth calling out:
@@ -124,8 +125,12 @@ worth calling out:
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- The four module-scope stages (15–18) run last so they operate on fully lowered
-  and schema-injected output.
+- The final five stages (15–19) run last so they operate on fully lowered and
+  schema-injected output.
+- `PatternCoverageTransformer` (stage 18) does no work unless pattern runtime
+  coverage is enabled. When enabled, it runs before
+  `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
+  authored bodies before hardening helpers are emitted.
 
 ## 4. Global Modes
 
@@ -137,7 +142,7 @@ worth calling out:
 Current mode-sensitive behavior:
 
 - `JsxExpressionSiteRouterTransformer` in `error` mode reports diagnostics
-  instead of rewriting JSX expressions that would require opaque-ref rewrites in
+  instead of rewriting JSX expressions that would require reactive rewrites in
   non-compute contexts.
 - Other transformers currently do not branch on mode.
 
@@ -163,7 +168,7 @@ list — is the authoritative source. As of this writing it recognizes:
 - `wish`
 - `generateObject` and `generateText`
 - the `runtime-call` family — tagged-call / function runtime origins: `str`,
-  `llm`, `llmDialog`, `fetchData`, `fetchProgram`, `streamData`,
+  `llm`, `llmDialog`, `fetchJson`, `fetchProgram`, `streamData`,
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)
@@ -201,8 +206,8 @@ Validates `as` and angle-bracket assertions:
   - `<X><unknown>expr`
   - parenthesized/mixed equivalents
 - **Error** `cast-validation:forbidden-cast`
-  - casts to `OpaqueRef<...>`
-- **Warning** `cast-validation:cell-cast`
+  - casts to `Reactive<...>`
+- **Error** `cast-validation:cell-cast`
   - casts to cell-like types: `Cell`, `OpaqueCell`, `Stream`, `ComparableCell`,
     `ReadonlyCell`, `WriteonlyCell`, `Writable`, `CellTypeConstructor`
 
@@ -249,7 +254,7 @@ On call `receiver.get()` (no args):
 Deliberate non-coverage of the structural fallback: `lift` / `handler` /
 `action` callback **parameters** are not inferred as opaque from structure
 alone — they keep their declared cell semantics. The structural inference exists
-only for the `OpaqueRef<T> = T` identity-alias case where the cell brand is
+only for the `Reactive<T> = T` identity-alias case where the cell brand is
 gone.
 
 Same-named local helpers are not treated as reactive origins unless the call
@@ -361,7 +366,7 @@ Compute wrappers override restrictions:
 - `computed`, `action`, `lift`, `handler` callbacks
 - inline JSX `on*` handlers
 - standalone function definitions
-- JSX expressions (handled by opaque-ref JSX transformer)
+- JSX expressions (handled by reactive JSX transformer)
 - the SQLite `table(columns, (row) => ({...}))` row-label rule callback —
   classified as the supported `sqlite-row-label-rule` compute boundary
   (`callback-boundary.ts`). `table()` is recognized by name **plus** the
@@ -378,6 +383,27 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
+  - class expression or declaration in pattern context unless inside compute
+    wrappers; the whole class is flagged once with a class-specific message
+- **Error** `pattern-context:object-member`
+  - a function-valued member of an object literal in pattern or render
+    context: a method, getter, setter, or a property whose value is an
+    arrow/function expression (including inside JSX data positions, and when
+    the function is wrapped in transparent expressions — parentheses, `as`,
+    `satisfies`, `!`, `<T>`)
+  - rejected regardless of the body, because the reactive-read lowering pass
+    does not descend into function bodies; the sole exception is a `toJSON`
+    member, which is reported only when its body reads a reactive value
+  - the message names the mechanism per kind: a getter or `toJSON()` member
+    runs once when the result is stored and freezes its return to a snapshot; a
+    method, setter, or function-valued property is a function value the
+    reactive data model cannot store (it throws `Cannot store function per se`)
+  - exempt: members inside compute wrappers (computed/lift/handler/action),
+    object literals outside pattern/render context, JSX event handlers,
+    array-method/render callbacks, and a `toJSON` member that reads no reactive
+    value (a toJSON-bearing object is storable — the data model converts it via
+    `toJSON()`); class members are covered separately by
+    `pattern-context:function-creation`
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
@@ -555,7 +581,7 @@ For each `JsxExpression`:
 - compute-context JSX does not lower `&&` / `||`
 - pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
-  - report `opaque-ref:jsx-expression` for non-compute contexts requiring
+  - report `reactive:jsx-expression` for non-compute contexts requiring
     rewrite
   - no rewrite
 
@@ -1059,7 +1085,7 @@ Special path:
 - arrays of `unknown` emit `items: { type: "unknown" }`
 - synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
   rather than collapsing them away
-- `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
+- `Reactive<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
   markers such as `asCell` / `asStream`
 - CFC-specific wrapper lowering such as `WriteAuthorizedBy`, projection aliases,
   and trusted-UI helper schema metadata is not part of current implemented
@@ -1071,7 +1097,7 @@ Special path:
 Diagnostic message transformers are exported separately from AST transform
 pipeline. Current built-in behavior:
 
-- `OpaqueRefErrorTransformer` rewrites TypeScript messages matching
+- `ReactiveErrorTransformer` rewrites TypeScript messages matching
   `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into user-facing
   guidance about unnecessary `.get()`.
 - optional `verbose` mode appends original TypeScript message.
@@ -1141,7 +1167,7 @@ Additional non-fixture unit suites cover:
 - cast/empty-array/pattern-context/opaque-get/schema-shrink validation
 - diagnostic message transformer behavior
 - event-handler detection heuristics
-- opaque-ref analysis/normalization/runtime-style APIs
+- reactive analysis/normalization/runtime-style APIs
 - pipeline regression and policy/capability-analysis behavior
 - lift-applied call helper and identifier utilities
 

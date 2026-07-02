@@ -13,7 +13,7 @@ signatures.
 This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
-1. Foundation: api, runtime, identity, memory
+1. Foundation: api, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
 4. Operation: background-piece-service, cli
@@ -67,8 +67,7 @@ already does).
   data types, and keywords. Check its "Status tiers" section before imitating
   any pattern — only `exemplar` entries are style references.
 
-**Important:** Ignore the top level `deprecated-patterns` folder - it is
-defunct.
+**Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
 
 ## Runtime Development
 
@@ -78,8 +77,15 @@ If you are developing runtime code, read the following documentation:
   practices
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
+- `docs/development/TESTING.md` - Running the test suites and the general unit
+  and integration test structure; hub that links the other testing docs
 - `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
   splitting/rebalancing work
+- `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
+  coverage and transformer-based pattern coverage), which CI job collects which,
+  and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
+- `docs/development/LLM_TESTING.md` - Testing patterns and server routes that
+  call the LLM (test-environment guard, mocks, conversation fixtures)
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/debugging/` - Runtime errors, type errors, and
@@ -92,14 +98,23 @@ before inferring from source code alone:
 deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 ```
 
+The transformed output is dense. Pipe it into `cf view` for an interactive,
+syntax-aware pager (less-like) that colours builders, schemas, closures and type
+positions, and lets you navigate the structure tree (`wasd`), search (`/`) and
+peek definitions. The text shown is verbatim — colour only:
+
+```bash
+deno task cf check <pattern>.tsx --show-transformed --no-run | deno task cf view
+```
+
 ### Adding New Packages
 
 When adding a new workspace package:
 
-1. Add the package path (e.g., `./packages/my-package`) to the root `deno.json`
+1. Add the package path (e.g., `./packages/my-package`) to the root `deno.jsonc`
    `"workspace"` array.
-2. The package's `deno.json` **must** include a `"tasks"` object with a `"test"`
-   entry. Use `"deno test"` if the package has tests, or
+2. The package's `deno.jsonc` **must** include a `"tasks"` object with a
+   `"test"` entry. Use `"deno test"` if the package has tests, or
    `"echo 'No tests defined.'"` as a stub for packages without tests yet.
 
 This is required because the root test runner (`tasks/test.ts`) iterates all
@@ -107,4 +122,5 @@ workspace packages and runs `deno task test` in each. If a package has no test
 task, Deno falls back to the root workspace's test task, which re-runs the
 entire suite recursively — causing exponential process spawning and CI timeouts.
 
-See `packages/utils/deno.json` for an example of a correctly configured package.
+See `packages/utils/deno.jsonc` for an example of a correctly configured
+package.

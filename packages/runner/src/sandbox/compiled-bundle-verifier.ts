@@ -2,6 +2,7 @@ import {
   CompiledJsParseError,
   findTopLevelArrow,
   findTopLevelEquals,
+  isStringLiteralRange,
   locationFromOffset,
   type ParsedDefineCall,
   parseFunctionText,
@@ -223,7 +224,8 @@ export function classifyModuleItems(
 
       if (
         isAllowedFunctionHardeningStatementNormalized(normalized, env) ||
-        isAllowedBindingIdentityStatementNormalized(normalized, env)
+        isAllowedBindingIdentityStatementNormalized(normalized, env) ||
+        isPatternCoverageHitStatement(source, statement)
       ) {
         continue;
       }
@@ -1691,6 +1693,33 @@ function isIifeExpression(normalized: string): boolean {
     normalized,
   ) ||
     /^\(function.*\)\([^)]*\)$/.test(normalized);
+}
+
+function isPatternCoverageHitStatement(
+  source: string,
+  statement: StatementChunk,
+): boolean {
+  const call = tryParseCallExpression(source, statement.start, statement.end);
+  if (!call) return false;
+  const calleeRange = stripWholeParentheses(call.callee, 0, call.callee.length);
+  const callee = call.callee.slice(calleeRange.start, calleeRange.end);
+  if (callee !== "globalThis.__cfPatternCoverage?.hit") {
+    return false;
+  }
+  if (call.args.length !== 2) return false;
+
+  if (
+    !isStringLiteralRange(source, call.args[0].start, call.args[0].end)
+  ) {
+    return false;
+  }
+
+  const spanId = stripJsTrivia(
+    source,
+    call.args[1].start,
+    call.args[1].end,
+  );
+  return /^(?:0|[1-9]\d*)$/.test(spanId);
 }
 
 function isRawMutableExpression(normalized: string): boolean {

@@ -425,8 +425,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     >(
       {} as ParkingAdminRegistryValue,
     );
-    const adminRegistry =
-      (inputAdminRegistry ?? defaultAdminRegistry) as ParkingAdminRegistryCell;
+    const adminRegistry: ParkingAdminRegistryCell = inputAdminRegistry ??
+      defaultAdminRegistry;
     const adminManagerCredential = new Writable.perUser<
       ParkingAdminManagerCredential | null
     >(null);

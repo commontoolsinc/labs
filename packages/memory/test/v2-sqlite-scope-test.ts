@@ -13,6 +13,7 @@ import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { table } from "../v2/sqlite/schema.ts";
 import type { CellScope, SqliteDbRef } from "../v2.ts";
+import { testSessionOpenAuth } from "./v2-auth-test-helpers.ts";
 
 const SPACE = "did:key:z6Mk-sqlite-scope-test";
 const ALICE = "did:key:z6Mk-alice";
@@ -35,6 +36,7 @@ describe("sqlite cell-db scope (per-user / per-session files)", () => {
             ?.principal;
         return typeof principal === "string" ? principal : undefined;
       },
+      sessionOpenAuth: testSessionOpenAuth,
     });
   });
 
@@ -48,7 +50,13 @@ describe("sqlite cell-db scope (per-user / per-session files)", () => {
     const session = await client.mount(
       SPACE,
       { sessionId },
-      () => ({ invocation: {}, authorization: { principal } }),
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal },
+      }),
     );
     return { client, session };
   };

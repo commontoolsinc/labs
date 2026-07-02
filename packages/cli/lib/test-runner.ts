@@ -7,7 +7,7 @@
  * 3. Return { tests: TestStep[] }
  *
  * TestStep is a discriminated union:
- * - { assertion: OpaqueRef<boolean> } from computed(() => condition)
+ * - { assertion: Reactive<boolean> } from computed(() => condition)
  * - { action: Stream<void> } from action(() => sideEffect)
  *
  * The discriminated union avoids TypeScript declaration emit issues
@@ -26,7 +26,13 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { ConsoleMethod, Runtime } from "@commonfabric/runner";
+import {
+  ConsoleMethod,
+  PatternCoverageCollector,
+  patternCoverageOutputPath,
+  Runtime,
+  writePatternCoverageLcov,
+} from "@commonfabric/runner";
 import type {
   Cell,
   ConsoleHandler,
@@ -36,7 +42,7 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import type { OpaqueRef } from "@commonfabric/api";
+import type { Reactive } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -55,6 +61,11 @@ import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
+import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
 import {
   type CDFPoint,
   getLogger,
@@ -100,6 +111,12 @@ async function withPhase<T>(
   }
 }
 
+function formatError(error: unknown): string {
+  return error instanceof Error
+    ? error.stack || error.message || String(error)
+    : String(error);
+}
+
 /**
  * A test step is an object with an 'assertion', 'action', or 'settle' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
@@ -118,7 +135,7 @@ async function withPhase<T>(
  * reads an async-builtin result to keep the read deterministic under load.
  */
 export type TestStep =
-  | { assertion: OpaqueRef<boolean>; skip?: boolean }
+  | { assertion: Reactive<boolean>; skip?: boolean }
   | {
     action: Stream<unknown>;
     event?: unknown;
@@ -252,6 +269,8 @@ export interface TestRunnerOptions {
   storageStats?: boolean;
   /** Limit for storage timing/count tables when storageStats is enabled. */
   storageStatsLimit?: number;
+  /** Directory for pattern runtime coverage LCOV artifacts. */
+  patternCoverageDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -860,6 +879,10 @@ export async function runTestPattern(
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
+  const patternCoverage = options.patternCoverageDir
+    ? new PatternCoverageCollector()
+    : undefined;
+  let writeLocalPatternCoverage = patternCoverage !== undefined;
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
   // console event) and logger-level error/warn activity (channel 2: logger count
@@ -895,11 +918,24 @@ export async function runTestPattern(
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
 
+  // Fetch mocking: a test opts in by exporting a module-scope `fetchMocks` array.
+  // We can't read it until after compile, so the injected fetch closes over a
+  // late-populated `fetchMockEntries` and falls through to the real fetch until
+  // (and unless) the test declares mocks. Driving the in-flight fetchJson to
+  // completion is the harness's existing job — a `{ settle: true }` step (or any
+  // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
+  const realFetch = globalThis.fetch.bind(globalThis);
+  let fetchMockEntries: FetchMockEntry[] | undefined;
+  const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
+
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
     () =>
       new Runtime({
         storageManager,
+        // Inject a fetch that honors test-declared `fetchMocks` (scoped to this
+        // runtime; no process-global mutation).
+        fetch: mockFetch,
         // Match the production runtime default: enforce explicitly declared
         // `ifc` policies so pattern tests act as a regression net for CFC.
         // Patterns without CFC annotations are unaffected; tests that need a
@@ -965,7 +1001,7 @@ export async function runTestPattern(
     );
     const { main } = await withPhase(
       ["runTestPattern", "compile"],
-      () => engine.compileAndEvaluateModules(program),
+      () => engine.compileAndEvaluateModules(program, { patternCoverage }),
     );
 
     if (!main?.default) {
@@ -974,12 +1010,19 @@ export async function runTestPattern(
       );
     }
 
+    // Read the test's opt-in fetch mocks now (after compile, before the run):
+    // a fetchJson with a non-empty URL fires during the initial settle, so the
+    // entries must be in place before `runtime.run(...)` below. `main` is the
+    // module namespace, so a named `fetchMocks` export is reachable.
+    fetchMockEntries = readFetchMocks(main);
+
     // Multi-user tests export a descriptor ({ setup?, participants }) as the
     // default export. They run in worker-isolated runtimes against a shared
     // storage server — hand off to the multi-user orchestrator (this local
     // runtime is only used for detection; the try/finally below disposes it).
     const multiUserMeta = multiUserDescriptorMeta(main.default);
     if (multiUserMeta) {
+      writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
         () => runMultiUserTestPattern(testPath, multiUserMeta, options),
@@ -1620,6 +1663,26 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    if (
+      patternCoverage && options.patternCoverageDir &&
+      writeLocalPatternCoverage
+    ) {
+      await withPhase(
+        ["runTestPattern", "coverage", "write"],
+        () =>
+          writePatternCoverageLcov(
+            patternCoverage,
+            patternCoverageOutputPath(options.patternCoverageDir!, testPath),
+            { root: options.root },
+          ),
+      ).catch((error) => {
+        console.error(
+          `[cf test] failed to write pattern coverage for ${testPath}: ${
+            formatError(error)
+          }`,
+        );
+      });
+    }
     // 6. Cleanup
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();

@@ -148,7 +148,7 @@ The exact current order and behavior are documented normatively in
 | `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
 | `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref     |
-| `OpaqueRef<T>`        | structural schema without `asOpaque`      | Read-only reactive ref    |
+| `Reactive<T>`         | structural schema without `asOpaque`      | Read-only reactive ref    |
 
 ## Additional Documentation
 

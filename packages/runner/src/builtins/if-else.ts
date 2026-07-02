@@ -72,8 +72,11 @@ export function ifElse(
       base: result,
     });
 
-    // When writing links, we need to use setRawUntyped (link doesn't match T)
-    resultWithLog.setRawUntyped(serializedRef);
+    // When writing links, we need to use setRawUntyped (link doesn't match T).
+    // Pass `onlyIfDifferent` so re-running with the same selected branch (e.g.
+    // the condition changed between two truthy values) does not write the
+    // identical reference again and needlessly re-trigger downstream work.
+    resultWithLog.setRawUntyped(serializedRef, true);
   };
 
   return {

@@ -1,8 +1,8 @@
 # handler() or Function Inside Pattern
 
-**Error:** `handler() should be defined at module scope, not inside a pattern` or `Function creation is not allowed in pattern context` or `lift() should not be immediately invoked inside a pattern`
+**Error:** `handler() should be defined at module scope, not inside a pattern` or `Function creation is not allowed in pattern context` or a `pattern-context:object-member` error such as `A method ... on an object literal in pattern or render context is a function value, which the reactive data model cannot store` or `lift() should not be immediately invoked inside a pattern`
 
-**Cause:** The CTS transformer requires that `handler()`, `lift()`, and helper functions be defined at module scope (outside the pattern body). The transformer cannot process closures over pattern-scoped variables.
+**Cause:** The CTS transformer requires that `handler()`, `lift()`, and helper functions be defined at module scope (outside the pattern body). The transformer cannot process closures over pattern-scoped variables. The same applies to a function-valued member of an object literal in the pattern body — a method, getter, setter, or a property whose value is an arrow/function. The reactive-read lowering pass does not descend into these bodies, so a reactive read inside is never tracked. A getter (or a `toJSON()` member) then runs once when the pattern result is stored and freezes whatever it returns to a snapshot; a method, setter, or function-valued property is a function value the reactive data model cannot store (it throws `Cannot store function per se`). Expose a value as a plain property or a `computed(() => ...)` field, and move behavior into a module-scope `handler()` or `lift()`. A `toJSON()` member that reads no reactive value is allowed — a toJSON-bearing object is storable, so only a `toJSON` that reads a reactive value is reported.
 
 ## Quick Fix: Use action() Instead
 

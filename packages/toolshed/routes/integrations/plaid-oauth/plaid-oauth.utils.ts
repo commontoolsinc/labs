@@ -7,6 +7,11 @@ import {
 } from "@commonfabric/runner";
 import { Configuration, PlaidApi, PlaidEnvironments } from "plaid";
 import env from "@/env.ts";
+import {
+  custodyIngest,
+  durableUpdate,
+  type VouchedChannel,
+} from "@/lib/custody-ingest.ts";
 
 // Plaid Auth Schema
 export const PlaidAuthSchema = {
@@ -157,76 +162,69 @@ export async function getAuthData(
   }
 }
 
-// Save auth data to the auth cell
-export async function saveAuthData(
-  authCellDocLink: string | SigilLink,
-  authData: PlaidAuthData,
-) {
-  try {
-    const authCell = await getAuthCell(authCellDocLink);
-
-    if (!authCell) {
-      throw new Error("Auth cell not found");
-    }
-
-    authCell.set(authData);
-
-    await runtime.storageManager.synced();
-
-    return authData;
-  } catch (error) {
-    throw new Error(`Error saving auth data: ${error}`);
-  }
+// Build the vouched-ingest channel for a Plaid auth cell. As with OAuth,
+// channel/audience are recorded-not-enforced provenance: pre-grant-infra the
+// channel is the cell's own space and audience records the Plaid source.
+function plaidIngestChannel(
+  authCell: Awaited<ReturnType<typeof getAuthCell>>,
+): VouchedChannel {
+  return {
+    channel: authCell.getAsNormalizedFullLink().space,
+    audience: "did:web:commonfabric.org#plaid",
+  };
 }
 
-// Add or update an item in the auth data
+// Add or update an item in the auth data. The read-merge-write runs INSIDE the
+// retrying custody transaction, so concurrent item updates re-read the current
+// value on each retry and don't overwrite each other with a stale snapshot
+// (replacing the divergent bare `.set()` that had no retry and read-modified
+// outside the transaction). A new/updated item is Plaid data arriving from the
+// provider, so it mints the ExternalIngest mark.
 export async function upsertPlaidItem(
   authCellDocLink: string | SigilLink,
   item: PlaidItem,
 ): Promise<PlaidAuthData> {
   try {
-    const authData = await getAuthData(authCellDocLink);
-
-    // Ensure items array exists
-    if (!authData.items) {
-      authData.items = [];
+    const authCell = await getAuthCell(authCellDocLink);
+    if (!authCell) {
+      throw new Error("Auth cell not found");
     }
-
-    // Find existing item index
-    const existingIndex = authData.items.findIndex(
-      (i) => i.itemId === item.itemId,
-    );
-
-    if (existingIndex >= 0) {
-      // Update existing item
-      authData.items[existingIndex] = item;
-    } else {
-      // Add new item
-      authData.items.push(item);
-    }
-
-    return await saveAuthData(authCellDocLink, authData);
+    return await custodyIngest.update(
+      authCell,
+      (current) => {
+        const data = (current as PlaidAuthData | undefined) ?? { items: [] };
+        const items = data.items ? [...data.items] : [];
+        const idx = items.findIndex((i) => i.itemId === item.itemId);
+        if (idx >= 0) items[idx] = item;
+        else items.push(item);
+        return { ...data, items };
+      },
+      plaidIngestChannel(authCell),
+    ) as PlaidAuthData;
   } catch (error) {
     throw new Error(`Error upserting Plaid item: ${error}`);
   }
 }
 
-// Remove an item from the auth data
+// Remove an item from the auth data. Removal is an operator action, not ingest,
+// so it uses the governed read-modify-write with NO mark — still atomic
+// (re-reads inside the retry) so it doesn't clobber a concurrent upsert.
 export async function removePlaidItem(
   authCellDocLink: string | SigilLink,
   itemId: string,
 ): Promise<PlaidAuthData> {
   try {
-    const authData = await getAuthData(authCellDocLink);
-
-    if (!authData.items) {
-      authData.items = [];
+    const authCell = await getAuthCell(authCellDocLink);
+    if (!authCell) {
+      throw new Error("Auth cell not found");
     }
-
-    // Filter out the item
-    authData.items = authData.items.filter((i) => i.itemId !== itemId);
-
-    return await saveAuthData(authCellDocLink, authData);
+    return await durableUpdate(authCell, (current) => {
+      const data = (current as PlaidAuthData | undefined) ?? { items: [] };
+      return {
+        ...data,
+        items: (data.items ?? []).filter((i) => i.itemId !== itemId),
+      };
+    }) as PlaidAuthData;
   } catch (error) {
     throw new Error(`Error removing Plaid item: ${error}`);
   }

@@ -28,8 +28,21 @@ function flagValue() {
   });
 }
 
+/**
+ * Strict boolean env flag: only "true"/"1" enable; "false", unset, or anything
+ * else disable. Avoids z.coerce.boolean()'s footgun where `Boolean("false")` is
+ * `true`, which would turn a flag ON when the operator set it to "false".
+ */
+function boolFlag() {
+  return z.string().default("false").transform((v) =>
+    v === "true" || v === "1"
+  );
+}
+
 // NOTE: This is where we define the environment variable types and defaults.
-const EnvSchema = z.object({
+// Exported so the parsing rules (e.g. OTEL_ENABLED) can be unit-tested without
+// going through the module-level singleton below.
+export const EnvSchema = z.object({
   ENV: z.string().default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().default(8000),
@@ -42,15 +55,25 @@ const EnvSchema = z.object({
     "trace",
     "silent",
   ]).default("info"),
-  DISABLE_LOG_REQ_RES: z.coerce.boolean().default(false),
+  // Strict parse (see boolFlag): DISABLE_LOG_REQ_RES=false now means "log req/res",
+  // matching operator intent. Previously z.coerce.boolean() turned "false" into true.
+  DISABLE_LOG_REQ_RES: boolFlag(),
   CACHE_DIR: z.string().default("./cache"),
 
   // ===========================================================================
   // OpenTelemetry Configuration
   // ===========================================================================
-  OTEL_ENABLED: z.coerce.boolean().default(false),
+  // Strict parse (see boolFlag): only "true"/"1" enable telemetry; "false"/unset
+  // disable it. z.coerce.boolean() would wrongly enable on the string "false".
+  OTEL_ENABLED: boolFlag(),
   OTEL_SERVICE_NAME: z.string().default("toolshed"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
+  // Wired into the provider in lib/otel.ts via samplerFromEnv(). The OTel JS SDK
+  // does not auto-read these from the environment under Deno, so we build the
+  // Sampler explicitly. Supported values: always_on (default), always_off,
+  // traceidratio, parentbased_always_on, parentbased_always_off,
+  // parentbased_traceidratio. OTEL_TRACES_SAMPLER_ARG is the ratio for the
+  // *ratio variants. Defaults (always_on / 1.0) keep 100% sampling.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
   // ===========================================================================
@@ -183,7 +206,8 @@ const EnvSchema = z.object({
   PLAID_PRODUCTS: z.string().default("transactions"),
   PLAID_COUNTRY_CODES: z.string().default("US"),
   PLAID_REDIRECT_URI: z.string().optional(),
-  PLAID_SYNC_ALL_TRANSACTIONS: z.coerce.boolean().default(false),
+  // Strict parse (see boolFlag); previously z.coerce.boolean() turned "false" into true.
+  PLAID_SYNC_ALL_TRANSACTIONS: boolFlag(),
   // ===========================================================================
 
   // URL of the toolshed API, for self-referring requests
@@ -205,15 +229,33 @@ const EnvSchema = z.object({
   // background service operator identity).
   MEMORY_SERVICE_DIDS: z.string().default(""),
 
+  // ===========================================================================
+  // State-inspector remote dump endpoint (`cf inspect --remote`).
+  // Exposes raw, read-only space SQLite snapshots over HTTP for offline
+  // autopsy. This is a STAGING-ONLY debugging tool: it hard-refuses to mount
+  // under ENV=production with no override (a productionized form is a separate,
+  // access-controlled mechanism — not this endpoint). A space dump is the
+  // entire contents of a space, so access is gated by CF1 first-party signature
+  // auth + a DID allowlist, and every dump is audit-logged. See
+  // routes/storage/memory/memory-dump.index.ts.
+  // ===========================================================================
+  // Master switch. Unset/"false" => the endpoint 404s as if it did not exist.
+  // Mounting ALSO requires ENV to be a recognized non-production value
+  // (development | test | staging) — unknown/alias envs fail closed. See
+  // routes/storage/memory/memory-dump-policy.ts.
+  MEMORY_DUMP_ENABLED: flagValue(),
+  // Comma-separated DIDs allowed to download dumps, in ADDITION to
+  // MEMORY_SERVICE_DIDS. Empty => only MEMORY_SERVICE_DIDS may dump.
+  MEMORY_DUMP_DIDS: z.string().default(""),
+
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
 
   // ===========================================================================
   // Experimental feature flags (see ExperimentalOptions in runner)
-  // Note: We intentionally avoid z.coerce.boolean() here. Zod's coerce uses
-  // Boolean(), which treats any non-empty string as truthy -- so setting an
-  // env var to "false" would incorrectly enable the flag. The other boolean
-  // env vars in this file have the same latent bug.
+  // These use flagValue() (tri-state: true/false/undefined) because the runner
+  // distinguishes "unset" from an explicit false. The plain on/off booleans
+  // above use boolFlag(); both avoid z.coerce.boolean()'s Boolean("false") trap.
   // ===========================================================================
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),

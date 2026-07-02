@@ -47,6 +47,10 @@ import {
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
+import {
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
@@ -63,6 +67,7 @@ import {
   type CfcFlowLabelsMode,
   type CfcLabelView,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  externalIngestStamp,
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
@@ -70,6 +75,7 @@ import {
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -166,6 +172,45 @@ export interface ExperimentalOptions {
   commitPreconditions?: boolean | undefined;
 }
 
+/**
+ * Content-addressed cache of compiled MODULE BYTES, injected via
+ * `RuntimeOptions.moduleByteCache`. The ESM cell-cache compile path consults it
+ * before the per-space storage read — a full hit skips both the storage read and
+ * the whole transform-and-emit step (`compileToModules`) — and populates it after
+ * a compile, so a module compiled in one runtime or space serves another
+ * compiling the same module.
+ *
+ * Entries are keyed by a module's content identity scoped by the compiled-set
+ * `runtimeVersion`; the emitted bytes are a deterministic function of that pair
+ * (the emitter strips the whole-program path prefix, so a module's bytes are the
+ * same in every program that contains it), so a hit always returns the bytes the
+ * identity addresses.
+ *
+ * The runtime defines only this interface. The implementation, and its
+ * persistence, live in test code, so the cache is instantiated only from tests
+ * and never in production.
+ */
+export interface ModuleByteCache {
+  /**
+   * The cached bodies for `identities` iff EVERY identity is present, else
+   * `undefined`. The transform-and-emit step is whole-program, so only a full
+   * set lets a compile skip it.
+   */
+  getCompleteSet(
+    runtimeVersion: string,
+    identities: readonly string[],
+  ): Map<string, CompiledModuleArtifact> | undefined;
+
+  /**
+   * Store a freshly compiled (or reused) module set, keyed by content identity
+   * scoped by `runtimeVersion`. Idempotent and content-addressed.
+   */
+  putAll(
+    runtimeVersion: string,
+    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+  ): void;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -203,6 +248,29 @@ export interface RuntimeOptions {
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
   hideInternalStackFrames?: boolean;
+  /**
+   * Tuning for committed-write backpressure under contention. Unset fields fall
+   * back to DEFAULT_COMMIT_BACKPRESSURE; tests use this to shrink the backoff
+   * and retry window. See scheduler/backpressure.ts.
+   */
+  commitBackpressure?: Partial<CommitBackpressurePolicy>;
+  /**
+   * Process-level, content-addressed cache of compiled MODULE BYTES, shared
+   * across runtimes. When set, the ESM cell-cache compile path consults it before
+   * the per-space storage read and populates it after a compile, so a module
+   * compiled in one runtime or space serves another runtime or space compiling
+   * the same module. When unset, the byte cache is off and only the per-space
+   * cache applies. Holds emitted JS only, never live pattern instances. See
+   * {@link ModuleByteCache}.
+   */
+  moduleByteCache?: ModuleByteCache;
+  /**
+   * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
+   * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
+   * a test harness can inject a deterministic mock without mutating process
+   * globals. (LLM calls mock separately, at the `LLMClient` layer.)
+   */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface CfcRuntimeStats {
@@ -309,12 +377,22 @@ export class Runtime {
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
+  readonly moduleByteCache?: ModuleByteCache;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
+  /** Resolved committed-write backpressure policy (all fields present). */
+  readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /**
+   * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
+   * the host `globalThis.fetch`; a test harness can inject a mock via
+   * `RuntimeOptions.fetch`.
+   */
+  readonly fetch: typeof globalThis.fetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -358,6 +436,10 @@ export class Runtime {
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
 
+    this.commitBackpressure = resolveCommitBackpressure(
+      options.commitBackpressure,
+    );
+
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     // Validate eagerly, mirroring the storage layer's resolver: a
@@ -380,6 +462,12 @@ export class Runtime {
     this.spaceHostMap = options.spaceHostMap
       ? Object.freeze({ ...options.spaceHostMap })
       : undefined;
+    // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
+    // preserving the existing behavior where a test overrides the global AFTER
+    // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
+    // mock is used as-is.
+    this.fetch = options.fetch ??
+      ((input, init) => globalThis.fetch(input, init));
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
@@ -392,6 +480,7 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    this.moduleByteCache = options.moduleByteCache;
     const actingPrincipal = options.storageManager.as.did() as DID;
     this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
       id: `principal:${actingPrincipal}`,
@@ -468,7 +557,7 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work the async builtins (fetchData,
+  // In-flight async builtin operations — the work the async builtins (fetchJson,
   // fetchProgram, llm/llmDialog, and reactive sqlite queries) perform AFTER their
   // handler returns, from a post-commit outbox flush: a network / LLM call or a
   // sqlite RPC, plus the result writeback. `idle()` deliberately does NOT wait
@@ -679,16 +768,12 @@ export class Runtime {
     const key = `${link.space}\0${link.id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     this.missingDocLoadKicks.add(key);
-    const maybePromise = this.getCellFromLink(link).sync();
-    if (maybePromise instanceof Promise) {
-      const promise = maybePromise.catch(() => {
+    this.storageManager.trackUntilSettled(
+      this.getCellFromLink(link).sync().catch(() => {
         // Allow a retry on failure (e.g. transient disconnect).
         this.missingDocLoadKicks.delete(key);
-      }).finally(() => {
-        this.storageManager.removeCrossSpacePromise(promise);
-      }) as unknown as Promise<void>;
-      this.storageManager.addCrossSpacePromise(promise);
-    }
+      }),
+    );
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
@@ -806,6 +891,18 @@ export class Runtime {
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
+      // A vouched ingest still needs its provenance mark minted even where CFC
+      // enforcement is disabled (e.g. the operator/toolshed runtime). The mint
+      // is a builtin-authored boundary-commit step that never rejects, so run
+      // prepare for it explicitly rather than forcing the enforcement dial up
+      // (which would desync ingest txs from the runtime's real mode). The
+      // stamp already marked the tx relevant; nothing else here applies when
+      // disabled, so fall straight through to prepareCfc.
+      if (externalIngestStamp(tx) !== undefined) {
+        if (state.prepare.status === "unprepared") {
+          tx.prepareCfc();
+        }
+      }
       return;
     }
     // Flow-label relevance is computed, not caller-marked (S16): the

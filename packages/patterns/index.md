@@ -119,7 +119,7 @@ intended as style references.
 **`google/WIP/`** — parked, unfinished work that never graduated into
 `google/core/`.
 
-Support files with no tier (not patterns): `deno.json`, `mod.ts`, `index.md`,
+Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
 `test-ui-helpers.ts`, `tools/` (codegen tooling).
 
@@ -1505,7 +1505,7 @@ them as a clickable card list, and uses an LLM to generate a summary of recent
 development activity. Fully reactive — changing the repo URL re-fetches and
 re-summarizes.
 
-**Keywords:** github, commits, fetchData, generateText, LLM, summary, activity
+**Keywords:** github, commits, fetchJson, generateText, LLM, summary, activity
 
 ### Input Schema
 

@@ -119,9 +119,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceName: options.spaceName,
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
+      cfcFlowLabels: options.cfcFlowLabels,
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
+      forwardWorkerConsole: options.forwardWorkerConsole,
     });
     return new RuntimeClient(initialized, options);
   }
@@ -402,6 +404,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async setTelemetryEnabled(enabled: boolean): Promise<void> {
     await this.#conn.request<RequestType.SetTelemetryEnabled>({
       type: RequestType.SetTelemetryEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Enable or disable forwarding of the worker runtime's console output to the
+   * main thread for the running worker. Takes effect immediately, without a
+   * reload. When disabled the worker restores its native console methods, so
+   * there is no per-log cost while off.
+   */
+  async setForwardWorkerConsole(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetForwardWorkerConsole>({
+      type: RequestType.SetForwardWorkerConsole,
       enabled,
     });
   }

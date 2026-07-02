@@ -5,6 +5,24 @@ when testing identity-sensitive behavior. Scoped cells make this important:
 `PerUser<T>` and `PerSession<T>` data is keyed by the active user DID, not only
 by the space DID.
 
+> **Use a unique key (`id new`) for your own identity.** `cf id derive "implicit
+> trust"` produces a *fixed, publicly-derivable* DID — the one the local toolshed
+> runs as in dev mode — so every developer who derives it shares the exact same
+> identity. That is fine on your own single-tenant localhost (it lets the CLI,
+> browser, and server act as one admin identity), but against a **shared or remote
+> server** (a teammate's box, staging, anything on a tailnet) it collapses
+> everyone into one principal: you see and overwrite each other's `PerUser` data
+> and act as each other. **Never derive or browser-import `implicit trust` against
+> a server other people use.** Reserve it for the one case below.
+
+## When To Derive `implicit trust`
+
+Only to deliberately act *as the local dev server's own identity* — i.e. for
+operator/admin tasks on your own localhost where the caller must match toolshed's
+dev identity (e.g. `add-admin-charm`, the background-charm-service operator,
+deploying system home patterns). For everything else — your personal identity,
+normal pattern dev, and any shared or remote server — use `id new`.
+
 ## Recommended Local Workflow
 
 Create one repo-local key and use it everywhere:

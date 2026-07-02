@@ -21,6 +21,8 @@
  *   or: deno test --allow-read skills/cf-review/check-facts.ts
  */
 
+import { parse as parseJsonc } from "@std/jsonc";
+
 const HERE = import.meta.dirname;
 if (HERE === undefined) {
   throw new Error("check-facts.ts must be run from a file path");
@@ -38,7 +40,7 @@ const exists = (p: string): boolean => {
   }
 };
 
-/** Does `key` ("." or "./sub") resolve against a deno.json `exports` value? */
+/** Does `key` ("." or "./sub") resolve against a deno.jsonc `exports` value? */
 function resolves(exp: unknown, key: string): boolean {
   if (typeof exp === "string") return key === "."; // string = root export only
   if (exp !== null && typeof exp === "object") {
@@ -55,22 +57,22 @@ export async function collectErrors(): Promise<string[]> {
   const skill = await read("skills/cf-review/SKILL.md");
 
   // Build a name -> exports map for every workspace package.
-  const root = JSON.parse(await read("deno.json")) as { workspace?: string[] };
+  const root = parseJsonc(await read("deno.jsonc")) as { workspace?: string[] };
   const exportsByName = new Map<string, unknown>();
   for (const member of root.workspace ?? []) {
-    const path = `${member.replace(/^\.\//, "")}/deno.json`;
+    const path = `${member.replace(/^\.\//, "")}/deno.jsonc`;
     let raw: string;
     try {
       raw = await read(path);
     } catch (e) {
-      if (e instanceof Deno.errors.NotFound) continue; // member has no deno.json
+      if (e instanceof Deno.errors.NotFound) continue; // member has no deno.jsonc
       throw e; // real I/O failure — surface it, don't hide config breakage
     }
     let pkg: { name?: string; exports?: unknown };
     try {
-      pkg = JSON.parse(raw);
+      pkg = parseJsonc(raw) as { name?: string; exports?: unknown };
     } catch (e) {
-      throw new Error(`invalid JSON in ${path}: ${(e as Error).message}`);
+      throw new Error(`invalid JSONC in ${path}: ${(e as Error).message}`);
     }
     if (pkg.name) exportsByName.set(pkg.name, pkg.exports);
   }

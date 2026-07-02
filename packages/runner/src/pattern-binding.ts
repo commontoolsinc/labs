@@ -1,6 +1,9 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
@@ -14,11 +17,14 @@ import {
   isCellLink,
   isLegacyAlias,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   Cell,
@@ -43,7 +49,7 @@ type UnwrapOneLevelOptions = {
    * sanitized schema (`sanitizeSchemaForLinks` strips `asCell` entries,
    * taking their scope annotation with them), so a `PerUser<Cell<>>`
    * declaration is invisible on the link by the time aliases are bound. The
-   * authored pattern schema keeps `asCell` (`keepAsCell: true` in
+   * authored pattern schema keeps `asCell` (`keepAsCell: KeepAsCell.All` in
    * builder/pattern.ts) and is the ground truth for what each slot declared.
    * (Internal cells don't need this: each derived internal cell carries its
    * declared scope on its descriptor, realized directly on its link.)
@@ -124,14 +130,12 @@ const scopedLinkForPath = (
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  if (isRecord(finalSchema)) {
-    if (isCellScope(finalSchema.scope)) {
-      scope = finalSchema.scope;
-    }
-    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
-    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-    if (isCellScope(asCellScope)) {
-      scope = asCellScope;
+  const linkSchema = finalSchema === undefined
+    ? undefined
+    : sanitizeAliasSchemaForBinding(finalSchema);
+  if (isRecord(linkSchema)) {
+    if (isCellScope(linkSchema.scope)) {
+      scope = linkSchema.scope;
     }
   }
 
@@ -139,9 +143,15 @@ const scopedLinkForPath = (
     ...link,
     path: [...path],
     scope,
-    ...(finalSchema !== undefined && { schema: finalSchema }),
+    ...(linkSchema !== undefined && { schema: linkSchema }),
   };
 };
+
+const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
+  // Compiled aliases retain asCell for schema fidelity. Live redirects use link
+  // schemas without cell wrappers so scoped asCell entries do not stamp the
+  // redirect link's own scope and bypass stored argument links.
+  sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,
@@ -267,10 +277,22 @@ export function sendValueToBinding<T>(
         valueLink !== undefined &&
         !areNormalizedLinksSame(valueLink, bindingLink)
       ) {
-        tx.writeValueOrThrow(
-          bindingLink,
-          createSigilLinkFromParsedLink(valueLink) as FabricValue,
-        );
+        const newValue = createSigilLinkFromParsedLink(
+          valueLink,
+        ) as FabricValue;
+        // Skip the write when the redirect already holds this exact link. Raw
+        // builtins (ifElse/when/unless/map/...) re-run and re-send their result
+        // whenever their inputs change, but the output binding points at a
+        // cause-stable result cell, so the link is usually unchanged. The read
+        // is an internal write-elision decision: kept out of scheduling
+        // (`ignoreReadForScheduling`) and CFC taint (`internalVerifierRead`),
+        // and compared with the `Fabric`-aware `valueEqual`.
+        const current = tx.readValueOrThrow(bindingLink, {
+          meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        });
+        if (!valueEqual(current, newValue)) {
+          tx.writeValueOrThrow(bindingLink, newValue);
+        }
         return;
       }
     }
@@ -401,7 +423,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           });
         const path = alias.path;
         const sourceSchema = alias.schema !== undefined
-          ? alias.schema
+          ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
@@ -423,7 +445,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         // we might have a schema in the alias, but if not, we may have one
         // in the link (from the pattern)
         const sourceSchema = alias.schema !== undefined
-          ? alias.schema
+          ? sanitizeAliasSchemaForBinding(alias.schema)
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;

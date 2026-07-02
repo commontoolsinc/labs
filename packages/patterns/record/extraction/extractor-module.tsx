@@ -50,6 +50,7 @@ import { getConfidenceLevel, SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 import { getCellValue } from "./schema-utils-pure.ts";
+import { getOcrErrorText } from "./error-utils.ts";
 
 // ===== Types =====
 
@@ -1071,9 +1072,7 @@ const startExtraction = handler<
       if (source.type === "notes") {
         // Access piece content via .get() first to resolve links, then access properties
         // Cell.key() navigation doesn't work through link boundaries - piece is stored as a link
-        const entry = (parentSubPiecesCell as Writable<SubPieceEntry[]>)
-          .key(source.index)
-          .get();
+        const entry = parentSubPiecesCell.key(source.index).get();
         const piece = entry?.piece as Record<string, unknown>;
         const liveContent = getCellValue<unknown>(piece?.content);
         const content = typeof liveContent === "string" ? liveContent : "";
@@ -1133,9 +1132,8 @@ function applyFieldToModule(
 
   try {
     // Only write if validation passed
-    // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-    // Use actualFieldName to write to the correct field (handles aliases)
-    (parentSubPiecesCell as Writable<SubPieceEntry[]>)
+    // Use actualFieldName to write to the correct field.
+    parentSubPiecesCell
       .key(existingIndex)
       .key("piece")
       .key(actualFieldName)
@@ -1296,8 +1294,7 @@ function applyNotesCleanup(params: NotesCleanupParams): boolean {
     // Approach 2: Fallback to Cell key navigation
     if (!thisCleanupSucceeded) {
       try {
-        // Cast needed: Writable.key() navigation loses type info for dynamic nested paths
-        (parentSubPiecesCell as Writable<SubPieceEntry[]>)
+        parentSubPiecesCell
           .key(notesIndex)
           .key("piece")
           .key("content")
@@ -1757,7 +1754,7 @@ export const ExtractorModule = pattern<
 
     // Build OCR calls for all selected photos using .map() on computed Cell
     // Each photo gets its own generateText call (framework caches per-item)
-    // .map() on OpaqueRef works reactively - returns another OpaqueRef<Array>
+    // .map() on Reactive works reactively - returns another Reactive<Array>
     const ocrCalls = photoSources.map((photo: ExtractableSource) => {
       // Build prompt for this photo
       const prompt = computed(() => {
@@ -1823,9 +1820,9 @@ export const ExtractorModule = pattern<
       if (!calls || calls.length === 0) return errors;
 
       for (const call of calls) {
-        const error = call.ocr?.error as { message?: string } | undefined;
-        if (error) {
-          errors[call.index] = String(error.message || error);
+        const errorText = getOcrErrorText(call.ocr?.error);
+        if (errorText) {
+          errors[call.index] = errorText;
         }
       }
       return errors;
@@ -1835,6 +1832,12 @@ export const ExtractorModule = pattern<
     const hasOcrErrors = computed(() => {
       const errors = ocrErrors;
       return Object.keys(errors).length > 0;
+    });
+
+    const ocrErrorMessage = computed((): string | null => {
+      const errors = Object.values(ocrErrors);
+      if (errors.length === 0) return null;
+      return errors.join("; ");
     });
 
     // ===== PER-SOURCE EXTRACTION ARCHITECTURE =====
@@ -2659,8 +2662,9 @@ export const ExtractorModule = pattern<
                     >
                       <span style={{ fontSize: "16px" }}>⚠️</span>
                       <span>
-                        OCR failed for some photos. Extraction will continue
-                        with available text.
+                        OCR failed for some photos:{" "}
+                        {ocrErrorMessage}. Extraction will continue with
+                        available text.
                       </span>
                     </div>,
                     null,

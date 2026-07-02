@@ -167,6 +167,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   removeCrossSpacePromise(promise: Promise<void>): void;
 
   /**
+   * Register a deferred async chain in the cross-space promise set so
+   * `Cell.pull()` and the scheduler's `idle()` await it, then drop it from the
+   * set once it settles. Until a chain is registered it is invisible to the
+   * convergence waiters: a pull can return before the chain has settled and
+   * observe held, not-yet-loaded state. This is the safe composition of
+   * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
+   * wiring the self-removing `finally` by hand at each call site.
+   */
+  trackUntilSettled(work: Promise<unknown>): void;
+
+  /**
    * Number of cross-space promises currently pending (async loads of link
    * targets in other spaces, kicked during link resolution or read
    * traversal). Zero in steady state — `Cell.pull()` uses this to decide
@@ -622,6 +633,26 @@ export interface IStorageTransaction {
   ): void;
 
   /**
+   * Record a mergeable write against the document at `address`: `count` elements
+   * appended at the array's tail, `count` elements set-added by identity, or a
+   * numeric `by` increment. The commit emits these as the corresponding
+   * mergeable op (which the server resolves against durable state) and drops the
+   * op's path from the commit's conflict read set, so concurrent and stale-base
+   * writes merge rather than clobber.
+   */
+  recordArrayAppend?(address: IMemorySpaceAddress, count: number): void;
+  recordAddUnique?(address: IMemorySpaceAddress, count: number): void;
+  recordIncrement?(address: IMemorySpaceAddress, by: number): void;
+  recordRemoveByValue?(address: IMemorySpaceAddress, value: FabricValue): void;
+
+  /**
+   * The document addresses for which this transaction recorded a mergeable op.
+   * The commit's read-set builder uses these to drop reads of those paths from
+   * conflict detection.
+   */
+  getMergeableOpAddresses?(): Iterable<IMemorySpaceAddress>;
+
+  /**
    * Optional: record a folded SQLite write onto this transaction so it commits
    * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
@@ -799,6 +830,16 @@ export interface IExtendedStorageTransaction
   markCreateOnly?(
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void;
+
+  /**
+   * Record a mergeable write against the document addressed by `link` — a tail
+   * append, a set-add by identity, or a numeric increment — forwarded to the
+   * underlying transaction after resolving the link to a memory address.
+   */
+  recordArrayAppend?(link: NormalizedFullLink, count: number): void;
+  recordAddUnique?(link: NormalizedFullLink, count: number): void;
+  recordIncrement?(link: NormalizedFullLink, by: number): void;
+  recordRemoveByValue?(link: NormalizedFullLink, value: FabricValue): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
@@ -1026,26 +1067,41 @@ export interface IExtendedStorageTransaction
    * When no write has occurred since the last read, that work is redundant: the
    * value, the reactive reads it registers, and the CFC state it produces are all
    * identical. These two methods let `Cell.get()` cache its result keyed by the
-   * cell's link identity; the implementation clears the entire cache on any
-   * write, so a cached entry is only ever returned when no write has intervened.
+   * stable value of the cell view; the implementation clears the entire cache
+   * on any write, so a cached entry is only ever returned when no write has
+   * intervened.
    *
    * Optional: transactions that must not cache (e.g. the non-reactive `sample()`
    * wrapper) leave these undefined and callers fall back to recomputing.
-   * `keyObject` must be a stable per-cell object identity (the cell's normalized
-   * link); `variant` distinguishes reads that differ in options. A returned
-   * `{ value }` wrapper signals a hit, so a cached `undefined` value is
-   * distinguishable from a miss.
+   * `key` must be a stable value key for the cell view (normalized link,
+   * including schema, plus any CFC label view); `variant` distinguishes reads
+   * that differ in options. A returned `{ value }` wrapper signals a hit, so a
+   * cached `undefined` value is distinguishable from a miss.
    */
   getCachedReadResult?(
-    keyObject: object,
+    key: string,
     variant: string,
   ): { value: unknown } | undefined;
 
   setCachedReadResult?(
-    keyObject: object,
+    key: string,
     variant: string,
     value: unknown,
   ): void;
+
+  /**
+   * Optional diagnostics for the transaction-local `Cell.get()` cache.
+   *
+   * `entries` reports the currently retained cache entries, which drops to zero
+   * after any write because writes replace the transaction-local cache map.
+   * Hit/miss/set counts are cumulative for the transaction.
+   */
+  getReadResultCacheStats?(): {
+    hits: number;
+    misses: number;
+    sets: number;
+    entries: number;
+  };
 }
 
 export interface ITransactionReader {

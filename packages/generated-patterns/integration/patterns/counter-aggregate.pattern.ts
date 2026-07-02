@@ -11,7 +11,7 @@ const adjustCounter = handler(
   ) => {
     const index = event?.index ?? 0;
     const amount = typeof event?.amount === "number" ? event.amount : 1;
-    const target = context.counters.key(index) as Cell<number>;
+    const target: Cell<number> = context.counters.key(index);
     const current = target.get() ?? 0;
     target.set(current + amount);
   },

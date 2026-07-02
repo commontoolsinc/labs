@@ -4,6 +4,7 @@ import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { memory } from "@/routes/storage/memory.ts";
+import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
 // Create a global runtime instance for the server
 let runtime: Runtime;
@@ -78,6 +79,10 @@ const handleShutdown = async () => {
         } else {
           console.log("Memory system closed successfully");
         }
+
+        // Flush buffered spans so the last batch isn't dropped on exit. No-op
+        // when telemetry is disabled; bounded by the SHUTDOWN_TIMEOUT race above.
+        await shutdownOpenTelemetry();
       })(),
       timeoutPromise,
     ]);

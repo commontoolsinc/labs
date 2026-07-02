@@ -12,8 +12,8 @@ import {
   type JSONSchema,
   type JSONValue,
   type Module,
-  type OpaqueRef,
   type Pattern,
+  type Reactive,
   type toJSON,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
@@ -32,7 +32,7 @@ import {
 import { isCell } from "../cell.ts";
 
 export type CellAliasResolver = (
-  cell: OpaqueRef<any>,
+  cell: Reactive<any>,
   path: readonly PropertyKey[],
   ignoreSelfAliases: boolean,
 ) => LegacyAlias | null | undefined;
@@ -66,7 +66,7 @@ export function toJSONWithLegacyAliases(
     // Otherwise it's an internal reference. Ask the pattern builder how this
     // cell should be represented in the serialized pattern.
     const alias = resolveCellAlias?.(
-      value as OpaqueRef<any>,
+      value as Reactive<any>,
       path,
       ignoreSelfAliases,
     );

@@ -1243,10 +1243,7 @@ const acceptSuggestionHandler = handler<
   rules.push(newRule);
 
   // Mark as dismissed
-  const dismissed = dismissedSuggestionIndices.get();
-  if (!dismissed.includes(originalIndex)) {
-    dismissedSuggestionIndices.set([...dismissed, originalIndex]);
-  }
+  dismissedSuggestionIndices.addUnique(originalIndex);
 });
 
 /** Reject a rule suggestion - just mark as dismissed */
@@ -1257,10 +1254,7 @@ const rejectSuggestionHandler = handler<
     dismissedSuggestionIndices: Writable<number[]>;
   }
 >((_event, { originalIndex, dismissedSuggestionIndices }) => {
-  const dismissed = dismissedSuggestionIndices.get();
-  if (!dismissed.includes(originalIndex)) {
-    dismissedSuggestionIndices.set([...dismissed, originalIndex]);
-  }
+  dismissedSuggestionIndices.addUnique(originalIndex);
 });
 
 /** State type for the classification result cell passed to handlers */
@@ -1542,7 +1536,7 @@ const refreshSuggestionsHandler = handler<
   // Clear dismissed indices so new suggestions will be visible
   dismissedSuggestionIndices.set([]);
   // Increment counter to force regeneration of prompt (triggers new LLM call)
-  ruleGenCounter.set(ruleGenCounter.get() + 1);
+  ruleGenCounter.increment(1);
 });
 
 /** Submit a new item for classification from UI input fields */

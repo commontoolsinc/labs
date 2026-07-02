@@ -67,7 +67,28 @@ export type PatchOp =
     index: number;
     remove: number;
     add: FabricValue[];
-  };
+  }
+  // A tail-relative append: `values` are inserted at the array's current tail,
+  // with the array (and the path to it) created if absent. Carries no index, so
+  // concurrent appends merge against durable state rather than clobbering via a
+  // position computed from a stale base.
+  | { op: "append"; path: string; values: FabricValue[] }
+  // Set-add by identity: each of `values` is appended at the tail only if no
+  // existing element of the array equals it (by stored-value equality), with the
+  // array created if absent. Idempotent and commutative, so concurrent adds of
+  // distinct elements merge and a repeated add is a no-op against durable state.
+  | { op: "add-unique"; path: string; values: FabricValue[] }
+  // Remove every element of the array at `path` that equals `value` by
+  // stored-value equality. Idempotent (removing an absent value is a no-op) and
+  // resolved against durable state, so it merges with concurrent writes instead
+  // of clobbering via a whole-array rewrite. For a list of links this removes
+  // the membership entry by its (deterministic) link, without reading the list.
+  | { op: "remove-by-value"; path: string; value: FabricValue }
+  // Numeric increment: `by` (which may be negative) is added to the number at
+  // `path`, treating an absent value as 0 and creating the path if absent.
+  // Applied against durable state, so concurrent increments sum rather than
+  // clobber via last-write-wins.
+  | { op: "increment"; path: string; by: number };
 
 export interface SetOperation {
   op: "set";
@@ -196,6 +217,7 @@ export interface SessionOpenResult {
   caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
+  sessionOpen: SessionOpenAuthMetadata;
 }
 
 export interface MemoryProtocolFlags {
@@ -229,6 +251,17 @@ export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
+  sessionOpen?: SessionOpenAuthMetadata;
+}
+
+export interface SessionOpenChallenge {
+  value: string;
+  expiresAt: number;
+}
+
+export interface SessionOpenAuthMetadata {
+  challenge: SessionOpenChallenge;
+  audience: string;
 }
 
 export interface SessionDescriptor {

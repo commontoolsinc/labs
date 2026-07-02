@@ -364,6 +364,36 @@ describe("CellController", () => {
 });
 
 // ---------------------------------------------------------------------------
+// CellController.flush()
+// ---------------------------------------------------------------------------
+
+describe("CellController — flush", () => {
+  it("runs a pending debounced write immediately", () => {
+    const cell = createMockCellHandle("initial");
+    const ctrl = new CellController<string>(createMockHost(), {
+      timing: { strategy: "debounce", delay: 300 },
+    });
+    ctrl.bind(cell);
+    ctrl.setValue("updated");
+    // Debounced: the write has not landed yet.
+    expect(cell.get()).toBe("initial");
+    ctrl.flush();
+    // flush() drains the pending write to the cell.
+    expect(cell.get()).toBe("updated");
+  });
+
+  it("is a no-op when nothing is pending", () => {
+    const cell = createMockCellHandle("x");
+    const ctrl = new CellController<string>(createMockHost(), {
+      timing: { strategy: "debounce", delay: 300 },
+    });
+    ctrl.bind(cell);
+    ctrl.flush();
+    expect(cell.get()).toBe("x");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // StringCellController
 // ---------------------------------------------------------------------------
 

@@ -4,10 +4,8 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { Resource } from "@opentelemetry/resources";
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import env from "@/env.ts";
-import {
-  isOpenInferenceSpan,
-  OpenInferenceBatchSpanProcessor,
-} from "@arizeai/openinference-vercel";
+import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
+import { samplerFromEnv } from "@/lib/otel-sampler.ts";
 
 // Ensure we only register once even during hot-reload
 let _providerRegistered = false;
@@ -26,20 +24,56 @@ export const provider = new BasicTracerProvider({
     "deployment.environment": env.ENV || "development",
     "openinference.project.name": env.CFTS_AI_LLM_PHOENIX_PROJECT,
   }),
+  // The SDK doesn't read OTEL_TRACES_SAMPLER from the env under Deno, so build
+  // the sampler explicitly. Defaults (always_on / 1.0) keep 100% sampling.
+  // NOTE: head sampling here applies to LLM/OpenInference spans too, so a ratio
+  // below 1.0 also thins the spans the collector forwards to Phoenix.
+  sampler: samplerFromEnv(env.OTEL_TRACES_SAMPLER, env.OTEL_TRACES_SAMPLER_ARG),
 });
 
 // Add span processor after construction (API changed in newer SDK versions)
+//
+// Export ALL spans (HTTP request spans from the otel middleware AND LLM spans) to
+// the OTLP collector. The collector fans them out: its Phoenix pipeline filters to
+// LLM/OpenInference spans, while its SigNoz pipeline ingests everything. We keep the
+// OpenInferenceBatchSpanProcessor (rather than a plain BatchSpanProcessor) so LLM
+// spans still get OpenInference semantic-convention formatting for Phoenix; a
+// pass-through spanFilter lets non-LLM spans through to SigNoz as well. (The
+// processor tags passed-through spans with an `openinference.span.kind`
+// attribute, so they are not strictly byte-for-byte unchanged.)
 provider.addSpanProcessor(
   new OpenInferenceBatchSpanProcessor({
     exporter: otlpExporter,
-    spanFilter: (span) => {
-      return isOpenInferenceSpan(span);
-    },
+    spanFilter: () => true,
   }),
 );
 
 export function getTracerProvider() {
   return _provider;
+}
+
+/**
+ * Flush and shut down the tracer provider so buffered spans aren't dropped when
+ * the process exits. No-op if telemetry was never initialized. Mirrors the
+ * bg-piece-service shutdown so toolshed doesn't lose its last span batch on
+ * deploy/restart.
+ */
+export async function shutdownOpenTelemetry(): Promise<void> {
+  if (!_provider) return;
+  const p = _provider;
+  _provider = undefined;
+  try {
+    await p.forceFlush();
+    await p.shutdown();
+  } finally {
+    // Reset the global API state so getTracer() falls back to the API no-op
+    // after shutdown. We deliberately do NOT reset _providerRegistered: the
+    // `provider` above is a module-level const that init can't rebuild, so a
+    // re-init must stay a guarded no-op rather than re-register a torn-down
+    // instance. Shutdown here is process-exit-only.
+    trace.disable();
+    context.disable();
+  }
 }
 
 // Prefer Deno's built-in context manager when running on Deno ≥2.2.
@@ -62,9 +96,9 @@ const getContextManager = () => {
   return new AsyncHooksContextManager();
 };
 
-export function initOpenTelemetry() {
-  if (_providerRegistered || !env.OTEL_ENABLED) {
-    if (!env.OTEL_ENABLED) {
+export function initOpenTelemetry(enabled: boolean = env.OTEL_ENABLED) {
+  if (_providerRegistered || !enabled) {
+    if (!enabled) {
       console.log("OpenTelemetry is disabled via OTEL_ENABLED env var");
     } else {
       console.log("OpenTelemetry already initialized, skipping");

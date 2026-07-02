@@ -402,6 +402,38 @@ Deno.test("Capability analysis tracks reassignment aliases", () => {
   assert(input.readPaths.includes("user.name"));
 });
 
+Deno.test("Capability analysis tracks object assignment pattern aliases", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      let name;
+      let alias;
+      ({ user: { name }, profile: alias } = input);
+      return name + alias.title;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("user.name"));
+  assert(input.readPaths.includes("profile"));
+  assert(input.readPaths.includes("profile.title"));
+});
+
+Deno.test("Capability analysis treats array assignment patterns as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      let first;
+      [first] = input.items;
+      return first.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.wildcard, true);
+});
+
 Deno.test("Capability analysis treats dynamic alias keys as wildcard", () => {
   const fn = parseFirstCallback(
     `const fn = (input, key) => {
@@ -412,6 +444,66 @@ Deno.test("Capability analysis treats dynamic alias keys as wildcard", () => {
   const summary = analyzeFunctionCapabilities(fn);
   const input = getPaths(summary, "input");
 
+  assertEquals(input.wildcard, true);
+});
+
+Deno.test("Capability analysis tracks template literal and numeric key paths", () => {
+  const fn = parseFirstCallback(
+    "const fn = (input) => input.key(`profile`).key(0).get();",
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("profile.0"));
+  assertEquals(input.wildcard, false);
+});
+
+Deno.test("Capability analysis tracks boolean wrapper conditions", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      for (; (input.ready as boolean)!; ) {
+        break;
+      }
+      return input.done ? input.value : input.alt;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("ready"));
+  assert(input.readPaths.includes("done"));
+  assert(input.readPaths.includes("value"));
+  assert(input.readPaths.includes("alt"));
+});
+
+Deno.test("Capability analysis marks object assignment spreads as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      let value;
+      ({ ["profile"]: value, ...rest } = input);
+      return value.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("profile"));
+  assert(input.readPaths.includes("profile.name"));
+  assertEquals(input.wildcard, true);
+});
+
+Deno.test("Capability analysis treats elementById as a wildcard array read", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => input.elementById("k1").get();`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  // elementById addresses a separately derived entity, so the access is
+  // attributed conservatively to the whole array root.
   assertEquals(input.wildcard, true);
 });
 
@@ -2002,3 +2094,42 @@ Deno.test(
     assertEquals(input.readPaths.length, 0);
   },
 );
+
+Deno.test("Capability analysis marks an array-destructured parameter as wildcard", () => {
+  // Unpacking a parameter positionally (`[first, second]`) loses the
+  // field-level precision needed to shrink, so the root is wildcarded.
+  const fn = parseFirstCallback(
+    `const fn = ([first, second]) => first.id + second.value;`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const param = summary.params[0];
+
+  assert(param, "expected a parameter summary");
+  assertEquals(param.wildcard, true);
+});
+
+Deno.test("Capability analysis skips omitted elements in array destructuring", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const [, , third] = input.items;
+      return third.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assert(input.readPaths.includes("items"));
+});
+
+Deno.test("Capability analysis tracks reads through a nullish-fallback alias", () => {
+  const fn = parseFirstCallback(
+    `const fn = (a, b) => {
+      const picked = a.user ?? b.user;
+      return picked.name;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+
+  assert(getPaths(summary, "a").readPaths.includes("user"));
+  assert(getPaths(summary, "b").readPaths.includes("user"));
+});

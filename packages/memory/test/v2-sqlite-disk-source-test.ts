@@ -19,6 +19,10 @@ import { DiskSourceRegistry } from "../v2/sqlite/disk-source.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import type { SqliteDbRef } from "../v2.ts";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 function seedDiskDb(path: string): void {
   const seed = new Database(path);
@@ -111,9 +115,12 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
     diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
     seedDiskDb(diskPath);
     handleId = `of:disk-${crypto.randomUUID()}`;
-    server = new Server({ store: new URL("memory://sqlite-disk-source-test") });
+    server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://sqlite-disk-source-test"),
+    });
     client = await connect({ transport: loopback(server) });
-    session = await client.mount(SPACE);
+    session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
   });
 
   afterEach(async () => {
@@ -179,6 +186,8 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
   it("does not leak a registration across spaces (C2)", async () => {
     const session2 = await client.mount(
       "did:key:z6Mk-sqlite-disk-source-test-2",
+      {},
+      testSessionOpenAuthFactory,
     );
     // Register the on-disk source under SPACE (session), NOT the second space.
     await session.registerSqliteDiskSource(handleId, diskPath);

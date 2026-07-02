@@ -27,11 +27,11 @@ import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 
 /**
- * Replace OpaqueRef expressions with parameter identifiers in the callback body.
+ * Replace Reactive expressions with parameter identifiers in the callback body.
  * Also registers the new identifiers with their UNWRAPPED types in the typeRegistry,
  * so that type-based checks inside the lift-applied callback see the correct types.
  */
-function replaceOpaqueRefsWithParams(
+function replaceReactivesWithParams(
   expression: ts.Expression,
   refToParamName: Map<ts.Expression, string>,
   factory: ts.NodeFactory,
@@ -45,7 +45,7 @@ function replaceOpaqueRefsWithParams(
         const newIdentifier = factory.createIdentifier(paramName);
 
         // Register the new identifier with its UNWRAPPED type.
-        // The ref has type OpaqueRef<T>, but inside the lift-applied callback
+        // The ref has type Reactive<T>, but inside the lift-applied callback
         // the parameter has type T (unwrapped).
         if (checker && typeRegistry) {
           const refType = checker.getTypeAtLocation(ref);
@@ -212,7 +212,7 @@ export function createLiftAppliedCall(
     refToParamName,
   );
 
-  const lambdaBody = replaceOpaqueRefsWithParams(
+  const lambdaBody = replaceReactivesWithParams(
     expression,
     refToParamName,
     factory,

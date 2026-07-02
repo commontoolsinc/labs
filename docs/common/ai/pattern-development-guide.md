@@ -258,15 +258,19 @@ That distinction matters because explicit computation callbacks like
 boundaries. Inside those callback bodies, use `.get()` when you need the raw
 boolean value.
 
-### CORS and `fetchData`
+### CORS and fetch builtins
 
-Patterns run in the browser. Any URL used with `fetchData` must be
-CORS-compatible. RSS feeds, private APIs, and many XML endpoints do not expose
-the required headers. Prefer public JSON APIs that explicitly allow
-cross-origin requests.
+Fetches currently run in the browser, so an absolute cross-origin URL only
+works if that server sends CORS headers. RSS feeds, private APIs, and many XML
+endpoints do not. For external web *page* content, read it through the
+first-party `/api/agent-tools/web-read` or `/api/agent-tools/web-search`
+endpoints, which fetch server-side. A CORS-blocked JSON API has no general
+workaround yet, so if a brief depends on one, note the limitation rather than
+silently shipping a pattern that cannot load it.
 
-If a brief requests a non-CORS source, substitute a compatible equivalent and
-note the change instead of shipping a pattern that cannot run in the browser.
+This is a current limitation of running fetches in the browser, expected to
+lift as fetches move to runtime-managed egress; it is not a reason to prefer
+relative URLs in general.
 
 ### Reactive Cycles
 

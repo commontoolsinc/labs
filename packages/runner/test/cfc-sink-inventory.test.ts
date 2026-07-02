@@ -8,7 +8,10 @@ import {
 describe("CFC sink inventory", () => {
   it("includes the initial sink rollout set", () => {
     expect(INITIAL_SINK_INVENTORY).toEqual([
-      "fetchData",
+      "fetchBinary",
+      "fetchText",
+      "fetchJson",
+      "fetchJsonUnchecked",
       "fetchProgram",
       "streamData",
       "llm",
@@ -16,7 +19,7 @@ describe("CFC sink inventory", () => {
       "generateText",
       "generateObject",
     ]);
-    expect(isInitialSinkInventoryName("fetchData")).toBe(true);
+    expect(isInitialSinkInventoryName("fetchJson")).toBe(true);
     expect(isInitialSinkInventoryName("generateObject")).toBe(true);
     expect(isInitialSinkInventoryName("navigateTo")).toBe(false);
   });

@@ -20,7 +20,7 @@
 import {
   //compileAndRun,
   computed,
-  fetchData,
+  fetchJson,
   //fetchProgram,
   NAME,
   navigateTo,
@@ -31,7 +31,9 @@ import {
   uiVariant,
   when,
 } from "commonfabric";
-import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import GmailExtractor, {
+  type GoogleAuthCell,
+} from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -39,22 +41,9 @@ import ChaseBillPattern from "./chase-bill-tracker.tsx";
 import BAMSchoolDashboardPattern from "./bam-school-dashboard.tsx";
 import BofABillTrackerPattern from "./bofa-bill-tracker.tsx";
 import EmailTicketFinderPattern from "./email-ticket-finder.tsx";
-import CalendarChangeDetectorPattern from "./calendar-change-detector.tsx";
+import CalendarDetectorPattern from "./calendar-change-detector.tsx";
 import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
-
-const PATTERNS: any = {
-  "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
-  "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
-  "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
-  "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
-  "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
-  "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
-  "google/extractors/calendar-change-detector.tsx":
-    CalendarChangeDetectorPattern,
-  "google/extractors/email-notes.tsx": EmailNotesPattern,
-  "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
-};
 
 // =============================================================================
 // TYPES
@@ -76,6 +65,12 @@ interface PatternMatchInfo {
   entry: RegistryEntry;
   /** Email addresses that triggered this pattern */
   matchedEmails: string[];
+}
+
+export interface LaunchedPatternInfo extends PatternMatchInfo {
+  pending: boolean;
+  error: string | null;
+  result: Record<string, unknown> | null;
 }
 
 // =============================================================================
@@ -119,15 +114,27 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
 export interface PatternOutput {
-  matchedPatterns: unknown[];
+  matchedPatterns: LaunchedPatternInfo[];
   emailCount: number;
   matchCount: number;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
+}
+
+type LaunchablePattern = (
+  input: { overrideAuth?: GoogleAuthCell },
+) => unknown;
+
+function hasPatternLauncher(value: unknown): value is {
+  for: (patternUri: string) => unknown;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { for?: unknown };
+  return typeof candidate.for === "function";
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -135,9 +142,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // FETCH REGISTRY
   // ==========================================================================
 
-  const registryFetch = fetchData<RegistryEntry[]>({
+  const registryFetch = fetchJson<RegistryEntry[]>({
     url: "/api/patterns/google/extractors/email-pattern-registry.json",
-    mode: "json",
   });
 
   const registry = computed<RegistryEntry[]>(() => registryFetch.result || []);
@@ -176,16 +182,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       { entry: RegistryEntry; emails: Set<string> }
     >();
 
-    const entries = registry;
-    const emails = allEmails || [] as any[];
-
-    if (!entries || entries.length === 0) return [];
-
-    for (const email of emails) {
+    for (const email of allEmails || [] as any[]) {
       const fromAddress = email?.from;
       if (!fromAddress) continue;
 
-      for (const entry of entries) {
+      for (const entry of registry) {
         if (!entry) continue;
         for (const emailPattern of entry.emailPatterns) {
           if (matchesEmailPattern(fromAddress, emailPattern)) {
@@ -200,16 +201,14 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       }
     }
 
-    // Convert Map to array
-    const results: PatternMatchInfo[] = [];
-    for (const [patternUri, { entry, emails }] of matchMap) {
-      results.push({
+    return Array.from(
+      matchMap,
+      ([patternUri, { entry, emails }]): PatternMatchInfo => ({
         patternUri,
         entry,
         matchedEmails: Array.from(emails),
-      });
-    }
-    return results;
+      }),
+    );
   });
 
   const matchCount = computed(() => patternMatches?.length || 0);
@@ -217,6 +216,18 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // ==========================================================================
   // LAUNCH MATCHED PATTERNS
   // ==========================================================================
+
+  const patterns: Record<string, LaunchablePattern> = {
+    "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
+    "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
+    "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
+    "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
+    "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
+    "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
+    "google/extractors/calendar-change-detector.tsx": CalendarDetectorPattern,
+    "google/extractors/email-notes.tsx": EmailNotesPattern,
+    "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
+  };
 
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
@@ -242,14 +253,15 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const compiled = compileAndRun(compileParams);
     */
 
-    const compiled = {
-      result: computed(() => {
-        const patternUri = matchInfo.patternUri;
-        const pattern = PATTERNS[patternUri];
-        if (!pattern) return null;
-        return pattern({} as any).for(patternUri);
-      }),
-    };
+    const result = computed<Record<string, unknown> | null>(() => {
+      const child = patterns[matchInfo.patternUri]?.({ overrideAuth });
+      if (!child) return null;
+      const launcher = hasPatternLauncher(child);
+      const childResult = launcher ? child.for(matchInfo.patternUri) : child;
+      return typeof childResult === "object" && childResult !== null
+        ? childResult as Record<string, unknown>
+        : null;
+    });
 
     return {
       patternUri: matchInfo.patternUri,
@@ -262,8 +274,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       /* error: computed(
         () => programFetch.error || compiled.error,
       ),*/
-      result: compiled.result,
-    };
+      result,
+    } satisfies LaunchedPatternInfo;
   });
 
   // Preview UI for compact display
@@ -504,7 +516,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
 
                       {/* Loading State */}
-                      {patternInfo.pending && (
+                      {when(
+                        patternInfo.pending,
                         <div
                           style={{
                             display: "flex",
@@ -517,11 +530,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         >
                           <cf-loader size="sm" />
                           <span>Loading pattern...</span>
-                        </div>
+                        </div>,
                       )}
 
                       {/* Error State */}
-                      {patternInfo.error && (
+                      {when(
+                        patternInfo.error,
                         <div
                           style={{
                             display: "block",
@@ -532,15 +546,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             fontSize: "14px",
                           }}
                         >
-                          Error: {patternInfo.error}
-                        </div>
+                          Error: {toIndentedDebugString(patternInfo.error)}
+                        </div>,
                       )}
 
                       {/* Preview UI from launched pattern */}
-                      {computed(() =>
-                        patternInfo.result && !patternInfo.pending &&
-                        !patternInfo.error
-                      ) && (
+                      {when(
+                        computed(() =>
+                          Boolean(patternInfo.result) &&
+                          !patternInfo.pending &&
+                          !patternInfo.error
+                        ),
                         <div
                           style={{
                             display: "block",
@@ -555,7 +571,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                             [TILE_UI] export, or the platform default). */
                           }
                           {uiVariant(patternInfo.result, "tile")}
-                        </div>
+                        </div>,
                       )}
                     </div>
                   ))}

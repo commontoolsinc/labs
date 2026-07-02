@@ -7,7 +7,7 @@
 
 ## Summary
 
-Unify builder-time `OpaqueRef` proxies and runtime `Cell` objects into a single
+Unify builder-time `Reactive` proxies and runtime `Cell` objects into a single
 capability-driven cell model. The new model preserves pattern ergonomics
 (implicit property access, helpers like `.map`) while producing a concrete
 runtime graph with stable cell identifiers that the runtime can persist,
@@ -41,14 +41,14 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 ### Current builder flow
 
 - `packages/runner/src/builder/pattern.ts` pushes a frame, runs the author’s
-  factory immediately, and records every `OpaqueRef` and node it touches.
-- Inputs are wrapped in `opaqueRef` proxies so the builder can serialize graphs
+  factory immediately, and records every `Reactive` and node it touches.
+- Inputs are wrapped in `reactive` proxies so the builder can serialize graphs
   before runtime cells exist.
 - `factoryFromPattern` walks the returned structure, records argument/result
   aliases, records derived internal cell descriptors, infers defaults, and
   emits JSON with `argumentSchema`, `resultSchema`, `derivedInternalCells`,
   `result`, and serialized nodes. No runtime cell ids exist yet.
-- `OpaqueRef` proxies track connected nodes, expose helpers like `.map()`, and
+- `Reactive` proxies track connected nodes, expose helpers like `.map()`, and
   rely on shadow refs to reuse parent cells without leaking frames.
 - `lift` transforms a function into a module factory whose implementation runs
   reactively once live. Handlers wrap functions to produce streams and run once
@@ -72,7 +72,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 ## Repository Observations
 
-- `packages/runner/src/builder/opaque-ref.ts` shows how `opaqueRef` proxies
+- `packages/runner/src/builder/reactive.ts` shows how `reactive` proxies
   track connected nodes via `.connect`, compute nested schema metadata with
   `ContextualFlowControl`, and expose helpers such as `.map`. Capability
   wrappers must recreate these affordances against real runtime cells.
@@ -90,7 +90,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 ## Problem Statement
 
-- Dual abstractions (`OpaqueRef` vs `Cell`) confuse authors and limit helper
+- Dual abstractions (`Reactive` vs `Cell`) confuse authors and limit helper
   availability.
 - Patterns lack persisted runtime graphs, making rehydration and teardown fragile
   for handler-produced or reactive graphs.
@@ -159,7 +159,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 - Builder APIs (`pattern`, `lift`, `handler`, helper exports).
 - Runtime cell creation, alias resolution, and pattern instantiation.
 - Serialization (`json-utils.ts`, pattern manager persistence, result metadata).
-- Tests and tooling that assume path-based aliases or opaque-ref-only helpers.
+- Tests and tooling that assume path-based aliases or reactive-only helpers.
 
 ## Implementation Plan
 
@@ -169,10 +169,10 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 ### Phase 1: Type System Unification (In Progress)
 
 1. **Unified Cell types**
-   - Create `CellLike<>` branded type system replacing separate `OpaqueRef` and
+   - Create `CellLike<>` branded type system replacing separate `Reactive` and
      `Cell` abstractions
    - Factor out capability traits: reading, writing, streaming, derives
-   - Define `OpaqueRef<>`, `Cell<>`, `Stream<>`, `ReadonlyCell<>`,
+   - Define `Reactive<>`, `Cell<>`, `Stream<>`, `ReadonlyCell<>`,
      `WriteonlyCell<>` via branded type combinations
    - Remove `ShadowRef`/`unsafe_` mechanisms
 2. **Cell creation without immediate links**
@@ -199,7 +199,7 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 ### Phase 3: Cleanup
 
 1. **Migration cleanup**
-   - Remove legacy `OpaqueRef` implementation
+   - Remove legacy `Reactive` implementation
    - Remove `.setDefault`; rely on schema-level defaults
    - Deprecate JSON pattern representation in favor of graph snapshots
 2. **Testing & documentation**

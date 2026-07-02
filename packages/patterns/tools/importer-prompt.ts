@@ -60,19 +60,19 @@ const AIRTABLE_AUTH_SOURCE = `import {
   computed,
   Default,
   handler,
-  ifElse,
   NAME,
   pattern,
   safeDateNow,
   Stream,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
 type Secret<T> = T;
 
-import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
 import {
   REFRESH_THRESHOLD_MS,
   startReactiveClock,
@@ -218,7 +218,10 @@ export function createPreviewUI(
  * Uses \`accessToken\` field (OAuth2TokenSchema convention).
  *
  * CRITICAL: When consuming from another pattern, DO NOT use derive()!
- * Use direct property access: \`airtableAuthPiece.auth\`
+ * Use direct property access: \`airtableAuthPiece.auth\`.
+ * If auth comes through an auth manager, use \`authIsReady(availability)\` for
+ * shared readiness checks. Keep the writable auth cell access explicit at the
+ * call site that needs it.
  */
 export type AirtableAuth = {
   accessToken: Secret<string> | Default<"">;
@@ -246,63 +249,64 @@ export type SelectedScopes = {
 };
 
 interface Input {
-  selectedScopes: SelectedScopes | Default<{
-    "data.records:read": true;
-    "data.records:write": false;
-    "data.recordComments:read": false;
-    "data.recordComments:write": false;
-    "schema.bases:read": true;
-    "schema.bases:write": false;
-    "webhook:manage": false;
-  }>;
-  auth: AirtableAuth | Default<{
-    accessToken: "";
-    tokenType: "";
-    scope: [];
-    expiresIn: 0;
-    expiresAt: 0;
-    refreshToken: "";
-    user: { email: ""; name: ""; picture: "" };
-  }>;
+  selectedScopes:
+    | SelectedScopes
+    | Default<{
+      "data.records:read": true;
+      "data.records:write": false;
+      "data.recordComments:read": false;
+      "data.recordComments:write": false;
+      "schema.bases:read": true;
+      "schema.bases:write": false;
+      "webhook:manage": false;
+    }>;
+  auth: Writable<AirtableAuth>;
 }
 
 /** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
-interface Output {
-  auth: AirtableAuth;
+export interface Output {
+  auth: Writable<AirtableAuth>;
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display */
-  userChip: unknown;
-  /** Minimal tile preview for picker/gallery display (CT-1321 variant) */
-  [TILE_UI]: unknown;
+  userChip: VNode;
+  /** Minimal preview for picker display */
+  [TILE_UI]: VNode;
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh */
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Module-scope singleton refresh guard for Airtable OAuth.
-// This is intentional: all instances of this auth pattern share one guard,
-// preventing concurrent refresh requests. This is correct because each
-// provider (e.g. Airtable, Google) has its own module with its own guard.
-const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/airtable-oauth/refresh",
-);
+async function refreshAirtableAuthToken(
+  auth: Writable<AirtableAuth>,
+  refreshInProgress: Writable<boolean>,
+): Promise<boolean> {
+  return await refreshOAuthToken(
+    auth,
+    "/api/integrations/airtable-oauth/refresh",
+    refreshInProgress,
+  );
+}
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
     auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
 >(
-  async (_event, { auth, refreshing, refreshFailed }) => {
+  async (_event, { auth, refreshInProgress, refreshing, refreshFailed }) => {
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      const didRefresh = await refreshAuthToken(auth);
+      const didRefresh = await refreshAirtableAuthToken(
+        auth,
+        refreshInProgress,
+      );
       refreshing.set(false);
       if (!didRefresh) return;
       refreshFailed.set(false);
@@ -316,17 +320,23 @@ const handleRefresh = handler<
 // Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
->(async (_event, { auth }) => {
-  await refreshAuthToken(auth);
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
+>(async (_event, { auth, refreshInProgress }) => {
+  await refreshAirtableAuthToken(auth, refreshInProgress);
 });
 
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<AirtableAuth> }
+  {
+    auth: Writable<AirtableAuth>;
+    refreshInProgress: Writable<boolean>;
+  }
 >(
-  async (_event, { auth }) => {
+  async (_event, { auth, refreshInProgress }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.accessToken || !currentAuth?.refreshToken) return;
 
@@ -341,7 +351,7 @@ const bgRefreshHandler = handler<
     );
 
     try {
-      await refreshAuthToken(auth);
+      await refreshAirtableAuthToken(auth, refreshInProgress);
       console.log("[airtable-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
@@ -387,11 +397,12 @@ export default pattern<Input, Output>(
     const hasSelectedScopes = computed(() =>
       Object.values(selectedScopes).some(Boolean)
     );
+    const authValue = computed(() => auth.get());
 
     // Check if re-auth is needed (selected scopes differ from granted)
     const needsReauth = computed(() => {
-      if (!auth?.accessToken) return false;
-      const grantedScopes: string[] = auth?.scope || [];
+      if (!authValue?.accessToken) return false;
+      const grantedScopes: string[] = authValue?.scope || [];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
         if (enabled && !grantedScopes.includes(key)) {
           return true;
@@ -404,31 +415,32 @@ export default pattern<Input, Output>(
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
-      if (!auth?.accessToken || !auth?.expiresAt) return false;
-      return auth.expiresAt < now.get();
+      if (!authValue?.accessToken || !authValue?.expiresAt) return false;
+      return authValue.expiresAt < now.get();
     });
 
     const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
     );
 
-    const checkboxesDisabled = computed(() => !!auth?.accessToken);
+    const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
+    const refreshInProgress = new Writable(false);
     const refreshing = new Writable(false);
     const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    const hasEmail = computed(() => !!auth?.user?.email);
-    const hasUserName = computed(() => !!auth?.user?.name);
+    const hasEmail = computed(() => !!authValue?.user?.email);
+    const hasUserName = computed(() => !!authValue?.user?.name);
 
     // Data-only computed for the tile preview — resolves reactive values to plain scalars
     const previewState = computed(() => {
-      const email = auth?.user?.email || "";
-      const name = auth?.user?.name || "";
+      const email = authValue?.user?.email || "";
+      const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
       const now = safeDateNow();
-      const expiresAt = auth?.expiresAt || 0;
+      const expiresAt = authValue?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
         expiresAt - now < 10 * 60 * 1000;
@@ -440,7 +452,7 @@ export default pattern<Input, Output>(
         ? "warning"
         : "ready";
       const scopeSummary = isAuthenticated
-        ? getScopeSummary(auth?.scope || [])
+        ? getScopeSummary(authValue?.scope || [])
         : getSelectedScopeSummary({
           "data.records:read": !!selectedScopes["data.records:read"],
           "data.records:write": !!selectedScopes["data.records:write"],
@@ -466,15 +478,17 @@ export default pattern<Input, Output>(
       };
     });
 
-    const loggedIn = computed(() => !!auth?.accessToken);
-    const notLoggedInWithScopes = computed(() => !loggedIn && hasSelectedScopes);
+    const loggedIn = computed(() => !!authValue?.accessToken);
+    const notLoggedInWithScopes = computed(() =>
+      !loggedIn && hasSelectedScopes
+    );
     const showTokenStatus = computed(() =>
-      !!auth?.user?.email && !isTokenExpired
+      !!authValue?.user?.email && !isTokenExpired
     );
 
     // Data-only computed for granted scopes
     const grantedScopesList = computed(() => {
-      const scopeList: string[] = auth?.scope || [];
+      const scopeList: string[] = authValue?.scope || [];
       return scopeList.map(
         (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
       );
@@ -483,7 +497,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return \`Airtable Auth (\${auth.user.email})\`;
+          return \`Airtable Auth (\${authValue.user.email})\`;
         }
         return "Airtable Auth";
       }),
@@ -510,30 +524,32 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {ifElse(loggedIn, "Authenticated", "Not Authenticated")}
+              Status: {loggedIn ? "Authenticated" : "Not Authenticated"}
             </h3>
 
-            {ifElse(
-              loggedIn,
-              <div>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Email:</strong> {auth.user.email}
+            {loggedIn
+              ? (
+                <div>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Email:</strong> {authValue.user.email}
+                  </p>
+                  <p style={{ margin: "8px 0" }}>
+                    <strong>Name:</strong> {authValue.user.name}
+                  </p>
+                </div>
+              )
+              : (
+                <p style={{ color: "#666" }}>
+                  Select permissions below and authenticate with Airtable
                 </p>
-                <p style={{ margin: "8px 0" }}>
-                  <strong>Name:</strong> {auth.user.name}
-                </p>
-              </div>,
-              <p style={{ color: "#666" }}>
-                Select permissions below and authenticate with Airtable
-              </p>,
-            )}
+              )}
           </div>
 
           {/* Permissions checkboxes */}
           <div
             style={{
               padding: "20px",
-              backgroundColor: auth?.user?.email ? "#e5e7eb" : "#f0f4f8",
+              backgroundColor: authValue?.user?.email ? "#e5e7eb" : "#f0f4f8",
               borderRadius: "8px",
               border: "1px solid #d0d7de",
               opacity: loggedIn ? 0.7 : 1,
@@ -541,158 +557,257 @@ export default pattern<Input, Output>(
           >
             <h4 style={{ marginTop: "0", marginBottom: "12px" }}>
               Permissions
-              {ifElse(
-                loggedIn,
-                <span
-                  style={{
-                    fontWeight: "normal",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                    marginLeft: "8px",
-                  }}
-                >
-                  (locked while authenticated)
-                </span>,
-                null,
-              )}
+              {loggedIn
+                ? (
+                  <span
+                    style={{
+                      fontWeight: "normal",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    (locked while authenticated)
+                  </span>
+                )
+                : null}
             </h4>
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_MAP).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:read"]}
+                  disabled={checkboxesDisabled}
                 >
-                  <cf-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </cf-checkbox>
-                </label>
-              ))}
+                  {SCOPE_MAP["data.records:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.records:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["webhook:manage"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["webhook:manage"]}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 
           {/* Re-auth warning */}
-          {ifElse(
-            needsReauth,
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "#fff3cd",
-                borderRadius: "8px",
-                border: "1px solid #ffc107",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Note:</strong>{" "}
-              You've selected new permissions. Click "Authenticate with
-              Airtable" below to grant access.
-            </div>,
-            null,
-          )}
+          {needsReauth
+            ? (
+              <div
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#fff3cd",
+                  borderRadius: "8px",
+                  border: "1px solid #ffc107",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Note:</strong>{" "}
+                You've selected new permissions. Click "Authenticate with
+                Airtable" below to grant access.
+              </div>
+            )
+            : null}
 
           {/* Favorite reminder */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#d4edda",
-                borderRadius: "8px",
-                border: "1px solid #28a745",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Tip:</strong>{" "}
-              Favorite this piece to share your Airtable auth across all your
-              patterns. Any pattern using{" "}
-              <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
-              will automatically find and use it.
-            </div>,
-            null,
-          )}
+          {loggedIn
+            ? (
+              <div
+                style={{
+                  padding: "15px",
+                  backgroundColor: "#d4edda",
+                  borderRadius: "8px",
+                  border: "1px solid #28a745",
+                  fontSize: "14px",
+                }}
+              >
+                <strong>Tip:</strong>{" "}
+                Favorite this piece to share your Airtable auth across all your
+                patterns. Any pattern using{" "}
+                <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
+                will automatically find and use it.
+              </div>
+            )
+            : null}
 
           {/* Show selected scopes */}
-          {ifElse(
-            notLoggedInWithScopes,
-            <div style={{ fontSize: "14px", color: "#666" }}>
-              Will request: {scopesDisplay}
-            </div>,
-            null,
-          )}
+          {notLoggedInWithScopes
+            ? (
+              <div style={{ fontSize: "14px", color: "#666" }}>
+                Will request: {scopesDisplay}
+              </div>
+            )
+            : null}
 
           {/* Token expired warning */}
-          {ifElse(
-            isTokenExpired,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#fee2e2",
-                borderRadius: "8px",
-                border: "1px solid #ef4444",
-                marginBottom: "15px",
-              }}
-            >
-              <h4
+          {isTokenExpired
+            ? (
+              <div
                 style={{
-                  margin: "0 0 8px 0",
-                  color: "#dc2626",
-                  fontSize: "14px",
+                  padding: "16px",
+                  backgroundColor: "#fee2e2",
+                  borderRadius: "8px",
+                  border: "1px solid #ef4444",
+                  marginBottom: "15px",
                 }}
               >
-                Session Expired
-              </h4>
-              <p
-                style={{
-                  margin: "0 0 12px 0",
-                  fontSize: "13px",
-                  color: "#4b5563",
-                }}
-              >
-                Your Airtable token has expired. Click below to refresh it.
-              </p>
-              <button
-                type="button"
-                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                disabled={refreshing}
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                }}
-              >
-                {ifElse(refreshing, "Refreshing...", "Refresh Token")}
-              </button>
-              {ifElse(
-                refreshFailed,
-                <p
+                <h4
                   style={{
-                    margin: "8px 0 0 0",
-                    fontSize: "13px",
+                    margin: "0 0 8px 0",
                     color: "#dc2626",
-                    fontWeight: "500",
+                    fontSize: "14px",
                   }}
                 >
-                  Refresh failed — try signing in again below.
-                </p>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
+                  Session Expired
+                </h4>
+                <p
+                  style={{
+                    margin: "0 0 12px 0",
+                    fontSize: "13px",
+                    color: "#4b5563",
+                  }}
+                >
+                  Your Airtable token has expired. Click below to refresh it.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRefresh({
+                    auth,
+                    refreshInProgress,
+                    refreshing,
+                    refreshFailed,
+                  })}
+                  disabled={refreshing}
+                  style={{
+                    padding: "10px 20px",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: refreshing ? "not-allowed" : "pointer",
+                    fontWeight: "500",
+                    fontSize: "14px",
+                  }}
+                >
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
+                </button>
+                {refreshFailed
+                  ? (
+                    <p
+                      style={{
+                        margin: "8px 0 0 0",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Refresh failed — try signing in again below.
+                    </p>
+                  )
+                  : null}
+              </div>
+            )
+            : null}
 
           <cf-oauth
             $auth={auth}
@@ -705,85 +820,90 @@ export default pattern<Input, Output>(
           />
 
           {/* Show granted scopes */}
-          {ifElse(
-            loggedIn,
-            <div
-              style={{
-                padding: "15px",
-                backgroundColor: "#e3f2fd",
-                borderRadius: "8px",
-                fontSize: "14px",
-              }}
-            >
-              <strong>Granted Scopes:</strong>
-              <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-                {grantedScopesList.map((scope) => <li>{scope}</li>)}
-              </ul>
-            </div>,
-            null,
-          )}
-
-          {/* Token status when authenticated and NOT expired */}
-          {ifElse(
-            showTokenStatus,
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#f0f9ff",
-                borderRadius: "8px",
-                border: "1px solid #0ea5e9",
-              }}
-            >
+          {loggedIn
+            ? (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
+                  padding: "15px",
+                  backgroundColor: "#e3f2fd",
+                  borderRadius: "8px",
+                  fontSize: "14px",
                 }}
               >
-                <div>
-                  <h4
-                    style={{
-                      margin: "0 0 4px 0",
-                      fontSize: "14px",
-                      color: "#0369a1",
-                    }}
-                  >
-                    Token Status
-                  </h4>
-                  <p
-                    style={{
-                      margin: "0",
-                      fontSize: "13px",
-                      color: "#4b5563",
-                    }}
-                  >
-                    Expires in: <strong>{tokenExpiryDisplay}</strong>
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                  disabled={refreshing}
+                <strong>Granted Scopes:</strong>
+                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                  {grantedScopesList.map((scope) => <li>{scope}</li>)}
+                </ul>
+              </div>
+            )
+            : null}
+
+          {/* Token status when authenticated and NOT expired */}
+          {showTokenStatus
+            ? (
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#f0f9ff",
+                  borderRadius: "8px",
+                  border: "1px solid #0ea5e9",
+                }}
+              >
+                <div
                   style={{
-                    padding: "8px 16px",
-                    backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: refreshing ? "not-allowed" : "pointer",
-                    fontWeight: "500",
-                    fontSize: "13px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
                   }}
                 >
-                  {ifElse(refreshing, "Refreshing...", "Refresh Now")}
-                </button>
+                  <div>
+                    <h4
+                      style={{
+                        margin: "0 0 4px 0",
+                        fontSize: "14px",
+                        color: "#0369a1",
+                      }}
+                    >
+                      Token Status
+                    </h4>
+                    <p
+                      style={{
+                        margin: "0",
+                        fontSize: "13px",
+                        color: "#4b5563",
+                      }}
+                    >
+                      Expires in: <strong>{tokenExpiryDisplay}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefresh({
+                      auth,
+                      refreshInProgress,
+                      refreshing,
+                      refreshFailed,
+                    })}
+                    disabled={refreshing}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: refreshing ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
+                  </button>
+                </div>
               </div>
-            </div>,
-            null,
-          )}
+            )
+            : null}
 
           <div
             style={{
@@ -803,44 +923,46 @@ export default pattern<Input, Output>(
       auth,
       scopes,
       selectedScopes,
-      userChip: ifElse(
-        hasEmail,
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#18BFFF",
-              display: "inline-block",
-            }}
-          />
-          <div>
-            <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+      userChip: hasEmail
+        ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#18BFFF",
+                display: "inline-block",
+              }}
+            />
+            <div>
+              <div style={{ fontWeight: 500, fontSize: "14px" }}>
+                {hasUserName ? authValue.user.name : authValue.user.email}
+              </div>
+              {hasUserName
+                ? (
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    {authValue.user.email}
+                  </div>
+                )
+                : null}
             </div>
-            {ifElse(
-              hasUserName,
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {auth.user.email}
-              </div>,
-              null,
-            )}
           </div>
-        </div>,
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#e5e7eb",
-              display: "inline-block",
-            }}
-          />
-          <span style={{ color: "#6b7280" }}>Not signed in</span>
-        </div>,
-      ),
+        )
+        : (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#e5e7eb",
+                display: "inline-block",
+              }}
+            />
+            <span style={{ color: "#6b7280" }}>Not signed in</span>
+          </div>
+        ),
       [TILE_UI]: (
         <div
           style={{
@@ -866,19 +988,19 @@ export default pattern<Input, Output>(
                 justifyContent: "center",
               }}
             >
-              {ifElse(
-                previewState.isAuthenticated,
-                <span
-                  style={{
-                    color: "white",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
-                  {previewState.initial}
-                </span>,
-                null,
-              )}
+              {previewState.isAuthenticated
+                ? (
+                  <span
+                    style={{
+                      color: "white",
+                      fontSize: "14px",
+                      fontWeight: "600",
+                    }}
+                  >
+                    {previewState.initial}
+                  </span>
+                )
+                : null}
             </div>
             <div
               style={{
@@ -895,38 +1017,36 @@ export default pattern<Input, Output>(
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {ifElse(
-                previewState.isAuthenticated,
-                <span>{previewState.name || previewState.email}</span>,
-                <span>Sign in required</span>,
-              )}
+              {previewState.isAuthenticated
+                ? <span>{previewState.name || previewState.email}</span>
+                : <span>Sign in required</span>}
             </div>
-            {ifElse(
-              previewState.isAuthenticated && !!previewState.name &&
-                !!previewState.email,
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {previewState.email}
-              </div>,
-              null,
-            )}
-            {ifElse(
-              !!previewState.scopeSummary,
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#6b7280",
-                  marginTop: "2px",
-                }}
-              >
-                {previewState.scopeSummary}
-              </div>,
-              null,
-            )}
+            {previewState.isAuthenticated && !!previewState.name &&
+                !!previewState.email
+              ? (
+                <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                  {previewState.email}
+                </div>
+              )
+              : null}
+            {previewState.scopeSummary
+              ? (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    marginTop: "2px",
+                  }}
+                >
+                  {previewState.scopeSummary}
+                </div>
+              )
+              : null}
           </div>
         </div>
       ),
-      refreshToken: refreshTokenHandler({ auth }),
-      bgUpdater: bgRefreshHandler({ auth }),
+      refreshToken: refreshTokenHandler({ auth, refreshInProgress }),
+      bgUpdater: bgRefreshHandler({ auth, refreshInProgress }),
     };
   },
 );
@@ -944,21 +1064,30 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  *
  * Usage:
  * \`\`\`typescript
- * const { auth, fullUI, isReady } = AirtableAuthManager({
+ * const { availability, fullUI, isReady } = AirtableAuthManager({
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
  *
- * if (!isReady) return;
- * // Use auth.accessToken for API calls
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Airtable first.</div>;
  *
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * \`\`\`
+ *
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
  */
 
-import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
-import AirtableAuth from "../airtable-auth.tsx";
+import { authIsReady } from "../../../auth/auth-types.ts";
+import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
+import AirtableAuth, {
+  type AirtableAuth as AirtableAuthData,
+} from "../airtable-auth.tsx";
 
 // Re-export shared types for consumers
 export type {
@@ -968,9 +1097,10 @@ export type {
 } from "../../../auth/auth-types.ts";
 export type {
   AuthManagerInput as AirtableAuthManagerInput,
-  AuthManagerOutput as AirtableAuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
 export type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
+
+export type AirtableAuthManagerOutput = AuthManagerOutput<AirtableAuthData>;
 
 /** Airtable scope keys */
 export type ScopeKey =
@@ -1015,7 +1145,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
 
 export const AirtableAuthManager = pattern<
   import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
-  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+  AirtableAuthManagerOutput
 >(({ requiredScopes, accountType, debugMode }) => {
   const createAuth = action(() => {
     const required = Array.isArray(requiredScopes) ? requiredScopes : [];
@@ -1059,13 +1189,26 @@ export const AirtableAuthManager = pattern<
     );
   });
 
-  return AuthManagerBase({
+  const base = AuthManagerBase<AirtableAuthData>({
     requiredScopes,
     accountType,
     debugMode,
     descriptor: AirtableAuthManagerDescriptor,
     createAuth,
   });
+
+  return {
+    auth: base.auth,
+    availability: base.availability,
+    authInfo: base.authInfo,
+    isReady: authIsReady(base.availability),
+    currentEmail: base.currentEmail,
+    currentState: base.currentState,
+    pickerUI: base.pickerUI,
+    statusUI: base.statusUI,
+    fullUI: base.fullUI,
+    [UI]: base.fullUI,
+  };
 });
 
 export default AirtableAuthManager;
@@ -1076,14 +1219,14 @@ const AIRTABLE_CLIENT_SOURCE = `/**
  * Airtable API client with automatic token refresh and retry logic.
  *
  * Usage:
- * \\\`\\\`\\\`typescript
+ * \`\`\`typescript
  * import { AirtableClient } from "./util/airtable-client.ts";
  *
  * const client = AirtableClient(authCell, { debugMode: true });
  * const bases = await client.listBases();
  * const tables = await client.listTables(baseId);
  * const records = await client.listRecords(baseId, tableId);
- * \\\`\\\`\\\`
+ * \`\`\`
  */
 import { getPatternEnvironment, Writable } from "commonfabric";
 
@@ -1198,7 +1341,7 @@ export function AirtableClient(
         const response = await fetch(url, {
           ...options,
           headers: {
-            Authorization: \\\`Bearer \\\${token}\\\`,
+            Authorization: \`Bearer \${token}\`,
             "Content-Type": "application/json",
             ...options.headers,
           },
@@ -1212,12 +1355,11 @@ export function AirtableClient(
 
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
-          const waitMs = retryAfter
-            ? parseInt(retryAfter) * 1000
-            : delay * (attempt + 1);
+          const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          const waitMs = !isNaN(parsed) ? parsed * 1000 : delay * (attempt + 1);
           debugLog(
             debugMode,
-            \\\`Rate limited, waiting \\\${waitMs}ms...\\\`,
+            \`Rate limited, waiting \${waitMs}ms...\`,
           );
           await sleep(waitMs);
           continue;
@@ -1226,7 +1368,7 @@ export function AirtableClient(
         if (!response.ok) {
           const errorBody = await response.text();
           throw new Error(
-            \\\`Airtable API error \\\${response.status}: \\\${errorBody}\\\`,
+            \`Airtable API error \${response.status}: \${errorBody}\`,
           );
         }
 
@@ -1236,7 +1378,7 @@ export function AirtableClient(
         if (attempt < retries) {
           debugLog(
             debugMode,
-            \\\`Request failed (attempt \\\${attempt + 1}/\\\${retries + 1}):\\\`,
+            \`Request failed (attempt \${attempt + 1}/\${retries + 1}):\`,
             lastError.message,
           );
           await sleep(delay);
@@ -1273,7 +1415,7 @@ export function AirtableClient(
     );
 
     if (!res.ok) {
-      throw new Error(\\\`Token refresh failed: \\\${res.status}\\\`);
+      throw new Error(\`Token refresh failed: \${res.status}\`);
     }
 
     const json = await res.json();
@@ -1303,7 +1445,7 @@ export function AirtableClient(
     let offset: string | undefined;
 
     do {
-      const url = new URL(\\\`\\\${AIRTABLE_META_BASE}/bases\\\`);
+      const url = new URL(\`\${AIRTABLE_META_BASE}/bases\`);
       if (offset) url.searchParams.set("offset", offset);
 
       const response = await request<{
@@ -1315,7 +1457,7 @@ export function AirtableClient(
       offset = response.offset;
     } while (offset);
 
-    debugLog(debugMode, \\\`Found \\\${bases.length} bases\\\`);
+    debugLog(debugMode, \`Found \${bases.length} bases\`);
     return bases;
   }
 
@@ -1325,13 +1467,13 @@ export function AirtableClient(
   async function listTables(
     baseId: string,
   ): Promise<AirtableTable[]> {
-    debugLog(debugMode, \\\`Listing tables for base \\\${baseId}...\\\`);
+    debugLog(debugMode, \`Listing tables for base \${baseId}...\`);
 
     const response = await request<{ tables: AirtableTable[] }>(
-      \\\`\\\${AIRTABLE_META_BASE}/bases/\\\${baseId}/tables\\\`,
+      \`\${AIRTABLE_META_BASE}/bases/\${baseId}/tables\`,
     );
 
-    debugLog(debugMode, \\\`Found \\\${response.tables.length} tables\\\`);
+    debugLog(debugMode, \`Found \${response.tables.length} tables\`);
     return response.tables;
   }
 
@@ -1345,7 +1487,7 @@ export function AirtableClient(
   ): Promise<AirtableRecord[]> {
     debugLog(
       debugMode,
-      \\\`Listing records from \\\${baseId}/\\\${tableIdOrName}...\\\`,
+      \`Listing records from \${baseId}/\${tableIdOrName}...\`,
     );
 
     const records: AirtableRecord[] = [];
@@ -1354,7 +1496,7 @@ export function AirtableClient(
 
     do {
       const url = new URL(
-        \\\`\\\${AIRTABLE_API_BASE}/\\\${baseId}/\\\${encodeURIComponent(tableIdOrName)}\\\`,
+        \`\${AIRTABLE_API_BASE}/\${baseId}/\${encodeURIComponent(tableIdOrName)}\`,
       );
 
       if (options.pageSize) {
@@ -1375,10 +1517,10 @@ export function AirtableClient(
       }
       if (options.sort) {
         for (let i = 0; i < options.sort.length; i++) {
-          url.searchParams.set(\\\`sort[\\\${i}][field]\\\`, options.sort[i].field);
+          url.searchParams.set(\`sort[\${i}][field]\`, options.sort[i].field);
           if (options.sort[i].direction) {
             url.searchParams.set(
-              \\\`sort[\\\${i}][direction]\\\`,
+              \`sort[\${i}][direction]\`,
               options.sort[i].direction!,
             );
           }
@@ -1399,7 +1541,7 @@ export function AirtableClient(
     } while (offset);
 
     const result = records.slice(0, maxRecords);
-    debugLog(debugMode, \\\`Fetched \\\${result.length} records\\\`);
+    debugLog(debugMode, \`Fetched \${result.length} records\`);
     return result;
   }
 
@@ -1412,10 +1554,10 @@ const AIRTABLE_IMPORTER_SOURCE = `import {
   computed,
   Default,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -1446,7 +1588,8 @@ interface Input {
 }
 
 /** Import records from an Airtable base. #airtableImporter */
-interface Output {
+export interface Output {
+  [UI]: VNode;
   records: readonly AirtableRecordData[];
   bases: readonly BaseInfo[];
   tables: readonly TableInfo[];
@@ -1550,16 +1693,15 @@ const fetchRecords = handler<
 });
 
 const onSelectBase = handler<
-  { target: { dataset: { baseId: string } } },
+  unknown,
   {
+    baseId: string;
     selectedBaseId: Writable<string>;
     selectedTableId: Writable<string>;
     tables: Writable<TableInfo[]>;
     records: Writable<AirtableRecordData[]>;
   }
->((event, { selectedBaseId, selectedTableId, tables, records }) => {
-  const baseId = event.target.dataset.baseId;
-  if (!baseId) return;
+>((_event, { baseId, selectedBaseId, selectedTableId, tables, records }) => {
   selectedBaseId.set(baseId);
   selectedTableId.set("");
   tables.set([]);
@@ -1567,14 +1709,13 @@ const onSelectBase = handler<
 });
 
 const onSelectTable = handler<
-  { target: { dataset: { tableId: string } } },
+  unknown,
   {
+    tableId: string;
     selectedTableId: Writable<string>;
     records: Writable<AirtableRecordData[]>;
   }
->((event, { selectedTableId, records }) => {
-  const tableId = event.target.dataset.tableId;
-  if (!tableId) return;
+>((_event, { tableId, selectedTableId, records }) => {
   selectedTableId.set(tableId);
   records.set([]);
 });
@@ -1587,14 +1728,13 @@ export default pattern<Input, Output>(
   ({ selectedBaseId, selectedTableId }) => {
     // Auth manager
     const {
-      auth: authResult,
-      isReady,
+      availability,
       fullUI: authUI,
     } = AirtableAuthManager({
       requiredScopes: REQUIRED_SCOPES,
     });
 
-    const auth = authResult as any;
+    const auth = availability.state === "ready" ? availability.auth : null;
 
     // State
     const bases = new Writable<BaseInfo[]>([]);
@@ -1628,34 +1768,8 @@ export default pattern<Input, Output>(
       return table?.name || "";
     });
 
-    // Bound handlers -- pass reactive inputs directly (no double-cast)
-    const boundFetchBases = fetchBases({ auth, bases, loading, error });
-    const boundFetchTables = fetchTables({
-      auth,
-      baseId: selectedBaseId,
-      tables,
-      loading,
-      error,
-    });
-    const boundFetchRecords = fetchRecords({
-      auth,
-      baseId: selectedBaseId,
-      tableId: selectedTableId,
-      records,
-      loading,
-      error,
-    });
-
-    const boundSelectBase = onSelectBase({
-      selectedBaseId,
-      selectedTableId,
-      tables,
-      records,
-    });
-    const boundSelectTable = onSelectTable({
-      selectedTableId,
-      records,
-    });
+    // NOTE: onSelectBase/onSelectTable are bound per-item in .map() below
+    // (idiomatic CTS: bind the ID into the handler context)
 
     // Column headers extracted from records
     const columnHeaders = computed(() => {
@@ -1673,59 +1787,25 @@ export default pattern<Input, Output>(
     const hasBaseSelected = computed(() => !!selectedBaseId);
     const hasTableSelected = computed(() => !!selectedTableId);
 
-    // Pre-compute base/table lists for JSX
-    const baseListUI = computed(() =>
-      bases.get().map((base) => (
-        <button
-          type="button"
-          onClick={boundSelectBase}
-          data-base-id={base.id}
-          style={{
-            padding: "10px 14px",
-            backgroundColor: selectedBaseId === base.id ? "#e0f2fe" : "white",
-            border: selectedBaseId === base.id
-              ? "1px solid #18BFFF"
-              : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: "14px",
-            fontWeight: selectedBaseId === base.id ? "600" : "normal",
-          }}
-        >
-          {base.name}
-        </button>
-      ))
+    // Data-only computed for base/table lists — JSX rendered inline in UI section
+    const baseList = computed(() =>
+      bases.get().map((base) => ({
+        id: base.id,
+        name: base.name,
+      }))
     );
 
-    const tableListUI = computed(() =>
-      tables.get().map((table) => (
-        <button
-          type="button"
-          onClick={boundSelectTable}
-          data-table-id={table.id}
-          style={{
-            padding: "10px 14px",
-            backgroundColor: selectedTableId === table.id ? "#e0f2fe" : "white",
-            border: selectedTableId === table.id
-              ? "1px solid #18BFFF"
-              : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: "14px",
-            fontWeight: selectedTableId === table.id ? "600" : "normal",
-          }}
-        >
-          {table.name}
-        </button>
-      ))
+    const tableList = computed(() =>
+      tables.get().map((table) => ({
+        id: table.id,
+        name: table.name,
+      }))
     );
 
-    // Precompute table rows as plain data
+    // Precompute table rows as plain data (avoid nested JSX .map() in computed)
     const tableRows = computed(() => {
       const recs = records.get();
-      const hdrs = columnHeaders;
+      const hdrs = columnHeaders as string[];
       return recs.map((rec) => ({
         cells: hdrs.map((col) => formatCellValue(rec.fields[col])),
       }));
@@ -1736,7 +1816,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => {
         if (selectedBaseName && selectedTableName) {
-          return \\\`Airtable: \\\${selectedBaseName} / \\\${selectedTableName}\\\`;
+          return \`Airtable: \${selectedBaseName} / \${selectedTableName}\`;
         }
         return "Airtable Importer";
       }),
@@ -1757,280 +1837,382 @@ export default pattern<Input, Output>(
           {/* Auth section */}
           {authUI}
 
-          {/* Main content - only when authenticated */}
-          {ifElse(
-            isReady,
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-              }}
-            >
-              {/* Base selection */}
+          {auth
+            ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
+                }}
+              >
+                {/* Base selection */}
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#f8f9fa",
+                    borderRadius: "8px",
+                    border: "1px solid #e0e0e0",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <h3 style={{ fontSize: "16px", margin: "0" }}>
+                      Select a Base
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={fetchBases({ auth, bases, loading, error })}
+                      disabled={loading}
+                      style={{
+                        padding: "8px 16px",
+                        backgroundColor: loading ? "#93c5fd" : "#18BFFF",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: loading ? "not-allowed" : "pointer",
+                        fontWeight: "500",
+                        fontSize: "14px",
+                      }}
+                    >
+                      {loading ? "Loading..." : "Load Bases"}
+                    </button>
+                  </div>
+
+                  {hasBases
+                    ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                        }}
+                      >
+                        {baseList.map((base) => (
+                          <button
+                            type="button"
+                            onClick={onSelectBase({
+                              baseId: base.id,
+                              selectedBaseId,
+                              selectedTableId,
+                              tables,
+                              records,
+                            })}
+                            style={{
+                              padding: "10px 14px",
+                              backgroundColor: selectedBaseId === base.id
+                                ? "#e0f2fe"
+                                : "white",
+                              border: selectedBaseId === base.id
+                                ? "1px solid #18BFFF"
+                                : "1px solid #e0e0e0",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: "14px",
+                              fontWeight: selectedBaseId === base.id
+                                ? "600"
+                                : "normal",
+                            }}
+                          >
+                            {base.name}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                    : (
+                      <p
+                        style={{ color: "#666", fontSize: "14px", margin: "0" }}
+                      >
+                        Click "Load Bases" to see your Airtable bases.
+                      </p>
+                    )}
+                </div>
+
+                {/* Table selection */}
+                {hasBaseSelected
+                  ? (
+                    <div
+                      style={{
+                        padding: "16px",
+                        backgroundColor: "#f8f9fa",
+                        borderRadius: "8px",
+                        border: "1px solid #e0e0e0",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <h3 style={{ fontSize: "16px", margin: "0" }}>
+                          Select a Table from {selectedBaseName}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={fetchTables({
+                            auth,
+                            baseId: selectedBaseId,
+                            tables,
+                            loading,
+                            error,
+                          })}
+                          disabled={loading}
+                          style={{
+                            padding: "8px 16px",
+                            backgroundColor: loading ? "#93c5fd" : "#18BFFF",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: loading ? "not-allowed" : "pointer",
+                            fontWeight: "500",
+                            fontSize: "14px",
+                          }}
+                        >
+                          {loading ? "Loading..." : "Load Tables"}
+                        </button>
+                      </div>
+
+                      {hasTables
+                        ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "4px",
+                            }}
+                          >
+                            {tableList.map((table) => (
+                              <button
+                                type="button"
+                                onClick={onSelectTable({
+                                  tableId: table.id,
+                                  selectedTableId,
+                                  records,
+                                })}
+                                style={{
+                                  padding: "10px 14px",
+                                  backgroundColor: selectedTableId === table.id
+                                    ? "#e0f2fe"
+                                    : "white",
+                                  border: selectedTableId === table.id
+                                    ? "1px solid #18BFFF"
+                                    : "1px solid #e0e0e0",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                  fontSize: "14px",
+                                  fontWeight: selectedTableId === table.id
+                                    ? "600"
+                                    : "normal",
+                                }}
+                              >
+                                {table.name}
+                              </button>
+                            ))}
+                          </div>
+                        )
+                        : (
+                          <p
+                            style={{
+                              color: "#666",
+                              fontSize: "14px",
+                              margin: "0",
+                            }}
+                          >
+                            Click "Load Tables" to see tables in this base.
+                          </p>
+                        )}
+                    </div>
+                  )
+                  : null}
+
+                {/* Fetch records */}
+                {hasTableSelected
+                  ? (
+                    <div
+                      style={{
+                        padding: "16px",
+                        backgroundColor: "#f8f9fa",
+                        borderRadius: "8px",
+                        border: "1px solid #e0e0e0",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <h3 style={{ fontSize: "16px", margin: "0" }}>
+                          Records from {selectedTableName}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={fetchRecords({
+                            auth,
+                            baseId: selectedBaseId,
+                            tableId: selectedTableId,
+                            records,
+                            loading,
+                            error,
+                          })}
+                          disabled={loading}
+                          style={{
+                            padding: "8px 16px",
+                            backgroundColor: loading ? "#93c5fd" : "#18BFFF",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: loading ? "not-allowed" : "pointer",
+                            fontWeight: "500",
+                            fontSize: "14px",
+                          }}
+                        >
+                          {loading ? "Fetching..." : "Fetch Records"}
+                        </button>
+                      </div>
+
+                      {hasRecords
+                        ? (
+                          <div>
+                            <p
+                              style={{
+                                fontSize: "14px",
+                                color: "#666",
+                                margin: "0 0 12px 0",
+                              }}
+                            >
+                              {recordCount} records loaded
+                            </p>
+                            <div
+                              style={{
+                                overflow: "auto",
+                                maxHeight: "500px",
+                                border: "1px solid #e0e0e0",
+                                borderRadius: "6px",
+                              }}
+                            >
+                              <table
+                                style={{
+                                  width: "100%",
+                                  borderCollapse: "collapse",
+                                  fontSize: "13px",
+                                }}
+                              >
+                                <thead>
+                                  <tr
+                                    style={{
+                                      backgroundColor: "#f3f4f6",
+                                      position: "sticky",
+                                      top: "0",
+                                    }}
+                                  >
+                                    {columnHeaders.map((col) => (
+                                      <th
+                                        style={{
+                                          padding: "8px 12px",
+                                          textAlign: "left",
+                                          borderBottom: "2px solid #e0e0e0",
+                                          fontWeight: "600",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {col}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {tableRows.map(
+                                    (row) => (
+                                      <tr>
+                                        {row.cells.map((cell) => (
+                                          <td
+                                            style={{
+                                              padding: "8px 12px",
+                                              borderBottom: "1px solid #f0f0f0",
+                                              maxWidth: "300px",
+                                              overflow: "hidden",
+                                              textOverflow: "ellipsis",
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ),
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )
+                        : (
+                          <p
+                            style={{
+                              color: "#666",
+                              fontSize: "14px",
+                              margin: "0",
+                            }}
+                          >
+                            Click "Fetch Records" to load data from this table.
+                          </p>
+                        )}
+                    </div>
+                  )
+                  : null}
+
+                {/* Error display */}
+                {hasError
+                  ? (
+                    <div
+                      style={{
+                        padding: "12px",
+                        backgroundColor: "#fee2e2",
+                        borderRadius: "8px",
+                        border: "1px solid #ef4444",
+                        fontSize: "14px",
+                        color: "#dc2626",
+                      }}
+                    >
+                      <strong>Error:</strong> {error}
+                    </div>
+                  )
+                  : null}
+              </div>
+            )
+            : (
               <div
                 style={{
                   padding: "16px",
-                  backgroundColor: "#f8f9fa",
+                  backgroundColor: "#f9fafb",
                   borderRadius: "8px",
-                  border: "1px solid #e0e0e0",
+                  border: "1px solid #e5e7eb",
+                  color: "#4b5563",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "12px",
-                  }}
-                >
-                  <h3 style={{ fontSize: "16px", margin: "0" }}>
-                    Select a Base
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={boundFetchBases}
-                    disabled={loading}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: loading ? "#93c5fd" : "#18BFFF",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: loading ? "not-allowed" : "pointer",
-                      fontWeight: "500",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {ifElse(loading, "Loading...", "Load Bases")}
-                  </button>
+                <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                  Waiting for Airtable connection
                 </div>
-
-                {ifElse(
-                  hasBases,
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "4px",
-                    }}
-                  >
-                    {baseListUI}
-                  </div>,
-                  <p style={{ color: "#666", fontSize: "14px", margin: "0" }}>
-                    Click "Load Bases" to see your Airtable bases.
-                  </p>,
-                )}
+                <div style={{ fontSize: "14px" }}>
+                  Connect Airtable with base and record read access before
+                  loading bases, tables, or records.
+                </div>
               </div>
-
-              {/* Table selection */}
-              {ifElse(
-                hasBaseSelected,
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#f8f9fa",
-                    borderRadius: "8px",
-                    border: "1px solid #e0e0e0",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <h3 style={{ fontSize: "16px", margin: "0" }}>
-                      Select a Table from {selectedBaseName}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={boundFetchTables}
-                      disabled={loading}
-                      style={{
-                        padding: "8px 16px",
-                        backgroundColor: loading ? "#93c5fd" : "#18BFFF",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: loading ? "not-allowed" : "pointer",
-                        fontWeight: "500",
-                        fontSize: "14px",
-                      }}
-                    >
-                      {ifElse(loading, "Loading...", "Load Tables")}
-                    </button>
-                  </div>
-
-                  {ifElse(
-                    hasTables,
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "4px",
-                      }}
-                    >
-                      {tableListUI}
-                    </div>,
-                    <p
-                      style={{ color: "#666", fontSize: "14px", margin: "0" }}
-                    >
-                      Click "Load Tables" to see tables in this base.
-                    </p>,
-                  )}
-                </div>,
-                null,
-              )}
-
-              {/* Fetch records */}
-              {ifElse(
-                hasTableSelected,
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#f8f9fa",
-                    borderRadius: "8px",
-                    border: "1px solid #e0e0e0",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <h3 style={{ fontSize: "16px", margin: "0" }}>
-                      Records from {selectedTableName}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={boundFetchRecords}
-                      disabled={loading}
-                      style={{
-                        padding: "8px 16px",
-                        backgroundColor: loading ? "#93c5fd" : "#18BFFF",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: loading ? "not-allowed" : "pointer",
-                        fontWeight: "500",
-                        fontSize: "14px",
-                      }}
-                    >
-                      {ifElse(loading, "Fetching...", "Fetch Records")}
-                    </button>
-                  </div>
-
-                  {ifElse(
-                    hasRecords,
-                    <div>
-                      <p
-                        style={{
-                          fontSize: "14px",
-                          color: "#666",
-                          margin: "0 0 12px 0",
-                        }}
-                      >
-                        {recordCount} records loaded
-                      </p>
-                      <div
-                        style={{
-                          overflow: "auto",
-                          maxHeight: "500px",
-                          border: "1px solid #e0e0e0",
-                          borderRadius: "6px",
-                        }}
-                      >
-                        <table
-                          style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: "13px",
-                          }}
-                        >
-                          <thead>
-                            <tr
-                              style={{
-                                backgroundColor: "#f3f4f6",
-                                position: "sticky",
-                                top: "0",
-                              }}
-                            >
-                              {columnHeaders.map((col) => (
-                                <th
-                                  style={{
-                                    padding: "8px 12px",
-                                    textAlign: "left",
-                                    borderBottom: "2px solid #e0e0e0",
-                                    fontWeight: "600",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {col}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tableRows.map(
-                              (row) => (
-                                <tr>
-                                  {row.cells.map((cell) => (
-                                    <td
-                                      style={{
-                                        padding: "8px 12px",
-                                        borderBottom: "1px solid #f0f0f0",
-                                        maxWidth: "300px",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {cell}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ),
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>,
-                    <p
-                      style={{ color: "#666", fontSize: "14px", margin: "0" }}
-                    >
-                      Click "Fetch Records" to load data from this table.
-                    </p>,
-                  )}
-                </div>,
-                null,
-              )}
-
-              {/* Error display */}
-              {ifElse(
-                hasError,
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#fee2e2",
-                    borderRadius: "8px",
-                    border: "1px solid #ef4444",
-                    fontSize: "14px",
-                    color: "#dc2626",
-                  }}
-                >
-                  <strong>Error:</strong> {error}
-                </div>,
-                null,
-              )}
-            </div>,
-            null,
-          )}
+            )}
         </div>
       ),
       records: computed(() => records.get()),
@@ -2059,10 +2241,12 @@ function formatCellValue(value: unknown): string {
     return value.map((v) => formatCellValue(v)).join(", ");
   }
   if (typeof value === "object") {
+    // Plain JSON: this fallback feeds user-visible UI cell content, not debug output
     return JSON.stringify(value);
   }
   return String(value);
-}`;
+}
+`;
 
 // ---------------------------------------------------------------------------
 // Prompt generation
@@ -2106,7 +2290,7 @@ components.
 All patterns start with:
 \`\`\`tsx
 import {
-  computed, Default, handler, ifElse, NAME, pattern,
+  computed, Default, handler, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
   safeDateNow, nonPrivateRandom, TILE_UI, CHIP_UI, uiVariant,
 } from "commonfabric";
@@ -2128,8 +2312,8 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 - **\`handler<EventType, ContextType>(async (event, context) => { ... })\`** —
   Async event handler. Declare at module scope, bind inside the pattern by
   passing context: \`myHandler({ cell1, cell2 })\`.
-- **\`ifElse(condition, trueNode, falseNode)\`** — Conditional rendering.
-  condition must be a reactive value (computed or cell).
+- **Bare ternaries in JSX** — Conditional rendering such as
+  \`{hasItems ? listNode : emptyNode}\`.
 - **\`wish<T>({ query, scope })\`** — Discover pieces across the space. Returns
   \`{ result, [UI] }\`. The \`[UI]\` is a picker component. NEVER access
   \`wishResult[UI]\` inside a \`computed()\` — it crashes the reactive graph.
@@ -2354,7 +2538,8 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
   - \`loginEndpoint="/api/integrations/${providerName}-oauth/login"\`
   - \`tokenField="accessToken"\`
 - Handle token refresh via \`/api/integrations/${providerName}-oauth/refresh\`
-- Include a \`bgUpdater\` stream handler for background-charm-service
+- Include a \`bgUpdater\` stream handler for background-piece-service
+- Type renderable output fields as \`VNode\`, including \`userChip\` and \`[TILE_UI]\`. Do not type renderable UI fields as \`unknown\`.
 - Define scope checkboxes matching the available scopes:
 ${
     Object.entries(providerConfig.scopes).map(([s, d]) =>
@@ -2364,20 +2549,20 @@ ${
 
 ## File 2: \`packages/patterns/${providerName}/core/util/${providerName}-auth-manager.tsx\`
 
-Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` pattern — follow the Airtable auth manager reference exactly:
+Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` utility — follow the Airtable auth manager reference exactly:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
 - Import \`action\`, \`navigateTo\`, \`pattern\`, and \`Writable\` from \`"commonfabric"\`
 - Import \`AuthManagerBase\` from \`"../../../auth/create-auth-manager.tsx"\`
 - Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
 - Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
-- Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, \`AuthManagerInput\`, \`AuthManagerOutput\`
+	- Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, and \`AuthManagerInput\`; define a provider-specific \`AuthManagerOutput<ProviderAuth>\` alias
 - Re-export the auth type from the auth pattern
 - Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
 - Define \`${pascalName}AuthManager\` as a module-scope \`pattern(...)\`
 - Inside that pattern, define \`createAuth = action(() => navigateTo(${pascalName}Auth(...)))\`; do not put pattern construction inside a standalone factory function
 - Build \`selectedScopes\` explicitly with one \`new Writable(required.includes("<scope>"))\` property per provider scope
-- Call \`AuthManagerBase({ requiredScopes, accountType, debugMode, descriptor, createAuth })\` and export the wrapper pattern as both named and default
+		- Call \`AuthManagerBase<ProviderAuth>({ requiredScopes, accountType, debugMode, descriptor, createAuth })\`, return the provider-typed fields including \`availability\`, and export the wrapper pattern as both named and default
 - This file should be ~90-130 lines total
 
 ## File 3: \`packages/patterns/${providerName}/core/util/${providerName}-client.ts\`
@@ -2416,34 +2601,37 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
-- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
+- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
+- Import \`authIsReady\` from \`"../auth/auth-types.ts"\` if the importer needs a shared readiness boolean
 - Define module-scope \`handler()\` functions for each API call:
-  - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)
+  - Each provider call handler takes a non-null \`auth\` cell and the relevant state cells (\`loading\`, \`error\`, result cells)
   - Each uses \`try/catch/finally\` with \`loading.set(true/false)\`
   - Creates a client instance: \`${pascalName}Client(auth)\`
 - The pattern function:
-  1. Creates auth manager: \`const { auth, isReady, fullUI: authUI } = ${pascalName}AuthManager({ requiredScopes: [...] })\`
+  1. Creates auth manager: \`const { availability, fullUI: authUI } = ${pascalName}AuthManager({ requiredScopes: [...] })\`, then derives \`auth\` with \`availability.state === "ready" ? availability.auth : null\`
   2. Defines Writable cells for mutable state (lists, loading, error)
   3. Defines computed cells for derived state (hasList, recordCount, etc.)
-  4. Binds handlers with reactive context
-  5. Returns [NAME], [UI], and data outputs
+  4. Uses one terminal return statement; do not return early from the pattern body
+  5. Renders \`auth ? mainContent : notReadyPanel\` so provider handlers are bound only in the authenticated branch where \`auth\` is non-null
+  6. Returns [NAME], [UI], and data outputs. Type \`[UI]\` as \`VNode\` in the Output interface.
+- Keep the auth cell selection at the call site. Do not wrap it in a plain helper or \`lift()\`. Use \`authIsReady(availability)\` only for boolean readiness checks.
 - UI structure:
   1. Title header
   2. \`{authUI}\` for auth status/picker
-  3. \`ifElse(isReady, mainContent, null)\` — main content only when authenticated
+  3. \`auth ? mainContent : notReadyPanel\` — main content only when authenticated, with an in-app explanation while auth is unavailable
   4. Inside main content:
      - Resource selection (hierarchical if applicable, like base -> table)
-     - Fetch button with loading state: \`{ifElse(loading, "Loading...", "Fetch Data")}\`
+     - Fetch button with loading state: \`{loading ? "Loading..." : "Fetch Data"}\`
      - Data display in an HTML \`<table>\` with sticky headers
-     - Error display with \`ifElse(hasError, errorDiv, null)\`
+     - Error display with \`{hasError ? errorDiv : null}\`
   5. Use brand color \`${brandColor}\` for buttons and highlights
 
 ## Critical Patterns to Follow
 
 1. **wish() for auth discovery** — Always use \`wish({ query: "${hashTag}", scope: [".", "~"] })\`
 2. **handler() for async ops** — Define at module scope, bind inside pattern
-3. **ifElse() for conditional rendering** — condition must be computed/cell, not raw boolean
+3. **Bare ternaries for conditional rendering** — use JSX ternaries for UI branches
 4. **new Writable() for mutable state** — Use \`.get()\` in handlers, \`.set()\` to update
 5. **computed() for derived values** — Pure computations only, no side effects
 6. **Token refresh on 401** — Client auto-refreshes via server endpoint
@@ -2451,6 +2639,7 @@ Main importer pattern. Follow the Airtable importer reference:
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
 9. **CTS transforms are enabled by default** — Do not add \`/// <cf-disable-transform />\` unless you are intentionally opting out
 10. **Import from "commonfabric"** — Not from individual packages
+11. **Concrete launcher state types** — Use \`boolean\` for loading or pending fields, \`string\` or \`string | null\` for error fields, and \`VNode\` for renderable UI fields. Keep raw API responses and unchecked child pattern outputs as \`unknown\` until a guard narrows them.
 </instructions>`);
 
   return sections.join("\n\n");

@@ -1,4 +1,4 @@
-import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
+import { computed, fetchText, ifElse, pattern, UI } from "commonfabric";
 
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
@@ -10,9 +10,8 @@ import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern<Record<string, never>>(() => {
-  const { pending, result } = fetchData({
+  const { pending, result } = fetchText({
     url: "/api/data",
-    mode: "text",
   });
 
   // Pattern 1: undefined as ifTrue (waiting state returns nothing)

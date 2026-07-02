@@ -251,7 +251,7 @@ export function createParameterFromBindings(
 
 /**
  * Generate both property name and param name for an expression,
- * following the standard pattern used across lift-applied/opaque-ref bindings.
+ * following the standard pattern used across lift-applied/reactive bindings.
  *
  * @param expressionText - Base text from the expression (typically from getExpressionText)
  * @param isIdentifier - Whether the expression is a simple identifier

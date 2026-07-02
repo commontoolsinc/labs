@@ -18,11 +18,11 @@ target. In particular:
 - plain `transact` requests do not currently carry or persist per-commit
   `invocation` / `authorization` payloads; signed-write metadata remains
   deferred to a later pass
-- the toolshed v2 websocket currently authenticates `session.open` by
-  verifying a signature from the requested space DID against the requested
-  session descriptor
-- broader ACL / `Origin` enforcement, including non-owner read opens, remains
-  deferred; treat the current endpoint as trusted-only for now
+- the toolshed v2 websocket authenticates `session.open` by requiring the
+  signed invocation to match the requested space, session descriptor, server
+  audience, current connection challenge, and short validity window
+- the memory server ACL policy gates session opens and commands when enabled;
+  route-level `Origin` enforcement remains deferred
 - session resume still uses caller-provided `sessionId` values; principal
   binding and server-issued session ids remain deferred
 - one-shot `graph.query` now honors `branch` and `atSeq`
@@ -76,6 +76,12 @@ codebase. The target wire messages are:
 Do not switch this pass to full UCAN message framing. None of the current wire
 messages are transport-level signed UCAN invocations beyond the current
 `session.open` authentication step.
+
+The `hello.ok` response includes `sessionOpen.audience` and a one-time
+`sessionOpen.challenge`. The client signs both values into the next
+`session.open` invocation, along with `iat` and `exp`. The server rejects a
+missing, expired, reused, or mismatched challenge, and rejects a missing or
+mismatched audience.
 
 ## 4. Session Model
 

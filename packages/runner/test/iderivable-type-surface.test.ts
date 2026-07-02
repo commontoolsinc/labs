@@ -6,7 +6,7 @@
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Cell, OpaqueCell, OpaqueRef } from "@commonfabric/api";
+import type { Cell, OpaqueCell, Reactive } from "@commonfabric/api";
 
 interface Item {
   label: string;
@@ -14,15 +14,15 @@ interface Item {
   tags: string[];
 }
 
-function acceptItems(value: OpaqueRef<Item[]>) {
+function acceptItems(value: Reactive<Item[]>) {
   return value;
 }
 
-function acceptStrings(value: OpaqueRef<string[]>) {
+function acceptStrings(value: Reactive<string[]>) {
   return value;
 }
 
-function acceptNumber(value: OpaqueRef<number>) {
+function acceptNumber(value: Reactive<number>) {
   return value;
 }
 

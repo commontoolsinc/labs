@@ -57,7 +57,7 @@ const logger = getLogger("llm", {
 const client = new LLMClient();
 
 // TODO(ja): investigate if generateText should be replaced by
-// fetchData with streaming support
+// a fetch builtin with streaming support
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
@@ -230,7 +230,7 @@ async function executeWithToolsLoop(params: {
     // Route the call to the executing space's host when the space is
     // host-mapped (one runtime spans hosts; an LLM call belongs to the
     // space whose pattern made it). An UNMAPPED space keeps the
-    // module-level default endpoint — like fetch-data, hostForSpace's
+    // module-level default endpoint — like the fetch builtins, hostForSpace's
     // apiUrl fallback is NOT used, because deployments may split the
     // pattern-facing api host from the runtime's memory host.
     const mappedLlmHost = runtime.mappedHostFor(space);
@@ -304,7 +304,7 @@ async function handleLLMError<T, P>(
   runtime: Runtime,
   pendingCell: Cell<boolean>,
   resultCell: Cell<T>,
-  errorCell: Cell<unknown>,
+  errorCell: Cell<string | undefined>,
   partialCell: Cell<P>,
   requestHashCell: Cell<string | undefined>,
   requestHash: string,
@@ -322,7 +322,7 @@ async function handleLLMError<T, P>(
 
   await runtime.editWithRetry((tx) => {
     pendingCell.withTx(tx).set(false);
-    errorCell.withTx(tx).set(error);
+    errorCell.withTx(tx).set(message);
     resultCell.withTx(tx).set(undefined as T);
     partialCell.withTx(tx).set(undefined as P);
     requestHashCell.withTx(tx).set(requestHash);

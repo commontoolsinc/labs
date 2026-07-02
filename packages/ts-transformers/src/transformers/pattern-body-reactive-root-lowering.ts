@@ -41,7 +41,7 @@ import {
 import {
   classifyUnsupportedExpressionSiteCallRoot,
 } from "./expression-site-policy.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
+import { getCellKind } from "./cell-type.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
@@ -49,6 +49,7 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "update",
   "get",
   "key",
+  "elementById",
   "map",
   "mapWithPattern",
   "filterWithPattern",
@@ -66,8 +67,11 @@ const WRITE_METHODS = new Set([
   "set",
   "update",
   "push",
+  "addUnique",
+  "increment",
   "remove",
   "removeAll",
+  "removeByValue",
   // Array mutators (in case the author reaches for them on a reactive array)
   "pop",
   "shift",
@@ -627,7 +631,7 @@ function rewriteTrackedOpaquePatternBody(
       const initializer = unwrapExpression(declaration.initializer);
       let rootIdentifier: ts.Identifier;
       // True only when the destructure root is a fresh reactive-origin call
-      // (`wish(...)`, `fetchData(...)`, etc.). In that case the synthesized
+      // (`wish(...)`, `fetchJson(...)`, etc.). In that case the synthesized
       // root cell starts without a cause, so we attach a stable `.for(...)`
       // to each named leaf below to pin its shared causeContainer to a
       // user-facing identifier — otherwise the cell falls back to a
@@ -988,7 +992,7 @@ function rewriteTrackedOpaquePatternBody(
 /**
  * Recursively process lift-applied callback bodies (the lowered form of
  * computed() callbacks) to rewrite property accesses on
- * locally-declared OpaqueRef variables (e.g., const foo = computed(...);
+ * locally-declared Reactive variables (e.g., const foo = computed(...);
  * foo.bar → foo.key("bar")).
  *
  * rewriteTrackedOpaquePatternBody stops at function boundaries, so
@@ -1201,12 +1205,12 @@ function hasLocalOpaqueOriginBinding(
  * Source shapes handled:
  *   const x = wish(...).result
  *     => const { result: x } = wish(...)
- *   const x = wish(...).result.allCharms
- *     => const { result: { allCharms: x } } = wish(...)
+ *   const x = wish(...).result.allPieces
+ *     => const { result: { allPieces: x } } = wish(...)
  *   const { x } = wish(...).result
  *     => const { result: { x } } = wish(...)
- *   const { x } = wish(...).result.allCharms
- *     => const { result: { allCharms: { x } } } = wish(...)
+ *   const { x } = wish(...).result.allPieces
+ *     => const { result: { allPieces: { x } } } = wish(...)
  *
  * Non-null assertions inside the chain are dropped (they have no runtime
  * effect). Casts and parens at the root of the chain are preserved.

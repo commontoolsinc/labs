@@ -46,6 +46,7 @@ function createSchedulerTestRuntime(
   apiUrl: string | URL,
   options: {
     experimental?: ExperimentalOptions;
+    commitBackpressure?: RuntimeOptions["commitBackpressure"];
     cfcEnforcementMode?: RuntimeOptions["cfcEnforcementMode"];
     storageManager?: SchedulerTestStorageManager;
   } = {},
@@ -56,6 +57,9 @@ function createSchedulerTestRuntime(
     apiUrl: apiUrl instanceof URL ? apiUrl : new URL(apiUrl),
     storageManager,
     ...(options.experimental ? { experimental: options.experimental } : {}),
+    ...(options.commitBackpressure
+      ? { commitBackpressure: options.commitBackpressure }
+      : {}),
     ...(options.cfcEnforcementMode
       ? { cfcEnforcementMode: options.cfcEnforcementMode }
       : {}),

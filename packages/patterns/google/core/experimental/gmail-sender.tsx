@@ -26,6 +26,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -116,7 +117,7 @@ const confirmAndSend = handler<
   result.set(null);
 
   try {
-    const client = new GmailSendClient(auth, { debugMode: true });
+    const client = GmailSendClient(auth, { debugMode: true });
     const email = draft.get();
 
     const response = await client.sendEmail({
@@ -133,7 +134,7 @@ const confirmAndSend = handler<
       success: true,
       messageId: response.id,
       threadId: response.threadId,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(safeDateNow()).toISOString(),
     });
 
     showConfirmation.set(false);
@@ -152,7 +153,7 @@ const confirmAndSend = handler<
     result.set({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(safeDateNow()).toISOString(),
     });
   } finally {
     sending.set(false);
@@ -172,13 +173,16 @@ const dismissResult = handler<unknown, { result: Writable<SendResult | null> }>(
 export default pattern<Input, Output>(({ draft }) => {
   // Auth via createGoogleAuth - discovers favorited Google Auth piece with gmailSend scope
   const {
-    auth,
+    availability,
     fullUI: authUI,
     isReady: hasAuth,
     currentEmail: senderEmail,
   } = createGoogleAuth({
     requiredScopes: ["gmailSend"],
   });
+  const auth = hasAuth && availability.state === "ready"
+    ? availability.auth
+    : null;
 
   // UI state
   const showConfirmation = new Writable(false);
@@ -619,6 +623,31 @@ export default pattern<Input, Output>(({ draft }) => {
                     account. This action cannot be undone.
                   </div>
                 </div>
+
+                {auth ? null : (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      padding: "12px 16px",
+                      background: "#fee2e2",
+                      borderRadius: "8px",
+                      border: "1px solid #ef4444",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: "600",
+                        marginBottom: "4px",
+                        color: "#991b1b",
+                      }}
+                    >
+                      Google connection required
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#b91c1c" }}>
+                      Reconnect Google before sending this email.
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
@@ -648,30 +677,52 @@ export default pattern<Input, Output>(({ draft }) => {
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={confirmAndSend({
-                    draft,
-                    auth,
-                    sending,
-                    result,
-                    showConfirmation,
-                  })}
-                  disabled={sending}
-                  style={{
-                    padding: "10px 20px",
-                    background: "#dc2626",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontSize: "14px",
-                    fontWeight: "500",
-                    cursor: "pointer",
-                    opacity: computed(() => sending.get() ? 0.7 : 1),
-                  }}
-                >
-                  {sending ? "Sending..." : "Send Email"}
-                </button>
+                {auth
+                  ? (
+                    <button
+                      type="button"
+                      onClick={confirmAndSend({
+                        draft,
+                        auth,
+                        sending,
+                        result,
+                        showConfirmation,
+                      })}
+                      disabled={sending}
+                      style={{
+                        padding: "10px 20px",
+                        background: "#dc2626",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                        cursor: "pointer",
+                        opacity: computed(() => sending.get() ? 0.7 : 1),
+                      }}
+                    >
+                      {sending ? "Sending..." : "Send Email"}
+                    </button>
+                  )
+                  : (
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        padding: "10px 20px",
+                        background: "#9ca3af",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                        cursor: "not-allowed",
+                        opacity: 0.8,
+                      }}
+                    >
+                      Send Email
+                    </button>
+                  )}
               </div>
             </div>
           </div>,

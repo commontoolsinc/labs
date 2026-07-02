@@ -25,7 +25,16 @@ interface State {
     votes: VoteEvent[];
 }
 const castVote = handler({
-    type: "unknown"
+    type: "object",
+    properties: {
+        id: {
+            type: "string"
+        },
+        step: {
+            "enum": ["single", "double"]
+        }
+    },
+    required: ["id", "step"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -52,34 +61,22 @@ const castVote = handler({
             required: ["id", "step"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, (_event, { votes }) => {
+} as const satisfies __cfHelpers.JSONSchema, (event, { votes }) => {
     votes.set([
         ...votes.get(),
-        { id: "module", step: "single" },
+        event,
     ]);
 });
 const __cfLift_1 = __cfHelpers.lift<{
-    castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, unknown>;
+    castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, VoteEvent>;
     state: {
         votes: VoteEvent[];
     };
-}, __cfHelpers.Stream<unknown>>(({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }), {
+}, __cfHelpers.Stream<VoteEvent>>(({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }), {
     type: "object",
     properties: {
         castVote: {
-            type: "object",
-            properties: {
-                type: {
-                    "enum": ["ref", "javascript", "pattern", "raw", "isolated", "passthrough"]
-                },
-                defaultScope: {
-                    $ref: "#/$defs/CellScope"
-                },
-                "with": {
-                    asCell: ["stream"]
-                }
-            },
-            required: ["type", "with"]
+            asCell: ["stream"]
         },
         state: {
             type: "object",
@@ -107,20 +104,31 @@ const __cfLift_1 = __cfHelpers.lift<{
                 }
             },
             required: ["id", "step"]
-        },
-        CellScope: {
-            "enum": ["space", "user", "session"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "unknown",
-    asCell: ["stream"]
+    $ref: "#/$defs/VoteEvent",
+    asCell: ["stream"],
+    $defs: {
+        VoteEvent: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                step: {
+                    "enum": ["single", "double"]
+                }
+            },
+            required: ["id", "step"]
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         boundCastVote: {
-            type: "unknown",
+            $ref: "#/$defs/VoteEvent",
             asCell: ["stream"]
         },
         item: {
@@ -133,7 +141,21 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
             required: ["id"]
         }
     },
-    required: ["boundCastVote", "item"]
+    required: ["boundCastVote", "item"],
+    $defs: {
+        VoteEvent: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                step: {
+                    "enum": ["single", "double"]
+                }
+            },
+            required: ["id", "step"]
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { boundCastVote, item }) => boundCastVote.send({
     id: item.id,
     step: "single",
@@ -185,7 +207,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                     required: ["canVote"]
                 },
                 boundCastVote: {
-                    type: "unknown",
+                    $ref: "#/$defs/VoteEvent",
                     asCell: ["stream"]
                 }
             },
@@ -194,6 +216,18 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     },
     required: ["element", "params"],
     $defs: {
+        VoteEvent: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                step: {
+                    "enum": ["single", "double"]
+                }
+            },
+            required: ["id", "step"]
+        },
         Item: {
             type: "object",
             properties: {

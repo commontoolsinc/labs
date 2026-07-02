@@ -56,26 +56,26 @@ const updateNestedEntry = handler(
     if (!Array.isArray(groupsValue)) return;
     if (groupIndex < 0 || groupIndex >= groupsValue.length) return;
 
-    const groupCell = context.groups.key(groupIndex) as Cell<NestedGroup>;
-    const entriesCell = groupCell.key("entries") as Cell<NestedEntry[]>;
+    const groupCell: Cell<NestedGroup> = context.groups.key(groupIndex);
+    const entriesCell: Cell<NestedEntry[]> = groupCell.key("entries");
     const entriesValue = entriesCell.get();
     if (!Array.isArray(entriesValue)) return;
     if (entryIndex < 0 || entryIndex >= entriesValue.length) return;
 
-    const entryCell = entriesCell.key(entryIndex) as Cell<NestedEntry>;
-    const valueCell = entryCell.key("value") as Cell<number>;
+    const entryCell: Cell<NestedEntry> = entriesCell.key(entryIndex);
+    const valueCell: Cell<number> = entryCell.key("value");
     const currentValue = valueCell.get() ?? 0;
     const delta = typeof event.delta === "number" ? event.delta : 1;
     valueCell.set(currentValue + delta);
 
     if (typeof event.label === "string") {
-      const labelCell = entryCell.key("label") as Cell<string>;
+      const labelCell: Cell<string> = entryCell.key("label");
       labelCell.set(event.label);
     }
 
     if (typeof event.note === "string") {
-      const detailsCell = entryCell.key("details") as Cell<EntryDetails>;
-      const noteCell = detailsCell.key("note") as Cell<string>;
+      const detailsCell: Cell<EntryDetails> = entryCell.key("details");
+      const noteCell: Cell<string> = detailsCell.key("note");
       noteCell.set(event.note);
     }
   },
@@ -93,8 +93,8 @@ const appendNestedEntry = handler(
     const groupsArray = Array.isArray(groupsValue) ? groupsValue : [];
     if (groupIndex < 0 || groupIndex >= groupsArray.length) return;
 
-    const groupCell = context.groups.key(groupIndex) as Cell<NestedGroup>;
-    const entriesCell = groupCell.key("entries") as Cell<NestedEntry[]>;
+    const groupCell: Cell<NestedGroup> = context.groups.key(groupIndex);
+    const entriesCell: Cell<NestedEntry[]> = groupCell.key("entries");
     const entriesValue = entriesCell.get();
     const length = Array.isArray(entriesValue) ? entriesValue.length : 0;
 

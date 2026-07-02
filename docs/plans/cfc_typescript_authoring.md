@@ -57,7 +57,7 @@ The implementation centers on a small canonical surface:
   `Confidential`, `Integrity`, `AddIntegrity`, `RequiresIntegrity`,
   `MaxConfidentiality`, `ExactCopy`, `LengthPreservedFrom`, `FilteredFrom`,
   `SubsetOf`, `PermutationOf`
-- `OpaqueInput<T, Spec>` for schema-level opacity with `OpaqueRef<T>` erasure
+- `OpaqueInput<T, Spec>` for schema-level opacity with `Reactive<T>` erasure
 - `WriteAuthorizedBy<T, typeof binding>` for trust-sensitive write policy
 - closed JSX helper set:
   `UiAction`, `UiPromptSlot`, `UiDisclosure`

@@ -503,6 +503,17 @@ export class CFInput extends BaseElement {
     this._formField.setValue(newValue);
   }
 
+  /**
+   * Flush any pending edit and await its commit to the bound cell, so callers
+   * can rely on the typed value having been applied and the set() round-trip
+   * completed before continuing. Does not surface a remote-commit rejection (the
+   * underlying set() logs and swallows that). When the field is not bound to a
+   * Cell, it falls back to the cell controller's setValue.
+   */
+  commit(): Promise<void> {
+    return this._formField.commit();
+  }
+
   private getPattern(): string {
     // Use custom pattern if provided
     if (this.pattern) {

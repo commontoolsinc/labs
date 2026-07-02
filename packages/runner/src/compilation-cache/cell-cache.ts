@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import { computeModuleHashes } from "../harness/module-identity.ts";
+import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -13,6 +14,10 @@ import {
   parseFabricRef,
   pinnedIdentity,
 } from "../sandbox/fabric-import-specifier.ts";
+import {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+} from "./compile-cache-version.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -71,21 +76,135 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly kind: "compiled";
   /** Per-module source map, if any (registered for fn.src / CFC resolution). */
   readonly sourceMap?: unknown;
+  /**
+   * Precomputed record surface (Fix B): the direct export names, `export *`
+   * target specifiers, and runtime import specifiers derived from `code` at
+   * compile time. Lets the boot-time record build skip the in-worker TS parse.
+   * Absent on documents written before the field existed (→ parse fallback).
+   */
+  readonly exportNames?: readonly string[];
+  readonly starTargetSpecs?: readonly string[];
+  readonly importSpecs?: readonly string[];
 }
 
 /**
  * Version tag for the compiled-set axis (`compileCache:<runtimeVersion>/...`).
- * A compiled document is only reused under a matching tag, so bumping this
- * invalidates the whole compiled set after any change to the compiler /
+ * A compiled document is only reused under a matching tag, so a change to this
+ * value invalidates the whole compiled set after any change to the compiler /
  * transformer pipeline or SES verifier that alters emitted bytes (the source
- * set, keyed by content identity alone, persists across the bump). There is no
- * automatic build fingerprint at runtime, so this is bumped by hand.
+ * set, keyed by content identity alone, persists across the change).
+ *
+ * The value is generated from a hash of the compiler inputs defined in
+ * `compiler-fingerprint.deno.ts`. Editing those inputs moves the tag and
+ * invalidates stale compiled docs. Deno source runs resolve the checked-in
+ * source marker to that hash at runtime. Runtimes without repository file access
+ * skip the compiled cache until a binary build bakes the hash into
+ * `compile-cache-version.ts`. See `getCompileCacheRuntimeVersion()` and
+ * `compiler-fingerprint.deno.ts`.
  */
-// v2: compiled docs are stamped with the constant `cf-compiled-by:cf-compiler`
-// atom instead of a per-user DID atom. v1 docs carry the old per-DID atoms; a
-// v2 write to the same key would be rejected by the label merge (addIntegrity
-// cannot be weakened), so the namespace bump orphans them instead.
-export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/v2";
+export {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
+} from "./compile-cache-version.ts";
+
+type CompilerFingerprintModule = {
+  computeCurrentCompilerVersion(): Promise<string>;
+};
+
+type CompileCacheVersionGlobal = typeof globalThis & {
+  __cfCompileCacheRuntimeVersion?: unknown;
+};
+
+let compileCacheRuntimeVersion: Promise<string | undefined> | undefined;
+let compileCacheRuntimeVersionForTesting:
+  | Promise<string | undefined>
+  | undefined;
+
+export function getCompileCacheRuntimeVersion(): Promise<string | undefined> {
+  if (compileCacheRuntimeVersionForTesting !== undefined) {
+    return compileCacheRuntimeVersionForTesting;
+  }
+  compileCacheRuntimeVersion ??= resolveCompileCacheRuntimeVersion();
+  return compileCacheRuntimeVersion;
+}
+
+export function setCompileCacheRuntimeVersionForTesting(
+  version: string | undefined,
+): () => void {
+  const previous = compileCacheRuntimeVersionForTesting;
+  compileCacheRuntimeVersionForTesting = Promise.resolve(version);
+  return () => {
+    compileCacheRuntimeVersionForTesting = previous;
+  };
+}
+
+export function resolveBakedCompileCacheRuntimeVersionForTesting(
+  version: string,
+): Promise<string | undefined> {
+  return resolveCompileCacheRuntimeVersion(version);
+}
+
+async function resolveCompileCacheRuntimeVersion(): Promise<
+  string | undefined
+>;
+async function resolveCompileCacheRuntimeVersion(
+  version: string,
+): Promise<string | undefined>;
+async function resolveCompileCacheRuntimeVersion(
+  version = COMPILE_CACHE_RUNTIME_VERSION,
+): Promise<string | undefined> {
+  const definedVersion = buildDefinedCompileCacheRuntimeVersion();
+  if (definedVersion !== undefined) {
+    return definedVersion;
+  }
+  if (version !== SOURCE_COMPILE_CACHE_RUNTIME_VERSION) {
+    return version;
+  }
+  if (!hasDenoRuntime()) {
+    return undefined;
+  }
+  const specifier = new URL(
+    "./compiler-fingerprint.deno.ts",
+    import.meta.url,
+  ).href;
+  try {
+    const module = await import(specifier) as CompilerFingerprintModule;
+    return await module.computeCurrentCompilerVersion();
+  } catch (error) {
+    if (isUnavailableSourceFingerprint(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function buildDefinedCompileCacheRuntimeVersion(): string | undefined {
+  const value = (globalThis as CompileCacheVersionGlobal)
+    .__cfCompileCacheRuntimeVersion;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function hasDenoRuntime(): boolean {
+  const candidate = globalThis as { Deno?: { stat?: unknown } };
+  return typeof candidate.Deno?.stat === "function";
+}
+
+function isUnavailableSourceFingerprint(error: unknown): boolean {
+  return [
+    "NotFound",
+    "NotADirectory",
+    "NotCapable",
+    "PermissionDenied",
+  ].some((name) => isDenoError(error, name));
+}
+
+function isDenoError(error: unknown, name: string): boolean {
+  const errors = (globalThis as {
+    Deno?: { errors?: Record<string, unknown> };
+  }).Deno?.errors;
+  const errorClass = errors?.[name];
+  return typeof errorClass === "function" && error instanceof errorClass;
+}
 
 /** Cell key (id) for a source-set document. */
 export function sourceDocKey(identity: string): string {
@@ -473,15 +592,11 @@ export async function loadVerifiedSourceClosure(
 /**
  * The CFC integrity atom stamped on a compiled document: the constant
  * `cf-compiled-by:cf-compiler`, attesting that the doc was emitted by the
- * system compiler. The atom covers the CODE that produced the doc, not the
- * user who ran it — deliberately, so a shared space's compile cache is
- * readable by every member (a per-user atom made every other member a
- * permanent cache miss AND made their write-backs collide on the label merge).
- * Minting is gated: prepare strips `cf-compiled-by:` atoms from any write not
- * authored by a trusted builtin, and `writeCompiledDocs` below is the one
- * legitimate minter. The hard guarantee lands when the server becomes the sole
- * acceptor of this write integrity and attaches real attestation data. See the
- * threat model in docs/specs/module-loading.md.
+ * system compiler. The atom covers the code that produced the doc, so every
+ * member of a shared space can read the same compiled cache entry. Minting is
+ * gated: prepare strips `cf-compiled-by:` atoms from any write not authored by a
+ * trusted builtin, and `writeCompiledDocs` below is the legitimate minter. The
+ * server-side attestation model is described in docs/specs/module-loading.md.
  */
 export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
 
@@ -491,6 +606,9 @@ const compiledDocProperties = {
   code: { type: "string" },
   filename: { type: "string" },
   sourceMap: {},
+  exportNames: { type: "array", items: { type: "string" } },
+  starTargetSpecs: { type: "array", items: { type: "string" } },
+  importSpecs: { type: "array", items: { type: "string" } },
   imports: {
     type: "array",
     items: {
@@ -519,6 +637,9 @@ export const COMPILED_DOC_SCHEMA = {
         code: { type: "string" },
         filename: { type: "string" },
         sourceMap: {},
+        exportNames: { type: "array", items: { type: "string" } },
+        starTargetSpecs: { type: "array", items: { type: "string" } },
+        importSpecs: { type: "array", items: { type: "string" } },
         imports: {
           type: "array",
           items: {
@@ -553,6 +674,9 @@ interface StoredCompiledDoc {
   code: string;
   filename: string;
   sourceMap?: unknown;
+  exportNames?: readonly string[];
+  starTargetSpecs?: readonly string[];
+  importSpecs?: readonly string[];
   imports: { specifier: string; link: unknown }[];
 }
 
@@ -612,11 +736,17 @@ export function writeCompiledDocs(
         schema,
         tx,
       );
+      // Fix B: derive the record surface from the compiled body once, here, so
+      // the boot-time record build reads it instead of re-parsing per load.
+      const derived = deriveModuleRecordFields(module.js);
       cell.set({
         kind: "compiled",
         identity: module.identity,
         code: module.js,
         filename: module.filename,
+        exportNames: derived.exportNames,
+        starTargetSpecs: derived.starTargetSpecs,
+        importSpecs: derived.importSpecs,
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
@@ -714,6 +844,15 @@ export async function loadCompiledClosure(
       code: doc.code,
       filename: doc.filename,
       ...(doc.sourceMap !== undefined ? { sourceMap: doc.sourceMap } : {}),
+      ...(doc.exportNames !== undefined
+        ? { exportNames: doc.exportNames }
+        : {}),
+      ...(doc.starTargetSpecs !== undefined
+        ? { starTargetSpecs: doc.starTargetSpecs }
+        : {}),
+      ...(doc.importSpecs !== undefined
+        ? { importSpecs: doc.importSpecs }
+        : {}),
       imports,
     });
   }

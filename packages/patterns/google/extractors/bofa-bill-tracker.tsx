@@ -27,12 +27,12 @@ import {
   Writable,
 } from "commonfabric";
 import BillExtractor, {
-  type Auth,
   type BillAnalysis,
   formatCurrency,
   formatDate,
   formatIdentifier,
   getIdentifierColor,
+  type GoogleAuthCell,
   processBills,
   type TrackedBill,
 } from "../core/bill-extractor/index.tsx";
@@ -100,7 +100,7 @@ const unmarkAsPaid = handler<
 // =============================================================================
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
   manuallyPaid?: Writable<string[] | Default<[]>>;
   demoMode?: Writable<boolean | Default<true>>;
 }

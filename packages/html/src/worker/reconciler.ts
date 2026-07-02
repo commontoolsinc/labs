@@ -21,6 +21,7 @@ import {
   isCell,
   isStream,
   type JSONSchema,
+  KeepAsCell,
   parseLink,
   type Stream,
   UI,
@@ -73,6 +74,25 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
   new Map([
     ["cf-chat-message", new Set(["name", "content"])],
   ]);
+// Props whose live DOM value can drift from the authored VDOM value
+// independently of any worker-side change — user input (`value`), scrolling
+// (`scrollTop`/`scrollLeft`), or browser / custom-element state (`checked`,
+// `selected`, `selectedIndex`, `indeterminate`, `open`). On the main thread,
+// setPropDefault re-asserts the authored value by comparing against the *live*
+// property, so for these props a repeated set-prop is a drift-repair, not pure
+// churn. The worker-side value guard (updatePropsInPlace) only knows the last
+// *authored* value and cannot see live drift, so it must never skip these —
+// they always re-emit.
+const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
+  "value",
+  "checked",
+  "selected",
+  "selectedIndex",
+  "indeterminate",
+  "open",
+  "scrollTop",
+  "scrollLeft",
+]);
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
@@ -526,12 +546,24 @@ export class WorkerReconciler {
       this.requiredAuthorshipIntegrityFromAuthor(node) ??
       [];
 
+    // Compose (do not replace) the enclosing text-integrity policy so nesting
+    // can only TIGHTEN it: required integrity is the union of every enclosing
+    // boundary's atoms, literal text is allowed only if every enclosing
+    // boundary allows it, and the block-attribution set carries every enclosing
+    // boundary id. An inner boundary can never relax an outer one.
+    const parentTextIntegrity = policy.textIntegrity;
+    const boundaryNodeIds = new Set(parentTextIntegrity?.boundaryNodeIds ?? []);
+    boundaryNodeIds.add(nodeId);
     return {
       ...policy,
       textIntegrity: {
-        requiredIntegrity,
-        allowLiteralText,
-        boundaryNodeId: nodeId,
+        requiredIntegrity: [
+          ...(parentTextIntegrity?.requiredIntegrity ?? []),
+          ...requiredIntegrity,
+        ],
+        allowLiteralText: (parentTextIntegrity?.allowLiteralText ?? true) &&
+          allowLiteralText,
+        boundaryNodeIds,
       },
     };
   }
@@ -895,7 +927,18 @@ export class WorkerReconciler {
       rightPolicy.requiredIntegrity,
     ) &&
       leftPolicy.allowLiteralText === rightPolicy.allowLiteralText &&
-      leftPolicy.boundaryNodeId === rightPolicy.boundaryNodeId;
+      this.boundaryNodeIdsEqual(
+        leftPolicy.boundaryNodeIds,
+        rightPolicy.boundaryNodeIds,
+      );
+  }
+
+  private boundaryNodeIdsEqual(
+    left: ReadonlySet<number>,
+    right: ReadonlySet<number>,
+  ): boolean {
+    return left.size === right.size &&
+      [...left].every((id) => right.has(id));
   }
 
   private atomListsEqual(
@@ -1054,7 +1097,7 @@ export class WorkerReconciler {
     policy: RenderPolicy,
     nodeId: number,
   ): void {
-    if (policy.textIntegrity?.boundaryNodeId !== nodeId) {
+    if (!policy.textIntegrity?.boundaryNodeIds.has(nodeId)) {
       return;
     }
     this.queueOps([{
@@ -1065,7 +1108,7 @@ export class WorkerReconciler {
     }]);
   }
 
-  private resetTextIntegrityBoundary(
+  private refreshTextIntegrityBoundaryState(
     state: NodeState,
     policy: RenderPolicy,
   ): void {
@@ -1074,29 +1117,70 @@ export class WorkerReconciler {
     }
     if (
       policy.textIntegrity !== undefined &&
-      policy.textIntegrity.boundaryNodeId !== state.nodeId
+      !policy.textIntegrity.boundaryNodeIds.has(state.nodeId)
     ) {
       return;
     }
+    const value = policy.textIntegrity === undefined
+      ? "ok"
+      : this.hasTextIntegrityBlockForBoundary(state, state.nodeId)
+      ? "blocked"
+      : "ok";
     this.queueOps([{
       op: "set-prop",
       nodeId: state.nodeId,
       key: "textIntegrityState",
-      value: "ok",
+      value,
     }]);
   }
 
-  private markTextIntegrityBlocked(policy: RenderPolicy): void {
-    const boundaryNodeId = policy.textIntegrity?.boundaryNodeId;
-    if (boundaryNodeId === undefined) {
-      return;
+  private hasTextIntegrityBlockForBoundary(
+    state: NodeState,
+    boundaryNodeId: number,
+  ): boolean {
+    if (state.textIntegrityBlockedFor?.has(boundaryNodeId)) {
+      return true;
     }
-    this.queueOps([{
-      op: "set-prop",
-      nodeId: boundaryNodeId,
-      key: "textIntegrityState",
-      value: "blocked",
-    }]);
+    if (
+      state.textIntegrityBlockedProps !== undefined &&
+      [...state.textIntegrityBlockedProps.values()].some((ids) =>
+        ids.has(boundaryNodeId)
+      )
+    ) {
+      return true;
+    }
+    for (const child of state.children.values()) {
+      if (
+        child.elementState &&
+        this.hasTextIntegrityBlockForBoundary(
+          child.elementState,
+          boundaryNodeId,
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private markTextIntegrityBlocked(
+    policy: RenderPolicy,
+  ): ReadonlySet<number> | undefined {
+    const boundaryNodeIds = policy.textIntegrity?.boundaryNodeIds;
+    if (boundaryNodeIds === undefined || boundaryNodeIds.size === 0) {
+      return undefined;
+    }
+    // Attribute the block to EVERY enclosing boundary, not just the nearest, so
+    // an outer boundary cannot stay "ok" over content that failed its bar.
+    this.queueOps(
+      [...boundaryNodeIds].map((nodeId) => ({
+        op: "set-prop" as const,
+        nodeId,
+        key: "textIntegrityState",
+        value: "blocked",
+      })),
+    );
+    return boundaryNodeIds;
   }
 
   private canRenderCellTextUnderPolicy(
@@ -1227,6 +1311,42 @@ export class WorkerReconciler {
     return TEXT_INTEGRITY_PROP_SINKS.get(state.tagName)?.has(key) ?? false;
   }
 
+  /**
+   * Whether re-asserting a re-supplied static primitive prop can skip its
+   * worker→main set-prop op. Shared by the inline static-prop path
+   * (updatePropsInPlace) and the Cell<Props> primitive path so the two cannot
+   * drift apart (CT-1798 / CT-1803).
+   *
+   * A skip is sound only when a repeated set-prop would be a true no-op on the
+   * main thread: setPropDefault value-guards the DOM write, but the op and the
+   * JSON.stringify it carries are not free. It is taken only for an unchanged
+   * primitive whose prior state was itself a static primitive, and never when:
+   *   - the value is an object/array — reference equality is unreliable;
+   *   - the prop is a text-integrity sink — its transform has policy-dependent
+   *     side effects and must re-run;
+   *   - the prop's live DOM value can drift independently of the VDOM
+   *     (DOM_LIVE_PROPS) — there the repeated op repairs drift via
+   *     setPropDefault's compare against the *live* value, which the worker
+   *     cannot observe.
+   * Assumes the default value-guarded setProp; a custom setProp with observable
+   * same-value behavior would not be re-invoked on a skip.
+   */
+  private canSkipUnchangedStaticProp(
+    state: NodeState,
+    key: string,
+    value: unknown,
+    existingState: PropState | undefined,
+  ): boolean {
+    const isPrimitiveValue = value === null ||
+      (typeof value !== "object" && typeof value !== "function");
+    return isPrimitiveValue &&
+      existingState !== undefined &&
+      existingState.cell === undefined &&
+      existingState.currentValue === value &&
+      !this.isTextIntegrityProp(state, key) &&
+      !DOM_LIVE_PROPS.has(key);
+  }
+
   private transformPropValueForState(
     state: NodeState,
     key: string,
@@ -1234,13 +1354,21 @@ export class WorkerReconciler {
     sourceCell?: Cell<unknown>,
     // deno-lint-ignore no-explicit-any
   ): any {
-    if (
-      this.isTextIntegrityProp(state, key) &&
-      (sourceCell
+    if (this.isTextIntegrityProp(state, key)) {
+      const shouldBlock = sourceCell
         ? this.shouldBlockTextFromCell(value, sourceCell, state.renderPolicy)
-        : this.shouldBlockLiteralText(value, state.renderPolicy))
-    ) {
-      this.markTextIntegrityBlocked(state.renderPolicy);
+        : this.shouldBlockLiteralText(value, state.renderPolicy);
+      if (!shouldBlock) {
+        state.textIntegrityBlockedProps?.delete(key);
+        return this.transformPropValue(key, value);
+      }
+      const boundaryNodeIds = this.markTextIntegrityBlocked(state.renderPolicy);
+      if (boundaryNodeIds !== undefined) {
+        if (state.textIntegrityBlockedProps === undefined) {
+          state.textIntegrityBlockedProps = new Map();
+        }
+        state.textIntegrityBlockedProps.set(key, boundaryNodeIds);
+      }
       this.queueOps([{
         op: "set-prop",
         nodeId: state.nodeId,
@@ -1272,7 +1400,7 @@ export class WorkerReconciler {
    * Follows [UI] chains and returns the VNode, or null if not a VNode.
    * Includes cycle detection to prevent infinite loops.
    */
-  private extractVNode(node: WorkerRenderNode): WorkerVNode | null {
+  private extractVNode(node: unknown): WorkerVNode | null {
     if (isWorkerVNode(node)) return node;
 
     // Follow [UI] chain with cycle detection
@@ -1362,9 +1490,6 @@ export class WorkerReconciler {
             oldState,
             policyChildren.children,
           );
-          if (!childrenSame || policyChanged) {
-            this.resetTextIntegrityBoundary(oldState, childPolicy);
-          }
           this.updateChildrenInPlace(
             ctx,
             oldState,
@@ -1373,6 +1498,9 @@ export class WorkerReconciler {
             childPolicy,
             policyChanged,
           );
+          if (!childrenSame || policyChanged) {
+            this.refreshTextIntegrityBoundaryState(oldState, childPolicy);
+          }
         }
         return;
       }
@@ -1512,7 +1640,15 @@ export class WorkerReconciler {
           cancel,
         });
       } else {
-        // Static prop - just set it (cancel any existing subscription)
+        // Static prop. Skip the redundant worker→main set-prop op for an
+        // unchanged primitive value (see canSkipUnchangedStaticProp). #4366 made
+        // updateChildrenInPlace always reconcile reused inline-VNode children,
+        // so this path now fires on every parent recompute even when captured
+        // values are identical; damping it removes the op + JSON.stringify
+        // churn (CT-1798).
+        if (this.canSkipUnchangedStaticProp(state, key, value, existingState)) {
+          continue;
+        }
         if (existingState) {
           existingState.cancel();
         }
@@ -1526,6 +1662,7 @@ export class WorkerReconciler {
         state.propSubscriptions.set(key, {
           cell: undefined,
           cancel: () => {},
+          currentValue: value,
         });
       }
     }
@@ -1541,6 +1678,7 @@ export class WorkerReconciler {
       this.removeSingleProp(state, key);
     }
     state.propSubscriptions.clear();
+    state.textIntegrityBlockedProps?.clear();
   }
 
   /**
@@ -1917,13 +2055,16 @@ export class WorkerReconciler {
             existingState.cancel();
           }
 
-          // Skip only when a previous primitive value is unchanged. Object/cell
-          // prop states do not track currentValue, so they must still emit a
-          // set-prop when transitioning to a primitive such as undefined.
+          // Skip a redundant op for an unchanged primitive, using the same
+          // predicate as the inline static-prop path so both honor the same
+          // DOM-live / text-integrity exclusions (CT-1803). Object/cell prop
+          // states have cell !== undefined or no currentValue, so transitions
+          // (e.g. to undefined) still emit.
           if (
-            existingState && !existingState.cell &&
-            existingState.currentValue === value
-          ) continue;
+            this.canSkipUnchangedStaticProp(state, key, value, existingState)
+          ) {
+            continue;
+          }
 
           const propValue = this.transformPropValueForState(
             state,
@@ -1997,7 +2138,6 @@ export class WorkerReconciler {
 
     const childrenSame = this.areChildrenSame(state, policyChildren.children);
     if (!childrenSame || policyChanged) {
-      this.resetTextIntegrityBoundary(state, childPolicy);
       this.updateChildrenInPlace(
         ctx,
         state,
@@ -2006,6 +2146,7 @@ export class WorkerReconciler {
         childPolicy,
         policyChanged,
       );
+      this.refreshTextIntegrityBoundaryState(state, childPolicy);
     }
   }
 
@@ -2115,6 +2256,7 @@ export class WorkerReconciler {
    * Remove a single prop from a node (DOM side + handler cleanup).
    */
   private removeSingleProp(state: NodeState, key: string): void {
+    state.textIntegrityBlockedProps?.delete(key);
     if (isEventProp(key)) {
       const eventType = getEventType(key);
       this.retireEventHandler(state, eventType);
@@ -2450,6 +2592,9 @@ export class WorkerReconciler {
       renderPolicy: policy,
       childRenderPolicy: policy,
       childrenBlockedByPolicy: false,
+      textIntegrityBlockedFor: integrityBlocked
+        ? policy.textIntegrity?.boundaryNodeIds
+        : undefined,
     };
   }
 
@@ -2713,7 +2858,13 @@ export class WorkerReconciler {
           key,
           value: propValue,
         }]);
-        state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+        // Record the bound value so a later in-place update can skip the
+        // redundant set-prop op when it is unchanged (CT-1798).
+        state.propSubscriptions.set(key, {
+          cell: undefined,
+          cancel: () => {},
+          currentValue: value,
+        });
       }
     }
 
@@ -2738,7 +2889,7 @@ export class WorkerReconciler {
     return convertCellsToLinks(value, {
       doNotConvertCellResults: true,
       includeSchema: true,
-      keepStreams: true,
+      keepAsCell: KeepAsCell.OnlyStream,
     });
   }
 
@@ -2898,11 +3049,33 @@ export class WorkerReconciler {
       if (!forceReplace && state.children.has(key)) {
         // Reuse existing child
         const existingState = state.children.get(key)!;
-        newMapping.set(key, existingState);
+        const canReuse = this.reconcileReusedChild(
+          ctx,
+          existingState,
+          child,
+          visited,
+          policy,
+        );
         state.children.delete(key);
-
-        // Update if it's an element with new data
-        // (For now, we trust the key - updates happen through Cell subscriptions)
+        if (canReuse) {
+          newMapping.set(key, existingState);
+        } else {
+          existingState.cancel();
+          this.cleanupNodeHandlers(existingState);
+          this.queueOps([{ op: "remove-node", nodeId: existingState.nodeId }]);
+          hasNewChildren = true;
+          const childState = this.renderChild(
+            ctx,
+            child,
+            visited,
+            state,
+            key,
+            policy,
+          );
+          if (childState) {
+            newMapping.set(key, childState);
+          }
+        }
       } else {
         // Create new child, passing parent state and key for position tracking
         hasNewChildren = true;
@@ -2974,6 +3147,106 @@ export class WorkerReconciler {
   }
 
   /**
+   * Reconcile a reused keyed child. A stable key preserves DOM identity and
+   * ordering, but the VNode payload may still have fresh captured values from a
+   * parent recomputation, so same-key reuse cannot blindly skip descendants.
+   */
+  private reconcileReusedChild(
+    ctx: ReconcileContext,
+    childState: ChildNodeState,
+    child: unknown,
+    visited: Set<object>,
+    policy: RenderPolicy,
+  ): boolean {
+    if (isCell(child)) {
+      return childState.cell !== undefined &&
+        this.sameCellForReuse(childState.cell, child);
+    }
+
+    if (
+      childState.isText &&
+      childState.cell === undefined &&
+      (typeof child === "string" || typeof child === "number" ||
+        typeof child === "boolean" || child === null || child === undefined)
+    ) {
+      const text = this.stringifyText(child);
+      if (text !== childState.currentValue) {
+        childState.currentValue = text;
+        this.queueOps([{
+          op: "update-text",
+          nodeId: childState.nodeId,
+          text,
+        }]);
+      }
+      return true;
+    }
+
+    if (!childState.elementState) return false;
+
+    const newVNode = this.extractVNode(child);
+    if (!newVNode) return false;
+
+    const sanitized = this.sanitizeNode(newVNode);
+    if (!sanitized || sanitized.name !== childState.elementState.tagName) {
+      return false;
+    }
+
+    const childPolicy = this.childRenderPolicyForNode(
+      sanitized,
+      policy,
+      childState.elementState.nodeId,
+    );
+    const policyChildren = this.childrenForRenderPolicy(
+      sanitized,
+      childPolicy,
+    );
+    const policyChanged = !this.renderPolicyEquals(
+      childState.elementState.childRenderPolicy,
+      childPolicy,
+    ) || childState.elementState.childrenBlockedByPolicy !==
+        policyChildren.blocked;
+
+    childState.currentValue = child;
+    childState.elementState.renderPolicy = policy;
+    childState.elementState.childRenderPolicy = childPolicy;
+    childState.elementState.childrenBlockedByPolicy = policyChildren.blocked;
+    childState.elementState.sourceChildren = sanitized.children;
+    childState.elementState.sourceProps = sanitized.props;
+
+    this.updatePropsInPlace(ctx, childState.elementState, sanitized.props);
+
+    if (policyChildren.children !== undefined) {
+      const childrenSame = this.areChildrenSame(
+        childState.elementState,
+        policyChildren.children,
+      );
+      this.updateChildrenInPlace(
+        ctx,
+        childState.elementState,
+        policyChildren.children,
+        new Set(visited),
+        childPolicy,
+        policyChanged,
+      );
+      if (!childrenSame || policyChanged) {
+        this.refreshTextIntegrityBoundaryState(
+          childState.elementState,
+          childPolicy,
+        );
+      }
+    }
+    return true;
+  }
+
+  private sameCellForReuse(left: Cell<unknown>, right: Cell<unknown>): boolean {
+    try {
+      return areLinksSame(left, right);
+    } catch {
+      return left === right;
+    }
+  }
+
+  /**
    * Render a child node (which may be a VNode, text, or Cell).
    * For Cell children, uses position-aware insertion instead of wrapper elements.
    */
@@ -3026,6 +3299,7 @@ export class WorkerReconciler {
       nodeId: -1,
       isText: false,
       cancel,
+      cell,
     };
 
     let currentCancel: Cancel | undefined;
@@ -3168,25 +3442,23 @@ export class WorkerReconciler {
                   sanitized.props,
                 );
 
-                // Check children: if same, do nothing (sinks active);
-                // if different, tear down and rebuild
                 if (policyChildren.children !== undefined) {
                   const childrenSame = this.areChildrenSame(
                     childState.elementState,
                     policyChildren.children,
                   );
+                  this.updateChildrenInPlace(
+                    ctx,
+                    childState.elementState,
+                    policyChildren.children,
+                    new Set(),
+                    childPolicy,
+                    policyChanged,
+                  );
                   if (!childrenSame || policyChanged) {
-                    this.resetTextIntegrityBoundary(
+                    this.refreshTextIntegrityBoundaryState(
                       childState.elementState,
                       childPolicy,
-                    );
-                    this.updateChildrenInPlace(
-                      ctx,
-                      childState.elementState,
-                      policyChildren.children,
-                      new Set(),
-                      childPolicy,
-                      policyChanged,
                     );
                   }
                 }

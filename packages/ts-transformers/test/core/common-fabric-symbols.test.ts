@@ -1,15 +1,20 @@
 /**
  * Unit tests for symbolDeclaresCommonFabricDefault.
  *
- * The function is meant to return true ONLY for properties whose declared type
- * is the Common Fabric Default<T,V> from `@commonfabric/api` (identified by the
- * source file being named "commonfabric.d.ts").  A user who happens to name
- * their own generic type "Default" must NOT trigger the same special handling.
+ * The function returns true for properties whose declared type is the Common
+ * Fabric Default<T,V> from `@commonfabric/api`. A user type named "Default"
+ * does not trigger the same special handling.
  */
 import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertFalse } from "@std/assert";
-import { symbolDeclaresCommonFabricDefault } from "../../src/core/common-fabric-symbols.ts";
+import { assert, assertEquals, assertFalse } from "@std/assert";
+import {
+  getImportTypeModuleName,
+  isCommonFabricDeclaration,
+  isCommonFabricModuleName,
+  isCommonFabricSymbol,
+  symbolDeclaresCommonFabricDefault,
+} from "../../src/core/common-fabric-symbols.ts";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -78,9 +83,186 @@ function getPropertySymbol(
   return found;
 }
 
+function getInterfaceSymbol(
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  interfaceName: string,
+): ts.Symbol | undefined {
+  let found: ts.Symbol | undefined;
+  ts.forEachChild(sourceFile, (node) => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === interfaceName) {
+      found = checker.getSymbolAtLocation(node.name);
+    }
+  });
+  return found;
+}
+
+function findFirstNode<T extends ts.Node>(
+  sourceFile: ts.SourceFile,
+  predicate: (node: ts.Node) => node is T,
+): T | undefined {
+  let found: T | undefined;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (predicate(node)) {
+      found = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("isCommonFabricModuleName", () => {
+  it("matches Common Fabric module names", () => {
+    assert(isCommonFabricModuleName("commonfabric"));
+    assert(isCommonFabricModuleName("@commonfabric/api"));
+    assert(isCommonFabricModuleName("@commonfabric/common"));
+  });
+
+  it("rejects unrelated module names", () => {
+    assertFalse(isCommonFabricModuleName("not-commonfabric"));
+    assertFalse(isCommonFabricModuleName("@notcommonfabric/api"));
+  });
+});
+
+describe("getImportTypeModuleName", () => {
+  it("reads the module name from an import type node", () => {
+    const sourceFile = ts.createSourceFile(
+      "/test.ts",
+      `type Ref = import("@commonfabric/api").Cell<number>;`,
+      ts.ScriptTarget.ES2020,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const typeNode = findFirstNode(sourceFile, ts.isImportTypeNode);
+
+    assert(typeNode);
+    assertEquals(getImportTypeModuleName(typeNode), "@commonfabric/api");
+  });
+});
+
+describe("isCommonFabricDeclaration", () => {
+  it("matches declarations from Common Fabric source files", () => {
+    const sourceFile = ts.createSourceFile(
+      "/repo/packages/api/index.ts",
+      `export interface Cell<T> { value: T }`,
+      ts.ScriptTarget.ES2020,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const declaration = findFirstNode(sourceFile, ts.isInterfaceDeclaration);
+
+    assert(declaration);
+    assert(isCommonFabricDeclaration(declaration));
+  });
+
+  it("matches declarations from installed Common Fabric package files", () => {
+    const sourceFile = ts.createSourceFile(
+      "/repo/node_modules/@commonfabric/api/index.d.ts",
+      `export interface Cell<T> { value: T }`,
+      ts.ScriptTarget.ES2020,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const declaration = findFirstNode(sourceFile, ts.isInterfaceDeclaration);
+
+    assert(declaration);
+    assert(isCommonFabricDeclaration(declaration));
+  });
+
+  it("matches declarations inside Common Fabric ambient modules", () => {
+    const sourceFile = ts.createSourceFile(
+      "/types.d.ts",
+      `declare module "@commonfabric/api" {
+        export interface Cell<T> { value: T }
+      }`,
+      ts.ScriptTarget.ES2020,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const declaration = findFirstNode(sourceFile, ts.isInterfaceDeclaration);
+
+    assert(declaration);
+    assert(isCommonFabricDeclaration(declaration));
+  });
+
+  it("rejects user declarations with matching names", () => {
+    const sourceFile = ts.createSourceFile(
+      "/test.ts",
+      `interface Cell<T> { value: T }`,
+      ts.ScriptTarget.ES2020,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const declaration = findFirstNode(sourceFile, ts.isInterfaceDeclaration);
+
+    assert(declaration);
+    assertFalse(isCommonFabricDeclaration(declaration));
+  });
+});
+
+describe("isCommonFabricSymbol", () => {
+  it("matches symbols from Common Fabric source files", () => {
+    const { program, checker } = createProgram({
+      "/repo/packages/api/index.ts": `
+        export interface Cell<T> {
+          get(): T;
+        }
+      `,
+    });
+
+    const sf = program.getSourceFile("/repo/packages/api/index.ts")!;
+    const symbol = getInterfaceSymbol(checker, sf, "Cell");
+
+    assert(symbol);
+    assert(isCommonFabricSymbol(symbol));
+  });
+
+  it("matches symbols from installed Common Fabric package files", () => {
+    const { program, checker } = createProgram({
+      "/repo/node_modules/@commonfabric/api/index.d.ts": `
+        export interface Cell<T> {
+          get(): T;
+        }
+      `,
+    });
+
+    const sf = program.getSourceFile(
+      "/repo/node_modules/@commonfabric/api/index.d.ts",
+    )!;
+    const symbol = getInterfaceSymbol(checker, sf, "Cell");
+
+    assert(symbol);
+    assert(isCommonFabricSymbol(symbol));
+  });
+
+  it("rejects user symbols with Common Fabric names", () => {
+    const { program, checker } = createProgram({
+      "/test.ts": `
+        interface Cell<T> {
+          get(): T;
+        }
+      `,
+    });
+
+    const sf = program.getSourceFile("/test.ts")!;
+    const symbol = getInterfaceSymbol(checker, sf, "Cell");
+
+    assert(symbol);
+    assertFalse(isCommonFabricSymbol(symbol));
+  });
+});
 
 describe("symbolDeclaresCommonFabricDefault", () => {
   describe("user-defined Default type (should return false)", () => {
@@ -153,9 +335,6 @@ describe("symbolDeclaresCommonFabricDefault", () => {
 
   describe("Common Fabric Default from commonfabric.d.ts (should return true)", () => {
     it("returns true when the property type references Default declared in commonfabric.d.ts", () => {
-      // isCommonFabricSymbol checks fileName.endsWith("commonfabric.d.ts").
-      // Declaring Default globally in commonfabric.d.ts and including it as a
-      // root file makes it the canonical Common Fabric Default.
       const { program, checker } = createProgram({
         "commonfabric.d.ts": `
           declare const DEFAULT_MARKER: unique symbol;

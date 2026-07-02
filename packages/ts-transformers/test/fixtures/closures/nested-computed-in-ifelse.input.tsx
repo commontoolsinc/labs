@@ -1,7 +1,7 @@
 /**
  * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *
- * When a computed() callback is inside an ifElse branch, the OpaqueRefJSX
+ * When a computed() callback is inside an ifElse branch, the ReactiveJSX
  * transformer's rewriteChildExpressions should NOT wrap expressions like
  * `toggle.get()` in an extra lift-applied computation, since the computed callback is already
  * a safe reactive context.

@@ -1,9 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
+  cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
+  isPrimitiveJsonValue,
   isPromptInjectionMaterialRiskAtom,
+  resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
@@ -21,7 +25,233 @@ const promptInfluence = {
   source: "of:hostile",
 } as const;
 
-describe("schema-based prompt injection sanitization", () => {
+describe("cfc schema sanitization", () => {
+  it("classifies primitive values and prompt-injection risk atoms", () => {
+    expect(isPrimitiveJsonValue(null)).toBe(true);
+    expect(isPrimitiveJsonValue("text")).toBe(true);
+    expect(isPrimitiveJsonValue(1)).toBe(true);
+    expect(isPrimitiveJsonValue(false)).toBe(true);
+    expect(isPrimitiveJsonValue({})).toBe(false);
+
+    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+      .toBe(true);
+    expect(isPromptInjectionMaterialRiskAtom({
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "prompt-injection-risk-value-screened",
+    })).toBe(true);
+    expect(isPromptInjectionMaterialRiskAtom({
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "prompt-influence",
+    })).toBe(false);
+  });
+
+  it("detects closed object schemas", () => {
+    expect(cfcObjectSchemaIsClosed({ type: "object" })).toBe(true);
+    expect(cfcObjectSchemaIsClosed({ properties: {} })).toBe(true);
+    expect(cfcObjectSchemaIsClosed({ required: ["title"] })).toBe(true);
+    expect(cfcObjectSchemaIsClosed({ additionalProperties: false })).toBe(
+      true,
+    );
+    expect(cfcObjectSchemaIsClosed({ additionalProperties: true })).toBe(
+      false,
+    );
+    expect(cfcObjectSchemaIsClosed({
+      additionalProperties: { type: "string" },
+    })).toBe(false);
+  });
+
+  it("resolves refs for validation and falls back on unresolved refs", () => {
+    const fullSchema = {
+      $defs: {
+        Count: { type: "integer" },
+      },
+    } as const;
+
+    expect(resolveSchemaForValidation({ $ref: "#/$defs/Count" }, fullSchema))
+      .toEqual({ type: "integer" });
+    expect(resolveSchemaForValidation({ $ref: "#/$defs/Missing" }, fullSchema))
+      .toBe(false);
+    expect(resolveSchemaForValidation({ type: "string" }, fullSchema))
+      .toEqual({ type: "string" });
+  });
+
+  it("annotates injection-safe primitive schema shapes", () => {
+    const risk = {
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "prompt-injection-risk-unscreened",
+    } as const;
+    const retained = {
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "prompt-influence",
+    } as const;
+
+    const annotated = schemaWithInjectionSafeAnnotations({
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        status: { enum: ["open", "closed"] },
+        note: { type: "string" },
+      },
+      required: ["approved", "status", "note"],
+      additionalProperties: false,
+    }, [risk, retained]) as any;
+
+    expect(annotated.required).toBeUndefined();
+    expect(annotated.properties.approved.ifc.addIntegrity).toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+    expect(annotated.properties.approved.ifc.confidentiality).toEqual([
+      retained,
+    ]);
+    expect(annotated.properties.status.ifc.addIntegrity).toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+    expect(annotated.properties.note.ifc.confidentiality).toContainEqual(risk);
+    expect(annotated.properties.note.ifc.confidentiality).toContainEqual(
+      retained,
+    );
+  });
+
+  it("leaves boolean schemas unchanged while annotating", () => {
+    expect(schemaWithInjectionSafeAnnotations(true, ["secret"])).toBe(true);
+  });
+
+  it("breaks ref cycles during annotation", () => {
+    const annotated = schemaWithInjectionSafeAnnotations({
+      $defs: {
+        Node: { $ref: "#/$defs/Node" },
+      },
+      $ref: "#/$defs/Node",
+    }, ["secret"]) as any;
+
+    expect(annotated.ifc.confidentiality).toEqual(["secret"]);
+  });
+
+  it("annotates refs, branches, arrays, and open objects", () => {
+    const observed = ["secret"];
+    const annotated = schemaWithInjectionSafeAnnotations({
+      $defs: {
+        Choice: {
+          anyOf: [
+            { type: "boolean" },
+            { type: "string" },
+          ],
+        },
+      },
+      type: "object",
+      properties: {
+        child: { $ref: "#/$defs/Choice" },
+        list: {
+          type: "array",
+          items: { type: "integer" },
+        },
+      },
+      additionalProperties: true,
+    }, observed) as any;
+
+    expect(annotated.ifc.confidentiality).toEqual(observed);
+    expect(annotated.properties.child.ifc.confidentiality).toEqual(observed);
+    expect(annotated.properties.list.ifc.addIntegrity).toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+    expect(annotated.properties.list.items.ifc.addIntegrity).toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+  });
+
+  it("annotates oneOf, allOf, empty objects, and not schemas", () => {
+    const annotated = schemaWithInjectionSafeAnnotations({
+      type: "object",
+      properties: {
+        choice: {
+          oneOf: [
+            { type: "boolean" },
+            { type: "null" },
+          ],
+        },
+        combined: {
+          allOf: [
+            { type: "integer" },
+            { const: 1 },
+          ],
+        },
+      },
+      required: ["choice", "combined"],
+      additionalProperties: false,
+      not: {
+        required: ["blocked"],
+      },
+    }, ["secret"]) as any;
+
+    expect(annotated.required).toBeUndefined();
+    expect(annotated.properties.choice.oneOf[0].ifc.addIntegrity)
+      .toContainEqual(INJECTION_SAFE_ATOM);
+    expect(annotated.properties.combined.allOf[1].ifc.addIntegrity)
+      .toContainEqual(INJECTION_SAFE_ATOM);
+    expect(annotated.not.required).toBeUndefined();
+
+    const emptyObject = schemaWithInjectionSafeAnnotations({
+      type: "object",
+      additionalProperties: false,
+    }, ["secret"]) as any;
+    expect(emptyObject.ifc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
+  });
+
+  it("validates values against schema features", () => {
+    expect(validateAgainstSchema(true, "anything")).toBeUndefined();
+    expect(validateAgainstSchema(false, "anything")).toBe(
+      "schema rejects all values",
+    );
+    expect(validateAgainstSchema({
+      $defs: { Count: { type: "integer" } },
+      $ref: "#/$defs/Count",
+    }, 2)).toBeUndefined();
+    expect(validateAgainstSchema({
+      allOf: [
+        { type: "object" },
+        { required: ["name"] },
+      ],
+    }, {})).toBe("missing required property name");
+    expect(validateAgainstSchema({
+      anyOf: [{ type: "string" }, { type: "number" }],
+    }, false)).toBe("value does not match anyOf");
+    expect(validateAgainstSchema({
+      oneOf: [{ type: "number" }, { type: "integer" }],
+    }, 1)).toBe("value does not match exactly one oneOf branch");
+    expect(validateAgainstSchema({ enum: ["a", "b"] }, "c")).toBe(
+      "value is not in enum",
+    );
+    expect(validateAgainstSchema({ const: "ready" }, "waiting")).toBe(
+      "value does not match const",
+    );
+    expect(validateAgainstSchema({ type: ["string", "number"] }, false)).toBe(
+      "value does not match type string|number",
+    );
+    expect(validateAgainstSchema({ type: "unknown" }, Symbol("value")))
+      .toBeUndefined();
+    expect(validateAgainstSchema({ type: "null" }, null)).toBeUndefined();
+    expect(validateAgainstSchema({ type: "custom" } as any, "value"))
+      .toBeUndefined();
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: { count: { type: "number" } },
+      additionalProperties: false,
+    }, { count: 1, extra: true })).toBe("additional property extra");
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: { title: { type: "string" } },
+      additionalProperties: { type: "number" },
+    }, { title: "ok", extra: "bad" })).toBe(
+      "extra: value does not match type number",
+    );
+    expect(validateAgainstSchema({
+      type: "array",
+      items: { type: "string" },
+    }, ["ok", 2])).toBe("1: value does not match type string");
+  });
+});
+
+describe("schema-based prompt injection sanitization compatibility", () => {
   it("adds InjectionSafe to closed enum, number, and boolean fields but not free strings", () => {
     const schema = {
       type: "object",
@@ -133,9 +363,7 @@ describe("schema-based prompt injection sanitization", () => {
     expect(isPromptInjectionMaterialRiskAtom(promptInfluence)).toBe(false);
   });
 
-  it("terminates on self-referential $ref schemas", () => {
-    // Cyclic schema: a tree node whose `children` is an array of the same
-    // node. The sanitizer must not infinite-loop walking the cycle.
+  it("terminates on self-referential ref schemas", () => {
     const schema = {
       $defs: {
         Node: {
@@ -154,17 +382,11 @@ describe("schema-based prompt injection sanitization", () => {
       $ref: "#/$defs/Node",
     } as const satisfies JSONSchema;
 
-    // Should resolve, terminate, and produce a sanitized schema; the inner
-    // `label` field is a free string so it carries the prompt-influence
-    // confidentiality but no InjectionSafe integrity.
     const sanitized = schemaWithInjectionSafeAnnotations(schema, [
       promptInfluence,
     ]) as any;
 
     expect(sanitized).toBeDefined();
-    // The cycle in `children` must not have produced an exception or a
-    // structurally infinite tree. We don't assert deep shape here — only
-    // that termination + sanitization happened.
     expect(typeof sanitized).toBe("object");
   });
 
@@ -185,12 +407,7 @@ describe("schema-based prompt injection sanitization", () => {
     expect(JSON.stringify(schema)).toBe(before);
   });
 
-  it("validates nested $refs by preserving root $defs across recursion", () => {
-    // Top-level $ref → $defs/Outer → contains property whose type is
-    // $defs/Inner. If validateAgainstSchema dropped root $defs when
-    // recursing through the top-level $ref, the nested $ref to Inner
-    // would resolve to false and the validation would reject valid
-    // values. This guards against that regression.
+  it("validates nested refs by preserving root defs across recursion", () => {
     const schema = {
       $defs: {
         Outer: {

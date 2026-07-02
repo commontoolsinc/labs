@@ -1,12 +1,15 @@
 import { env, waitFor } from "@commonfabric/integration";
 import { sleep } from "@commonfabric/utils/sleep";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { TEST_LLM } from "./flags.ts";
+import {
+  initializePiecesController,
+  PiecesController,
+} from "./pieces-controller.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const ignore = !TEST_LLM;
@@ -26,7 +29,7 @@ describe("Chat pattern test", () => {
   if (!ignore) {
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await PiecesController.initialize({
+      cc = await initializePiecesController({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,

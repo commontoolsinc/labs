@@ -131,6 +131,14 @@ export function raw<T, R>(
     // `cause.outputSpot` for scope-aware builtins; `cause.outputSpot` stays for
     // identity (it is hashed into result-cell causes and must not churn).
     outputBinding?: NormalizedFullLink,
+    // Whether this node is resuming from synced storage and should defer its
+    // initial run until sync completes. Passed out-of-band (like `outputBinding`
+    // above) rather than folded into `cause`: it is transient (present only on
+    // resume), so hashing it into the result-cell id would diverge a fresh
+    // runtime from a resumed one for the same logical node. Container-minting
+    // builtins (map/filter/flatMap) read it to defer their per-element
+    // sub-pattern runs until sync completes too.
+    awaitSync?: boolean,
   ) => RawBuiltinReturnType,
   options?: RawModuleOptions,
 ): ModuleFactory<T, R> {

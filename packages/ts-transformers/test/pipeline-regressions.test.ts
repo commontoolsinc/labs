@@ -112,6 +112,7 @@ Deno.test(
       "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
       "ModuleScopeCfDataTransformer",
+      "PatternCoverageTransformer",
       "ModuleScopeFunctionHardeningTransformer",
     ]);
   },

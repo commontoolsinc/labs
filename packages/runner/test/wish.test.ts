@@ -2564,6 +2564,83 @@ describe("wish built-in", () => {
         .toBe("Ada Lovelace");
     });
 
+    it("#profile resolves to the default directly (no picker) when a default is set among multiple profiles", async () => {
+      // Regression for the profile-picker deadlock: a non-headless `#profile`
+      // wish from a viewer with 2+ profiles used to launch the multi-candidate
+      // picker, leaving `.result` undefined until a selection — dead-locking
+      // every pattern that wishes for "the viewer's active profile" (e.g.
+      // profile-group-chat's send guard). With a default set, `#profile` must
+      // resolve to it directly as a single result.
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-default-among-many",
+      )).did();
+      const profileA = runtime.getCell(
+        profileSpaceDid,
+        "profile-a",
+        undefined,
+        tx,
+      );
+      profileA.set({
+        name: "Default Della",
+        initialNameApplied: "Default Della",
+        avatar: "della.png",
+        bio: "",
+        elements: [],
+      });
+      const profileB = runtime.getCell(
+        profileSpaceDid,
+        "profile-b",
+        undefined,
+        tx,
+      );
+      profileB.set({
+        name: "Other Otto",
+        initialNameApplied: "Other Otto",
+        avatar: "otto.png",
+        bio: "",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-among-many",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profiles").set([profileA, profileB]);
+      homeDefaultCell.key("defaultProfile").set(profileA);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return { profile: wish({ query: "#profile" }) };
+      });
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-default-among-many-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Single, direct result — the default — not the picker (which would leave
+      // `.result` undefined until a selection).
+      expect(result.key("profile").get()?.result?.name).toBe("Default Della");
+    });
+
     it("#profileDefault is not a well-known profile target", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-default-removed-space",
@@ -2811,7 +2888,7 @@ describe("wish built-in", () => {
         avatar: "",
         elements: [{
           cell: profileCard,
-          tag: "#profile-card",
+          tag: "#profileCard",
           userTags: ["person"],
           title: "Profile Card",
         }],
@@ -2837,7 +2914,7 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => ({
         byUserTag: wish({ query: "#person", scope: ["profile"] }),
-        byTag: wish({ query: "#profile-card", scope: ["profile"] }),
+        byTag: wish({ query: "#profileCard", scope: ["profile"] }),
       }));
 
       const resultCell = runtime.getCell<Record<string, any>>(
@@ -3445,10 +3522,19 @@ describe("tagMatchesHashtag", () => {
     expect(tagMatchesHashtag("#pattern for dinner", "pattern")).toBe(true);
   });
 
-  it("matches hashtag portion before special characters", () => {
-    // The hashtag #todo_list is parsed as #todo (underscore ends the hashtag)
-    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(true);
-    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(false);
+  it("includes underscores in the hashtag", () => {
+    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(true);
+    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(false);
+  });
+
+  it("ends the hashtag at a hyphen", () => {
+    expect(tagMatchesHashtag("#todo-list", "todo")).toBe(true);
+    expect(tagMatchesHashtag("#todo-list", "todo-list")).toBe(false);
+  });
+
+  it("matches hashtags written in non-Latin scripts", () => {
+    expect(tagMatchesHashtag("一篇 #日本語 笔记", "日本語")).toBe(true);
+    expect(tagMatchesHashtag("café au #café", "café")).toBe(true);
   });
 });
 

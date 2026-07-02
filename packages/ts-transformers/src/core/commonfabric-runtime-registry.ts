@@ -136,7 +136,29 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: true,
   },
   {
-    exportName: "fetchData",
+    exportName: "fetchBinary",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "fetchText",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  // `fetchJson` additionally gets type-argument schema injection in
+  // schema-injection.ts (lowering `fetchJson<T>` to an injected `schema`
+  // parameter, like sqliteQuery's `rowSchema`), and is a compile error
+  // without a type argument.
+  {
+    exportName: "fetchJson",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "fetchJsonUnchecked",
     category: "call",
     callKind: "runtime-call",
     reactiveOrigin: true,

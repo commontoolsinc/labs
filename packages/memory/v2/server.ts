@@ -23,6 +23,8 @@ import {
   type SessionAckRequest,
   type SessionAckResult,
   type SessionEffectMessage,
+  type SessionOpenAuthMetadata,
+  type SessionOpenChallenge,
   type SessionOpenRequest,
   type SessionOpenResult,
   type SessionRevokedMessage,
@@ -83,6 +85,7 @@ import {
   trackedIdsFromEntries,
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import { authorizationError } from "./session-open-auth.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -90,6 +93,8 @@ const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
+const SESSION_OPEN_CHALLENGE_BYTES = 32;
 
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
@@ -144,6 +149,11 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const randomHex = (bytes: number): string => {
+  const data = crypto.getRandomValues(new Uint8Array(bytes));
+  return [...data].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 const schedulerObservationFromValue = (
   observation: unknown,
@@ -299,6 +309,15 @@ const sessionKey = (space: string, sessionId: string): string =>
 
 type Send = (message: ServerMessage) => void;
 
+type SessionOpenAuthContext = {
+  audience: string;
+  challenge: SessionOpenChallenge;
+};
+
+type SessionOpenChallengeState = SessionOpenChallenge & {
+  consumed: boolean;
+};
+
 type SessionHandle = {
   space: string;
   sessionId: string;
@@ -314,6 +333,7 @@ class Connection {
   #closed = false;
   #syncSchemaTable = false;
   #sessions = new Map<string, SessionHandle>();
+  #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
@@ -357,6 +377,60 @@ class Connection {
       sessionId,
       reason,
     });
+  }
+
+  issueSessionOpenAuth(): SessionOpenAuthMetadata {
+    const sessionOpen = this.server.sessionOpenHandshake();
+    this.#sessionOpenChallenge = {
+      ...sessionOpen.challenge,
+      consumed: false,
+    };
+    return sessionOpen;
+  }
+
+  sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
+    const audience = this.server.sessionOpenAudience();
+    const invocation = isRecord(message.invocation) ? message.invocation : null;
+    if (invocation === null || typeof invocation.aud !== "string") {
+      throw authorizationError("memory session.open requires audience");
+    }
+    if (invocation.aud !== audience) {
+      throw authorizationError("memory session.open audience mismatch");
+    }
+
+    const challenge = this.#sessionOpenChallenge;
+    if (challenge === null) {
+      throw authorizationError("memory session.open challenge unavailable");
+    }
+    if (challenge.consumed) {
+      throw authorizationError("memory session.open challenge already used");
+    }
+    if (challenge.expiresAt <= this.server.nowSeconds()) {
+      throw authorizationError("memory session.open challenge expired");
+    }
+    if (typeof invocation.challenge !== "string") {
+      throw authorizationError("memory session.open requires challenge");
+    }
+    if (invocation.challenge !== challenge.value) {
+      throw authorizationError("memory session.open challenge mismatch");
+    }
+
+    return {
+      audience,
+      challenge: {
+        value: challenge.value,
+        expiresAt: challenge.expiresAt,
+      },
+    };
+  }
+
+  consumeSessionOpenChallenge(challenge: SessionOpenChallenge): void {
+    if (this.#sessionOpenChallenge === null) {
+      return;
+    }
+    if (this.#sessionOpenChallenge.value === challenge.value) {
+      this.#sessionOpenChallenge.consumed = true;
+    }
   }
 
   async receive(payload: string): Promise<void> {
@@ -453,6 +527,9 @@ class Connection {
         return;
       }
       const response = respondToHello(parsed);
+      if (response.type === "hello.ok") {
+        response.sessionOpen = this.issueSessionOpenAuth();
+      }
       this.send(response);
       if (response.type !== "hello.ok") {
         return;
@@ -659,9 +736,22 @@ export class Server {
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
-      authorizeSessionOpen?: (
+      authorizeSessionOpen: (
         message: SessionOpenRequest,
+        context: SessionOpenAuthContext,
       ) => Promise<string | undefined> | string | undefined;
+      /**
+       * Authentication data advertised in `hello.ok` and enforced for
+       * `session.open` on this server.
+       */
+      sessionOpenAuth: {
+        /** Audience value clients must sign into `session.open` as `aud`. */
+        audience: string;
+        /** How long a connection challenge may be used, in seconds. */
+        challengeTtlSeconds?: number;
+        /** Current unix time in seconds. Tests may inject this. */
+        nowSeconds?: () => number;
+      };
       /**
        * Space access control. `off` (default) preserves the historical
        * any-authenticated-session-may-do-anything behavior. `observe`
@@ -687,10 +777,31 @@ export class Server {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
       };
-    } = {},
+    },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+  }
+
+  nowSeconds(): number {
+    return this.options.sessionOpenAuth.nowSeconds?.() ??
+      Math.floor(Date.now() / 1000);
+  }
+
+  sessionOpenAudience(): string {
+    return this.options.sessionOpenAuth.audience;
+  }
+
+  sessionOpenHandshake(): SessionOpenAuthMetadata {
+    const ttl = this.options.sessionOpenAuth.challengeTtlSeconds ??
+      DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS;
+    return {
+      audience: this.sessionOpenAudience(),
+      challenge: {
+        value: randomHex(SESSION_OPEN_CHALLENGE_BYTES),
+        expiresAt: this.nowSeconds() + ttl,
+      },
+    };
   }
 
   /** Counters for ACL decisions; `wouldDeny` is the observe-mode rollout
@@ -1357,8 +1468,13 @@ export class Server {
     connection: Connection,
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
+      const authContext = connection.sessionOpenAuthContext(message);
+      const principal = await this.options.authorizeSessionOpen(
+        message,
+        authContext,
+      );
+      connection.consumeSessionOpenChallenge(authContext.challenge);
       const engine = await this.openEngine(message.space);
-      const principal = await this.options.authorizeSessionOpen?.(message);
       this.#ensureCreatorSeeded(engine, message.space, principal);
       const deny = await this.#authorizeMessage(
         message.space,
@@ -1388,6 +1504,7 @@ export class Server {
           opened.sessionId,
         )
         : null;
+      const nextSessionOpen = connection.issueSessionOpenAuth();
       return {
         type: "response",
         requestId: message.requestId,
@@ -1398,6 +1515,7 @@ export class Server {
           caughtUpLocalSeq: opened.caughtUpLocalSeq,
           ...(opened.resumed === true ? { resumed: true } : {}),
           ...(catchup ? { sync: catchup.effect } : {}),
+          sessionOpen: nextSessionOpen,
         },
       };
     } catch (error) {
@@ -2392,7 +2510,18 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      return Promise.resolve(encodeMemoryBoundary(respondToHello(parsed)));
+      const response = respondToHello(parsed);
+      if (response.type !== "hello.ok") {
+        return Promise.resolve(encodeMemoryBoundary(response));
+      }
+      return Promise.resolve(encodeMemoryBoundary({
+        type: "response",
+        requestId: "handshake",
+        error: toError(
+          "ProtocolError",
+          "memory Server.respond cannot issue session.open authentication metadata",
+        ),
+      }));
     }
     return Promise.resolve(null);
   }

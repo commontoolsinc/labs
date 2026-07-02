@@ -24,7 +24,7 @@ occurs when dragging modules with multiple browser tabs open.
 - Uses `<cf-drag-source>` wrapper around each module card
 - Uses `<cf-drop-zone>` between each module and at start/end of columns
 - `insertAtPosition` handler receives the dragged item and insertion position
-- Handler updates `subCharms` array with new order and pinned state
+- Handler updates `subPieces` array with new order and pinned state
 
 ### Layout Modes
 
@@ -43,7 +43,7 @@ The framework's sync mechanism creates a **race condition** when two browser
 tabs are open to the same piece:
 
 ```
-Tab A: User drags module    →  subCharms.set([...reordered])  →  Write to server
+Tab A: User drags module    →  subPieces.set([...reordered])  →  Write to server
 Tab B: (idle, but syncing)  →  Receives update                →  May write back stale data
                                     ↓
                             CONFLICT DETECTED
@@ -60,7 +60,7 @@ atomically:
 
 ```typescript
 // Under the hood, this becomes multiple writes:
-subCharms.set([{ piece: link, type: "notes", name: "My Notes" }]);
+subPieces.set([{ piece: link, type: "notes", name: "My Notes" }]);
 // → Write: modules[0].piece = link
 // → Write: modules[0].type = "notes"    // ← Can be lost in conflict!
 // → Write: modules[0].name = "My Notes"
@@ -75,7 +75,7 @@ lost.
 - Modules show "📋" fallback icon instead of proper icon (📝, 📧, etc.)
 - Module header shows "📋 Unknown" or similar
 - The `piece` link still works (sub-piece data is intact)
-- Only the metadata in the parent's `subCharms` array is corrupted
+- Only the metadata in the parent's `subPieces` array is corrupted
 
 ---
 
@@ -100,7 +100,7 @@ piece:
 3. **Array element updates are NOT atomic** - conflict mid-write can lose
    properties
 4. **When two tabs write simultaneously:**
-   - Both tabs call `subCharms.set(newList)`
+   - Both tabs call `subPieces.set(newList)`
    - Writes race to server
    - Conflict detected, retry occurs
    - Retry may read partial/stale data where `type` property is missing
@@ -141,17 +141,17 @@ the framework's idiomatic patterns:
 
 ```typescript
 const insertAtPosition = handler<
-  { detail: { sourceCell: Writable<SubCharmEntry> } },
+  { detail: { sourceCell: Writable<SubPieceEntry> } },
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    insertAfterEntry: SubCharmEntry | null; // null = insert at start
+    subPieces: Writable<SubPieceEntry[]>;
+    insertAfterEntry: SubPieceEntry | null; // null = insert at start
     targetPinned: boolean;
   }
->((event, { subCharms, insertAfterEntry, targetPinned }) => {
+>((event, { subPieces, insertAfterEntry, targetPinned }) => {
   const sourceCell = event.detail?.sourceCell;
   if (!sourceCell) return;
 
-  const current = subCharms.get() || [];
+  const current = subPieces.get() || [];
 
   // Find the ACTUAL entry in current array using Writable.equals() for proper link identity
   // This ensures we have complete, fresh data even if sourceCell is stale from multi-tab conflicts
@@ -193,7 +193,7 @@ const insertAtPosition = handler<
     ...withoutDragged.slice(insertIndex),
   ];
 
-  subCharms.set(newList);
+  subPieces.set(newList);
 });
 ```
 
@@ -217,7 +217,7 @@ based on our understanding of the framework.
 
 2. **Fresh data from current array**: Instead of using `sourceCell.get()` which
    may return stale data from before a conflict retry, we find the entry in the
-   current `subCharms.get()` array. This array should be authoritative and have
+   current `subPieces.get()` array. This array should be authoritative and have
    all properties intact.
 
 3. **Spread preserves all properties**: By spreading `actualEntry` (not the
@@ -242,7 +242,7 @@ fill remaining column space for easier drop target.
 <cf-drop-zone
   accept="module"
   oncf-drop={insertAtPosition({
-    subCharms,
+    subPieces,
     insertAfterEntry: null,
     targetPinned: false,
   })}

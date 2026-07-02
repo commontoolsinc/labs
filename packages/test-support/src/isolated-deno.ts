@@ -1,4 +1,5 @@
 import { join } from "@std/path";
+import { parse as parseJsonc } from "@std/jsonc";
 
 export interface DenoCommandWithTemporaryLockOptions {
   root: string;
@@ -12,6 +13,14 @@ export interface DenoCheckWithTemporaryConfigOptions {
   config: unknown;
   files: string[];
   tempConfigPrefix: string;
+}
+
+// Read and parse a Deno config file (`deno.json` / `deno.jsonc`) with the JSONC
+// parser, so a config that carries comments is read correctly.
+export async function readDenoConfig(
+  path: string,
+): Promise<Record<string, any>> {
+  return parseJsonc(await Deno.readTextFile(path)) as Record<string, any>;
 }
 
 async function removeIfPresent(path: string, options?: Deno.RemoveOptions) {

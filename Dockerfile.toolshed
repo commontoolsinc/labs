@@ -1,7 +1,7 @@
 # Toolshed container image (M0 spike — see common-cluster docs/implementation-plan.md)
 #
 # Build context must be the labs repo ROOT (workspace imports resolve from the
-# root deno.json). Modeled on clusterduck's Dockerfile.worker labs-builder
+# root deno.jsonc). Modeled on clusterduck's Dockerfile.worker labs-builder
 # stage, pinned to the Deno version tasks/check.sh requires.
 #
 #   docker build -f Dockerfile.toolshed --build-arg COMMIT_SHA=$(git rev-parse HEAD) \

@@ -28,14 +28,16 @@ ls -la cf.key                  # Check for existing
 # Never overwrite an existing key file — existing identity-scoped data
 # becomes invisible under a new identity.
 
-# For local dev: derive key matching toolshed's "implicit trust" identity
-deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
-
-# For a fresh random key (e.g., against production):
+# Default: a fresh, UNIQUE key. Use this for normal pattern dev and for any
+# server (local, shared, or remote).
 deno run -A packages/cli/mod.ts id new > cf.key
 
 # To match a browser identity registered with a recovery phrase:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > cf.key
+
+# To reproduce a key from your OWN secret passphrase (unique to you; pass via
+# file or stdin to keep it out of shell history):
+deno run -A packages/cli/mod.ts id derive -- passphrase.txt > cf.key
 ```
 
 Both `id derive` and `id from-mnemonic` accept the secret three ways: as a file
@@ -64,9 +66,9 @@ export CF_IDENTITY=./cf.key
 **Identity visibility footgun:** If CLI and browser use different DIDs, the same
 piece should still load and unscoped/`PerSpace` data should remain visible, but
 `PerUser`, `PerSession`, favorites, drafts, and home-space state may look empty
-or default. For identity-sensitive local work, use one key everywhere and import
-the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
-`docs/development/SHARED_IDENTITY.md`.
+or default. For identity-sensitive local work, use one key everywhere — generate
+it with `id new` and import the CLI PKCS8/PEM key in the browser via
+`Import CLI Key`. See `docs/development/SHARED_IDENTITY.md`.
 
 **Experimental flags** must be set as env vars on both servers AND CLI commands.
 See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
@@ -214,7 +216,7 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `packages/patterns/system/default-app.tsx` - System pieces (allCharms list
+- `packages/patterns/system/default-app.tsx` - System pieces (allPieces list
   lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
 - `docs/development/debugging/cli-debugging.md` - CLI debugging

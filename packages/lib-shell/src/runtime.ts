@@ -35,6 +35,10 @@ export type RuntimeCfcEnforcementMode = NonNullable<
   RuntimeClientOptions["cfcEnforcementMode"]
 >;
 
+export type RuntimeCfcFlowLabelsMode = NonNullable<
+  RuntimeClientOptions["cfcFlowLabels"]
+>;
+
 export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
@@ -57,7 +61,19 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+  /**
+   * Flow-label propagation dial (S16). Shell hosts default to "observe"
+   * (Epic H1): derive the per-tx conservative join and emit diagnostics,
+   * persisting nothing — the measurement stage before "persist".
+   */
+  cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+  /**
+   * When true, forward the worker runtime's console output to the main
+   * thread so it reaches devtools and integration-test console capture.
+   * Off by default.
+   */
+  forwardWorkerConsole?: boolean;
   getBuildHash?: () => Promise<string | undefined>;
   workerUrl?: URL;
 };
@@ -110,14 +126,22 @@ export function createRuntimeClientOptions({
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
+  // Epic H1 (docs/plans/cfc-future-work-implementation.md): shell hosts run
+  // the flow-label dial at "observe" — derive the per-tx conservative join
+  // and emit diagnostics without persisting — as the measurement stage
+  // before flipping to "persist" (H2).
+  cfcFlowLabels = "observe",
   trustSnapshot,
+  forwardWorkerConsole,
 }: {
   session: Session;
   apiUrl: URL;
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+  cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+  forwardWorkerConsole?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? {
@@ -135,7 +159,9 @@ export function createRuntimeClientOptions({
     spaceName: session.spaceName,
     experimental,
     cfcEnforcementMode,
+    cfcFlowLabels,
     trustSnapshot: resolvedTrustSnapshot,
+    forwardWorkerConsole,
   };
 }
 
@@ -461,7 +487,9 @@ export class RuntimeInternals extends EventTarget {
     spaceHostMap,
     experimental,
     cfcEnforcementMode,
+    cfcFlowLabels,
     trustSnapshot,
+    forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
@@ -501,7 +529,9 @@ export class RuntimeInternals extends EventTarget {
         spaceHostMap,
         experimental,
         cfcEnforcementMode,
+        cfcFlowLabels,
         trustSnapshot,
+        forwardWorkerConsole,
       }),
     );
 

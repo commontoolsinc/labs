@@ -8,10 +8,13 @@
  *
  * Note: Actual Gmail API calls are not tested here - only state management.
  *
- * Run: deno task cf test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns/google --verbose
+ * Run: deno task cf test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern } from "commonfabric";
-import GmailAgenticSearch from "./gmail-agentic-search.tsx";
+import { computed, pattern, Writable } from "commonfabric";
+import GmailAgenticSearch, { type Auth } from "./gmail-agentic-search.tsx";
+
+const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
+const futureExpiry = 4102444800000;
 
 export default pattern(() => {
   // Instantiate with minimal config
@@ -28,6 +31,26 @@ export default pattern(() => {
     title: "Receipt Finder",
     scanButtonLabel: "Find Receipts",
     maxSearches: 5,
+  });
+
+  const directAuth = new Writable<Auth>({
+    token: "test-token",
+    tokenType: "Bearer",
+    scope: [gmailScope],
+    expiresIn: 3600,
+    expiresAt: futureExpiry,
+    refreshToken: "refresh-token",
+    user: {
+      email: "direct@example.com",
+      name: "Direct User",
+      picture: "",
+    },
+  });
+
+  const directAuthSearcher = GmailAgenticSearch({
+    agentGoal: "Find messages with direct auth",
+    title: "Direct Auth Searcher",
+    auth: directAuth,
   });
 
   // ==========================================================================
@@ -101,6 +124,10 @@ export default pattern(() => {
     () => customSearcher.searchProgress.status === "idle",
   );
 
+  const assert_direct_auth_is_used = computed(() =>
+    directAuthSearcher.authSource === "direct"
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -125,10 +152,12 @@ export default pattern(() => {
       // === Custom config instance ===
       { assertion: assert_custom_not_scanning },
       { assertion: assert_custom_progress_idle },
+      { assertion: assert_direct_auth_is_used },
     ],
     // Expose subjects for debugging
     searcher,
     customSearcher,
+    directAuthSearcher,
     // Pattern triggers scheduler errors from auth/filter computations in headless runner
     allowRuntimeErrors: true,
   };

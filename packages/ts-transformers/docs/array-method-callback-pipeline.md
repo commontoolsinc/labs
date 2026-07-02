@@ -100,7 +100,7 @@ For the identifier-form path, the late stages handle most of the lowering:
 
 - During stage 7, the expression-site lowering decides whether each expression
   in the body needs an early `derive`/`computed` wrap. The decision flows from
-  `analyze(expression)` reporting `containsOpaqueRef` / `requiresRewrite` /
+  `analyze(expression)` reporting `containsReactive` / `requiresRewrite` /
   `dataFlows`.
 - Most `elem.foo`-style passthrough reads (inside `{elem.foo}` JSX, inside
   `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at
@@ -127,15 +127,15 @@ The decision at stage 7 about whether to wrap is made by a gate in
 ## Why the dataflow analyzer needs an explicit signal
 
 The analyzer (`src/ast/dataflow.ts`) decides reactivity from the TypeScript type
-at each expression. For a direct `OpaqueRef<T>` reference, the type itself says
+at each expression. For a direct `Reactive<T>` reference, the type itself says
 "this is reactive."
 
 The synthesized array-method-callback element parameter is **deliberately not**
-typed as `OpaqueRef`. `SchemaFactory.createArrayMethodCallbackSchema`
+typed as `Reactive`. `SchemaFactory.createArrayMethodCallbackSchema`
 (`src/closures/utils/schema-factory.ts`) types `element` as the plain user
 element type `T`. Downstream consumers (capability summary analysis,
 type-shrinking, schema generation) need the plain type — widening to
-`OpaqueRef<T>` would break their assumptions.
+`Reactive<T>` would break their assumptions.
 
 So the analyzer needs an out-of-band signal that `elem` is implicitly opaque
 even when its TS type is plain. That signal is the
@@ -146,9 +146,9 @@ even when its TS type is plain. That signal is the
   that function is in `mapCallbackRegistry`. If yes, the identifier is
   reads-as-opaque.
 - The analyzer's identifier branch returns the same opaque shape it returns for
-  a direct `OpaqueRef` when the hook says yes.
+  a direct `Reactive` when the hook says yes.
 - The analyzer's property-access branch (when the recursive analysis of the
-  target returns `containsOpaqueRef: true` and the leftmost identifier is an
+  target returns `containsReactive: true` and the leftmost identifier is an
   element binding) records the full property access as a dataflow — not just the
   root identifier — so derive builders can emit the partial- key inputs shape
   `{ elem: { foo: elem.key("foo") } }`.

@@ -2,10 +2,11 @@ import {
   type BuiltInLLMMessage,
   computed,
   type Default,
-  fetchData,
+  fetchText,
   handler,
   ifElse,
   llmDialog,
+  NAME,
   nonPrivateRandom,
   pattern,
   patternTool,
@@ -29,6 +30,12 @@ import {
 } from "./summary-index.tsx";
 import SuggestionHistory from "./suggestion-history.tsx";
 import { type MentionablePiece } from "./backlinks-index.tsx";
+
+type SuggestionResult = {
+  [NAME]?: string;
+};
+
+type SuggestionResultCell = Writable<SuggestionResult>;
 
 const triggerGeneration = handler<
   unknown,
@@ -87,9 +94,9 @@ export default pattern<
   {
     situation: string;
     context: { [id: string]: any };
-    initialResults: Writable<unknown>[] | Default<[]>;
+    initialResults: SuggestionResultCell[] | Default<[]>;
   },
-  WishState<Writable<any>> & { [UI]: VNode }
+  WishState<SuggestionResultCell> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {
   // --- Picker state (used when initialResults is non-empty) ---
   const selectedIndex = new Writable(0);
@@ -100,7 +107,7 @@ export default pattern<
     return userConfirmedIndex.get();
   });
 
-  const pickerResult = computed(() => {
+  const pickerResult = computed((): SuggestionResultCell | undefined => {
     if (initialResults.length === 0) return undefined;
     const idx = confirmedIndex; // Auto-unwraps to number | null
     if (idx === null) return undefined; // Wait for user confirmation
@@ -121,7 +128,7 @@ export default pattern<
   const suggestionHistory = SuggestionHistory({});
 
   const patternIndexUrl = wish<{ url: Writable<string> }>({
-    query: "#pattern-index",
+    query: "#patternIndex",
   });
   const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
   computed(() => {
@@ -134,9 +141,8 @@ export default pattern<
     }
   });
 
-  const { result: patternIndex } = fetchData({
+  const { result: patternIndex } = fetchText({
     url: resolvedPatternUrl,
-    mode: "text",
   });
 
   const profileContext = computed(() => {
@@ -203,7 +209,7 @@ Use the user context above to personalize your suggestions when relevant.`;
     },
     model: "anthropic:claude-sonnet-4-5",
     context,
-    resultSchema: toSchema<{ cell: Writable<any> }>(),
+    resultSchema: toSchema<{ cell: SuggestionResultCell }>(),
     queue: "suggestions",
   });
 

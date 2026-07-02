@@ -184,6 +184,16 @@ describe("CFInput", () => {
     el.timingDelay = 500;
     expect(el.timingDelay).toBe(500);
   });
+
+  it("commit() returns a promise and resolves", async () => {
+    const el = new CFInput();
+    // No cell is bound (binding happens in firstUpdated, not run here), so
+    // commit() flushes and falls back to the cell controller's setValue (a
+    // no-op for an unbound value), then resolves.
+    const result = el.commit();
+    expect(result).toBeInstanceOf(Promise);
+    await result;
+  });
 });
 
 describe("CFInput — INPUT_PATTERNS", () => {

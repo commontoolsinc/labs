@@ -53,8 +53,6 @@ also read "vertically": learn a concept, then immediately open the hood on it.
   repository root and are the ground truth; when this tutorial and the code
   disagree, the code wins.
 - Code in patterns imports from the `commonfabric` module.
-- You will meet one legacy name in the code: a *piece* is called a *charm* in
-  older identifiers and package names (e.g. `background-charm-service`). This
-  tutorial uses the current names — **pattern** and **piece** — and flags the
-  old one where you'll encounter it. (An even older name for pattern,
-  *recipe*, survives only in a few stale comments and test fixtures.)
+- This tutorial uses the current names, **pattern** and **piece**. An older name
+  for pattern, *recipe*, survives only in a few stale comments and test
+  fixtures.

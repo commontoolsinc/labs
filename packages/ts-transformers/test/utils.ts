@@ -58,7 +58,7 @@ export async function batchTypeCheckFixtures(
     return acc;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
@@ -288,7 +288,7 @@ export async function transformFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
@@ -522,7 +522,7 @@ export async function transformFiles(
           "1. Update the input fixture to use valid Common Fabric patterns",
         );
         errors.push(
-          "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
+          "   (e.g., use Cell<T> for mutable state, Reactive<T> for references)",
         );
         errors.push(
           "2. Run with SKIP_INPUT_CHECK=1 to skip validation temporarily",
@@ -634,7 +634,7 @@ export async function validateFiles(
     return files;
   }, {} as Record<string, string>);
 
-  // Match compiler options from deno.json for consistent type-checking
+  // Match compiler options from deno.jsonc for consistent type-checking
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,

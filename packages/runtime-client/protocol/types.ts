@@ -39,6 +39,7 @@ export enum RequestType {
   // Cell operations (main -> worker)
   CellGet = "cell:get",
   CellSet = "cell:set",
+  CellPush = "cell:push",
   CellSend = "cell:send",
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
@@ -58,6 +59,7 @@ export enum RequestType {
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
+  SetForwardWorkerConsole = "runtime:setForwardWorkerConsole",
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
   GetSettleStats = "runtime:getSettleStats",
   GetSettleStatsHistory = "runtime:getSettleStatsHistory",
@@ -157,6 +159,13 @@ export interface InitializationData {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
+  // Flow-label propagation dial for the worker runtime (S16 default
+  // transition; docs/plans/cfc-future-work-implementation.md Epic H1):
+  // "off" = no derivation; "observe" = compute the per-tx conservative
+  // join and emit diagnostics, persist nothing; "persist" = write derived
+  // label components. Propagation never rejects by itself. Absent =
+  // the runner's default ("off").
+  cfcFlowLabels?: "off" | "observe" | "persist";
   // Whether author-supplied render-boundary declassification is honored.
   // Defaults to "allow" (current behavior). "deny" ignores author-supplied
   // `declassifyConfidentiality` so a pattern can't release a secret upward
@@ -177,6 +186,12 @@ export interface InitializationData {
     actingPrincipal?: string;
     revision?: string;
   };
+  // When true, the worker mirrors its own console output (log/warn/error)
+  // to the main thread, which re-emits it on the page console prefixed
+  // with `[worker]`, so runtime-internal logs reach devtools and
+  // integration-test console capture. Off by default: each forwarded call
+  // costs one postMessage, so it is enabled only for diagnostic runs.
+  forwardWorkerConsole?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -200,6 +215,16 @@ export interface CellGetRequest extends BaseRequest {
 
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
+  cell: CellRef;
+  value: JSONValue;
+}
+
+// A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
+// it carries the whole already-appended array — but routed as its own request so
+// the runtime keeps the read-target as a commit precondition (compare-and-set),
+// rather than the blind last-write-wins of CellSet.
+export interface CellPushRequest extends BaseRequest {
+  type: RequestType.CellPush;
   cell: CellRef;
   value: JSONValue;
 }
@@ -320,6 +345,11 @@ export interface SetLoggerEnabledRequest extends BaseRequest {
 
 export interface SetTelemetryEnabledRequest extends BaseRequest {
   type: RequestType.SetTelemetryEnabled;
+  enabled: boolean;
+}
+
+export interface SetForwardWorkerConsoleRequest extends BaseRequest {
+  type: RequestType.SetForwardWorkerConsole;
   enabled: boolean;
 }
 
@@ -673,6 +703,7 @@ export type IPCClientRequest =
   | DisposeRequest
   | CellGetRequest
   | CellSetRequest
+  | CellPushRequest
   | CellSendRequest
   | CellSubscribeRequest
   | CellUnsubscribeRequest
@@ -686,6 +717,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | SetForwardWorkerConsoleRequest
   | ResetLoggerBaselinesRequest
   | GetSettleStatsRequest
   | GetSettleStatsHistoryRequest
@@ -920,6 +952,10 @@ export type Commands = {
     request: SetTelemetryEnabledRequest;
     response: EmptyResponse;
   };
+  [RequestType.SetForwardWorkerConsole]: {
+    request: SetForwardWorkerConsoleRequest;
+    response: EmptyResponse;
+  };
   [RequestType.ResetLoggerBaselines]: {
     request: ResetLoggerBaselinesRequest;
     response: EmptyResponse;
@@ -967,6 +1003,10 @@ export type Commands = {
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.CellPush]: {
+    request: CellPushRequest;
     response: EmptyResponse;
   };
   [RequestType.CellSend]: {

@@ -11,7 +11,7 @@ import { __cfHelpers } from "commonfabric";
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().
  *
- * Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
+ * Inside a lift-applied callback, Reactive values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
 import { computed, pattern, UI } from "commonfabric";
@@ -117,7 +117,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 // FIXTURE: computed-local-var-map
 // Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const localVar = filtered; return localVar.map(fn) }) → lift(({ filtered }) => { const localVar = filtered; return localVar.map(fn) })(...)
-// Context: Inside a lift-applied callback, OpaqueRef values are unwrapped to plain JS,
+// Context: Inside a lift-applied callback, Reactive values are unwrapped to plain JS,
 //   so `localVar` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on local aliases.
 export default pattern((__cf_pattern_input) => {

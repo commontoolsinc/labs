@@ -2,6 +2,10 @@ import { assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { isCollectionType } from "../../src/ast/mod.ts";
+import {
+  inferArrayElementType,
+  unwrapOpaqueLikeType,
+} from "../../src/ast/type-inference.ts";
 
 function createProgram(source: string): {
   sourceFile: ts.SourceFile;
@@ -130,4 +134,118 @@ Deno.test("isCollectionType: scalars, objects, and mixed unions are not collecti
 Deno.test("isCollectionType: an undefined type is not a collection", () => {
   const { checker } = createProgram(SOURCE);
   assertEquals(isCollectionType(undefined, checker), false);
+});
+
+// `inferArrayElementType` operates on the resolved Type, not the syntax, so the
+// declared Array/ReadonlyArray interfaces need a numeric index signature for
+// `getIndexTypeOfType` to return the element type.
+const ARRAY_ELEMENT_SOURCE = `
+  interface Array<T> { length: number; [index: number]: T; }
+  interface ReadonlyArray<T> { length: number; [index: number]: T; }
+  interface Box<T> { value: T; }
+
+  declare const plainArray: string[];
+  declare const unionOfArrays: string[] | number[];
+  declare const optionalArray: string[] | undefined;
+  declare const refIntersection: { tag: number } & string[];
+  declare const plainIntersection: { a: number } & { b: string };
+  declare const boxedArrays: Box<string[]> | number[];
+  declare const boxedScalarMix: Box<string> | number[];
+  declare const scalar: string;
+
+  plainArray;
+  unionOfArrays;
+  optionalArray;
+  refIntersection;
+  plainIntersection;
+  boxedArrays;
+  boxedScalarMix;
+  scalar;
+`;
+
+/** Find the trailing `name;` expression-statement reference by identifier. */
+function findReference(
+  sourceFile: ts.SourceFile,
+  name: string,
+): ts.Expression {
+  let found: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isExpressionStatement(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === name
+    ) {
+      found = node.expression;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  if (!found) throw new Error(`Reference ${name} not found`);
+  return found;
+}
+
+function elementTypeText(name: string): string {
+  const { sourceFile, checker } = createProgram(ARRAY_ELEMENT_SOURCE);
+  const result = inferArrayElementType(findReference(sourceFile, name), {
+    checker,
+    factory: ts.factory,
+    sourceFile,
+  });
+  return result.type ? checker.typeToString(result.type) : "<none>";
+}
+
+Deno.test("inferArrayElementType: plain array yields the element type", () => {
+  assertEquals(elementTypeText("plainArray"), "string");
+});
+
+Deno.test("inferArrayElementType: union of distinct arrays yields a union element", () => {
+  // Drives the union fallback (`extractElementFromArrayType` over the union),
+  // de-duplication, and the internal `getUnionType` reconstruction.
+  assertEquals(elementTypeText("unionOfArrays"), "string | number");
+});
+
+Deno.test("inferArrayElementType: array-or-undefined drops the undefined arm", () => {
+  // Drives the single-survivor branch of `combineExtractedElementTypes`.
+  assertEquals(elementTypeText("optionalArray"), "string");
+});
+
+Deno.test("inferArrayElementType: intersection with an array reference unwraps the array", () => {
+  // Drives `findReferenceTypeInIntersection` returning the array member.
+  assertEquals(elementTypeText("refIntersection"), "string");
+});
+
+Deno.test("inferArrayElementType: intersection without an array member is not array-like", () => {
+  // Drives `findReferenceTypeInIntersection` returning undefined and the
+  // empty-result branch of `combineExtractedElementTypes`.
+  assertEquals(elementTypeText("plainIntersection"), "<none>");
+});
+
+Deno.test("inferArrayElementType: union of a wrapped array and a plain array", () => {
+  // Drives the Object/Reference branch of `extractElementFromArrayType` that
+  // recurses into a reference's type argument.
+  assertEquals(elementTypeText("boxedArrays"), "string | number");
+});
+
+Deno.test("inferArrayElementType: a non-array reference member contributes nothing", () => {
+  // `Box<string>` is a reference whose argument is not array-like, so only the
+  // `number[]` arm contributes an element type.
+  assertEquals(elementTypeText("boxedScalarMix"), "number");
+});
+
+Deno.test("inferArrayElementType: a scalar has no element type", () => {
+  assertEquals(elementTypeText("scalar"), "<none>");
+});
+
+Deno.test("unwrapOpaqueLikeType: a plain type is returned unchanged", () => {
+  const { sourceFile, checker } = createProgram(ARRAY_ELEMENT_SOURCE);
+  const scalar = checker.getTypeAtLocation(findReference(sourceFile, "scalar"));
+  assertEquals(
+    checker.typeToString(unwrapOpaqueLikeType(scalar, checker)!),
+    "string",
+  );
+});
+
+Deno.test("unwrapOpaqueLikeType: undefined input returns undefined", () => {
+  const { checker } = createProgram(ARRAY_ELEMENT_SOURCE);
+  assertEquals(unwrapOpaqueLikeType(undefined, checker), undefined);
 });

@@ -26,7 +26,7 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
   const clickCount = new Writable(0);
 
   const handleClick = action(() => {
-    clickCount.set(clickCount.get() + 1);
+    clickCount.increment(1);
   });
 
   return {

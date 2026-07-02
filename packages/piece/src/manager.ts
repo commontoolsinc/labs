@@ -10,6 +10,7 @@ import {
   isLink,
   isStream,
   JSONSchema,
+  KeepAsCell,
   type MemorySpace,
   Module,
   parseLink,
@@ -960,7 +961,7 @@ export class PieceManager {
         linkCell.getAsLink({
           base: targetInputCell,
           includeSchema: true,
-          keepStreams: true,
+          keepAsCell: KeepAsCell.OnlyStream,
         }),
       );
     });

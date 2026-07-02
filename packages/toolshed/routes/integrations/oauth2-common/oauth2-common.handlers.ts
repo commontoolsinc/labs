@@ -1,7 +1,7 @@
 import type { Tokens } from "@cmd-johnson/oauth2-client";
 import type { Context } from "@hono/hono";
 import { getLogger } from "@commonfabric/utils/logger";
-import { setBGCharm } from "@commonfabric/background-charm";
+import { setBGPiece } from "@commonfabric/background-piece";
 import { runtime } from "@/index.ts";
 import { OAuth2TokenSchema } from "@commonfabric/runner";
 import type { JSONSchema } from "@commonfabric/runner";
@@ -330,7 +330,7 @@ export function createOAuth2Handlers(
         const integrationPieceId = decodedState?.integrationPieceId;
 
         if (space && integrationPieceId) {
-          await setBGCharm({
+          await setBGPiece({
             space,
             pieceId: integrationPieceId,
             integration: config.name,
@@ -469,7 +469,7 @@ export function createOAuth2Handlers(
   async function backgroundIntegration(c: Context) {
     try {
       const payload = await c.req.json();
-      await setBGCharm({
+      await setBGPiece({
         space: payload.space,
         pieceId: payload.pieceId,
         integration: payload.integration,

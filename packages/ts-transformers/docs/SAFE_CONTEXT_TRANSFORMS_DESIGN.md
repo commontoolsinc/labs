@@ -1,8 +1,8 @@
-# Selective OpaqueRef Transformations in Safe Wrapper Contexts
+# Selective Reactive Transformations in Safe Wrapper Contexts
 
 ## Problem Statement
 
-The `OpaqueRefJSXTransformer` currently skips ALL JSX transformation when inside
+The `ReactiveJSXTransformer` currently skips ALL JSX transformation when inside
 a "safe callback wrapper" (action, handler, computed, derive, lift, inline JSX
 event handlers, standalone functions). This blanket skip was intended to mean
 "opaque reading is allowed here", but it inadvertently skips transformations
@@ -23,7 +23,7 @@ handler<Event, State>((event, state) => {
 
 Currently, this code is NOT transformed because we're inside a handler (safe
 context). But the `&&` expression evaluates `computed()` which returns an
-`OpaqueRef` object - and objects are always truthy in JavaScript! So `<Panel />`
+`Reactive` object - and objects are always truthy in JavaScript! So `<Panel />`
 always renders regardless of the actual value.
 
 **Expected behavior:** Transform `computed() && <Panel />` to
@@ -31,7 +31,7 @@ always renders regardless of the actual value.
 
 ### Root Cause
 
-In `opaque-ref-jsx.ts` line 39:
+In `reactive-jsx.ts` line 39:
 
 ```typescript
 if (isInsideSafeCallbackWrapper(node, checker)) {
@@ -67,16 +67,16 @@ wrappers.
 
 ### What Should Transform in Safe Contexts
 
-| Transformation                    | In Safe Context? | Reason                                         |
-| --------------------------------- | ---------------- | ---------------------------------------------- |
-| `&&` → `when()`                   | **YES**          | OpaqueRef is truthy; need proper short-circuit |
-| `                                 |                  | `→`unless()`                                   |
-| `ifElse()` predicate → `derive()` | **YES**          | Predicates need reactive tracking              |
-| Property access → `derive()`      | **NO**           | Already in reactive context                    |
-| Template literal → `derive()`     | **NO**           | Already in reactive context                    |
-| Ternary → `derive()`              | **NO**           | Already in reactive context                    |
-| Unary `!` → `derive()`            | **NO**           | Already in reactive context                    |
-| Container → `derive()`            | **NO**           | Already in reactive context                    |
+| Transformation                    | In Safe Context? | Reason                                        |
+| --------------------------------- | ---------------- | --------------------------------------------- |
+| `&&` → `when()`                   | **YES**          | Reactive is truthy; need proper short-circuit |
+| `                                 |                  | `→`unless()`                                  |
+| `ifElse()` predicate → `derive()` | **YES**          | Predicates need reactive tracking             |
+| Property access → `derive()`      | **NO**           | Already in reactive context                   |
+| Template literal → `derive()`     | **NO**           | Already in reactive context                   |
+| Ternary → `derive()`              | **NO**           | Already in reactive context                   |
+| Unary `!` → `derive()`            | **NO**           | Already in reactive context                   |
+| Container → `derive()`            | **NO**           | Already in reactive context                   |
 
 ### Key Insight
 
@@ -114,9 +114,9 @@ export interface EmitterContext {
 }
 ```
 
-### Step 2: Modify OpaqueRefJSXTransformer
+### Step 2: Modify ReactiveJSXTransformer
 
-**File:** `src/transformers/opaque-ref-jsx.ts`
+**File:** `src/transformers/reactive-jsx.ts`
 
 Remove the early return for safe contexts. Instead, detect safe context and pass
 it through:
@@ -157,9 +157,9 @@ function transform(context: TransformationContext): ts.SourceFile {
         // Only report errors for non-safe contexts
         if (!inSafeContext) {
           context.reportDiagnostic({
-            type: "opaque-ref:jsx-expression",
+            type: "reactive:jsx-expression",
             message:
-              "JSX expression with OpaqueRef computation should use derive",
+              "JSX expression with Reactive computation should use derive",
             node: node.expression,
           });
         }
@@ -325,10 +325,10 @@ export const emitCallExpression: Emitter = ({
 
 ### New Tests to Add
 
-**File:** `test/opaque-ref-jsx.test.ts` (or new file)
+**File:** `test/reactive-jsx.test.ts` (or new file)
 
 ```typescript
-describe("OpaqueRefJSXTransformer in safe contexts", () => {
+describe("ReactiveJSXTransformer in safe contexts", () => {
   it("transforms && to when() inside handler callback", () => {
     const input = `
       handler<Event, { show: boolean }>((e, { show }) => {
@@ -385,7 +385,7 @@ describe("OpaqueRefJSXTransformer in safe contexts", () => {
 This is a **bug fix** - existing code that was incorrectly NOT being transformed
 will now be transformed. This could cause:
 
-1. **Runtime behavior changes** - Code that was evaluating OpaqueRef objects as
+1. **Runtime behavior changes** - Code that was evaluating Reactive objects as
    truthy will now correctly evaluate their values
 2. **Potential new errors** - If code relied on the buggy "always truthy"
    behavior
@@ -397,7 +397,7 @@ However, these are correctness improvements, not regressions.
 | File                                                                        | Change                                    |
 | --------------------------------------------------------------------------- | ----------------------------------------- |
 | `src/transformers/expression-rewrite/types.ts`                              | Add `inSafeContext` to interfaces         |
-| `src/transformers/opaque-ref-jsx.ts`                                        | Remove early return, pass `inSafeContext` |
+| `src/transformers/reactive-jsx.ts`                                          | Remove early return, pass `inSafeContext` |
 | `src/transformers/expression-rewrite/rewrite-expression.ts`                 | Pass `inSafeContext` through              |
 | `src/transformers/expression-rewrite/emitters/binary-expression.ts`         | Guard fallback derive                     |
 | `src/transformers/expression-rewrite/emitters/call-expression.ts`           | Guard fallback derive                     |

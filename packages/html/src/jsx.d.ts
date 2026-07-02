@@ -2880,8 +2880,8 @@ type EventHandler<T> =
   | Stream<T>
   | Stream<void>;
 
-// `Charm` is not a pattern type.
-type Charm = any;
+// `Piece` is not a pattern type.
+type Piece = any;
 
 interface CFCellLinkElement extends CFHTMLElement {}
 interface CFSpaceLinkElement extends CFHTMLElement {}
@@ -2891,6 +2891,7 @@ interface CFLinkPreviewElement extends CFHTMLElement {}
 interface CFTextAreaElement extends CFHTMLElement {}
 interface CFFileInputElement extends CFHTMLElement {}
 interface CFImageInputElement extends CFHTMLElement {}
+interface CFImageElement extends CFHTMLElement {}
 interface CFInputLegacyElement extends CFHTMLElement {}
 interface CFCheckboxElement extends CFHTMLElement {}
 interface CFAutocompleteElement extends CFHTMLElement {}
@@ -2922,6 +2923,7 @@ interface CFQuestionElement extends CFHTMLElement {}
 interface CFAlertElement extends CFHTMLElement {}
 interface CFVStackElement extends CFHTMLElement {}
 interface CFMessageInputElement extends CFHTMLElement {}
+interface CFSubmitInputElement extends CFHTMLElement {}
 interface CFToolbarElement extends CFHTMLElement {}
 interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
@@ -3346,6 +3348,17 @@ interface CFMessageInputAttributes<T> extends CFHTMLAttributes<T> {
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "appearance"?: "rounded";
   "oncf-send"?: EventHandler<{ message: string }>;
+}
+
+interface CFSubmitInputAttributes<T> extends CFHTMLAttributes<T> {
+  "placeholder"?: string;
+  "buttonText"?: string;
+  "inputId"?: string;
+  "disabled"?: boolean | CellLike<boolean>;
+  // Optional initial text. The field is otherwise uncontrolled: it mirrors the
+  // typed text into its own `value` (read on the host as event.target.value on
+  // submit) and is not meant for two-way cell binding.
+  "initialValue"?: string;
 }
 
 interface CTSendMessageAttributes<T> extends CFHTMLAttributes<T> {
@@ -3854,6 +3867,14 @@ interface CFImageInputAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-error"?: EventHandler<any>;
 }
 
+interface CFImageAttributes<T> extends CFHTMLAttributes<T> {
+  "bytes"?: unknown;
+  "$bytes"?: CellLike<unknown>;
+  "mediaType"?: string;
+  "media-type"?: string;
+  "alt"?: string;
+}
+
 interface CFCheckboxAttributes<T> extends CFHTMLAttributes<T> {
   "$checked"?: CellLike<boolean>;
   "checked"?: boolean;
@@ -3998,8 +4019,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
-  "$mentionable"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
-  "$mentioned"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
+  "$mentionable"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
+  "$mentioned"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;
@@ -4962,6 +4983,10 @@ declare global {
         CFImageInputAttributes<CFImageInputElement>,
         CFImageInputElement
       >;
+      "cf-image": CFDOM.DetailedHTMLProps<
+        CFImageAttributes<CFImageElement>,
+        CFImageElement
+      >;
       "cf-checkbox": CFDOM.DetailedHTMLProps<
         CFCheckboxAttributes<CFCheckboxElement>,
         CFCheckboxElement
@@ -5045,6 +5070,10 @@ declare global {
       "cf-message-input": CFDOM.DetailedHTMLProps<
         CFMessageInputAttributes<CFMessageInputElement>,
         CFMessageInputElement
+      >;
+      "cf-submit-input": CFDOM.DetailedHTMLProps<
+        CFSubmitInputAttributes<CFSubmitInputElement>,
+        CFSubmitInputElement
       >;
       "cf-chat-message": CFDOM.DetailedHTMLProps<
         CFChatMessageAttributes<CFChatMessageElement>,

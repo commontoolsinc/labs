@@ -1,0 +1,66 @@
+{
+  "name": "@commonfabric/patterns",
+  // How to test in this package. A test belongs to exactly one of three lanes.
+  // Pick the lane by what the test needs, drop the file in the matching place,
+  // and the runner for that lane discovers it on its own — there is no list of
+  // files to keep in sync.
+  //
+  // Lane 1 — plain Deno unit test. A `*.test.ts` file of pure logic (helpers,
+  // parsing, schema/string utilities) that runs under `deno test` with no
+  // Common Fabric runtime, shell, toolshed, or browser. Put it anywhere in the
+  // package except an `integration/` directory. The `test` task below picks up
+  // every `**/*.test.ts` outside `integration/`, so adding a unit test is just
+  // adding the file. This is the only lane the root `deno task test` (the
+  // workspace "Test" CI job) runs for this package; it is not sharded.
+  // Examples: vehicles.test.ts, cfc/prompt-injection/prompt.test.ts.
+  //
+  // Lane 2 — pattern test (the testing and coverage docs call these "pattern
+  // unit tests"). A `*.test.tsx` file that `export default`s a pattern (or
+  // `multiUserTest(...)`) which drives a real pattern through `action(...)`
+  // steps and `assert_*` `computed(...)` checks. It is run by `cf test`, which
+  // instantiates it in the runtime; it is not a `deno test`. Colocate it next
+  // to the pattern it exercises. The `.tsx` extension alone routes it here: the
+  // `test` task's `**/*.test.ts` glob never matches `.test.tsx`. CI runs these
+  // in the "Pattern Unit Tests" job, split into chunks by filename (the
+  // `pattern-tests` target in tasks/integration.ts), and they are the only
+  // source of authored-pattern coverage (see docs/development/COVERAGE.md).
+  //
+  // Lane 3 — integration test. A `*.test.ts` file under `integration/` that
+  // needs a running shell/toolshed/browser (PiecesController, ShellIntegration,
+  // end-to-end flows). It is run by `deno task integration`. CI runs these in
+  // the "Pattern Integration Tests" job across four shards; a heavy new file
+  // can be pinned to a shard in tasks/select-pattern-integration-files.ts, and
+  // otherwise falls back to round-robin. Reload-specific cases live in
+  // integration/reload/ and run via `integration:reload`.
+  //
+  // Every workspace member must define a `test` task. The root runner
+  // (tasks/test.ts) calls `deno task test` in each member, and a member with no
+  // such task falls through to the root task and recurses over the whole
+  // workspace. So this lane stays a real task, never an empty stub.
+  //
+  // For how to write each kind of test and how CI measures them, see
+  // docs/development/TESTING.md (the testing hub),
+  // docs/common/workflows/pattern-testing.md (writing pattern tests), and
+  // docs/development/COVERAGE.md (how the lanes feed the coverage-debt gate).
+  "tasks": {
+    "integration": "LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
+    "integration:reload": "LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A $INTEGRATION_TEST_FLAGS ./integration/reload/*.test.ts",
+    "integration:all": "TEST_HTTP=1 TEST_LLM=1 LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A ./integration/*.test.ts",
+    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' ."
+  },
+  // File discovery for the `test` task (lane 1). `include` keeps only
+  // `.test.ts`, so pattern tests (`.test.tsx`, lane 2) are never collected;
+  // `exclude` drops every `integration/` directory (lane 3, including nested
+  // ones such as google/core/integration), which the `integration` task runs
+  // instead. These globs apply only to bare `deno test` (the `test` task);
+  // the `integration*` tasks pass explicit paths, which Deno does not filter
+  // through `exclude`. The `test` task runs with -A because some unit tests
+  // spawn a hermetic deno/cf subprocess (for example a compiler check).
+  "test": {
+    "include": ["**/*.test.ts"],
+    "exclude": ["**/integration"]
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

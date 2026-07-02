@@ -10,7 +10,9 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
   type EntityRef,
@@ -18,6 +20,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -58,15 +61,15 @@ import {
   type NodeFactory,
   type NodeRef,
   type OpaqueCell,
-  type OpaqueRef,
   type PatternFactory,
+  type Reactive,
   type Schema,
   SELF,
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
-import { isOpaqueRefMarker } from "./builder/types.ts";
+import { isReactiveMarker } from "./builder/types.ts";
 import {
   type CellResult,
   createQueryResultProxy,
@@ -80,7 +83,10 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   type CellViewRef,
@@ -107,10 +113,10 @@ import {
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
+  KeepAsCell,
   type NormalizedFullLink,
   type NormalizedLink,
   parseLink,
-  type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
@@ -174,7 +180,7 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
- * OpaqueRef/Cell. These wrapped the callback in an anonymous inline pattern,
+ * Reactive/Cell. These wrapped the callback in an anonymous inline pattern,
  * which has no stable content-addressed `{ identity, symbol }` and so cannot be
  * passed/persisted by identity (CT-1623). Authored pattern code is always
  * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
@@ -184,7 +190,7 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
 function throwOpFunctionFormMessage(
   method: "map" | "filter" | "flatMap",
 ): string {
-  return `OpaqueRef.${method}(fn) is no longer supported: an inline pattern has ` +
+  return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
     `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
     `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
@@ -319,7 +325,7 @@ declare module "@commonfabric/api" {
       callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
-    sync(): Promise<Cell<T>> | Cell<T>;
+    sync(): Promise<Cell<T>>;
     pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
@@ -332,7 +338,8 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
-      } & SanitizeSchemaForLinksOptions,
+        keepAsCell?: KeepAsCell;
+      },
     ): SigilLink;
     getAsWriteRedirectLink(
       options?: {
@@ -368,8 +375,13 @@ declare module "@commonfabric/api" {
      * storage layer but does not conform to the cell's schema type.
      *
      * Prefer `setRaw()` when the value matches `T`.
+     *
+     * When `onlyIfDifferent` is `true`, the current raw value is read first and
+     * the write is skipped entirely if it deep-equals the value that would be
+     * written. The read is marked `ignoreReadForScheduling`, so it does not
+     * register a dependency that could re-trigger the writing computation.
      */
-    setRawUntyped(value: FabricValue): void;
+    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -385,9 +397,9 @@ declare module "@commonfabric/api" {
       name?: unknown;
       external?: unknown;
     };
-    getAsOpaqueRefProxy(
+    getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
-    ): OpaqueRef<T>;
+    ): Reactive<T>;
     toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
@@ -401,7 +413,7 @@ declare module "@commonfabric/api" {
     copyTrap: boolean;
 
     /** Set the self-reference for SELF symbol support in patterns */
-    setSelfRef(selfRef: OpaqueRef<any>): void;
+    setSelfRef(selfRef: Reactive<any>): void;
   }
 
   interface ICreatable<C extends AnyBrandedCell<any>> {
@@ -429,8 +441,12 @@ const cellMethods = new Set<
   "send",
   "update",
   "push",
+  "addUnique",
+  "increment",
   "remove",
   "removeAll",
+  "removeByValue",
+  "elementById",
   "equals",
   "equalLinks",
   "key",
@@ -463,7 +479,7 @@ const cellMethods = new Set<
   "setSchema",
   "connect",
   "export",
-  "getAsOpaqueRefProxy",
+  "getAsReactiveProxy",
   "setSelfRef",
   "exec",
   "query",
@@ -474,6 +490,26 @@ const cellMethods = new Set<
  *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
  *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
  *  insert's VALUES tuple is NOT mistaken for a column list. */
+// The schema for one element of an array schema, suitable for a standalone
+// element cell. The array's items schema is often a `$ref` into the array
+// schema's `$defs`; carry those `$defs` onto the element schema so the reference
+// (and any nested references) still resolve once the element is addressed on its
+// own, detached from the array.
+function elementSchemaFor(
+  arraySchema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!isRecord(arraySchema)) return undefined;
+  const items = arraySchema.items;
+  if (!isRecord(items) || Array.isArray(items)) {
+    return items as JSONSchema | undefined;
+  }
+  const defs = arraySchema.$defs;
+  if (defs && !("$defs" in items)) {
+    return { ...items, $defs: defs } as JSONSchema;
+  }
+  return items as JSONSchema;
+}
+
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
   const m = sql.match(
     /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
@@ -621,7 +657,12 @@ export class CellImpl<T extends FabricValue>
   private _kind: CellKind;
 
   // Self-reference for pattern SELF symbol support
-  private _selfRef?: OpaqueRef<any>;
+  private _selfRef?: Reactive<any>;
+  private viewRefHashCache?: {
+    link: NormalizedFullLink;
+    cfcLabelView: CfcLabelView | undefined;
+    hash: string;
+  };
 
   constructor(
     public readonly runtime: Runtime,
@@ -687,6 +728,18 @@ export class CellImpl<T extends FabricValue>
       link: this.link,
       cfcLabelView: this._cfcLabelView,
     };
+  }
+
+  private viewRefHash(): string {
+    const link = this.link;
+    const cfcLabelView = this._cfcLabelView;
+    const cached = this.viewRefHashCache;
+    if (cached?.link === link && cached.cfcLabelView === cfcLabelView) {
+      return cached.hash;
+    }
+    const hash = hashStringOf({ link, cfcLabelView } satisfies CellViewRef);
+    this.viewRefHashCache = { link, cfcLabelView, hash };
+    return hash;
   }
 
   /**
@@ -876,8 +929,10 @@ export class CellImpl<T extends FabricValue>
     // tx, and the same CFC state. Reuse the prior result when the tx supports
     // caching (the non-reactive sample() wrapper does not) and is still open.
     // The tx clears this cache on any write, so a hit only happens when nothing
-    // has changed since the last read. Keyed on the cell's link identity, which
-    // is stable per cell; `variant` separates reads that differ in options.
+    // has changed since the last read. Key by the stable value of the view ref
+    // (link + CFC label view), not link object identity, so equivalent CellImpl
+    // wrappers in the same tx can share the cached traversal result. `variant`
+    // separates reads that differ in options or synced state.
     const tx = this.tx;
     const cacheable = tx !== undefined &&
       tx.getCachedReadResult !== undefined &&
@@ -887,8 +942,9 @@ export class CellImpl<T extends FabricValue>
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
     const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    const cacheKey = cacheable ? this.viewRefHash() : undefined;
     if (cacheable) {
-      const cached = tx.getCachedReadResult!(this._link, variant);
+      const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
         return cached.value as Readonly<StripDefaultBrand<T>>;
       }
@@ -913,8 +969,8 @@ export class CellImpl<T extends FabricValue>
     if (cacheable) {
       // Re-read this._link: validateAndTransform (via viewRef -> link) may have
       // run ensureLink() and replaced it with the completed link object, which
-      // is the identity subsequent get()s will key on.
-      tx.setCachedReadResult!(this._link, variant, value);
+      // is the identity subsequent get()s will hash.
+      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
     }
     return value;
   }
@@ -1355,7 +1411,11 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+    // Read marked as the op's own incidental read: dropped from the commit's
+    // conflict set so the append merges, while a handler's explicit read is not.
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
     const cause = this._frame?.cause;
 
     let array = currentValue as unknown[];
@@ -1402,6 +1462,226 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       recursivelyAddIDIfNeeded(combined, this._frame),
       cause,
+    );
+
+    // Record the append intent so the commit emits a tail-relative, mergeable
+    // operation instead of a position diffed against a possibly-stale base.
+    this.tx.recordArrayAppend?.(resolvedLink, value.length);
+  }
+
+  addUnique(
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.addUnique() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    const cause = this._frame?.cause;
+
+    let array = currentValue as unknown[];
+    if (array !== undefined && !Array.isArray(array)) {
+      throw new Error(
+        "Cell.addUnique() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (array === undefined) {
+      diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
+      const resolvedSchema = resolveSchema(this.schema);
+      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        ? processDefaultValue(
+          this.runtime,
+          this.tx,
+          this.link,
+          resolvedSchema.default,
+        )
+        : [];
+    }
+
+    // Anchor ids on the new values, then keep only those not already present
+    // (by stored-value equality, matching the server's add-unique dedup). The
+    // server re-dedups against durable state, catching elements the local
+    // replica had not loaded.
+    const anchored = recursivelyAddIDIfNeeded(
+      value as unknown[],
+      this._frame,
+    ) as unknown[];
+    const existing = array;
+    // A cell candidate matches an existing element by its (deterministic) link,
+    // so re-adding the same keyed entity is a local no-op; a plain value matches
+    // by stored-value equality, mirroring the server's keyless dedup.
+    const alreadyPresent = (candidate: unknown) =>
+      existing.some((element) =>
+        isCell(candidate)
+          ? areLinksSame(
+            element,
+            candidate,
+            this as unknown as Cell<any>,
+            true,
+            this.tx!,
+            this.runtime,
+          )
+          : deepEqual(element, candidate)
+      );
+    const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
+    if (toAdd.length === 0) {
+      return;
+    }
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolvedLink,
+      [...existing, ...toAdd],
+      cause,
+    );
+    this.tx.recordAddUnique?.(resolvedLink, toAdd.length);
+  }
+
+  increment(by: number = 1): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.increment() requires transaction and number value\n" +
+          "help: use in handlers only, ensure cell is typed as number",
+      );
+    }
+    if (by === 0) {
+      throw new Error(
+        "Cell.increment() requires a non-zero amount\n" +
+          "help: a zero increment is a no-op; drop the call",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    if (currentValue !== undefined && typeof currentValue !== "number") {
+      throw new Error(
+        "Cell.increment() requires transaction and number value\n" +
+          "help: use in handlers only, ensure cell is typed as number",
+      );
+    }
+    const cause = this._frame?.cause;
+    const next = (typeof currentValue === "number" ? currentValue : 0) + by;
+    diffAndUpdate(this.runtime, this.tx, resolvedLink, next, cause);
+
+    // Record the increment intent so the commit emits a mergeable increment the
+    // server resolves against durable state instead of a value diffed against a
+    // possibly-stale read.
+    this.tx.recordIncrement?.(resolvedLink, by);
+  }
+
+  // Remove every element of this array equal to `ref` by stored value. A cell
+  // ref matches by its (deterministic) link, so the membership entry is removed
+  // without depending on the list's prior contents — concurrent removes of
+  // distinct entries merge. The optimistic local filter and the committed op
+  // both match by the stored value.
+  removeByValue(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        "Cell.removeByValue() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      resolvedLink,
+      resolvedLink.schema ?? this.schema,
+    );
+    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+      meta: mergeableOpRead,
+    });
+    const array = currentValue as unknown[];
+    if (array === undefined) {
+      return;
+    }
+    if (!Array.isArray(array)) {
+      throw new Error(
+        "Cell.removeByValue() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
+    // A cell ref matches an element by its (deterministic) link; a plain value
+    // matches by stored-value equality. The removed elements are the array's
+    // stored representations (links stay as their sigil), so recording each one
+    // as the op's value lets the server match the durable element exactly.
+    const matches = (element: unknown) =>
+      isCell(ref)
+        ? areLinksSame(
+          element,
+          ref,
+          this as unknown as Cell<any>,
+          true,
+          this.tx!,
+          this.runtime,
+        )
+        : deepEqual(element, ref);
+    const removed = array.filter(matches);
+    if (removed.length === 0) {
+      return;
+    }
+    const filtered = array.filter((element) => !matches(element));
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolvedLink,
+      filtered,
+      this._frame?.cause,
+    );
+    for (const element of removed) {
+      this.tx.recordRemoveByValue?.(resolvedLink, element as FabricValue);
+    }
+  }
+
+  // Returns a cell for the entity deterministically derived from this array and
+  // `idKey` — the entity a keyed element of this array is identified by. The
+  // derivation is content-only (no per-event cause), so the same `idKey` always
+  // resolves to the same entity. This lets a handler read/edit one keyed element
+  // (e.g. "my vote for this option") and add or remove its membership via
+  // addUnique / removeByValue, without ever reading the whole array.
+  elementById(idKey: string, schema?: JSONSchema): Cell<any> {
+    const tx = this.runtime.readTx(this.tx);
+    const resolvedLink = resolveLink(this.runtime, tx, this.link);
+    const entityId = createRef(
+      { id: idKey },
+      {
+        parent: { id: resolvedLink.id, space: resolvedLink.space },
+        path: resolvedLink.path,
+      },
+    );
+    const arraySchema = resolveSchema(resolvedLink.schema ?? this.schema);
+    const elementSchema = schema ?? elementSchemaFor(arraySchema);
+    return this.runtime.getCellFromEntityId(
+      resolvedLink.space,
+      entityId,
+      [],
+      elementSchema,
+      this.tx,
+      resolvedLink.scope,
     );
   }
 
@@ -1641,7 +1921,7 @@ export class CellImpl<T extends FabricValue>
     }
   }
 
-  sync(): Promise<Cell<T>> | Cell<T> {
+  sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
@@ -1726,7 +2006,8 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
-    } & SanitizeSchemaForLinksOptions,
+      keepAsCell?: KeepAsCell;
+    },
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
       ...options,
@@ -1793,12 +2074,33 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue): void {
+  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
+
+    const inlined = findAndInlineDataURILinks(value);
+
+    // When asked to write only on change, read the current raw value and bail
+    // out if it already equals what we'd write. `readValueOrThrow` mirrors the
+    // `writeValueOrThrow` below (same transaction and address, no link
+    // resolution). The read is purely an internal write-elision decision, so it
+    // is marked `ignoreReadForScheduling` (it must not register a
+    // self-dependency that would re-trigger the writer) and
+    // `internalVerifierRead` (it must not taint the transaction's CFC labels
+    // with this cell's own value). Comparison uses `valueEqual`, the
+    // `Fabric`-aware content equality the storage no-op gates rely on:
+    // `deepEqual` walks enumerable own-props and so conflates distinct
+    // same-class `FabricSpecialObject`s (e.g. `FabricBytes`/`FabricHash`),
+    // which would drop a real change.
+    if (onlyIfDifferent) {
+      const current = this.tx.readValueOrThrow(this.link, {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      });
+      if (valueEqual(current, inlined)) return;
+    }
 
     // Raw writes bypass diff-based attempted-target capture. Same-value direct
     // writes through this internal path are therefore outside phase-1 CFC
@@ -1808,7 +2110,7 @@ export class CellImpl<T extends FabricValue>
       this.link,
       this.link.schema ?? this.schema,
     );
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
+    this.tx.writeValueOrThrow(this.link, inlined);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
@@ -1879,7 +2181,7 @@ export class CellImpl<T extends FabricValue>
    */
   connect(node: NodeRef): void {
     // For cells created during pattern construction, we need to track which nodes
-    // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
+    // they're connected to. Since Cell doesn't have a nodes set like Reactive's store,
     // we'll store this in a WeakMap keyed by the cell instance.
     const top = this._causeContainer.cell;
     if (!cellNodes.has(top)) {
@@ -1889,7 +2191,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Export cell metadata for introspection, similar to OpaqueRef's export method.
+   * Export cell metadata for introspection, similar to Reactive's export method.
    * If the cell has a link, it's included as 'external'.
    */
   export(): {
@@ -1931,20 +2233,20 @@ export class CellImpl<T extends FabricValue>
    * Set the self-reference for pattern SELF symbol support.
    * This allows patterns to access their own output via the SELF symbol.
    */
-  setSelfRef(selfRef: OpaqueRef<any>): void {
+  setSelfRef(selfRef: Reactive<any>): void {
     this._selfRef = selfRef;
   }
 
   /**
-   * Wrap this cell in a proxy that provides OpaqueRef behavior.
+   * Wrap this cell in a proxy that provides Reactive behavior.
    * The proxy adds Symbol.iterator, Symbol.toPrimitive, and toCell support,
    * and recursively wraps child cells accessed via property access.
    *
-   * @returns A proxied version of this cell with OpaqueRef behavior
+   * @returns A proxied version of this cell with Reactive behavior
    */
-  getAsOpaqueRefProxy(
+  getAsReactiveProxy(
     boundTarget?: (...args: unknown[]) => unknown,
-  ): OpaqueRef<T> {
+  ): Reactive<T> {
     const self = this as unknown as Cell<T>;
     // `query`/`exec` are SqliteDb-only methods whose names are also common data
     // fields (e.g. wish's `query`). Only forward them as methods on a
@@ -1958,7 +2260,7 @@ export class CellImpl<T extends FabricValue>
             let index = 0;
             while (index < 50) { // Limit to 50 items like original
               const itemCell = self.key(index) as Cell<unknown>;
-              yield itemCell.getAsOpaqueRefProxy();
+              yield itemCell.getAsReactiveProxy();
               index++;
             }
           };
@@ -1971,7 +2273,7 @@ export class CellImpl<T extends FabricValue>
         } else if (prop === toCell) {
           // Return a function that returns the unproxied cell
           return () => self;
-        } else if (prop === isOpaqueRefMarker) {
+        } else if (prop === isReactiveMarker) {
           return true;
         } else if (prop === SELF) {
           // Return the self-reference if set (for pattern SELF symbol support)
@@ -1987,7 +2289,7 @@ export class CellImpl<T extends FabricValue>
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite")
           ) {
-            return nestedCell.getAsOpaqueRefProxy(
+            return nestedCell.getAsReactiveProxy(
               (self as unknown as Record<
                 string,
                 (...args: unknown[]) => unknown
@@ -1995,19 +2297,19 @@ export class CellImpl<T extends FabricValue>
                 .bind(self),
             );
           } else {
-            return nestedCell.getAsOpaqueRefProxy();
+            return nestedCell.getAsReactiveProxy();
           }
         }
         // Delegate everything else to orignal target
         return (target as any)[prop];
       },
     });
-    return proxy as unknown as OpaqueRef<T>;
+    return proxy as unknown as Reactive<T>;
   }
 
   /**
    * Map over an array cell, creating a new derived array.
-   * Similar to Array.prototype.map but works with OpaqueRefs.
+   * Similar to Array.prototype.map but works with Reactives.
    */
   /**
    * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
@@ -2027,8 +2329,11 @@ export class CellImpl<T extends FabricValue>
       reactOn?: unknown;
       maxConfidentiality?: ReadonlyArray<unknown>;
       onExceed?: "fail" | "skip";
+      readClearance?: boolean;
     },
-  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+  ): Reactive<
+    { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
+  > {
     return sqliteQueryNodeFactory({
       db: this,
       sql,
@@ -2037,20 +2342,24 @@ export class CellImpl<T extends FabricValue>
       // CFC Phase 3 read surface: the declared output ceiling + exceed mode.
       maxConfidentiality: options?.maxConfidentiality,
       onExceed: options?.onExceed,
+      // CFC Phase 3.b: read-time clearance (reader-filtered rows).
+      readClearance: options?.readClearance,
       // Forward the transformer-injected `<Row>` schema (lowered into the
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+    }) as Reactive<
+      { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
+    >;
   }
 
   map<S>(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<S>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     throw new Error(throwOpFunctionFormMessage("map"));
   }
 
@@ -2062,7 +2371,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     // Create the factory if it doesn't exist
     if (!mapFactory) {
       mapFactory = createNodeFactory({
@@ -2072,7 +2381,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = mapFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });
@@ -2094,11 +2403,11 @@ export class CellImpl<T extends FabricValue>
       array: (T extends Array<infer U> ? U : T)[],
     ) => S,
     initialValue: S,
-  ): OpaqueRef<S> {
+  ): Reactive<S> {
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
-    })(this as unknown as OpaqueRef<any>);
+    })(this as unknown as Reactive<any>);
   }
 
   /**
@@ -2115,7 +2424,7 @@ export class CellImpl<T extends FabricValue>
       index: number,
       array: (T extends Array<infer U> ? U : T)[],
     ) => boolean,
-  ): OpaqueRef<number> {
+  ): Reactive<number> {
     // Uses lift rather than a per-element-pattern builtin (like filter/map)
     // because findIndex returns a plain number, not an element reference —
     // there's no benefit to per-element reactive tracking. The lift approach
@@ -2127,21 +2436,21 @@ export class CellImpl<T extends FabricValue>
         throw new TypeError("findIndex called on non-array value");
       }
       return list.findIndex(fn);
-    })(this as unknown as OpaqueRef<any>);
+    })(this as unknown as Reactive<any>);
   }
 
   /**
    * Filter an array cell, creating a new array with only matching elements.
-   * Similar to Array.prototype.filter but works with OpaqueRefs.
+   * Similar to Array.prototype.filter but works with Reactives.
    * Output contains cell references to the original elements.
    */
   filter(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     throw new Error(throwOpFunctionFormMessage("filter"));
   }
 
@@ -2153,7 +2462,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
         type: "ref",
@@ -2162,7 +2471,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = filterFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });
@@ -2172,16 +2481,16 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * FlatMap over an array cell, creating a flattened array from per-element arrays.
-   * Similar to Array.prototype.flatMap but works with OpaqueRefs.
+   * Similar to Array.prototype.flatMap but works with Reactives.
    * Each callback should return an array; results are concatenated one level deep.
    */
   flatMap<S>(
     _fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
     ) => FactoryInput<S[]>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     throw new Error(throwOpFunctionFormMessage("flatMap"));
   }
 
@@ -2193,7 +2502,7 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
-  ): OpaqueRef<S[]> {
+  ): Reactive<S[]> {
     if (!flatMapFactory) {
       flatMapFactory = createNodeFactory({
         type: "ref",
@@ -2202,7 +2511,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = flatMapFactory({
-      list: this as unknown as OpaqueRef<T>,
+      list: this as unknown as Reactive<T>,
       op: op,
       params: params,
     });
@@ -2741,7 +3050,8 @@ export function convertCellsToLinks(
     includeSchema?: boolean;
     doNotConvertCellResults?: boolean;
     includeCfcLabelView?: boolean;
-  } & SanitizeSchemaForLinksOptions = {},
+    keepAsCell?: KeepAsCell;
+  } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {

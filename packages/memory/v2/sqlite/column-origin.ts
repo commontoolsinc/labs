@@ -50,7 +50,7 @@ const SYMBOLS = {
 } as const;
 
 // The `@db/sqlite` prebuilt release. These options MUST match what `@db/sqlite`
-// uses internally (and the version pinned in packages/memory/deno.json) so
+// uses internally (and the version pinned in packages/memory/deno.jsonc) so
 // plug's `download()` returns the SAME cached file `@db/sqlite` dlopen'd.
 const SQLITE3_RELEASE = {
   name: "sqlite3",

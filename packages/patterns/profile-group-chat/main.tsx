@@ -4,6 +4,7 @@ import {
   Default,
   equals,
   handler,
+  ifElse,
   NAME,
   pattern,
   type PerSpace,
@@ -104,14 +105,6 @@ export interface ProfileGroupChatOutput {
   sendMessage: Stream<SendEvent>;
 }
 
-const headerLabel = {
-  fontSize: "0.75rem",
-  fontWeight: "600",
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-  color: "#6b7280",
-};
-
 export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
   ({ messages, draft }) => {
     // Resolve THIS viewer's shared profile (their default profile / picker
@@ -175,7 +168,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
             <cf-hstack justify="between" align="center" gap="4">
               <cf-heading level={3}>Profile chat</cf-heading>
               <cf-vstack gap="1" align="end">
-                <span style={headerLabel}>You</span>
+                <cf-text variant="caption" tone="muted">You</cf-text>
                 <cf-profile-badge $profile={profileWish.result} size="sm" />
               </cf-vstack>
             </cf-hstack>
@@ -185,9 +178,9 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
               to their live profile cell (name + DID-hued seal dot, navigable). */
             }
             <cf-vstack gap="1">
-              <span style={headerLabel}>
+              <cf-text variant="caption" tone="muted">
                 In this room ({participantCount})
-              </span>
+              </cf-text>
               {
                 /* Plain flex row (not cf-hstack) — cf-hstack's :host clips
                   overflow:hidden, which cuts the badges' verified glow. */
@@ -227,17 +220,22 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
                     $profile={message.authorProfile}
                   />
                   <cf-vstack gap="0">
-                    <span style={{ fontSize: "0.8125rem", fontWeight: "600" }}>
-                      {message.author}
-                    </span>
-                    <span
-                      style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap" }}
+                    <cf-text variant="body-compact">{message.author}</cf-text>
+                    <cf-text
+                      variant="body"
+                      block
+                      style={{ whiteSpace: "pre-wrap" }}
                     >
                       {message.body}
-                    </span>
+                    </cf-text>
                   </cf-vstack>
                 </div>
               ))}
+              {ifElse(
+                computed(() => (messages ?? []).length === 0),
+                <cf-empty-state message="No messages yet — say hello!" />,
+                null,
+              )}
             </cf-vstack>
 
             {/* Composer — disabled until the viewer has a resolvable profile. */}
@@ -246,7 +244,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
                 $value={draft}
                 placeholder="Message"
                 aria-label="Message"
-                timing-strategy="immediate"
+                timingStrategy="immediate"
                 style={{ flex: "1" }}
               />
               <cf-button onClick={send} disabled={computed(() => !hasProfile)}>

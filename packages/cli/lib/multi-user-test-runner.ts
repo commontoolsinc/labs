@@ -228,6 +228,7 @@ export async function runMultiUserTestPattern(
           apiUrl: server.url.href,
           testPath,
           root: options.root,
+          patternCoverageDir: options.patternCoverageDir,
           participant: spec.name,
           seedDefaults: index === 0,
         }) as ParticipantInitResult;
@@ -439,11 +440,26 @@ export async function runMultiUserTestPattern(
     };
   } finally {
     for (const participant of participants) {
+      if (options.patternCoverageDir) {
+        await participant.worker.call("writeCoverage").catch((error) => {
+          console.error(
+            `[cf test] failed to write pattern coverage for ${participant.spec.name}: ${
+              formatError(error)
+            }`,
+          );
+        });
+      }
       await participant.worker.call("dispose").catch(() => {});
       participant.worker.terminate();
     }
     await server.close().catch(() => {});
   }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error
+    ? error.stack || error.message || String(error)
+    : String(error);
 }
 
 function recordSkip(

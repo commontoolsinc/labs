@@ -28,9 +28,11 @@ runs Toolshed on `localhost:8000`; use `dev-local` for the shell, not
 `dev`). Then:
 
 ```bash
-# Derive a deterministic dev key. Use `id derive`, NOT `id new > file` —
-# the latter pollutes the key file with ANSI output.
-deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
+# Create a unique dev key. Redirect from `deno run -A packages/cli/mod.ts`,
+# never `deno task cf` — the task wrapper prints ANSI preamble that corrupts
+# the key file. (Chapter 10 covers the shared `implicit trust` dev identity
+# and the narrow case where you'd derive it instead.)
+deno run -A packages/cli/mod.ts id new > cf.key
 
 export CF_IDENTITY=./cf.key
 export CF_API_URL=http://localhost:8000

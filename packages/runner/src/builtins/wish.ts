@@ -25,6 +25,7 @@ import {
   internSchema,
 } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { extractHashtags } from "@commonfabric/data-model/schema-tags";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -206,8 +207,8 @@ export function tagMatchesHashtag(
   tag: string | undefined,
   searchTermWithoutHash: string,
 ): boolean {
-  const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-  return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+  if (tag === undefined) return false;
+  return extractHashtags(tag).includes(searchTermWithoutHash);
 }
 
 type WishContext = {
@@ -330,7 +331,9 @@ function subscribeProfileName(cell: Cell<unknown>): void {
  * order. Identity is by link equality (`Cell.equals`); there is no synthetic
  * key. Returns [] when no valid profile exists yet.
  */
-function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
+function getProfileCandidateCells(
+  ctx: WishContext,
+): { ordered: Cell<unknown>[]; defaultValid: boolean } {
   const homeSpaceCell = getHomeSpaceCell(ctx);
   const defaultPattern = homeSpaceCell.key("defaultPattern").resolveAsCell();
   const profilesCell = defaultPattern.key("profiles");
@@ -356,7 +359,7 @@ function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
     subscribeProfileName(cell);
     candidates.push(cell);
   }
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return { ordered: [], defaultValid: false };
 
   // Ordering inputs: the default link and the MRU list.
   const defaultEntry = defaultPattern.key("defaultProfile");
@@ -389,7 +392,7 @@ function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
     }
     return mruRank(a) - mruRank(b);
   });
-  return ordered;
+  return { ordered, defaultValid };
 }
 
 /**
@@ -398,11 +401,11 @@ function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
  * profile exists yet so callers can fall back to the create surface.
  */
 function getDefaultProfileCell(ctx: WishContext): Cell<unknown> {
-  const candidates = getProfileCandidateCells(ctx);
-  if (candidates.length === 0) {
+  const { ordered } = getProfileCandidateCells(ctx);
+  if (ordered.length === 0) {
     throw new WishError("No profile exists yet");
   }
-  return candidates[0];
+  return ordered[0];
 }
 
 function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
@@ -805,15 +808,26 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      const candidates = getProfileCandidateCells(ctx);
-      if (candidates.length === 0) {
+      const { ordered, defaultValid } = getProfileCandidateCells(ctx);
+      if (ordered.length === 0) {
         // No profile yet — throw so the #profile error path falls back to the
         // create surface (see profileCreateUI).
         throw new WishError("No profile exists yet");
       }
+      // When the viewer has a valid DEFAULT profile, `#profile` resolves to it
+      // directly (single result) — the picker disambiguates *which* profile when
+      // there is no default, it does not re-confirm an explicit default on every
+      // read. Without this short-circuit, any viewer with 2+ profiles gets the
+      // multi-candidate picker and `.result` stays `undefined` until a selection,
+      // dead-locking every pattern that wishes for "the viewer's active profile"
+      // (e.g. profile-group-chat's send guard). Only genuine ambiguity (no
+      // default chosen yet) drives the picker.
+      if (defaultValid) {
+        return [{ cell: ordered[0], pathPrefix: [] }];
+      }
       // Ordered default-first, then by MRU. Headless / single-result callers
-      // take the first (the default); multiple candidates drive the picker.
-      return candidates.map((cell) => ({ cell, pathPrefix: [] }));
+      // take the first; multiple candidates with no default drive the picker.
+      return ordered.map((cell) => ({ cell, pathPrefix: [] }));
     }
 
     case "#profileName": {

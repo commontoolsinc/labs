@@ -88,6 +88,7 @@ async function execInSandbox(
 
 export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
   const logger = c.get("logger");
+  const verifiedUserDid = c.get("verifiedUserDid");
   const payload = await c.req.json();
   const {
     sandboxId,
@@ -97,7 +98,7 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
     environment,
   } = payload;
 
-  logger.info({ sandboxId, command }, "Sandbox exec request");
+  logger.info({ sandboxId, command, verifiedUserDid }, "Sandbox exec request");
 
   // Inject CF_API_URL so `cf` inside sandboxes can reach the toolshed
   const sandboxToolshedUrl = env.SANDBOX_TOOLSHED_URL || env.API_URL;

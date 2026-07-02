@@ -84,12 +84,12 @@ You need your own Google OAuth credentials:
 
 Tokens expire after ~1 hour. Refresh happens automatically in two layers:
 
-**Layer 1: Automatic (background-charm-service)** When google-auth is registered
-with background-charm-service, the `bgUpdater` handler is polled every ~60
+**Layer 1: Automatic (background-piece-service)** When google-auth is registered
+with background-piece-service, the `bgUpdater` handler is polled every ~60
 seconds. If the token has < 10 minutes remaining, it refreshes proactively — no
 user action needed.
 
-To enable: register your google-auth piece with background-charm-service.
+To enable: register your google-auth piece with background-piece-service.
 
 **Layer 2: One-click (UI fallback)** If background refresh isn't running (e.g.,
 local dev), consuming patterns show a "Refresh Session" button when the token
@@ -297,9 +297,9 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 
 3. **The pattern must support overrideAuth**: The gmail-importer has:
    ```typescript
-   overrideAuth?: Auth;
+   overrideAuth?: GoogleAuthCell;
    ```
-   This optional input is what receives the linked auth data.
+   This optional input receives the linked writable auth cell.
 
 4. **Check "Reading From" in inspect**: After linking, `cf piece inspect` shows:
    ```

@@ -213,6 +213,22 @@ const newOptionId = () =>
     Math.floor(nonPrivateRandom() * 1e6).toString(36)
   }`;
 
+// The deterministic key a vote is addressed by: a voter's vote for one option.
+// castVote, clearMyVote, and the removeOption cascade all derive the same key,
+// so they reach the same vote entity in any session without scanning the list.
+const voteKey = (voterName: string, optionId: string): string =>
+  JSON.stringify([voterName, optionId]);
+
+// Clear a vote's entity document. The entity outlives its membership link, so a
+// removal that only drops the link would leave the entity holding the removed
+// vote's content; a later read by the same key (the castVote toggle decision)
+// would then see that stale content and treat the absent vote as present.
+// Removing a vote always pairs the link removal with this clear.
+const clearVoteEntity = (votes: VotesCell, key: string): void => {
+  const vote: Writable<Vote | undefined> = votes.elementById(key);
+  vote.set(undefined);
+};
+
 const getInitials = (name: string): string => {
   const trimmed = name.trim();
   if (!trimmed) return "?";
@@ -274,11 +290,17 @@ const addOption = handler<AddOptionEvent, {
   if (!me || me !== admin) return;
   const trimmed = trimmedName(title ?? optionDraft.get());
   if (!trimmed) return;
-  options.push({
-    id: newOptionId(),
+  // Address the option by its id so later edits and removal reach it without a
+  // positional index. addUnique merges concurrent adds (distinct ids) and is
+  // idempotent on the id.
+  const id = newOptionId();
+  const option = options.elementById(id);
+  option.set({
+    id,
     title: trimmed,
     addedByName: me,
   });
+  options.addUnique(option);
   optionDraft.set("");
 });
 
@@ -291,11 +313,20 @@ const removeOption = handler<RemoveOptionEvent, {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  const current = options.get();
-  const target = current.find((o) => o.id === optionId);
-  if (!target) return;
-  options.remove(target);
-  votes.set(votes.get().filter((v) => v.optionId !== optionId));
+  const option = options.elementById(optionId);
+  if (!option.get()) return;
+  options.removeByValue(option);
+  // Cascade: drop every vote for this option, each by its own deterministic
+  // key, so votes for other options (including ones cast concurrently) merge
+  // through rather than being clobbered by a whole-list rewrite. The explicit
+  // read of the vote list is retained, so a concurrent change to it makes this
+  // commit conflict and retry, catching votes cast for this option after the
+  // read.
+  for (const v of votes.get().filter((v) => v.optionId === optionId)) {
+    const key = voteKey(v.voterName, optionId);
+    votes.removeByValue(votes.elementById(key));
+    clearVoteEntity(votes, key);
+  }
 });
 
 const castVote = handler<CastVoteEvent, {
@@ -304,20 +335,19 @@ const castVote = handler<CastVoteEvent, {
 }>(({ optionId, voteType }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  const current = votes.get();
-  const existingIdx = current.findIndex(
-    (v) => v.voterName === me && v.optionId === optionId,
-  );
-  if (existingIdx >= 0) {
-    const existing = current[existingIdx];
-    if (existing.voteType === voteType) {
-      votes.remove(existing);
-      return;
-    }
-    votes.key(existingIdx).key("voteType").set(voteType);
+  // My vote for this option has a deterministic address, so this reads and
+  // edits just that one vote — never the whole list. Clicking the current
+  // color toggles the vote off; any other color sets it.
+  const key = voteKey(me, optionId);
+  const myVote = votes.elementById(key);
+  const existing = myVote.get();
+  if (existing && existing.voteType === voteType) {
+    votes.removeByValue(myVote);
+    clearVoteEntity(votes, key);
     return;
   }
-  votes.push({ voterName: me, optionId, voteType });
+  myVote.set({ voterName: me, optionId, voteType });
+  votes.addUnique(myVote);
 });
 
 const resetVotes = handler<ResetVotesEvent, {
@@ -328,6 +358,12 @@ const resetVotes = handler<ResetVotesEvent, {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
+  // Clearing the board is an intentional whole-list overwrite. Clear each vote's
+  // entity too, so a voter who re-votes their pre-reset color after the reset is
+  // not toggled off against the stale entity content.
+  for (const v of votes.get()) {
+    clearVoteEntity(votes, voteKey(v.voterName, v.optionId));
+  }
   votes.set([]);
 });
 
@@ -341,11 +377,9 @@ const clearMyVote = handler<ClearVoteEvent, {
 }>(({ optionId }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
+  const key = voteKey(me, optionId);
+  votes.removeByValue(votes.elementById(key));
+  clearVoteEntity(votes, key);
 });
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
@@ -900,18 +934,30 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {options.map((option) => {
-                          const oid = option.id;
-                          const summaryRank = computed(() => {
-                            const idx = ranked.findIndex(
-                              (t) => t.option.id === oid,
-                            );
-                            return idx >= 0 ? idx + 1 : 9999;
-                          });
-                          return (
+                        {
+                          /* Build every row's swatches in ONE top-level
+                            `computed` over the resolved `ranked` tally, with
+                            plain JS maps. Two reasons this shape, not a reactive
+                            `ranked.map(...)`/subpattern or an inline
+                            `votes.filter(...)`:
+                            1. Votes are links to separate entities; the
+                               top-level `tallyOptions` call resolves every
+                               voter's entity (including remote ones on another
+                               replica), so reading `ranked` here sees them,
+                               whereas a `votes.filter` in a nested map sees only
+                               the votes a replica has materialized locally.
+                            2. A reactive map / subpattern re-renders its per-item
+                               swatches unreliably when a remote vote updates a
+                               row's voters; a single `computed` re-runs as a
+                               whole when `ranked` changes (like the count above),
+                               so the swatches track cross-replica votes
+                               reliably. `ranked` is pre-sorted, so this also
+                               gives the row order with no `order` CSS hack. */
+                        }
+                        {computed(() =>
+                          ranked.map((tally) => (
                             <div
                               style={{
-                                order: summaryRank,
                                 display: "flex",
                                 alignItems: "center",
                                 gap: "8px",
@@ -929,7 +975,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   color: "#111827",
                                 }}
                               >
-                                {option.title}
+                                {tally.option.title}
                               </div>
                               <div
                                 style={{
@@ -939,36 +985,35 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   justifyContent: "flex-end",
                                 }}
                               >
-                                {votes.filter((vote) => vote.optionId === oid)
-                                  .map((vote) => (
-                                    <span
-                                      title={vote.voterName}
-                                      data-vote-swatch-name={vote.voterName}
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        minWidth: "22px",
-                                        height: "22px",
-                                        padding: "0 6px",
-                                        borderRadius: "9999px",
-                                        backgroundColor:
-                                          VOTE_SWATCH[vote.voteType],
-                                        color: "white",
-                                        fontSize: "11px",
-                                        fontWeight: 700,
-                                        boxShadow: vote.voterName === me
-                                          ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                          : "none",
-                                      }}
-                                    >
-                                      {getInitials(vote.voterName)}
-                                    </span>
-                                  ))}
+                                {tally.voters.map((voter) => (
+                                  <span
+                                    title={voter.name}
+                                    data-vote-swatch-name={voter.name}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      minWidth: "22px",
+                                      height: "22px",
+                                      padding: "0 6px",
+                                      borderRadius: "9999px",
+                                      backgroundColor:
+                                        VOTE_SWATCH[voter.voteType],
+                                      color: "white",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      boxShadow: voter.name === me
+                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                        : "none",
+                                    }}
+                                  >
+                                    {getInitials(voter.name)}
+                                  </span>
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
+                          ))
+                        )}
                       </div>
                     </div>
                   )
@@ -1298,13 +1343,20 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         }}
                       >
                         <cf-input
+                          id="lp-add-option-input"
                           $value={optionDraft}
                           placeholder="Add an option (e.g. Sushi place)…"
                           aria-label="Option title"
                           timing-strategy="immediate"
                           style="flex:1"
                         />
-                        <cf-button onClick={boundAddOption}>Add</cf-button>
+                        <cf-button
+                          id="lp-add-option-button"
+                          aria-label="Add option"
+                          onClick={boundAddOption}
+                        >
+                          Add
+                        </cf-button>
                         {isResetConfirm
                           ? (
                             <>

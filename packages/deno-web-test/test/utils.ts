@@ -1,5 +1,6 @@
 import * as path from "@std/path";
 import { copy } from "@std/fs";
+import { parse as parseJsonc } from "@std/jsonc";
 
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
@@ -28,8 +29,10 @@ export const runDenoWebTest = async (
 
   // Overwrite the test project's "test" task with the
   // absolute path of deno-web-test's `cli.ts` export.
-  const manifestPath = path.join(tmpProjectPath, "deno.json");
-  const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+  const manifestPath = path.join(tmpProjectPath, "deno.jsonc");
+  const manifest = parseJsonc(await Deno.readTextFile(manifestPath)) as {
+    tasks: { test: string };
+  };
   manifest.tasks.test =
     `deno run --allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));

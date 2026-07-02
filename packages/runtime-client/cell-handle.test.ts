@@ -485,3 +485,49 @@ describe("CellHandle disposal-raced writes", () => {
     expect(spy.calls.length).toBe(0);
   });
 });
+
+describe("CellHandle push (read-modify-write)", () => {
+  const ref: CellRef = {
+    id: "of:push-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  const runtimeCapturing = (requests: unknown[]): RuntimeClient =>
+    ({
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    }) as unknown as RuntimeClient;
+
+  it("sends a CellPush carrying the appended array (not a blind CellSet)", () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<number[]>(runtimeCapturing(requests), ref);
+    // Seed the local cache so push has an array to read-modify-write.
+    cell[$onCellUpdate]([1, 2]);
+
+    cell.push(3);
+
+    expect(requests.length).toBe(1);
+    const request = requests[0] as { type: unknown; value: unknown };
+    // Routed as CellPush (compare-and-set) rather than the blind CellSet, and
+    // it carries the whole client-computed array.
+    expect(request.type).toBe(RequestType.CellPush);
+    expect(request.value).toEqual([1, 2, 3]);
+  });
+
+  it("throws when the cell is not an array", () => {
+    const cell = new CellHandle<number[]>(runtimeCapturing([]), ref);
+    cell[$onCellUpdate]("not an array" as unknown as number[]);
+    expect(() => cell.push(1)).toThrow(
+      "push() can only be used on array cells",
+    );
+  });
+});

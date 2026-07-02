@@ -14,9 +14,10 @@ import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 
 import {
   buildSourceDocs,
-  COMPILE_CACHE_RUNTIME_VERSION,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
+  compiledDocWriteSchema,
+  getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadSourceClosure,
   loadVerifiedSourceClosure,
@@ -26,6 +27,7 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // ---------------------------------------------------------------------------
 // Shared-server helper: two managers with DIFFERENT signers over ONE in-process
@@ -63,9 +65,15 @@ const newSharedServer = () =>
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
 const signer = await Identity.fromPassphrase("cell-cache test");
+const resolvedRuntimeVersion = await getCompileCacheRuntimeVersion();
+if (resolvedRuntimeVersion === undefined) {
+  throw new Error("compile-cache runtime version unavailable in Deno test");
+}
+const runtimeVersion = resolvedRuntimeVersion;
 
 // Step 4.3.1–4.3.3 — content-addressed cache document model. The cache operates
 // in identity space on the engine's `CacheableModule[]`; these tests synthesize
@@ -223,6 +231,13 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     expect(v.missing).toEqual([]);
   });
 
+  it("flags a missing entry document", () => {
+    const v = verifySourceDocs("missing-entry", new Map());
+    expect(v.ok).toBe(false);
+    expect(v.mismatches).toEqual([]);
+    expect(v.missing).toEqual(["missing-entry"]);
+  });
+
   it("rejects a tampered document (recomputed identity != key)", () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const docs = new Map(buildSourceDocs(modules, entryIdentity));
@@ -314,6 +329,77 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     );
     // Loaded closure self-verifies (recomputed identities match the keys).
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
+  });
+
+  it("loads duplicate source import links once", async () => {
+    const entryIdentity = "source-entry-with-duplicate-imports";
+    const childIdentity = "source-duplicate-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./child.ts";\nimport "./again.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./child.ts", targetIdentity: childIdentity },
+          { specifier: "./again.ts", targetIdentity: childIdentity },
+        ],
+      },
+      {
+        identity: childIdentity,
+        filename: "/child.ts",
+        source: `export const value = 1;`,
+        js: "/* compiled child */",
+        imports: [],
+      },
+    ];
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+
+    const loaded = await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+
+    expect(loaded?.size).toBe(2);
+    expect(loaded?.get(entryIdentity)?.imports).toEqual([
+      { specifier: "./child.ts", identity: childIdentity },
+      { specifier: "./again.ts", identity: childIdentity },
+    ]);
+  });
+
+  it("skips source imports that do not point to source documents", async () => {
+    const entryIdentity = "source-entry-with-broken-imports";
+    const missingIdentity = "source-missing-child";
+    const tx = runtime.edit();
+    const missingLink = runtime.getCell(
+      spaceA,
+      sourceDocKey(missingIdentity),
+      undefined,
+      tx,
+    ).getAsLink();
+    runtime.getCell(spaceA, sourceDocKey(entryIdentity), undefined, tx).set({
+      kind: "source",
+      identity: entryIdentity,
+      code: `export const value = 1;`,
+      filename: "/entry.ts",
+      imports: [
+        { specifier: "./plain.ts" },
+        { specifier: "./missing.ts", link: missingLink },
+      ],
+    });
+
+    const loaded = await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+
+    expect(loaded?.size).toBe(1);
+    expect(loaded?.get(entryIdentity)?.imports).toEqual([]);
   });
 
   it("annotatePattern is non-normative (W4): the closure still verifies and the identity is unchanged", async () => {
@@ -477,6 +563,126 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
       new Set(["/main.tsx", "/util.ts", "/types.ts"]),
     );
+  });
+
+  it("loads duplicate compiled import links once", async () => {
+    const entryIdentity = "compiled-entry-with-duplicate-imports";
+    const childIdentity = "compiled-duplicate-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./child.ts";\nimport "./again.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./child.ts", targetIdentity: childIdentity },
+          { specifier: "./again.ts", targetIdentity: childIdentity },
+        ],
+      },
+      {
+        identity: childIdentity,
+        filename: "/child.ts",
+        source: `export const value = 1;`,
+        js: "/* compiled child */",
+        imports: [],
+      },
+    ];
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(2);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([
+      { specifier: "./child.ts", identity: childIdentity },
+      { specifier: "./again.ts", identity: childIdentity },
+    ]);
+  });
+
+  it("skips compiled import links without integrity", async () => {
+    const entryIdentity = "compiled-entry-with-unstamped-import";
+    const missingIdentity = "compiled-unstamped-child";
+    const modules: CacheableModule[] = [
+      {
+        identity: entryIdentity,
+        filename: "/entry.ts",
+        source: `import "./missing.ts";`,
+        js: "/* compiled entry */",
+        imports: [
+          { specifier: "./missing.ts", targetIdentity: missingIdentity },
+        ],
+      },
+    ];
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(1);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([]);
+  });
+
+  it("skips compiled imports that do not carry links", async () => {
+    const entryIdentity = "compiled-entry-with-missing-link";
+    const wtx = runtime.edit();
+    const previousIdentity = wtx.getCfcState().implementationIdentity;
+    wtx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      runtime.getCell(
+        spaceA,
+        compiledDocKey(RTVER, entryIdentity),
+        compiledDocWriteSchema(),
+        wtx,
+      ).set({
+        kind: "compiled",
+        identity: entryIdentity,
+        code: "/* compiled entry */",
+        filename: "/entry.ts",
+        imports: [
+          { specifier: "./plain.ts" },
+        ],
+      });
+    } finally {
+      wtx.setCfcImplementationIdentity(previousIdentity);
+    }
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(1);
+    expect(loaded.get(entryIdentity)?.imports).toEqual([]);
   });
 
   it("reaches an otherwise-unreachable module via the entry root link", async () => {
@@ -649,7 +855,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
     const replicationOpts = {
-      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      runtimeVersion,
     };
     const wtx = runtime.edit();
     writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);
@@ -767,7 +973,7 @@ const e2eSignerB = await Identity.fromPassphrase("cell-cache-e2e user B");
 describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
   // The shared compile-cache space — owned by signerA (its DID is the address).
   const sharedSpace = e2eSignerA.did();
-  const RTVER = COMPILE_CACHE_RUNTIME_VERSION;
+  const RTVER = runtimeVersion;
 
   // Minimal two-file program for the e2e compile cycle.
   const E2E_PROGRAM: RuntimeProgram = {

@@ -16,10 +16,20 @@
  * 2. Deploy this pattern
  * 3. Link: cf piece link google-auth/auth calendar-change-detector/overrideAuth
  */
-import { computed, JSONSchema, NAME, pattern, TILE_UI, UI } from "commonfabric";
+import {
+  computed,
+  JSONSchema,
+  NAME,
+  pattern,
+  type PatternFactory,
+  safeDateNow,
+  TILE_UI,
+  UI,
+} from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
-import type { Auth } from "../core/gmail-extractor.tsx";
+import type { Email } from "../core/gmail-importer.tsx";
+import type { GoogleAuthCell } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
@@ -104,6 +114,41 @@ const SCHEDULE_CHANGE_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type ScheduleChangeAnalysisResult = Schema<typeof SCHEDULE_CHANGE_SCHEMA>;
+type ExtractorAnalysisItem = {
+  email: Email;
+  emailId: string;
+  emailDate: string;
+  analysis: {
+    pending?: boolean;
+    result?: ScheduleChangeAnalysisResult;
+    error?: string | null;
+  };
+  pending: boolean;
+  error?: string | null;
+};
+type ScheduleChangeAnalysisItem = ExtractorAnalysisItem & {
+  result?: ScheduleChangeAnalysisResult;
+};
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+const addScheduleChangeResult = pattern<
+  ExtractorAnalysisItem,
+  ScheduleChangeAnalysisItem
+>((item) => ({
+  email: item.email,
+  emailId: item.emailId,
+  emailDate: item.emailDate,
+  analysis: item.analysis,
+  pending: item.pending,
+  error: item.error,
+  result: item.analysis.result as ScheduleChangeAnalysisResult | undefined,
+}));
 
 // Prompt template for LLM extraction
 const EXTRACTION_PROMPT_TEMPLATE =
@@ -215,7 +260,7 @@ function formatDate(dateStr: string | undefined): string {
 // =============================================================================
 
 interface PatternInput {
-  overrideAuth?: Auth;
+  overrideAuth?: GoogleAuthCell;
 }
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */
@@ -225,7 +270,7 @@ export interface PatternOutput {
   urgentChanges: ScheduleChange[];
   normalChanges: ScheduleChange[];
   hasChanges: boolean;
-  [TILE_UI]: unknown;
+  [TILE_UI]: import("commonfabric").VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
@@ -246,11 +291,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const { pendingCount, completedCount, rawAnalyses } = extractor;
 
   // Create emailAnalyses with result alias for backward compatibility
-  const emailAnalyses = computed(() =>
-    rawAnalyses?.map((item) => ({
-      ...item,
-      result: item.analysis?.result as ScheduleChangeAnalysisResult | undefined,
-    })) || []
+  const emailAnalyses = (
+    rawAnalyses as ReactiveArray<ExtractorAnalysisItem>
+  ).mapWithPattern(
+    addScheduleChangeResult,
+    {},
   );
 
   // ==========================================================================
@@ -262,7 +307,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const changeList: ScheduleChange[] = [];
 
     // Create a single reference date for ALL calculations
-    const today = new Date();
+    const today = new Date(safeDateNow());
     today.setHours(0, 0, 0, 0);
 
     // Seven days from now

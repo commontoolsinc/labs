@@ -8,6 +8,7 @@ import {
   Stream,
   TILE_UI,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -159,7 +160,10 @@ export function createPreviewUI(
  * Uses `accessToken` field (OAuth2TokenSchema convention).
  *
  * CRITICAL: When consuming from another pattern, DO NOT use derive()!
- * Use direct property access: `airtableAuthPiece.auth`
+ * Use direct property access: `airtableAuthPiece.auth`.
+ * If auth comes through an auth manager, use `authIsReady(availability)` for
+ * shared readiness checks. Keep the writable auth cell access explicit at the
+ * call site that needs it.
  */
 export type AirtableAuth = {
   accessToken: Secret<string> | Default<"">;
@@ -198,28 +202,18 @@ interface Input {
       "schema.bases:write": false;
       "webhook:manage": false;
     }>;
-  auth:
-    | AirtableAuth
-    | Default<{
-      accessToken: "";
-      tokenType: "";
-      scope: [];
-      expiresIn: 0;
-      expiresAt: 0;
-      refreshToken: "";
-      user: { email: ""; name: ""; picture: "" };
-    }>;
+  auth: Writable<AirtableAuth>;
 }
 
 /** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
 export interface Output {
-  auth: AirtableAuth;
+  auth: Writable<AirtableAuth>;
   scopes: string[];
   selectedScopes: SelectedScopes;
   /** Compact user display */
-  userChip: unknown;
+  userChip: VNode;
   /** Minimal preview for picker display */
-  [TILE_UI]: unknown;
+  [TILE_UI]: VNode;
   /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh */
@@ -345,11 +339,12 @@ export default pattern<Input, Output>(
     const hasSelectedScopes = computed(() =>
       Object.values(selectedScopes).some(Boolean)
     );
+    const authValue = computed(() => auth.get());
 
     // Check if re-auth is needed (selected scopes differ from granted)
     const needsReauth = computed(() => {
-      if (!auth?.accessToken) return false;
-      const grantedScopes: string[] = auth?.scope || [];
+      if (!authValue?.accessToken) return false;
+      const grantedScopes: string[] = authValue?.scope || [];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
         if (enabled && !grantedScopes.includes(key)) {
           return true;
@@ -362,15 +357,15 @@ export default pattern<Input, Output>(
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
-      if (!auth?.accessToken || !auth?.expiresAt) return false;
-      return auth.expiresAt < now.get();
+      if (!authValue?.accessToken || !authValue?.expiresAt) return false;
+      return authValue.expiresAt < now.get();
     });
 
     const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
     );
 
-    const checkboxesDisabled = computed(() => !!auth?.accessToken);
+    const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
     const refreshInProgress = new Writable(false);
     const refreshing = new Writable(false);
@@ -378,16 +373,16 @@ export default pattern<Input, Output>(
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    const hasEmail = computed(() => !!auth?.user?.email);
-    const hasUserName = computed(() => !!auth?.user?.name);
+    const hasEmail = computed(() => !!authValue?.user?.email);
+    const hasUserName = computed(() => !!authValue?.user?.name);
 
     // Data-only computed for the tile preview — resolves reactive values to plain scalars
     const previewState = computed(() => {
-      const email = auth?.user?.email || "";
-      const name = auth?.user?.name || "";
+      const email = authValue?.user?.email || "";
+      const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
       const now = safeDateNow();
-      const expiresAt = auth?.expiresAt || 0;
+      const expiresAt = authValue?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
         expiresAt - now < 10 * 60 * 1000;
@@ -399,7 +394,7 @@ export default pattern<Input, Output>(
         ? "warning"
         : "ready";
       const scopeSummary = isAuthenticated
-        ? getScopeSummary(auth?.scope || [])
+        ? getScopeSummary(authValue?.scope || [])
         : getSelectedScopeSummary({
           "data.records:read": !!selectedScopes["data.records:read"],
           "data.records:write": !!selectedScopes["data.records:write"],
@@ -425,17 +420,17 @@ export default pattern<Input, Output>(
       };
     });
 
-    const loggedIn = computed(() => !!auth?.accessToken);
+    const loggedIn = computed(() => !!authValue?.accessToken);
     const notLoggedInWithScopes = computed(() =>
       !loggedIn && hasSelectedScopes
     );
     const showTokenStatus = computed(() =>
-      !!auth?.user?.email && !isTokenExpired
+      !!authValue?.user?.email && !isTokenExpired
     );
 
     // Data-only computed for granted scopes
     const grantedScopesList = computed(() => {
-      const scopeList: string[] = auth?.scope || [];
+      const scopeList: string[] = authValue?.scope || [];
       return scopeList.map(
         (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
       );
@@ -444,7 +439,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return `Airtable Auth (${auth.user.email})`;
+          return `Airtable Auth (${authValue.user.email})`;
         }
         return "Airtable Auth";
       }),
@@ -478,10 +473,10 @@ export default pattern<Input, Output>(
               ? (
                 <div>
                   <p style={{ margin: "8px 0" }}>
-                    <strong>Email:</strong> {auth.user.email}
+                    <strong>Email:</strong> {authValue.user.email}
                   </p>
                   <p style={{ margin: "8px 0" }}>
-                    <strong>Name:</strong> {auth.user.name}
+                    <strong>Name:</strong> {authValue.user.name}
                   </p>
                 </div>
               )
@@ -496,7 +491,7 @@ export default pattern<Input, Output>(
           <div
             style={{
               padding: "20px",
-              backgroundColor: auth?.user?.email ? "#e5e7eb" : "#f0f4f8",
+              backgroundColor: authValue?.user?.email ? "#e5e7eb" : "#f0f4f8",
               borderRadius: "8px",
               border: "1px solid #d0d7de",
               opacity: loggedIn ? 0.7 : 1,
@@ -522,24 +517,118 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_MAP).map(([key, description]) => (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: loggedIn ? "not-allowed" : "pointer",
-                    color: loggedIn ? "#9ca3af" : "inherit",
-                  }}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:read"]}
+                  disabled={checkboxesDisabled}
                 >
-                  <cf-checkbox
-                    $checked={selectedScopes[key as keyof SelectedScopes]}
-                    disabled={checkboxesDisabled}
-                  >
-                    {description}
-                  </cf-checkbox>
-                </label>
-              ))}
+                  {SCOPE_MAP["data.records:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.records:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.records:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["data.recordComments:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["data.recordComments:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:read"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:read"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["schema.bases:write"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["schema.bases:write"]}
+                </cf-checkbox>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: loggedIn ? "not-allowed" : "pointer",
+                  color: loggedIn ? "#9ca3af" : "inherit",
+                }}
+              >
+                <cf-checkbox
+                  $checked={selectedScopes["webhook:manage"]}
+                  disabled={checkboxesDisabled}
+                >
+                  {SCOPE_MAP["webhook:manage"]}
+                </cf-checkbox>
+              </label>
             </div>
           </div>
 
@@ -790,12 +879,12 @@ export default pattern<Input, Output>(
             />
             <div>
               <div style={{ fontWeight: 500, fontSize: "14px" }}>
-                {hasUserName ? auth.user.name : auth.user.email}
+                {hasUserName ? authValue.user.name : authValue.user.email}
               </div>
               {hasUserName
                 ? (
                   <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                    {auth.user.email}
+                    {authValue.user.email}
                   </div>
                 )
                 : null}

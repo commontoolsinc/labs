@@ -43,10 +43,7 @@ import {
   COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
   COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commonfabric-runtime-registry.ts";
-import {
-  getCellKind,
-  isBrandedCellType,
-} from "../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind, isBrandedCellType } from "../transformers/cell-type.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
   getTypeAtLocationWithFallback,
@@ -73,7 +70,6 @@ const CELL_LIKE_CLASSES = spellingsWhere({
   CellTypeConstructor: true,
   ScopedCellTypeConstructor: true,
   SqliteDb: false,
-  OpaqueRef: false,
   Reactive: false,
 });
 
@@ -1124,7 +1120,7 @@ function hasReactiveCollectionProvenanceInternal(
     // That wrap, and the symbol's registration in syntheticReactiveCollectionRegistry,
     // happen in a later pass than the array-method lowering decision, so a nested
     // `.map`/`.filter` over the result's elements would otherwise race the registration
-    // and be emitted raw (-> "OpaqueRef.map(fn) is no longer supported" at runtime).
+    // and be emitted raw (-> "Reactive.map(fn) is no longer supported" at runtime).
     // Recognizing the shape structurally here makes the receiver provably reactive at
     // decision time, exactly as the inline `options.map(...)` form already is.
     //

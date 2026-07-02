@@ -7,10 +7,10 @@
  *
  * SETUP:
  * 1. Deploy folksonomy-aggregator.tsx first
- * 2. Favorite the aggregator with tag "folksonomy-aggregator"
+ * 2. Favorite the aggregator with tag "folksonomyAggregator"
  * 3. Deploy this demo pattern
  * 4. Add tags in one section, see them appear as suggestions in another
- * 5. Check the aggregator charm to see events flowing in
+ * 5. Check the aggregator piece to see events flowing in
  *
  * FEATURES DEMONSTRATED:
  * - Two tag instances with the same scope share suggestions
@@ -48,7 +48,7 @@ export default pattern<Input, Output>(
       suggestions: Record<string, unknown[]>;
       postEvent: unknown;
     }>({
-      query: "#folksonomy-aggregator",
+      query: "#folksonomyAggregator",
       scope: ["~", "."],
     });
     const hasAggregator = aggregatorWish.result != null;
@@ -111,7 +111,7 @@ export default pattern<Input, Output>(
               <span>
                 {hasAggregator
                   ? "Connected to folksonomy-aggregator - community features active!"
-                  : "Aggregator not found. Deploy and favorite folksonomy-aggregator with tag 'folksonomy-aggregator' for community features."}
+                  : "Aggregator not found. Deploy and favorite folksonomy-aggregator with tag 'folksonomyAggregator' for community features."}
               </span>
             </cf-hstack>
           </div>
@@ -293,7 +293,7 @@ export default pattern<Input, Output>(
                 Item C has a different scope, so it won't see recipe tags
               </li>
               <li>
-                Check the aggregator charm to see all events and top tags
+                Check the aggregator piece to see all events and top tags
               </li>
             </ol>
           </cf-vstack>

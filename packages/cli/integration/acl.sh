@@ -60,11 +60,11 @@ echo ""
 
 # Test 1: Initial space creation - owner should have automatic access
 echo "Test 1: Initial space creation and owner access"
-CHARM_ID=$(cf charm new --main-export customPatternExport $SPACE_ARGS_OWNER $PATTERN_SRC)
-echo "Created charm: $CHARM_ID"
+PIECE_ID=$(cf piece new --main-export customPatternExport $SPACE_ARGS_OWNER $PATTERN_SRC)
+echo "Created piece: $PIECE_ID"
 
-if ! cf charm ls $SPACE_ARGS_OWNER | grep -q "$CHARM_ID"; then
-  error "Owner should be able to list their own charm"
+if ! cf piece ls $SPACE_ARGS_OWNER | grep -q "$PIECE_ID"; then
+  error "Owner should be able to list their own piece"
 fi
 success "Owner has automatic access to newly created space"
 
@@ -83,12 +83,12 @@ success "ACL initialized with owner having OWNER capability"
 # Test 3: Non-authorized users cannot access space
 echo ""
 echo "Test 3: Access control - unauthorized users"
-if cf charm ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$CHARM_ID"; then
+if cf piece ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$PIECE_ID"; then
   error "USER1 should not have access without ACL entry"
 fi
 success "Unauthorized user cannot access space"
 
-if cf charm ls $SPACE_ARGS_USER2 2>/dev/null | grep -q "$CHARM_ID"; then
+if cf piece ls $SPACE_ARGS_USER2 2>/dev/null | grep -q "$PIECE_ID"; then
   error "USER2 should not have access without ACL entry"
 fi
 success "Multiple unauthorized users correctly denied access"
@@ -110,16 +110,16 @@ fi
 success "USER1 correctly listed in ACL with READ capability"
 
 # Verify USER1 can now read
-if ! cf charm ls $SPACE_ARGS_USER1 | grep -q "$CHARM_ID"; then
-  error "USER1 with READ capability should be able to list charms"
+if ! cf piece ls $SPACE_ARGS_USER1 | grep -q "$PIECE_ID"; then
+  error "USER1 with READ capability should be able to list pieces"
 fi
 success "USER1 with READ capability can query/read data"
 
 # Test 5: READ capability does not allow writes
 echo ""
 echo "Test 5: READ capability restrictions"
-if cf charm new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC 2>/dev/null; then
-  error "USER1 with READ should not be able to create charms"
+if cf piece new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC 2>/dev/null; then
+  error "USER1 with READ should not be able to create pieces"
 fi
 success "READ capability correctly prevents write operations"
 
@@ -130,15 +130,15 @@ cf acl set $DID_USER2 WRITE $SPACE_ARGS_OWNER
 success "Added USER2 with WRITE capability"
 
 # Verify USER2 can read
-if ! cf charm ls $SPACE_ARGS_USER2 | grep -q "$CHARM_ID"; then
+if ! cf piece ls $SPACE_ARGS_USER2 | grep -q "$PIECE_ID"; then
   error "USER2 with WRITE capability should be able to read"
 fi
 success "USER2 with WRITE capability can read data"
 
 # Verify USER2 can write
-CHARM_ID2=$(cf charm new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC)
-if [ -z "$CHARM_ID2" ]; then
-  error "USER2 with WRITE capability should be able to create charms"
+PIECE_ID2=$(cf piece new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC)
+if [ -z "$PIECE_ID2" ]; then
+  error "USER2 with WRITE capability should be able to create pieces"
 fi
 success "USER2 with WRITE capability can write data"
 
@@ -156,9 +156,9 @@ fi
 success "USER1 capability correctly upgraded to WRITE"
 
 # Verify USER1 can now write
-CHARM_ID3=$(cf charm new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC)
-if [ -z "$CHARM_ID3" ]; then
-  error "USER1 with upgraded WRITE capability should be able to create charms"
+PIECE_ID3=$(cf piece new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC)
+if [ -z "$PIECE_ID3" ]; then
+  error "USER1 with upgraded WRITE capability should be able to create pieces"
 fi
 success "USER1 with upgraded WRITE capability can now write"
 
@@ -193,7 +193,7 @@ fi
 success "USER1 successfully removed from ACL"
 
 # Verify USER1 no longer has access
-if cf charm ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$CHARM_ID"; then
+if cf piece ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$PIECE_ID"; then
   error "USER1 should not have access after removal from ACL"
 fi
 success "USER1 access revoked after ACL removal"
@@ -249,8 +249,8 @@ fi
 success "USER2 capability correctly downgraded to READ"
 
 # Verify USER2 can no longer write
-if cf charm new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC 2>/dev/null; then
-  error "USER2 with downgraded READ should not be able to create charms"
+if cf piece new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC 2>/dev/null; then
+  error "USER2 with downgraded READ should not be able to create pieces"
 fi
 success "Downgraded USER2 correctly restricted to READ operations"
 

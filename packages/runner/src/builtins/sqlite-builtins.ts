@@ -512,6 +512,10 @@ type QueryState = {
   result?: unknown[];
   error?: unknown;
   requestHash?: string;
+  /** CFC Phase 3.b read-time clearance audit: how many rows the acting reader
+   *  could not read were withheld (a declared existence release). Absent when
+   *  no clearance was requested. */
+  withheld?: number;
 };
 
 /** sqliteQuery: reactive server-side read. */
@@ -543,6 +547,10 @@ export function sqliteQuery(
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
       maxConfidentiality?: unknown[];
       onExceed?: unknown;
+      // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
+      // acting reader may read (a declared existence release). Requires the
+      // touched rule-bearing table to permit it (rowLabelReadClearance).
+      readClearance?: unknown;
     } | undefined;
 
     // The query result holds rows from a scope-partitioned db, so it must be at
@@ -552,7 +560,19 @@ export function sqliteQuery(
         typeof (inputs.db as SqliteDbRef).id === "string")
       ? (inputs.db as SqliteDbRef).scope
       : undefined;
-    const scope = narrowestScope([outputBinding?.scope, dbScope]);
+    // CFC Phase 3.b: a read-time-clearance result is filtered to the ACTING
+    // READER, so it must never be shared across readers. Force it to (at least)
+    // per-`user` scope so each reader gets an isolated result cell — otherwise a
+    // space-scoped result cell would let one reader observe another's filtered
+    // rows (the shared cell + reader-independent request hash both leak).
+    const clearanceScope: CellScope | undefined = inputs?.readClearance
+      ? "user"
+      : undefined;
+    const scope = narrowestScope([
+      outputBinding?.scope,
+      dbScope,
+      clearanceScope,
+    ]);
 
     if (!initialized || resultScope !== scope) {
       result = makeResultCell<QueryState>(
@@ -588,10 +608,18 @@ export function sqliteQuery(
       // them re-issues the query (pre-existing queries re-hash once — benign).
       maxConfidentiality: inputs.maxConfidentiality ?? null,
       onExceed: inputs.onExceed ?? null,
+      readClearance: inputs.readClearance ?? null,
+      // Phase 3.b: a cleared result depends on WHO is asking, so the acting
+      // reader is part of the query identity (belt-and-suspenders with the
+      // per-user result scope above — a cleared result is never keyed only by
+      // the boolean). Absent for non-clearance queries so they do not re-hash.
+      clearanceReader: inputs.readClearance
+        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
+        : null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
-    // in-memory flag — see fetch-data.ts). Re-issue otherwise.
+    // in-memory flag — see fetch.ts). Re-issue otherwise.
     if (result.withTx(tx).get()?.requestHash === hash) return;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
@@ -685,11 +713,17 @@ export function sqliteQuery(
             staticConfidentiality: staticConfidentialityOf(labelSchema),
             ceiling,
             onExceed: inputs.onExceed,
+            // Phase 3.b read-time clearance: the reader is the acting principal
+            // (same identity the ceiling placeholders resolve against).
+            readClearance: inputs.readClearance
+              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+              : undefined,
           });
           if ("error" in rowLabels) {
             await failQuery(rowLabels.error);
             return;
           }
+          const withheld = rowLabels.withheld;
           // onExceed:"skip" — drop rows the declared ceiling does not admit
           // (a declared, observable existence release; 06-cfc.md ceiling).
           const keep = rowLabels.keep;
@@ -724,6 +758,7 @@ export function sqliteQuery(
               pending: false,
               result: resultRows,
               requestHash: hash,
+              ...(withheld !== undefined ? { withheld } : {}),
             });
             // Per-row label attachment (CFC Phase 3): each row split into its
             // own entity doc above; write each labeled row doc DIRECTLY (its

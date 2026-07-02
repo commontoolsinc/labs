@@ -1,10 +1,10 @@
 import { env } from "@commonfabric/integration";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { initializePiecesController } from "./pieces-controller.ts";
 
 const { API_URL } = env;
 
@@ -61,7 +61,7 @@ describe("Compile all patterns", () => {
       // The PatternManager caches compiled patterns indefinitely, so we need a
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
-      const cc = await PiecesController.initialize({
+      const cc = await initializePiecesController({
         spaceName: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,

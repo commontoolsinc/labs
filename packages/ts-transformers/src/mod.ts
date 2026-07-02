@@ -1,5 +1,8 @@
 export type {
   DiagnosticSeverity,
+  PatternCoverageKind,
+  PatternCoverageOptions,
+  PatternCoverageSpan,
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
@@ -9,6 +12,7 @@ export {
   CrossStageState,
   injectCfDataHelper,
   injectCfHelpers,
+  PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   sourceDisablesCfTransform,
   transformCfDirective,
@@ -32,6 +36,6 @@ export { CommonFabricTransformerPipeline } from "./cf-pipeline.ts";
 export {
   CompositeDiagnosticTransformer,
   type DiagnosticMessageTransformer,
-  OpaqueRefErrorTransformer,
-  type OpaqueRefErrorTransformerOptions,
+  ReactiveErrorTransformer,
+  type ReactiveErrorTransformerOptions,
 } from "./diagnostics/mod.ts";

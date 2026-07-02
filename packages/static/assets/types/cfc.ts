@@ -29,8 +29,10 @@ export type CfcAtom = CfcJsonValue;
 export declare const CFC_ATOM_TYPE: {
   readonly Builtin: "https://commonfabric.org/cfc/atom/Builtin";
   readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";
+  readonly ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest";
   readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
   readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
+  readonly LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived";
   readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
   readonly PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified";
   readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
@@ -77,6 +79,17 @@ export type CfcUserSurfaceInputAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
   readonly user: string;
   readonly surface: string;
+  readonly valueDigest: string;
+};
+type CfcLlmDerivedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.LlmDerived;
+  readonly model?: string;
+};
+export type CfcExternalIngestAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.ExternalIngest;
+  readonly channel: string;
+  readonly audience: string;
+  readonly receivedAt: string;
   readonly valueDigest: string;
 };
 export type CfcPromptSlotBoundAtom<
@@ -130,11 +143,18 @@ export declare const cfcAtom: {
   ) => CfcCaveatAtom;
   readonly builtin: (name: string) => CfcBuiltinAtom;
   readonly injectionSafe: () => CfcInjectionSafeAtom;
+  readonly llmDerived: (model?: string) => CfcLlmDerivedAtom;
   readonly userSurfaceInput: (
     user: string,
     surface: string,
     valueDigest: string,
   ) => CfcUserSurfaceInputAtom;
+  readonly externalIngest: (
+    channel: string,
+    audience: string,
+    receivedAt: string,
+    valueDigest: string,
+  ) => CfcExternalIngestAtom;
   readonly promptSlotBound: <Source extends CfcAtom, Role extends string>(
     source: Source,
     role: Role,

@@ -11,8 +11,8 @@ import { __cfHelpers } from "commonfabric";
  * Regression test for array.length access inside computed().
  *
  * This mimics the pattern from default-app.tsx where:
- * - allCharms comes from wish<{ allCharms: MentionableCharm[] }>
- * - computed(() => allCharms.length) accesses .length on an array from wish
+ * - allPieces comes from wish<{ allPieces: MentionablePiece[] }>
+ * - computed(() => allPieces.length) accesses .length on an array from wish
  *
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
@@ -21,18 +21,18 @@ import { computed, NAME, pattern, UI, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-interface Charm {
+interface Piece {
     id: string;
     name: string;
 }
 const __cfLift_1 = __cfHelpers.lift<{
-    allCharms: {
+    allPieces: {
         length: number;
     };
-}, string>(({ allCharms }) => `Charms (${allCharms.length})`, {
+}, string>(({ allPieces }) => `Pieces (${allPieces.length})`, {
     type: "object",
     properties: {
-        allCharms: {
+        allPieces: {
             type: "object",
             properties: {
                 length: {
@@ -42,18 +42,18 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["length"]
         }
     },
-    required: ["allCharms"]
+    required: ["allPieces"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
-    allCharms: {
+    allPieces: {
         length: number;
     };
-}, number>(({ allCharms }) => allCharms.length, {
+}, number>(({ allPieces }) => allPieces.length, {
     type: "object",
     properties: {
-        allCharms: {
+        allPieces: {
             type: "object",
             properties: {
                 length: {
@@ -63,23 +63,23 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["length"]
         }
     },
-    required: ["allCharms"]
+    required: ["allPieces"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
-    const charm = __cf_pattern_input.key("element");
-    return (<li>{charm.key("name")}</li>);
+    const piece = __cf_pattern_input.key("element");
+    return (<li>{piece.key("name")}</li>);
 }, {
     type: "object",
     properties: {
         element: {
-            $ref: "#/$defs/Charm"
+            $ref: "#/$defs/Piece"
         }
     },
     required: ["element"],
     $defs: {
-        Charm: {
+        Piece: {
             type: "object",
             properties: {
                 id: {
@@ -114,27 +114,27 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-array-length
-// Verifies: computed(() => expr) with .length access on an OpaqueRef<T[]> is closure-extracted
-//   computed(() => allCharms.length) → lift(({ allCharms }) => allCharms.length)({ allCharms: { length: allCharms.length } })
-//   allCharms.map(fn) → allCharms.mapWithPattern(pattern(fn, ...schemas), {})
+// Verifies: computed(() => expr) with .length access on a Reactive<T[]> is closure-extracted
+//   computed(() => allPieces.length) → lift(({ allPieces }) => allPieces.length)({ allPieces: { length: allPieces.length } })
+//   allPieces.map(fn) → allPieces.mapWithPattern(pattern(fn, ...schemas), {})
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
     const __cf_destructure_1 = wish<{
-        allCharms: Charm[];
+        allPieces: Piece[];
     }>({ query: "/" }, {
         type: "object",
         properties: {
-            allCharms: {
+            allPieces: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Charm"
+                    $ref: "#/$defs/Piece"
                 }
             }
         },
-        required: ["allCharms"],
+        required: ["allPieces"],
         $defs: {
-            Charm: {
+            Piece: {
                 type: "object",
                 properties: {
                     id: {
@@ -147,17 +147,17 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema), allCharms = __cf_destructure_1.key("result", "allCharms").for("allCharms", true);
+    } as const satisfies __cfHelpers.JSONSchema), allPieces = __cf_destructure_1.key("result", "allPieces").for("allPieces", true);
     return {
-        [NAME]: __cfLift_1({ allCharms: {
-                length: allCharms.key("length")
+        [NAME]: __cfLift_1({ allPieces: {
+                length: allPieces.key("length")
             } }),
         [UI]: (<div>
-        <span>Count: {__cfLift_2({ allCharms: {
-                length: allCharms.key("length")
+        <span>Count: {__cfLift_2({ allPieces: {
+                length: allPieces.key("length")
             } })}</span>
         <ul>
-          {allCharms.mapWithPattern(__cfPattern_1, {})}
+          {allPieces.mapWithPattern(__cfPattern_1, {})}
         </ul>
       </div>),
     };

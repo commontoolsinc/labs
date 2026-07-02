@@ -318,6 +318,12 @@ verified-authority gating deferred). The remaining phase-D piece is the
 (`childRenderPolicyForNode` → `canRenderCellUnderPolicy`) gets a default policy
 of roughly _acting-user identity atoms + an allow-list of caveat-kind label
 classes_, admitted by default and tightened over time (SC-16 specs the profile).
+Text-integrity render boundaries (`<cf-cfc-authorship verifyTextIntegrity>`) gate
+this same render egress channel and follow the same monotonic-composition
+discipline — see
+[`cfc-render-boundary-composition.md`](./cfc-render-boundary-composition.md)
+(confidentiality narrows/intersects; text integrity unions/ANDs; nesting only
+tightens). CT-1796.
 
 | Channel                       | Check today                                                                              | With propagation                                                                                                                          |
 | ----------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

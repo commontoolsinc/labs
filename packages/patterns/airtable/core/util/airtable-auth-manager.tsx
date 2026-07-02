@@ -9,21 +9,30 @@
  *
  * Usage:
  * ```typescript
- * const { auth, fullUI, isReady } = AirtableAuthManager({
+ * const { availability, fullUI, isReady } = AirtableAuthManager({
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
  *
- * if (!isReady) return;
- * // Use auth.accessToken for API calls
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Airtable first.</div>;
  *
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * ```
+ *
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
  */
 
-import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
-import AirtableAuth from "../airtable-auth.tsx";
+import { authIsReady } from "../../../auth/auth-types.ts";
+import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
+import AirtableAuth, {
+  type AirtableAuth as AirtableAuthData,
+} from "../airtable-auth.tsx";
 
 // Re-export shared types for consumers
 export type {
@@ -33,9 +42,10 @@ export type {
 } from "../../../auth/auth-types.ts";
 export type {
   AuthManagerInput as AirtableAuthManagerInput,
-  AuthManagerOutput as AirtableAuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
 export type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
+
+export type AirtableAuthManagerOutput = AuthManagerOutput<AirtableAuthData>;
 
 /** Airtable scope keys */
 export type ScopeKey =
@@ -80,7 +90,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
 
 export const AirtableAuthManager = pattern<
   import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
-  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+  AirtableAuthManagerOutput
 >(({ requiredScopes, accountType, debugMode }) => {
   const createAuth = action(() => {
     const required = Array.isArray(requiredScopes) ? requiredScopes : [];
@@ -124,13 +134,26 @@ export const AirtableAuthManager = pattern<
     );
   });
 
-  return AuthManagerBase({
+  const base = AuthManagerBase<AirtableAuthData>({
     requiredScopes,
     accountType,
     debugMode,
     descriptor: AirtableAuthManagerDescriptor,
     createAuth,
   });
+
+  return {
+    auth: base.auth,
+    availability: base.availability,
+    authInfo: base.authInfo,
+    isReady: authIsReady(base.availability),
+    currentEmail: base.currentEmail,
+    currentState: base.currentState,
+    pickerUI: base.pickerUI,
+    statusUI: base.statusUI,
+    fullUI: base.fullUI,
+    [UI]: base.fullUI,
+  };
 });
 
 export default AirtableAuthManager;

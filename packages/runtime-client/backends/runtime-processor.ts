@@ -22,11 +22,14 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markUiInputBlindWriteTx,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
+  setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
+  unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -37,6 +40,7 @@ import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
@@ -46,6 +50,7 @@ import {
   type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellGetResponse,
+  type CellPushRequest,
   type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
@@ -164,6 +169,7 @@ export function runtimeOptionsFromInitializationData(
     telemetry,
     experimental: data.experimental,
     cfcEnforcementMode: data.cfcEnforcementMode,
+    cfcFlowLabels: data.cfcFlowLabels,
     trustSnapshotProvider: data.trustSnapshot
       ? () => data.trustSnapshot
       : undefined,
@@ -666,7 +672,7 @@ export class RuntimeProcessor {
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
       includeSchema: true,
-      keepAsCell: true,
+      keepAsCell: KeepAsCell.All,
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
     });
@@ -684,11 +690,53 @@ export class RuntimeProcessor {
     };
   }
 
+  // A `CellHandle.set` is a blind leaf overwrite (last-write-wins); a
+  // `CellHandle.push` is read-modify-write and keeps compare-and-set. The
+  // blind-vs-CAS decision is made by METHOD — which request type the client sent
+  // — not by inspecting the value's shape. Both carry the whole already-resolved
+  // value on the wire.
   handleCellSet(request: CellSetRequest): void {
+    this.applyCellWrite(request, /* blind */ true);
+  }
+
+  handleCellPush(request: CellPushRequest): void {
+    this.applyCellWrite(request, /* blind */ false);
+  }
+
+  // Shared write path for CellSet/CellPush. In blind mode the set's reads carry no
+  // value-equality precondition, so a UI overwrite is last-write-wins and no
+  // longer loses the own-write race that rolled the edit back. In their place we
+  // thread ONE structural precondition — the cell's PARENT address — which
+  // buildReads turns into a nonRecursive read: that catches a concurrent whole-doc
+  // delete or an ancestor reshape (so a stale nested patch can't throw at
+  // read-materialization) without conflicting on a concurrent write to the cell's
+  // own value. We compute the parent here, at handleCellSet, because the logical
+  // write path is known only here — buildReads sees the optimized element-level
+  // diff. In non-blind (push) mode the read-target stays a commit precondition, so
+  // a concurrent push aborts rather than being clobbered. The blind mark is
+  // cleared before prepareTxForCommit so CFC boundary-commit read-then-writes
+  // retain their preconditions.
+  applyCellWrite(
+    request: CellSetRequest | CellPushRequest,
+    blind: boolean,
+  ): void {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
+    if (blind) {
+      markUiInputBlindWriteTx(tx);
+      // The resolved storage address of the write target; its parent is the
+      // structural existence/shape precondition for the blind write.
+      const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
+      setBlindStructuralTarget(tx, {
+        id: link.id,
+        space: link.space,
+        scope: link.scope,
+        path: link.path.slice(0, -1),
+      });
+    }
     cell.withTx(tx).set(value);
+    if (blind) unmarkUiInputBlindWriteTx(tx);
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC.
@@ -730,7 +778,7 @@ export class RuntimeProcessor {
       }
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
-        keepAsCell: true,
+        keepAsCell: KeepAsCell.All,
         doNotConvertCellResults: true,
         includeCfcLabelView: true,
       });
@@ -1284,6 +1332,8 @@ export class RuntimeProcessor {
         return this.handleCellGet(request);
       case RequestType.CellSet:
         return this.handleCellSet(request);
+      case RequestType.CellPush:
+        return this.handleCellPush(request);
       case RequestType.CellSend:
         return this.handleCellSend(request);
       case RequestType.CellSubscribe:

@@ -39,7 +39,11 @@ import {
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isObject,
+  isPlainContainer,
+  isRecord,
+} from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -76,10 +80,41 @@ import type {
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
-import { isReadExcludedFromConflict } from "./reactivity-log.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+} from "./transaction-inspection.ts";
+import {
+  getBlindStructuralTarget,
+  isMergeableOpRead,
+  isReadExcludedFromConflict,
+  isReadIgnoredForCommit,
+  isReadMarkedAsAttemptedWrite,
+} from "./reactivity-log.ts";
+
+// A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
+// part of the write; that read is dropped from its conflict set.
+const isCfcLabelPath = (path: readonly string[]): boolean =>
+  path.length === 1 && path[0] === "cfc";
+
+const isStrictPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length < path.length &&
+  prefix.every((segment, index) => path[index] === segment);
+
+const isSamePath = (
+  a: readonly string[],
+  b: readonly string[],
+): boolean =>
+  a.length === b.length && a.every((segment, index) => b[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
+import {
+  hasValueAtPath,
+  isArrayIndexSegment,
+  readValueAtPath,
+} from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -99,6 +134,11 @@ export type { SessionFactory } from "./v2-remote-session.ts";
 const logger = getLogger("storage.v2", {
   enabled: true,
   level: "error",
+});
+const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
 });
 
 function withCommitTiming<T>(
@@ -238,6 +278,12 @@ type DocumentRecord = {
   materialized?: PendingMaterializationCache;
 };
 
+type PendingPatchLogContext = {
+  space: MemorySpace;
+  id: URI;
+  scope?: CellScope;
+};
+
 type ConfirmedCommitRead = {
   id: URI;
   scope?: CellScope;
@@ -314,6 +360,10 @@ const changedPathsForPendingPatch = (
     switch (patch.op) {
       case "replace":
       case "splice":
+      case "append":
+      case "add-unique":
+      case "remove-by-value":
+      case "increment":
         return [parsePointer(patch.path)];
       case "add":
       case "remove": {
@@ -331,6 +381,44 @@ const changedPathsForPendingPatch = (
     }
   });
 
+// Finds the first existing prefix in `base` that blocks a pending nested write.
+// cloneWithValueAtPath can create missing containers when applying the selected
+// write path.
+const firstExistingPrefixThatBlocksPendingPath = (
+  base: EntityDocument | undefined,
+  path: readonly string[],
+): string[] | undefined => {
+  for (let length = 1; length < path.length; length += 1) {
+    const prefix = path.slice(0, length);
+    if (!hasValueAtPath(base, prefix)) {
+      // Once a prefix is missing, by definition everything else in the path
+      // can be written, so nothing is blocking it.
+      return undefined;
+    }
+    const value = readValueAtPath(base, prefix);
+    const nextSegment = path[length]!;
+    if (
+      !isPlainContainer(value) ||
+      (Array.isArray(value) && !isArrayIndexSegment(nextSegment))
+    ) {
+      return prefix;
+    }
+  }
+  return undefined;
+};
+
+const pendingSetPathForBase = (
+  base: EntityDocument | undefined,
+  pendingValue: EntityDocument,
+  path: readonly string[],
+): readonly string[] => {
+  const prefix = firstExistingPrefixThatBlocksPendingPath(base, path);
+  if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
+    return path;
+  }
+  return prefix;
+};
+
 const compactChangedPaths = (paths: readonly string[][]): string[][] => {
   const sorted = [...paths].sort((left, right) => left.length - right.length);
   const retained: string[][] = [];
@@ -346,6 +434,7 @@ const compactChangedPaths = (paths: readonly string[][]): string[][] => {
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
+  logContext: PendingPatchLogContext,
 ): EntityDocument | undefined => {
   switch (pending.op) {
     case "delete":
@@ -360,10 +449,24 @@ const applyPendingVersion = (
         )
       ) {
         if (hasValueAtPath(pending.value, path)) {
+          const setPath = pendingSetPathForBase(next, pending.value, path);
+          if (!isSamePath(setPath, path)) {
+            pendingPatchLogger.warn("pending-branch-replace", () => [
+              "pending patch visibility replaced data at an existing branch that blocked the nested write",
+              {
+                space: logContext.space,
+                id: logContext.id,
+                scope: normalizeCellScope(logContext.scope),
+                localSeq: pending.localSeq,
+                path,
+                replacementPath: setPath,
+              },
+            ]);
+          }
           next = cloneWithValueAtPath(
             next,
-            path,
-            readValueAtPath(pending.value, path),
+            setPath,
+            readValueAtPath(pending.value, setPath),
           ) as EntityDocument;
           continue;
         }
@@ -393,6 +496,7 @@ const ensurePendingMaterializationCache = (
 
 const materializedVersionThroughPending = (
   record: DocumentRecord,
+  logContext: PendingPatchLogContext,
   pendingCount = record.pending.length,
 ): MaterializedVersion => {
   if (pendingCount <= 0) {
@@ -408,7 +512,7 @@ const materializedVersionThroughPending = (
     const pending = record.pending[nextIndex]!;
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending),
+      value: applyPendingVersion(base.value, pending, logContext),
       transactionValue: UNCACHED_TRANSACTION_VALUE,
     });
   }
@@ -741,6 +845,13 @@ export class StorageManager implements IStorageManager {
 
   removeCrossSpacePromise(promise: Promise<void>): void {
     this.#crossSpacePromises.delete(promise);
+  }
+
+  trackUntilSettled(work: Promise<unknown>): void {
+    const tracked = work.finally(() =>
+      this.#crossSpacePromises.delete(tracked)
+    ) as Promise<void>;
+    this.#crossSpacePromises.add(tracked);
   }
 
   pendingCrossSpacePromiseCount(): number {
@@ -2096,12 +2207,77 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
+    // For a blind UI-input write, handleCellSet threads the cell's PARENT address
+    // here; its `ignoreReadForCommit` reads are dropped below and replaced by one
+    // nonRecursive read at this parent (emitted after the loop).
+    const structuralTarget = getBlindStructuralTarget(source);
+
+    // Emit one commit read for `id`, baselined against the most recent in-flight
+    // local version of that doc below this commit's localSeq if one exists, else
+    // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
+    // carries its own `meta.seq`). Shared by the per-read loop below and the blind
+    // write's structural precondition so the two emission sites stay in lockstep.
+    const pushCommitRead = (
+      id: URI,
+      scope: CellScope | undefined,
+      path: DocumentPath,
+      nonRecursive: boolean,
+      confirmedSeq?: number,
+    ) => {
+      const record = this.#docs.get(docKey(id, scope));
+      const pendingLocalSeq = record?.pending
+        .filter((version) => version.localSeq < localSeq)
+        .at(-1)?.localSeq;
+      const shape = nonRecursive ? { nonRecursive: true } : {};
+      if (pendingLocalSeq !== undefined) {
+        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
+      } else {
+        confirmed.push({
+          id,
+          scope,
+          path,
+          seq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          ...shape,
+        });
+      }
+    };
+
+    // A mergeable op resolves against durable state, so it does not depend on
+    // the document's prior value. On an entity touched by a mergeable op, the
+    // reads the op ITSELF issues are dropped from conflict detection — its own
+    // value read (marked `mergeableOpRead`), its write-target reads (marked
+    // attempted-write), and the CFC write-policy label at ["cfc"] — so disjoint
+    // and stale-base writes merge and the op applies on top of a concurrent
+    // whole-entity write. A handler's OWN explicit read of the entity is kept,
+    // so a conditional mergeable write (e.g. dedup-then-push) still conflicts
+    // and retries. Server-side write authorization is enforced at apply time.
+    const mergeableOpPathsByEntity = new Map<string, (readonly string[])[]>();
+    for (const op of getDirectTransactionMergeableOpAddresses(source) ?? []) {
+      if (op.space !== this.#space) continue;
+      const key = `${op.id}\0${normalizeCellScope(op.scope)}`;
+      const paths = mergeableOpPathsByEntity.get(key);
+      if (paths) {
+        paths.push(op.path);
+      } else {
+        mergeableOpPathsByEntity.set(key, [op.path]);
+      }
+    }
+
     for (const read of reads) {
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
+        continue;
+      }
+      // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is not
+      // a value-equality concurrency precondition: a blind `set` must not lose the
+      // own-write race on its own write-target read. Drop it from the conflict set.
+      // Its structural replacement — one nonRecursive read at the cell's PARENT — is
+      // emitted once after the loop from the threaded `structuralTarget`, since the
+      // logical write path is known only at handleCellSet, not from this diff.
+      if (isReadIgnoredForCommit(read.meta)) {
         continue;
       }
 
@@ -2116,29 +2292,54 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       const scope = normalizeCellScope(read.scope);
-      const record = this.#docs.get(docKey(read.id as URI, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
-      if (pendingLocalSeq !== undefined) {
-        pending.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          localSeq: pendingLocalSeq,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
-      } else {
-        confirmed.push({
-          id: read.id as URI,
-          scope,
-          path: toCommitReadPath(read.path),
-          seq: typeof read.meta?.seq === "number"
-            ? read.meta.seq
-            : record?.confirmed.seq ?? 0,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-        });
+
+      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      if (
+        opPaths !== undefined &&
+        (isMergeableOpRead(read.meta) ||
+          isReadMarkedAsAttemptedWrite(read.meta) ||
+          isCfcLabelPath(read.path) ||
+          // Deep reads under the op path (link resolution, element sub-reads) are
+          // incidental to the op. A shape-only (nonRecursive) read AT the op path
+          // is also incidental — it is the query-result proxy's container read of
+          // the array being mutated, which must not false-conflict with a
+          // concurrent mergeable op. A RECURSIVE read AT the op path is the
+          // handler's explicit read of the collection, and is kept so a
+          // conditional mergeable write still conflicts and retries.
+          opPaths.some((opPath) =>
+            isStrictPrefixPath(opPath, read.path) ||
+            (read.nonRecursive === true && isSamePath(opPath, read.path))
+          ))
+      ) {
+        continue;
       }
+      pushCommitRead(
+        read.id as URI,
+        scope,
+        toCommitReadPath(read.path),
+        read.nonRecursive === true,
+        typeof read.meta?.seq === "number" ? read.meta.seq : undefined,
+      );
+    }
+    // The blind UI-input write's single structural existence/shape precondition: a
+    // nonRecursive read at the cell's PARENT (threaded from handleCellSet). It
+    // conflicts with a concurrent whole-doc delete/replace (TIER-1, path-blind) and
+    // with a reshape of the parent or any ancestor (TIER-2 nonRecursive overlap
+    // fires at-or-above the read path), but NOT with a write to the cell's own
+    // value (which sits below the parent, including array elements) — so the
+    // own-write race stays conflict-free.
+    if (
+      structuralTarget !== undefined &&
+      structuralTarget.space === this.#space
+    ) {
+      pushCommitRead(
+        structuralTarget.id as URI,
+        normalizeCellScope(
+          structuralTarget.scope as Parameters<typeof normalizeCellScope>[0],
+        ),
+        toCommitReadPath(structuralTarget.path),
+        true,
+      );
     }
     // Keep the nonRecursive flag on the reads sent to the engine (it was
     // historically stripped here). The engine applies shallow (shape-only)
@@ -2425,6 +2626,7 @@ class SpaceReplica implements ISpaceReplica {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
+            { space: this.#space, id, scope },
             lastPendingIndex + 1,
           );
           const cache = ensurePendingMaterializationCache(record);
@@ -2439,7 +2641,11 @@ class SpaceReplica implements ISpaceReplica {
         } else {
           promoted = confirmedVersion(
             applied.seq,
-            applyPendingVersion(record.confirmed.value, pending),
+            applyPendingVersion(record.confirmed.value, pending, {
+              space: this.#space,
+              id,
+              scope,
+            }),
           );
         }
       }
@@ -2488,7 +2694,11 @@ class SpaceReplica implements ISpaceReplica {
     }
     return {
       record,
-      version: materializedVersionThroughPending(record),
+      version: materializedVersionThroughPending(record, {
+        space: this.#space,
+        id,
+        scope,
+      }),
     };
   }
 

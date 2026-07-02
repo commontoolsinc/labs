@@ -58,7 +58,7 @@ Can be nested and overriden further down the subtree.
 Used to render a `Cell` that has a `[UI]` property into the DOM. Usually not required inside a pattern, used in the app shell itself.
 
 ```{code-block} html
-<cf-render $cell={myCharm} />
+<cf-render $cell={myPiece} />
 ```
 
 ## cf-keybind (beta)

@@ -9,26 +9,31 @@
  *
  * Usage:
  * ```typescript
- * const { auth, fullUI, isReady } = createGoogleAuth({
+ * const { availability, fullUI, isReady } = createGoogleAuth({
  *   requiredScopes: ["gmail", "drive"],
  * });
  *
- * // Guard API calls with isReady
- * if (!isReady) return;
- * // Use auth.token for API calls
+ * const auth = availability.state === "ready" ? availability.auth : null;
+ * const providerUI = auth
+ *   ? <Importer auth={auth} />
+ *   : <div>Connect Google first.</div>;
  *
  * // In UI: {fullUI} handles all auth states
- * return { [UI]: <div>{fullUI}</div> };
+ * return { [UI]: <div>{fullUI}{providerUI}</div> };
  * ```
  *
- * Token refresh: Tokens auto-refresh via background-charm-service (when registered).
+ * Use authIsReady(availability) for shared boolean readiness checks.
+ * Keep the writable auth cell selection next to the code that uses it.
+ *
+ * Token refresh: Tokens auto-refresh via background-piece-service (when registered).
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
-import { action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
-import GoogleAuth from "../google-auth.tsx";
+import { authIsReady } from "../../../auth/auth-types.ts";
+import GoogleAuth, { type Auth } from "../google-auth.tsx";
 
 // Re-export shared types for consumers
 export type {
@@ -38,10 +43,11 @@ export type {
 } from "../../../auth/auth-types.ts";
 import type {
   AuthManagerInput as GoogleAuthManagerInput,
-  AuthManagerOutput as GoogleAuthManagerOutput,
+  AuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
-export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
-export type { Auth } from "../google-auth.tsx";
+export type GoogleAuthManagerOutput = AuthManagerOutput<Auth>;
+export type { GoogleAuthManagerInput };
+export type { Auth, GoogleAuthCell } from "../google-auth.tsx";
 
 const GOOGLE_SCOPE_MAP_VALUES = {
   gmail: "https://www.googleapis.com/auth/gmail.readonly",
@@ -132,13 +138,26 @@ export const GoogleAuthManager = pattern<
     );
   });
 
-  return AuthManagerBase({
+  const base = AuthManagerBase<Auth>({
     requiredScopes,
     accountType,
     debugMode,
     descriptor: GoogleAuthManagerDescriptor,
     createAuth,
   });
+
+  return {
+    auth: base.auth,
+    availability: base.availability,
+    authInfo: base.authInfo,
+    isReady: authIsReady(base.availability),
+    currentEmail: base.currentEmail,
+    currentState: base.currentState,
+    pickerUI: base.pickerUI,
+    statusUI: base.statusUI,
+    fullUI: base.fullUI,
+    [UI]: base.fullUI,
+  };
 });
 
 // Backward-compatible export for existing code that uses createGoogleAuth()

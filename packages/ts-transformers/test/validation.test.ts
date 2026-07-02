@@ -7,10 +7,6 @@ function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
 }
 
-function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
-  return diagnostics.filter((d) => d.severity === "warning");
-}
-
 function getEmptyArrayErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) =>
     d.type === "cell-factory:empty-array" && d.severity === "error"
@@ -65,11 +61,11 @@ const casted = {} as Cell<number>;
 Deno.test("Cast Validation", async (t) => {
   await t.step("errors on double cast 'as unknown as'", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
       interface Item { name: string; }
       const data = { name: "test" };
-      const ref = data as unknown as OpaqueRef<Item>;
+      const ref = data as unknown as Reactive<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -79,13 +75,13 @@ Deno.test("Cast Validation", async (t) => {
     assertHasErrorType(errors, "cast-validation:double-unknown");
   });
 
-  await t.step("errors on 'as OpaqueRef<>'", async () => {
+  await t.step("errors on 'as Reactive<>'", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
       interface Item { name: string; }
       const data: any = { name: "test" };
-      const ref = data as OpaqueRef<Item>;
+      const ref = data as Reactive<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -95,7 +91,7 @@ Deno.test("Cast Validation", async (t) => {
     assertHasErrorType(errors, "cast-validation:forbidden-cast");
   });
 
-  await t.step("warns on 'as Cell<>'", async () => {
+  await t.step("errors on 'as Cell<>'", async () => {
     const source = `
       import { Cell } from "commonfabric";
 
@@ -105,12 +101,12 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
   });
 
-  await t.step("warns on 'as OpaqueCell<>'", async () => {
+  await t.step("errors on 'as OpaqueCell<>'", async () => {
     const source = `
       import { OpaqueCell } from "commonfabric";
 
@@ -120,12 +116,12 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
   });
 
-  await t.step("warns on 'as Writable<>'", async () => {
+  await t.step("errors on 'as Writable<>'", async () => {
     const source = `
       import { Writable } from "commonfabric";
 
@@ -135,9 +131,242 @@ Deno.test("Cast Validation", async (t) => {
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const warnings = getWarnings(diagnostics);
-    assertGreater(warnings.length, 0, "Expected at least one warning");
-    assertEquals(warnings[0]!.type, "cast-validation:cell-cast");
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on union casts containing 'Writable<>'", async () => {
+    const source = `
+      import { Writable } from "commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as (Writable<number> | undefined);
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on renamed imports of 'Cell<>'", async () => {
+    const source = `
+      import { Cell as C } from "commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as C<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on type aliases to 'Cell<>'", async () => {
+    const source = `
+      import { Cell } from "commonfabric";
+
+      type MyCell = Cell<number>;
+      const data: any = { value: 42 };
+      const cell = data as MyCell;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on import type casts to 'Cell<>'", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as import("commonfabric").Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("errors on interfaces extending 'Cell<>'", async () => {
+    const source = `
+      import { Cell } from "commonfabric";
+
+      interface MyCell extends Cell<number> {}
+      const data: any = { value: 42 };
+      const cell = data as MyCell;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step(
+    "errors on wrappers from framework module declarations",
+    async () => {
+      const source = `
+        import { Cell } from "@commonfabric/local-test";
+
+        const data: any = { value: 42 };
+        const cell = data as Cell<number>;
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "local-commonfabric.d.ts": `
+            declare module "@commonfabric/local-test" {
+              export interface Cell<T> {
+                get(): T;
+              }
+            }
+          `,
+        },
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+    },
+  );
+
+  await t.step("errors on qualified framework import types", async () => {
+    const source = `
+      declare module "@commonfabric/local-test" {
+        export namespace wrappers {
+          export interface Cell<T> {
+            get(): T;
+          }
+        }
+      }
+
+      const data: any = { value: 42 };
+      const cell = data as import("@commonfabric/local-test").wrappers.Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+  });
+
+  await t.step("allows import types from non-framework modules", async () => {
+    const source = `
+      declare module "not-commonfabric" {
+        export interface Cell<T> {
+          get(): T;
+        }
+      }
+
+      const data: any = { value: 42 };
+      const cell = data as import("not-commonfabric").Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step(
+    "allows imports from non-framework module declarations",
+    async () => {
+      const source = `
+      import { Cell } from "not-commonfabric";
+
+      const data: any = { value: 42 };
+      const cell = data as Cell<number>;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "not-commonfabric.d.ts": `
+          declare module "not-commonfabric" {
+            export interface Cell<T> {
+              get(): T;
+            }
+          }
+        `,
+        },
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "Should not produce any errors");
+    },
+  );
+
+  await t.step("allows unresolved type references", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as MissingCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows unresolved qualified type references", async () => {
+    const source = `
+      const data: any = { value: 42 };
+      const cell = data as MissingNamespace.MissingCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows recursive local type aliases", async () => {
+    const source = `
+      type LocalCell<T> = LocalCell<T>;
+
+      const data: any = { value: 42 };
+      const cell = data as LocalCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows interfaces extending unresolved types", async () => {
+    const source = `
+      interface LocalCell<T> extends MissingCell<T> {}
+
+      const data: any = { value: 42 };
+      const cell = data as LocalCell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
+  });
+
+  await t.step("allows unrelated local types named 'Cell'", async () => {
+    const source = `
+      type Cell<T> = { value: T };
+
+      const data: any = { value: 42 };
+      const cell = data as Cell<number>;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Should not produce any errors");
   });
 
   await t.step("allows valid type assertions", async () => {
@@ -301,7 +530,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       assertEquals(
         errors.length,
         0,
-        "Optional chaining inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+        "Optional chaining inside JSX should be allowed (ReactiveJSXTransformer handles it)",
       );
     },
   );
@@ -1667,9 +1896,9 @@ Deno.test("Computed local reactive alias validation", async (t) => {
 Deno.test("Diagnostic output format", async (t) => {
   await t.step("includes source location information", async () => {
     const source = `
-      import { OpaqueRef } from "commonfabric";
+      import { Reactive } from "commonfabric";
 
-      const data = {} as unknown as OpaqueRef<any>;
+      const data = {} as unknown as Reactive<any>;
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONFABRIC_TYPES,
@@ -1813,11 +2042,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback inside JSX", async () => {
-    const source = `      import { pattern, h, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, h, Reactive } from "commonfabric";
 
       interface Item { name: string; }
 
-      export default pattern<{ items: OpaqueRef<Item[]> }>(({ items }) => {
+      export default pattern<{ items: Reactive<Item[]> }>(({ items }) => {
         return <div>{items.map(item => <span>{item.name}</span>)}</div>;
       });
     `;
@@ -1864,12 +2093,12 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step("allows map callback outside JSX in pattern body", async () => {
-    const source = `      import { pattern, OpaqueRef } from "commonfabric";
+    const source = `      import { pattern, Reactive } from "commonfabric";
 
       interface Item { name: string; }
 
       const listItems = pattern<
-        { items: OpaqueRef<Item[]> },
+        { items: Reactive<Item[]> },
         { result: Array<{ label: string }> }
       >(({ items }) => {
         const result = items.map((item) => ({
@@ -1947,6 +2176,703 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
         0,
         "Callbacks in standalone helpers should not be flagged as pattern-context function creation",
       );
+    },
+  );
+
+  await t.step(
+    "errors on class expression with reactive-capturing method in pattern body",
+    async () => {
+      const source = `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        const C = class { read() { return value?.token; } };
+        return { C };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:function-creation");
+    },
+  );
+
+  await t.step("errors on class declaration in pattern body", async () => {
+    const source = `      import { pattern } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        class Helper { double() { return item.price * 2; } }
+        return { Helper };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertHasErrorType(errors, "pattern-context:function-creation");
+  });
+
+  await t.step("allows class expression inside computed()", async () => {
+    const source = `      import { pattern, computed } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const doubled = computed(() => {
+          const Doubler = class { run() { return item.price * 2; } };
+          return new Doubler().run();
+        });
+        return { doubled };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Class expression inside computed() should be allowed",
+    );
+  });
+
+  await t.step("allows class at module scope", async () => {
+    const source = `      import { pattern } from "commonfabric";
+
+      interface Item { price: number; }
+
+      class Doubler {
+        constructor(private price: number) {}
+        run() { return this.price * 2; }
+      }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        return { item };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Class declared at module scope should be allowed",
+    );
+  });
+
+  await t.step(
+    "a standalone function const is still pattern-context:function-creation",
+    async () => {
+      const source = `      import { pattern, h } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const helper = () => item.price * 2;
+        return <div>{helper()}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "pattern-context:function-creation");
+      assertEquals(
+        errors.filter((e) => e.type === "pattern-context:object-member")
+          .length,
+        0,
+      );
+    },
+  );
+});
+
+Deno.test("Pattern Context Validation - Object Members", async (t) => {
+  const memberErrors = (diagnostics: readonly TransformationDiagnostic[]) =>
+    getErrors(diagnostics).filter((e) =>
+      e.type === "pattern-context:object-member"
+    );
+
+  // The reactive value `value` is captured by every member body below; the
+  // rule rejects the whole member regardless of how the body reads it.
+  const withReactiveLocal = (memberSource: string, returns = "api") =>
+    `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        const api = ${memberSource};
+        return ${returns};
+      });
+    `;
+
+  await t.step(
+    "errors on a method, naming the unstorable-function reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ read() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "function value, which the reactive data model cannot store",
+      );
+      assertStringIncludes(errs[0]!.message, "handler()");
+    },
+  );
+
+  await t.step(
+    "errors on a getter, naming the serialization-snapshot reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ get t() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "evaluated when the pattern result is stored",
+      );
+      assertStringIncludes(errs[0]!.message, "one-time snapshot");
+    },
+  );
+
+  await t.step("errors on a setter, advising handler()", async () => {
+    const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ name: string }>(({ name }) => {
+        const api = { set label(v: string) { v.trim(); } };
+        return api;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const errs = memberErrors(diagnostics);
+    assertEquals(errs.length, 1);
+    assertStringIncludes(errs[0]!.message, "A setter on an object literal");
+    assertStringIncludes(errs[0]!.message, "module-scope handler()");
+  });
+
+  await t.step(
+    "errors on a toJSON() method with the serialization reason",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ toJSON() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "toJSON() member on an object literal",
+      );
+      assertStringIncludes(
+        errs[0]!.message,
+        "runs when the pattern result is stored",
+      );
+    },
+  );
+
+  await t.step(
+    "a toJSON property (arrow) gets the serialization message, not unstorable",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ toJSON: () => value?.token }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      const errs = memberErrors(diagnostics);
+      assertEquals(errs.length, 1);
+      assertStringIncludes(
+        errs[0]!.message,
+        "toJSON() member on an object literal",
+      );
+      assertStringIncludes(
+        errs[0]!.message,
+        "runs when the pattern result is stored",
+      );
+    },
+  );
+
+  await t.step("errors on a function-valued property (arrow)", async () => {
+    const { diagnostics } = await validateSource(
+      withReactiveLocal("{ read: () => value?.token }"),
+      { types: COMMONFABRIC_TYPES },
+    );
+    const errs = memberErrors(diagnostics);
+    assertEquals(errs.length, 1);
+    assertStringIncludes(
+      errs[0]!.message,
+      "A function-valued property on an object literal",
+    );
+  });
+
+  await t.step("errors on a function-expression-valued property", async () => {
+    const { diagnostics } = await validateSource(
+      withReactiveLocal("{ read: function () { return value?.token; } }"),
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(memberErrors(diagnostics).length, 1);
+  });
+
+  await t.step(
+    "errors on a returned-object member as well as a local one",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        return { read() { return value?.token; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // The rule ignores the body, so reactive reads laundered through these shapes
+  // are caught without a body scanner.
+  await t.step(
+    "errors regardless of how the body reads the reactive value",
+    async () => {
+      const bodies = [
+        "{ get t() { const { token } = value; return token; } }", // destructuring
+        "{ read() { return { ...value }; } }", // spread
+        `{ ["read"]() { return value?.token; } }`, // computed member name
+        "{ read(a = value?.token) { return a; } }", // parameter default
+      ];
+      for (const body of bodies) {
+        const { diagnostics } = await validateSource(
+          withReactiveLocal(body),
+          { types: COMMONFABRIC_TYPES },
+        );
+        assertEquals(
+          memberErrors(diagnostics).length,
+          1,
+          `expected an object-member error for ${body}`,
+        );
+      }
+    },
+  );
+
+  // Closing the JSX hole: an object-literal member function in a JSX data
+  // position is not lowered there and is rejected, but JSX event handlers and
+  // render/array-method callbacks stay legal.
+  await t.step("errors on a function-valued property inside JSX", async () => {
+    const { diagnostics } = await validateSource(
+      `      import { computed, pattern, h } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        return <div data-x={{ read: () => value?.token }} />;
+      });
+    `,
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(memberErrors(diagnostics).length, 1);
+  });
+
+  await t.step("allows a JSX event handler arrow", async () => {
+    const { diagnostics } = await validateSource(
+      `      import { pattern, h } from "commonfabric";
+
+      export default pattern<{ n: number }>(({ n }) => {
+        return <button onClick={() => console.log(n)}>x</button>;
+      });
+    `,
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(getErrors(diagnostics).length, 0);
+  });
+
+  await t.step("allows a JSX array-method render callback", async () => {
+    const { diagnostics } = await validateSource(
+      `      import { pattern, h, Reactive } from "commonfabric";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items: Reactive<Item[]> }>(({ items }) => {
+        return <div>{items.map((item) => <span>{item.name}</span>)}</div>;
+      });
+    `,
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(getErrors(diagnostics).length, 0);
+  });
+
+  await t.step(
+    "allows a plain reactive property read (it lowers)",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ token: value?.token }", "api"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(getErrors(diagnostics).length, 0);
+    },
+  );
+
+  await t.step("allows an object member inside computed()", async () => {
+    const { diagnostics } = await validateSource(
+      `      import { computed, pattern, h } from "commonfabric";
+
+      export default pattern<{ n: number }>(({ n }) => {
+        const doubled = computed(() => {
+          const helper = { calc() { return n * 2; } };
+          return helper.calc();
+        });
+        return <div>{doubled}</div>;
+      });
+    `,
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(memberErrors(diagnostics).length, 0);
+  });
+
+  await t.step("allows object members at module scope", async () => {
+    const { diagnostics } = await validateSource(
+      `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      const helpers = { double(n: number) { return n * 2; } };
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        return { token: value?.token };
+      });
+    `,
+      { types: COMMONFABRIC_TYPES },
+    );
+    assertEquals(memberErrors(diagnostics).length, 0);
+  });
+
+  // A class in pattern context is flagged by pattern-context:function-creation
+  // (the class rule), not by the object-member rule — object-member is scoped to
+  // object-literal members. This pins the division between the two diagnostics.
+  await t.step(
+    "flags a class via function-creation, not via object-member",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { computed, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        const Api = class { read() { return value?.token; } };
+        return { Api };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+      assertHasErrorType(
+        getErrors(diagnostics),
+        "pattern-context:function-creation",
+      );
+    },
+  );
+
+  // A function-valued property may be wrapped in transparent expressions
+  // (parentheses, `as`, `satisfies`, `!`, `<T>`) before the property assignment.
+  // The wrapped spelling is the same member and reports object-member, not
+  // function-creation, in and out of JSX.
+  await t.step(
+    "reports object-member for transparently-wrapped function properties",
+    async () => {
+      const wrapped = [
+        "{ read: (() => value?.token) as () => string | undefined }", // as-cast
+        "{ read: (() => value?.token) }", // parentheses
+        "{ read: (() => value?.token) satisfies () => string | undefined }", // satisfies
+        "{ read: (() => value?.token)! }", // non-null
+      ];
+      for (const member of wrapped) {
+        const { diagnostics } = await validateSource(
+          withReactiveLocal(member),
+          { types: COMMONFABRIC_TYPES },
+        );
+        assertEquals(
+          memberErrors(diagnostics).length,
+          1,
+          `expected one object-member error for ${member}`,
+        );
+        const types = getErrors(diagnostics).map((e) => e.type);
+        assertEquals(
+          types.includes("pattern-context:function-creation"),
+          false,
+          `wrapped property should not report function-creation for ${member}`,
+        );
+      }
+    },
+  );
+
+  await t.step(
+    "reports object-member for a wrapped function property inside JSX",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { computed, pattern, h } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        return <div data-x={{ read: (() => value?.token) as () => string | undefined }}>x</div>;
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A toJSON member is storable (the data model converts a toJSON-bearing
+  // object), so a pure toJSON that reads no reactive value is allowed, while one
+  // that reads a reactive value still freezes a snapshot and is reported.
+  await t.step(
+    "allows a pure toJSON() member with no reactive read",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      export default pattern<{ n: number }>(({ n }) => {
+        return { v: n, toJSON() { return { v: 1 }; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  await t.step(
+    "allows a pure toJSON property (arrow) with no reactive read",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      export default pattern<{ n: number }>(({ n }) => {
+        return { v: n, toJSON: () => ({ v: 1 }) };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  await t.step(
+    "still flags a toJSON() member that reads a reactive value",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ toJSON() { return { t: value?.token }; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // The toJSON body check follows reactive values laundered through plain local
+  // bindings (a destructured parameter, a re-alias) and reads of an outer
+  // pattern value from a toJSON nested in a callback.
+  await t.step(
+    "flags a toJSON() that reads a destructured pattern parameter",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>((props) => {
+        const { auth } = props;
+        return { v: 1, toJSON() { return { t: auth?.token }; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  await t.step(
+    "flags a toJSON() nested in a callback that reads an outer pattern value",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth; items: number[] }>(
+        ({ auth, items }) => {
+          return {
+            rows: items.map((x) => ({ x, toJSON() { return { t: auth }; } })),
+          };
+        },
+      );
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // Reactive roots are matched by symbol, so a toJSON parameter that shadows an
+  // input name reads its own non-reactive value and is not flagged.
+  await t.step(
+    "allows a toJSON() whose own parameter shadows an input name",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        return { v: 1, toJSON(auth: string = "x") { return { t: auth }; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  // A nested callback's own parameter is not a reactive root, so reading a plain
+  // element of a non-reactive array literal in a toJSON is not flagged.
+  await t.step(
+    "allows a toJSON() that reads a plain non-reactive array element",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      export default pattern<{ n: number }>(({ n }) => {
+        const plain = [1, 2, 3];
+        return {
+          v: n,
+          rows: plain.map((x) => ({ x, toJSON() { return { y: x }; } })),
+        };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  // A function inside an object literal passed as a JSX prop is an unstorable
+  // member, the same as in a result object — no catalog component accepts an
+  // object-of-functions prop, so this rejection is intended, not a false
+  // positive.
+  await t.step(
+    "rejects an object-of-handlers passed as a JSX prop value",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { computed, pattern, h } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Auth }>(({ auth }) => {
+        const value = computed(() => auth);
+        return <div data-x={{ onClick: () => value?.token }}>x</div>;
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A member named by a string literal is matched the same as an identifier
+  // name.
+  await t.step(
+    "flags a method whose name is a string literal",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal(`{ "read"() { return value?.token; } }`),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A member whose name is a non-static computed expression cannot be resolved
+  // to `toJSON`, so it takes the unstorable-method path.
+  await t.step(
+    "flags a method whose name is a computed expression",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal("{ [1 + 1]() { return value?.token; } }"),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A pattern with no inputs has no reactive roots, so a toJSON in its result
+  // reads nothing reactive and is allowed.
+  await t.step(
+    "allows a toJSON() in a pattern that has no inputs",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { pattern } from "commonfabric";
+
+      export default pattern(() => {
+        return { v: 1, toJSON() { return { v: 1 }; } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 0);
+    },
+  );
+
+  // A toJSON that reads a reactive input through a `.get()` call is a reactive
+  // read and is flagged.
+  await t.step(
+    "flags a toJSON() that reads a reactive input via .get()",
+    async () => {
+      const { diagnostics } = await validateSource(
+        `      import { Cell, pattern } from "commonfabric";
+
+      interface Auth { token?: string; }
+
+      export default pattern<{ auth: Cell<Auth> }>(({ auth }) => {
+        return { toJSON() { return auth.get(); } };
+      });
+    `,
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
+    },
+  );
+
+  // A toJSON body is walked past nested functions, and the reactive read it
+  // does contain is found even when it is not the last node in the body.
+  await t.step(
+    "flags a toJSON() with a nested function and a reactive read before more statements",
+    async () => {
+      const { diagnostics } = await validateSource(
+        withReactiveLocal(
+          "{ toJSON() { const f = () => 1; const a = value?.token; return { a, b: 1 }; } }",
+        ),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(memberErrors(diagnostics).length, 1);
     },
   );
 });
@@ -2146,7 +3072,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
   });
 });
 
-Deno.test("OpaqueRef .get() Validation", async (t) => {
+Deno.test("Reactive .get() Validation", async (t) => {
   await t.step(
     "errors on .get() called on computed result",
     async () => {
@@ -2865,7 +3791,7 @@ Deno.test("Standalone Function Validation", async (t) => {
     async () => {
       const source = `      import { computed, Cell } from "commonfabric";
 
-      const count = {} as Cell<number>;
+      declare const count: Cell<number>;
 
       const helper = () => {
         return computed(() => count.get() * 2);
@@ -2970,7 +3896,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       const source =
         `      import { pattern, patternTool, computed, Cell } from "commonfabric";
 
-      const multiplier = {} as Cell<number>;
+      declare const multiplier: Cell<number>;
 
       const tool = patternTool(pattern(({ query }: { query: string }) => {
         return computed(() => query.length * multiplier.get());
@@ -2994,7 +3920,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       const source =
         `      import { patternTool, computed, Cell } from "commonfabric";
 
-      const multiplier = {} as Cell<number>;
+      declare const multiplier: Cell<number>;
 
       const tool = patternTool(({ query }: { query: string }) => {
         return computed(() => query.length * multiplier.get());
@@ -3123,7 +4049,7 @@ Deno.test("Standalone Function Validation", async (t) => {
     async () => {
       const source = `      import { computed, Cell } from "commonfabric";
 
-      const count = {} as Cell<number>;
+      declare const count: Cell<number>;
 
       const outer = () => {
         // Nested function uses computed() — error should be on inner,
@@ -3451,12 +4377,12 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
       const source = `
         import { pattern, wish } from "commonfabric";
 
-        type ResultShape = { allCharms: { id: string }[] };
+        type ResultShape = { allPieces: { id: string }[] };
 
         export default pattern<Record<string, never>>(() => {
-          const { allCharms } =
+          const { allPieces } =
             (wish({ query: "/" }) as { result: ResultShape }).result;
-          return { count: allCharms.length };
+          return { count: allPieces.length };
         });
       `;
       const { diagnostics, output } = await validateSource(source, {

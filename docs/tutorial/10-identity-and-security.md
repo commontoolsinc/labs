@@ -24,10 +24,18 @@ Two derivation tricks give the system its shape:
 
 A **space DID** is just `someIdentity.derive(spaceName).did()`. No
 registration step, no central registry: knowing the derivation inputs *is*
-knowing the space. (Dev environments lean on this hard — the CLI's
-`id derive "implicit trust"` from Chapter 6 reproduces the standard dev
-identity, and named dev spaces derive from a well-known passphrase, which
-is why two local setups agree on what `did:key:...` a space name means.)
+knowing the space. Dev environments lean on this hard: named dev spaces
+derive from a well-known passphrase, which is why two local setups agree on
+what `did:key:...` a space name means. The same trick defines the **shared
+dev identity** `id derive "implicit trust"` — the DID the local toolshed
+itself runs as in dev mode. Because it comes from a public string, *everyone*
+who derives it gets the identical keypair. That is a convenience on your own
+localhost (CLI, browser, and server can all act as one admin identity) and a
+footgun anywhere shared: derive or browser-import it against a server other
+people use and you all become the *same* principal — seeing and overwriting
+each other's `PerUser` data. Use a unique `id new` key for your own identity;
+reserve `implicit trust` for deliberately acting as a local dev server's
+operator. See `docs/development/SHARED_IDENTITY.md`.
 
 ## Passkeys: the browser login
 
@@ -55,13 +63,22 @@ current (v2) protocol, authorization happens at **session open**
 (`packages/runner/src/storage/v2-remote-session.ts`,
 `packages/toolshed/routes/storage/memory.ts`):
 
-1. The client builds an invocation
-   `{ iss: <user did>, cmd: "session.open", sub: <space did>, args: {protocol, session} }`
-   and signs its hash with the user's key.
-2. The server verifies the signature against the issuer DID and that the
-   signed invocation matches *this exact* session-open request (no replay
-   onto other sessions).
-3. The issuer becomes the session's pinned **principal**: reopening the
+1. The client receives `sessionOpen.audience` and a one-time
+   `sessionOpen.challenge` from the server's `hello.ok`.
+2. The client builds a `session.open` invocation and signs its hash with the
+   user's key. The signed invocation includes:
+   - `iss`: the user DID
+   - `cmd`: `"session.open"`
+   - `sub`: the space DID
+   - `aud`: the server DID from `sessionOpen.audience`
+   - `challenge`: the challenge value from `sessionOpen.challenge`
+   - `iat` and `exp`: the signed time window
+   - `args.protocol` and `args.session`: the protocol and session descriptor
+3. The server verifies the signature against the issuer DID. It also verifies
+   that the signed invocation matches this session-open request, the advertised
+   audience, the current connection challenge, and the allowed time window.
+   That prevents replay onto another server or onto a later connection.
+4. The issuer becomes the session's pinned **principal**: reopening the
    session as someone else fails, a stolen stale token is revoked, and —
    importantly — the principal is what keys the `user:`/`session:` scope
    partitions from Chapter 9. `PerUser` isolation is cryptographic

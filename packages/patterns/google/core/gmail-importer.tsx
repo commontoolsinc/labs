@@ -38,8 +38,9 @@ type SyncableWritable<T> = Writable<T> & {
  * reference - do NOT copy it into a read-only projection. Token refresh
  * mutates the auth cell in place, so any consumer that reads a detached
  * snapshot will see refresh silently fail.
- * Use direct property access (piece.auth) or select it with a ternary
- * (which lowers to ifElse and preserves the underlying cell reference).
+ * Use direct property access (piece.auth). If auth comes through an auth
+ * manager, use `authIsReady(availability)` for readiness and keep writable auth
+ * cell access explicit at the call site that needs it.
  */
 export type Auth = {
   token: Secret<string> | Default<"">;
@@ -54,6 +55,8 @@ export type Auth = {
     picture: string;
   } | Default<{ email: ""; name: ""; picture: "" }>;
 };
+
+export type GoogleAuthCell = Writable<Auth>;
 
 function htmlToMarkdown(htmlContent: string): string {
   return htmlContent
@@ -130,7 +133,7 @@ export interface Output {
   /** Auth UI component for managing Google OAuth connection */
   authUI: VNode;
   /** Handler to trigger email fetch from external patterns */
-  bgUpdater: Stream<unknown>;
+  bgUpdater: Stream<void>;
   /** Whether auth is ready (has valid token) */
   isReady: boolean;
   // /** Search emails by query string (searches subject, from, snippet) */
@@ -162,10 +165,10 @@ const _updateLimit = handler<
 // consistent token refresh behavior across all Gmail patterns.
 
 const googleUpdater = handler<
-  unknown,
+  void,
   {
     emails: SyncableWritable<Array<Writable<Email>>>;
-    auth: SyncableWritable<Auth>;
+    auth: (SyncableWritable<Auth> | Writable<Auth>) | null;
     settings: SyncableWritable<
       | Settings
       | Default<{
@@ -180,6 +183,13 @@ const googleUpdater = handler<
     fetching?: Writable<boolean>;
   }
 >(async (_event, state) => {
+  if (!state.auth) {
+    if (state.fetching) {
+      state.fetching.set(false);
+    }
+    return;
+  }
+
   // Set fetching state if available
   if (state.fetching) {
     state.fetching.set(true);
@@ -189,7 +199,7 @@ const googleUpdater = handler<
   // otherwise we may end up conflicting.
   await Promise.all([
     state.emails.sync(),
-    state.auth.sync(),
+    "sync" in state.auth ? state.auth.sync() : state.auth,
     state.settings.sync(),
     state.historyId.sync(),
   ]);
@@ -1095,7 +1105,7 @@ export default pattern<
       }>;
     // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
     // Use: cf piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
-    overrideAuth?: Auth;
+    overrideAuth?: GoogleAuthCell;
   },
   Output
 >(({ settings, overrideAuth }) => {
@@ -1113,14 +1123,12 @@ export default pattern<
     requiredScopes: ["gmail"] as ScopeKey[],
   });
 
-  // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-  const hasOverrideAuth = !!overrideAuth?.token;
-  const overrideAuthEmail = overrideAuth?.user?.email || "";
+  // Check if overrideAuth is provided for manual linking.
+  const overrideAuthValue = computed(() => overrideAuth?.get());
+  const hasOverrideAuth = !!overrideAuthValue?.token;
+  const overrideAuthEmail = overrideAuthValue?.user?.email || "";
 
-  // IMPORTANT: select auth via a bare ternary (lowers to ifElse), NOT a plain
-  // projection that would copy the value. This keeps `auth` a live, writable
-  // cell reference so cross-piece token refresh can mutate it in place.
-  const auth = hasOverrideAuth ? overrideAuth : wishedAuth;
+  const auth = overrideAuth && hasOverrideAuth ? overrideAuth : wishedAuth;
   const isReady = hasOverrideAuth ? hasOverrideAuth : wishedIsReady;
   const currentEmail = hasOverrideAuth ? overrideAuthEmail : wishedCurrentEmail;
 
@@ -1178,7 +1186,7 @@ export default pattern<
       }
       hasAutoFetched.set(true);
       // Trigger the fetch handler
-      googleUpdaterStream.send({});
+      googleUpdaterStream.send();
     }
   });
 

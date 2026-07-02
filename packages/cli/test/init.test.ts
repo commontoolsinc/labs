@@ -6,7 +6,7 @@ import { cf, checkStderr } from "./utils.ts";
 
 describe("cli init", () => {
   it("Initializes workspace", async () => {
-    // Tasks always run with deno.json directory as CWD
+    // Tasks always run with deno.jsonc directory as CWD
     // make sure to clean up files
     const root = join(import.meta.dirname!, "..");
     expect(await exists(join(root, "tsconfig.json"))).toEqual(false);

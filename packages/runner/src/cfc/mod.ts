@@ -50,6 +50,7 @@ export {
   isCfcEnforcementMode,
 } from "./types.ts";
 export {
+  canonicalizeCfcLabel,
   canonicalizeCfcMetadata,
   canonicalizeDereferenceTrace,
   canonicalizeLogicalPath,
@@ -58,6 +59,14 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
+export type { CfcConfClause, CfcOrClause } from "./clause.ts";
+export {
+  clauseAlternatives,
+  clausesEqual,
+  clauseSubsumes,
+  isOrClause,
+  normalizeClause,
+} from "./clause.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
@@ -76,6 +85,11 @@ export type {
   HarnessWriteFileAuthorizationRequest,
 } from "./harness-write-policy.ts";
 export { evaluateHarnessWriteFileAuthorization } from "./harness-write-policy.ts";
+export {
+  type CfcExternalIngestMeta,
+  externalIngestStamp,
+  stampExternalIngest,
+} from "./external-ingest.ts";
 export {
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   INITIAL_SINK_INVENTORY,

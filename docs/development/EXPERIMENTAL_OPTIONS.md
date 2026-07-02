@@ -49,7 +49,7 @@ The same env vars work for all entry points:
   `env.ts`.
 - **Shell build** (`packages/shell`): injected at build time via
   `felt.config.ts` defines, read from globals in `src/lib/env.ts`.
-- **Background charm service** (`packages/background-charm-service`): parsed in
+- **Background piece service** (`packages/background-piece-service`): parsed in
   `src/env.ts` and threaded to worker processes via IPC.
 - **CF CLI** (`packages/cli`): the `cf` CLI reads experimental flags from the
   environment when constructing its `Runtime` instance.
@@ -124,21 +124,21 @@ Key points:
 4. The **Runtime constructor** calls experiment configuration functions, which
    collectively set up the ambient config for the system.
 
-## Background Charm Service
+## Background Piece Service
 
-The background charm service has its own propagation path:
+The background piece service has its own propagation path:
 
 ```
-bg-charm-service/src/main.ts   --> new Runtime({ experimental: { ... } })
-                                     (reads from env.ts)
-                                --> BackgroundCharmService({ runtime })
-                                     --> SpaceManager({ experimental: runtime.experimental })
-                                          --> WorkerController({ experimental })
-                                               --> worker.ts initialize({ experimental })
-                                                    --> new Runtime({ experimental })
+packages/background-piece-service/src/main.ts
+  --> new Runtime({ experimental: { ... } }) (reads from env.ts)
+  --> BackgroundPieceService({ runtime })
+  --> SpaceManager({ experimental: runtime.experimental })
+  --> WorkerController({ experimental })
+  --> worker.ts initialize({ experimental })
+  --> new Runtime({ experimental })
 ```
 
-Set the same `EXPERIMENTAL_*` env vars when starting the background charm
+Set the same `EXPERIMENTAL_*` env vars when starting the background piece
 service.
 
 ## Verifying Flags Are Working

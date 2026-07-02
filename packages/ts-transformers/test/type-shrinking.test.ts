@@ -3,8 +3,15 @@ import ts from "typescript";
 
 import type { CapabilityParamSummary } from "../src/core/mod.ts";
 import {
+  applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
+  containsAnyOrUnknownTypeNode,
+  isCellLikeTypeNode,
+  isSqliteTypeNode,
+  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
+  wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
 
 function createProgram(source: string): {
@@ -793,4 +800,244 @@ Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven
   assertStringIncludes(printed, "id: string;");
   assertEquals(printed.includes("title"), false);
   assertEquals(printed.includes("value"), false);
+});
+
+Deno.test("applyCapabilityDefaultsToTypeNode applies defaults through tuples and unions", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input =
+      | [{ name?: string; unused?: string }]
+      | { fallback?: string; unused?: string };
+    type NameDefault = "Anonymous";
+    type FallbackDefault = "Fallback";
+  `);
+  const input = findTypeAlias(sourceFile, "Input");
+  const nameDefault = findTypeAlias(sourceFile, "NameDefault");
+  const fallbackDefault = findTypeAlias(sourceFile, "FallbackDefault");
+  const baseType = checker.getTypeAtLocation(input.type);
+
+  const result = applyCapabilityDefaultsToTypeNode(
+    input.type,
+    [
+      { path: ["0", "name"], defaultType: nameDefault.type },
+      { path: ["fallback"], defaultType: fallbackDefault.type },
+    ],
+    baseType,
+    [["0", "name"], ["fallback"]],
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(
+    printed,
+    'name?: __cfHelpers.Default<string, "Anonymous">;',
+  );
+  assertStringIncludes(
+    printed,
+    'fallback?: __cfHelpers.Default<string, "Fallback">;',
+  );
+});
+
+Deno.test("type shrinking helper predicates detect wrapper type nodes", () => {
+  const { sourceFile, checker } = createProgram(`
+    type CellValue = Cell<string>;
+    type StreamValue = Stream<string>;
+    type SqliteValue = SqliteDb<{ id: string }>;
+    type PlainValue = string;
+    type AnyUnion = { value: any } | { fallback: unknown };
+  `);
+  const cellNode = findTypeAlias(sourceFile, "CellValue").type;
+  const streamNode = findTypeAlias(sourceFile, "StreamValue").type;
+  const sqliteNode = findTypeAlias(sourceFile, "SqliteValue").type;
+  const plainNode = findTypeAlias(sourceFile, "PlainValue").type;
+  const anyUnionNode = findTypeAlias(sourceFile, "AnyUnion").type;
+
+  assertEquals(containsAnyOrUnknownTypeNode(anyUnionNode), true);
+  assertEquals(containsAnyOrUnknownTypeNode(plainNode), false);
+  assertEquals(isCellLikeTypeNode(cellNode), true);
+  assertEquals(isCellLikeTypeNode(sqliteNode), false);
+  assertEquals(isStreamTypeNode(streamNode), true);
+  assertEquals(isStreamTypeNode(cellNode), false);
+  assertEquals(isSqliteTypeNode(sqliteNode), true);
+  assertEquals(isSqliteTypeNode(cellNode), false);
+  assertEquals(preservedWrapperFor(streamNode, undefined, checker), "Stream");
+  assertEquals(preservedWrapperFor(sqliteNode, undefined, checker), "SqliteDb");
+  assertEquals(preservedWrapperFor(plainNode, undefined, checker), undefined);
+});
+
+Deno.test("applyShrinkAndWrap descends identity paths through named interface references", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    interface Inner { keep: string; drop: number; }
+    interface Outer { inner: Inner; other: string; }
+    type Input = Outer;
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["inner", "keep"]],
+      identityCellPaths: [["inner", "keep"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  // The reference resolves to declared members, recurses into `inner`, and
+  // wraps the `keep` leaf. Identity-path application transforms the targeted
+  // leaf in place and leaves the surrounding structure intact.
+  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
+  assertStringIncludes(printed, "drop: number");
+  assertStringIncludes(printed, "other: string");
+});
+
+Deno.test("applyShrinkAndWrap rebuilds inline literals when a nested identity leaf changes", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    type Input = {
+      inner: { keep: string; drop: number };
+      other: string;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["inner", "keep"]],
+      identityCellPaths: [["inner", "keep"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
+  assertStringIncludes(printed, "drop: number");
+  assertStringIncludes(printed, "other: string");
+});
+
+Deno.test("applyShrinkAndWrap returns an inline literal unchanged when a nested identity path does not resolve", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input = {
+      a: { x: string };
+      b: string;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["a", "missing"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  // No member changes, so the literal (and its `a` member) is returned as-is.
+  assertStringIncludes(printed, "x: string");
+  assertStringIncludes(printed, "b: string");
+  assertEquals(printed.includes("OpaqueCell"), false);
+});
+
+Deno.test("applyShrinkAndWrap leaves array elements untouched when an identity item path does not resolve", () => {
+  const { sourceFile, checker } = createProgram(`
+    interface Item { keep: string; drop: number; }
+    type Input = Item[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["0", "missing"]],
+      identityCellPaths: [["0", "missing"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  // The item path names no real member, so the element type (and the whole
+  // array node) is returned unchanged.
+  assertEquals(printed, "Item[]");
+});
+
+Deno.test("applyShrinkAndWrap descends identity item paths through readonly arrays", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    interface Item { keep: string; drop: number; }
+    type Input = readonly Item[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["0", "keep"]],
+      identityCellPaths: [["0", "keep"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  // The readonly-array node recurses into its element type, resolves the item
+  // interface's members, and wraps the requested leaf in place.
+  assertStringIncludes(printed, "readonly");
+  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
+  assertStringIncludes(printed, "drop: number");
+});
+
+Deno.test("wrapTypeNodeWithCapability emits the expected cell wrappers", () => {
+  const { sourceFile } = createProgram(`type Value = string;`);
+  const valueNode = findTypeAlias(sourceFile, "Value").type;
+
+  const wrappers = [
+    ["readonly", "ReadonlyCell"],
+    ["comparable", "ComparableCell"],
+    ["writeonly", "WriteonlyCell"],
+    ["writable", "Writable"],
+    ["opaque", "OpaqueCell"],
+  ] as const;
+
+  for (const [capability, wrapperName] of wrappers) {
+    const printed = printTypeNode(
+      wrapTypeNodeWithCapability(valueNode, capability, ts.factory),
+      sourceFile,
+    );
+    assertStringIncludes(printed, `__cfHelpers.${wrapperName}<string>`);
+  }
 });

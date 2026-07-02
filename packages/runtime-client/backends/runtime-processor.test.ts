@@ -27,6 +27,7 @@ import { parseLink } from "../../runner/src/link-utils.ts";
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
 );
+const testSessionOpenAudience = "did:key:z6Mk-runtime-processor-test-audience";
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
   constructor(private readonly server: MemoryV2Server.Server) {}
@@ -35,7 +36,19 @@ class SharedV2SessionFactory implements V2Storage.SessionFactory {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.server),
     });
-    const session = await client.mount(space);
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {
+          principal: cfcSigner.did(),
+        },
+      }),
+    );
     return { client, session };
   }
 }
@@ -47,7 +60,16 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
 }
 
 const createRuntime = () => {
-  const server = new MemoryV2Server.Server();
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: {
+      audience: testSessionOpenAudience,
+    },
+  });
   const storageManager = new SharedV2StorageManager({
     as: cfcSigner,
     memoryHost: new URL("memory://"),
@@ -1459,9 +1481,21 @@ describe("RuntimeProcessor CFC commit preparation", () => {
       send: (value: unknown) => {
         expect(value).toBe("new value");
       },
+      // A blind `set` resolves the write target to thread its parent as the
+      // structural precondition (see applyCellWrite).
+      resolveAsCell: () => ({
+        getAsNormalizedFullLink: () => ({
+          id: ref.id,
+          space: ref.space,
+          scope: ref.scope,
+          path: ref.path,
+        }),
+      }),
     };
     return {
       processor: {
+        // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
+        applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
         runtime: {
           edit: () => tx,
           prepareTxForCommit: (candidate: unknown) => {
@@ -1487,6 +1521,16 @@ describe("RuntimeProcessor CFC commit preparation", () => {
 
     await RuntimeProcessor.prototype.handleCellSet.call(processor, {
       type: RequestType.CellSet,
+      cell: ref,
+      value: "new value",
+    });
+  });
+
+  it("prepares cell push transactions before committing (non-blind path)", async () => {
+    const { processor } = createProcessor();
+
+    await RuntimeProcessor.prototype.handleCellPush.call(processor, {
+      type: RequestType.CellPush,
       cell: ref,
       value: "new value",
     });
@@ -1549,6 +1593,7 @@ describe("runtimeOptionsFromInitializationData", () => {
         identity: {} as never,
         spaceDid: "did:key:space",
         cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "observe",
         trustSnapshot: {
           id: "principal:did:key:worker",
           actingPrincipal: "did:key:worker",
@@ -1559,6 +1604,7 @@ describe("runtimeOptionsFromInitializationData", () => {
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcFlowLabels).toBe("observe");
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",
