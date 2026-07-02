@@ -695,6 +695,16 @@ describe("link-utils", () => {
       expect(noneB.properties).toBe(noneA.properties); // cached sub-tree reused
       expect(noneA.properties.name).toEqual({ type: "string" }); // asCell stripped
 
+      // The shared sub-tree is deep-frozen: a consumer mutating a nested node
+      // throws loudly instead of silently poisoning every later same-schema
+      // build. The handed-out top itself stays caller-mutable (fresh per call).
+      expect(Object.isFrozen(noneA.properties)).toBe(true);
+      expect(Object.isFrozen(noneA.properties.name)).toBe(true);
+      expect(() => {
+        (noneA.properties.name as { type?: string }).type = "mutated";
+      }).toThrow(TypeError);
+      expect(Object.isFrozen(noneB)).toBe(false);
+
       // A different keepAsCell mode is cached separately (asCell kept here).
       const allA = sanitizeSchemaForLinks(schema, KeepAsCell.All) as {
         properties: Record<string, JSONSchema>;

@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type CellScope,
   type FactoryInput,
@@ -313,38 +314,13 @@ function factoryFromPattern<T, R>(
   // of internal cells (negligible for small patterns, but a scaling cliff for
   // large ones, and it runs on every pattern instantiation, not just at boot).
   const assignedCauseKeys = new Set<string>();
-  // Key-order-insensitive serialization, matching `deepEqual`'s order-insensitive
-  // record comparison, so `assignedCauseKeys.has(key)` is exactly the collision
-  // test the previous `deepEqual` scan performed. Causes are always JSON values
-  // with no `undefined`, so this is a faithful, collision-free key.
-  const causeKey = (cause: JSONValue): string => {
-    // `deepEqual` compares primitives with `Object.is` (so -0≠0, NaN=NaN) and is
-    // type- and key-order-insensitive for records. Encode with a per-type tag +
-    // Object.is-faithful numbers so `JSON.stringify`'s primitive collapses
-    // (-0→0, NaN/±Infinity→null, number 1 vs string "1") can't produce a false
-    // collision the previous `deepEqual` scan would not have.
-    const enc = (x: unknown): unknown => {
-      if (x === null) return " null";
-      switch (typeof x) {
-        case "string":
-          return " s" + x;
-        case "boolean":
-          return " b" + x;
-        case "number":
-          return " n" + (Object.is(x, -0) ? "-0" : String(x));
-        case "object":
-          if (Array.isArray(x)) return x.map(enc);
-          return Object.fromEntries(
-            Object.keys(x as Record<string, unknown>).sort().map(
-              (k) => [k, enc((x as Record<string, unknown>)[k])],
-            ),
-          );
-        default:
-          return " ?" + String(x);
-      }
-    };
-    return JSON.stringify(enc(cause));
-  };
+  // The canonical value hash is exactly the collision test the previous
+  // `deepEqual` scan performed: records hash key-order-insensitively (keys are
+  // fed in sorted UTF-8 byte order), numbers hash by their float64 bits with a
+  // dedicated `-0` cache entry, and `NaN` hashes canonically — i.e. `Object.is`
+  // primitive semantics and order-insensitive records, matching `deepEqual` on
+  // the JSON values causes are made of.
+  const causeKey = (cause: JSONValue): string => hashStringOf(cause);
   let anonymousPartialCauseCount = 0;
   const nextAnonymousPartialCause = (isStream: boolean): JSONObject => {
     const generated = { $generated: anonymousPartialCauseCount++ };
