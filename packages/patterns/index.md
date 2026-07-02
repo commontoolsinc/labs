@@ -66,9 +66,9 @@ App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
 legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
-`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
-`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
-`weekly-calendar/`.
+`project-list/`, `router/`, `scoped-group-chat/`, `scoped-name-handoff/`,
+`scoped-user-directory/`, `scrabble/`, `shared-profile-demo/`,
+`shared-profile-roster/`, `suggestable/`, `weekly-calendar/`.
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
@@ -811,6 +811,34 @@ interface Output {
   balances: Balance[];
   settlements: Settlement[];
   total: number;
+}
+```
+
+## `scoped-name-handoff/main.tsx`
+
+Minimal scoped-cell demo. Each viewer edits their own durable `PerUser` name,
+then clicks a button to copy that value into the shared `PerSpace` name visible
+to everyone in the space.
+
+**Keywords:** scopes, per-space, per-user, shared cell, personal cell, name,
+multi-user
+
+### Input Schema
+
+```ts
+interface ScopedNameHandoffInput {
+  sharedName?: PerSpace<Writable<string | Default<"">>>;
+  myName?: PerUser<Writable<string | Default<"">>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface ScopedNameHandoffOutput {
+  sharedName: PerSpace<string | Default<"">>;
+  myName: PerUser<string | Default<"">>;
+  publishName: Stream<void>;
 }
 ```
 
