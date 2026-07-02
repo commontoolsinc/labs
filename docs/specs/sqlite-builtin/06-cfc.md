@@ -316,8 +316,10 @@ with the pure half in
 
 **Declared output ceiling.** A query may declare the maximum confidentiality
 its result may carry — a consumer contract checked per row against the
-computed label (per-row joined with the projection's per-column atoms), **not**
-reader clearance (no read-time clearance model exists):
+computed label (per-row joined with the projection's per-column atoms). It is
+**not** reader clearance: the ceiling asks "may the result carry this?", not
+"may *this reader* see it?". Read-time clearance is a separate, opt-in mode
+(below).
 
 ```tsx
 // Shown for illustration only.
@@ -346,6 +348,42 @@ existence release (CFC spec §8.17.2, invariant 14): opt-in in the query
 contract, required to be policy-permitted and auditable — and it never applies
 to aggregates (a withheld row already contributed server-side; a count cannot
 be un-counted), where the mode is rejected outright.
+
+**Read-time clearance (Phase 3.b).** Filtering by *who is asking*, rather than
+by a declared contract: `db.query(sql, { readClearance: true })` keeps only the
+rows the **acting reader** may read and drops the rest. A reader may read a row
+iff, for **every** conjunctive clause of the row's re-derived confidentiality,
+the reader is one of that clause's alternatives (the label stores concrete
+principals — `dbOwner()` is resolved at eval time — so this is exact-match; a
+non-principal atom like a caveat is never reader-satisfiable, so the row is
+withheld — fail closed). Because dropping a row releases its presence bit, this
+is a **declared existence release** (CFC spec §8.17, invariant 14) and requires
+all three:
+
+- **(a) declared** in the query contract (the explicit `readClearance` option —
+  never a silent fallback);
+- **(b) policy-permitted**: the touched rule-bearing table must opt in with
+  `table(columns, rule, { allowReadClearance: true })` (serialized as
+  `rowLabelReadClearance` on the schema). A clearance query against a table that
+  has not opted in **refuses**; so does one that touches no rule-bearing table,
+  or that runs with no acting principal;
+- **(c) auditable**: the query result reports `withheld` — the count of rows the
+  reader could not read — so the release is observable in aggregate without
+  leaking which rows were dropped.
+
+It **never applies to aggregates** (a null-origin projection has no per-row
+reader to test), where the mode is rejected outright. Read-time clearance
+composes with a declared ceiling: a row survives only if **both** the contract
+admits it and the reader may read it.
+
+```tsx
+// Shown for illustration only.
+// Per-user mailbox view: each reader sees only their own messages.
+const mine = db.query<Row>("SELECT * FROM messages ORDER BY id", {
+  readClearance: true,
+});
+// mine.withheld === (rows the acting reader may not read)
+```
 
 ### Write — the runner gate (`db.exec`)
 

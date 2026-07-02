@@ -2329,8 +2329,11 @@ export class CellImpl<T extends FabricValue>
       reactOn?: unknown;
       maxConfidentiality?: ReadonlyArray<unknown>;
       onExceed?: "fail" | "skip";
+      readClearance?: boolean;
     },
-  ): Reactive<{ pending: boolean; result?: Row[]; error?: unknown }> {
+  ): Reactive<
+    { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
+  > {
     return sqliteQueryNodeFactory({
       db: this,
       sql,
@@ -2339,11 +2342,15 @@ export class CellImpl<T extends FabricValue>
       // CFC Phase 3 read surface: the declared output ceiling + exceed mode.
       maxConfidentiality: options?.maxConfidentiality,
       onExceed: options?.onExceed,
+      // CFC Phase 3.b: read-time clearance (reader-filtered rows).
+      readClearance: options?.readClearance,
       // Forward the transformer-injected `<Row>` schema (lowered into the
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as Reactive<{ pending: boolean; result?: Row[]; error?: unknown }>;
+    }) as Reactive<
+      { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
+    >;
   }
 
   map<S>(

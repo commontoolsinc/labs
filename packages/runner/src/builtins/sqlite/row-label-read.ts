@@ -17,6 +17,7 @@ import {
 } from "@commonfabric/memory/sqlite/row-label";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
+import { clauseAlternatives } from "../../cfc/clause.ts";
 
 interface ResultColumn {
   output: string;
@@ -46,6 +47,11 @@ export interface RowLabelReadArgs {
   ceiling?: readonly unknown[];
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+  /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
+   *  reader may read (a declared existence release, §8.17/inv-14). Requires the
+   *  rule-bearing table to opt in (`rowLabelReadClearance`); never for
+   *  aggregates. `reader` is the acting principal (undefined → refuse). */
+  readClearance?: { reader: string | undefined };
 }
 
 export type RowLabelReadResult =
@@ -54,8 +60,13 @@ export type RowLabelReadResult =
     /** Per kept-order row: the per-row label for its row entity doc, or
      *  undefined when the row carries no per-row label. */
     labels: (PerRowIfc | undefined)[];
-    /** Row keep-mask under a declared ceiling (undefined: no ceiling). */
+    /** Row keep-mask under a declared ceiling and/or read-time clearance
+     *  (undefined: neither declared). */
     keep: boolean[] | undefined;
+    /** CFC Phase 3.b: rows withheld because the acting reader could not read
+     *  them (a declared, audited existence release). 0/undefined when no
+     *  clearance was requested. */
+    withheld?: number;
   };
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
@@ -105,6 +116,23 @@ function intersectCommonAlternatives(
   return { kind: "readers", atoms: acc === undefined ? [] : [...acc.values()] };
 }
 
+// CFC Phase 3.b — whether the acting reader may read a row carrying this
+// confidentiality label: EVERY conjunctive clause must list the reader among
+// its alternatives (an AND of ORs). A public row (no confidentiality) is
+// readable by all. Per-row labels store concrete principals (dbOwner() is
+// resolved to the owner at eval time), so an alternative admits the reader iff
+// it is exactly the reader principal; a non-principal alternative
+// (Caveat/Expires/material-risk marker) never admits a plain reader, so the row
+// is withheld — fail closed.
+function readerAdmitsLabel(
+  confidentiality: readonly unknown[],
+  reader: string,
+): boolean {
+  return confidentiality.every((clause) =>
+    clauseAlternatives(clause).some((alt) => alt === reader)
+  );
+}
+
 /**
  * Compute each result row's per-row label from the declared rules and the
  * projection's TRUE column origins, then apply the declared output ceiling.
@@ -132,8 +160,13 @@ export function computeRowLabelRead(
   const onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
 
   // Discover + re-validate rule-bearing tables (db.tables is wire-supplied;
-  // "couldn't validate" is never "no label").
-  const rules: { name: string; spec: RowLabelSpec }[] = [];
+  // "couldn't validate" is never "no label"). `allowReadClearance` is the
+  // per-table policy opt-in for Phase 3.b read-time clearance.
+  const rules: {
+    name: string;
+    spec: RowLabelSpec;
+    allowReadClearance: boolean;
+  }[] = [];
   for (const [name, t] of Object.entries(tables ?? {})) {
     if (!tableDeclaresRowLabel(t)) continue;
     const spec = (t as { rowLabel: RowLabelSpec }).rowLabel;
@@ -147,7 +180,13 @@ export function computeRowLabelRead(
           reason,
       };
     }
-    rules.push({ name, spec });
+    rules.push({
+      name,
+      spec,
+      allowReadClearance:
+        (t as { rowLabelReadClearance?: unknown }).rowLabelReadClearance ===
+          true,
+    });
   }
 
   const nullOrigin =
@@ -292,7 +331,67 @@ export function computeRowLabelRead(
     }
   }
 
-  return { labels, keep };
+  // CFC Phase 3.b — read-time clearance (§8.17/inv-14). A declared existence
+  // release: keep only rows the acting reader may read. Requires (a) the query
+  // opted in (readClearance), (b) the touched rule-bearing table permits it
+  // (rowLabelReadClearance), (c) it is audited (withheld count). Never for
+  // aggregates — an aggregate has no per-row reader test.
+  let withheld: number | undefined;
+  if (args.readClearance !== undefined) {
+    if (nullOrigin) {
+      return {
+        error: "sqlite: read-time clearance never applies to an aggregate/" +
+          "expression projection — there is no per-row reader to test; remove " +
+          "readClearance or query the underlying rows directly",
+      };
+    }
+    const applicable = rules.filter((r) =>
+      columns?.some((c) => c.table === r.name)
+    );
+    if (applicable.length === 0) {
+      return {
+        error: "sqlite: read-time clearance needs a rule-bearing table with " +
+          "per-row labels to filter, but this query touches none — remove " +
+          "readClearance",
+      };
+    }
+    const forbidden = applicable.filter((r) => !r.allowReadClearance);
+    if (forbidden.length > 0) {
+      return {
+        error:
+          "sqlite: read-time clearance is not permitted by the governing " +
+          `policy of table ${
+            forbidden.map((r) => `"${r.name}"`).join(", ")
+          } — pass { allowReadClearance: true } to table() to opt in`,
+      };
+    }
+    const reader = args.readClearance.reader;
+    if (reader === undefined) {
+      return {
+        error: "sqlite: read-time clearance needs the acting reader, but no " +
+          "acting principal is available — refusing (fail closed)",
+      };
+    }
+    const staticConf = args.staticConfidentiality ?? [];
+    const clearanceKeep: boolean[] = [];
+    withheld = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const effective = [
+        ...(labels[i]?.confidentiality ?? []),
+        ...staticConf,
+      ];
+      const admits = readerAdmitsLabel(effective, reader);
+      if (!admits) withheld++;
+      clearanceKeep.push(admits);
+    }
+    // Intersect with any ceiling keep-mask: a row survives iff BOTH the declared
+    // contract admits it and the reader may read it.
+    keep = keep === undefined
+      ? clearanceKeep
+      : keep.map((k, i) => k && clearanceKeep[i]);
+  }
+
+  return { labels, keep, withheld };
 }
 
 /**

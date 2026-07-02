@@ -119,10 +119,16 @@ function normalizeColumn(name: string, spec: ColumnSpec): ColumnSchema {
  * 3); it is built + validated eagerly — a malformed rule throws here, at
  * definition time — and serializes onto the schema as `rowLabel` (see
  * `row-label.ts` and docs/specs/sqlite-builtin/06-cfc.md).
+ *
+ * `opts.allowReadClearance` opts the table into CFC Phase 3.b read-time
+ * clearance: a `readClearance` query may then filter rows to those the acting
+ * reader can read (a declared existence release). It needs a `rowLabel` rule —
+ * clearance filters rows by their per-row label — so it throws without one.
  */
 export function table<C extends Record<string, ColumnSpec>>(
   columns: C,
   rule?: RowLabelRule<C>,
+  opts?: { allowReadClearance?: boolean },
 ): TableSchema {
   const properties: Record<string, ColumnSchema> = {};
   const required: string[] = [];
@@ -133,6 +139,15 @@ export function table<C extends Record<string, ColumnSpec>>(
   const schema: TableSchema = { type: "object", properties, required };
   if (rule !== undefined) {
     schema.rowLabel = buildRowLabelSpec(Object.keys(columns), rule);
+  }
+  if (opts?.allowReadClearance) {
+    if (rule === undefined) {
+      throw new Error(
+        "table(): allowReadClearance needs a rowLabel rule — read-time " +
+          "clearance filters rows by their per-row label",
+      );
+    }
+    schema.rowLabelReadClearance = true;
   }
   return schema;
 }
