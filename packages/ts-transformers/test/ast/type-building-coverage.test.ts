@@ -1,9 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import ts from "typescript";
 
 import {
@@ -16,6 +11,35 @@ import {
   type CaptureTreeNode,
   createCaptureTreeNode,
 } from "../../src/utils/capture-tree.ts";
+import { collect, parseModule } from "../transformed-ast.ts";
+
+/**
+ * Reparse a printed capture-type literal and return its members keyed by name,
+ * each carrying its optional flag and the printed text of its declared type.
+ * Asserting on these AST-derived members is stronger than substring-matching
+ * the printed text: an optional token and a member type are pinned exactly.
+ */
+function typeLiteralProps(printed: string): Map<
+  string,
+  { optional: boolean; type: string }
+> {
+  const decl = collect(
+    parseModule(`type __T = ${printed};`),
+    ts.isTypeAliasDeclaration,
+  )[0];
+  if (!decl) throw new Error(`Could not parse type literal: ${printed}`);
+  const out = new Map<string, { optional: boolean; type: string }>();
+  for (const signature of collect(decl.type, ts.isPropertySignature)) {
+    const name = ts.isIdentifier(signature.name)
+      ? signature.name.text
+      : signature.name.getText(decl.getSourceFile());
+    out.set(name, {
+      optional: !!signature.questionToken,
+      type: signature.type ? signature.type.getText(decl.getSourceFile()) : "",
+    });
+  }
+  return out;
+}
 
 function createProgram(fileName: string, sourceText: string) {
   const sourceFile = ts.createSourceFile(
@@ -229,8 +253,9 @@ Deno.test("buildCaptureTypeElements: an optional intermediate property is emitte
       ts.factory.createTypeLiteralNode(elements),
       sourceFile,
     );
-    assertStringIncludes(printed, "nested?:");
-    assertStringIncludes(printed, "value: string");
+    const members = typeLiteralProps(printed);
+    assertEquals(members.get("nested")?.optional, true);
+    assertEquals(members.get("value")?.type, "string");
   });
 });
 
@@ -263,8 +288,11 @@ Deno.test("buildCaptureTypeElements: a required intermediate property has no que
       ts.factory.createTypeLiteralNode(elements),
       sourceFile,
     );
-    assertStringIncludes(printed, "nested: {");
-    assert(!printed.includes("nested?:"));
+    const members = typeLiteralProps(printed);
+    // The required `nested` intermediate is emitted without a question token,
+    // and resolves to an object literal carrying its `value` leaf.
+    assertEquals(members.get("nested")?.optional, false);
+    assertEquals(members.get("value")?.type, "string");
   });
 });
 
