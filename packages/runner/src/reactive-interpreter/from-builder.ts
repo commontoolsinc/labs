@@ -53,6 +53,10 @@ export interface BuiltRog {
    * interpreter needs no `$implRef`/SES resolution on this path — the same
    * functions legacy node instantiation would run. */
   leafImpls: Map<OpId, (input: unknown) => unknown>;
+  /** Inlined nested patterns' own BuiltRogs by `pattern` op id (recursive:
+   * carries the child's live leaf impls alongside the child Rog the op's
+   * detail also references). */
+  children: Map<OpId, BuiltRog>;
   /** Live element pattern factories for collection ops (op id → factory),
    * so W4 can resolve the element's own BuiltRog at dispatch time. */
   collectionElements: Map<OpId, unknown>;
@@ -174,6 +178,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
   const { nodes, cellNameForCell, internalCauses } = input;
   const incomplete: string[] = [];
   const leafImpls = new Map<OpId, (input: unknown) => unknown>();
+  const children = new Map<OpId, BuiltRog>();
   const collectionElements = new Map<OpId, unknown>();
 
   // Pass 1 — reserve op ids for nodes; map output roots to producers.
@@ -372,7 +377,8 @@ function buildRog(input: RogBuildInput): BuiltRog {
     if (mod.type === "pattern") {
       const argument = refForValue(node.inputs) ??
         markIncomplete(id, "pattern_argument_unmapped");
-      const child = getBuiltRog(mod.implementation)?.rog;
+      const childBuilt = getBuiltRog(mod.implementation);
+      if (childBuilt !== undefined) children.set(id, childBuilt);
       return {
         id,
         kind: "pattern",
@@ -381,7 +387,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
         detail: {
           kind: "pattern",
           argument: argument ?? { kind: "const", value: undefined },
-          ...(child !== undefined && { child }),
+          ...(childBuilt !== undefined && { child: childBuilt.rog }),
         },
       };
     }
@@ -602,7 +608,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
     internals,
     ...(incomplete.length > 0 && { incomplete: dedupe(incomplete) }),
   };
-  return { rog, leafImpls, collectionElements };
+  return { rog, leafImpls, children, collectionElements };
 }
 
 function dedupe(reasons: string[]): string[] {
