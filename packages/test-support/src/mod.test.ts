@@ -5,6 +5,7 @@ import {
   createCompileByteCache,
   createUnifiedDiff,
   defineFixtureSuite,
+  flushCompileByteCache,
   ProcessModuleByteCache,
   runDenoCheckWithTemporaryConfig,
   runDenoCommandWithTemporaryLock,
@@ -16,6 +17,7 @@ describe("test-support module exports", () => {
     expect(createCompileByteCache()).toBeInstanceOf(ProcessModuleByteCache);
     expect(typeof createUnifiedDiff).toBe("function");
     expect(typeof defineFixtureSuite).toBe("function");
+    expect(typeof flushCompileByteCache).toBe("function");
     expect(typeof runDenoCheckWithTemporaryConfig).toBe("function");
     expect(typeof runDenoCommandWithTemporaryLock).toBe("function");
     expect(typeof shouldUpdateGoldens).toBe("function");

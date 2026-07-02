@@ -12,6 +12,7 @@ import type {
 import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
+  setCompileCacheRuntimeVersionForTesting,
 } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("module byte cache test");
@@ -26,11 +27,14 @@ const runtimeVersion = resolvedRuntimeVersion;
 // (eviction, disk persistence) lives in test code outside the runtime and is
 // tested there.
 class FakeByteCache implements ModuleByteCache {
+  gets = 0;
+  puts = 0;
   private readonly m = new Map<string, CompiledModuleArtifact>();
   getCompleteSet(
     rt: string,
     ids: readonly string[],
   ): Map<string, CompiledModuleArtifact> | undefined {
+    this.gets++;
     const out = new Map<string, CompiledModuleArtifact>();
     for (const id of ids) {
       const a = this.m.get(`${rt}\0${id}`);
@@ -43,6 +47,7 @@ class FakeByteCache implements ModuleByteCache {
     rt: string,
     mods: readonly { identity: string; js: string; sourceMap?: unknown }[],
   ): void {
+    this.puts++;
     for (const x of mods) {
       this.m.set(
         `${rt}\0${x.identity}`,
@@ -90,6 +95,31 @@ describe("ModuleByteCache cross-runtime reuse", () => {
       storageManager,
       moduleByteCache: byteCache,
     });
+
+  it("skips the injected byte cache when the runtime version is unavailable", async () => {
+    const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
+      undefined,
+    );
+    const byteCache = new FakeByteCache();
+    const rt = runtimeIn(byteCache);
+
+    try {
+      const result = await rt.patternManager.compileAndRegisterModules({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: "export const answer = 42;\nexport default answer;",
+        }],
+      });
+
+      expect((result.main as { answer: number }).answer).toBe(42);
+      expect(byteCache.gets).toBe(0);
+      expect(byteCache.puts).toBe(0);
+    } finally {
+      restoreRuntimeVersion();
+      await rt.dispose();
+    }
+  });
 
   it("a fresh runtime + fresh space process-hits and persists the closure", async () => {
     const byteCache = new FakeByteCache();
