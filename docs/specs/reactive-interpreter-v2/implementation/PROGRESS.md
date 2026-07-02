@@ -14,7 +14,7 @@ measured numbers (OFF vs ON, same commit) once W3 exists.
 | W4 — collections Option A | ⬜ | — |
 | W5 — transformer native ops | ⬜ | — |
 | W6 — function lowering | ⬜ | — |
-| W7 — suites + chat sim + measurements (continuous) | ⬜ | — |
+| W7 — suites + chat sim + measurements (continuous) | 🟡 running | **Root `deno task test` flag-off: ALL PASSING (207.5s; baseline 210.5s — no construction cost).** **Root integration 7/7** (after the str un-hoist fix; cli suite needed a pre-existing deno.jsonc fix reproduced broken on main). **Chat sim flag-ON 12/0 in 5.4s** — the v1 ~226× pathology does NOT reproduce (conservative gates keep group-chat legacy). Runner: flag-off 738/0, flag-ON 737/1. |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
 
