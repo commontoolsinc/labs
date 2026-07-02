@@ -2035,12 +2035,19 @@ function toolInputRequiredIntegrityFailure(
   }
   if (isRecord(schema.properties)) {
     for (const [key, childSchema] of Object.entries(schema.properties)) {
-      const childValue = isRecord(value) ? value[key] : undefined;
+      // Only gate fields the model actually supplied. An absent (e.g. optional)
+      // field carries no value to gate; treating it as `undefined` would fail
+      // an optional field's floor and over-block the call. A required field the
+      // model omitted is a structural error handled by ordinary input
+      // validation, not a floor bypass — there is no injected value to gate.
+      if (!isRecord(value) || !Object.hasOwn(value, key)) {
+        continue;
+      }
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
         space,
         childSchema,
-        childValue,
+        value[key],
         path ? `${path}.${key}` : key,
       );
       if (failure !== undefined) {

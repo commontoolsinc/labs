@@ -315,6 +315,121 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     }
   });
 
+  it("does not over-block when an optional floor-field is omitted", async () => {
+    // A floor-declaring field the model did not supply carries no value to
+    // gate — the call must proceed (the gate protects injected VALUES, not
+    // omissions).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
+      const note = handler<{ text: string; cc?: string }, { notes: any }>(
+        {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            cc: { type: "string", ifc: { requiredIntegrity: [KERNEL_ATOM] } },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            notes: {
+              type: "array",
+              items: { type: "string" },
+              asCell: ["cell"],
+            },
+          },
+          required: ["notes"],
+        },
+        ({ text }, { notes }) => {
+          notes.push(text);
+        },
+      );
+      const resultSchema = {
+        type: "object",
+        properties: {
+          notes: { type: "array", items: { type: "string" } },
+          tools: true,
+        },
+        required: ["notes", "tools"],
+      } as const satisfies JSONSchema;
+      const testPattern = pattern(
+        () => {
+          const notes = Writable.of<string[]>([]);
+          return {
+            notes,
+            tools: {
+              note: {
+                description: "Note.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                    cc: {
+                      type: "string",
+                      ifc: { requiredIntegrity: [KERNEL_ATOM] },
+                    },
+                  },
+                  required: ["text"],
+                  additionalProperties: false,
+                },
+                handler: note({ notes }),
+              },
+            },
+          };
+        },
+        false,
+        resultSchema,
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "agent-optional-floor",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+
+      const catalog = llmToolExecutionHelpers.buildToolCatalog(
+        result.key("tools") as any,
+        false,
+      );
+      // `cc` (the floor field) is omitted → the call proceeds.
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-omit",
+        toolName: "note",
+        input: { text: "hello" },
+      }] as any);
+      await runtime.idle();
+      expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
+
+      // ...but supplying `cc` as a literal still fails its floor.
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-cc",
+        toolName: "note",
+        input: { text: "again", cc: "bob@evil.org" },
+      }] as any);
+      await runtime.idle();
+      expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("descends into array-items floors", async () => {
     // A floor under `items` must gate every model-supplied element.
     const storageManager = StorageManager.emulate({ as: signer });
