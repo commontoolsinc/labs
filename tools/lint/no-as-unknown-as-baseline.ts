@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/background-piece-service/src/utils.ts": [
-    "103:8:1iy7nx4",
-  ],
   "packages/background-piece-service/src/worker.ts": [
     "251:50:1js655g",
   ],

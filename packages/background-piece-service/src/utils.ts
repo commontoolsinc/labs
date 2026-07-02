@@ -100,7 +100,7 @@ export async function setBGPiece({
         disabledAt: undefined,
         lastRun: 0,
         status: "Initializing",
-      } as unknown as Cell<BGPieceEntry>);
+      });
     });
 
     await runtime.storageManager.synced();
