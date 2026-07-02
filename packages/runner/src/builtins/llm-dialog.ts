@@ -19,6 +19,7 @@ import {
   toDeepFrozenSchema,
 } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   LLMDialogResultSchema,
   LLMMessageSchema,
@@ -27,8 +28,22 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
+
+// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
+// Recorded as the schema write-policy input for each model-produced message's
+// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
+// exactly that message — see `pushModelMessages`.
+const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
+  ...LLMMessageSchema,
+  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+} as JSONSchema);
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isCell, isStream } from "../cell.ts";
+import {
+  isCell,
+  isStream,
+  recordRelevantSchemaWritePolicyInput,
+} from "../cell.ts";
+import { resolveLinkScope } from "../scope.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
@@ -2935,6 +2950,69 @@ async function startRequest(
   const builtinTools = inputs.key("builtinTools").get() !== false;
 
   const messagesCell = inputs.key("messages");
+
+  // Epic D1 (docs/specs/cfc-trusted-agent-tool-integrity.md piece B): model-
+  // produced bytes — assistant content and tool results entering the dialog
+  // transcript — are stamped `LlmDerived` at the point they enter the store,
+  // so "untrusted model output" is explicit provenance rather than absence of
+  // integrity. The stamp rides the item schema's `ifc.addIntegrity`, which
+  // persists a labelMap entry on exactly the pushed message; the plain-schema
+  // pushes (user messages via `addMessage`, builtin-authored error literals)
+  // stay unstamped. The write is attributed to the builtin because
+  // `LlmDerived` is a runtime-minted evidence family: the persist-time gate
+  // (`gateRuntimeMintedIntegrity`, audit S4) strips it from any other author,
+  // which is also what stops pattern code from forging the stamp.
+  const pushModelMessages = (
+    tx: IExtendedStorageTransaction,
+    messages: Schema<typeof LLMMessageSchema>[],
+  ) => {
+    const startIndex = (messagesCell.withTx(tx).get() as
+      | readonly unknown[]
+      | undefined)?.length ?? 0;
+    messagesCell.withTx(tx).push(...messages);
+    if (runtime.cfcEnforcementMode === "disabled") {
+      return;
+    }
+    // Attribute the writes to the builtin: `LlmDerived` is a runtime-minted
+    // evidence family, so the persist-time gate (`gateRuntimeMintedIntegrity`,
+    // audit S4) admits it only from builtin authors — the same gating that
+    // stops pattern code from forging the stamp.
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "llmDialog",
+    });
+    // Record the stamping schema for each pushed message's own entity doc
+    // (every model push carries an [ID] sigil, so each message splits into
+    // its own doc). The messages link carries its own schema, which wins over
+    // an `asSchema` handle inside `push()` (`resolvedLink.schema ?? ...`), so
+    // the stamp cannot ride the array handle — instead this mirrors the
+    // split-entity idiom in data-updating.ts (`recordRelevantSchemaWrite-
+    // PolicyInput` on the child doc), which also marks the transaction
+    // CFC-relevant so `prepareTxForCommit` runs the persist pass that mints
+    // the labelMap entry.
+    const base = messagesCell.getAsNormalizedFullLink();
+    for (let index = 0; index < messages.length; index++) {
+      const raw = messagesCell.withTx(tx).key(startIndex + index).getRaw();
+      const link = parseLink(raw);
+      const id = link?.id;
+      if (link === undefined || id === undefined) {
+        logger.warn(
+          "llm",
+          "model message did not split into its own doc; LlmDerived stamp skipped",
+        );
+        continue;
+      }
+      recordRelevantSchemaWritePolicyInput(tx, {
+        ...link,
+        id,
+        space: link.space ?? base.space ?? space,
+        scope: resolveLinkScope(link.scope, base.scope),
+        path: [],
+        schema: LLM_DERIVED_MESSAGE_SCHEMA,
+      }, LLM_DERIVED_MESSAGE_SCHEMA);
+    }
+  };
+
   const toolsCell = inputs.key("tools") as Cell<
     Record<string, Schema<typeof LLMToolSchema>>
   >;
@@ -3174,9 +3252,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
                   observedConfidentiality: requestObservedConfidentiality,
                 },
               ]);
-              messagesCell.withTx(tx).push(
+              pushModelMessages(tx, [
                 assistantMessage as Schema<typeof LLMMessageSchema>,
-              );
+              ]);
             },
           );
 
@@ -3274,8 +3352,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
                     toolResults[index]?.observedConfidentiality ?? [],
                 })),
               );
-              messagesCell.withTx(tx).push(
-                ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
+              pushModelMessages(
+                tx,
+                toolResultMessages as Schema<typeof LLMMessageSchema>[],
               );
             },
           );
@@ -3356,9 +3435,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
                 observedConfidentiality: requestObservedConfidentiality,
               },
             ]);
-            messagesCell.withTx(tx).push(
+            pushModelMessages(tx, [
               assistantMessage as Schema<typeof LLMMessageSchema>,
-            );
+            ]);
             pending.withTx(tx).set(false);
           },
         );

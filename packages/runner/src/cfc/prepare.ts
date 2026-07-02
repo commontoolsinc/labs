@@ -2660,6 +2660,11 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   // identity, so any ExternalIngest atom an attacker smuggles into the payload
   // is stripped — the trusted mark can only come from the builtin mint step.
   CFC_ATOM_TYPE.ExternalIngest,
+  // LLM-derivation provenance is minted by the llm builtins at the point
+  // model bytes enter the store (Epic D1). Gating it keeps the stamp honest
+  // in BOTH directions: pattern code can neither forge it onto values the
+  // model never produced nor author schemas that mint it.
+  CFC_ATOM_TYPE.LlmDerived,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
