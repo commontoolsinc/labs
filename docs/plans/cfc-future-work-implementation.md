@@ -128,11 +128,29 @@ Integrity stays flat forever (no OR-integrity — spec §3.1.6; mixed integrity 
    (spec §3.1.8 rationale: OR-Expires inverts most-restrictive-wins; OR-Caveat
    makes risk dischargeable by identity).
 6. **Ceiling meet.** `meetCfcObservationCeilings`
-   ([observation.ts:157](../../packages/runner/src/cfc/observation.ts)) — for
-   clause entries, meet = pairwise alternative-set intersection of clause
-   pairs, dropping empties (sound: the intersection clause subsumes via both
-   parents). Flat/flat stays the current set intersection. Property-test
-   soundness: `fits(L, meet(C1,C2)) ⟹ fits(L,C1) ∧ fits(L,C2)`.
+   ([observation.ts:188](../../packages/runner/src/cfc/observation.ts)).
+   _Corrected 2026-07-02 — the original decision here ("pairwise
+   alternative-set intersection, sound: the intersection clause subsumes via
+   both parents") was **unsound**._ Ceiling clauses sit on the demanding side
+   of subsumption (`alts(c) ⊆ alts(l)`): fewer alternatives = a weaker demand
+   = admits **more** labels, so intersecting alternative sets *loosens*.
+   Counterexample: `meet([{A,B}], [{B,C}]) = [{B}]` admits label `[[B]]`,
+   which ceiling `[{A,B}]` alone rejects. The sound **and complete** clause
+   meet is the **pairwise alternative-set UNION**: `alts(c1) ∪ alts(c2) ⊆
+   alts(l)` holds iff both parents subsume `l`, and any label fitting both
+   ceilings has a witness pair whose union it fits. The union meet is also
+   the true meet on flat/flat inputs — `meet([A],[B]) = [{anyOf:[A,B]}]`,
+   decision-equivalent to today's atom intersection for flat *labels* but
+   additionally admitting OR-labels the intersection wrongly rejects.
+   Implementations may keep the flat-pair intersection fast path (equal-atom
+   pairs collapse to the atom) and may drop cross pairs to bound
+   `O(|C1|·|C2|)` ceiling growth — both are sound over-restrictions; the
+   intersection of alternative sets is never sound. Status: A2 (#4470)
+   landed the conservative deepEqual-identical meet with the general meet
+   explicitly deferred (rationale documented at the site); the union meet +
+   the **both-direction** property test `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧
+   fits(L,C2)` must land before clause ceilings first reach this seam (B5
+   `BoundaryContext`/sink ceilings, H3b render ceiling).
 
 ### Stages
 
@@ -148,7 +166,9 @@ ordering of alternatives in `canonical.ts` (`canonicalizeCfcMetadata` must sort
 Rewrite `atomsOutsideCeiling` → clause-subsumption membership (return offending
 label *clauses*); `cfcObservationFitsCeiling` signature unchanged; the
 ungrantable `CFC_LABEL_READ_FAILED_ATOM` handling unchanged (it can never be
-subsumed-in). `meetCfcObservationCeilings` per decision 6.
+subsumed-in). `meetCfcObservationCeilings` per decision 6 (as landed in
+#4470: the conservative deepEqual meet; the union clause-meet is a
+follow-up owed before B5/H3b — see decision 6).
 **Red first:** the multi-party counterexample — label `[[User(A)],[User(B)]]`
 (nobody alone may read) vs ceiling `[{anyOf:[User(A),User(B)]}]` (readers A or
 B) must **fail** fit. Also: OR-clause label `[{anyOf:[A,B]}]` vs flat ceiling
@@ -419,8 +439,11 @@ shape-only via `nonRecursive` / followRef via `linkResolutionProbe`) in
 `forEachFlowObservation` ([prepare.ts:1215](../../packages/runner/src/cfc/prepare.ts));
 `effectiveReadLabel` selects entries by class-compatibility instead of the
 boolean; `excludeLinkOrigin` becomes class selection (link-origin entries
-consumed by `followRef` reads). Flow-taint parity test: with only legacy
-covering entries, derived joins are byte-identical to today.
+consumed by `followRef` reads). Flow-taint parity test, scoped per C0 §6:
+with only legacy covering entries, derived joins are byte-identical to today
+for `value`/`shape`/`enumerate` reads; the `followRef` path intentionally
+widens (that widening *is* the SC-8 fix) and is asserted as the new wider
+join, not claimed as parity.
 
 **C2 — persist split.** The persist region writes `observes:"value"` derived
 entries plus a `shape` entry per written path; the existing `structure` stamps
@@ -445,9 +468,16 @@ the epic).
 [sqlite-builtins.ts:205](../../packages/runner/src/builtins/sqlite-builtins.ts))
 narrows to the classes actually consumed.
 
-**Rollout.** No dial needed: entries are additive and legacy readers treat
-them as covering. Perf: labelMap grows ~2× entries per written path — bench
-before/after (canonicalize + label-sync).
+**Rollout.** _Corrected by C0 (#4476) — two regimes, not one._
+`value`/`shape`/`enumerate` entries are additive and legacy readers treat
+them as covering (over-taint, fail-safe — no dial needed). The **followRef
+slice is NOT fail-safe writer-first**: a legacy reader *drops*
+`origin:"link"` entries via `excludeLinkOrigin`, so a new writer + old
+reader **under-taints**. Deploy the class-aware reader before the writer, or
+gate followRef persistence behind a dial flipped only after readers
+understand it — a hard prerequisite for the SC-8 slice
+(`docs/specs/cfc-observation-classes.md` §9). Perf: labelMap grows ~2×
+entries per written path — bench before/after (canonicalize + label-sync).
 
 ---
 

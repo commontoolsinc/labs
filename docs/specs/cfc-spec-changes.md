@@ -105,6 +105,12 @@ Minimal needed now: reading an array whose items resolve to references _without
 dereferencing_ consumes container enumeration + per-item shape only — not
 element `value`. (This is what makes SC-7's coordinator taint well-defined.) A
 fuller table can come with the observation-class implementation.
+(Design settled 2026-07-02, C0 #4476 + follow-up patches:
+`docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
+§5 SC-4 grow-vs-replace split, the §3 `origin:"link"` ⇒ implicit
+`observes:"followRef"` covering-rule carve-out, and `count` folding into
+`enumerate`. The spec PR to `commontoolsinc/specs` for §4.6.3 is now owed;
+file it once C1 validates the mapping in code.)
 
 **SC-9 [normative] Staged conformance for the default transition — §8.9.3 or
 §18.** §8.9.3 derives both confidentiality and integrity (TransformedBy +
