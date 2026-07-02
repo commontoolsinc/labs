@@ -420,6 +420,16 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  // In-flight commits from user-intent event handlers (writes that changed
+  // values). Event commits are issued fire-and-forget so the scheduler can keep
+  // processing later events against the locally applied state while server
+  // confirmation is in flight. The client-facing idle
+  // (RuntimeProcessor.handleIdle) waits for these to settle so a just-issued
+  // event write is durable before the client treats the runtime as quiescent —
+  // a client that reads "idle" as a safe point to navigate or reload would
+  // otherwise drop the in-flight commit when the page (and this worker) is torn
+  // down. Distinct from backgroundTasks, which re-trigger scheduling.
+  private pendingEventCommits = new Set<Promise<unknown>>();
   private initialRehydrationTokens = new WeakMap<Action, symbol>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -961,16 +971,52 @@ export class Scheduler {
   }
 
   idle(): Promise<void> {
+    return this.#waitForQuiescence(false);
+  }
+
+  // Client-facing quiescence: reactive quiescence AND durability of in-flight
+  // user-intent event commits. Event-handler commits are issued fire-and-forget
+  // (events.ts), so plain idle() reports quiescence while such a commit is still
+  // travelling to the server; a client that reads idle as a safe point to
+  // navigate or reload would then drop that write when the page and its worker
+  // are torn down. A landed commit also dirties readers of the committed write
+  // (onEventCommitWrites), which can re-trigger scheduler work that produces
+  // further commits, so durability and reactive quiescence are one joint
+  // fixpoint. This reuses the same recursive convergence idle() uses — a pending
+  // commit is just one more class of work to wait for — so there is no separate
+  // retry loop and no round cap. It resolves exactly when the scheduler is
+  // quiescent and no tracked commit is in flight, and (like idle()) never
+  // resolves for a system that genuinely never settles.
+  idleWithEventCommits(): Promise<void> {
+    return this.#waitForQuiescence(true);
+  }
+
+  #waitForQuiescence(awaitEventCommits: boolean): Promise<void> {
     return new Promise<void>((resolve) => {
+      // Re-evaluate every condition from scratch once the thing we are waiting
+      // on settles.
+      const recheck = () =>
+        this.#waitForQuiescence(awaitEventCommits).then(resolve);
+      // A parked waiter (idlePromises) resolves when the scheduler drains, but a
+      // commit can still be in flight then, so the commit-aware variant re-checks
+      // instead of resolving. That re-check is deferred to a microtask: it must
+      // not re-enter #waitForQuiescence synchronously while resolveIdlePromises
+      // is iterating idlePromises (draining runs before the scheduler marks
+      // itself not-scheduled, so a synchronous re-check would push back into the
+      // array mid-drain). The plain variant keeps the direct resolver.
+      const park = awaitEventCommits ? () => queueMicrotask(recheck) : resolve;
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
-        this.runningPromise.then(() => this.idle().then(resolve));
+        this.runningPromise.then(recheck);
       } else if (this.backgroundTasks.size > 0) {
         // Async scheduler work, such as event-triggered auto-start, is still in
         // flight. Wait for it to settle and then re-check the scheduler state.
-        Promise.allSettled([...this.backgroundTasks]).then(() =>
-          this.idle().then(resolve)
-        );
+        Promise.allSettled([...this.backgroundTasks]).then(recheck);
+      } else if (awaitEventCommits && this.pendingEventCommits.size > 0) {
+        // In-flight user-intent event commits. Wait for them to settle (server
+        // confirmation or terminal failure) and then re-check: a landed commit
+        // can dirty readers and re-trigger scheduler work.
+        Promise.allSettled([...this.pendingEventCommits]).then(recheck);
       } else if (
         hasEventQueueWakeTimer(this.eventQueueWakeState) &&
         ((this.eventQueue.length > 0 &&
@@ -979,15 +1025,15 @@ export class Scheduler {
       ) {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       } else if (this.hasPendingLineageHeadEvent()) {
         // A cross-space lineage head has no timer; its origin commit callback
         // is the wake source, so idle must stay open until that callback runs.
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
           this.queueExecution();
-          this.idlePromises.push(resolve);
+          this.idlePromises.push(park);
           return;
         }
         // Nothing is scheduled to run - we're idle.
@@ -996,9 +1042,28 @@ export class Scheduler {
         resolve();
       } else {
         // Execution is scheduled - wait for it to complete
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       }
     });
+  }
+
+  /**
+   * Register an in-flight user-intent event-handler commit so the client-facing
+   * idle can wait for it to become durable. Normalized to always resolve and
+   * auto-removed once it settles, so a rejecting commit is safe and never leaks.
+   */
+  trackEventCommit(promise: Promise<unknown>): void {
+    const tracked = promise.then(() => {}, () => {});
+    this.pendingEventCommits.add(tracked);
+    tracked.finally(() => this.pendingEventCommits.delete(tracked));
+  }
+
+  /**
+   * Whether any user-intent event commit is still in flight. Introspection for
+   * tests and diagnostics; the wait itself lives in idleWithEventCommits().
+   */
+  hasPendingEventCommits(): boolean {
+    return this.pendingEventCommits.size > 0;
   }
 
   queueExecution(): void {
