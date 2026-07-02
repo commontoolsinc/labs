@@ -25,13 +25,20 @@ import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 
 export class MergeablePushValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
+    // A single callback can be reachable from more than one call site: the
+    // lift-applied shape `lift(cb)(input)` exposes both the applied outer call
+    // and the unapplied inner `lift(cb)` call, and both resolve to the same
+    // callback. Check each callback once so the "one warning per handler"
+    // guarantee holds regardless of how many call sites reference it.
+    const checked = new Set<ts.Node>();
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         const callback = getCapabilitySummaryCallbackArgument(
           node,
           context.checker,
         );
-        if (callback) {
+        if (callback && !checked.has(callback)) {
+          checked.add(callback);
           this.checkCallback(callback, context);
         }
       }

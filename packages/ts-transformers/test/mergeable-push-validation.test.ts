@@ -121,6 +121,31 @@ Deno.test("Mergeable push validation", async (t) => {
   );
 
   await t.step(
+    "reports one warning for a lift-applied callback, not one per call site",
+    async () => {
+      // `lift(cb)(input)` exposes both the applied outer call and the unapplied
+      // inner `lift(cb)` call, and both resolve to the same callback node.
+      // Without per-callback deduplication the read-then-push warns twice.
+      const source = [
+        'import { lift } from "commonfabric";',
+        "",
+        "declare const someInput: { items: number[] };",
+        "",
+        "export const doubled = lift((s: { items: number[] }) => {",
+        "  const current = s.items;",
+        "  s.items.push(current.length);",
+        "  return current;",
+        "})(someInput);",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      assertEquals(getReadThenPushWarnings(diagnostics).length, 1);
+    },
+  );
+
+  await t.step(
     "does not warn on the identity-addressed addUnique fix",
     async () => {
       const source = [
