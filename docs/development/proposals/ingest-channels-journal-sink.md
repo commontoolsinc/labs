@@ -150,3 +150,14 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 - Retention/GC of old journal partitions (a future generic trail-management concern).
 - **Intra-partition size cap.** `appendToJournal` does `[...current, ...records]` with no per-partition ceiling, and `custodyIngest.update` re-serializes the whole value each write, so sustained appends to one partition are O(N²) and grow unbounded within per-POST limits. Confined to the token holder's own space and bounded in practice by per-day partitioning (one UTC day of genuine traffic); a cheap element-count backstop is a tracked follow-up, not v1.
 - **Extracting the shared bearer-auth crypto + registry.** `verifyIngestSecret`, `randomBase62`, and the service-space registry are copied from `webhooks.utils.ts` (the proven path). A `lib/ingest-registry.ts` extraction shared by both routes is the fast-follow that avoids drift — deferred with the self-serve create work to keep this PR from churning shipped, re-vendored webhook code.
+
+## Fast-follows (tracked, post-v1)
+
+From the branch critique's P2 list — deliberately NOT in this PR; each has a named trigger:
+
+- **Extract shared bearer-secret crypto** into `lib/channel-secret.ts` — *trigger: the next PR touching either route.* Webhooks keep their async hex `sha256`, ingest its sync base64url; the two stored-hash encodings must be format-tagged or migrated before any registry merge. (Same item as the shared-crypto bullet in Out of scope.)
+- **Per-partition element-count backstop** (~50k) inside the `custodyIngest.update` closure, mapped to a loud 413 — *trigger: before any always-on beacon ships.* Never re-partition server-side. (Same item as the intra-partition size cap in Out of scope.)
+- **Revocation** — a `--disable` flag on the provisioning script that flips `enabled: false` — *trigger: before loom's "revoke beacon token" control surface lands.*
+- **Test gaps** (opportunistic): a `>1 MB` `app.request` asserting the 413 bodyLimit body; a second-append test pinning mark coalescing per (path, origin) (`prepare.ts`); dedup the `ingestMarks` test helper into shared support.
+- **Per-install rate limiting** (429) — loom's `plan.md` Workstream-D step 3 specifies it; the branch has only the body cap + `MAX_BATCH`. *Decision (fine at ~10 users): deferred until self-serve create* — revisit with an in-memory per-channel token bucket in `processIngest` if abuse appears.
+- **Provisioning identity footgun** — the script writes into the service space of whatever identity its `.env` yields; a mismatch provisions into the wrong space and every POST 401s with no diagnostic. Add a usage note: run with the same `.env`/identity as the target toolshed.
