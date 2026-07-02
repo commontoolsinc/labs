@@ -1,5 +1,15 @@
 # 06 — Migration plan: work orders, gates, harvest, process
 
+> **Sequencing refined (2026-07-02, D-V2-SEQ):** implementation follows the
+> lower-risk **builder-first** ordering in
+> [implementation/00-README.md](./implementation/00-README.md) — the builder
+> records the ROG at pattern-construction time (compiled patterns execute
+> builder calls, so this is the unifying front-end), transformer native-op
+> emission follows as increments, and the ROG → legacy expander moves to the
+> legacy-retirement stage. The table below is the original V-numbered plan,
+> kept for the gate definitions; the live work-order status is
+> [implementation/PROGRESS.md](./implementation/PROGRESS.md).
+
 ## 1. Work orders
 
 Each lands as small PRs on main behind a default-off flag

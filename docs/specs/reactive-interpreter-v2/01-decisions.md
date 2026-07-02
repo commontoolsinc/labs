@@ -47,6 +47,11 @@ Three consequences define the migration mechanics:
 2. **The builder DSL becomes a second front-end** that constructs the same IR
    at runtime (it already builds a graph; it builds this one instead). This
    is what lets `extract.ts` die rather than survive for the builder path.
+   *(Sequencing refinement, D-V2-SEQ: the builder front-end is built FIRST —
+   compiled patterns execute builder calls at construction time, so
+   builder-born ROG emission covers compiled and hand-built patterns before
+   any transformer change; the expander is deferred to legacy retirement.
+   See [implementation/DECISIONS.md](./implementation/DECISIONS.md).)*
 3. **Old compiled artifacts** (pre-v2 format) load via the retained legacy
    loader, keyed on an artifact format version. New compiles produce v2
    artifacts. No in-place migration of deployed pattern bytes; the compile
