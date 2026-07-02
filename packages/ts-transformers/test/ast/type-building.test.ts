@@ -1,9 +1,7 @@
-import {
-  assertEquals,
-  assertStrictEquals,
-  assertStringIncludes,
-} from "@std/assert";
+import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import ts from "typescript";
+
+import { parseModule } from "../transformed-ast.ts";
 
 import {
   buildCaptureTypeElements,
@@ -130,14 +128,51 @@ Deno.test("buildCaptureTypeElements handles destructured keys and renames identi
       sourceFile,
     );
 
-    assertStringIncludes(printed, "zero?: string");
-    assertStringIncludes(printed, "namedKey?: number");
-    assertStringIncludes(printed, "kept: boolean");
-    assertStringIncludes(printed, '"not-safe": boolean');
+    // Reparse the printed type literal and inspect its members: the optional
+    // destructured keys widen to `T | undefined`, the plain key keeps its
+    // type, and the identifier-unsafe key `not-safe` is emitted as a quoted
+    // string-literal property name.
+    const members = typeLiteralMembers(printed);
+    assertEquals(members.get("zero"), {
+      optional: true,
+      type: "string | undefined",
+    });
+    assertEquals(members.get("namedKey"), {
+      optional: true,
+      type: "number | undefined",
+    });
+    assertEquals(members.get("kept"), { optional: false, type: "boolean" });
+    assertEquals(members.get("not-safe"), { optional: false, type: "boolean" });
   } finally {
     transformed.dispose();
   }
 });
+
+// Reparse a printed type-literal into a map from member name to its optionality
+// and printed type keyword. Wrapping it in `type __T = …;` lets the parser
+// recover the members from text, so assertions read real nodes rather than
+// matching substrings of the print.
+function typeLiteralMembers(
+  printed: string,
+): Map<string, { optional: boolean; type: string }> {
+  const root = parseModule(`type __T = ${printed};`);
+  const alias = root.statements[0];
+  assert(ts.isTypeAliasDeclaration(alias) && ts.isTypeLiteralNode(alias.type));
+  const out = new Map<string, { optional: boolean; type: string }>();
+  for (const member of alias.type.members) {
+    assert(ts.isPropertySignature(member) && member.type);
+    const name = member.name;
+    const key = ts.isStringLiteralLike(name) || ts.isIdentifier(name)
+      ? name.text
+      : undefined;
+    assert(key !== undefined, "unexpected member name");
+    out.set(key, {
+      optional: member.questionToken !== undefined,
+      type: member.type.getText(root),
+    });
+  }
+  return out;
+}
 
 function createProgram(fileName: string, sourceText: string) {
   const sourceFile = ts.createSourceFile(
