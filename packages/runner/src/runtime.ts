@@ -170,6 +170,11 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /** Reactive Interpreter v2: dispatch eligible patterns through the ROG
+   * interpreter (docs/specs/reactive-interpreter-v2/). Default off; env
+   * fallback `CF_EXPERIMENTAL_INTERPRETER=1`. Fail-closed: anything the
+   * interpreter cannot represent falls back to legacy instantiation. */
+  experimentalInterpreter?: boolean | undefined;
 }
 
 /**
@@ -408,8 +413,17 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      experimentalInterpreter: undefined,
       ...options.experimental,
     };
+    if (this.experimental.experimentalInterpreter === undefined) {
+      try {
+        this.experimental.experimentalInterpreter =
+          Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1";
+      } catch {
+        this.experimental.experimentalInterpreter = false;
+      }
+    }
 
     // Log any overridden experimental flags.
     const overrideFlags = Object.entries(this.experimental)

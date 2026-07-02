@@ -89,6 +89,7 @@ import {
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
+import { planInterpreterDispatch } from "./reactive-interpreter/dispatch.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -1207,13 +1208,24 @@ export class Runner {
           options.awaitSyncBeforeInitialRun,
         );
       try {
-        for (const node of pattern.nodes) {
+        // Reactive Interpreter v2 (flag-gated, fail-closed): when the pattern
+        // carries a complete builder-born ROG and the partition admits it,
+        // instantiate the interpreter's synthetic node plan instead of the
+        // per-node legacy loop. Any fallback reason → legacy, side-effect-free
+        // (planning is pure; nothing is written before the decision).
+        const interpreterPlan = this.runtime.experimental.experimentalInterpreter
+          ? planInterpreterDispatch(pattern)
+          : undefined;
+        const nodesToInstantiate = interpreterPlan?.kind === "interpret"
+          ? interpreterPlan.nodes
+          : pattern.nodes;
+        for (const node of nodesToInstantiate) {
           const baseCell = resultCell.withTx(actualTx);
           this.instantiateNode(
             actualTx,
             node.module,
-            node.inputs,
-            node.outputs,
+            node.inputs as FabricValue,
+            node.outputs as FabricValue,
             baseCell,
             addNodeCancel,
             pattern,
