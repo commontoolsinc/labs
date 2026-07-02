@@ -10,6 +10,7 @@ import type {
   HoistRegistrationSink,
 } from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 
 export type HarnessedFunction = (input: any) => void;
 
@@ -90,6 +91,7 @@ export interface ResolvedFabricPin {
 export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: PatternCoverageSpan[];
 }
 
 /**
@@ -108,6 +110,8 @@ export interface CacheableModule {
   js: string;
   /** Per-module source map, when available. */
   sourceMap?: unknown;
+  /** Pattern coverage spans registered while compiling this module. */
+  patternCoverageSpans?: PatternCoverageSpan[];
   /** Internal import edges: specifier → the dependency module's identity. */
   imports: { specifier: string; targetIdentity: string }[];
 }

@@ -19,11 +19,23 @@ export interface SerializedModuleBytes {
   key: string;
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: CachedPatternCoverageSpan[];
+}
+
+export interface CachedPatternCoverageSpan {
+  fileName: string;
+  id: number;
+  kind: "runtime";
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: CachedPatternCoverageSpan[];
 }
 
 export interface ModuleByteCache {
@@ -34,7 +46,7 @@ export interface ModuleByteCache {
 
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void;
 }
 
@@ -71,6 +83,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     if (typeof artifact.sourceMap === "string") {
       size += artifact.sourceMap.length;
     }
+    if (artifact.patternCoverageSpans !== undefined) {
+      size += JSON.stringify(artifact.patternCoverageSpans).length;
+    }
     return size;
   }
 
@@ -104,15 +119,27 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     identity: string,
     artifact: CompiledModuleArtifact,
   ): void {
-    this.insert(ProcessModuleByteCache.key(runtimeVersion, identity), artifact);
+    this.insert(
+      ProcessModuleByteCache.key(runtimeVersion, identity),
+      artifact,
+      { replaceExisting: true },
+    );
   }
 
-  private insert(key: string, artifact: CompiledModuleArtifact): void {
+  private insert(
+    key: string,
+    artifact: CompiledModuleArtifact,
+    options: { replaceExisting: boolean },
+  ): void {
     const existing = this.entries.get(key);
     if (existing !== undefined) {
       this.entries.delete(key);
-      this.entries.set(key, existing);
-      return;
+      this.totalBytes -= existing.size;
+      if (!options.replaceExisting) {
+        this.entries.set(key, existing);
+        this.totalBytes += existing.size;
+        return;
+      }
     }
     const size = ProcessModuleByteCache.sizeOf(artifact);
     this.entries.set(key, { artifact, size });
@@ -122,16 +149,10 @@ export class ProcessModuleByteCache implements ModuleByteCache {
 
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void {
     for (const module of modules) {
-      this.put(
-        runtimeVersion,
-        module.identity,
-        module.sourceMap === undefined
-          ? { js: module.js }
-          : { js: module.js, sourceMap: module.sourceMap },
-      );
+      this.put(runtimeVersion, module.identity, artifactFromModule(module));
     }
   }
 
@@ -149,11 +170,16 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   snapshot(): SerializedModuleBytes[] {
     const out: SerializedModuleBytes[] = [];
     for (const [key, { artifact }] of this.entries) {
-      out.push(
-        artifact.sourceMap === undefined
-          ? { key, js: artifact.js }
-          : { key, js: artifact.js, sourceMap: artifact.sourceMap },
-      );
+      const serialized: SerializedModuleBytes = { key, js: artifact.js };
+      if (artifact.sourceMap !== undefined) {
+        serialized.sourceMap = artifact.sourceMap;
+      }
+      if (artifact.patternCoverageSpans !== undefined) {
+        serialized.patternCoverageSpans = artifact.patternCoverageSpans.map(
+          copyPatternCoverageSpan,
+        );
+      }
+      out.push(serialized);
     }
     return out;
   }
@@ -167,11 +193,22 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (entry === null || typeof entry !== "object") continue;
       const e = entry as Partial<SerializedModuleBytes>;
       if (typeof e.key !== "string" || typeof e.js !== "string") continue;
+      const patternCoverageSpans = normalizePatternCoverageSpans(
+        e.patternCoverageSpans,
+      );
+      if (
+        e.patternCoverageSpans !== undefined &&
+        patternCoverageSpans === undefined
+      ) continue;
+      const artifact: CompiledModuleArtifact = { js: e.js };
+      if (e.sourceMap !== undefined) artifact.sourceMap = e.sourceMap;
+      if (patternCoverageSpans !== undefined) {
+        artifact.patternCoverageSpans = patternCoverageSpans;
+      }
       this.insert(
         e.key,
-        e.sourceMap === undefined
-          ? { js: e.js }
-          : { js: e.js, sourceMap: e.sourceMap },
+        artifact,
+        { replaceExisting: false },
       );
     }
   }
@@ -184,6 +221,60 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   stats(): { entries: number; bytes: number } {
     return { entries: this.entries.size, bytes: this.totalBytes };
   }
+}
+
+function artifactFromModule(
+  module: { identity: string } & CompiledModuleArtifact,
+): CompiledModuleArtifact {
+  const artifact: CompiledModuleArtifact = { js: module.js };
+  if (module.sourceMap !== undefined) artifact.sourceMap = module.sourceMap;
+  if (module.patternCoverageSpans !== undefined) {
+    artifact.patternCoverageSpans = module.patternCoverageSpans.map(
+      copyPatternCoverageSpan,
+    );
+  }
+  return artifact;
+}
+
+function normalizePatternCoverageSpans(
+  spans: unknown,
+): CachedPatternCoverageSpan[] | undefined {
+  if (spans === undefined) return undefined;
+  if (!Array.isArray(spans)) return undefined;
+  const normalized: CachedPatternCoverageSpan[] = [];
+  for (const span of spans) {
+    if (!isPatternCoverageSpan(span)) return undefined;
+    normalized.push(copyPatternCoverageSpan(span));
+  }
+  return normalized;
+}
+
+function isPatternCoverageSpan(
+  span: unknown,
+): span is CachedPatternCoverageSpan {
+  if (span === null || typeof span !== "object") return false;
+  const s = span as Partial<CachedPatternCoverageSpan>;
+  return typeof s.fileName === "string" &&
+    typeof s.id === "number" &&
+    s.kind === "runtime" &&
+    typeof s.startLine === "number" &&
+    typeof s.endLine === "number" &&
+    typeof s.startColumn === "number" &&
+    typeof s.endColumn === "number";
+}
+
+function copyPatternCoverageSpan(
+  span: CachedPatternCoverageSpan,
+): CachedPatternCoverageSpan {
+  return {
+    fileName: span.fileName,
+    id: span.id,
+    kind: span.kind,
+    startLine: span.startLine,
+    endLine: span.endLine,
+    startColumn: span.startColumn,
+    endColumn: span.endColumn,
+  };
 }
 
 /**

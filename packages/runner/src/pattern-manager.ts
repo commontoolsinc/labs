@@ -62,6 +62,16 @@ function throwableStorageError(error: CommitError): Error {
   });
 }
 
+function moduleByteCacheRuntimeVersion(
+  runtimeVersion: string | undefined,
+  options: { patternCoverage: boolean },
+): string | undefined {
+  if (runtimeVersion === undefined) return undefined;
+  return options.patternCoverage
+    ? `${runtimeVersion}/pattern-coverage`
+    : runtimeVersion;
+}
+
 /**
  * Re-derive a stored module's fabric edges from its SOURCE text (source docs
  * deliberately do not store them as links). Unpinned specifiers are skipped:
@@ -505,12 +515,13 @@ export class PatternManager {
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult> {
-    const byteCache = options?.patternCoverage === undefined
-      ? this.runtime.moduleByteCache
-      : undefined;
+    const byteCache = this.runtime.moduleByteCache;
     const runtimeVersion = byteCache === undefined
       ? undefined
-      : await getCompileCacheRuntimeVersion();
+      : moduleByteCacheRuntimeVersion(
+        await getCompileCacheRuntimeVersion(),
+        { patternCoverage: options?.patternCoverage !== undefined },
+      );
     if (byteCache === undefined || runtimeVersion === undefined) {
       const result = await this.runtime.harness.compileAndEvaluateModules(
         program,

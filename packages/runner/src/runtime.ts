@@ -209,7 +209,7 @@ export interface ModuleByteCache {
    */
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void;
 }
 

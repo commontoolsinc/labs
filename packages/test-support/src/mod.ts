@@ -19,6 +19,7 @@ export type {
   FixtureSuiteConfig,
 } from "./fixture-runner.ts";
 export type {
+  CachedPatternCoverageSpan,
   CompiledModuleArtifact,
   ModuleByteCache,
   SerializedModuleBytes,

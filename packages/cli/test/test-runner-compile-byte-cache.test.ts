@@ -28,6 +28,22 @@ class CountingProcessModuleByteCache extends ProcessModuleByteCache {
   }
 }
 
+async function readCoverageText(coverageDir: string): Promise<string> {
+  const chunks: string[] = [];
+  async function readDirectory(dir: string): Promise<void> {
+    for await (const entry of Deno.readDir(dir)) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory) {
+        await readDirectory(path);
+      } else if (entry.isFile && entry.name.endsWith(".lcov")) {
+        chunks.push(await Deno.readTextFile(path));
+      }
+    }
+  }
+  await readDirectory(coverageDir);
+  return chunks.join("\n");
+}
+
 describe(
   "cf test compile byte cache",
   { sanitizeOps: false, sanitizeResources: false },
@@ -96,6 +112,61 @@ describe(
             expect(
               second.stdout.some((line) => line.includes("compile-cache-hit")),
             ).toBe(true);
+          });
+        });
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("uses a coverage-specific cache key across cf test processes", async () => {
+      const dir = await Deno.makeTempDir({
+        prefix: "cf-test-compile-byte-cache-coverage-env-",
+      });
+      const cacheFile = join(dir, "cache.json");
+      const coverageDir = join(dir, "coverage");
+      const command = `test "${TEST_FILE}" --root "${FIXTURES}"`;
+
+      try {
+        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
+          await withEnv("CF_PATTERN_COVERAGE_DIR", coverageDir, async () => {
+            await withEnv("CF_LOG_LEVEL", "info", async () => {
+              const first = await cf(command);
+              expect(first.code).toBe(0);
+              checkStderr(first.stderr);
+
+              const entries = JSON.parse(await Deno.readTextFile(cacheFile));
+              expect(Array.isArray(entries)).toBe(true);
+              expect(
+                entries.some((entry: { key?: unknown }) =>
+                  typeof entry.key === "string" &&
+                  entry.key.includes("/pattern-coverage\0")
+                ),
+              ).toBe(true);
+              expect(
+                entries.some((
+                  entry: { patternCoverageSpans?: unknown },
+                ) => Array.isArray(entry.patternCoverageSpans)),
+              ).toBe(true);
+
+              const second = await cf(command);
+              expect(second.code).toBe(0);
+              checkStderr(second.stderr);
+              expect(
+                second.stdout.some((line) =>
+                  line.includes("[compile-byte-cache] restored")
+                ),
+              ).toBe(true);
+              expect(
+                second.stdout.some((line) =>
+                  line.includes("compile-cache-hit")
+                ),
+              ).toBe(true);
+
+              const coverage = await readCoverageText(coverageDir);
+              expect(coverage).toContain("SF:");
+              expect(coverage).toMatch(/LH:[1-9]/);
+            });
           });
         });
       } finally {

@@ -1,6 +1,7 @@
 import { Console } from "./console.ts";
 import {
   type CacheableModule,
+  type CompiledModuleArtifact,
   type EvaluateResult,
   type Exports,
   type Harness,
@@ -330,17 +331,18 @@ export class Engine extends EventTarget implements Harness {
       // transitively sensitive, so a partial set cannot be trusted — fall back
       // to a full recompile. The cache is queried by identity (directly, or
       // lazily once identities are known) without leaking the engine's prefix.
-      // Coverage compiles need fresh emitted JavaScript because cached bodies do
-      // not include counters.
-      const cached = patternCoverage !== undefined
+      const cachedCandidate = options.precompiledModules ??
+        (options.precompiledModulesFor
+          ? await options.precompiledModulesFor({
+            entryIdentity,
+            identities: [...new Set(identityByPath.values())],
+          })
+          : undefined);
+      const cached = patternCoverage !== undefined &&
+          cachedCandidate !== undefined &&
+          !cachedArtifactsIncludePatternCoverage(cachedCandidate)
         ? undefined
-        : options.precompiledModules ??
-          (options.precompiledModulesFor
-            ? await options.precompiledModulesFor({
-              entryIdentity,
-              identities: [...new Set(identityByPath.values())],
-            })
-            : undefined);
+        : cachedCandidate;
       const fullHit = cached !== undefined &&
         moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
 
@@ -358,6 +360,11 @@ export class Engine extends EventTarget implements Harness {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (options.patternCoverage !== undefined) {
+            options.patternCoverage.registerSpans(
+              artifact.patternCoverageSpans ?? [],
             );
           }
         }
@@ -505,6 +512,11 @@ export class Engine extends EventTarget implements Harness {
       const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
+        const patternCoverageSpans = patternCoverage === undefined
+          ? undefined
+          : options.patternCoverage?.spansForFile(
+            coverageFilenameFor(file.name, id, mounts),
+          );
         const imports = cacheableImportsFor(
           file.name,
           importEdges,
@@ -517,6 +529,9 @@ export class Engine extends EventTarget implements Harness {
           source: file.contents,
           js: precompiledBodies.get(file.name)!,
           ...(sourceMap === undefined ? {} : { sourceMap }),
+          ...(patternCoverageSpans === undefined
+            ? {}
+            : { patternCoverageSpans }),
           imports,
         };
       });
@@ -1507,6 +1522,15 @@ function patternCoverageOptionsForCompile(
     },
     registerSpan: (span) => collector.registerSpan(span),
   };
+}
+
+function cachedArtifactsIncludePatternCoverage(
+  artifacts: ReadonlyMap<string, CompiledModuleArtifact>,
+): boolean {
+  for (const artifact of artifacts.values()) {
+    if (!Array.isArray(artifact.patternCoverageSpans)) return false;
+  }
+  return true;
 }
 
 function coverageFilenameFor(
