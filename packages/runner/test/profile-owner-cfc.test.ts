@@ -291,6 +291,108 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  // A mergeable array op (add-unique / remove-by-value) records the same schema
+  // write-policy input and produces the same array-path write as a whole-value
+  // `set`, so the owner-write authorization applies to it unchanged. An
+  // owner-protected string list keeps the assertion on the op itself, not on the
+  // keyed-entity machinery.
+  const ownerProtectedTagList = (ownerDid: string): JSONSchema => ({
+    type: "object",
+    properties: {
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        ifc: {
+          ownerPrincipal: ownerDid,
+          addIntegrity: [ownerAtom(ownerDid)],
+          writeAuthorizedBy: [PROFILE_WRITER],
+          uiContract: {
+            helper: "UiAction",
+            action: "EditProfile",
+            trustedPattern: "ProfileHome",
+            requiredEventIntegrity: ["ProfileHome"],
+          },
+        },
+      },
+    },
+    required: ["tags"],
+  });
+
+  it("authorizes mergeable add-unique and remove-by-value on an owner-protected list", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = ownerProtectedTagList(alice.did());
+      const seed = runtime.edit();
+      setTrustedProfileWriter(seed, alice.did());
+      const seedCell = runtime.getCell(
+        alice.did(),
+        "cfc-mergeable-list",
+        schema,
+        seed,
+      );
+      seedCell.set({ tags: [] });
+      const target = seedCell.getAsNormalizedFullLink();
+      recordTrustedEdit(seed, target, ["tags"]);
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // The authorized writer adds through the mergeable op.
+      const add = runtime.edit();
+      setTrustedProfileWriter(add, alice.did());
+      runtime.getCell(alice.did(), "cfc-mergeable-list", schema, add)
+        .key("tags").addUnique("x");
+      recordTrustedEdit(add, target, ["tags"]);
+      add.prepareCfc();
+      expect((await add.commit()).error).toBeUndefined();
+
+      // ...and removes through the mergeable op.
+      const rm = runtime.edit();
+      setTrustedProfileWriter(rm, alice.did());
+      runtime.getCell(alice.did(), "cfc-mergeable-list", schema, rm)
+        .key("tags").removeByValue("x");
+      recordTrustedEdit(rm, target, ["tags"]);
+      rm.prepareCfc();
+      expect((await rm.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects an unauthorized mergeable write to an owner-protected list", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = ownerProtectedTagList(alice.did());
+      const seed = runtime.edit();
+      setTrustedProfileWriter(seed, alice.did());
+      const seedCell = runtime.getCell(
+        alice.did(),
+        "cfc-mergeable-list-rejected",
+        schema,
+        seed,
+      );
+      seedCell.set({ tags: [] });
+      const target = seedCell.getAsNormalizedFullLink();
+      recordTrustedEdit(seed, target, ["tags"]);
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Bob add-uniques to Alice's owner-protected list: the mergeable op is
+      // gated by the same ownerPrincipal check as a whole-value set.
+      const tx = runtime.edit();
+      setTrustedProfileWriter(tx, bob.did());
+      runtime.getCell(alice.did(), "cfc-mergeable-list-rejected", schema, tx)
+        .key("tags").addUnique("x");
+      recordTrustedEdit(tx, target, ["tags"]);
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("ownerPrincipal");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects unauthenticated owner-protected profile writes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
