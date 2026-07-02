@@ -1,7 +1,8 @@
-import ts from "typescript";
+import type ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
-import { resolveImportSpecifier } from "@commonfabric/js-compiler";
+import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+import { compilerStack } from "../harness/deferred-compiler-stack.ts";
 import {
   computeModuleHashes,
   findInternalTarget,
@@ -23,8 +24,6 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
  * Engine drives it with CF-transformer-pipeline output via `precompiledBodies`;
  * the bare `ts.transpileModule` fallback is for the standalone/test path.
  */
-
-const TARGET = ts.ScriptTarget.ES2023;
 
 const logger = getLogger("module-record-compiler");
 
@@ -633,12 +632,13 @@ export function compileSourcesToRecords(
       exportNames = cached.exports;
       compiled = cached.compiled;
     } else {
+      const { ts: tsc } = compilerStack();
       exportNames = resolveFullExports(source.name);
-      compiled = ts.transpileModule(source.contents, {
+      compiled = tsc.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
-          module: ts.ModuleKind.CommonJS,
-          target: TARGET,
+          module: tsc.ModuleKind.CommonJS,
+          target: tsc.ScriptTarget.ES2023,
           esModuleInterop: true,
         },
       }).outputText;
@@ -1000,24 +1000,29 @@ export function buildRecordsFromCompiled(
 export function extractCompiledExports(
   compiled: string,
 ): { names: readonly string[]; starTargetSpecs: readonly string[] } {
-  const sourceFile = ts.createSourceFile(
+  // Deferred compiler stack (parses): reached only on compile flows and the
+  // legacy-doc fallback, both of which await ensureCompilerStack() first
+  // (compile entries in the engine; evaluateCachedModules for fields-less
+  // docs). The persisted-surface boot path never gets here.
+  const { ts: tsc } = compilerStack();
+  const sourceFile = tsc.createSourceFile(
     "compiled.js",
     compiled,
-    TARGET,
+    tsc.ScriptTarget.ES2023,
     true,
-    ts.ScriptKind.JS,
+    tsc.ScriptKind.JS,
   );
   const names = new Set<string>();
   const starTargetSpecs = new Set<string>();
 
   const isExportsRef = (node: ts.Expression): boolean =>
-    ts.isIdentifier(node) && node.text === "exports";
+    tsc.isIdentifier(node) && node.text === "exports";
 
   const requireArg = (node: ts.Expression): string | undefined => {
     if (
-      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      tsc.isCallExpression(node) && tsc.isIdentifier(node.expression) &&
       node.expression.text === "require" && node.arguments.length === 1 &&
-      ts.isStringLiteralLike(node.arguments[0])
+      tsc.isStringLiteralLike(node.arguments[0])
     ) {
       return (node.arguments[0] as ts.StringLiteralLike).text;
     }
@@ -1027,26 +1032,26 @@ export function extractCompiledExports(
   function visit(node: ts.Node): void {
     // exports.<name> = …
     if (
-      ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isPropertyAccessExpression(node.left) &&
+      tsc.isBinaryExpression(node) &&
+      node.operatorToken.kind === tsc.SyntaxKind.EqualsToken &&
+      tsc.isPropertyAccessExpression(node.left) &&
       isExportsRef(node.left.expression)
     ) {
       const name = node.left.name.text;
       if (name !== "__esModule") names.add(name);
     }
-    if (ts.isCallExpression(node)) {
+    if (tsc.isCallExpression(node)) {
       const callee = node.expression;
-      const calleeName = ts.isIdentifier(callee)
+      const calleeName = tsc.isIdentifier(callee)
         ? callee.text
-        : ts.isPropertyAccessExpression(callee)
+        : tsc.isPropertyAccessExpression(callee)
         ? callee.name.text
         : undefined;
       // Object.defineProperty(exports, "<name>", …) — named re-export / getter.
       if (
         calleeName === "defineProperty" && node.arguments.length >= 2 &&
         isExportsRef(node.arguments[0]) &&
-        ts.isStringLiteralLike(node.arguments[1])
+        tsc.isStringLiteralLike(node.arguments[1])
       ) {
         const name = (node.arguments[1] as ts.StringLiteralLike).text;
         if (name !== "__esModule") names.add(name);
@@ -1057,7 +1062,7 @@ export function extractCompiledExports(
         if (spec !== undefined) starTargetSpecs.add(spec);
       }
     }
-    ts.forEachChild(node, visit);
+    tsc.forEachChild(node, visit);
   }
   visit(sourceFile);
   return { names: [...names], starTargetSpecs: [...starTargetSpecs] };
@@ -1074,25 +1079,26 @@ export function extractCompiledExports(
  * for a real dependency edge.
  */
 function extractRuntimeImports(compiled: string): readonly string[] {
-  const sourceFile = ts.createSourceFile(
+  const { ts: tsc } = compilerStack();
+  const sourceFile = tsc.createSourceFile(
     "compiled.js",
     compiled,
-    TARGET,
+    tsc.ScriptTarget.ES2023,
     true,
-    ts.ScriptKind.JS,
+    tsc.ScriptKind.JS,
   );
   const out = new Set<string>();
   function visit(node: ts.Node): void {
     if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
+      tsc.isCallExpression(node) &&
+      tsc.isIdentifier(node.expression) &&
       node.expression.text === "require" &&
       node.arguments.length === 1 &&
-      ts.isStringLiteralLike(node.arguments[0])
+      tsc.isStringLiteralLike(node.arguments[0])
     ) {
       out.add((node.arguments[0] as ts.StringLiteralLike).text);
     }
-    ts.forEachChild(node, visit);
+    tsc.forEachChild(node, visit);
   }
   visit(sourceFile);
   return [...out];
@@ -1100,13 +1106,14 @@ function extractRuntimeImports(compiled: string): readonly string[] {
 
 /** Collect bound identifier names from a (possibly destructuring) binding. */
 function collectBindingNames(name: ts.BindingName, out: Set<string>): void {
-  if (ts.isIdentifier(name)) {
+  const { ts: tsc } = compilerStack();
+  if (tsc.isIdentifier(name)) {
     out.add(name.text);
     return;
   }
   // Object/array binding patterns: `export const { a, b } = …` / `[x] = …`.
   for (const element of name.elements) {
-    if (ts.isBindingElement(element)) {
+    if (tsc.isBindingElement(element)) {
       collectBindingNames(element.name, out);
     }
   }
@@ -1124,28 +1131,29 @@ interface ModuleExports {
 }
 
 function collectModuleExports(source: Source): ModuleExports {
-  const sourceFile = ts.createSourceFile(
+  const { ts: tsc } = compilerStack();
+  const sourceFile = tsc.createSourceFile(
     source.name,
     source.contents,
-    TARGET,
+    tsc.ScriptTarget.ES2023,
     true,
   );
   const names = new Set<string>();
   const starTargets: string[] = [];
 
   for (const statement of sourceFile.statements) {
-    const isExported = ts.canHaveModifiers(statement) &&
-      ts.getModifiers(statement)?.some((m) =>
-        m.kind === ts.SyntaxKind.ExportKeyword
+    const isExported = tsc.canHaveModifiers(statement) &&
+      tsc.getModifiers(statement)?.some((m) =>
+        m.kind === tsc.SyntaxKind.ExportKeyword
       );
-    const isDefault = ts.canHaveModifiers(statement) &&
-      ts.getModifiers(statement)?.some((m) =>
-        m.kind === ts.SyntaxKind.DefaultKeyword
+    const isDefault = tsc.canHaveModifiers(statement) &&
+      tsc.getModifiers(statement)?.some((m) =>
+        m.kind === tsc.SyntaxKind.DefaultKeyword
       );
 
     if (
-      (ts.isFunctionDeclaration(statement) ||
-        ts.isClassDeclaration(statement)) && isExported
+      (tsc.isFunctionDeclaration(statement) ||
+        tsc.isClassDeclaration(statement)) && isExported
     ) {
       if (isDefault) {
         names.add("default");
@@ -1153,42 +1161,42 @@ function collectModuleExports(source: Source): ModuleExports {
         names.add(statement.name.text);
       }
     } else if (
-      (ts.isEnumDeclaration(statement) ||
-        ts.isModuleDeclaration(statement)) && isExported
+      (tsc.isEnumDeclaration(statement) ||
+        tsc.isModuleDeclaration(statement)) && isExported
     ) {
-      if (statement.name && ts.isIdentifier(statement.name)) {
+      if (statement.name && tsc.isIdentifier(statement.name)) {
         names.add(statement.name.text);
       }
-    } else if (ts.isVariableStatement(statement) && isExported) {
+    } else if (tsc.isVariableStatement(statement) && isExported) {
       for (const decl of statement.declarationList.declarations) {
         collectBindingNames(decl.name, names);
       }
-    } else if (ts.isExportAssignment(statement)) {
+    } else if (tsc.isExportAssignment(statement)) {
       if (statement.isExportEquals) {
         throw new Error(
           `${source.name}: 'export =' is not supported by the ESM module-record adapter (authored sources must be ES modules)`,
         );
       }
       names.add("default"); // `export default <expr>`
-    } else if (ts.isExportDeclaration(statement)) {
+    } else if (tsc.isExportDeclaration(statement)) {
       // `export type ...` re-exports are compile-time only; ignore them.
       if (statement.isTypeOnly) {
         continue;
       }
       const clause = statement.exportClause;
-      if (clause && ts.isNamedExports(clause)) {
+      if (clause && tsc.isNamedExports(clause)) {
         // `export { a, b }` or `export { a } from "./m"`; skip `export { type T }`.
         for (const element of clause.elements) {
           if (!element.isTypeOnly) {
             names.add(element.name.text);
           }
         }
-      } else if (clause && ts.isNamespaceExport(clause)) {
+      } else if (clause && tsc.isNamespaceExport(clause)) {
         // `export * as ns from "./m"`.
         names.add(clause.name.text);
       } else if (
         statement.moduleSpecifier &&
-        ts.isStringLiteral(statement.moduleSpecifier)
+        tsc.isStringLiteral(statement.moduleSpecifier)
       ) {
         // Bare `export * from "./m"`: record the target so its export names can
         // be unioned in (resolved transitively by the caller).

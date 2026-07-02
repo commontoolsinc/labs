@@ -12,6 +12,12 @@ import {
   runtimeModuleRecords,
 } from "../src/sandbox/esm-module-loader.ts";
 
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync parse internals directly (below the async flow
+// boundaries that normally load the deferred compiler stack), so load it here.
+await ensureCompilerStack();
+
 class MapRecordCache implements ModuleRecordCache {
   store = new Map<string, CompiledModuleArtifact>();
   hits = 0;

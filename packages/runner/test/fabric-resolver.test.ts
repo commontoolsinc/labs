@@ -23,6 +23,12 @@ import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
 
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync parse internals directly (below the async flow
+// boundaries that normally load the deferred compiler stack), so load it here.
+await ensureCompilerStack();
+
 const signer = await Identity.fromPassphrase("fabric resolver test");
 const space = signer.did();
 const otherSpace = "did:key:z6MkFabricResolverOtherSpace";

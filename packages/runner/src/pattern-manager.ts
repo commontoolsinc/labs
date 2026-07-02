@@ -1,9 +1,6 @@
-import ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  collectImportSpecifiers,
-  type Source,
-} from "@commonfabric/js-compiler";
+import type { Source } from "@commonfabric/js-compiler";
+import { compilerStack } from "./harness/deferred-compiler-stack.ts";
 import { Module, Pattern } from "./builder/types.ts";
 import {
   brandTrustedPattern,
@@ -55,7 +52,6 @@ const logger = getLogger("pattern-manager");
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
-const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
 function throwableStorageError(error: CommitError): Error {
   if (error instanceof Error) return error;
@@ -76,13 +72,16 @@ function throwableStorageError(error: CommitError): Error {
 function fabricImportRefsFromSource(
   doc: SourceDoc,
 ): CacheableModule["imports"] {
+  // Deferred compiler stack (parses): source docs only reach this via
+  // loadVerifiedSourceClosure, which awaits ensureCompilerStack().
+  const { collectImportSpecifiers, ts } = compilerStack();
   const source: Source = { name: doc.filename, contents: doc.code };
   const refs: CacheableModule["imports"] = [];
   const seen = new Set<string>();
   for (
     const specifier of collectImportSpecifiers(
       source,
-      FABRIC_IMPORT_SCAN_TARGET,
+      ts.ScriptTarget.ES2023,
     )
   ) {
     if (!isFabricImportSpecifier(specifier)) continue;

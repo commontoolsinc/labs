@@ -7,7 +7,7 @@ import {
 } from "@commonfabric/api";
 import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
-import { HttpProgramResolver } from "@commonfabric/js-compiler";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { type Cell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
