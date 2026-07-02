@@ -53,6 +53,7 @@ export const EXPERIMENTAL = {
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the
   // boot floor's largest single cost). The define overrides either way.
-  eagerSourceAnnotation: flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
-    (ENVIRONMENT === "development"),
+  eagerSourceAnnotation:
+    flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
+      (ENVIRONMENT === "development"),
 };

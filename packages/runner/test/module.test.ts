@@ -16,8 +16,8 @@ import {
 import {
   action,
   handler,
-  lift,
   isEagerSourceAnnotationEnabled,
+  lift,
   parseStackFrame,
   resolveSourceLocationFromStack,
   setEagerSourceAnnotation,
