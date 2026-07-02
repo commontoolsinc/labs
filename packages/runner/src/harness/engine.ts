@@ -1266,22 +1266,6 @@ export class Engine extends EventTarget implements Harness {
         : this.canonicalSourceByPrefixed.get(`/${source}`));
   }
 
-  // Translate a source-location string into a stable content-addressed
-  // implementation identity. See the Harness interface for the contract.
-  implementationHashForSource(sourceLocation: string): string | undefined {
-    const match = sourceLocation.match(/^(.*):(\d+):(\d+)$/);
-    const sourcePath = match ? match[1] : sourceLocation;
-    const suffix = match ? `:${match[2]}:${match[3]}` : "";
-    // `fn.src` is already canonical (`cf:module/<hash>/<path>`); reduce it to the
-    // pure per-module code identity `cf:module/<hash>` for the fingerprint.
-    const canonical = sourcePath.match(/^cf:module\/([^/]+)/);
-    if (canonical) {
-      return `cf:module/${canonical[1]}${suffix}`;
-    }
-    const hash = this.moduleHashByPrefixedSource.get(sourcePath);
-    return hash === undefined ? undefined : `cf:module/${hash}${suffix}`;
-  }
-
   // Map a single position to its original source location.
   // Returns null if no source map is loaded for the filename.
   mapPosition(
