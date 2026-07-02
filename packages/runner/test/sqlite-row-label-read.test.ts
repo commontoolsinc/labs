@@ -295,6 +295,64 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     assertEquals(res.labels, [{ confidentiality: [reader] }]);
   });
 
+  it("an aggregate with SEVERAL common readers is labeled by their OR-clause (Epic E2)", () => {
+    // A single OR-clause with two static unconditional readers (owner AND a
+    // public constant) → both are common, so the aggregate row carries an
+    // any(owner, public) clause and fits a ceiling naming either.
+    const twoReaders = {
+      emails: table(
+        { id: "integer", from: "text", body: "text" },
+        (f) => ({
+          confidentiality: any(
+            dbOwner(),
+            constant("did:key:public"),
+            principal("mailto", match(f.from, ADDR)),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: twoReaders,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 4 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [
+      { confidentiality: [{ anyOf: [OWNER, "did:key:public"] }] },
+    ]);
+    // Fits a ceiling naming the public reader alone (subsumption).
+    const kept = expectOk(computeRowLabelRead({
+      tables: twoReaders,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 4 }],
+      owner: OWNER,
+      ceiling: ["did:key:public"],
+    }));
+    assertEquals(kept.keep, [true]);
+  });
+
+  it("two confidentiality-bearing tables with DISJOINT readers refuse the aggregate (Epic E2)", () => {
+    // Each table has a single static reader, but different ones — no principal
+    // reads every row of both, so the aggregate (which could range over either)
+    // has no guaranteed reader and must refuse (the acc.size===0 path, distinct
+    // from a single rule with no reader at all).
+    const disjoint = {
+      a: table({ id: "integer", x: "text" }, () => ({
+        confidentiality: constant("did:key:reader-a"),
+      })),
+      b: table({ id: "integer", y: "text" }, () => ({
+        confidentiality: constant("did:key:reader-b"),
+      })),
+    };
+    const res = computeRowLabelRead({
+      tables: disjoint,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+    });
+    expectError(res, "aggregate");
+  });
+
   it("a well-formed anyOf wire spec is accepted; a malformed one refuses (Epic E1)", () => {
     // A well-formed OR-clause validates and produces per-row labels...
     const okTables = JSON.parse(JSON.stringify(emailTables)) as Record<

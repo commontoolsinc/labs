@@ -19,6 +19,7 @@ import {
   principal,
   type RowLabelSpec,
   ruleCommonAlternatives,
+  ruleConstrainsConfidentiality,
   validateRowLabelSpec,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
@@ -253,6 +254,69 @@ Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)"
     ),
   })).rowLabel as RowLabelSpec;
   assertEquals(ruleCommonAlternatives(nestedRule, { dbOwner: OWNER }), [OWNER]);
+
+  // An integrity-only rule has no confidentiality clause → no common
+  // alternative to compute (the aggregate is public, decided by the caller).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(integrityOnly, { dbOwner: OWNER }), []);
+
+  // Two conjuncts each with a DIFFERENT static reader → the running
+  // intersection empties, so there is no reader of every row.
+  const disjointConjuncts = table(EMAIL_COLUMNS, () => ({
+    confidentiality: all(constant("did:key:A"), constant("did:key:B")),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(disjointConjuncts, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a degenerate empty conjunction (rejected at table() time, but
+  // reachable via a hand-built wire spec) yields no common alternative.
+  const emptyConjunction = {
+    version: 1,
+    confidentiality: { allOf: [] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(emptyConjunction, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a non-record conjunct (malformed wire spec) contributes no
+  // static reader rather than throwing — fail closed to no common alternative.
+  const malformedConjunct = {
+    version: 1,
+    confidentiality: { allOf: ["not-a-node"] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(malformedConjunct, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("ruleConstrainsConfidentiality: confidentiality present vs integrity-only (Epic E2)", () => {
+  // An integrity-only rule imposes NO confidentiality constraint — an aggregate
+  // over it is public, not a refusal. Distinguished from a rule that DOES
+  // constrain (any nesting of at least one clause).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(integrityOnly), false);
+
+  const withConf = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(withConf), true);
+
+  // Nested all(all(...)) still counts as constraining.
+  const nested = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(principal("mailto", match(f.from, ADDR))),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(nested), true);
 });
 
 Deno.test("a rule referencing an unknown column throws", () => {
