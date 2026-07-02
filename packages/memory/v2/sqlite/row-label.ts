@@ -797,6 +797,20 @@ function staticUnconditionalAlternatives(
   return [];
 }
 
+// Flatten a confidentiality expression into its conjunctive clauses, descending
+// through nested `all(...)` (allOf) levels: `all(all(A, B), C)` is the three
+// conjuncts A, B, C. Both consumers below reason per-conjunct, so a nested
+// conjunction must not hide a clause — a one-level flatten would treat
+// `all(A, B)` as one opaque term with no static reader and refuse an aggregate
+// that is in fact satisfiable. Leaves (anyOf/principal/when/dbOwner/constant)
+// pass through unchanged; an `any(...)` never wraps an `allOf` (E1 rejects that
+// at authoring), so only allOf nesting needs flattening.
+function flattenConfConjuncts(conf: unknown): unknown[] {
+  return isRecord(conf) && Array.isArray(conf.allOf)
+    ? conf.allOf.flatMap(flattenConfConjuncts)
+    : [conf];
+}
+
 /**
  * The atoms that are a reader of EVERY row this rule could label — the
  * "common-alternative" set (CFC spec §8.17.4, Epic E2). An atom is common iff
@@ -813,9 +827,7 @@ export function ruleCommonAlternatives(
 ): unknown[] {
   const conf = isRecord(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return [];
-  const conjuncts = isRecord(conf) && Array.isArray(conf.allOf)
-    ? conf.allOf
-    : [conf];
+  const conjuncts = flattenConfConjuncts(conf);
   if (conjuncts.length === 0) return [];
   let common: Map<string, unknown> | undefined;
   for (const c of conjuncts) {
@@ -846,10 +858,7 @@ export function ruleCommonAlternatives(
 export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
   const conf = isRecord(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return false;
-  const conjuncts = isRecord(conf) && Array.isArray(conf.allOf)
-    ? conf.allOf
-    : [conf];
-  return conjuncts.length > 0;
+  return flattenConfConjuncts(conf).length > 0;
 }
 
 /** The rule attached to a (possibly wire-supplied) table schema, or undefined.

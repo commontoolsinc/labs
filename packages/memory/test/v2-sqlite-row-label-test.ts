@@ -238,6 +238,21 @@ Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)"
   assertEquals(ruleCommonAlternatives(constRule, { dbOwner: OWNER }), [
     "did:key:public",
   ]);
+
+  // A NESTED all(...) must not hide a clause: all(all(anyA, anyB), anyC) has
+  // dbOwner() in every leaf clause, so the owner is still common. A one-level
+  // flatten would treat the inner all(...) as an opaque term with no static
+  // reader and wrongly return [] (a false aggregate refusal).
+  const nestedRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(
+        any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+        any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+      ),
+      any(dbOwner(), constant("did:key:public")),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(nestedRule, { dbOwner: OWNER }), [OWNER]);
 });
 
 Deno.test("a rule referencing an unknown column throws", () => {
