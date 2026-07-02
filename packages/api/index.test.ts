@@ -1,7 +1,6 @@
 import { expect } from "@std/expect";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
-  type FabricBytes,
   type FetchBinaryResult,
 } from "@commonfabric/api";
 
@@ -18,11 +17,13 @@ Deno.test("api module loads and re-exports the CFC canonical alias names", () =>
 });
 
 Deno.test("FetchBinaryResult describes bytes plus a media type", () => {
-  // Type-level pin for the fetchBinary result shape: a FabricBytes buffer and a
-  // media-type string. Constructed structurally so the assertion runs without a
-  // real FabricBytes instance (the constructor lives in the runtime, not here).
-  const sample: FetchBinaryResult = {
-    bytes: { length: 3 } as unknown as FabricBytes,
+  type FetchBinaryResultSample = {
+    bytes: Pick<FetchBinaryResult["bytes"], "length">;
+    mediaType: FetchBinaryResult["mediaType"];
+  };
+
+  const sample: FetchBinaryResultSample = {
+    bytes: { length: 3 },
     mediaType: "image/png",
   };
   expect(sample.mediaType).toBe("image/png");

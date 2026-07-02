@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/api/index.test.ts": [
-    "25:25:56x9ks",
-  ],
   "packages/background-piece-service/cast-admin.ts": [
     "147:41:1lr2mil",
   ],
