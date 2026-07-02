@@ -43,6 +43,7 @@ import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
   CfcTxState,
+  CfcWriteFloorMode,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -844,6 +845,8 @@ export interface IExtendedStorageTransaction
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /** Set the write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18). */
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation

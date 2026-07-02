@@ -63,9 +63,11 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcTxState,
+  type CfcWriteFloorMode,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
@@ -119,6 +121,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
+    writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     triggerReads: [],
@@ -137,6 +140,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // off — same shape as the enforcement floor (audit S3): code holding a
   // Cell must not disable propagation mid-transaction to launder a value.
   private cfcFlowLabelsPinned = false;
+  private cfcWriteFloorPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -203,6 +207,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
       this.cfcFlowLabelsPinned = true;
+    }
+  }
+
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
+    // Anti-downgrade pin (mirrors flow labels): once `enforce` is set — by the
+    // runtime at tx creation — pattern/handler code that reaches the tx cannot
+    // weaken it to `observe`/`off` to slip an SC-18 floor violation through
+    // (cubic review). Strengthening to `enforce` is always allowed.
+    if (this.cfcWriteFloorPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
+          `is pinned at "enforce"`,
+      );
+    }
+    this.cfcState.writeFloorMode = mode;
+    if (mode === "enforce") {
+      this.cfcWriteFloorPinned = true;
     }
   }
 
@@ -1166,6 +1187,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void {
     this.wrapped.setCfcFlowLabelsMode(mode);
+  }
+
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
+    this.wrapped.setCfcWriteFloorMode(mode);
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {

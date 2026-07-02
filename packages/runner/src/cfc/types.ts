@@ -330,10 +330,25 @@ export type CfcFlowLabelsMode = "off" | "observe" | "persist";
 
 export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
 
+/**
+ * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3),
+ * orthogonal to the enforcement ladder and the flow dial: `off` = no check;
+ * `observe` = evaluate the floor and emit diagnostics, never reject;
+ * `enforce` = a floor miss records a prepare reason (which rejects the commit
+ * under the enforcing enforcement modes, and is logged otherwise). The floor
+ * tests the WRITTEN VALUE's integrity — schema mints, carried link-view
+ * integrity, the flow hereditary meet — never the consumed-read set (that is
+ * the read-side gate in `verifyInputRequirements`).
+ */
+export type CfcWriteFloorMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
   flowLabelsMode: CfcFlowLabelsMode;
+  writeFloorMode: CfcWriteFloorMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger

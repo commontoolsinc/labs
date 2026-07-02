@@ -118,6 +118,23 @@ export const cfcObservationFitsCeiling = (
 };
 
 /**
+ * Integrity-floor membership (§8.10.3 / §8.12.4.1): every required atom must
+ * be structurally present in the carried integrity. Exact-match today — this
+ * is THE single shared predicate for the read-side gate
+ * (`verifyInputRequirements`), the write-side floor (`verifyWriteFloor`, Epic
+ * D3), and the tool-input floor (llm-dialog, Epic D2), so D5's upgrade to
+ * pattern/concept matching (`matchAtomPattern` + `conceptSatisfied`) lands in
+ * ONE place instead of diverging across three inlined copies.
+ */
+export const cfcIntegritySatisfiesFloor = (
+  integrity: readonly unknown[],
+  requiredIntegrity: readonly unknown[],
+): boolean =>
+  requiredIntegrity.every((required) =>
+    integrity.some((actual) => deepEqual(actual, required))
+  );
+
+/**
  * The confidentiality CLAUSES in `confidentiality` that fall OUTSIDE `ceiling`
  * (the complement that makes `cfcObservationFitsCeiling` false). Fit is CNF
  * clause subsumption (spec §8.10.3, Epic A2): a label clause `l` is admitted

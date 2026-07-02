@@ -42,7 +42,11 @@ import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
-import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
+import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloor,
+  uniqueCfcAtoms,
+} from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -2532,10 +2536,9 @@ const verifyInputRequirements = (
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
       const ok = gatedReads.every((read) =>
-        requiredIntegrity.every((required) =>
-          (read.label?.integrity ?? []).some((actual) =>
-            deepEqual(actual, required)
-          )
+        cfcIntegritySatisfiesFloor(
+          read.label?.integrity ?? [],
+          requiredIntegrity,
         )
       );
       if (!ok) {
@@ -3154,6 +3157,235 @@ const verifySinkRequestCeilings = (
   return reasons;
 };
 
+// Applied write paths at/under `path` on this target, from the storage-level
+// write details. Used by the write floor to detect plain-data descendant
+// writes that link contributions do not cover. Deliberately NOT the
+// reactivity log (`ifcEntryAppliesToAttemptedWrite`'s second source): an
+// attempted-but-unapplied write lands no value — the floor's per-path value
+// probe excludes it anyway — and the structural skip decision still falls
+// back to `ifcEntryAppliesToAttemptedWrite`, which consults the log.
+const attemptedWritePathsUnder = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): (readonly string[])[] => {
+  const out: (readonly string[])[] = [];
+  for (const write of tx.getWriteDetails?.(target.space) ?? []) {
+    if (
+      write.address.id !== target.id ||
+      normalizeCellScope(write.address.scope) !== target.scope ||
+      write.address.path[0] !== "value"
+    ) {
+      continue;
+    }
+    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+    if (concretePathHasPrefix(writePath, path)) out.push(writePath);
+  }
+  return out;
+};
+
+/**
+ * Epic D3 — the write-side `requiredIntegrity` FLOOR (§8.12.4.1 / SC-18),
+ * dual of the read-side gate in `verifyInputRequirements`: where that gate
+ * quantifies over the transaction's consumed reads, the floor tests the
+ * WRITTEN VALUE's integrity at each floor-declaring path. Per SC-18 the floor
+ * is a minimum (above-floor writes pass); an overwrite is checked against the
+ * declared floor only — never the prior value's integrity, no meet across
+ * successive writes; a value with no (or only forged-then-stripped) integrity
+ * on a floor-declaring path fails.
+ *
+ * What credits the value (mirrors what this commit persists at the path):
+ * - the schema-derived label — `addIntegrity` mints and `exactCopyOf` carry,
+ *   evidence-gated by the write's authoring identity (a pattern cannot forge
+ *   runtime-minted evidence to pass its own floor);
+ * - each link written at/under the path — the linked source's own label, the
+ *   D2 by-reference contract on the write side. Every link must individually
+ *   satisfy the floor (one endorsed sibling never launders another);
+ * - the flow hereditary meet, when flow labels are on (`value` contributions
+ *   carry the per-tx derived integrity).
+ *
+ * Scope (v1, exact-match membership — D5 upgrades to pattern/concept):
+ * wildcard (`*`) floor entries stay read-gate-only; unlike `writeAuthorizedBy`
+ * there is NO pattern-setup escape — the floor is a value requirement, so a
+ * setup that writes a floored path must itself mint the required integrity
+ * (`addIntegrity`), fail-closed; a pure delete (no written value) is not a
+ * floored write — the floor governs values, not absence.
+ */
+const verifyWriteFloor = (
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  ctx: {
+    identityForPath: (
+      path: readonly string[],
+    ) => ImplementationIdentity | undefined;
+    identityForInput: (
+      input: WritePolicyInput,
+    ) => ImplementationIdentity | undefined;
+    linkWriteInputs: readonly LinkWritePolicyInput[];
+    candidateSchemas: ReadonlyMap<string, JSONSchema>;
+    flowIntegrity: readonly unknown[];
+  },
+): string[] => {
+  const failures: string[] = [];
+  const entries = walkIfcSchema(schema);
+  const entryLabels = new Map<string, IFCLabel>(
+    entries.map((entry) => [pathKey(entry.path), entry.label]),
+  );
+  for (const entry of entries) {
+    const ifc = isRecord(entry.schema) ? entry.schema.ifc : undefined;
+    const floor = Array.isArray(ifc?.requiredIntegrity)
+      ? ifc.requiredIntegrity
+      : [];
+    if (floor.length === 0) continue;
+    if (entry.path.includes("*")) continue;
+    // Floor applicability is STRUCTURAL — did anything land at/under the floor
+    // path, or does a link cover it? It must never hinge solely on the
+    // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
+    // matcher can return false for values that genuinely landed (e.g. a nested
+    // link sigil at a typed slot) and would silently skip the floor — letting
+    // unendorsed data through (review). The value-conditioned check remains
+    // only as a widening fallback for ancestor-write shapes the structural
+    // sources miss; over-applying a floor to a non-matching union arm
+    // over-rejects (fail-closed), never leaks.
+    const linksHere = ctx.linkWriteInputs.filter((input) =>
+      concretePathHasPrefix(
+        canonicalizeLogicalPath(input.target.path),
+        entry.path,
+      )
+    );
+    // A link written at a strict ANCESTOR swaps the whole container: the value
+    // now living at the floor path is the linked source's value at the
+    // corresponding nested path (for a fresh doc it reconstructs as
+    // `undefined`, so this must not depend on the value matcher either).
+    const ancestorLinks = ctx.linkWriteInputs.filter((input) => {
+      const linkPath = canonicalizeLogicalPath(input.target.path);
+      return linkPath.length < entry.path.length &&
+        concretePathHasPrefix(entry.path, linkPath);
+    });
+    const writesUnder = attemptedWritePathsUnder(tx, target, entry.path);
+    if (
+      linksHere.length === 0 && ancestorLinks.length === 0 &&
+      writesUnder.length === 0 &&
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
+    ) {
+      continue;
+    }
+
+    // The label this commit persists at the path: schema integrity +
+    // `addIntegrity` mints + `exactCopyOf` carry, evidence-gated so a pattern
+    // author cannot forge runtime-minted atoms to satisfy their own floor.
+    const base = gateRuntimeMintedIntegrity(
+      derivePersistedLabel(tx, entry.schema, entry.label, entryLabels),
+      ctx.identityForPath(entry.path),
+    ).integrity ?? [];
+
+    // One contribution per link written at/under the floor path (each linked
+    // value must individually carry the floor), plus one `value` contribution
+    // when plain data was written (crediting the flow meet when available).
+    const contributions: (readonly unknown[])[] = [];
+    for (const input of linksHere) {
+      const derived = derivePersistedLinkLabel(
+        tx,
+        input,
+        ctx.candidateSchemas,
+        ctx.identityForInput(input),
+      );
+      // An underivable link (`reason` set, `label` undefined) contributes empty
+      // integrity — it fails the floor, fail-closed, alongside the persist
+      // loop's own missing-source reason (both reject).
+      contributions.push(derived.label?.integrity ?? []);
+    }
+    for (const input of ancestorLinks) {
+      // Re-point the derivation at the floor path INSIDE the linked source:
+      // the value at the floor path is source.path + (floor − linkPath), so
+      // the credit is the source's own label at that nested path (an endorsed
+      // nested value passes; an unendorsed one fails, fail-closed).
+      const linkPath = canonicalizeLogicalPath(input.target.path);
+      const relative = entry.path.slice(linkPath.length);
+      const derived = derivePersistedLinkLabel(
+        tx,
+        {
+          ...input,
+          source: {
+            ...input.source,
+            path: [
+              ...canonicalizeLogicalPath(input.source.path),
+              ...relative,
+            ],
+          },
+          target: { ...input.target, path: entry.path },
+        },
+        ctx.candidateSchemas,
+        ctx.identityForInput(input),
+      );
+      contributions.push(derived.label?.integrity ?? []);
+    }
+    const written = writeValueForTarget(tx, { ...target, path: entry.path });
+    // A value contribution exists when plain data lands at/under the floor
+    // path, judged three ways (any one suffices, fail-closed):
+    // - the reconstructed value at the path is not pure link structure
+    //   (plain/mixed data written at or above the path);
+    // - some attempted write at/under the path carries a value and is not
+    //   covered by a link input — the descendant-only mixed case (one child a
+    //   link, a sibling plain data) where the parent may reconstruct as
+    //   pure-link or undefined and would otherwise be judged by the link
+    //   contributions alone (review). The per-path value probe keeps DELETE
+    //   details (no value) out;
+    // - nothing else contributed at all (a value-shaped write with no link
+    //   inputs — e.g. a raw sigil smuggled without link policy inputs), so the
+    //   floor is still evaluated, fail-closed.
+    const descendantValueWrite = writesUnder.some((writePath) =>
+      !linksHere.some((input) =>
+        concretePathHasPrefix(
+          writePath,
+          canonicalizeLogicalPath(input.target.path),
+        )
+      ) &&
+      writeValueForTarget(tx, { ...target, path: writePath }) !== undefined
+    );
+    // Nothing landed anywhere: a pure delete/clear — absence is not a floored
+    // value (the floor governs values written, not removals).
+    if (
+      written === undefined && !descendantValueWrite &&
+      contributions.length === 0
+    ) {
+      continue;
+    }
+    const valueWritten =
+      (written !== undefined && !isPureLinkStructure(written)) ||
+      descendantValueWrite ||
+      contributions.length === 0;
+    if (valueWritten) contributions.push(ctx.flowIntegrity);
+
+    const misses = contributions.some((extra) =>
+      !cfcIntegritySatisfiesFloor([...base, ...extra], floor)
+    );
+    if (misses) {
+      failures.push(
+        `write floor failed at /${
+          entry.path.join("/")
+        } (requiredIntegrity, §8.12.4.1)`,
+      );
+    }
+  }
+  return failures;
+};
+
 export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
@@ -3389,6 +3621,37 @@ export const prepareBoundaryCommit = (
       reasons.push(exactCopyFailure);
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
+    }
+
+    // Epic D3 (§8.12.4.1 / SC-18): the write-side requiredIntegrity floor —
+    // the WRITTEN VALUE's integrity must satisfy each floor-declaring entry.
+    // `observe` diagnoses; `enforce` records a reason (rejecting the commit
+    // under the enforcing enforcement modes, mirroring requirementFailure).
+    if (state.writeFloorMode !== "off") {
+      const floorFailures = verifyWriteFloor(tx, verificationSchema, target, {
+        identityForPath: (path) =>
+          identityForSchemaPath(writeAuthorIdentities.get(key), path),
+        identityForInput,
+        linkWriteInputs,
+        candidateSchemas: candidates,
+        // Only PERSISTED flow integrity may credit the floor: `observe` mode
+        // computes the join for diagnostics but stores nothing on the value, so
+        // crediting it would let a plain write pass a floor with integrity that
+        // never lands (codex/cubic review). Only `persist` writes the derived
+        // component.
+        flowIntegrity: flowPersist ? flowIntegrity : [],
+      });
+      if (floorFailures.length > 0) {
+        if (state.writeFloorMode === "enforce") {
+          reasons.push(...floorFailures);
+          if (!isIngestTarget) continue;
+          ingestVerificationFailed = true;
+        } else {
+          for (const failure of floorFailures) {
+            state.diagnostics.push(`write-floor(observe): ${failure}`);
+          }
+        }
+      }
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);
