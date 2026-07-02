@@ -39,7 +39,10 @@ import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
-import { canonicalizeLogicalPath } from "./canonical.ts";
+import {
+  canonicalizeCfcMetadata,
+  canonicalizeLogicalPath,
+} from "./canonical.ts";
 import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
@@ -4000,6 +4003,26 @@ export const prepareBoundaryCommit = (
         entries: coalescedLabelEntries,
       },
     };
+
+    // SC-11 idempotence: skip the envelope write when the derived metadata is
+    // canonically identical to what is already stored. Re-deriving an unchanged
+    // label must not rewrite the `["cfc"]` doc — that would bump the document
+    // revision and churn the sync/conflict machinery on every recompute. This
+    // is load-bearing once `cfcFlowLabels:"persist"` attaches a derived
+    // component to EVERY value write (H2): the common case is a rerun that
+    // reads the same inputs and derives the same labels, which must be a no-op.
+    // `canonicalizeCfcMetadata` sorts entries + canonicalizes clauses, so the
+    // comparison is order-insensitive and matches `cfcLabelViewsEqual`
+    // semantics.
+    if (
+      existing !== undefined &&
+      deepEqual(
+        canonicalizeCfcMetadata(existing),
+        canonicalizeCfcMetadata(metadata),
+      )
+    ) {
+      continue;
+    }
 
     tx.writeOrThrow({
       space,
