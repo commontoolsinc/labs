@@ -242,6 +242,27 @@ is a **requirement**, and tightening it is the restrictive (allowed)
 direction — the two must not be conflated. Write-side floor checking needs a
 home in §8.10 (today §8.10.3 is input/consume-side only).
 
+The **integrity-direction code home is now landed (Epic D3, `verifyWriteFloor`
+in `prepare.ts`)** behind the `cfcWriteFloor: off | observe | enforce` dial
+(default `off`, orthogonal to the enforcement and flow dials). It tests the
+**written value's** integrity — the schema-derived label (`addIntegrity` mints
++ `exactCopyOf` carry, evidence-gated by `gateRuntimeMintedIntegrity` so a
+pattern cannot forge runtime-minted atoms to pass its own floor), each link
+written at/under the path (the linked source's own label — the D2 by-reference
+contract on the write side, one contribution per link so no laundering across
+siblings), and the flow hereditary meet when flow labels persist — against the
+floor with **exact-match** membership via the single shared predicate
+`cfcIntegritySatisfiesFloor` (observation.ts), which the read-side gate and the
+D2 tool-input floor now also call so D5's pattern/concept upgrade lands in one
+place. SC-18's own semantics are honored: floor-is-a-minimum, overwrite checked
+against the declared floor only (no meet across successive writes, no prior-
+value consultation), and empty integrity on a floor-declaring path fails (a
+stamped-`LlmDerived`-only value fails any floor by construction — closing the
+write-side half of the vacuous pass). Wildcard (`*`) floor entries and
+pattern-setup/seed initialization stay exempt (v1 scope); (a) the standard-
+profile default, (b) `enforce-strict` making writer-fit itself reject, and (c)
+the §8.10 spec home remain open.
+
 **SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
 Verified open (the rule is stated as fact in §15.1 and §3.1.2, nowhere
 recorded as a revisit-trigger assumption). Record the assumption where the
