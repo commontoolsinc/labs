@@ -143,14 +143,21 @@ Integrity stays flat forever (no OR-integrity — spec §3.1.6; mixed integrity 
    decision-equivalent to today's atom intersection for flat *labels* but
    additionally admitting OR-labels the intersection wrongly rejects.
    Implementations may keep the flat-pair intersection fast path (equal-atom
-   pairs collapse to the atom) and may drop cross pairs to bound
-   `O(|C1|·|C2|)` ceiling growth — both are sound over-restrictions; the
+   pairs collapse to the atom — that *is* their union) and, if
+   `O(|C1|·|C2|)` ceiling growth ever bites, may drop cross pairs — a sound
+   over-restriction, but one that forfeits completeness (a pruned meet is
+   strictly tighter than the true meet: `[{anyOf:[A,B]}]` fits `[A]` and
+   `[B]` individually but not a meet whose cross pair was dropped). The
    intersection of alternative sets is never sound. Status: A2 (#4470)
    landed the conservative deepEqual-identical meet with the general meet
-   explicitly deferred (rationale documented at the site); the union meet +
-   the **both-direction** property test `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧
-   fits(L,C2)` must land before clause ceilings first reach this seam (B5
-   `BoundaryContext`/sink ceilings, H3b render ceiling).
+   explicitly deferred (rationale documented at the site); the union meet
+   must land before clause ceilings first reach this seam (B5
+   `BoundaryContext`/sink ceilings, H3b render ceiling), with the property
+   test matched to the implementation: the full pairwise-union meet gets the
+   **both-direction** test `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧ fits(L,C2)`;
+   a cross-pair-pruning variant only ever gets the soundness direction
+   (`⟹`), stated as such. Prefer the full meet — the biconditional is the
+   guard worth having.
 
 ### Stages
 
