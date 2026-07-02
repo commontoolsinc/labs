@@ -9,7 +9,8 @@ import type {
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
-import { cloneCfcLabelView } from "./label-view-core.ts";
+import { cloneCfcLabelView, type IFCLabel } from "./label-view-core.ts";
+import { isOrClause, normalizeClause } from "./clause.ts";
 
 /**
  * Returns a canonical-form logical path: any leading `"value"` element
@@ -175,6 +176,29 @@ export const canonicalizeWritePolicyInput = (
   }
 };
 
+/**
+ * Canonical form of a label for digest purposes. Clause-INTERIOR
+ * canonicalization only: each confidentiality entry that is an OR-clause gets
+ * its alternatives deduped/sorted (and singletons unwrapped) via
+ * `normalizeClause`, so two labels differing only in alternative insertion
+ * order digest identically. The top-level entry lists (clause list, integrity
+ * set) keep their given order — flat labels pass through byte-identical, and
+ * persisted forms are never reordered by canonicalization (SC-11 idempotence
+ * comparisons stay stable).
+ */
+export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
+  const confidentiality = label.confidentiality;
+  if (
+    !Array.isArray(confidentiality) || !confidentiality.some(isOrClause)
+  ) {
+    return label;
+  }
+  return {
+    ...label,
+    confidentiality: confidentiality.map(normalizeClause),
+  };
+};
+
 export const canonicalizeCfcMetadata = (
   metadata: CfcMetadata,
 ): CfcMetadata => ({
@@ -184,7 +208,7 @@ export const canonicalizeCfcMetadata = (
     version: 1,
     entries: [...metadata.labelMap.entries].map((entry) => ({
       path: canonicalizeLogicalPath(entry.path),
-      label: entry.label,
+      label: canonicalizeCfcLabel(entry.label),
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
     })).sort((left, right) => {
       const leftKey = logicalPathToPointer(left.path);
