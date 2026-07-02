@@ -46,6 +46,7 @@ const MINT_SCHEMA = {
 const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcWriteFloor?: CfcWriteFloorMode;
+  cfcFlowLabels?: "off" | "observe" | "persist";
 }) =>
   new Runtime({
     apiUrl: new URL("https://example.com"),
@@ -53,6 +54,9 @@ const makeRuntime = (opts: {
     cfcEnforcementMode: "enforce-explicit",
     ...(opts.cfcWriteFloor !== undefined
       ? { cfcWriteFloor: opts.cfcWriteFloor }
+      : {}),
+    ...(opts.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: opts.cfcFlowLabels }
       : {}),
   });
 
@@ -93,6 +97,37 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       const sink = runtime.getCell(
         signer.did(),
         "wf-bare-sink",
+        FLOOR_SCHEMA,
+        tx,
+      );
+      sink.set({ out: "unendorsed" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("flow-persist with an empty hereditary meet does not weaken the floor", async () => {
+    // Under cfcFlowLabels:"persist" the floor credits the flow meet — but an
+    // empty meet (the common case: some unlabeled read empties it) credits
+    // nothing, so an unendorsed write still rejects. Pins the flowPersist
+    // credit branch AND that flow mode cannot become an accidental bypass.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcWriteFloor: "enforce",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const tx = runtime.edit();
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-flow-sink",
         FLOOR_SCHEMA,
         tx,
       );
