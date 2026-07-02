@@ -32,3 +32,21 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
 - (2026-07-02) Campaign start. Branch = main(0cf48b278) + v2 spec
   (7c47ece87). Baseline root `deno task test` kicked off; builder recon in
   flight; W0 docs this entry.
+- (2026-07-02) Baseline pinned: root `deno task test` 210.5s, all green.
+  Builder recon: pattern identity is content-addressed from serialized bytes
+  → D-V2-ROG-SIDETABLE (WeakMap, never serialized); compiled patterns
+  execute builder calls at module load → builder front-end covers them.
+- (2026-07-02) W1 landed (`667ecf1bd`): rog.ts v2 + unit tests.
+- (2026-07-02) W2 landed (`b01b75554`): builder-born ROG at pattern()
+  finalization; str hoisted + native interpolate; tagged control; unknown
+  refs fail-closed to effect boundaries. Runner package suite **738/0**
+  with construction ALWAYS-ON (regression gate green).
+- (2026-07-02) W3a landed (`88d139fba`): evalRog v2 (v1 semantics ported;
+  indexed internals; ONE normalized control rule; recursive children).
+  End-to-end green over builder-born ROGs.
+- (2026-07-02) W3b landed (`b8ff8088e`): partition v2 (structural recursion,
+  principled external-internal inputs, pure-nested-pattern inline;
+  D-V2-F4-DEFER + D-V2-PURE-PATTERN-INLINE recorded). NEXT: the dispatch
+  seam (flag-on at instantiatePattern consuming BuiltRog + partition),
+  measurement harness port (doc#/node#/wall census), then root test +
+  integration both flags + the cfc-group-chat multi-user sim.
