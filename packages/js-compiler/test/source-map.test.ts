@@ -399,9 +399,10 @@ describe("composeBundleSourceMap", () => {
 
 describe("composeBundleSourceMap textual fast path (vs consumer/generator)", () => {
   /**
-   * The pre-fast-path implementation, verbatim: consumer → generator →
-   * JSON.parse. The public function must stay position-equivalent to this for
-   * every input shape (taking the fast path or falling back).
+   * The pre-#4455 implementation, verbatim, kept as the TEST-ONLY differential
+   * oracle (the production fallback was removed — no live users; guards fail
+   * loud instead). The public composer must stay position-equivalent to this
+   * for every well-formed input shape.
    */
   function legacyCompose(
     modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
@@ -623,7 +624,7 @@ export const tag = "util";
     expectEquivalent([{ body: "x", map }], "drop.js", 0, { minMappings: 2 });
   });
 
-  it("falls back on a source override over a multi-source map", () => {
+  it("collapses a multi-source map onto a source override like the oracle", () => {
     const g = new SourceMapGenerator({ file: "a.js" });
     g.addMapping({
       generated: { line: 1, column: 0 },
@@ -647,7 +648,7 @@ export const tag = "util";
     );
   });
 
-  it("falls back on non-empty sourceRoot and on unsorted mappings", () => {
+  it("fails loud on non-empty sourceRoot and on unsorted mappings", () => {
     const rooted: SourceMap = {
       version: "3",
       file: "a.js",
@@ -656,8 +657,9 @@ export const tag = "util";
       names: [],
       mappings: "AAAA",
     } as SourceMap;
-    expectEquivalent([{ body: "x", map: rooted }], "rooted.js");
-    // genCol 4 then genCol 2 on the same line — the generator re-sorts.
+    expect(() => composeBundleSourceMap([{ body: "x", map: rooted }], "r.js"))
+      .toThrow(/sourceRoot/);
+    // genCol 4 then genCol 2 on the same line.
     const unsorted: SourceMap = {
       version: "3",
       file: "a.js",
@@ -666,9 +668,8 @@ export const tag = "util";
       names: [],
       mappings: "IAAA,FAAC",
     } as SourceMap;
-    expectEquivalent([{ body: "x", map: unsorted }], "unsorted.js", 0, {
-      minMappings: 2,
-    });
+    expect(() => composeBundleSourceMap([{ body: "x", map: unsorted }], "u.js"))
+      .toThrow(/not sorted/);
   });
 
   it("takes the fast path on compiler-shaped inputs (observable via kept declared names)", () => {
@@ -730,11 +731,9 @@ export const tag = "util";
     expect(gets).toBeLessThan(24);
   });
 
-  it("matches legacy on hostile streams via the guard fallbacks", () => {
-    // Each shape trips a distinct transcoder guard (malformed VLQ, negative
-    // column, oversized segment, out-of-range index, module mapping past its
-    // body); the public function must still behave exactly like the legacy
-    // composer — same result or same throw.
+  it("fails loud on corrupt streams, per guard", () => {
+    // Each shape trips a distinct transcoder guard; with the legacy fallback
+    // removed these are hard, descriptive errors.
     const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
       ({
         version: "3",
@@ -770,21 +769,29 @@ export const tag = "util";
         expect(fast === undefined).toBe(legacy === undefined);
       }
     };
+    const boom = (
+      modules: ReadonlyArray<
+        { body: string; map?: SourceMap; source?: string }
+      >,
+      msg: RegExp,
+    ) =>
+      expect(() => composeBundleSourceMap(modules, "hostile.js")).toThrow(msg);
     // Malformed VLQ characters.
-    expectSameOutcome([{ body: "x", map: raw("!!invalid!!") }]);
+    boom([{ body: "x", map: raw("!!invalid!!") }], /malformed VLQ/);
     // Negative generated column (VLQ -1 = "D").
-    expectSameOutcome([{ body: "x", map: raw("DAAA") }]);
+    boom([{ body: "x", map: raw("DAAA") }], /negative generated column/);
     // Oversized segment (6 VLQ fields).
-    expectSameOutcome([{ body: "x", map: raw("AAAAAA") }]);
+    boom([{ body: "x", map: raw("AAAAAA") }], /more than 5 fields/);
     // Source index out of range (delta +1 with a single source).
-    expectSameOutcome([{ body: "x", map: raw("ACAA") }]);
+    boom([{ body: "x", map: raw("ACAA") }], /index out of range/);
     // First module's map claims more lines than its 1-line body occupies, so
     // the second module's offset falls behind the emitted line cursor.
-    expectSameOutcome([
+    boom([
       { body: "x", map: raw("AAAA;AACA;AACA") },
       { body: "y", map: raw("AAAA", ["b.ts"]) },
-    ]);
-    // Empty mappings alongside a real module (contributes nothing).
+    ], /extends past its body/);
+    // Empty mappings alongside a real module (contributes nothing) stays
+    // equivalent to the oracle.
     expectSameOutcome([
       { body: "x", map: raw("") },
       { body: "y", map: raw("AAAA", ["b.ts"]) },

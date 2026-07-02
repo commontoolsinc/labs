@@ -1,9 +1,5 @@
 import { SourceMap } from "./interface.ts";
-import {
-  MappedPosition,
-  SourceMapConsumer,
-  SourceMapGenerator,
-} from "source-map-js";
+import { MappedPosition, SourceMapConsumer } from "source-map-js";
 import { LRUCache } from "@commonfabric/utils/cache";
 
 export type { MappedPosition };
@@ -12,8 +8,19 @@ export type { MappedPosition };
 // VLQ-level composition (the fast path of `composeBundleSourceMap`)
 // ---------------------------------------------------------------------------
 
-/** Input shape the textual transcoder cannot prove position-equivalent for. */
-class FastPathUnsupported extends Error {}
+/**
+ * A mappings stream the transcoder cannot compose: malformed VLQs, unsorted
+ * segments, out-of-range indices, or shapes our compiler never emits (a
+ * non-empty `sourceRoot`). These indicate corrupt or foreign input, so they
+ * fail loud rather than degrade — the pre-#4455 consumer/generator
+ * implementation survives only as the differential oracle in the tests.
+ */
+export class SourceMapComposeError extends Error {
+  constructor(reason: string) {
+    super(`composeBundleSourceMap: ${reason}`);
+    this.name = "SourceMapComposeError";
+  }
+}
 
 const BASE64_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -32,7 +39,7 @@ function decodeVLQ(mappings: string, cursor: { i: number }): number {
   for (;;) {
     const code = mappings.charCodeAt(cursor.i++);
     const digit = code < 128 ? BASE64_VALUES[code] : -1;
-    if (digit === -1) throw new FastPathUnsupported("malformed VLQ");
+    if (digit === -1) throw new SourceMapComposeError("malformed VLQ");
     result += (digit & 0x1f) << shift;
     if ((digit & 0x20) === 0) break;
     shift += 5;
@@ -71,11 +78,9 @@ const atSegmentEnd = (mappings: string, i: number): boolean =>
  * valid), where the generator collects only first-use entries — lookups
  * resolve identically, the arrays may just carry unused entries. Mappings
  * without an original position (1-field segments) are dropped, matching the
- * legacy `m.source == null` filter. Throws {@link FastPathUnsupported} on
- * shapes whose equivalence would need the full decode: a `source` override
- * over a multi-source map (the legacy path collapses every mapping onto the
- * override), a non-empty `sourceRoot` (legacy resolves sources against it),
- * and unsorted or malformed streams (the generator re-sorts).
+ * legacy `m.source == null` filter. Corrupt or foreign shapes (malformed
+ * VLQs, unsorted streams, out-of-range indices, non-empty `sourceRoot`) throw
+ * {@link SourceMapComposeError} — fail loud, no silent degradation.
  */
 function composeBundleSourceMapTextual(
   modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
@@ -100,7 +105,9 @@ function composeBundleSourceMapTextual(
   for (const { body, map, source } of modules) {
     if (map) {
       if (typeof map.sourceRoot === "string" && map.sourceRoot !== "") {
-        throw new FastPathUnsupported("sourceRoot");
+        throw new SourceMapComposeError(
+          "non-empty sourceRoot (never emitted by our compiler)",
+        );
       }
       // Materialize every map field into plain locals ONCE. On the cached
       // boot path these maps are storage-backed proxies whose property reads
@@ -109,9 +116,9 @@ function composeBundleSourceMapTextual(
       // (measured: ~9ms → ~87ms per boot). One shallow copy per module keeps
       // the loop on plain data for proxies and plain maps alike.
       const mapSources = [...(map.sources ?? [])];
-      if (source !== undefined && mapSources.length > 1) {
-        throw new FastPathUnsupported("source override over multi-source map");
-      }
+      // A `source` override collapses every mapping onto the override entry
+      // (srcGlobal below always emits the override index), so multi-source
+      // inputs are fine; range checks still validate against the declared set.
       const effectiveSources = source !== undefined ? [source] : mapSources;
       const mapNames = [...(map.names ?? [])];
       const rawContents =
@@ -149,7 +156,9 @@ function composeBundleSourceMapTextual(
           continue;
         }
         genColAbs += decodeVLQ(s, cursor);
-        if (genColAbs < 0) throw new FastPathUnsupported("negative column");
+        if (genColAbs < 0) {
+          throw new SourceMapComposeError("negative generated column");
+        }
         if (atSegmentEnd(s, cursor.i)) continue; // 1-field segment: dropped
         mSrc += decodeVLQ(s, cursor);
         mOrigLine += decodeVLQ(s, cursor);
@@ -159,24 +168,28 @@ function composeBundleSourceMapTextual(
           mName += decodeVLQ(s, cursor);
           hasName = true;
           if (!atSegmentEnd(s, cursor.i)) {
-            throw new FastPathUnsupported("oversized segment");
+            throw new SourceMapComposeError("segment with more than 5 fields");
           }
         }
         if (
           mSrc < 0 || mSrc >= sourceCount || mOrigLine < 0 ||
           mOrigCol < 0 || (hasName && (mName < 0 || mName >= nameCount))
         ) {
-          throw new FastPathUnsupported("index out of range");
+          throw new SourceMapComposeError("source/name index out of range");
         }
         if (lineOpen) {
           if (genColAbs < linePrevGen) {
-            throw new FastPathUnsupported("unsorted mappings");
+            throw new SourceMapComposeError(
+              "mappings not sorted by generated position",
+            );
           }
           out.push(",");
         } else {
           const bundleLine = lineOffset + moduleLine;
           if (bundleLine < emittedLines) {
-            throw new FastPathUnsupported("module maps beyond its body");
+            throw new SourceMapComposeError(
+              "module mapping extends past its body",
+            );
           }
           out.push(";".repeat(bundleLine - emittedLines));
           emittedLines = bundleLine;
@@ -266,91 +279,11 @@ export function composeBundleSourceMap(
   // (1-based, relative to the eval'd string) map correctly.
   startLineOffset = 0,
 ): SourceMap | undefined {
-  // Compose at the VLQ text level when possible. The composition runs inside
-  // the runtime worker at every piece boot (once for the eval bundle plus once
-  // per module, for every record-graph evaluation), and the
-  // consumer→generator round-trip below decodes every mapping into an object,
-  // re-sorts, re-encodes, and JSON-parses — tens of ms per cold boot for the
-  // system-app closure. The textual transcoder produces position-equivalent
-  // output in one allocation-free pass; anything it cannot prove equivalent
-  // falls back to the legacy path.
-  try {
-    return composeBundleSourceMapTextual(
-      modules,
-      bundleFilename,
-      startLineOffset,
-    );
-  } catch (error) {
-    if (!(error instanceof FastPathUnsupported)) throw error;
-    return composeBundleSourceMapLegacy(
-      modules,
-      bundleFilename,
-      startLineOffset,
-    );
-  }
-}
-
-/**
- * Reference composition via `SourceMapConsumer`/`SourceMapGenerator`. Kept as
- * the fallback for input shapes the textual fast path rejects (multi-source
- * maps under a `source` override, non-empty `sourceRoot`, unsorted or
- * malformed mappings) — rare in practice: per-module compiler maps are
- * single-source, rootless, and sorted.
- */
-function composeBundleSourceMapLegacy(
-  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
-  bundleFilename: string,
-  startLineOffset = 0,
-): SourceMap | undefined {
-  const generator = new SourceMapGenerator({ file: bundleFilename });
-  let lineOffset = startLineOffset;
-  let any = false;
-  for (const { body, map, source } of modules) {
-    if (map) {
-      const consumer = new SourceMapConsumer(map);
-      consumer.eachMapping((m) => {
-        if (
-          m.source == null || m.originalLine == null ||
-          m.originalColumn == null
-        ) return;
-        generator.addMapping({
-          generated: {
-            line: m.generatedLine + lineOffset,
-            column: m.generatedColumn,
-          },
-          original: { line: m.originalLine, column: m.originalColumn },
-          source: source ?? m.source,
-          name: m.name ?? undefined,
-        });
-        any = true;
-      });
-      const contents =
-        (map as { sourcesContent?: (string | null)[] }).sourcesContent;
-      if (source) {
-        // Source overridden to a single full module path: register that
-        // module's content under the override name so DevTools can still show
-        // the authored text (parity with the AMD bundle map). Per-module
-        // compiler maps carry exactly one source, so the first content is it.
-        const content = contents?.find((c) => c != null);
-        if (content != null) generator.setSourceContent(source, content);
-      } else {
-        const sources = map.sources ?? [];
-        if (contents) {
-          sources.forEach((src, i) => {
-            const content = contents[i];
-            if (src != null && content != null) {
-              generator.setSourceContent(src, content);
-            }
-          });
-        }
-      }
-    }
-    // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.
-    // Robust to trailing newlines, unlike split().length.
-    lineOffset += (body.match(/\n/g)?.length ?? 0) + 1;
-  }
-  if (!any) return undefined;
-  return JSON.parse(generator.toString()) as SourceMap;
+  return composeBundleSourceMapTextual(
+    modules,
+    bundleFilename,
+    startLineOffset,
+  );
 }
 
 /**
