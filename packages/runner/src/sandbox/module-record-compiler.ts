@@ -199,9 +199,8 @@ function stampDefiningModule(
     // succeeded, and a getter's return value must never receive this module's
     // defining stamp. Real builder factories carry `.implementation` as an own
     // data property, so legitimate artifacts are unaffected.
-    const implementation = typeof value === "function"
-      ? value
-      : Object.getOwnPropertyDescriptor(value, "implementation")?.value;
+    const implementation =
+      Object.getOwnPropertyDescriptor(value, "implementation")?.value ?? value;
     if (typeof implementation === "function") {
       recordDefiningModule(implementation, identity);
     }
