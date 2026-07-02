@@ -3604,6 +3604,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): Record<string, Immutable<FabricValue>> | undefined {
     this.traverseObjectCalls++;
     const filteredObj: Record<string, Immutable<FabricValue>> = {};
+    // SPIKE (B2 grace, PR #4457): properties whose value is a LINK that cannot
+    // be resolved for THIS reader (target unwritten / cross-space not loaded /
+    // scoped to another principal). They are exempted from the `required`
+    // check below: an unresolvable reference degrades that field, it must not
+    // void the whole object (and thereby the containing array/read).
+    const unresolvableLinkProps = new Set<string>();
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
@@ -3667,8 +3673,32 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const { ok: val, error } = SchemaObjectTraverser.hasAsCell(propSchema)
           ? this.tx.runWithAmbientReadMeta(excludeReadFromConflict, descend)
           : descend();
+        if (error !== undefined && isSigilLink(propValue)) {
+          unresolvableLinkProps.add(propKey);
+        }
         if (error === undefined) {
           filteredObj[propKey] = val;
+        } else if (
+          !this.traverseCells &&
+          SchemaObjectTraverser.hasAsCell(propSchema)
+        ) {
+          // SPIKE (B2 grace, see PR #4457): an asCell property is an opaque
+          // boundary — if its link target is not resolvable for THIS reader
+          // (not written yet, cross-space not yet loaded, or scoped to another
+          // principal's partition), still return a cell for it instead of
+          // dropping the property. Dropping it made the `required` check below
+          // void the whole object, which voided the containing array
+          // (traverseArrayWithSchema), blacking out the entire read for every
+          // non-authoring session. This mirrors the existing policy for array
+          // elements ("If the target is not written yet, still return a cell
+          // for it instead of invalidating the parent array") and for
+          // inline-valued asCell properties above; downstream consumers can
+          // subscribe to the cell and observe the target when it materializes.
+          const cellLink = getNextCellLink(propDoc, propSchema);
+          filteredObj[propKey] = this.objectCreator.createObject(
+            cellLink,
+            undefined,
+          );
         }
       }
     }
@@ -3725,6 +3755,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
+          if (unresolvableLinkProps.has(requiredProperty)) continue;
           if (!(requiredProperty in filteredObj)) {
             logger.info("traverse", () => [
               "Missing required property",
