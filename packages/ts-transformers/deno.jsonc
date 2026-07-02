@@ -5,7 +5,9 @@
     ".": "./src/mod.ts",
     "./core/context": "./src/core/context.ts",
     "./core/imports": "./src/core/imports.ts",
-    "./runtime-registry": "./src/core/commonfabric-runtime-registry.ts"
+    "./runtime-registry": "./src/core/commonfabric-runtime-registry.ts",
+    // Typescript-free transformer↔runtime contract values (boot-safe).
+    "./runtime-contract": "./src/core/runtime-contract.ts"
   },
   "imports": {
     "typescript": "npm:typescript"

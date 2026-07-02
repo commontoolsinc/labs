@@ -9,24 +9,23 @@ import {
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
-import {
-  collectImportSpecifiers,
-  getTypeScriptEnvironmentTypes,
-  InMemoryProgram,
-  type MappedPosition,
-  type Program,
-  type ProgramResolver,
-  type Source,
+import type {
+  MappedPosition,
+  Program,
+  ProgramResolver,
+  Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-import ts from "typescript";
+import { InMemoryProgram } from "@commonfabric/js-compiler/program";
+import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
 import {
-  CommonFabricTransformerPipeline,
   PATTERN_COVERAGE_GLOBAL,
-  type PatternCoverageOptions,
-  ReactiveErrorTransformer,
   sourceDisablesCfTransform,
-} from "@commonfabric/ts-transformers";
+} from "@commonfabric/ts-transformers/runtime-contract";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -52,8 +51,8 @@ import {
 import {
   composeBundleSourceMap,
   identitySourceMap,
-  type SourceMap,
-} from "@commonfabric/js-compiler";
+} from "@commonfabric/js-compiler/source-map";
+import type { SourceMap } from "@commonfabric/js-compiler";
 import {
   loadModuleGraph,
   runtimeModuleRecords,
@@ -89,7 +88,6 @@ import { FabricAwareResolver } from "./fabric-resolver.ts";
 import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 
 const logger = getLogger("engine");
-const IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -197,6 +195,9 @@ export class Engine extends EventTarget implements Harness {
   }
 
   async initializeCompiler(): Promise<CompilerInternals> {
+    // First compiler use on this engine: load the deferred compiler stack
+    // (typescript + transformers), kept off the worker-boot path.
+    const { TypeScriptCompiler } = await ensureCompilerStack();
     const environmentTypes = await Engine.getEnvironmentTypes(
       this.ctRuntime.staticCache,
     );
@@ -247,6 +248,9 @@ export class Engine extends EventTarget implements Harness {
   > {
     logger.timeStart("compileToRecordGraph");
     try {
+      // Pretransform/import-scan below parse before the compiler internals
+      // are awaited — load the deferred compiler stack up front.
+      await ensureCompilerStack();
       const id = options.identifier ?? computeId(program);
       assertNoReservedFabricPaths(program.files);
       const mappedProgram = pretransformProgramForModules(program, id);
@@ -366,11 +370,13 @@ export class Engine extends EventTarget implements Harness {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new ReactiveErrorTransformer({
+          diagnosticMessageTransformer: new (compilerStack()
+            .ReactiveErrorTransformer)({
             verbose: options.verboseErrors,
           }),
           beforeTransformers: (program) => {
-            const pipeline = new CommonFabricTransformerPipeline({
+            const pipeline = new (compilerStack()
+              .CommonFabricTransformerPipeline)({
               patternCoverage,
             });
             return {
@@ -557,6 +563,8 @@ export class Engine extends EventTarget implements Harness {
       return { patternCount: 0, fileCount: 0, diagnostics: [] };
     }
 
+    // Pretransform parses before the compiler internals are awaited.
+    await ensureCompilerStack();
     const runTransform = options.transform ?? true;
     const unioned = new Map<string, Source>();
     const mains: string[] = [];
@@ -585,7 +593,8 @@ export class Engine extends EventTarget implements Harness {
         runtimeModules: Engine.runtimeModuleNames(),
         beforeTransformers: runTransform
           ? (program) => {
-            const pipeline = new CommonFabricTransformerPipeline();
+            const pipeline = new (compilerStack()
+              .CommonFabricTransformerPipeline)();
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -707,7 +716,8 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       specifierAliases,
       beforeTransformers: (program) => {
-        const pipeline = new CommonFabricTransformerPipeline();
+        const pipeline = new (compilerStack()
+          .CommonFabricTransformerPipeline)();
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
@@ -1109,6 +1119,19 @@ export class Engine extends EventTarget implements Harness {
       ]),
     );
 
+    // A module without the persisted record surface (legacy doc, or a test
+    // building modules by hand) makes buildRecordsFromCompiled parse its body
+    // — load the deferred compiler stack first. The warm-cache boot path
+    // always carries the surface (runtimeVersion fingerprints the extractor),
+    // so the steady boot stays compiler-free.
+    if (
+      modules.some((m) =>
+        m.exportNames === undefined || m.starTargetSpecs === undefined ||
+        m.importSpecs === undefined
+      )
+    ) {
+      await ensureCompilerStack();
+    }
     const graph = buildRecordsFromCompiled(modules, {
       runtimeModules: runtimeModulesOption,
     });
@@ -1307,7 +1330,8 @@ export class Engine extends EventTarget implements Harness {
     return getRuntimeModuleTypes(cache);
   }
 
-  static getEnvironmentTypes(cache: StaticCache) {
+  static async getEnvironmentTypes(cache: StaticCache) {
+    const { getTypeScriptEnvironmentTypes } = await ensureCompilerStack();
     return getTypeScriptEnvironmentTypes(cache);
   }
 
@@ -1382,9 +1406,15 @@ function assertFabricImportsHaveSpace(
   options: { fabricImports?: { space: MemorySpace } },
 ): void {
   if (options.fabricImports !== undefined) return;
+  // Deferred compiler stack (parses): only called from compileToRecordGraph,
+  // which awaits ensureCompilerStack() first.
+  const { collectImportSpecifiers, ts } = compilerStack();
   for (const file of files) {
     for (
-      const specifier of collectImportSpecifiers(file, IMPORT_SCAN_TARGET)
+      const specifier of collectImportSpecifiers(
+        file,
+        ts.ScriptTarget.ES2023,
+      )
     ) {
       if (isFabricImportSpecifier(specifier)) {
         throw new Error(

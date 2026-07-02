@@ -4,8 +4,8 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { HttpProgramResolver } from "@commonfabric/js-compiler";
-import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
@@ -340,11 +340,14 @@ async function startFetch(
     // Create HTTP program resolver
     const resolver = new HttpProgramResolver(url);
 
+    // Program resolution parses; load the deferred compiler stack first.
+    const { resolveProgram, ts } = await ensureCompilerStack();
+
     // Resolve the program with all dependencies
     const program = await resolveProgram(resolver, {
       unresolvedModules: { type: "allow-all" },
       resolveUnresolvedModuleTypes: true,
-      target: TARGET,
+      target: ts.ScriptTarget.ES2023,
     });
 
     // Check if aborted during resolution
