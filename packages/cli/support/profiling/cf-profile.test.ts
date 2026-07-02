@@ -113,6 +113,8 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
         "-A",
         scriptPath,
         `--profile-output=${profilePath}`,
+        "--profile-start-pattern=Usage",
+        "--profile-stop-pattern=Usage",
         "--help",
       ],
       stdout: "piped",
@@ -133,11 +135,87 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
     const meta = JSON.parse(await Deno.readTextFile(metaPath));
     assertEquals(meta.command, ["--help"]);
     assertEquals("profileDoneMarker" in meta, false);
+    assertEquals(meta.profileStartPattern, "Usage");
+    assertEquals(meta.profileStopPattern, "Usage");
     assertEquals(meta.cliStatus.success, true);
     assertEquals(meta.captureStatus.success, true);
   } finally {
     await Deno.remove(tmpDir, { recursive: true });
   }
+});
+
+Deno.test("cf-profile requires a CLI command", async () => {
+  const scriptPath = fromFileUrl(new URL("cf-profile.ts", import.meta.url));
+
+  const result = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "-A",
+      scriptPath,
+    ],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const stdout = decoder.decode(result.stdout);
+  const stderr = decoder.decode(result.stderr);
+
+  assert(result.code !== 0, `${stdout}\n${stderr}`);
+  assertStringIncludes(
+    stderr,
+    "cf-profile requires a Common Fabric CLI command",
+  );
+});
+
+Deno.test("cf-profile exits when the child never publishes an inspector URL", async () => {
+  const tmpDir = await Deno.makeTempDir({ prefix: "cf-profile-port-test-" });
+  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  try {
+    const port = (listener.addr as Deno.NetAddr).port;
+    const profilePath = join(tmpDir, "profile.cpuprofile");
+    const scriptPath = fromFileUrl(new URL("cf-profile.ts", import.meta.url));
+
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "-A",
+        scriptPath,
+        `--profile-output=${profilePath}`,
+        `--profile-inspect-port=${port}`,
+        "--help",
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const stdout = decoder.decode(result.stdout);
+    const stderr = decoder.decode(result.stderr);
+
+    assert(result.code !== 0, `${stdout}\n${stderr}`);
+    assertStringIncludes(stderr, "Failed to start inspector server");
+  } finally {
+    listener.close();
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("capture-deno-inspector-profile entrypoint validates required args", async () => {
+  const scriptPath = fromFileUrl(
+    new URL("capture-deno-inspector-profile.ts", import.meta.url),
+  );
+
+  const result = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "-A",
+      scriptPath,
+    ],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const stdout = decoder.decode(result.stdout);
+  const stderr = decoder.decode(result.stderr);
+
+  assert(result.code !== 0, `${stdout}\n${stderr}`);
+  assertStringIncludes(stderr, "--output is required");
 });
 
 Deno.test("capture-deno-inspector-profile waits for profiler start before summary stop", async () => {
