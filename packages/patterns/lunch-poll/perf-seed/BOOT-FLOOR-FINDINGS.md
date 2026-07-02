@@ -420,3 +420,97 @@ graph for a piece that doesn't need it. It cuts across #3+#4+#5 at once.
 Architectural; wants Berni's input on whether eager full-system-app eval is a
 deliberate constraint before it's picked up. **Recommended next-session focus
 once he's back.**
+
+## 11. Session 2026-07-01/02 (L rig, offset 12): #6 + #8 fixed, #7 dissolved, and the 4× closure-eval bug
+
+Three PRs (independent, compose in any order): **#4455** (sourcemap compose),
+**#4459** (defer compiler stack), **#4460** (single-flight by-identity load).
+**Floor: ~497ms (that morning's main) → ~206ms with all three** (two profiled
+cold boots each, ±2ms/bucket). Fresh table at the bottom.
+
+**#7 "mystery quicksort" never existed as its own bucket.** The
+`doQuickSort ← randomIntInRange` frames are mozilla source-map-js's
+`parseMappings` sort. Root owners: (a) a slice inside #1's
+`originalPositionFor`, (b) the majority under
+**`composeBundleSourceMap ←
+evaluateGraph ← evaluateCachedModules`** — a **~53ms
+bucket ("#8")** the ~20ms attribution had hidden. Every cold boot composed the
+closure's maps (engine.ts:878 bundle + :920 per-module, CT-1754 machinery) via a
+consumer→generator round-trip (decode all mappings to objects, sort, re-encode,
+JSON.parse) — and every registered map was parsed TWICE (compose's consumer +
+the registry's lazy one).
+
+**Fix (#4455):** streaming VLQ transcoder in `js-compiler/source-map.ts` —
+per-segment integer decode/re-emit with delta rebasing; no objects, no sort, no
+generator; legacy path kept as fallback for unprovable shapes (differential
+tests incl. hostile streams). ~41 → ~10ms probed; bucket 53 → 16. **Regime
+lesson (cost a round):** cached-boot maps are storage-backed PROXIES —
+per-segment `.length` reads made v1 ~87ms (worse than legacy). Materialize map
+fields into plain locals before hot loops; a proxy-read-budget test pins the
+class. Retirement of the fallback is ticketed (CT-1816) gated on the
+identity-arc migrations (maps are CFC-identity-load-bearing until then).
+
+**#6 esbuild glue (#4459):** `typescript.js` is **10MB of the 14.3MB worker
+bundle** with **~100 static importers** (metafile: 75 ts-transformers, 14
+schema-generator, 7 runner, 4 js-compiler); every worker spawn paid the 10MB CJS
+factory eval + ~100 × `__toESM`/`__copyProps` (~250k defineProperty) — while the
+steady boot never compiles (post-#4441/#4442). Fix: sever all static value edges
+— `runner/src/harness/compiler-stack.ts` is the ONLY static importer, behind one
+memoized dynamic import (`deferred-compiler-stack.ts`; sync internals via a
+THROWING accessor so a missed `ensureCompilerStack()` fails loud); ts-free
+subpaths (`js-compiler/{program,specifier,errors}`,
+`ts-transformers/runtime-contract`); type-only imports stay put (erased).
+Metafile-assert: no static entry→typescript path. Bucket 34 → 0 **plus ~17ms**
+hidden factory eval from "(other)" (`__require2` 13.5 → 2.4 self). Bytes still
+ship — code-splitting ticketed (CT-1817; worker is already a module worker,
+exactly one dynamic edge).
+
+**The big one (#4460), found by re-deriving parked #3:** the "88% redundant
+schema hashes" were not diffuse leakage — **the same 9-module closure was fully
+evaluated 4× per cold boot.** Timestamped probes: four identical
+`loadPatternByIdentity(entry, "default")` calls in the same ms (one per
+referencing piece), all miss `addressableByIdentity` (dedups COMPLETED loads
+only), four concurrent `evaluateCachedModules` — re-creating every schema
+literal (intern dups: fresh 618 ≈ one eval; 3×618 re-exec + ~650/eval derivation
+dups ≈ the 4,460), every annotation, harden, factory, compose. The ifc-attach
+memo idea is a DEAD END (`schemaWithLub` runs 0× at boot — no confidentiality
+atoms flow). Fix: single-flight the load tail per `(space, entryIdentity)`
+mirroring `inProgressCompilations`; followers re-enter the front door and hit
+the leader-populated index — the pre-existing arrived-later path, so concurrency
+now converges to sequential semantics. Concurrency regression test: two-runtime
+fixture (tx must be committed; keep BOTH runtimes alive — disposing A first
+tears down shared emulated storage).
+
+**Fresh bucket table** (trivial pattern, worker busy; "before" = 2026-07-01
+main):
+
+| bucket        | before | +#4455 | +#4459 | +#4460 (all) |
+| ------------- | ------ | ------ | ------ | ------------ |
+| #1 debug-meta | 98     | ~103†  | ~103   | **25**       |
+| #3 intern     | 80     | 78     | 78     | **35**       |
+| #4 harden     | 49     | 48     | 47     | **13**       |
+| #5 factory    | 38     | 37     | 38     | **12**       |
+| #6 glue       | 34     | 34     | **0**  | 0            |
+| #8 compose    | 53     | **16** | 22‡    | 22           |
+| (other)       | 142    | 139    | 122    | **95–97**    |
+| **TOTAL**     | ~497   | ~462   | ~441   | **~206**     |
+
+† ~6ms consumer-parse migrated from #8 into #1's lazy first-lookup (dies with
+lazy-`.src`). ‡ #4459's rig lacked #4455 (separate branches); combined ≈ ~16/4.
+
+**Rig gotchas added this session:** agent-browser auth/localStorage can
+evaporate after sleep/renderer crash — re-import cf.key (snapshot immediately
+before `upload`, refs go stale); profiler `stop <file>` writes relative to the
+DAEMON's cwd — use absolute paths; `viewSettled` can resolve before module eval
+(warm) — classify cold by `evaluateCachedModules` presence in the profile;
+in-worker `new Error().stack` is SES-censored for compartment-driven calls —
+per-site attribution needs value tags/counters, not stacks; CI "Performance
+Check" failures here were coverage-debt (new defensive branches), answered with
+real tests, not baselines.
+
+**State after this session:** floor ~206ms. Remaining: #3 ~35 (true residual —
+per-eval derivation dups within the single eval), #1 ~25 (identity thread), #8
+~16-22 (residual transcode + lazy parse; dies further with C), #4 ~13, #5 ~12,
+other ~95. **~200 is banked; below ~150 needs defer-eager-system-app (Berni).**
+Tickets: CT-1815 (directive regex decision), CT-1816 (retire compose fallback),
+CT-1817 (code-split worker bundle).

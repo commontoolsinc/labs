@@ -219,9 +219,20 @@ path rather than the slow fallback on demand — but it's no longer load-bearing
 
 ## 6. WORKSTREAM 3 — the other 6 boot-floor buckets (the bulk of cold-load)
 
-> **STATUS (2026-07-01, EOD).** #2 TS-parse **DONE** (#4441 merged + #4442 open,
-> `parsed=9→0`). #5 factory **partially landed** (#4447: O(1) partial-cause
-> dedup
+> **STATUS (2026-07-02, supersedes below).** #2 DONE (#4441+#4442 merged). **#6
+> DONE (#4459)**, **#8 (née #7) DONE (#4455)**, and the biggest win: **#4460
+> single-flights the by-identity load** — the closure was being evaluated **4×
+> per cold boot** (concurrent identical loads racing a completed-only cache),
+> the hidden multiplier behind #1/#3/#4/#5/#8. Floor: **~497 → ~206ms** with the
+> three PRs (all open, independent). #3's parking rationale was re-derived: the
+> "88% redundant hashes" were mostly the 4× re-execution; true residual ~35ms.
+> #5 = #4447 (open). #4 (~13 post-#4460) least tractable. **~200 banked; <150
+> needs defer-eager-system-app (Berni, ~mid-July).** Tickets: CT-1815/1816/1817.
+> Full detail + fresh table + new rig gotchas: **`BOOT-FLOOR-FINDINGS.md` §11**.
+>
+> **STATUS (2026-07-01, EOD — superseded).** #2 TS-parse **DONE** (#4441 merged
+> \+ #4442 open, `parsed=9→0`). #5 factory **partially landed** (#4447: O(1)
+> partial-cause dedup
 >
 > - sanitize memo). #3 schema-intern **PARKED** (88% redundant hashes, but the
 >   schema system is already heavily memoized; low ROI). #1 is the identity/
