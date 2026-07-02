@@ -1,5 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { markStrInterpolation } from "../reactive-interpreter/builtin-markers.ts";
 import { createNodeFactory, lift } from "./module.ts";
 import type {
   FactoryInput,
@@ -410,22 +411,28 @@ export function wish<T = unknown>(
 // str`Hello, ${name}!`
 //
 // TODO(seefeld): This should be a built-in module
+//
+// Hoisted to module scope (one shared function identity, not a fresh closure
+// per call): a single identity gives it stable provenance, and the ROG
+// front-end recognizes it by identity (markStrInterpolation) to emit a
+// native `interpolate` op instead of an opaque leaf.
+const interpolatedString = ({
+  strings,
+  values,
+}: {
+  strings: TemplateStringsArray;
+  values: unknown[];
+}) =>
+  strings.reduce(
+    (result, str, i) => result + str + (i < values.length ? values[i] : ""),
+    "",
+  );
+markStrInterpolation(interpolatedString);
+
 export function str(
   strings: TemplateStringsArray,
   ...values: unknown[]
 ): Reactive<string> {
-  const interpolatedString = ({
-    strings,
-    values,
-  }: {
-    strings: TemplateStringsArray;
-    values: unknown[];
-  }) =>
-    strings.reduce(
-      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      "",
-    );
-
   return lift(interpolatedString)({ strings, values });
 }
 

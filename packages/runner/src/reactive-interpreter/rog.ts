@@ -222,11 +222,14 @@ export type KindDetail =
     kind: "control";
     op: ControlOp;
     pred: ValueRef;
-    /** The value produced when the predicate selects the "then" side. */
-    then: ValueRef;
-    /** The value for the other side; the literal `"pred"` encodes the
-     * when/unless "else returns the condition" semantics EXPLICITLY
-     * (02-ir.md §2.2 — v1 encoded this positionally and got it wrong once). */
+    /** Value when the predicate is TRUTHY. The literal `"pred"` means "the
+     * predicate's own value" — fully normalized semantics, so the evaluator
+     * has ONE rule (`truthy(pred) ? then : else`) and never special-cases
+     * per op name (02-ir.md §2.2; v1 encoded this positionally and got it
+     * wrong once). ifElse: {then: a, else: b} · when(c,v): {then: v,
+     * else: "pred"} · unless(c,f): {then: "pred", else: f}. */
+    then: ValueRef | "pred";
+    /** Value when the predicate is FALSY (same "pred" convention). */
     else: ValueRef | "pred";
   }
   | { kind: "access"; path: PathStep[] }
@@ -360,7 +363,8 @@ export function inputsOf(op: Op): ValueRef[] {
   if (d.kind === "collection") extra.push(d.listInput);
   if (d.kind === "pattern") extra.push(d.argument);
   if (d.kind === "control") {
-    extra.push(d.pred, d.then);
+    extra.push(d.pred);
+    if (d.then !== "pred") extra.push(d.then);
     if (d.else !== "pred") extra.push(d.else);
   }
   return [...op.inputs, ...extra];

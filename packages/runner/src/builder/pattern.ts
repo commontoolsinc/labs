@@ -51,6 +51,10 @@ import { isCell, setCellUnlinkedSpace } from "../cell.ts";
 import { createRef } from "../create-ref.ts";
 import { toURI } from "../uri-utils.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import {
+  setBuiltRog,
+  tryBuildRogFromBuilder,
+} from "../reactive-interpreter/from-builder.ts";
 import { Runtime } from "../runtime.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import {
@@ -483,6 +487,19 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
+  // Reactive-interpreter v2 front-end (D-V2-SEQ / D-V2-ROG-SIDETABLE): build
+  // the ROG from the same live context legacy serialization just consumed.
+  // Inert data in a WeakMap — no behavior change, no serialization change;
+  // flag-gated dispatch consumes it (fail-closed on `incomplete`).
+  const builtRog = tryBuildRogFromBuilder({
+    argumentSchema,
+    resultSchema,
+    nodes: Array.from(allNodes),
+    outputs,
+    cellNameForCell,
+    internalCauses: assignedInternalPartialCauses,
+  });
+
   const pattern: Pattern & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
     resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
@@ -493,6 +510,7 @@ function factoryFromPattern<T, R>(
     // pattern afterwards (see factory.ts:exportsCallback)
     toJSON: () => patternToJSON(patternFactory),
   };
+  if (builtRog !== undefined) setBuiltRog(pattern, builtRog);
 
   const makePatternFactory = (
     defaultScope?: CellScope,
@@ -536,6 +554,10 @@ function factoryFromPattern<T, R>(
         toJSON: () => patternToJSON(factory),
       } as Pattern & toJSON,
     ) as PatternFactory<T, R>;
+
+    // Every factory copy (root + asScope/inSpace derivations) resolves to the
+    // same BuiltRog (identity-neutral WeakMap side-table).
+    if (builtRog !== undefined) setBuiltRog(factory, builtRog);
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as
     // derivation copies so identity facts resolve through to the root factory
