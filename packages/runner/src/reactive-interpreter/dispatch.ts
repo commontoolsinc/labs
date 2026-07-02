@@ -39,6 +39,15 @@ const logger = getLogger("runner.reactive-interpreter", {
   level: "info",
 });
 
+/** Env-gated dispatch tracing (RI2_DEBUG=1): one line per decision. */
+const RI2_DEBUG = (() => {
+  try {
+    return Deno.env.get("RI2_DEBUG") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 // ---------------------------------------------------------------------------
 // Census — the progress metric (never "green via fallback" unnoticed).
 // ---------------------------------------------------------------------------
@@ -104,6 +113,7 @@ function fallback(reason: string): DispatchPlan {
   const key = reason.split(":")[0];
   census.fallbackByReason[key] = (census.fallbackByReason[key] ?? 0) + 1;
   logger.info("fallback", () => [reason]);
+  if (RI2_DEBUG) console.log(`[ri2] fallback: ${reason}`);
   return { kind: "fallback", reason };
 }
 
@@ -204,6 +214,12 @@ export function planInterpreterDispatch(
   if (typeof node === "string") return fallback(node);
 
   census.interpreted++;
+  if (RI2_DEBUG) {
+    console.log(
+      `[ri2] interpret: ops=${built.rog.ops.length} ` +
+        `nodes=${pattern.nodes.length} seg=${part.segments[0].id}`,
+    );
+  }
   return { kind: "interpret", nodes: [node] };
 }
 
@@ -227,6 +243,10 @@ function buildSegmentNode(
 ): SyntheticNode | string {
   const rog = built.rog;
   const outputOpIds = nodeDerivedOpIds(pattern, rog);
+  // COST GATE (and correctness for node-less patterns): with no node-derived
+  // ops there are no legacy actions to collapse — the result tree is pure
+  // alias projection and interpretation could only add a spurious node.
+  if (outputOpIds.length === 0) return "no_node_ops";
 
   // INPUTS binding. Whole-argument read when any argument ref exists
   // (per-path narrowing is the D-V2-READSETS follow-up on this seam), plus
@@ -273,6 +293,10 @@ function buildSegmentNode(
       implementation,
       // Debug label surfaced by the runner's raw-node naming.
       debugName: `ri2:${segment.id}`,
+      // Thread the tx's narrowest read scope into the result write (legacy
+      // javascript-action parity for runtime-scoped inputs; see the
+      // sendResult site in instantiateRawNode).
+      ri2ThreadNarrowestReadScope: true,
     } as unknown as Module,
     inputs,
     outputs,
@@ -308,6 +332,10 @@ function makeSegmentImplementation(
       const frame = options.actionFrame(tx, { ri2Segment: segmentId });
       let firstError: unknown;
       try {
+        // Legacy action parity: effective-scope routing derives from the
+        // narrowest scope READ since this reset (scope carry-through is a
+        // tx-level mechanism; the reads below feed it).
+        tx.resetNarrowestReadScope();
         const bound = inputsCell.withTx(tx).get() ?? {};
         const seedByInternal = new Map<number, unknown>();
         for (const [key, value] of Object.entries(bound.internals ?? {})) {

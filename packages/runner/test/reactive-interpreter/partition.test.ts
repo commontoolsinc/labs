@@ -102,7 +102,7 @@ describe("partition over builder-born ROGs (W3)", () => {
     assert(seg0.outputs.length >= 1, "seg0 must materialize boundary input");
   });
 
-  it("a pure nested pattern is NOT a boundary (inlined into the segment)", () => {
+  it("a pure nested pattern is a boundary by default; inlinable on opt-in", () => {
     const inner = pattern<{ x: number }>((input) => ({
       doubled: lift((v: { x: number }) => v.x * 2)({ x: input.x }),
     }));
@@ -110,10 +110,21 @@ describe("partition over builder-born ROGs (W3)", () => {
       out: inner({ x: input.y }),
     }));
 
-    const result = partition({ built: builtOf(outer) });
-    assert(result.partitionable);
-    assertEquals(result.boundaries.length, 0);
-    assertEquals(result.segments.length, 1);
+    // Default: a child pattern's result cell can itself be the observable
+    // (the launched-child / piece-identity contract), so it stays a boundary.
+    const defaultResult = partition({ built: builtOf(outer) });
+    assert(defaultResult.partitionable);
+    assertEquals(defaultResult.boundaries.length, 1);
+    assertEquals(defaultResult.boundaries[0].kind, "pattern");
+
+    // Opt-in (future consumed-as-value analysis): inlined into the segment.
+    const inlined = partition({
+      built: builtOf(outer),
+      inlinePurePatterns: true,
+    });
+    assert(inlined.partitionable);
+    assertEquals(inlined.boundaries.length, 0);
+    assertEquals(inlined.segments.length, 1);
   });
 
   it("an incomplete ROG fails closed", () => {

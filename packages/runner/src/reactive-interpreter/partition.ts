@@ -135,11 +135,14 @@ function rogIsFullyPure(built: BuiltRog): boolean {
 function boundaryKindOf(
   built: BuiltRog,
   op: Op,
+  inlinePurePatterns: boolean,
 ): Boundary["kind"] | null {
   if (op.kind === "effect") return "effect";
   if (op.kind === "collection") return "collection";
   if (op.kind === "pattern") {
-    return isPureInlinablePattern(built, op.id) ? null : "pattern";
+    return inlinePurePatterns && isPureInlinablePattern(built, op.id)
+      ? null
+      : "pattern";
   }
   if (op.kind === "leaf" && !built.leafImpls.has(op.id)) {
     return "unresolved-leaf";
@@ -165,6 +168,14 @@ function dependencyRefs(op: Op): ValueRef[] {
 
 export interface PartitionInput {
   built: BuiltRog;
+  /** Treat a COMPLETE, recursively-pure nested `pattern` op as a pure op
+   * evalRog inlines (D-V2-PURE-PATTERN-INLINE). Default FALSE: a child
+   * pattern's result cell can itself be the observable (a handler-built
+   * child pushed into a list must be a real, addressable PIECE — the
+   * launched-child contract), and the dispatch cannot yet distinguish
+   * consumed-as-value children from retained-as-piece ones. Inlining
+   * returns with that analysis. */
+  inlinePurePatterns?: boolean;
 }
 
 /**
@@ -187,6 +198,7 @@ export interface PartitionInput {
  */
 export function partition(input: PartitionInput): PartitionResult {
   const built = input.built;
+  const inlinePurePatterns = input.inlinePurePatterns ?? false;
   const rog = built.rog;
   const ops = rog.ops;
   const n = ops.length;
@@ -204,7 +216,7 @@ export function partition(input: PartitionInput): PartitionResult {
   const isBoundary = new Array<boolean>(n).fill(false);
   const boundaryKind = new Array<Boundary["kind"] | null>(n).fill(null);
   for (let i = 0; i < n; i++) {
-    const k = boundaryKindOf(built, ops[i]);
+    const k = boundaryKindOf(built, ops[i], inlinePurePatterns);
     if (k !== null) {
       isBoundary[i] = true;
       boundaryKind[i] = k;

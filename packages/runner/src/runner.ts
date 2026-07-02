@@ -3930,7 +3930,17 @@ export class Runner {
               outputBindingSchema,
               builtinIdentity,
             ),
-            { preserveLinkOutput: true },
+            {
+              preserveLinkOutput: true,
+              // Opt-in effective-scope threading for the reactive-interpreter
+              // segment nodes (legacy javascript actions pass the tx's
+              // narrowest read scope; no legacy raw builtin sets this marker,
+              // so the default path is byte-identical).
+              ...((module as { ri2ThreadNarrowestReadScope?: boolean })
+                  .ri2ThreadNarrowestReadScope
+                ? { narrowestReadScope: tx.getNarrowestReadScope() }
+                : {}),
+            },
           );
         },
         addCancel,

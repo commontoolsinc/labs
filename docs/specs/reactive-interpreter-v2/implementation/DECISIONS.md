@@ -97,3 +97,14 @@ A nested `pattern` op whose child BuiltRog is complete and recursively pure
 is NOT a boundary: it stays inside its segment and evalRog inlines the child
 (v1's W5a win, now by construction at partition time). Only effectful /
 incomplete / plain-JSON children remain `pattern` boundaries.
+
+## D-V2-PURE-PATTERN-INLINE — AMENDED: dispatch-off by default (2026-07-02)
+
+Flag-ON triage found the hole: a handler-built child pattern pushed into a
+list must be a real, ADDRESSABLE piece (its result cell IS the observable —
+the launched-child contract); inlining collapsed it to a value (undefined
+list entries in patterns-ifelse push test). Inlining is safe only for
+consumed-as-value children, which the dispatch cannot yet distinguish. The
+partition keeps the capability behind `inlinePurePatterns` (default false);
+evalRog's pattern case stays for that future. Engagement cost recorded by
+census as `boundaries_pending:pattern`.
