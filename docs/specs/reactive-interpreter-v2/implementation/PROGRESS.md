@@ -10,7 +10,7 @@ measured numbers (OFF vs ON, same commit) once W3 exists.
 | W0 — plan + decisions | ✅ done (`804f881b7`) | — |
 | W1 — IR v2 core | ✅ done (`667ecf1bd`) | rog.ts + unit tests; internals table-indexed; normalized control tags |
 | W2 — builder-born ROG | ✅ done (`b01b75554`) | Zero-recognition front-end at pattern() finalization (WeakMap side-table); str→interpolate native; unknown refs fail-closed to effect boundaries; full runner suite 738/0 with construction ALWAYS-ON (baseline parity) |
-| W3 — flag-on dispatch + measurement harness | 🟡 in progress | W3a evaluator landed (`88d139fba`): v1 semantics ported to IR v2, end-to-end green over builder-born ROGs (control falsy-operands, str coercion, error isolation, probe, nested inline). Next: partition port + dispatch seam + census/measure harness |
+| W3 — flag-on dispatch + measurement harness | 🟡 in progress | W3a evaluator (`88d139fba`) + W3b partition (`b8ff8088e`) + W3c dispatch (`6acd8702d`) + measurement (`8cb0c7597`). **Vertical slice GREEN**: builder ROG → partition → synthetic raw node → evalRog → original aliases; differential oracle byte-equal incl. reactive edit; census interpreted. **First numbers** (compute-heavy pure pattern): nodes 14→5 (−64%), docs 12→11, wall 55.6→13.9ms (−75%). Flag-off untouched. **Flag-ON corpus run: 711/27** — triage list below. |
 | W4 — collections Option A | ⬜ | — |
 | W5 — transformer native ops | ⬜ | — |
 | W6 — function lowering | ⬜ | — |
@@ -46,7 +46,35 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   End-to-end green over builder-born ROGs.
 - (2026-07-02) W3b landed (`b8ff8088e`): partition v2 (structural recursion,
   principled external-internal inputs, pure-nested-pattern inline;
-  D-V2-F4-DEFER + D-V2-PURE-PATTERN-INLINE recorded). NEXT: the dispatch
-  seam (flag-on at instantiatePattern consuming BuiltRog + partition),
-  measurement harness port (doc#/node#/wall census), then root test +
-  integration both flags + the cfc-group-chat multi-user sim.
+  D-V2-F4-DEFER + D-V2-PURE-PATTERN-INLINE recorded).
+- (2026-07-02) W3c landed (`6acd8702d`, measurement `8cb0c7597`): flag-on
+  dispatch, single-segment increment. Synthetic `{type:"raw"}` node whose
+  outputs binding maps op ids → the ops' ORIGINAL serialized aliases (one
+  sendResult == the N legacy writes). Runner diff ~15 lines. Differential
+  oracle green; first numbers: nodes −64%, docs −1, wall −75% (shape:
+  6 lifts + 2 str + ifElse).
+- (2026-07-02) **Flag-ON corpus triage (full runner suite, 711/27).**
+  Failure classes, mapped to v1 precedents:
+  1. **SES security regressions ×3** — leafImpls captured at build time run
+     WITHOUT the trust gate legacy applies at resolution
+     (`resolveJavaScriptFunction` liveTrusted). FIX FIRST (security): dispatch
+     admits a leaf only if it passes a runner-supplied trust predicate
+     (v1 interpreterLiveLeafTrustCheck idiom); else unresolved-leaf boundary
+     → fallback.
+  2. **Leaf caps gates missing** — "patterns returned by lifted functions",
+     "named cell inside a lift", "sample()", Schemas ×2 (asCell handles):
+     need v1's static scans as capture-time caps (instantiatesPattern /
+     needsCellContext / async) + a builder frame (runtime+tx) pushed around
+     evalRog so cell() inside a lift body works.
+  3. **ifElse semantics ×3** — legacy builtin writes a branch REFERENCE
+     (write-once on re-trigger); the control op resolves values. Includes an
+     action-NAMING introspection test (possible test-artifact class).
+  4. **Dynamic patterns ×5** — derive-returning-pattern (CT-1316) + dynamic
+     instantiation: dynamic module → must stay legacy (gate probably missing
+     a dynamic-module case at dispatch).
+  5. **reload-sibling-overdirty + scheduler event receipts** — synthetic-node
+     rehydration/identity semantics; investigate.
+  6. **Stack traces ×2** — error-frame parity (the documented onError gap).
+  Strategy (v1's proven move): add capture/dispatch gates so classes 1/2/4
+  fall back fail-closed → drives flag-ON green while census keeps honest
+  engagement; then re-admit classes with proper support.
