@@ -307,6 +307,44 @@ function factoryFromPattern<T, R>(
   };
 
   const assignedInternalPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
+  // Canonical keys of the causes already assigned. Testing a candidate cause for
+  // collision is then an O(1) `Set` lookup instead of a `deepEqual` scan over
+  // every previously-assigned cause — the scan made this loop O(N²) in the number
+  // of internal cells (negligible for small patterns, but a scaling cliff for
+  // large ones, and it runs on every pattern instantiation, not just at boot).
+  const assignedCauseKeys = new Set<string>();
+  // Key-order-insensitive serialization, matching `deepEqual`'s order-insensitive
+  // record comparison, so `assignedCauseKeys.has(key)` is exactly the collision
+  // test the previous `deepEqual` scan performed. Causes are always JSON values
+  // with no `undefined`, so this is a faithful, collision-free key.
+  const causeKey = (cause: JSONValue): string => {
+    // `deepEqual` compares primitives with `Object.is` (so -0≠0, NaN=NaN) and is
+    // type- and key-order-insensitive for records. Encode with a per-type tag +
+    // Object.is-faithful numbers so `JSON.stringify`'s primitive collapses
+    // (-0→0, NaN/±Infinity→null, number 1 vs string "1") can't produce a false
+    // collision the previous `deepEqual` scan would not have.
+    const enc = (x: unknown): unknown => {
+      if (x === null) return " null";
+      switch (typeof x) {
+        case "string":
+          return " s" + x;
+        case "boolean":
+          return " b" + x;
+        case "number":
+          return " n" + (Object.is(x, -0) ? "-0" : String(x));
+        case "object":
+          if (Array.isArray(x)) return x.map(enc);
+          return Object.fromEntries(
+            Object.keys(x as Record<string, unknown>).sort().map(
+              (k) => [k, enc((x as Record<string, unknown>)[k])],
+            ),
+          );
+        default:
+          return " ?" + String(x);
+      }
+    };
+    return JSON.stringify(enc(cause));
+  };
   let anonymousPartialCauseCount = 0;
   const nextAnonymousPartialCause = (isStream: boolean): JSONObject => {
     const generated = { $generated: anonymousPartialCauseCount++ };
@@ -325,17 +363,16 @@ function factoryFromPattern<T, R>(
     let partialCause = name === undefined
       ? nextAnonymousPartialCause(isStream)
       : name as JSONValue;
-    while (
-      Array.from(assignedInternalPartialCauses.values()).some((used) =>
-        deepEqual(used, partialCause)
-      )
-    ) {
+    let key = causeKey(partialCause);
+    while (assignedCauseKeys.has(key)) {
       const generated = nextAnonymousPartialCause(isStream);
       partialCause = name === undefined
         ? generated
         : { name: name as JSONValue, ...generated };
+      key = causeKey(partialCause);
     }
     assignedInternalPartialCauses.set(top, partialCause);
+    assignedCauseKeys.add(key);
   });
 
   const cellReferenceForCell = (
