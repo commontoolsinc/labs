@@ -167,14 +167,6 @@ interface ParentInput {
   data2: Writable<Container | null | Default<null>>;
 }
 
-let nav:
-  | ((
-    myData: Writable<Container | null>,
-    otherData: Writable<Container | null>,
-    whichPlayer: 1 | 2,
-  ) => unknown)
-  | null = null;
-
 const joinAsP1 = handler<
   void,
   { data1: Writable<Container | null>; data2: Writable<Container | null> }
@@ -196,7 +188,9 @@ const joinAsP1 = handler<
   console.log("[Parent] P1 joining with items:", items);
   data1.set({ label: "Player 1", items });
   console.log("[Parent] P1 navigating to child...");
-  if (nav) return nav(data1, data2, 1); // My data = data1, Other = data2
+  return navigateTo(
+    Child({ myData: data1, otherData: data2, whichPlayer: 1 }),
+  );
 });
 
 const joinAsP2 = handler<
@@ -220,7 +214,9 @@ const joinAsP2 = handler<
   console.log("[Parent] P2 joining with items:", items);
   data2.set({ label: "Player 2", items });
   console.log("[Parent] P2 navigating to child...");
-  if (nav) return nav(data2, data1, 2); // My data = data2, Other = data1
+  return navigateTo(
+    Child({ myData: data2, otherData: data1, whichPlayer: 2 }),
+  );
 });
 
 const Parent = pattern<ParentInput, object>(({ data1, data2 }) => ({
@@ -236,8 +232,5 @@ const Parent = pattern<ParentInput, object>(({ data1, data2 }) => ({
     </div>
   ),
 }));
-
-nav = (myData, otherData, whichPlayer) =>
-  navigateTo(Child({ myData, otherData, whichPlayer }));
 
 export default Parent;
