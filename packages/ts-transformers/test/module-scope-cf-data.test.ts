@@ -1,6 +1,19 @@
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert } from "@std/assert";
+import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callsNamed, parseModule } from "./transformed-ast.ts";
+
+// The default export is `__cfHelpers.__cf_data(helper)`: one call to the member
+// `__cf_data` whose sole argument is the identifier `helper`.
+function wrapsHelper(out: string): boolean {
+  const calls = callsNamed(parseModule(out), "__cf_data");
+  return calls.some((call) => {
+    const arg = call.arguments[0];
+    return call.arguments.length === 1 && arg !== undefined &&
+      ts.isIdentifier(arg) && arg.text === "helper";
+  });
+}
 
 // The module-scope cf-data transformer wraps a default-exported callable with
 // `__cfHelpers.__cf_data` when that callable's body may return a call applied to
@@ -23,7 +36,7 @@ Deno.test("module-scope cf-data wraps an arrow callable returning a call-on-call
     "const helper = () => factory()();",
     "export default helper;",
   ]);
-  assertStringIncludes(out, "export default __cfHelpers.__cf_data(helper)");
+  assert(wrapsHelper(out));
 });
 
 Deno.test("module-scope cf-data wraps a block-body callable whose return is a call-on-call result", async () => {
@@ -35,7 +48,7 @@ Deno.test("module-scope cf-data wraps a block-body callable whose return is a ca
     "};",
     "export default helper;",
   ]);
-  assertStringIncludes(out, "export default __cfHelpers.__cf_data(helper)");
+  assert(wrapsHelper(out));
 });
 
 Deno.test("module-scope cf-data wraps when the call-on-call result is nested in the returned expression", async () => {
@@ -43,7 +56,7 @@ Deno.test("module-scope cf-data wraps when the call-on-call result is nested in 
     "const helper = () => ({ value: factory()() });",
     "export default helper;",
   ]);
-  assertStringIncludes(out, "export default __cfHelpers.__cf_data(helper)");
+  assert(wrapsHelper(out));
 });
 
 Deno.test("module-scope cf-data ignores a call-on-call result inside a nested function boundary", async () => {
@@ -56,10 +69,7 @@ Deno.test("module-scope cf-data ignores a call-on-call result inside a nested fu
   ]);
   // The call-on-call result lives inside the inner arrow, which is a traversal
   // boundary, so the outer callable is not treated as returning a call result.
-  assert(
-    !out.includes("__cf_data(helper)"),
-    "expected helper to be left unwrapped",
-  );
+  assert(!wrapsHelper(out), "expected helper to be left unwrapped");
 });
 
 Deno.test("module-scope cf-data ignores a callable whose body expression is itself a function", async () => {
@@ -69,8 +79,5 @@ Deno.test("module-scope cf-data ignores a callable whose body expression is itse
   ]);
   // The arrow body is a function expression — a traversal boundary — so the
   // nested call-on-call result is not attributed to `helper`.
-  assert(
-    !out.includes("__cf_data(helper)"),
-    "expected helper to be left unwrapped",
-  );
+  assert(!wrapsHelper(out), "expected helper to be left unwrapped");
 });

@@ -1,56 +1,152 @@
-import {
-  assert,
-  assertEquals,
-  assertMatch,
-  assertStringIncludes,
-} from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
+import ts from "typescript";
 import { CFC_TRANSFORMER_STAGE_NAMES } from "../src/cf-pipeline.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import {
+  callsNamed,
+  collect,
+  emittedSchemas,
+  hasKeyPathRead,
+  literalToValue,
+  parseModule,
+} from "./transformed-ast.ts";
 
-function extractSchemas(output: string): string[] {
-  const schemas: string[] = [];
-  const marker = "as const satisfies __cfHelpers.JSONSchema";
-  let searchFrom = 0;
-  while (true) {
-    const markerIdx = output.indexOf(marker, searchFrom);
-    if (markerIdx === -1) break;
-
-    let start = markerIdx - 1;
-    while (start >= 0 && /\s/.test(output[start]!)) start--;
-
-    let schemaText: string | undefined;
-    if (output[start] === "}") {
-      let depth = 1;
-      start--;
-      while (start >= 0 && depth > 0) {
-        if (output[start] === "}") depth++;
-        else if (output[start] === "{") depth--;
-        start--;
-      }
-      start++;
-      schemaText = output.slice(start, markerIdx).trim();
-    } else {
-      let tokenStart = start;
-      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
-        tokenStart--;
-      }
-      tokenStart++;
-      const token = output.slice(tokenStart, start + 1).trim();
-      if (token === "true" || token === "false") {
-        schemaText = token;
-      }
-    }
-
-    if (!schemaText) {
-      searchFrom = markerIdx + marker.length;
-      continue;
-    }
-
-    schemas.push(schemaText);
-    searchFrom = markerIdx + marker.length;
+/**
+ * The hoisted `const __cfLift_N = __cfHelpers.lift(...)` call that ultimately
+ * produces `const <resultName> = …`. Walks the `.for(...)` chain on the result
+ * initializer down to the `__cfLift_N(...)` application, then finds the matching
+ * declaration.
+ */
+function liftCallFor(
+  root: ts.SourceFile,
+  resultName: string,
+): ts.CallExpression {
+  const decl = collect(root, ts.isVariableDeclaration).find((d) =>
+    ts.isIdentifier(d.name) && d.name.text === resultName
+  );
+  if (!decl?.initializer) {
+    throw new Error(`No \`const ${resultName} = …\` declaration`);
   }
-  return schemas;
+  let expr: ts.Expression = decl.initializer;
+  while (
+    ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression)
+  ) {
+    expr = expr.expression.expression;
+  }
+  if (!ts.isCallExpression(expr) || !ts.isIdentifier(expr.expression)) {
+    throw new Error(`Expected ${resultName} to apply a hoisted lift`);
+  }
+  const liftId = expr.expression.text;
+  const liftDecl = collect(root, ts.isVariableDeclaration).find((d) =>
+    ts.isIdentifier(d.name) && d.name.text === liftId
+  );
+  if (!liftDecl?.initializer || !ts.isCallExpression(liftDecl.initializer)) {
+    throw new Error(`No hoisted lift declaration for ${liftId}`);
+  }
+  return liftDecl.initializer;
+}
+
+/**
+ * The `... satisfies …JSONSchema` argument literals of a hoisted lift call,
+ * evaluated in argument order. The lift signature is `lift(cb, argSchema,
+ * resSchema)`, so index 0 is the input schema and index 1 the result schema.
+ */
+function liftSchemaArgs(call: ts.CallExpression): Record<string, unknown>[] {
+  return call.arguments
+    .filter((arg): arg is ts.SatisfiesExpression =>
+      ts.isSatisfiesExpression(arg)
+    )
+    .map((arg) => literalToValue(arg) as Record<string, unknown>);
+}
+
+/** The argument and result schemas of the hoisted lift driving `resultName`. */
+function liftSchemasFor(
+  root: ts.SourceFile,
+  resultName: string,
+): { argSchema: Record<string, unknown>; resSchema: Record<string, unknown> } {
+  const schemas = liftSchemaArgs(liftCallFor(root, resultName));
+  if (schemas.length < 2) {
+    throw new Error(`Expected two schema arguments for ${resultName}`);
+  }
+  return { argSchema: schemas[0]!, resSchema: schemas[1]! };
+}
+
+/**
+ * The input (argument) schema of the first hoisted lift emitted in `root` — the
+ * lift a lone `computed()` capture lowers to.
+ */
+function firstLiftArgSchema(root: ts.SourceFile): Record<string, unknown> {
+  const liftCall = callsNamed(root, "lift").find((call) =>
+    ts.isPropertyAccessExpression(call.expression) &&
+    ts.isIdentifier(call.expression.expression) &&
+    call.expression.expression.text === "__cfHelpers"
+  );
+  if (!liftCall) {
+    throw new Error("expected an emitted __cfHelpers.lift(...) call");
+  }
+  const schemas = liftSchemaArgs(liftCall);
+  if (schemas.length < 1) throw new Error("lift call had no schema arguments");
+  return schemas[0]!;
+}
+
+/** Every `type` string that appears anywhere within an evaluated schema. */
+function collectSchemaTypes(value: unknown, acc: string[] = []): string[] {
+  if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "type" && typeof child === "string") acc.push(child);
+      collectSchemaTypes(child, acc);
+    }
+  }
+  return acc;
+}
+
+/**
+ * True when `node` sits inside a callback arrow that a reactive compute owns —
+ * an arrow passed directly to `lift`/`derive`, or the callback of a hoisted
+ * `const __cfLift_N = __cfHelpers.lift(cb, …)` declaration. This distinguishes a
+ * call the pipeline extracted into a synthetic compute from one left structural.
+ */
+function isInsideExtractedComputeCallback(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const arrowParent = current.parent;
+      if (arrowParent && ts.isCallExpression(arrowParent)) {
+        const callee = arrowParent.expression;
+        const calleeName = ts.isIdentifier(callee)
+          ? callee.text
+          : ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : undefined;
+        if (calleeName === "lift" || calleeName === "derive") return true;
+      }
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * True when `node` has an ancestor call whose target name (bare or member) is
+ * `name` — e.g. it is nested inside a `derive(...)` / `__cfHelpers.derive(...)`
+ * call.
+ */
+function isInsideCallNamed(node: ts.Node, name: string): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isCallExpression(current)) {
+      const callee = current.expression;
+      const calleeName = ts.isIdentifier(callee)
+        ? callee.text
+        : ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : undefined;
+      if (calleeName === name) return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 Deno.test(
@@ -83,11 +179,34 @@ const p = pattern<{ items: string[] }>((state) => ({
     );
 
     assertEquals(computationDiagnostics.length, 0);
-    assertStringIncludes(
-      output,
-      "const fontSize = __cf_pattern_input.params.style[key];",
+
+    const root = parseModule(output);
+    // `fontSize` binds to a dynamic element access `…style[key]`, keyed by the
+    // `key` identifier, never resolved to the static `.small` member.
+    const fontSizeDecl = collect(root, ts.isVariableDeclaration).find((decl) =>
+      ts.isIdentifier(decl.name) && decl.name.text === "fontSize"
     );
-    assert(!output.includes("__cf_pattern_input.params.style.small"));
+    assert(fontSizeDecl?.initializer, "expected a fontSize declaration");
+    const access = fontSizeDecl.initializer;
+    assert(
+      ts.isElementAccessExpression(access) &&
+        ts.isIdentifier(access.argumentExpression) &&
+        access.argumentExpression.text === "key",
+      "expected fontSize to bind a `[key]` element access",
+    );
+    const style = access.expression;
+    assert(
+      ts.isPropertyAccessExpression(style) && style.name.text === "style",
+      "expected the element access base to be `…style`",
+    );
+    assert(
+      !collect(root, ts.isPropertyAccessExpression).some((pa) =>
+        pa.name.text === "small" &&
+        ts.isPropertyAccessExpression(pa.expression) &&
+        pa.expression.name.text === "style"
+      ),
+      "expected no static `style.small` resolution",
+    );
   },
 );
 
@@ -99,6 +218,7 @@ Deno.test(
       "EmptyArrayOfValidationTransformer",
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
+      "MergeablePushValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
       "LiftLoweringTransformer",
       "ClosureTransformer",
@@ -136,11 +256,33 @@ const p = pattern<{ item: { title: string } }>((state) => {
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(
-      output,
-      'const __cf_destructure_1 = state.key("item"), title = __cf_destructure_1.key(getKey());',
+    const root = parseModule(output);
+    // `state.key("item")` reactive read survives, and `title` binds to a
+    // `.key(getKey())` dynamic read — the key argument stays the `getKey()`
+    // call, never resolved to the literal `"title"`.
+    assert(hasKeyPathRead(root, "item", "state"));
+    const titleDecl = collect(root, ts.isVariableDeclaration).find((decl) =>
+      ts.isIdentifier(decl.name) && decl.name.text === "title"
     );
-    assert(!output.includes('title = __cf_destructure_1.key("title")'));
+    assert(titleDecl?.initializer, "expected a title declaration");
+    const keyCall = titleDecl.initializer;
+    assert(
+      ts.isCallExpression(keyCall) &&
+        ts.isPropertyAccessExpression(keyCall.expression) &&
+        keyCall.expression.name.text === "key",
+      "expected title to bind a `.key(...)` call",
+    );
+    const keyArg = keyCall.arguments[0];
+    assert(
+      keyArg && ts.isCallExpression(keyArg) &&
+        ts.isIdentifier(keyArg.expression) &&
+        keyArg.expression.text === "getKey",
+      "expected the key argument to stay the getKey() call, not the literal",
+    );
+    assert(
+      !(keyArg && ts.isStringLiteralLike(keyArg)),
+      "expected the dynamic key not to resolve to a string literal",
+    );
   },
 );
 
@@ -171,10 +313,38 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
     // c[__cfHelpers.NAME])`. The surface form must include the helper
     // expression on the `c` root specifically — generic substring
     // checks could pass even if `c` got renamed by an unrelated bug.
-    assertStringIncludes(output, "c.key(__cfHelpers.NAME)");
+    const root = parseModule(output);
+    const isHelperName = (node: ts.Expression): boolean =>
+      ts.isPropertyAccessExpression(node) && node.name.text === "NAME" &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "__cfHelpers";
+    const keyOnC = callsNamed(root, "key").filter((call) =>
+      ts.isPropertyAccessExpression(call.expression) &&
+      ts.isIdentifier(call.expression.expression) &&
+      call.expression.expression.text === "c"
+    );
     assert(
-      !output.includes("c.key(NAME)") && !output.includes("c[NAME]"),
-      "Bare NAME identifier must not appear in lowered output",
+      keyOnC.some((call) =>
+        call.arguments[0] !== undefined && isHelperName(call.arguments[0])
+      ),
+      "expected c.key(__cfHelpers.NAME) helper-backed read",
+    );
+    // No `.key(NAME)` with a bare NAME identifier argument.
+    assert(
+      !callsNamed(root, "key").some((call) =>
+        call.arguments[0] !== undefined &&
+        ts.isIdentifier(call.arguments[0]) &&
+        call.arguments[0].text === "NAME"
+      ),
+      "Bare NAME identifier must not appear as a .key() argument",
+    );
+    // No `c[NAME]` element access with a bare NAME identifier.
+    assert(
+      !collect(root, ts.isElementAccessExpression).some((el) =>
+        ts.isIdentifier(el.argumentExpression) &&
+        el.argumentExpression.text === "NAME"
+      ),
+      "Bare NAME identifier must not appear as an element access key",
     );
   },
 );
@@ -191,36 +361,44 @@ Deno.test(
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const schemas = extractSchemas(output);
+    const root = parseModule(output);
 
-    const outerMapSchema =
-      schemas.find((schema) =>
-        schema.includes('required: ["element", "params"]') &&
-        schema.includes("globalAccent") &&
-        schema.includes("selectedTaskId") &&
-        schema.includes("hoveredSectionId")
-      ) ?? "";
-    assert(outerMapSchema.length > 0, "expected outer sections map schema");
-    assertStringIncludes(outerMapSchema, "id");
-    assertStringIncludes(outerMapSchema, "title");
-    assertStringIncludes(outerMapSchema, "expanded");
-    assertStringIncludes(outerMapSchema, "accent");
-    assertStringIncludes(outerMapSchema, "tasks");
+    // Every property name that appears anywhere in an evaluated schema.
+    const keysDeep = (value: unknown, acc = new Set<string>()): Set<string> => {
+      if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          acc.add(key);
+          keysDeep(child, acc);
+        }
+      }
+      return acc;
+    };
 
-    const innerMapSchema =
-      schemas.find((schema) =>
-        schema.includes('required: ["element", "params"]') &&
-        schema.includes("sectionIndex") &&
-        schema.includes("selectedTaskId") &&
-        schema.includes("hoveredSectionId") &&
-        !schema.includes("globalAccent")
-      ) ?? "";
-    assert(innerMapSchema.length > 0, "expected inner tasks map schema");
-    assertStringIncludes(innerMapSchema, "id");
-    assertStringIncludes(innerMapSchema, "label");
-    assertStringIncludes(innerMapSchema, "done");
-    assertStringIncludes(innerMapSchema, "tags");
-    assertStringIncludes(innerMapSchema, "note");
+    const mapSchemas = emittedSchemas(root)
+      .filter((schema) => {
+        const required = schema.required;
+        return Array.isArray(required) && required.includes("element") &&
+          required.includes("params");
+      })
+      .map((schema) => ({ schema, keys: keysDeep(schema) }));
+
+    const outerMap = mapSchemas.find(({ keys }) =>
+      keys.has("globalAccent") && keys.has("selectedTaskId") &&
+      keys.has("hoveredSectionId")
+    );
+    assert(outerMap, "expected outer sections map schema");
+    for (const field of ["id", "title", "expanded", "accent", "tasks"]) {
+      assert(outerMap.keys.has(field), `outer map schema missing ${field}`);
+    }
+
+    const innerMap = mapSchemas.find(({ keys }) =>
+      keys.has("sectionIndex") && keys.has("selectedTaskId") &&
+      keys.has("hoveredSectionId") && !keys.has("globalAccent")
+    );
+    assert(innerMap, "expected inner tasks map schema");
+    for (const field of ["id", "label", "done", "tags", "note"]) {
+      assert(innerMap.keys.has(field), `inner map schema missing ${field}`);
+    }
   },
 );
 
@@ -339,43 +517,72 @@ export default pattern<{
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(
-      output,
-      "=> f.validationIssue !== undefined",
-    );
     // After CT-1644 Phase 2, the synthesized predicate wrapper is hoisted to a
     // module-scope const and applied at the call site:
     //   const __cfLift_N = __cfHelpers.lift(
     //     argSchema, resSchema, ({ f }) => f.validationIssue !== undefined);
     //   ...__cfLift_N({ f: { validationIssue: f.key("validationIssue") } })
-    // The callback lives on the hoisted lift decl; the input on the applied
-    // site. Anchor on the unique predicate callback text, walk back to the
-    // nearest `const __cfLift_N =` that owns it (decls don't nest, so the last
-    // such declaration before the callback is its owner), then assert that same
-    // id is applied with the `f` validationIssue capture.
-    const predicateIdx = output.indexOf(
-      "({ f }) => f.validationIssue !== undefined",
+    // Find the lift decl whose callback is the validationIssue predicate, then
+    // assert the same hoisted id is applied with the `f` validationIssue
+    // capture as its input.
+    const root = parseModule(output);
+
+    // A `something !== undefined` test on a `.validationIssue` access.
+    const isValidationPredicate = (node: ts.Node): boolean => {
+      if (!ts.isBinaryExpression(node)) return false;
+      if (
+        node.operatorToken.kind !==
+          ts.SyntaxKind.ExclamationEqualsEqualsToken
+      ) return false;
+      const left = node.left;
+      const right = node.right;
+      const isValidationAccess = ts.isPropertyAccessExpression(left) &&
+        left.name.text === "validationIssue";
+      const isUndefined = ts.isIdentifier(right) && right.text === "undefined";
+      return isValidationAccess && isUndefined;
+    };
+
+    const predicateLift = collect(root, ts.isVariableDeclaration).find(
+      (decl) => {
+        if (!ts.isIdentifier(decl.name)) return false;
+        if (!decl.initializer || !ts.isCallExpression(decl.initializer)) {
+          return false;
+        }
+        const callee = decl.initializer.expression;
+        const isLift = ts.isPropertyAccessExpression(callee) &&
+          callee.name.text === "lift";
+        if (!isLift) return false;
+        return decl.initializer.arguments.some((arg) =>
+          ts.isArrowFunction(arg) && !ts.isBlock(arg.body) &&
+          isValidationPredicate(arg.body)
+        );
+      },
     );
     assert(
-      predicateIdx >= 0,
-      "expected the synthesized validationIssue predicate callback",
-    );
-    const declMatches = [
-      ...output.slice(0, predicateIdx).matchAll(
-        /const (__cfLift_\d+) = __cfHelpers\.lift/g,
-      ),
-    ];
-    assert(
-      declMatches.length > 0,
+      predicateLift && ts.isIdentifier(predicateLift.name),
       "expected a hoisted lift decl owning the validationIssue predicate",
     );
-    const validationLiftId = declMatches[declMatches.length - 1][1];
-    assertMatch(
-      output,
-      new RegExp(
-        validationLiftId +
-          '\\(\\{ f: \\{[\\s\\S]*?validationIssue: f(?:\\.validationIssue|\\.key\\("validationIssue"\\))[\\s\\S]*?\\} \\}\\)',
-      ),
+    const validationLiftId = (predicateLift.name as ts.Identifier).text;
+
+    // The hoisted lift is applied with `{ f: { validationIssue: <read> } }`.
+    const applied = callsNamed(root, validationLiftId).find((call) => {
+      const arg = call.arguments[0];
+      if (!arg || !ts.isObjectLiteralExpression(arg)) return false;
+      const fProp = arg.properties.find((p) =>
+        ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
+        p.name.text === "f"
+      );
+      if (!fProp || !ts.isPropertyAssignment(fProp)) return false;
+      const fValue = fProp.initializer;
+      if (!ts.isObjectLiteralExpression(fValue)) return false;
+      return fValue.properties.some((p) =>
+        ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
+        p.name.text === "validationIssue"
+      );
+    });
+    assert(
+      applied,
+      "expected the hoisted lift applied with the f validationIssue capture",
     );
   },
 );
@@ -429,12 +636,43 @@ export default pattern<{
     );
 
     assertEquals(computationDiagnostics.length, 0);
-    assertStringIncludes(output, ".mapWithPattern(");
-    assertStringIncludes(output, "=> fieldCheckStates[fieldKey] === true");
+    const root = parseModule(output);
+
     assert(
-      !output.includes(
-        "const isChecked = fieldCheckStates[fieldKey] === true;",
+      callsNamed(root, "mapWithPattern").length >= 1,
+      "expected a mapWithPattern call",
+    );
+
+    // `fieldCheckStates[fieldKey] === true` — a strict-equality test whose left
+    // side reads element `[fieldKey]` off `fieldCheckStates`.
+    const isFieldCheckEquality = (node: ts.Node): boolean => {
+      if (!ts.isBinaryExpression(node)) return false;
+      if (
+        node.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken
+      ) return false;
+      const left = node.left;
+      return ts.isElementAccessExpression(left) &&
+        ts.isIdentifier(left.expression) &&
+        left.expression.text === "fieldCheckStates" &&
+        ts.isIdentifier(left.argumentExpression) &&
+        left.argumentExpression.text === "fieldKey" &&
+        node.right.kind === ts.SyntaxKind.TrueKeyword;
+    };
+
+    // The equality survives as an extracted arrow body, not an eager local.
+    assert(
+      collect(root, ts.isArrowFunction).some((arrow) =>
+        !ts.isBlock(arrow.body) && isFieldCheckEquality(arrow.body)
       ),
+      "expected the fieldCheckStates equality to lower into an arrow body",
+    );
+    assert(
+      !collect(root, ts.isVariableDeclaration).some((decl) =>
+        ts.isIdentifier(decl.name) && decl.name.text === "isChecked" &&
+        decl.initializer !== undefined &&
+        isFieldCheckEquality(decl.initializer)
+      ),
+      "expected no eager `const isChecked = fieldCheckStates[fieldKey] === true`",
     );
   },
 );
@@ -449,8 +687,13 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
 
+    const root = parseModule(output);
     assert(
-      output.includes("{examples.mapWithPattern("),
+      callsNamed(root, "mapWithPattern").some((call) =>
+        ts.isPropertyAccessExpression(call.expression) &&
+        ts.isIdentifier(call.expression.expression) &&
+        call.expression.expression.text === "examples"
+      ),
       "expected transformed examples.mapWithPattern call site",
     );
 
@@ -460,19 +703,39 @@ Deno.test(
     // lives at module scope, ABOVE the `examples.mapWithPattern(__cfPattern_N,
     // …)` call site rather than inline at it. The property this test guards is
     // unchanged: the examples capture's params-keyed prologue survives the
-    // pipeline. Assert against the whole output (the prologue lines are unique
-    // to this map's callback).
-    assertStringIncludes(
-      output,
-      'const selectedExampleId = __cf_pattern_input.key("params", "selectedExampleId");',
+    // pipeline.
+    // `const <name> = __cf_pattern_input.key("params", "<seg>")`.
+    const hasParamsPrologue = (name: string, seg: string): boolean =>
+      collect(root, ts.isVariableDeclaration).some((decl) => {
+        if (!ts.isIdentifier(decl.name) || decl.name.text !== name) {
+          return false;
+        }
+        const init = decl.initializer;
+        if (!init || !ts.isCallExpression(init)) return false;
+        const callee = init.expression;
+        if (
+          !ts.isPropertyAccessExpression(callee) ||
+          callee.name.text !== "key" ||
+          !ts.isIdentifier(callee.expression) ||
+          callee.expression.text !== "__cf_pattern_input"
+        ) return false;
+        const args = init.arguments.map((a) =>
+          ts.isStringLiteralLike(a) ? a.text : undefined
+        );
+        return args[0] === "params" && args[1] === seg;
+      });
+
+    assert(
+      hasParamsPrologue("selectedExampleId", "selectedExampleId"),
+      "expected selectedExampleId params-keyed prologue",
     );
-    assertStringIncludes(
-      output,
-      'const currentItem = __cf_pattern_input.key("params", "currentItem");',
+    assert(
+      hasParamsPrologue("currentItem", "currentItem"),
+      "expected currentItem params-keyed prologue",
     );
-    assertStringIncludes(
-      output,
-      'const examples = __cf_pattern_input.key("params", "examples");',
+    assert(
+      hasParamsPrologue("examples", "examples"),
+      "expected examples params-keyed prologue",
     );
   },
 );
@@ -487,10 +750,29 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "itemsWithAisles.mapWithPattern(");
+    const root = parseModule(output);
     assert(
-      !output.includes(
-        'required: ["itemsWithAisles", "items", "correctionIndex", "correctionTitle", "hasConnectedStore"]',
+      callsNamed(root, "mapWithPattern").some((call) =>
+        ts.isPropertyAccessExpression(call.expression) &&
+        ts.isIdentifier(call.expression.expression) &&
+        call.expression.expression.text === "itemsWithAisles"
+      ),
+      "expected itemsWithAisles.mapWithPattern call site",
+    );
+    // No emitted schema requires the whole branch's captures, which would mean
+    // the branch got wrapped in a single derive rather than staying
+    // pattern-lowered.
+    const wholeBranchRequired = [
+      "itemsWithAisles",
+      "items",
+      "correctionIndex",
+      "correctionTitle",
+      "hasConnectedStore",
+    ];
+    assert(
+      !emittedSchemas(root).some((schema) =>
+        Array.isArray(schema.required) &&
+        JSON.stringify(schema.required) === JSON.stringify(wholeBranchRequired)
       ),
       "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
     );
@@ -519,10 +801,23 @@ export default pattern(() => {
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "const child = Child({ value });");
-    assertStringIncludes(output, 'childValue: child.key("value")');
+    const root = parseModule(output);
+    // `const child = Child({ value })` stays a plain structural call.
+    const childCall = callsNamed(root, "Child").find((call) =>
+      call.parent && ts.isVariableDeclaration(call.parent) &&
+      ts.isIdentifier(call.parent.name) && call.parent.name.text === "child"
+    );
+    assert(childCall, "expected `const child = Child(...)`");
+    // `childValue: child.key("value")` — a `.key("value")` read on `child`.
     assert(
-      !/__cfHelpers\.derive\([\s\S]{0,240}Child\(\{ value \}\)\)/.test(output),
+      hasKeyPathRead(root, "value", "child"),
+      'expected childValue to read child.key("value")',
+    );
+    // The Child call is not nested inside any derive call.
+    assert(
+      !callsNamed(root, "Child").some((call) =>
+        isInsideCallNamed(call, "derive")
+      ),
       "expected pattern factory invocation to stay structural instead of being wrapped in derive",
     );
   },
@@ -563,21 +858,44 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "const row = EntryRow({");
-    assertStringIncludes(output, 'piece: entry.key("piece")');
-    assertStringIncludes(output, 'name: entry.key("name")');
-    assertStringIncludes(output, 'backlinks: entry.key("backlinks")');
+    const root = parseModule(output);
+    // `const row = EntryRow({...})` stays structural.
+    assert(
+      callsNamed(root, "EntryRow").some((call) =>
+        call.parent && ts.isVariableDeclaration(call.parent) &&
+        ts.isIdentifier(call.parent.name) && call.parent.name.text === "row"
+      ),
+      "expected `const row = EntryRow(...)`",
+    );
+    // Element fields lower to `entry.key("<field>")` reactive reads.
+    assert(hasKeyPathRead(root, "piece", "entry"));
+    assert(hasKeyPathRead(root, "name", "entry"));
+    assert(hasKeyPathRead(root, "backlinks", "entry"));
     // CT-1586: row[UI] must lower to row.key(__cfHelpers.UI) in-place,
     // never to a derive wrapper around the [UI] element access. This is
     // the exact ticket repro — without the assertion below, the bug
     // (derive(..., ({row}) => row[__cfHelpers.UI])) would have passed the
     // outer "stays structural" check above unnoticed.
-    assertStringIncludes(output, "row.key(__cfHelpers.UI)");
     assert(
-      !/__cfHelpers\.derive\([\s\S]{0,500}EntryRow: EntryRow[\s\S]{0,500}EntryRow\(\{/
-        .test(
-          output,
-        ),
+      callsNamed(root, "key").some((call) => {
+        const callee = call.expression;
+        if (
+          !ts.isPropertyAccessExpression(callee) ||
+          !ts.isIdentifier(callee.expression) ||
+          callee.expression.text !== "row"
+        ) return false;
+        const arg = call.arguments[0];
+        return arg !== undefined && ts.isPropertyAccessExpression(arg) &&
+          arg.name.text === "UI" && ts.isIdentifier(arg.expression) &&
+          arg.expression.text === "__cfHelpers";
+      }),
+      "expected row.key(__cfHelpers.UI) in-place lowering",
+    );
+    // The EntryRow call is not nested inside any derive call.
+    assert(
+      !callsNamed(root, "EntryRow").some((call) =>
+        isInsideCallNamed(call, "derive")
+      ),
       "expected mapped pattern factory invocation to stay structural instead of being wrapped in derive",
     );
   },
@@ -622,18 +940,26 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
       types: COMMONFABRIC_TYPES,
     });
 
+    const root = parseModule(output);
     // The plain helper call is preserved.
-    assertStringIncludes(output, "plainHelper(");
-    // Because plainHelper is NOT classified as opaque-origin, the call
-    // result must be derive-wrapped — the call should appear inside a
-    // synthetic compute callback's body. The arrow `({ entry }) =>
-    // plainHelper(...)` is the tell. If isPatternFactoryCalleeExpression
-    // matched it, the call would land structurally as `const row =
-    // plainHelper(...)` with no surrounding derive.
-    assertStringIncludes(output, "}) => plainHelper(");
+    const plainHelperCalls = callsNamed(root, "plainHelper");
+    assert(plainHelperCalls.length >= 1, "expected a plainHelper call");
+    // Because plainHelper is NOT classified as opaque-origin, its result is
+    // wrapped in a synthetic reactive compute — the call moves into an
+    // extracted callback arrow whose enclosing context is a `lift`/`derive`
+    // application, rather than staying at `const row = plainHelper(...)`. If
+    // isPatternFactoryCalleeExpression matched it, the call would land
+    // structurally as a direct `row` initializer with no surrounding compute.
     assert(
-      !/const row = plainHelper\(/.test(output),
-      "expected plainHelper call to be wrapped in derive(...) — non-opaque-origin calls must NOT be treated as pattern factories",
+      plainHelperCalls.some((call) => isInsideExtractedComputeCallback(call)),
+      "expected plainHelper call to be wrapped in a reactive compute — non-opaque-origin calls must NOT be treated as pattern factories",
+    );
+    assert(
+      !plainHelperCalls.some((call) =>
+        call.parent && ts.isVariableDeclaration(call.parent) &&
+        ts.isIdentifier(call.parent.name) && call.parent.name.text === "row"
+      ),
+      "expected no structural `const row = plainHelper(...)`",
     );
   },
 );
@@ -677,14 +1003,31 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
       types: COMMONFABRIC_TYPES,
     });
 
+    const root = parseModule(output);
     // The pattern-factory call itself still stays structural.
-    assertStringIncludes(output, "const row = EntryRow({");
+    assert(
+      callsNamed(root, "EntryRow").some((call) =>
+        call.parent && ts.isVariableDeclaration(call.parent) &&
+        ts.isIdentifier(call.parent.name) && call.parent.name.text === "row"
+      ),
+      "expected `const row = EntryRow(...)`",
+    );
     // The dynamic access should NOT have lowered to `.key()` — `.key()` is
     // only valid for known-static path segments. The dynamic-wrap path
-    // is responsible for this case.
+    // is responsible for this case. No `row.key(entry.…)`.
     assert(
-      !/row\.key\(entry\./.test(output),
-      "expected dynamic key access not to lower to row.key(...)",
+      !callsNamed(root, "key").some((call) => {
+        const callee = call.expression;
+        if (
+          !ts.isPropertyAccessExpression(callee) ||
+          !ts.isIdentifier(callee.expression) ||
+          callee.expression.text !== "row"
+        ) return false;
+        const arg = call.arguments[0];
+        return arg !== undefined && ts.isPropertyAccessExpression(arg) &&
+          ts.isIdentifier(arg.expression) && arg.expression.text === "entry";
+      }),
+      "expected dynamic key access not to lower to row.key(entry.…)",
     );
   },
 );
@@ -716,9 +1059,22 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "const row = EntryRow({");
+    const root = parseModule(output);
     assert(
-      !output.includes("EntryRow: EntryRow"),
+      callsNamed(root, "EntryRow").some((call) =>
+        call.parent && ts.isVariableDeclaration(call.parent) &&
+        ts.isIdentifier(call.parent.name) && call.parent.name.text === "row"
+      ),
+      "expected `const row = EntryRow(...)`",
+    );
+    // No `EntryRow: EntryRow` capture property — the module-scope factory must
+    // stay in lexical scope, not be threaded through derive data.
+    assert(
+      !collect(root, ts.isPropertyAssignment).some((prop) =>
+        ts.isIdentifier(prop.name) && prop.name.text === "EntryRow" &&
+        ts.isIdentifier(prop.initializer) &&
+        prop.initializer.text === "EntryRow"
+      ),
       "expected module-scope pattern factory to stay in lexical scope instead of being captured as derive data",
     );
   },
@@ -756,13 +1112,33 @@ export default pattern(() => {
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "const authManager = createAuthManager({");
-    assertStringIncludes(output, "accountType: selectedAccountType,");
+    const root = parseModule(output);
+    // `const authManager = createAuthManager({ accountType: selectedAccountType })`.
+    const factoryCall = callsNamed(root, "createAuthManager").find((call) =>
+      call.parent && ts.isVariableDeclaration(call.parent) &&
+      ts.isIdentifier(call.parent.name) &&
+      call.parent.name.text === "authManager"
+    );
     assert(
-      !/__ctHelpers\.derive\([\s\S]{0,280}createAuthManager\(\{[\s\S]{0,120}accountType: selectedAccountType[\s\S]{0,120}\}\)\)/
-        .test(
-          output,
+      factoryCall,
+      "expected `const authManager = createAuthManager(...)`",
+    );
+    const arg = factoryCall.arguments[0];
+    assert(
+      arg && ts.isObjectLiteralExpression(arg) &&
+        arg.properties.some((prop) =>
+          ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) &&
+          prop.name.text === "accountType" &&
+          ts.isIdentifier(prop.initializer) &&
+          prop.initializer.text === "selectedAccountType"
         ),
+      "expected accountType: selectedAccountType argument",
+    );
+    // The factory call is not nested inside any derive call.
+    assert(
+      !callsNamed(root, "createAuthManager").some((call) =>
+        isInsideCallNamed(call, "derive")
+      ),
       "expected opaque-returning factory helper to stay structural instead of being wrapped in derive",
     );
   },
@@ -784,14 +1160,45 @@ export default pattern<{ values: string[] }>(({ values }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const normalized = output.replace(/\s+/g, " ");
+    const root = parseModule(output);
 
     // computed(() => summarize(values.get())) closure-extracts `values` and
     // lowers to a hoisted lift; after CT-1644 Phase 2 the call site applies
     // the hoisted const: const result = __cfLift_N({ values: values }).for(...)
-    assertMatch(
-      normalized,
-      /const result = __cfLift_\d+\(\{ values: values \}\)\.for\("result", true\);/,
+    const resultDecl = collect(root, ts.isVariableDeclaration).find((decl) =>
+      ts.isIdentifier(decl.name) && decl.name.text === "result"
+    );
+    assert(resultDecl?.initializer, "expected a result declaration");
+    const forCall = resultDecl.initializer;
+    assert(
+      ts.isCallExpression(forCall) &&
+        ts.isPropertyAccessExpression(forCall.expression) &&
+        forCall.expression.name.text === "for",
+      "expected result to bind a `.for(...)` call",
+    );
+    assertEquals(
+      forCall.arguments.map((a) => literalToValue(a)),
+      ["result", true],
+    );
+    // The `.for` receiver applies a hoisted lift with `{ values: values }`.
+    const liftApply = forCall.expression.expression;
+    assert(
+      ts.isCallExpression(liftApply) && ts.isIdentifier(liftApply.expression) &&
+        /^__cfLift_\d+$/.test(liftApply.expression.text),
+      "expected the .for receiver to be a hoisted __cfLift_N application",
+    );
+    const liftArg = liftApply.arguments[0];
+    assert(
+      liftArg && ts.isObjectLiteralExpression(liftArg) &&
+        liftArg.properties.some((prop) =>
+          (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) &&
+            prop.name.text === "values" &&
+            ts.isIdentifier(prop.initializer) &&
+            prop.initializer.text === "values") ||
+          (ts.isShorthandPropertyAssignment(prop) &&
+            prop.name.text === "values")
+        ),
+      "expected the hoisted lift applied with the `values` capture",
     );
   },
 );
@@ -851,23 +1258,92 @@ export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, 'const onVoteYes = () => myVote === "yes"');
-    assertStringIncludes(output, "boundClearVote.send({ itemId: iid })");
-    assertStringIncludes(
-      output,
-      'boundCastVote.send({ itemId: iid, vote: "yes" })',
+    const root = parseModule(output);
+    const onVoteYesDecl = collect(root, ts.isVariableDeclaration).find((decl) =>
+      ts.isIdentifier(decl.name) && decl.name.text === "onVoteYes"
     );
+    assert(onVoteYesDecl?.initializer, "expected an onVoteYes declaration");
+
+    // The handler stays function-valued: a plain arrow whose body is the
+    // imperative ternary `myVote === "yes" ? … : …`.
+    const arrow = onVoteYesDecl.initializer;
+    assert(
+      ts.isArrowFunction(arrow),
+      "local event handler variable must stay a plain arrow function",
+    );
+    const ternary = ts.isParenthesizedExpression(arrow.body)
+      ? arrow.body.expression
+      : arrow.body;
+    assert(
+      ts.isConditionalExpression(ternary) &&
+        ts.isBinaryExpression(ternary.condition) &&
+        ts.isIdentifier(ternary.condition.left) &&
+        ternary.condition.left.text === "myVote" &&
+        ternary.condition.operatorToken.kind ===
+          ts.SyntaxKind.EqualsEqualsEqualsToken &&
+        ts.isStringLiteralLike(ternary.condition.right) &&
+        ternary.condition.right.text === "yes",
+      'expected the handler body to be the `myVote === "yes"` ternary',
+    );
+
+    // Both branches keep their `.send({...})` calls. The `iid` argument is a
+    // reactive identifier, so assert on the property shape rather than
+    // evaluating the object literal.
+    const sendCallOn = (receiver: string): ts.CallExpression | undefined =>
+      callsNamed(root, "send").find((call) =>
+        ts.isPropertyAccessExpression(call.expression) &&
+        ts.isIdentifier(call.expression.expression) &&
+        call.expression.expression.text === receiver
+      );
+    const propNames = (call: ts.CallExpression): string[] => {
+      const arg = call.arguments[0];
+      if (!arg || !ts.isObjectLiteralExpression(arg)) return [];
+      return arg.properties.flatMap((prop) =>
+        prop.name && ts.isIdentifier(prop.name) ? [prop.name.text] : []
+      );
+    };
+    const itemIdReadsIid = (call: ts.CallExpression): boolean => {
+      const arg = call.arguments[0] as ts.ObjectLiteralExpression;
+      return arg.properties.some((prop) =>
+        ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) &&
+        prop.name.text === "itemId" && ts.isIdentifier(prop.initializer) &&
+        prop.initializer.text === "iid"
+      );
+    };
+    const clearSend = sendCallOn("boundClearVote");
+    assert(clearSend, "expected boundClearVote.send(...)");
+    assertEquals(propNames(clearSend), ["itemId"]);
+    assert(
+      itemIdReadsIid(clearSend),
+      "expected boundClearVote.send itemId: iid",
+    );
+    const castSend = sendCallOn("boundCastVote");
+    assert(castSend, "expected boundCastVote.send(...)");
+    assertEquals(propNames(castSend), ["itemId", "vote"]);
+    assert(itemIdReadsIid(castSend), "expected boundCastVote.send itemId: iid");
+    const castVoteProp = (castSend.arguments[0] as ts.ObjectLiteralExpression)
+      .properties.find((prop) =>
+        ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) &&
+        prop.name.text === "vote"
+      );
+    assert(
+      castVoteProp && ts.isPropertyAssignment(castVoteProp) &&
+        ts.isStringLiteralLike(castVoteProp.initializer) &&
+        castVoteProp.initializer.text === "yes",
+      'expected boundCastVote.send vote: "yes"',
+    );
+
     // After CT-1644 Phase 2 a genuinely reactive computed lowers to a hoisted
     // lift whose call site is `const onVoteYes = __cfLift_N(...)`. The local
-    // event handler must stay a plain arrow, so no such hoisted application is
-    // assigned to onVoteYes.
+    // event handler must stay a plain arrow, so its initializer is not a
+    // lift application.
     assert(
-      !output.includes("const onVoteYes = __cfHelpers.lift(") &&
-        !/const onVoteYes = __cfLift_\d+\(/.test(output),
+      !ts.isCallExpression(arrow),
       "local event handler variable must not become a reactive cell containing a function",
     );
+    // The handler body contains no ifElse lowering.
     assert(
-      !output.includes("=> () => __cfHelpers.ifElse("),
+      callsNamed(root, "ifElse").length === 0,
       "local event handler body must keep imperative ternary semantics",
     );
   },
@@ -890,11 +1366,41 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
       types: COMMONFABRIC_TYPES,
     });
 
+    const root = parseModule(output);
+    // The eager `const raw = enabled.get()` read must not survive.
     assert(
-      !output.includes("const raw = enabled.get();"),
+      !collect(root, ts.isVariableDeclaration).some((decl) => {
+        if (!ts.isIdentifier(decl.name) || decl.name.text !== "raw") {
+          return false;
+        }
+        const init = decl.initializer;
+        return init !== undefined && ts.isCallExpression(init) &&
+          ts.isPropertyAccessExpression(init.expression) &&
+          init.expression.name.text === "get" &&
+          ts.isIdentifier(init.expression.expression) &&
+          init.expression.expression.text === "enabled";
+      }),
       "expected the eager cell read to be lowered into a derive before the IIFE body uses it",
     );
-    assertStringIncludes(output, "({ enabled }) => enabled.get()");
+    // A derive arrow `({ enabled }) => enabled.get()` takes over the read.
+    assert(
+      collect(root, ts.isArrowFunction).some((arrow) => {
+        const param = arrow.parameters[0];
+        const hasEnabledBinding = param !== undefined &&
+          ts.isObjectBindingPattern(param.name) &&
+          param.name.elements.some((el) =>
+            ts.isIdentifier(el.name) && el.name.text === "enabled"
+          );
+        if (!hasEnabledBinding || ts.isBlock(arrow.body)) return false;
+        const body = arrow.body;
+        return ts.isCallExpression(body) &&
+          ts.isPropertyAccessExpression(body.expression) &&
+          body.expression.name.text === "get" &&
+          ts.isIdentifier(body.expression.expression) &&
+          body.expression.expression.text === "enabled";
+      }),
+      "expected a derive arrow `({ enabled }) => enabled.get()`",
+    );
   },
 );
 
@@ -931,39 +1437,40 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     });
     // computed(() => options.length > 0 ? options[0].title : null) closure-
     // extracts `options` and lowers to a hoisted lift. After CT-1644 Phase 2
-    // the schema-bearing decl lives at `const __cfLift_N = __cfHelpers.lift(`
-    // and the call site is `const minimalNullable = __cfLift_N({ options })`.
-    const minimalNullableSite = output.match(
-      /const minimalNullable = (__cfLift_\d+)\(/,
+    // the schema-bearing decl is `const __cfLift_N = __cfHelpers.lift(cb,
+    // argSchema, resSchema)` and the call site applies it to `{ options }`.
+    const root = parseModule(output);
+    const { argSchema, resSchema } = liftSchemasFor(root, "minimalNullable");
+
+    // Input schema keeps `options` array-shaped with object items carrying
+    // `title` — never shrunk to an object with numeric string keys.
+    const options = (argSchema.properties as Record<string, unknown>)
+      .options as Record<string, unknown>;
+    assertEquals(options.type, "array");
+    const items = options.items as Record<string, unknown>;
+    assertEquals(items.type, "object");
+    assertEquals(
+      ((items.properties as Record<string, unknown>).title as Record<
+        string,
+        unknown
+      >).type,
+      "string",
     );
     assert(
-      minimalNullableSite !== null,
-      "expected transformed minimalNullable lift-applied call",
-    );
-    const minimalNullableLiftId = minimalNullableSite[1];
-    const minimalNullableStart = output.indexOf(
-      `const ${minimalNullableLiftId} = __cfHelpers.lift`,
+      !("0" in (items.properties as Record<string, unknown>)),
+      "expected array items schema not to shrink to numeric-key object",
     );
     assert(
-      minimalNullableStart >= 0,
-      "expected hoisted minimalNullable lift declaration",
-    );
-    const minimalNullableWindow = output.slice(
-      minimalNullableStart,
-      minimalNullableStart + 1200,
+      !Array.isArray(options.required) ||
+        !(options.required as string[]).includes("0"),
+      "expected the input schema not to require object-style array members",
     );
 
-    assertStringIncludes(minimalNullableWindow, 'type: "array"');
-    assertStringIncludes(minimalNullableWindow, "items:");
-    assertStringIncludes(minimalNullableWindow, "title:");
-    assertStringIncludes(minimalNullableWindow, 'type: "null"');
+    // Result schema is the nullable `string | null` produced by the ternary.
+    const resultTypes = collectSchemaTypes(resSchema);
     assert(
-      !minimalNullableWindow.includes('properties: {\n        "0"'),
-      "expected the derive input schema to stay array-shaped, not shrink to an object with numeric keys",
-    );
-    assert(
-      !minimalNullableWindow.includes('required: ["length", "0"]'),
-      "expected the derive input schema not to require object-style array members",
+      resultTypes.includes("null"),
+      "expected the nullable result schema to admit null",
     );
   },
 );
@@ -1001,24 +1508,21 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["my
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1644 Phase 2, computed() lowers to a hoisted lift:
-    //   const __cfLift_N = __cfHelpers.lift({argSchema}, {resSchema}, cb);
-    // The hoisted decl carries the capture's input schema; it is the first
-    // __cfHelpers.lift( occurrence in the module.
-    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
-    // (`lift(`); match the helper-call head either way.
-    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
-    assert(
-      liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
-    );
-    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+    // After CT-1644 Phase 2, computed() lowers to a hoisted lift carrying the
+    // capture's input schema; it is the first __cfHelpers.lift( in the module.
+    const root = parseModule(output);
+    const argSchema = firstLiftArgSchema(root);
 
-    // Capture-input properties appear in the hoisted lift's argument schema.
-    assertStringIncludes(liftWindow, "displayName: {");
-    assertStringIncludes(liftWindow, 'type: "string"');
-    assertStringIncludes(liftWindow, '"default": ""');
-    assertStringIncludes(liftWindow, 'scope: "user"');
+    // The destructured `displayName` capture keeps its PerUser string default.
+    const displayName = (argSchema.properties as Record<string, unknown>)
+      .displayName as Record<
+        string,
+        unknown
+      >;
+    assert(displayName, "expected displayName in the lift argument schema");
+    assertEquals(displayName.type, "string");
+    assertEquals(displayName["default"], "");
+    assertEquals(displayName.scope, "user");
   },
 );
 
@@ -1042,20 +1546,22 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) 
       types: COMMONFABRIC_TYPES,
     });
     // After CT-1644 Phase 2, computed() lowers to a hoisted lift whose decl is
-    // the first __cfHelpers.lift( occurrence in the module.
-    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
-    // (`lift(`); match the helper-call head either way.
-    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
-    assert(
-      liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
-    );
-    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+    // the first __cfHelpers.lift( in the module.
+    const root = parseModule(output);
+    const argSchema = firstLiftArgSchema(root);
 
-    assertStringIncludes(liftWindow, "draftTitle: {");
-    assertStringIncludes(liftWindow, 'type: "string"');
-    assertStringIncludes(liftWindow, '"default": ""');
-    assertStringIncludes(liftWindow, "asCell:");
+    const draftTitle = (argSchema.properties as Record<string, unknown>)
+      .draftTitle as Record<
+        string,
+        unknown
+      >;
+    assert(draftTitle, "expected draftTitle in the lift argument schema");
+    assertEquals(draftTitle.type, "string");
+    assertEquals(draftTitle["default"], "");
+    assert(
+      Array.isArray(draftTitle.asCell),
+      "expected the Writable capture to carry an asCell descriptor",
+    );
   },
 );
 
@@ -1079,19 +1585,25 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) 
       types: COMMONFABRIC_TYPES,
     });
     // After CT-1644 Phase 2, computed() lowers to a hoisted lift whose decl is
-    // the first __cfHelpers.lift( occurrence in the module.
-    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
-    // (`lift(`); match the helper-call head either way.
-    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
-    assert(
-      liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
-    );
-    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+    // the first __cfHelpers.lift( in the module.
+    const root = parseModule(output);
+    const argSchema = firstLiftArgSchema(root);
 
-    assertStringIncludes(liftWindow, "selections:");
     assert(
-      !liftWindow.includes("AnonymousType_"),
+      "selections" in (argSchema.properties as Record<string, unknown>),
+      "expected selections in the lift argument schema",
+    );
+    // No orphan anonymous-type ref anywhere in the evaluated schema.
+    const hasAnonymousRef = (value: unknown): boolean => {
+      if (typeof value === "string") return value.includes("AnonymousType_");
+      if (Array.isArray(value)) return value.some(hasAnonymousRef);
+      if (value && typeof value === "object") {
+        return Object.values(value).some(hasAnonymousRef);
+      }
+      return false;
+    };
+    assert(
+      !hasAnonymousRef(argSchema),
       "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
     );
   },
@@ -1119,22 +1631,19 @@ export default pattern<Input>(({ departments }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1644 Phase 2 the materializer options live in the hoisted
-    // decl `const __cfLift_N = __cfHelpers.lift(...)`; the call site is
-    // `const init = __cfLift_N(...)`.
-    const initSite = output.match(/const init = (__cfLift_\d+)\(/);
+    // After CT-1644 Phase 2 the materializer options live in the hoisted decl
+    // `const __cfLift_N = __cfHelpers.lift(cb, argSchema, resSchema, options)`;
+    // the call site is `const init = __cfLift_N(...)`. The options are the last
+    // argument, a plain object literal (not a JSONSchema).
+    const root = parseModule(output);
+    const liftCall = liftCallFor(root, "init");
+    const optionsArg = liftCall.arguments.at(-1)!;
     assert(
-      initSite !== null,
-      "expected computed() to lower to a hoisted lift call site for init",
+      ts.isObjectLiteralExpression(optionsArg),
+      "expected a trailing materializer options object",
     );
-    const initStart = output.indexOf(
-      `const ${initSite[1]} = __cfHelpers.lift`,
-    );
-    assert(initStart >= 0, "expected hoisted lift declaration for init");
-    const liftWindow = output.slice(initStart, initStart + 1400);
-
-    assertStringIncludes(liftWindow, "materializerWriteInputPaths");
-    assertStringIncludes(liftWindow, '["departments"]');
+    const options = literalToValue(optionsArg) as Record<string, unknown>;
+    assertEquals(options.materializerWriteInputPaths, [["departments"]]);
   },
 );
 
@@ -1159,20 +1668,30 @@ export default pattern<Input>(({ departments }) => {
     });
     // After CT-1644 Phase 2 the schema/options live in the hoisted decl
     // `const __cfLift_N = __cfHelpers.lift(...)`; the call site is
-    // `const count = __cfLift_N(...)`.
-    const countSite = output.match(/const count = (__cfLift_\d+)\(/);
+    // `const count = __cfLift_N(...)`. A readonly computation carries no
+    // materializer options, so no lift argument mentions
+    // materializerWriteInputPaths.
+    const root = parseModule(output);
+    const liftCall = liftCallFor(root, "count");
+    const hasMaterializerKey = (value: unknown): boolean => {
+      if (Array.isArray(value)) return value.some(hasMaterializerKey);
+      if (value && typeof value === "object") {
+        return Object.keys(value).includes("materializerWriteInputPaths") ||
+          Object.values(value).some(hasMaterializerKey);
+      }
+      return false;
+    };
     assert(
-      countSite !== null,
-      "expected computed() to lower to a hoisted lift call site for count",
-    );
-    const countStart = output.indexOf(
-      `const ${countSite[1]} = __cfHelpers.lift`,
-    );
-    assert(countStart >= 0, "expected hoisted lift declaration for count");
-    const liftWindow = output.slice(countStart, countStart + 1200);
-
-    assert(
-      !liftWindow.includes("materializerWriteInputPaths"),
+      !liftCall.arguments.some((arg) => {
+        if (
+          !ts.isObjectLiteralExpression(arg) && !ts.isSatisfiesExpression(arg)
+        ) return false;
+        try {
+          return hasMaterializerKey(literalToValue(arg));
+        } catch {
+          return false;
+        }
+      }),
       "readonly computed() should remain a normal pull computation",
     );
   },

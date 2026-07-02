@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import type { CapabilityParamSummary } from "../src/core/mod.ts";
@@ -13,6 +13,73 @@ import {
   printTypeNode,
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
+import { collect, parseModule } from "./transformed-ast.ts";
+
+// ---------------------------------------------------------------------------
+// Structural inspection of printed type nodes.
+//
+// `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
+// `assertStringIncludes` is weak: it matches on formatting and cannot tell a
+// property named `title` apart from the word `title` appearing anywhere. These
+// helpers reparse the printed type node and expose its members as real AST
+// nodes so tests can assert on property names, optional flags, exact member
+// types, and the shape of the root node.
+// ---------------------------------------------------------------------------
+
+/** Reparse a printed type node into a `ts.TypeNode`. */
+function parseType(printed: string): ts.TypeNode {
+  const decl = collect(
+    parseModule(`type __T = ${printed};`),
+    ts.isTypeAliasDeclaration,
+  )[0];
+  if (!decl) throw new Error(`Could not parse type node: ${printed}`);
+  return decl.type;
+}
+
+interface PropInfo {
+  optional: boolean;
+  type: string;
+}
+
+/**
+ * Every property signature reachable under `node`, keyed by name, carrying its
+ * optional flag and the printed text of its declared type. Nested literals
+ * contribute their own members, so `unused` being absent from the map means it
+ * appears nowhere in the shape.
+ */
+function props(node: ts.Node): Map<string, PropInfo> {
+  const sf = node.getSourceFile();
+  const out = new Map<string, PropInfo>();
+  for (const signature of collect(node, ts.isPropertySignature)) {
+    const name = ts.isIdentifier(signature.name)
+      ? signature.name.text
+      : signature.name.getText(sf);
+    out.set(name, {
+      optional: !!signature.questionToken,
+      type: signature.type ? signature.type.getText(sf) : "",
+    });
+  }
+  return out;
+}
+
+/** Reparse the printed shrink result and return its member map. */
+function shrunkProps(result: ts.TypeNode, sourceFile: ts.SourceFile): {
+  node: ts.TypeNode;
+  props: Map<string, PropInfo>;
+} {
+  const node = parseType(printTypeNode(result, sourceFile));
+  return { node, props: props(node) };
+}
+
+/** True when `node` contains a reference to the qualified name `left.right`. */
+function hasQualifiedRef(node: ts.Node, left: string, right: string): boolean {
+  return collect(node, ts.isTypeReferenceNode).some((ref) => {
+    const name = ref.typeName;
+    return ts.isQualifiedName(name) &&
+      ts.isIdentifier(name.left) && name.left.text === left &&
+      name.right.text === right;
+  });
+}
 
 function createProgram(source: string): {
   sourceFile: ts.SourceFile;
@@ -268,12 +335,12 @@ Deno.test("applyShrinkAndWrap preserves full array item shapes for direct array 
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "people");
-  assertStringIncludes(printed, "active");
-  assertStringIncludes(printed, "name");
-  assertStringIncludes(printed, "priorityRank");
-  assertEquals(printed.includes("other"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assert(members.has("people"));
+  assertEquals(members.get("active")?.type, "boolean");
+  assertEquals(members.get("name")?.type, "string");
+  assertEquals(members.get("priorityRank")?.type, "number");
+  assertEquals(members.has("other"), false);
 });
 
 Deno.test("applyShrinkAndWrap keeps numeric array access array-shaped", () => {
@@ -429,10 +496,15 @@ Deno.test("applyShrinkAndWrap defaults-only fallback expands repeated child leav
     "defaults_only",
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "right: {\n            a: string;");
-  assertStringIncludes(printed, "\n            b: string;");
-  assertEquals(printed.includes("right: Shared"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  // Both `left` and `right` are expanded into inline literals with `a` and `b`
+  // leaves rather than left as `Shared` references.
+  assertEquals(members.get("a")?.type, "string");
+  assertEquals(members.get("b")?.type, "string");
+  const right = collect(node, ts.isPropertySignature).find((signature) =>
+    ts.isIdentifier(signature.name) && signature.name.text === "right"
+  );
+  assert(right && right.type && ts.isTypeLiteralNode(right.type));
 });
 
 Deno.test("applyShrinkAndWrap preserves nested primitive leaves for property-only access", () => {
@@ -455,9 +527,9 @@ Deno.test("applyShrinkAndWrap preserves nested primitive leaves for property-onl
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "text: string;");
-  assertEquals(printed.includes("length: number"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("text")?.type, "string");
+  assertEquals(members.has("length"), false);
 });
 
 Deno.test("applyShrinkAndWrap turns identity-only wrapped inputs into OpaqueCell<unknown>", () => {
@@ -563,11 +635,11 @@ Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<un
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "left: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "right: __cfHelpers.OpaqueCell<unknown>");
-  assertEquals(printed.includes("name"), false);
-  assertEquals(printed.includes("nested"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("left")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("right")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.has("name"), false);
+  assertEquals(members.has("nested"), false);
 });
 
 Deno.test("applyShrinkAndWrap turns read-only cell leaves into ReadonlyCell", () => {
@@ -597,9 +669,9 @@ Deno.test("applyShrinkAndWrap turns read-only cell leaves into ReadonlyCell", ()
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "value: __cfHelpers.ReadonlyCell<number>");
-  assertEquals(printed.includes("untouched"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("value")?.type, "__cfHelpers.ReadonlyCell<number>");
+  assertEquals(members.has("untouched"), false);
 });
 
 Deno.test("applyShrinkAndWrap turns opaque derivation cell leaves into OpaqueCell", () => {
@@ -628,10 +700,12 @@ Deno.test("applyShrinkAndWrap turns opaque derivation cell leaves into OpaqueCel
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "items: __cfHelpers.OpaqueCell");
-  assertStringIncludes(printed, "name: string");
-  assertEquals(printed.includes("untouched"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  const items = members.get("items");
+  assert(items && hasQualifiedRef(node, "__cfHelpers", "OpaqueCell"));
+  assert(items.type.startsWith("__cfHelpers.OpaqueCell<"));
+  assertEquals(members.get("name")?.type, "string");
+  assertEquals(members.has("untouched"), false);
 });
 
 Deno.test("applyShrinkAndWrap turns comparable cell leaves into ComparableCell<unknown>", () => {
@@ -662,11 +736,17 @@ Deno.test("applyShrinkAndWrap turns comparable cell leaves into ComparableCell<u
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "left: __cfHelpers.ComparableCell<unknown>");
-  assertStringIncludes(printed, "right: __cfHelpers.ComparableCell<unknown>");
-  assertEquals(printed.includes("name"), false);
-  assertEquals(printed.includes("nested"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(
+    members.get("left")?.type,
+    "__cfHelpers.ComparableCell<unknown>",
+  );
+  assertEquals(
+    members.get("right")?.type,
+    "__cfHelpers.ComparableCell<unknown>",
+  );
+  assertEquals(members.has("name"), false);
+  assertEquals(members.has("nested"), false);
 });
 
 Deno.test("applyShrinkAndWrap lets identity containers cover retained child paths", () => {
@@ -692,10 +772,10 @@ Deno.test("applyShrinkAndWrap lets identity containers cover retained child path
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "item: unknown");
-  assertEquals(printed.includes("active"), false);
-  assertEquals(printed.includes("name"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("item")?.type, "unknown");
+  assertEquals(members.has("active"), false);
+  assertEquals(members.has("name"), false);
 });
 
 Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item fields", () => {
@@ -723,12 +803,12 @@ Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item field
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "id: string;");
-  assertStringIncludes(printed, "stage: string;");
-  assertStringIncludes(printed, "owner: string;");
-  assertEquals(printed.includes("unused"), false);
-  assertEquals(printed.includes("nested"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("id")?.type, "string");
+  assertEquals(members.get("stage")?.type, "string");
+  assertEquals(members.get("owner")?.type, "string");
+  assertEquals(members.has("unused"), false);
+  assertEquals(members.has("nested"), false);
 });
 
 Deno.test("applyShrinkAndWrap preserves inherited interface fields in array unions", () => {
@@ -760,11 +840,11 @@ Deno.test("applyShrinkAndWrap preserves inherited interface fields in array unio
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "id: string;");
-  assertStringIncludes(printed, "score: number;");
-  assertEquals(printed.includes("name"), false);
-  assertEquals(printed.includes("unused"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("id")?.type, "string");
+  assertEquals(members.get("score")?.type, "number");
+  assertEquals(members.has("name"), false);
+  assertEquals(members.has("unused"), false);
 });
 
 Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven shrinking", () => {
@@ -795,11 +875,11 @@ Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "[CF_SELF]?: {");
-  assertStringIncludes(printed, "id: string;");
-  assertEquals(printed.includes("title"), false);
-  assertEquals(printed.includes("value"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("[CF_SELF]")?.optional, true);
+  assertEquals(members.get("id")?.type, "string");
+  assertEquals(members.has("title"), false);
+  assertEquals(members.has("value"), false);
 });
 
 Deno.test("applyCapabilityDefaultsToTypeNode applies defaults through tuples and unions", () => {
@@ -829,14 +909,16 @@ Deno.test("applyCapabilityDefaultsToTypeNode applies defaults through tuples and
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(
-    printed,
-    'name?: __cfHelpers.Default<string, "Anonymous">;',
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("name")?.optional, true);
+  assertEquals(
+    members.get("name")?.type,
+    '__cfHelpers.Default<string, "Anonymous">',
   );
-  assertStringIncludes(
-    printed,
-    'fallback?: __cfHelpers.Default<string, "Fallback">;',
+  assertEquals(members.get("fallback")?.optional, true);
+  assertEquals(
+    members.get("fallback")?.type,
+    '__cfHelpers.Default<string, "Fallback">',
   );
 });
 
@@ -892,13 +974,13 @@ Deno.test("applyShrinkAndWrap descends identity paths through named interface re
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
+  const { props: members } = shrunkProps(result, sourceFile);
   // The reference resolves to declared members, recurses into `inner`, and
   // wraps the `keep` leaf. Identity-path application transforms the targeted
   // leaf in place and leaves the surrounding structure intact.
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
-  assertStringIncludes(printed, "other: string");
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
+  assertEquals(members.get("other")?.type, "string");
 });
 
 Deno.test("applyShrinkAndWrap rebuilds inline literals when a nested identity leaf changes", () => {
@@ -927,10 +1009,10 @@ Deno.test("applyShrinkAndWrap rebuilds inline literals when a nested identity le
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
-  assertStringIncludes(printed, "other: string");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
+  assertEquals(members.get("other")?.type, "string");
 });
 
 Deno.test("applyShrinkAndWrap returns an inline literal unchanged when a nested identity path does not resolve", () => {
@@ -955,11 +1037,11 @@ Deno.test("applyShrinkAndWrap returns an inline literal unchanged when a nested 
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
+  const { node, props: members } = shrunkProps(result, sourceFile);
   // No member changes, so the literal (and its `a` member) is returned as-is.
-  assertStringIncludes(printed, "x: string");
-  assertStringIncludes(printed, "b: string");
-  assertEquals(printed.includes("OpaqueCell"), false);
+  assertEquals(members.get("x")?.type, "string");
+  assertEquals(members.get("b")?.type, "string");
+  assertEquals(hasQualifiedRef(node, "__cfHelpers", "OpaqueCell"), false);
 });
 
 Deno.test("applyShrinkAndWrap leaves array elements untouched when an identity item path does not resolve", () => {
@@ -1013,12 +1095,13 @@ Deno.test("applyShrinkAndWrap descends identity item paths through readonly arra
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
+  const { node, props: members } = shrunkProps(result, sourceFile);
   // The readonly-array node recurses into its element type, resolves the item
   // interface's members, and wraps the requested leaf in place.
-  assertStringIncludes(printed, "readonly");
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
+  assert(ts.isTypeOperatorNode(node));
+  assertEquals(node.operator, ts.SyntaxKind.ReadonlyKeyword);
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
 });
 
 Deno.test("wrapTypeNodeWithCapability emits the expected cell wrappers", () => {
@@ -1034,10 +1117,16 @@ Deno.test("wrapTypeNodeWithCapability emits the expected cell wrappers", () => {
   ] as const;
 
   for (const [capability, wrapperName] of wrappers) {
-    const printed = printTypeNode(
+    const node = parseType(printTypeNode(
       wrapTypeNodeWithCapability(valueNode, capability, ts.factory),
       sourceFile,
+    ));
+    assert(ts.isTypeReferenceNode(node));
+    assert(hasQualifiedRef(node, "__cfHelpers", wrapperName));
+    assert(node.typeArguments && node.typeArguments.length === 1);
+    assertEquals(
+      node.typeArguments[0]!.getText(node.getSourceFile()),
+      "string",
     );
-    assertStringIncludes(printed, `__cfHelpers.${wrapperName}<string>`);
   }
 });

@@ -1,7 +1,20 @@
 import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
-import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
+import {
+  analyzeFunctionCapabilities,
+  type MergeablePushMisuse,
+} from "../../src/policy/mod.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
+
+function collectMergeablePushMisuses(
+  source: string,
+): MergeablePushMisuse[] {
+  const findings: MergeablePushMisuse[] = [];
+  analyzeFunctionCapabilities(parseFirstCallback(source), {
+    mergeablePushMisuseSink: (finding) => findings.push(finding),
+  });
+  return findings;
+}
 
 function parseFirstCallback(
   source: string,
@@ -2133,3 +2146,127 @@ Deno.test("Capability analysis tracks reads through a nullish-fallback alias", (
   assert(getPaths(summary, "a").readPaths.includes("user"));
   assert(getPaths(summary, "b").readPaths.includes("user"));
 });
+Deno.test(
+  "Mergeable-push misuse: flags a read-then-push to the same collection",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        if (existing.some((u) => u.name === "a")) return;
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.rootName, "input");
+    assertEquals(findings[0]!.path.join("."), "users");
+    assert(ts.isCallExpression(findings[0]!.node));
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: flags an iterate-then-push to the same collection",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        for (const u of input.key("users")) { u; }
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "users");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: flags a read-then-push in a destructured handler",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = ({ name }, { users, myName }) => {
+        if (myName.get()) return;
+        const existing = users.get();
+        if (existing.some((u) => u.name === name)) return;
+        users.push({ name });
+        myName.set(name);
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "users");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores an unconditional push with no read",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores a push when the read is of a different path",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        input.key("log").get();
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores a read-then-addUnique (the keyed fix)",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        input.key("users").get();
+        input.key("users").addUnique({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores a read-modify-write set",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const current = input.key("users").get();
+        input.key("users").set([...current, { name: "a" }]);
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: records no sites when no sink is provided",
+  () => {
+    // Without a sink the analysis stays a pure capability summary; the
+    // read-then-push above is still classified as read+write (writable).
+    const summary = analyzeFunctionCapabilities(
+      parseFirstCallback(
+        `const fn = (input) => {
+          input.key("users").get();
+          input.key("users").push({ name: "a" });
+        };`,
+      ),
+    );
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+    assertEquals(input!.capability, "writable");
+  },
+);

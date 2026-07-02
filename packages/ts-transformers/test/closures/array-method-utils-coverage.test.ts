@@ -1,6 +1,7 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 
+import { collect } from "../transformed-ast.ts";
 import type { TransformationContext } from "../../src/core/mod.ts";
 import type { CaptureTreeNode } from "../../src/utils/capture-tree.ts";
 import {
@@ -87,14 +88,52 @@ function firstArrowParam(
   return found;
 }
 
-const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
-
-function print(node: ts.Node, file: ts.SourceFile): string {
-  return printer.printNode(ts.EmitHint.Unspecified, node, file);
-}
-
 const passthroughBindingId = (candidate: string): ts.Identifier =>
   ts.factory.createIdentifier(candidate);
+
+/**
+ * The bound leaf identifier names of a binding pattern (or any node containing
+ * binding elements), recursing through nested object and array patterns. This
+ * captures the identifiers a destructuring introduces regardless of how the
+ * printer lays the pattern out.
+ */
+function boundNames(node: ts.Node): string[] {
+  return collect(node, ts.isBindingElement).flatMap((element) =>
+    ts.isIdentifier(element.name) ? [element.name.text] : []
+  );
+}
+
+/** True when `node` contains a rest binding element (`...name`). */
+function hasRestElement(node: ts.Node): boolean {
+  return collect(node, ts.isBindingElement).some((element) =>
+    element.dotDotDotToken !== undefined
+  );
+}
+
+/** The identifiers a printed block reads or returns, by their source text. */
+function identifierTexts(node: ts.Node): Set<string> {
+  return new Set(collect(node, ts.isIdentifier).map((id) => id.text));
+}
+
+/**
+ * True when `node` declares `name` — as a plain `const name = ...` variable or
+ * as a leaf of a destructuring binding.
+ */
+function declaresName(node: ts.Node, name: string): boolean {
+  const asVariable = collect(node, ts.isVariableDeclaration).some((decl) =>
+    ts.isIdentifier(decl.name) && decl.name.text === name
+  );
+  return asVariable || boundNames(node).includes(name);
+}
+
+/** True when `node` contains `return <identifier>;` for the given name. */
+function returnsIdentifier(node: ts.Node, name: string): boolean {
+  return collect(node, ts.isReturnStatement).some((statement) =>
+    statement.expression !== undefined &&
+    ts.isIdentifier(statement.expression) &&
+    statement.expression.text === name
+  );
+}
 
 Deno.test("analyzeElementBinding synthesizes `element` when the callback takes no parameter", () => {
   const { checker } = createProgram("const x = 1;");
@@ -162,9 +201,7 @@ Deno.test("analyzeElementBinding normalizes a plain object destructuring paramet
   assertEquals(analysis.computedAliases.length, 0);
   assert(ts.isObjectBindingPattern(analysis.bindingName));
   assertEquals(analysis.elementIdentifier.text, "element");
-  const text = print(analysis.bindingName, sourceFile);
-  assertStringIncludes(text, "name");
-  assertStringIncludes(text, "value");
+  assertEquals(boundNames(analysis.bindingName), ["name", "value"]);
 });
 
 Deno.test("analyzeElementBinding walks nested object and array binding patterns", () => {
@@ -181,10 +218,10 @@ Deno.test("analyzeElementBinding walks nested object and array binding patterns"
   );
   assertEquals(analysis.computedAliases.length, 0);
   assert(ts.isObjectBindingPattern(analysis.bindingName));
-  const text = print(analysis.bindingName, sourceFile);
   // Nested object and array patterns are rebuilt with their leaf names intact.
-  assertStringIncludes(text, "inner");
-  assertStringIncludes(text, "first");
+  const names = new Set(boundNames(analysis.bindingName));
+  assert(names.has("inner"));
+  assert(names.has("first"));
 });
 
 Deno.test("analyzeElementBinding handles renamed and string-keyed object properties", () => {
@@ -200,9 +237,11 @@ Deno.test("analyzeElementBinding handles renamed and string-keyed object propert
     passthroughBindingId,
   );
   assertEquals(analysis.computedAliases.length, 0);
-  const text = print(analysis.bindingName, sourceFile);
-  assertStringIncludes(text, "renamed");
-  assertStringIncludes(text, "ok");
+  // The renamed property (`label: renamed`) and the string-keyed property
+  // (`"weird-key": ok`) bind their target identifiers, not their source keys.
+  const names = new Set(boundNames(analysis.bindingName));
+  assert(names.has("renamed"));
+  assert(names.has("ok"));
 });
 
 Deno.test("analyzeElementBinding preserves array holes and rest elements", () => {
@@ -219,10 +258,11 @@ Deno.test("analyzeElementBinding preserves array holes and rest elements", () =>
   );
   assertEquals(analysis.computedAliases.length, 0);
   assert(ts.isArrayBindingPattern(analysis.bindingName));
-  const text = print(analysis.bindingName, sourceFile);
   // The leading hole and the rest element are carried through the rebuild.
-  assertStringIncludes(text, "...rest");
-  assertStringIncludes(text, "second");
+  const names = new Set(boundNames(analysis.bindingName));
+  assert(names.has("second"));
+  assert(names.has("rest"));
+  assert(hasRestElement(analysis.bindingName));
 });
 
 Deno.test("analyzeElementBinding recurses into array elements that are themselves binding patterns", () => {
@@ -239,11 +279,11 @@ Deno.test("analyzeElementBinding recurses into array elements that are themselve
   );
   assertEquals(analysis.computedAliases.length, 0);
   assert(ts.isArrayBindingPattern(analysis.bindingName));
-  const text = print(analysis.bindingName, sourceFile);
   // Both the nested array pattern and the nested object pattern are rebuilt.
-  assertStringIncludes(text, "a");
-  assertStringIncludes(text, "b");
-  assertStringIncludes(text, "c");
+  const names = new Set(boundNames(analysis.bindingName));
+  assert(names.has("a"));
+  assert(names.has("b"));
+  assert(names.has("c"));
 });
 
 Deno.test("analyzeElementBinding drops nested object patterns that hold only a computed key inside an array", () => {
@@ -265,8 +305,7 @@ Deno.test("analyzeElementBinding drops nested object patterns that hold only a c
   assertEquals(analysis.computedAliases.length, 1);
   assertEquals(analysis.computedAliases[0].aliasName, "chosen");
   assert(analysis.destructureStatement);
-  const text = print(analysis.destructureStatement, sourceFile);
-  assertStringIncludes(text, "kept");
+  assert(boundNames(analysis.destructureStatement).includes("kept"));
 });
 
 Deno.test("analyzeElementBinding drops nested object patterns that hold only a computed key inside an object", () => {
@@ -286,10 +325,12 @@ Deno.test("analyzeElementBinding drops nested object patterns that hold only a c
   );
   assertEquals(analysis.computedAliases.length, 1);
   assert(analysis.destructureStatement);
-  const text = print(analysis.destructureStatement, sourceFile);
   // The nested-only-computed property is dropped; the sibling plain key stays.
-  assertStringIncludes(text, "kept");
-  assertEquals(text.includes("nested"), false);
+  assert(boundNames(analysis.destructureStatement).includes("kept"));
+  assertEquals(
+    identifierTexts(analysis.destructureStatement).has("nested"),
+    false,
+  );
 });
 
 Deno.test("analyzeElementBinding lifts a computed key into an alias with a residual destructure", () => {
@@ -311,9 +352,10 @@ Deno.test("analyzeElementBinding lifts a computed key into an alias with a resid
   assertEquals(analysis.computedAliases[0].aliasName, "chosen");
   assertEquals(analysis.elementIdentifier.text, "element");
   assert(analysis.destructureStatement);
-  const text = print(analysis.destructureStatement, sourceFile);
-  assertStringIncludes(text, "other");
-  assertStringIncludes(text, "element");
+  // The residual destructure binds the plain `other` property from the
+  // synthesized `element` receiver.
+  assert(boundNames(analysis.destructureStatement).includes("other"));
+  assert(identifierTexts(analysis.destructureStatement).has("element"));
 });
 
 Deno.test("rewriteCallbackBody returns the body unchanged when there are no computed aliases", () => {
@@ -348,9 +390,10 @@ Deno.test("rewriteCallbackBody injects alias and key prologues around an express
   // A concise expression body becomes a block; the key binding and the alias
   // binding are prepended, and the original expression returns from the block.
   assert(ts.isBlock(result));
-  const text = print(result, sourceFile);
-  assertStringIncludes(text, "chosen");
-  assertStringIncludes(text, "return chosen");
+  // The lifted alias `chosen` is bound in the prologue and the original
+  // expression body becomes a `return chosen;`.
+  assert(declaresName(result, "chosen"));
+  assert(returnsIdentifier(result, "chosen"));
 });
 
 Deno.test("rewriteCallbackBody reuses an existing block body when injecting alias prologues", () => {
@@ -370,9 +413,9 @@ Deno.test("rewriteCallbackBody reuses an existing block body when injecting alia
   );
   const result = rewriteCallbackBody(body, analysis, testContext(checker));
   assert(ts.isBlock(result));
-  const text = print(result, sourceFile);
   // The original block's statements are retained after the injected prologue.
-  assertStringIncludes(text, "return chosen");
+  assert(declaresName(result, "chosen"));
+  assert(returnsIdentifier(result, "chosen"));
 });
 
 /** Finds the body of the first arrow function in the source. */
