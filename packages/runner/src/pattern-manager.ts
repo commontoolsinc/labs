@@ -119,6 +119,19 @@ export class PatternManager {
   // instance. The hash is computed with `createRef` purely as a stable digest
   // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
+  // Single-flight dedup for the expensive tail of `loadPatternByIdentity`
+  // (storage closure read + SES evaluation), keyed by `${space}\0${identity}`.
+  // Boot references the same entry several times at once (one load per
+  // referencing piece/system pattern); without this every concurrent miss ran
+  // its own full closure evaluation — measured as 4 identical 9-module SES
+  // evals per cold worker boot, the multiplier behind most of the per-module
+  // boot-floor buckets. Followers await the leader and then resolve their own
+  // symbol from the indexes the leader's evaluation populated — the same path
+  // a load arriving after completion takes.
+  private inProgressByIdentityLoads = new Map<
+    string,
+    Promise<Pattern | undefined>
+  >();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -751,7 +764,6 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
-    const harness = this.runtime.harness;
     // In-memory artifact index: the pattern may already be live this session —
     // an evaluated ESM artifact, or a hand-built pattern given a synthetic
     // pointer via `associatePatternIdentity`. This path is independent of the
@@ -773,6 +785,43 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    const key = `${space}\0${entryIdentity}`;
+    const pending = this.inProgressByIdentityLoads.get(key);
+    if (pending === undefined) {
+      const load = this.loadPatternByIdentityFromStorage(
+        entryIdentity,
+        symbol,
+        space,
+      ).finally(() => this.inProgressByIdentityLoads.delete(key));
+      this.inProgressByIdentityLoads.set(key, load);
+      return await load;
+    }
+    // Follower: the leader's evaluation indexes every symbol of the closure,
+    // so after it settles the in-memory lookups above serve this call. Its
+    // failure is the leader caller's to surface; this call retries on its own
+    // behalf below.
+    await pending.catch(() => {});
+    // Back through the front door: hits the now-populated indexes in the
+    // common case. If the leader failed or did not surface this symbol, the
+    // in-flight entry is gone, so this call becomes the leader of its own
+    // attempt — the same load it would have run without dedup. Each pass
+    // consumes a settled leader, so the recursion is bounded by the number of
+    // concurrent callers.
+    return await this.loadPatternByIdentity(entryIdentity, symbol, space);
+  }
+
+  /**
+   * The storage-backed tail of {@link loadPatternByIdentity}: closure read,
+   * SES evaluation, artifact indexing, and the cold-load recovery fallbacks.
+   * Callers must hold the single-flight slot for `(space, entryIdentity)`.
+   */
+  private async loadPatternByIdentityFromStorage(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
     const runtimeVersion = await getCompileCacheRuntimeVersion();
     if (runtimeVersion === undefined) {
       return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
