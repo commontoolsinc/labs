@@ -416,23 +416,30 @@ export class Runtime {
       experimentalInterpreter: undefined,
       ...options.experimental,
     };
-    if (this.experimental.experimentalInterpreter === undefined) {
-      try {
-        this.experimental.experimentalInterpreter =
-          Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1";
-      } catch {
-        this.experimental.experimentalInterpreter = false;
-      }
-    }
-
-    // Log any overridden experimental flags.
+    // Log any overridden experimental flags (caller-passed only — env
+    // fallbacks resolve below this block so ambient env vars don't spam a
+    // line into every subprocess's stderr).
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.log(
+      // stderr, not stdout: stdout-JSON consumers (the CLI dev pipeline)
+      // must stay clean — same idiom as the CLI's own override log.
+      console.error(
         `Experimental flag overrides: ${overrideFlags.join(", ")}`,
       );
+    }
+
+    if (this.experimental.experimentalInterpreter === undefined) {
+      // Env fallback (CF_EXPERIMENTAL_INTERPRETER=1). Materialize only when
+      // enabled; undefined reads as off.
+      try {
+        if (Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1") {
+          this.experimental.experimentalInterpreter = true;
+        }
+      } catch {
+        // No env access (browser/sandbox): stays undefined = off.
+      }
     }
 
     // Propagate experimental flags to their ambient control points, then read
