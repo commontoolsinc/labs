@@ -81,7 +81,7 @@ import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
 import {
-  identityFromCanonicalSource,
+  getDefiningModule,
   readBindingIdentity,
   recordVerifiedProvenance,
 } from "./verified-provenance.ts";
@@ -1073,20 +1073,21 @@ export class Engine extends EventTarget implements Harness {
       if (typeof implementation !== "function") return;
       // Reject a CONFIRMED cross-module mismatch: a re-exporting module
       // (`export { setName } from "./defn"`) surfaces the same function under
-      // its own identity, but the function's canonical `fn.src` names its
-      // defining module. Provenance is first-write-wins and CFC fails closed on
-      // an identity/`fn.src` mismatch, so letting a re-exporter (possibly
-      // visited first) stamp its identity would make a valid verified artifact
-      // resolve as `unsupported`; dropping the re-exporter's record leaves the
-      // defining module's (matching) record to stick. A non-canonical `src`
-      // (e.g. a standalone-engine load whose src isn't rewritten to
-      // `cf:module/<hash>`) is left ALONE — recording it is harmless (CFC then
-      // fail-closes on its own src check), and blocking it would needlessly
-      // strip the `$implRef` such a module can still resolve by.
-      const srcIdentity = identityFromCanonicalSource(
-        (implementation as { src?: string }).src,
-      );
-      if (srcIdentity !== undefined && srcIdentity !== identity) return;
+      // its own identity. Provenance is first-write-wins, so letting a
+      // re-exporter (possibly visited first here) stamp its identity would give a
+      // genuinely-verified artifact the WRONG (re-exporter's) module identity —
+      // and its `writeAuthorizedBy` claims (which name the defining module) would
+      // then be denied. The defining module stamps `getDefiningModule` at its
+      // own (dependency-ordered) evaluation, so drop any record whose recording
+      // identity disagrees; the defining module's (matching) record sticks. An
+      // UNSTAMPED function (undefined — e.g. a runtime/host module, or a
+      // standalone-engine load) is left ALONE: recording it is harmless.
+      // (This replaces the former canonical-`fn.src` guard; `.src` is now
+      // lazy/debug-only and no longer names the defining module.)
+      const definingIdentity = getDefiningModule(implementation);
+      if (definingIdentity !== undefined && definingIdentity !== identity) {
+        return;
+      }
       const bindingIdentity = readBindingIdentity(value);
       recordVerifiedProvenance(implementation, {
         identity,

@@ -4,7 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
-import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import {
+  getDefiningModule,
+  getVerifiedProvenance,
+} from "../src/harness/verified-provenance.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 
@@ -84,16 +87,20 @@ describe("re-export provenance", () => {
     const module = node!.module as Module;
     const fn = module.implementation as HarnessedFunction;
 
-    // Provenance identity matches the function's own canonical source — the
-    // DEFINING module (handlers.tsx), never the re-exporting entry.
+    // Provenance identity is the DEFINING module (handlers.tsx), never the
+    // re-exporting entry. `.src` is now lazy/debug-only, so the guard is
+    // re-rooted onto the defining-module stamp (recorded at each module's
+    // dependency-ordered evaluation): the defining module's stamp equals the
+    // provenance identity that stuck. Under the bug (re-exporter visited first,
+    // no guard) the re-exporter's identity would have stamped provenance instead,
+    // so these would DIFFER.
     const provenance = getVerifiedProvenance(fn);
     expect(provenance).toBeDefined();
-    expect((fn as { src?: string }).src ?? "").toContain(
-      `cf:module/${provenance!.identity}`,
-    );
+    expect(getDefiningModule(fn)).toBe(provenance!.identity);
 
-    // CFC resolves it as verified — NOT unsupported (the bug would have made a
-    // re-exporter's identity stamp it, failing the fn.src consistency check).
+    // CFC resolves it as verified — NOT unsupported. With the wrong (re-exporter)
+    // identity, a `writeAuthorizedBy` claim naming the defining module would be
+    // denied.
     const identity = resolvePolicyFacingImplementationIdentity(module, {
       implementation: fn,
     });

@@ -68,6 +68,34 @@ export function getVerifiedProvenance(
 }
 
 /**
+ * The content identity of the module that DEFINED an implementation function,
+ * stamped at that module's evaluation (module-record-compiler `execute`). This
+ * is the `.src`-free replacement for the re-exporter provenance guard: a
+ * re-exporting module surfaces the SAME function object under its own identity,
+ * and `recordModuleProvenance` is first-write-wins, so without a discriminator a
+ * re-exporter visited first would stamp its identity onto a function it did not
+ * define. Modules evaluate in dependency order (a re-exporter imports — so runs
+ * after — its definer), and this WeakMap is first-write-wins, so the defining
+ * module's stamp always wins. A WeakMap (not a property) because implementations
+ * are hardened/frozen after creation.
+ *
+ * `.src` USED to serve this role (its canonical `cf:module/<hash>` named the
+ * defining module), but `.src` is now lazy/debug-only, so identity — including
+ * this guard — must not depend on it.
+ */
+const definingModuleByFn = new WeakMap<object, string>();
+
+/** First-write-wins: only the defining (dependency-first) module's stamp sticks. */
+export function recordDefiningModule(fn: unknown, identity: string): void {
+  if (typeof fn !== "function") return;
+  if (!definingModuleByFn.has(fn)) definingModuleByFn.set(fn, identity);
+}
+
+export function getDefiningModule(fn: unknown): string | undefined {
+  return typeof fn === "function" ? definingModuleByFn.get(fn) : undefined;
+}
+
+/**
  * Read the CT-1665 verified-binding annotation off a builder factory (the
  * transformer's `__cfBindVerifiedBinding` attaches it to the factory object,
  * which shares its implementation function with the node module).
