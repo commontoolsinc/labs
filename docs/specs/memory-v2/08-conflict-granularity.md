@@ -104,32 +104,38 @@ reader — the shape it observed changed. A disjoint deep-value `replace` strict
 subset of the recursive one, so it can only remove spurious conflicts, never miss
 a genuine one.
 
-### Known limitation: mergeable creates and parent shape readers
+### Mergeable creates and parent shape readers
 
-Parent injection is keyed off the wire op's static `structural` flag (`add` /
-`remove` / `move`), which marks ops that restructure a container's key set on
-*every* apply. The mergeable ops `append` / `add-unique` / `increment` are not
-structural, because on an existing target they only change a value (an
-already-present array's contents, or a number) and marking them structural would
-over-conflict every parent shape reader against an ordinary append — the
-write-contention the mergeable ops exist to avoid.
+Parent injection is keyed off `patchOpChangesParentKeySet`, not the static
+`structural` flag alone. `structural` (`add` / `remove` / `move`) marks ops that
+restructure a container's key set on *every* apply. The mergeable ops `append` /
+`add-unique` / `increment` are not structural, because on an existing target they
+only change a value (an already-present array's contents, or a number), and
+marking them structural would over-conflict every parent shape reader against an
+ordinary append — the write-contention the mergeable ops exist to avoid.
 
 But those three ops also change the parent's key set in one case: when their
 apply **materializes a previously-absent path** (creating the array/scalar and
 the path to it — e.g. a first `push` to a not-yet-existing list). Whether a
-create happened depends on the pre-state, which the static touched-path matcher
-does not see, so a **cross-session shape-only reader of the parent is not
-invalidated** by such a create. (The creating session's own reactivity is
-unaffected — `buildReactivityPathsForChange` emits the parent path when a key is
-added — and recursive readers of the parent still conflict via the leaf-only
-matcher, since the read path prefixes the created leaf. Only cross-session
-nonRecursive readers of the parent are affected, and only on create-from-absent,
-which schema `Default<[]>` usually preempts.)
+create happened is value-dependent, so the static op tag cannot express it. The
+writer records it instead: the mergeable-op build stamps the wire op's
+`createsKey` flag when its transaction base held no value at the path (see
+`runner storage/mergeable-ops.ts` and the `createsKey` field in
+`packages/memory/v2.ts`), and `patchOpChangesParentKeySet` injects the parent for
+a flagged op. So a cross-session shape-only reader of the parent now conflicts
+with a create-from-absent mergeable op, but not with an append to an
+already-present child.
 
-The correct fix is a **state-aware** matcher that injects the parent path only
-when the committed op actually created the key — determined from the revision's
-pre-state at apply time (comparing before/after at `parentPath(op.path)`) rather
-than from the op tag alone. That is a follow-up beyond the static registry.
+The writer's base is authoritative for the "never miss a genuine conflict"
+guarantee: the *first* commit to create a key necessarily saw it absent and sets
+the flag, so a shape reader whose base predates the create always conflicts; a
+later append to the now-present key does not carry the flag. A stale base can
+only set the flag when the key already existed durably, which over-conflicts a
+parent shape reader conservatively (an extra retry), never missing one.
+
+(Recursive readers of the parent already conflict via the leaf-only matcher —
+the read path prefixes the created leaf — independent of `createsKey`; the flag
+only affects the shape/nonRecursive path.)
 
 ## 3. asCell reference-resolution reads are not value dependencies
 

@@ -2463,11 +2463,19 @@ export class V2StorageTransaction implements IStorageTransaction {
           allowArrayLength: true,
         })
       );
+      // Presence, not definedness: an already-present slot (even holding
+      // `undefined`) does not add a key to its parent, so the op does not
+      // materialize a path and must not stamp `createsKey`.
+      const hadInitialValue = doc.initial.value !== undefined &&
+        hasValueAtPath(doc.initial.value, intent.path, {
+          allowArrayLength: true,
+        });
       const built = buildMergeableIntent(intent, {
         workingArray: Array.isArray(working)
           ? working as FabricValue[]
           : undefined,
         hadInitialArray: Array.isArray(initial),
+        hadInitialValue,
       });
       ops.push(...built.ops);
       suppress.push(...built.suppress);

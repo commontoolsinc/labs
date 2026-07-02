@@ -71,13 +71,13 @@ export type PatchOp =
   // A tail-relative append: `values` are inserted at the array's current tail,
   // with the array (and the path to it) created if absent. Carries no index, so
   // concurrent appends merge against durable state rather than clobbering via a
-  // position computed from a stale base.
-  | { op: "append"; path: string; values: FabricValue[] }
+  // position computed from a stale base. `createsKey` — see below.
+  | { op: "append"; path: string; values: FabricValue[]; createsKey?: true }
   // Set-add by identity: each of `values` is appended at the tail only if no
   // existing element of the array equals it (by stored-value equality), with the
   // array created if absent. Idempotent and commutative, so concurrent adds of
   // distinct elements merge and a repeated add is a no-op against durable state.
-  | { op: "add-unique"; path: string; values: FabricValue[] }
+  | { op: "add-unique"; path: string; values: FabricValue[]; createsKey?: true }
   // Remove every element of the array at `path` that equals `value` by
   // stored-value equality. Idempotent (removing an absent value is a no-op) and
   // resolved against durable state, so it merges with concurrent writes instead
@@ -87,8 +87,22 @@ export type PatchOp =
   // Numeric increment: `by` (which may be negative) is added to the number at
   // `path`, treating an absent value as 0 and creating the path if absent.
   // Applied against durable state, so concurrent increments sum rather than
-  // clobber via last-write-wins.
-  | { op: "increment"; path: string; by: number };
+  // clobber via last-write-wins. `createsKey` — see below.
+  | { op: "increment"; path: string; by: number; createsKey?: true };
+
+// `createsKey` (append / add-unique / increment): set by the writer when the op
+// MATERIALIZES a previously-absent path — its own transaction base held no value
+// at `path`, so applying it adds `path`'s last segment as a key to the parent
+// container. It does not change how the op applies (these ops already
+// create-if-absent); it tells the conflict matcher to invalidate a shape-only
+// (nonRecursive) reader of the parent, whose key set changed. Absent/false means
+// the target already existed, so only its value changed and no parent shape
+// reader need conflict. The writer's base is authoritative for "never miss a
+// genuine conflict": the first commit that creates a key necessarily saw it
+// absent and sets the flag; a later append to the now-present key does not. A
+// stale base can only set the flag when the key already existed durably, which
+// over-conflicts a parent shape reader conservatively (an extra retry), never
+// missing one. See docs/specs/memory-v2/08-conflict-granularity.md.
 
 export interface SetOperation {
   op: "set";

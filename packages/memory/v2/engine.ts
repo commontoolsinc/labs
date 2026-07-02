@@ -3,7 +3,7 @@ import type { FabricValue } from "@commonfabric/api";
 import { runWrite } from "./sqlite/exec.ts";
 import {
   applyPatch,
-  patchOpIsStructural,
+  patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
@@ -3921,10 +3921,13 @@ export const patchOverlapsNonRecursiveRead = (
 
 const touchedPathsForPatch = (patch: PatchOp): string[][] => {
   const leaves = touchedPointerPaths(patch);
-  // Structural ops (add/remove/move) also touch the parent container's key-set,
-  // so a shape-only reader of the parent must be invalidated. Value-only ops
-  // touch only the leaf/array path, which such a reader already prefixes.
-  return patchOpIsStructural(patch)
+  // Ops that change the parent container's key-set — the structural ops
+  // (add/remove/move) and a mergeable op that materialized a previously-absent
+  // path (its `createsKey` flag) — also touch the parent, so a shape-only
+  // reader of the parent must be invalidated. Ops that only change a value at an
+  // already-present path touch only the leaf/array path, which such a reader
+  // already prefixes.
+  return patchOpChangesParentKeySet(patch)
     ? [...leaves, ...leaves.map((path) => parentPath(path))]
     : leaves;
 };
