@@ -315,24 +315,47 @@ mergeable methods to stop false-conflicting and clobbering under contention; the
 favorites, spaces, MRU, and pin lists on the owner-protected home space are the
 highest-value remaining candidates.
 
-## Residual: profile-append-during-rehydration is not fully closed by this change
+## Residual: profile-append-during-rehydration (closed by mergeable-op retry windowing)
 
 This work was motivated by profile creates being lost when issued while the home
 space is rehydrating. The mergeable-append mechanism here is necessary for that
-case and fixes the part where a stale or empty base produced a clobbering or
-position-wrong op. It is not sufficient on its own.
+case: it fixes the part where a stale or empty base produced a clobbering or
+position-wrong op. It was not sufficient on its own. A second failure remained on
+the cross-space, multi-space commit path. That failure is described and closed
+below.
 
-An end-to-end probe — create one profile, reload, then create two more using only
-an idle-wait (no full-sync barrier) between steps, reading a durable count of the
-home `profiles` list — still ends at one. Server-side op tracing during that run
-shows the home `profiles` entity receiving its initial `set` and exactly one
-`append` op (the first, pre-reload create); the two post-reload creates
-produce no append revision on that entity at all. A commit that is rejected on a
-conflict never reaches the revision-apply path, so the two appends are being
-attempted and conflict-rejected (or reverted and not replayed) during the
-post-reload churn — not clobbered at the tail. That is a separate failure: an
-optimistic event-handler write reverted by an unrelated conflict during
-rehydration and never successfully retried (and/or the home rehydration storm
-itself), on the cross-space, multi-space commit path. Closing it needs work on
-the revert/replay of event-handler writes or on eliminating the rehydration
-storm, beyond making the append mergeable.
+A profile create is a multi-space commit. The handler pushes a freshly-created
+`ProfileHome.inSpace()` onto the home `profiles` list, so a single transaction
+both appends to the home space and writes the new profile's own space. A
+multi-space commit runs one per-space commit in order — the child space first,
+then the home space — with no rollback. During the reload storm the home-space
+commit fails repeatedly with transient errors: a stale read, or a same-replica
+race as rehydration applies revisions to the local replica concurrently with the
+commit. The child space, committed first, is already durable, so the new
+profile exists in its own space; but the home-space append keeps failing.
+
+The event-handler commit path retried these failures, but a transient error that
+is not a `ConflictError` consumed the handler's fixed retry budget (five
+attempts). Once the budget was exhausted the commit hit the give-up disposition,
+which drops the write. The mergeable append — add-wins, commutative, and unable
+to truly conflict — was dropped along with it. The durable result is a profile
+whose `ProfileHome` exists but which is absent from the home list, so the durable
+count of `profiles` ends at one.
+
+The fix routes the storm's stale-basis inconsistency through the windowed-retry
+path a `ConflictError` already used — rather than the fixed budget — when the
+commit carries a mergeable op. A `StorageTransactionInconsistent` is a same-basis
+race: a value the transaction read changed on this replica between the read and
+the commit, which re-running against fresh state resolves. A mergeable op's
+durable intent commutes, so retrying it is always safe and it lands once the
+storm clears. The extra windowing is scoped to that stale-basis error: an
+authorization failure, a malformed store op, or a transport error still keeps the
+fixed budget even with a mergeable op present, because re-running cannot resolve
+it. A commit that genuinely cannot converge within the retry window surfaces a
+loud `CommitConvergenceError` instead of silently dropping the append. See
+`classifyCommitDisposition` in `packages/runner/src/scheduler/events.ts`, and the
+regression test
+`packages/runner/test/mergeable-append-multispace-conflict.test.ts`, which
+injects a stale-basis inconsistency storm longer than the fixed budget on the
+home-space commit of a multi-space mergeable append and asserts the append
+survives durably.
