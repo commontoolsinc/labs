@@ -308,3 +308,31 @@ Deno.test(
     expect(garbled).toEqual(baseline);
   },
 );
+
+Deno.test(
+  "multi-instance ids stay per-instance with the eager annotation OFF (production default)",
+  async () => {
+    // THE REGRESSION THIS PINS: with eager annotation off, anonymous arrow
+    // implementations have an empty fn.name, and identity stamping was once
+    // gated behind the name — the stamps were skipped and identity fell to a
+    // per-symbol re-derivation with NO instance key, silently collapsing two
+    // instances of one lift onto one durable observation (and one actionStats
+    // entry, mis-tuning auto-debounce for maps/repeated ops). Stamping is now
+    // unconditional and the fallback derivation is deleted, so the DEFAULT
+    // (annotation-off) state must produce the same per-instance shape the
+    // eager-on test above pins.
+    const observations = await runMultiAndCollect(
+      StorageManager.emulate({ as: signer }),
+    );
+
+    expect(observations.length).toBe(2);
+    expect(new Set(observations.map((o) => o.actionId)).size).toBe(2);
+    for (const { actionId, fingerprint } of observations) {
+      // Per-instance id: content address + `:dbl` symbol + instance suffix.
+      expect(actionId).toMatch(/^cf:module\/[^:]+:dbl:[^:]+$/);
+      // Per-symbol fingerprint: NO instance suffix, shared by both instances.
+      expect(fingerprint).toMatch(/^impl:cf:module\/[^:]+:dbl$/);
+    }
+    expect(new Set(observations.map((o) => o.fingerprint)).size).toBe(1);
+  },
+);

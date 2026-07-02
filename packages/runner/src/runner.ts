@@ -3582,24 +3582,33 @@ export class Runner {
       }
     };
 
+    // Identity stamping is UNCONDITIONAL — the single identity channel (the
+    // scheduler reads only these stamps; there is no fallback derivation).
+    // The debug NAME below depends on `name` (fn.src / fn.name — absent for
+    // anonymous arrows when the eager source annotation is off), but identity
+    // must not: gating the stamps on `name` silently re-opened the per-symbol
+    // multi-instance collision (N instances of one lift sharing one id, so one
+    // actionStats entry and one durable observation) whenever annotation was
+    // off — the production default.
+    //
+    // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
+    // not `module.implementation`: an `$implRef`-resolved module (reloaded from
+    // a serialized graph) carries the ref, not the live function, so reading
+    // provenance off `module.implementation` would drop the content-addressed
+    // scheduler identity on reload.
+    this.applyImplementationHash(action, fn);
+    (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+      schedulerActionInstanceKey({
+        process: processCell.getAsNormalizedFullLink(),
+        reads,
+        writes,
+      });
     if (name) {
       setRunnableName(
         action,
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
-      // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
-      // not `module.implementation`: an `$implRef`-resolved module (reloaded from
-      // a serialized graph) carries the ref, not the live function, so reading
-      // provenance off `module.implementation` would drop the content-addressed
-      // scheduler identity on reload.
-      this.applyImplementationHash(action, fn);
-      (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
-        schedulerActionInstanceKey({
-          process: processCell.getAsNormalizedFullLink(),
-          reads,
-          writes,
-        });
     }
 
     // Writable arguments alone do not make an output-producing action a
