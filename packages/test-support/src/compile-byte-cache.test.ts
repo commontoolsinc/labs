@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 
 import {
   createCompileByteCache,
+  flushCompileByteCache,
+  type ModuleByteCache,
   ProcessModuleByteCache,
   restoreCompileByteCacheForTesting,
   writeCompileByteCacheForTesting,
@@ -127,6 +129,7 @@ describe("ProcessModuleByteCache", () => {
       { key: 42, js: "no" }, // bad key
       { key: `${RT}\0nojs` }, // missing js
       { key: `${RT}\0badspans`, js: "NO", patternCoverageSpans: ["bad"] },
+      { key: `${RT}\0badspanstype`, js: "NO", patternCoverageSpans: "bad" },
       null,
       "garbage",
     ] as unknown[]);
@@ -136,6 +139,16 @@ describe("ProcessModuleByteCache", () => {
 });
 
 describe("createCompileByteCache", () => {
+  it("does not flush caches without disk persistence", () => {
+    const fakeCache: ModuleByteCache = {
+      getCompleteSet: () => undefined,
+      putAll: () => {},
+    };
+
+    expect(flushCompileByteCache(fakeCache)).toBeUndefined();
+    expect(flushCompileByteCache(new ProcessModuleByteCache())).toBeUndefined();
+  });
+
   it("creates an in-memory cache when CF_COMPILE_CACHE_FILE is unset", () => {
     const previous = Deno.env.get("CF_COMPILE_CACHE_FILE");
     try {
