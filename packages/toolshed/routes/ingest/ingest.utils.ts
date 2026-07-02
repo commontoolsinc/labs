@@ -90,10 +90,14 @@ const RegistrationSchema = {
   ],
 } as const satisfies JSONSchema;
 
-// Records are stored verbatim (byte-identical to the wire) so the read side is
-// the single schema authority. Crucially there is NO `default`: a never-written
-// partition cell must read back as `undefined` (ABSENT — "never captured"),
-// distinct from `[]` (EMPTY — "no signal"), which the loom read side depends on.
+// Records are stored value-for-value as parsed from the wire (no labs-added
+// fields; values round-trip through JSON unchanged — e.g. lat/lng decimal
+// strings stay strings, not reparsed to float) so the read side is the single
+// schema authority. NOT raw-byte-identical: the handler parses JSON and the
+// provenance digest is over the JSON serialization, not the request bytes
+// (binding raw bytes is a future hardening). Crucially there is NO `default`: a
+// never-written partition cell must read back as `undefined` (ABSENT — "never
+// captured"), distinct from `[]` (EMPTY — "no signal"), per the loom read side.
 export const JournalSchema = {
   type: "array",
   items: { type: "object", additionalProperties: true },
@@ -308,15 +312,16 @@ export type IngestResult =
  * bearer token and JSON body have been pulled off the request. Split out from
  * the Hono handler so the full auth contract (bearer lookup, dummy-hash-
  * equalized 401 for missing/disabled/wrong-token, 502-vs-401, hostile-partition
- * 400, batch cap) is unit-testable against a real runtime. `body` is the
- * already-parsed JSON payload.
+ * 400, batch cap) is unit-testable against a real runtime. `rawBody` is the raw
+ * request body text; it is parsed only AFTER auth succeeds, so a bad/unknown/
+ * disabled/wrong-sink token gets a uniform 401 regardless of body validity.
  */
 export async function processIngest(
   runtime: Runtime,
   serviceSpace: string,
   id: string,
   token: string,
-  body: unknown,
+  rawBody: string,
   logger?: IngestLogger,
 ): Promise<IngestResult> {
   // Storage errors must 502, not masquerade as 401.
@@ -342,6 +347,15 @@ export async function processIngest(
   }
   if (!verifyIngestSecret(token, registration.secretHash)) {
     return { status: 401, body: { error: "Invalid request" } };
+  }
+
+  // Parse the body only AFTER auth — a bad token must stay opaque (uniform 401)
+  // even when the body is malformed, so there is no 400-vs-401 oracle.
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return { status: 400, body: { error: "Invalid JSON body" } };
   }
 
   const partition = (body as { partition?: unknown } | null)?.partition;

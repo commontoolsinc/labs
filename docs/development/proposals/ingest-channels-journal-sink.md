@@ -2,7 +2,7 @@
 
 *A minted, bearer-authed inbound endpoint whose payload can be durably accumulated as a provenance-marked, append-only record log — the generic capability behind webhooks, the location beacon, and any DID-less external source.*
 
-**Status:** proposed · design-only · **cross-space gate resolved: buildable under `MEMORY_ACL_MODE=off`/`observe` (today's default); operator-DID-in-`MEMORY_SERVICE_DIDS` (or a per-space grant) is a tracked prerequisite before any enforce flip** · **Updated:** 2026-07-01
+**Status:** proposed · **cross-space gate confirmed by ops (Estuary `MEMORY_ACL_MODE` unset → `off`, works today); operator DID `did:key:z6MkjUMJxa2ra9wfFjXY1CcbxGrxGGrwSWV7bKsD7Kb5vNqq` must join `MEMORY_SERVICE_DIDS` (or get per-space grants) before any enforce flip** · **Updated:** 2026-07-02
 
 Builds directly on the landed vouched-ingest primitive (labs #4392): the runtime-minted `ExternalIngest` mark + `custodyIngest`. See `vouched-ingest-channel-mint-design.md` for the split-mint seam this stands on.
 
@@ -66,7 +66,7 @@ Nothing named "location", "trail", or any loom schema lives in labs.
 
 ## Layering — labs stores lean, loom wraps on read
 
-labs stores the **lean** records byte-identical to the wire payload, with zero labs-added fields. The `loom.source-record.v1` envelope — its `recordId` convention, `canonical_json`, and `versionId` — stays entirely in loom, on its read/import side, which already owns that schema and its Python hashing. This keeps the dependency direction correct (labs is upstream of loom; loom vendors labs) and deletes the TS↔Python `canonical_json` parity burden entirely: with no second serializer, there is nothing to keep byte-identical.
+labs stores the **lean** records value-for-value as parsed from the wire (zero labs-added fields; values round-trip through JSON unchanged — e.g. lat/lng decimal strings stay strings). This is *value-preserving after JSON parse*, **not raw-byte-identical**: the handler parses JSON and the provenance digest is over the JSON serialization, not the request bytes (binding the raw bytes is a future hardening). The `loom.source-record.v1` envelope — its `recordId` convention, `canonical_json`, and `versionId` — stays entirely in loom, on its read/import side, which already owns that schema and its Python hashing. This keeps the dependency direction correct (labs is upstream of loom; loom vendors labs) and deletes the TS↔Python `canonical_json` parity burden entirely.
 
 Provenance at rest is the runtime-minted `ExternalIngest` mark — stronger and fabric-native — not the envelope.
 
@@ -106,7 +106,7 @@ Provenance at rest is the runtime-minted `ExternalIngest` mark — stronger and 
 
 **Two caveats.** (1) The webhook precedent is weaker than it looks: loom currently derives all identities from a shared "common user" passphrase (`link-foreign-cells.ts:107`), so "cross-space" there is degenerate — the off-mode path is proven, but authorization across *genuinely distinct* principals is not. (2) There is **zero** cross-space test coverage (`custody-ingest.test.ts:36` writes to `signer.did()` only, via `StorageManager.emulate` with no ACL layer) — a regression would pass CI silently, so the journal sink's tests must exercise a foreign-space write.
 
-**Cheapest confirmation** (one operator, <1 min, no code): read `MEMORY_ACL_MODE` and `MEMORY_SERVICE_DIDS` from the running Estuary env (GitHub `estuary` environment, `labs-estuary-deploy.md:14-19`). off/observe → authorized today, done. enforce → confirm the operator DID is listed in `MEMORY_SERVICE_DIDS`.
+**Confirmed by ops (2026-07-02).** Estuary's `MEMORY_ACL_MODE` is unset (→ `off`) and `MEMORY_SERVICE_DIDS` is empty; the Estuary toolshed operator DID is `did:key:z6MkjUMJxa2ra9wfFjXY1CcbxGrxGGrwSWV7bKsD7Kb5vNqq`. Hosted ingest works under current config, and there is no enforce-flip timeline. **Deploy checklist before any future `MEMORY_ACL_MODE=enforce` flip:** add that operator DID to `MEMORY_SERVICE_DIDS` (or provision equivalent per-space grants) first, and run `observe` mode grepping `wouldDeny` for the operator DID as a pre-flip canary — otherwise hosted ingest into user spaces starts failing at the flip.
 
 ## Cross-repo contract (loom read side)
 
@@ -161,3 +161,4 @@ From the branch critique's P2 list — deliberately NOT in this PR; each has a n
 - **Test gaps** (opportunistic): a `>1 MB` `app.request` asserting the 413 bodyLimit body; a second-append test pinning mark coalescing per (path, origin) (`prepare.ts`); dedup the `ingestMarks` test helper into shared support.
 - **Per-install rate limiting** (429) — loom's `plan.md` Workstream-D step 3 specifies it; the branch has only the body cap + `MAX_BATCH`. *Decision (fine at ~10 users): deferred until self-serve create* — revisit with an in-memory per-channel token bucket in `processIngest` if abuse appears.
 - **Provisioning identity footgun** — the script writes into the service space of whatever identity its `.env` yields; a mismatch provisions into the wrong space and every POST 401s with no diagnostic. Add a usage note: run with the same `.env`/identity as the target toolshed.
+- **Idempotency / replay guidance for generic consumers** (Wilk) — the journal sink does no server-side dedup, so a retried POST re-appends. Document the read-side idempotency contract (dedup on a stable record key — loom's `point_id`) so a generic, non-location consumer knows replay handling is its responsibility.

@@ -24,19 +24,17 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
   }
   const token = authHeader.slice(7);
 
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
+  // Read the raw body but DON'T parse here — processIngest parses only after it
+  // has verified the token, so a bad token can't be distinguished by body
+  // validity (uniform 401 for bad/unknown/disabled/wrong-sink).
+  const rawBody = await c.req.text();
 
   const result = await processIngest(
     runtime,
     identity.did(),
     id,
     token,
-    body,
+    rawBody,
     logger,
   );
   if (result.status === 200) return c.json(result.body, 200);

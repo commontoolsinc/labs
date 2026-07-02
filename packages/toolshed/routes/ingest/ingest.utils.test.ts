@@ -106,10 +106,11 @@ describe("ingest journal sink", () => {
     expect(marks[0]).toMatchObject({ channel: space, audience: "install-1" });
   });
 
-  it("stores records byte-identical — no labs-added fields, strings kept", async () => {
+  it("stores records value-for-value after JSON parse — no labs-added fields, strings kept", async () => {
     const r = reg();
-    // lat/lng as exact decimal strings: labs must not reparse to float (loom's
-    // versionId parity depends on the wire bytes).
+    // lat/lng as exact decimal strings: labs must not reparse to float (values
+    // round-trip through JSON unchanged; NOT raw-byte identical — the digest is
+    // over the JSON serialization).
     const point = {
       point_id: "p1",
       ts: 123,
@@ -241,6 +242,15 @@ describe("ingest journal sink", () => {
     return { r, secret };
   };
 
+  // Mirror the handler: serialize the body to JSON and let processIngest parse
+  // it (after auth). `rt` overridable for the storage-error case.
+  const call = (
+    id: string,
+    token: string,
+    body: unknown,
+    rt: Runtime = runtime,
+  ) => processIngest(rt, space, id, token, JSON.stringify(body));
+
   it("processIngest: unknown / disabled / wrong-token all -> identical 401", async () => {
     const { r } = await savedReg({ id: "ing_ok" });
     await saveRegistration(
@@ -249,15 +259,15 @@ describe("ingest journal sink", () => {
       reg({ id: "ing_off", secretHash: "unused", enabled: false }),
     );
 
-    const unknown = await processIngest(runtime, space, "ing_unknown", "t", {
+    const unknown = await call("ing_unknown", "t", {
       partition: "2026-07-01",
       records: [{ x: 1 }],
     });
-    const disabled = await processIngest(runtime, space, "ing_off", "t", {
+    const disabled = await call("ing_off", "t", {
       partition: "2026-07-01",
       records: [{ x: 1 }],
     });
-    const wrong = await processIngest(runtime, space, "ing_ok", "ingsec_nope", {
+    const wrong = await call("ing_ok", "ingsec_nope", {
       partition: "2026-07-01",
       records: [{ x: 1 }],
     });
@@ -278,16 +288,16 @@ describe("ingest journal sink", () => {
         throw new Error("boom");
       },
     } as unknown as Runtime;
-    const res = await processIngest(broken, space, "ing_x", "t", {
+    const res = await call("ing_x", "t", {
       partition: "d",
       records: [{ x: 1 }],
-    });
+    }, broken);
     expect(res.status).toBe(502);
   });
 
   it("processIngest: valid token -> 200 and durably appends", async () => {
     const { r, secret } = await savedReg({ id: "ing_write" });
-    const res = await processIngest(runtime, space, "ing_write", secret, {
+    const res = await call("ing_write", secret, {
       partition: "2026-07-05",
       records: [{ point_id: "a" }, { point_id: "b" }],
     });
@@ -300,13 +310,13 @@ describe("ingest journal sink", () => {
   it("processIngest: hostile / missing partition -> 400, no write", async () => {
     const { secret } = await savedReg({ id: "ing_part" });
     for (const bad of ["../x", "", "a/b", "..", "."]) {
-      const res = await processIngest(runtime, space, "ing_part", secret, {
+      const res = await call("ing_part", secret, {
         partition: bad,
         records: [{ x: 1 }],
       });
       expect(res.status).toBe(400);
     }
-    const missing = await processIngest(runtime, space, "ing_part", secret, {
+    const missing = await call("ing_part", secret, {
       records: [{ x: 1 }],
     });
     expect(missing.status).toBe(400);
@@ -323,7 +333,7 @@ describe("ingest journal sink", () => {
       { partition: "d" },
     ];
     for (const body of bodies) {
-      const res = await processIngest(runtime, space, "ing_rec", secret, body);
+      const res = await call("ing_rec", secret, body);
       expect(res.status).toBe(400);
     }
   });
@@ -331,11 +341,37 @@ describe("ingest journal sink", () => {
   it("processIngest: over-cap batch -> 413", async () => {
     const { secret } = await savedReg({ id: "ing_cap" });
     const records = Array.from({ length: MAX_BATCH + 1 }, (_, i) => ({ i }));
-    const res = await processIngest(runtime, space, "ing_cap", secret, {
+    const res = await call("ing_cap", secret, {
       partition: "2026-07-06",
       records,
     });
     expect(res.status).toBe(413);
+  });
+
+  it("processIngest: bad token + malformed body stays a uniform 401 (not 400)", async () => {
+    await savedReg({ id: "ing_mal" });
+    // Malformed JSON with a wrong token must NOT leak a 400 — auth runs first.
+    const res = await processIngest(
+      runtime,
+      space,
+      "ing_mal",
+      "ingsec_wrong",
+      "{not json",
+    );
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Invalid request" });
+  });
+
+  it("processIngest: valid token + malformed body -> 400", async () => {
+    const { secret } = await savedReg({ id: "ing_mal2" });
+    const res = await processIngest(
+      runtime,
+      space,
+      "ing_mal2",
+      secret,
+      "{not json",
+    );
+    expect(res.status).toBe(400);
   });
 
   it("processIngest: wrong-sink channel -> identical 401, no write", async () => {
@@ -345,7 +381,7 @@ describe("ingest journal sink", () => {
       ...r,
       sink: "stream",
     } as unknown as IngestRegistration);
-    const res = await processIngest(runtime, space, "ing_stream", secret, {
+    const res = await call("ing_stream", secret, {
       partition: "2026-07-01",
       records: [{ x: 1 }],
     });
@@ -370,7 +406,7 @@ describe("ingest journal sink", () => {
     const { secret } = await savedReg({ id: "ing_seen" });
     expect(await getLastSeen(runtime, space, "ing_seen")).toBeNull();
 
-    const ok = await processIngest(runtime, space, "ing_seen", secret, {
+    const ok = await call("ing_seen", secret, {
       partition: "2026-07-07",
       records: [{ x: 1 }],
     });
@@ -380,7 +416,7 @@ describe("ingest journal sink", () => {
     expect(Number.isNaN(Date.parse(seen as string))).toBe(false);
 
     // A wrong token must not touch last-seen.
-    await processIngest(runtime, space, "ing_seen", "ingsec_wrong", {
+    await call("ing_seen", "ingsec_wrong", {
       partition: "2026-07-07",
       records: [{ x: 1 }],
     });
