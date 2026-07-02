@@ -18,6 +18,8 @@ import {
   match,
   principal,
   type RowLabelSpec,
+  ruleCommonAlternatives,
+  ruleConstrainsConfidentiality,
   validateRowLabelSpec,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
@@ -190,6 +192,131 @@ Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B�
       })),
     Error,
   );
+});
+
+Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)", () => {
+  const OWNER = "did:key:zOwner";
+  // An unconditional dbOwner() in a single OR-clause → the owner is common.
+  const orRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(orRule, { dbOwner: OWNER }), [OWNER]);
+
+  // dbOwner in every conjunct's OR-clause → still common.
+  const cnfRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(cnfRule, { dbOwner: OWNER }), [OWNER]);
+
+  // The CONJUNCTIVE email rule (all(principal, …, dbOwner)) has NO common
+  // reader — a principal() conjunct is data-dependent, so nobody reads every
+  // row. This is why an aggregate over it must still refuse.
+  assertEquals(ruleCommonAlternatives(emailSpec(), { dbOwner: OWNER }), []);
+
+  // dbOwner unconditional as a top-level conjunct is NOT a common reader of
+  // the OTHER conjuncts (a principal clause it doesn't satisfy).
+  const mixed = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(mixed, { dbOwner: OWNER }), []);
+
+  // constant() is a static reader too.
+  const constRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      constant("did:key:public"),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(constRule, { dbOwner: OWNER }), [
+    "did:key:public",
+  ]);
+
+  // A NESTED all(...) must not hide a clause: all(all(anyA, anyB), anyC) has
+  // dbOwner() in every leaf clause, so the owner is still common. A one-level
+  // flatten would treat the inner all(...) as an opaque term with no static
+  // reader and wrongly return [] (a false aggregate refusal).
+  const nestedRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(
+        any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+        any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+      ),
+      any(dbOwner(), constant("did:key:public")),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(nestedRule, { dbOwner: OWNER }), [OWNER]);
+
+  // An integrity-only rule has no confidentiality clause → no common
+  // alternative to compute (the aggregate is public, decided by the caller).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(integrityOnly, { dbOwner: OWNER }), []);
+
+  // Two conjuncts each with a DIFFERENT static reader → the running
+  // intersection empties, so there is no reader of every row.
+  const disjointConjuncts = table(EMAIL_COLUMNS, () => ({
+    confidentiality: all(constant("did:key:A"), constant("did:key:B")),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(disjointConjuncts, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a degenerate empty conjunction (rejected at table() time, but
+  // reachable via a hand-built wire spec) yields no common alternative.
+  const emptyConjunction = {
+    version: 1,
+    confidentiality: { allOf: [] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(emptyConjunction, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a non-record conjunct (malformed wire spec) contributes no
+  // static reader rather than throwing — fail closed to no common alternative.
+  const malformedConjunct = {
+    version: 1,
+    confidentiality: { allOf: ["not-a-node"] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(malformedConjunct, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("ruleConstrainsConfidentiality: confidentiality present vs integrity-only (Epic E2)", () => {
+  // An integrity-only rule imposes NO confidentiality constraint — an aggregate
+  // over it is public, not a refusal. Distinguished from a rule that DOES
+  // constrain (any nesting of at least one clause).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(integrityOnly), false);
+
+  const withConf = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(withConf), true);
+
+  // Nested all(all(...)) still counts as constraining.
+  const nested = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(principal("mailto", match(f.from, ADDR))),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(nested), true);
 });
 
 Deno.test("a rule referencing an unknown column throws", () => {

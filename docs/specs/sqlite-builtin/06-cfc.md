@@ -282,14 +282,29 @@ with the pure half in
    projection, or two result columns sharing its origin, **refuses the
    query**; so does a rule-bearing read without column provenance, or a query
    touching more than one rule-bearing table (cross-rule joins are deferred).
-2. **Aggregates refuse.** Any null-origin column (`COUNT(*)`, expression) on a
-   rule-bearing query refuses: the output derives from every contributing row,
-   and that cannot be re-labeled per row. Rule-less tables keep Phase 2's
-   conservative static merge. (Two future lifts: once OR-clauses land, a
-   principal listed unconditionally in `any(...)` is an alternative in every
-   row's clause — the common-alternative property, CFC spec §8.17.4 — and
-   reads aggregates by the ordinary algebra; an author-declared `derived:`
-   fallback label remains a possible follow-up.)
+2. **Aggregates lift by the common-alternative property, else refuse.** A
+   null-origin column (`COUNT(*)`, expression) on a rule-bearing query derives
+   from every contributing row and cannot be re-labeled per row, so per-row
+   attribution is impossible. Instead the read intersects, across every
+   **confidentiality-bearing** rule-bearing table, the atoms that are a *static
+   unconditional reader of every row* — a `dbOwner()` or `constant(...)`
+   alternative that appears in every conjunctive clause (the common-alternative
+   property, CFC spec §8.17.4). Three outcomes:
+   - **A non-empty intersection** labels the aggregate rows by that reader set
+     (a single atom, or an `any(...)` OR-clause) and lets the declared output
+     ceiling decide — a member reads the join of all contributing rows, so the
+     aggregate carries no declassification.
+   - **An integrity-only (or otherwise unconstrained) set of tables** imposes no
+     confidentiality, so the aggregate is public: it carries no per-row label.
+   - **A confidentiality-bearing table with no reader in the intersection**
+     (e.g. a per-row `principal(match(...))` rule, or two tables with disjoint
+     owners) still **refuses**: no principal is guaranteed to read every
+     contributing row. Query the rows directly, add an unconditional reader, or
+     move the aggregate to a rule-less table.
+
+   Rule-less tables keep Phase 2's conservative static merge. (An
+   author-declared `derived:` fallback label for the refuse case remains a
+   possible follow-up.)
 3. **Evaluate per row, attach per row.** Each result row already splits into
    its own entity doc; the flush writes each labeled row doc **directly** (its
    own id, root path) under a root-`ifc` schema. Keyed by the row doc's id,

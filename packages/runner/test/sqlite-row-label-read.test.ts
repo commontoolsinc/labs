@@ -14,7 +14,9 @@ import {
 import { table } from "@commonfabric/memory/sqlite/schema";
 import {
   all,
+  any,
   authoredBy,
+  constant,
   dbOwner,
   match,
   principal,
@@ -180,9 +182,170 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     expectError(res, "provenance");
   });
 
-  it("an aggregate / null-origin column on a rule-bearing db refuses (COUNT(*))", () => {
+  it("an aggregate on the CONJUNCTIVE rule refuses — no common reader (COUNT(*))", () => {
     const res = computeRowLabelRead({
       tables: emailTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+    });
+    expectError(res, "aggregate");
+  });
+
+  it("an aggregate is allowed when the rule has a common reader (Epic E2)", () => {
+    // A rule with an unconditional dbOwner() alternative → the owner reads
+    // every row → soundly reads a COUNT(*). The aggregate row is labeled by
+    // the common alternative (the owner), and a ceiling naming the owner fits.
+    const orTables = {
+      emails: table(
+        { id: "integer", from: "text", to: "text", body: "text" },
+        (f) => ({
+          confidentiality: all(
+            any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+            any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [{ confidentiality: [OWNER] }]);
+
+    // ...and it fits a ceiling naming the owner, but not one that omits it.
+    const kept = expectOk(computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+      ceiling: [OWNER],
+    }));
+    assertEquals(kept.keep, [true]);
+
+    const missed = computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+      ceiling: ["did:key:someone-else"],
+    });
+    expectError(missed, "ceiling");
+  });
+
+  it("an aggregate over an integrity-only table is public — no label, not a refusal (Epic E2)", () => {
+    // A rule declaring ONLY integrity imposes no confidentiality, so a COUNT(*)
+    // over it is readable by everyone: the aggregate carries no label rather
+    // than refusing for "no common reader" (a confidentiality notion). This is
+    // the "no confidentiality constraint" vs "constrained but no shared reader"
+    // distinction that ruleCommonAlternatives returning [] alone cannot make.
+    const integrityOnly = {
+      notes: table(
+        { id: "integer", from: "text", body: "text" },
+        (f) => ({
+          integrity: authoredBy(
+            principal("mailto", match(f.from, ADDR, { min: 1 })),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: integrityOnly,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 5 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [undefined]);
+
+    // ...and carrying no confidentiality it fits even an empty ceiling.
+    const kept = expectOk(computeRowLabelRead({
+      tables: integrityOnly,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 5 }],
+      owner: OWNER,
+      ceiling: [],
+    }));
+    assertEquals(kept.keep, [true]);
+  });
+
+  it("the common-alternative intersection matches object constants regardless of key order (Epic E2)", () => {
+    // Two confidentiality-bearing tables whose only common reader is the SAME
+    // object-valued constant, written with keys in different order. The
+    // aggregate must intersect them by canonical atom key, not refuse as if
+    // they were distinct atoms (the non-canonical JSON.stringify bug).
+    const reader = { org: "acme", team: "research" };
+    const readerReordered = { team: "research", org: "acme" };
+    const twoTables = {
+      a: table({ id: "integer", x: "text" }, () => ({
+        confidentiality: all(constant(reader)),
+      })),
+      b: table({ id: "integer", y: "text" }, () => ({
+        confidentiality: all(constant(readerReordered)),
+      })),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: twoTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 3 }],
+      owner: OWNER,
+    }));
+    // Kept as one shared reader, NOT dropped to a refusal.
+    assertEquals(res.labels, [{ confidentiality: [reader] }]);
+  });
+
+  it("an aggregate with SEVERAL common readers is labeled by their OR-clause (Epic E2)", () => {
+    // A single OR-clause with two static unconditional readers (owner AND a
+    // public constant) → both are common, so the aggregate row carries an
+    // any(owner, public) clause and fits a ceiling naming either.
+    const twoReaders = {
+      emails: table(
+        { id: "integer", from: "text", body: "text" },
+        (f) => ({
+          confidentiality: any(
+            dbOwner(),
+            constant("did:key:public"),
+            principal("mailto", match(f.from, ADDR)),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: twoReaders,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 4 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [
+      { confidentiality: [{ anyOf: [OWNER, "did:key:public"] }] },
+    ]);
+    // Fits a ceiling naming the public reader alone (subsumption).
+    const kept = expectOk(computeRowLabelRead({
+      tables: twoReaders,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 4 }],
+      owner: OWNER,
+      ceiling: ["did:key:public"],
+    }));
+    assertEquals(kept.keep, [true]);
+  });
+
+  it("two confidentiality-bearing tables with DISJOINT readers refuse the aggregate (Epic E2)", () => {
+    // Each table has a single static reader, but different ones — no principal
+    // reads every row of both, so the aggregate (which could range over either)
+    // has no guaranteed reader and must refuse (the acc.size===0 path, distinct
+    // from a single rule with no reader at all).
+    const disjoint = {
+      a: table({ id: "integer", x: "text" }, () => ({
+        confidentiality: constant("did:key:reader-a"),
+      })),
+      b: table({ id: "integer", y: "text" }, () => ({
+        confidentiality: constant("did:key:reader-b"),
+      })),
+    };
+    const res = computeRowLabelRead({
+      tables: disjoint,
       columns: [col("cnt", null, null)],
       rows: [{ cnt: 2 }],
       owner: OWNER,
