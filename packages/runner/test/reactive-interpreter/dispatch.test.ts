@@ -133,15 +133,20 @@ describe("interpreter dispatch differential (W3c)", () => {
     );
   });
 
-  it("control pattern: flag-on == flag-off via the reference-semantics fallback", async () => {
-    // ifElse/when/unless are gated (`control_reference_semantics`) until
-    // control emission writes branch LINKS like the legacy builtins. This
-    // oracle pins that the gate is safe: equal outputs, census shows the
-    // fallback (not an interpretation).
+  it("multi-segment: segments coalesce around a preserved ifElse boundary", async () => {
+    // seg0 (two lifts + str feeding the control inputs) → ifElse boundary
+    // (the ORIGINAL node, verbatim — legacy branch-LINK semantics) → seg1
+    // (a lift consuming the control output). Byte-equal both flags, and the
+    // census proves real multi-segment engagement.
     const buildPattern = () =>
-      pattern<{ flag: boolean; a: number; b: number }>((input) => ({
-        picked: ifElse(input.flag, input.a, input.b),
-      })) as unknown as Pattern;
+      pattern<{ flag: boolean; a: number; b: number }>((input) => {
+        const doubled = lift((v: { a: number }) => v.a * 2)({ a: input.a });
+        const tripled = lift((v: { b: number }) => v.b * 3)({ b: input.b });
+        const picked = ifElse(input.flag, doubled, tripled);
+        const label = str`picked=${picked}`;
+        const shifted = lift((v: { p: number }) => v.p + 100)({ p: picked });
+        return { picked, label, shifted };
+      }) as unknown as Pattern;
 
     const argument = { flag: true, a: 1, b: 2 };
     const edit = { path: ["flag"], value: false };
@@ -153,11 +158,27 @@ describe("interpreter dispatch differential (W3c)", () => {
 
     assertEquals(interpreted.initial, legacy.initial);
     assertEquals(interpreted.afterEdit, legacy.afterEdit);
-    assertEquals(legacy.initial, { picked: 1 });
-    assertEquals(legacy.afterEdit, { picked: 2 });
+    assertEquals(legacy.initial, {
+      picked: 2,
+      label: "picked=2",
+      shifted: 102,
+    });
+    assertEquals(legacy.afterEdit, {
+      picked: 6,
+      label: "picked=6",
+      shifted: 106,
+    });
     assert(
-      (census.fallbackByReason["control_reference_semantics"] ?? 0) >= 1,
-      `expected control fallback, census=${JSON.stringify(census)}`,
+      census.interpreted >= 1,
+      `expected multi-segment interpretation, census=${JSON.stringify(census)}`,
+    );
+    assert(
+      (census.boundariesByKind["control"] ?? 0) >= 1,
+      `expected a preserved control boundary, census=${JSON.stringify(census)}`,
+    );
+    assert(
+      census.nodeOpsCollapsed >= 4,
+      `expected >=4 collapsed node ops, census=${JSON.stringify(census)}`,
     );
   });
 });

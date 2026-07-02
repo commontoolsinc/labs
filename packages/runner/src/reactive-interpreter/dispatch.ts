@@ -1,27 +1,29 @@
 /**
- * Flag-on DISPATCH planning (W3c) — decide whether a pattern instantiation
- * runs through the interpreter, and if so, emit the synthetic node plan the
- * runner instantiates instead of the legacy per-node loop.
+ * Flag-on DISPATCH planning — decide whether a pattern instantiation runs
+ * through the interpreter, and emit the synthetic node plan the runner
+ * instantiates instead of the legacy per-node loop.
  *
- * The plan RIDES THE EXISTING MACHINERY entirely: each emitted node is an
- * ordinary `{ type: "raw" }` module node whose `outputs` binding maps op ids
- * to the ops' ORIGINAL serialized output aliases (op id == `pattern.nodes`
- * index, from-builder pass 1) — so one `sendResult` writes every value
- * through `sendValueToBinding` exactly as the N legacy actions would have,
- * and the scheduler derives reads/writes from the bindings as for any raw
- * builtin. Faithful emission by construction; the win is ONE action instead
- * of N (the node-count half of the tax; the doc wins come in later
- * increments, per the v1 trajectory).
+ * MULTI-SEGMENT EMISSION (v1 07 §4 realized): each maximal pure region
+ * becomes ONE synthetic `{ type: "raw" }` node; every boundary op (handler /
+ * effect / control / collection / nested pattern / untrusted or
+ * capability-bearing leaf) keeps its ORIGINAL serialized node, instantiated
+ * VERBATIM. Because segments write their ops' ORIGINAL output aliases and
+ * boundaries read their ORIGINAL input aliases, the legacy alias topology IS
+ * the document wiring — no container-of-links, no multi-value fan-out
+ * primitive, no read-through machinery: a segment feeding three boundaries
+ * just writes the three internal cells those boundaries already alias
+ * (v1's F1/F2/F3 findings dissolve by construction).
  *
- * FIRST INCREMENT scope: fully-pure single-segment patterns (no boundaries).
- * Everything else records a census reason and falls back to legacy — the
- * fail-closed discipline. Multi-segment emission (segments + preserved
- * boundary nodes) is the next increment on this seam.
+ * Cross-segment values ride the same way: a segment READS an upstream
+ * boundary/segment op's output through that op's original output alias and
+ * SEEDS the evaluator with it. Construct ops (synthesized input/result
+ * trees, no legacy alias) are pulled into every segment that references
+ * them — pure, cheap, duplication is sound.
  *
- * KNOWN GAP (tracked): per-op runtime errors are isolated to `undefined`
- * (value parity with legacy) and logged, but not yet routed to the
- * scheduler's onError channel (v1 R4 parity) — a throw here would abort the
- * WHOLE segment tx where legacy loses only the throwing node's write.
+ * FAIL-CLOSED: pattern-wide fallback only for no-ROG / incomplete ROG /
+ * scope markers / unpartitionable / nothing-to-collapse. Everything else
+ * demotes the specific op to a boundary. The census is the honest
+ * engagement metric (collapsed node-ops / total node-ops).
  */
 
 import { getLogger } from "@commonfabric/utils/logger";
@@ -32,7 +34,7 @@ import { popFrame } from "../builder/pattern.ts";
 import { type BuiltRog, getBuiltRog } from "./from-builder.ts";
 import { partition, type Segment } from "./partition.ts";
 import { evalRog } from "./interpret.ts";
-import type { OpId, Rog } from "./rog.ts";
+import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
 
 const logger = getLogger("runner.reactive-interpreter", {
   enabled: false,
@@ -56,12 +58,21 @@ export interface DispatchCensus {
   attempted: number;
   interpreted: number;
   fallbackByReason: Record<string, number>;
+  /** Node-derived ops seen across interpreted patterns. */
+  nodeOpsSeen: number;
+  /** Node-derived ops collapsed into segments (the engagement numerator). */
+  nodeOpsCollapsed: number;
+  /** Boundary ops preserved as verbatim legacy nodes, by kind. */
+  boundariesByKind: Record<string, number>;
 }
 
 const census: DispatchCensus = {
   attempted: 0,
   interpreted: 0,
   fallbackByReason: {},
+  nodeOpsSeen: 0,
+  nodeOpsCollapsed: 0,
+  boundariesByKind: {},
 };
 
 export function getDispatchCensus(): DispatchCensus {
@@ -72,13 +83,17 @@ export function resetDispatchCensus(): void {
   census.attempted = 0;
   census.interpreted = 0;
   census.fallbackByReason = {};
+  census.nodeOpsSeen = 0;
+  census.nodeOpsCollapsed = 0;
+  census.boundariesByKind = {};
 }
 
 // ---------------------------------------------------------------------------
 // Plan shape the runner consumes.
 // ---------------------------------------------------------------------------
 
-/** One synthetic node the runner feeds through `instantiateNode` verbatim. */
+/** One node the runner feeds through `instantiateNode` — either a synthetic
+ * segment node or a VERBATIM original boundary node. */
 export interface SyntheticNode {
   module: Module;
   inputs: unknown;
@@ -88,6 +103,19 @@ export interface SyntheticNode {
 export type DispatchPlan =
   | { kind: "interpret"; nodes: SyntheticNode[] }
   | { kind: "fallback"; reason: string };
+
+export interface DispatchOptions {
+  /** SECURITY gate (the legacy `resolveJavaScriptFunction` liveTrusted test,
+   * runner-supplied): a captured live leaf impl may run in the interpreter
+   * ONLY if it passes — an untrusted callback DEMOTES to a verbatim legacy
+   * node, where the SES fallback sandboxes it. */
+  leafTrust: (fn: (input: unknown) => unknown) => boolean;
+  /** Create the pattern frame the segment action runs in (the legacy
+   * `createPatternFrame`): gives leaf bodies the runtime context legacy
+   * actions have AND carries the piece metadata `handleSchedulerError`
+   * reads off `error.frame`. The dispatch pops it via `popFrame`. */
+  actionFrame: (tx: IExtendedStorageTransaction, cause: unknown) => Frame;
+}
 
 /** Recursive key-walk for scope-routing markers in serialized pattern data. */
 function containsScopeMarker(value: unknown, depth = 0): boolean {
@@ -117,45 +145,6 @@ function fallback(reason: string): DispatchPlan {
   return { kind: "fallback", reason };
 }
 
-export interface DispatchOptions {
-  /** SECURITY gate (the legacy `resolveJavaScriptFunction` liveTrusted test,
-   * runner-supplied): a captured live leaf impl may run in the interpreter
-   * ONLY if it passes — an untrusted callback must take the legacy path,
-   * where the SES fallback sandboxes it. */
-  leafTrust: (fn: (input: unknown) => unknown) => boolean;
-  /** Create the pattern frame the segment action runs in (the legacy
-   * `createPatternFrame`): gives leaf bodies the runtime context legacy
-   * actions have AND carries the piece metadata `handleSchedulerError`
-   * reads off `error.frame`. The dispatch pops it via `popFrame`. */
-  actionFrame: (tx: IExtendedStorageTransaction, cause: unknown) => Frame;
-}
-
-/** Recursively find the first gating leaf problem in a BuiltRog: an untrusted
- * captured impl (SECURITY) or a capability bit the single-node interpreter
- * cannot honor (needs handles / builder frame / instantiates patterns /
- * async). Fail-closed reasons feed the census. */
-function findLeafGate(
-  built: BuiltRog,
-  leafTrust: DispatchOptions["leafTrust"],
-): string | undefined {
-  for (const op of built.rog.ops) {
-    if (op.detail.kind === "leaf") {
-      const impl = built.leafImpls.get(op.id);
-      if (impl && !leafTrust(impl)) return "untrusted_leaf";
-      const caps = op.detail.caps;
-      if (caps) {
-        const bits = Object.keys(caps).sort().join("+");
-        return `leaf_caps:${bits}`;
-      }
-    }
-  }
-  for (const child of built.children.values()) {
-    const inner = findLeafGate(child, leafTrust);
-    if (inner) return inner;
-  }
-  return undefined;
-}
-
 /**
  * Plan the interpreter instantiation for one pattern, or fall back.
  * Pure decision + closure construction; no runtime side effects.
@@ -172,16 +161,10 @@ export function planInterpreterDispatch(
     return fallback(`incomplete:${built.rog.incomplete.join(",")}`);
   }
 
-  const leafGate = findLeafGate(built, options.leafTrust);
-  if (leafGate) return fallback(leafGate);
-
-  // SCOPE-NARROWING gate (v1 D-EMISSION-SCOPE parity): the legacy javascript
-  // action tracks the narrowest scope read per run and routes outputs to
-  // their effective scope (`tx.resetNarrowestReadScope` + scoped aliases /
-  // `.asScope()` / `.inSpace()` / scoped result schemas). The segment action
-  // implements none of that yet, so ANY scope marker in the serialized
-  // pattern → legacy. Key-walk (not substring) over nodes + result schema;
-  // a user-data key literally named "scope" over-blocks — fail-closed.
+  // SCOPE-NARROWING gate (v1 D-EMISSION-SCOPE parity): schema-declared
+  // scope routing on aliases/results is per-op machinery the segment write
+  // path does not implement — pattern-wide fallback. (Runtime-scoped INPUTS
+  // are handled: the segment action threads the tx's narrowest read scope.)
   if (
     containsScopeMarker(pattern.nodes) ||
     containsScopeMarker(pattern.resultSchema) ||
@@ -190,49 +173,87 @@ export function planInterpreterDispatch(
     return fallback("scope_narrowing");
   }
 
-  // CONTROL REFERENCE-SEMANTICS gate: the legacy ifElse/when/unless builtins
-  // write a LINK to the selected branch (write-once on re-trigger; aliasing
-  // observable via Cell.push through the output). The evaluator resolves
-  // VALUES — equal under deep reads, divergent under aliasing/write-shape.
-  // Until control emission writes links, any control op → legacy.
-  if (built.rog.ops.some((op) => op.kind === "control")) {
-    return fallback("control_reference_semantics");
+  // Demote gated leaves to boundaries: untrusted impls (SECURITY — the
+  // verbatim legacy node applies its own SES/trust resolution) and
+  // capability-bearing bodies (need handles / builder frames / may
+  // instantiate patterns — all things the legacy javascript action provides).
+  const boundaryLeafOps = new Set<OpId>();
+  for (const op of built.rog.ops) {
+    if (op.detail.kind !== "leaf") continue;
+    const impl = built.leafImpls.get(op.id);
+    if ((impl && !options.leafTrust(impl)) || op.detail.caps) {
+      boundaryLeafOps.add(op.id);
+    }
   }
 
-  const part = partition({ built });
+  const part = partition({ built, boundaryLeafOps });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
-  if (part.boundaries.length > 0) {
-    return fallback(
-      `boundaries_pending:${part.boundaries.map((b) => b.kind).join(",")}`,
-    );
-  }
-  if (part.segments.length !== 1) {
-    return fallback(`multi_segment_pending:${part.segments.length}`);
+
+  // Build one synthetic node per segment that collapses ≥1 node-derived op.
+  const nodes: SyntheticNode[] = [];
+  const collapsed = new Set<OpId>();
+  for (const segment of part.segments) {
+    const seg = buildSegmentNode(pattern, built, segment, options);
+    if (seg === null) continue; // constructs-only segment: nothing to emit
+    if (typeof seg === "string") return fallback(seg);
+    nodes.push(seg.node);
+    for (const id of seg.nodeOps) collapsed.add(id);
   }
 
-  const node = buildSegmentNode(pattern, built, part.segments[0], options);
-  if (typeof node === "string") return fallback(node);
+  // COST GATE: collapsing fewer than two node actions is neutral at best
+  // (1→1) — plain legacy is strictly simpler. Also covers the all-boundary
+  // and node-less shapes.
+  if (collapsed.size < 2) {
+    return fallback(`nothing_to_collapse:${collapsed.size}`);
+  }
+
+  // Boundaries: the ORIGINAL nodes, verbatim.
+  for (const b of part.boundaries) {
+    const original = pattern.nodes[b.opId];
+    if (!original) return fallback(`boundary_without_node:${b.opId}`);
+    nodes.push({
+      module: original.module as Module,
+      inputs: original.inputs,
+      outputs: original.outputs,
+    });
+    census.boundariesByKind[b.kind] =
+      (census.boundariesByKind[b.kind] ?? 0) + 1;
+  }
 
   census.interpreted++;
+  census.nodeOpsSeen += pattern.nodes.length;
+  census.nodeOpsCollapsed += collapsed.size;
   if (RI2_DEBUG) {
     console.log(
-      `[ri2] interpret: ops=${built.rog.ops.length} ` +
-        `nodes=${pattern.nodes.length} seg=${part.segments[0].id}`,
+      `[ri2] interpret: nodes=${pattern.nodes.length} ` +
+        `collapsed=${collapsed.size} segments=${
+          nodes.length - part.boundaries.length
+        } boundaries=${part.boundaries.length}`,
     );
   }
-  return { kind: "interpret", nodes: [node] };
+  return { kind: "interpret", nodes };
 }
 
 // ---------------------------------------------------------------------------
 // Segment node emission.
 // ---------------------------------------------------------------------------
 
-/** Ops that write through their ORIGINAL node output alias: exactly the
- * node-derived ops (op id == `pattern.nodes` index; construct ops appended
- * past that range are pure intermediates with no legacy alias). */
-function nodeDerivedOpIds(pattern: Pattern, rog: Rog): OpId[] {
-  const n = pattern.nodes.length;
-  return rog.ops.filter((op) => op.id < n).map((op) => op.id);
+interface SegmentEmission {
+  node: SyntheticNode;
+  /** The node-derived ops this segment collapses. */
+  nodeOps: OpId[];
+}
+
+/** Full dependency refs of an op (inputsOf + construct template leaves). */
+function dependencyRefsOf(op: Op) {
+  const refs = [...inputsOf(op)];
+  if (op.detail.kind === "construct") {
+    const t = op.detail.template;
+    refs.push(
+      ...(t.shape === "object" ? Object.values(t.fields) : t.items),
+    );
+  }
+  return refs;
 }
 
 function buildSegmentNode(
@@ -240,75 +261,134 @@ function buildSegmentNode(
   built: BuiltRog,
   segment: Segment,
   options: DispatchOptions,
-): SyntheticNode | string {
+): SegmentEmission | null | string {
   const rog = built.rog;
-  const outputOpIds = nodeDerivedOpIds(pattern, rog);
-  // COST GATE (and correctness for node-less patterns): with no node-derived
-  // ops there are no legacy actions to collapse — the result tree is pure
-  // alias projection and interpretation could only add a spurious node.
-  if (outputOpIds.length === 0) return "no_node_ops";
+  const nodeCount = pattern.nodes.length;
+  const opById = new Map<OpId, Op>(rog.ops.map((o) => [o.id, o]));
 
-  // INPUTS binding. Whole-argument read when any argument ref exists
-  // (per-path narrowing is the D-V2-READSETS follow-up on this seam), plus
-  // one entry per externally-written internal cell the segment reads
-  // (handler state / defaults — none in the no-boundary first increment,
-  // but the shape is ready).
-  const readsArgument = segment.inputs.some((r) => r.kind === "argument");
-  const internalReads = new Map<number, unknown>();
-  for (const ref of segment.inputs) {
-    if (ref.kind !== "internal") continue;
-    const decl = rog.internals[ref.cell];
-    if (!decl) return `internal_ref_out_of_range:${ref.cell}`;
-    if (decl.producedBy !== undefined) continue; // intra-segment producer
-    internalReads.set(ref.cell, {
-      $alias: { partialCause: decl.partialCause, path: [] },
-    });
+  const segmentNodeOps = segment.opIds.filter((id) => id < nodeCount);
+  if (segmentNodeOps.length === 0) return null;
+
+  // Assemble the sub-ROG: the segment's node ops plus every construct op
+  // they (transitively) reference — constructs have no legacy alias, so they
+  // are recomputed wherever needed (pure; duplication across segments is
+  // sound). Collect external node-op reads + externally-written internals
+  // along the way.
+  const include = new Set<OpId>(segmentNodeOps);
+  const externalOps = new Set<OpId>();
+  const internalReads = new Set<number>();
+  let readsArgument = false;
+
+  const queue = [...segmentNodeOps];
+  while (queue.length > 0) {
+    const op = opById.get(queue.pop()!);
+    if (!op) return `missing_op_in_rog`;
+    for (const ref of dependencyRefsOf(op)) {
+      if (ref === undefined) continue;
+      if (ref.kind === "argument") {
+        readsArgument = true;
+      } else if (ref.kind === "opOut") {
+        if (include.has(ref.op)) continue;
+        if (ref.op >= nodeCount) {
+          // A construct op: pull it into this segment and keep walking.
+          include.add(ref.op);
+          queue.push(ref.op);
+        } else {
+          externalOps.add(ref.op);
+        }
+      } else if (ref.kind === "internal") {
+        const decl = rog.internals[ref.cell];
+        if (!decl) return `internal_ref_out_of_range:${ref.cell}`;
+        if (decl.producedBy === undefined) {
+          internalReads.add(ref.cell);
+        } else if (!include.has(decl.producedBy)) {
+          if (decl.producedBy >= nodeCount) {
+            include.add(decl.producedBy);
+            queue.push(decl.producedBy);
+          } else {
+            externalOps.add(decl.producedBy);
+          }
+        }
+      } else if (ref.kind === "result") {
+        return "result_self_reference";
+      }
+    }
   }
+
+  const subRog: Rog = {
+    v: rog.v,
+    argumentSchema: rog.argumentSchema,
+    resultSchema: rog.resultSchema,
+    // Per-op alias writes carry the outputs; no single result egress here.
+    result: { kind: "const", value: undefined },
+    ops: [...include].sort((a, b) => a - b).map((id) => opById.get(id)!),
+    internals: rog.internals,
+  };
+
+  // INPUTS binding: whole argument when read (per-path narrowing is the
+  // D-V2-READSETS follow-up), externally-written internals by cause, and
+  // upstream boundary/segment op outputs through their ORIGINAL aliases.
   const inputs: Record<string, unknown> = {};
   if (readsArgument) {
     inputs.argument = { $alias: { cell: "argument", path: [] } };
   }
   if (internalReads.size > 0) {
-    inputs.internals = Object.fromEntries(
-      [...internalReads].map(([idx, alias]) => [String(idx), alias]),
-    );
+    const internals: Record<string, unknown> = {};
+    for (const idx of internalReads) {
+      internals[String(idx)] = {
+        $alias: { partialCause: rog.internals[idx].partialCause, path: [] },
+      };
+    }
+    inputs.internals = internals;
+  }
+  if (externalOps.size > 0) {
+    const ops: Record<string, unknown> = {};
+    for (const id of externalOps) {
+      ops[String(id)] = pattern.nodes[id].outputs;
+    }
+    inputs.ops = ops;
   }
 
-  // OUTPUTS binding: op id → the op's ORIGINAL serialized output alias tree.
+  // OUTPUTS binding: this segment's node ops write their ORIGINAL aliases.
   const outputs: Record<string, unknown> = {};
-  for (const opId of outputOpIds) {
+  for (const opId of segmentNodeOps) {
     outputs[String(opId)] = pattern.nodes[opId].outputs;
   }
 
   const implementation = makeSegmentImplementation(
     built,
-    outputOpIds,
+    subRog,
+    segmentNodeOps,
+    [...externalOps],
     segment.id,
     options,
   );
 
   return {
-    module: {
-      type: "raw",
-      implementation,
-      // Debug label surfaced by the runner's raw-node naming.
-      debugName: `ri2:${segment.id}`,
-      // Thread the tx's narrowest read scope into the result write (legacy
-      // javascript-action parity for runtime-scoped inputs; see the
-      // sendResult site in instantiateRawNode).
-      ri2ThreadNarrowestReadScope: true,
-    } as unknown as Module,
-    inputs,
-    outputs,
+    node: {
+      module: {
+        type: "raw",
+        implementation,
+        debugName: `ri2:${segment.id}`,
+        // Thread the tx's narrowest read scope into the result write
+        // (legacy javascript-action parity for runtime-scoped inputs).
+        ri2ThreadNarrowestReadScope: true,
+      } as unknown as Module,
+      inputs,
+      outputs,
+    },
+    nodeOps: segmentNodeOps,
   };
 }
 
-/** The raw-builtin implementation for one segment: evaluate the (sub-)ROG
- * against the bound inputs and write every node-derived op value through the
- * original aliases in ONE action. */
+/** The raw-builtin implementation for one segment: seed external reads,
+ * evaluate the sub-ROG, write every collapsed op's value through its
+ * original alias in ONE action. */
 function makeSegmentImplementation(
   built: BuiltRog,
+  subRog: Rog,
   outputOpIds: OpId[],
+  externalOpIds: OpId[],
   segmentId: string,
   options: DispatchOptions,
 ) {
@@ -316,6 +396,7 @@ function makeSegmentImplementation(
     inputsCell: Cell<{
       argument?: unknown;
       internals?: Record<string, unknown>;
+      ops?: Record<string, unknown>;
     }>,
     sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
     _addCancel: unknown,
@@ -333,25 +414,29 @@ function makeSegmentImplementation(
       let firstError: unknown;
       try {
         // Legacy action parity: effective-scope routing derives from the
-        // narrowest scope READ since this reset (scope carry-through is a
-        // tx-level mechanism; the reads below feed it).
+        // narrowest scope READ since this reset.
         tx.resetNarrowestReadScope();
         const bound = inputsCell.withTx(tx).get() ?? {};
+        const seed = new Map<OpId, unknown>();
+        for (const id of externalOpIds) {
+          seed.set(id, bound.ops?.[String(id)]);
+        }
         const seedByInternal = new Map<number, unknown>();
         for (const [key, value] of Object.entries(bound.internals ?? {})) {
           seedByInternal.set(Number(key), value);
         }
-        const { opValues, errors } = evalRog(built.rog, {
+        const { opValues, errors } = evalRog(subRog, {
           argument: bound.argument,
           leafImpls: built.leafImpls,
           children: built.children,
+          seed,
           seedByInternal,
         });
         const out: Record<string, unknown> = {};
         for (const opId of outputOpIds) {
           out[String(opId)] = opValues.get(opId);
         }
-        // Per-op containment parity: the throwing op's slot is written as
+        // Per-op containment parity: a throwing op's slot is written as
         // `undefined` (evalRog isolated it), siblings keep their values —
         // exactly what N legacy node actions produce.
         sendResult(tx, out);

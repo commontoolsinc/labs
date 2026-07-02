@@ -63,7 +63,13 @@ export interface Boundary {
   /** Stable boundary id: `bnd${opId}`. */
   id: string;
   opId: OpId;
-  kind: "effect" | "collection" | "pattern" | "unresolved-leaf";
+  kind:
+    | "effect"
+    | "collection"
+    | "pattern"
+    | "control"
+    | "unresolved-leaf"
+    | "gated-leaf";
   /** The boundary's READ inputs (its `boundary←producer` edges). */
   inputs: ValueRef[];
   /** For a collection/pattern boundary with an inlinable body, the
@@ -136,6 +142,8 @@ function boundaryKindOf(
   built: BuiltRog,
   op: Op,
   inlinePurePatterns: boolean,
+  boundaryLeafOps: ReadonlySet<OpId> | undefined,
+  controlAsBoundary: boolean,
 ): Boundary["kind"] | null {
   if (op.kind === "effect") return "effect";
   if (op.kind === "collection") return "collection";
@@ -144,8 +152,10 @@ function boundaryKindOf(
       ? null
       : "pattern";
   }
-  if (op.kind === "leaf" && !built.leafImpls.has(op.id)) {
-    return "unresolved-leaf";
+  if (op.kind === "control" && controlAsBoundary) return "control";
+  if (op.kind === "leaf") {
+    if (!built.leafImpls.has(op.id)) return "unresolved-leaf";
+    if (boundaryLeafOps?.has(op.id)) return "gated-leaf";
   }
   return null;
 }
@@ -176,6 +186,16 @@ export interface PartitionInput {
    * consumed-as-value children from retained-as-piece ones. Inlining
    * returns with that analysis. */
   inlinePurePatterns?: boolean;
+  /** Leaf op ids the DISPATCH demoted to boundaries (untrusted impls,
+   * capability-bearing bodies): kept as verbatim legacy javascript nodes,
+   * with the pure region coalescing around them. */
+  boundaryLeafOps?: ReadonlySet<OpId>;
+  /** Treat control ops (ifElse/when/unless nodes) as boundaries — the
+   * legacy builtins write branch LINKS (reference semantics) the evaluator
+   * does not reproduce; preserving the original node is exactly faithful
+   * (D-V2-CONTROL-MODERNIZE: no builtin-fidelity chase). Default TRUE until
+   * native control emission writes links. */
+  controlAsBoundary?: boolean;
 }
 
 /**
@@ -199,6 +219,7 @@ export interface PartitionInput {
 export function partition(input: PartitionInput): PartitionResult {
   const built = input.built;
   const inlinePurePatterns = input.inlinePurePatterns ?? false;
+  const controlAsBoundary = input.controlAsBoundary ?? true;
   const rog = built.rog;
   const ops = rog.ops;
   const n = ops.length;
@@ -216,7 +237,13 @@ export function partition(input: PartitionInput): PartitionResult {
   const isBoundary = new Array<boolean>(n).fill(false);
   const boundaryKind = new Array<Boundary["kind"] | null>(n).fill(null);
   for (let i = 0; i < n; i++) {
-    const k = boundaryKindOf(built, ops[i], inlinePurePatterns);
+    const k = boundaryKindOf(
+      built,
+      ops[i],
+      inlinePurePatterns,
+      input.boundaryLeafOps,
+      controlAsBoundary,
+    );
     if (k !== null) {
       isBoundary[i] = true;
       boundaryKind[i] = k;
