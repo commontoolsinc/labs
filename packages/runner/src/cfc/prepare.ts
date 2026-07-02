@@ -182,6 +182,43 @@ const effectiveReadLabel = (
   return joined;
 };
 
+// Read-like shape (space/id/scope/path + a recursive read profile) for the
+// addresses whose invalidating writes scheduled this run — the §8.9.2 trigger
+// reads. Enabled only under the H5 gate (`triggerReadGating`); yields nothing
+// otherwise, so the enforcement consumed sets are byte-identical to today when
+// the flag is off. `cid:` triggers (content-addressed schema/program docs) are
+// excluded as they are on the flow side. Treated as RECURSIVE reads (the
+// conservative direction: the whole triggering value could have influenced the
+// decision to run). No `meta` — trigger entries never carry the
+// internal-verifier marker, so they always count.
+const triggerReadSources = (
+  tx: IExtendedStorageTransaction,
+): Array<{
+  space: MemorySpace;
+  id: URI;
+  scope: ReturnType<typeof normalizeCellScope>;
+  path: readonly string[];
+  type: "application/json";
+  nonRecursive?: boolean;
+  meta: Record<never, never>;
+}> => {
+  if (!tx.getCfcState().triggerReadGating) return [];
+  const out = [];
+  for (const trigger of tx.getCfcState().triggerReads) {
+    if (trigger.id.startsWith("cid:")) continue;
+    out.push({
+      space: trigger.space,
+      id: trigger.id as URI,
+      scope: normalizeCellScope(trigger.scope),
+      path: canonicalizeLogicalPath(trigger.path),
+      type: "application/json" as const,
+      nonRecursive: false,
+      meta: {},
+    });
+  }
+  return out;
+};
+
 const mergeLabelValues = (
   ...sources: Array<readonly unknown[] | undefined>
 ) => {
@@ -2452,9 +2489,15 @@ const verifyInputRequirements = (
   // The consumed reads this gate quantifies over (provenance-only reads
   // excluded). Distinct from the egress side's transaction-global consumed
   // set (collectConsumedConfidentiality), which keeps every labeled read.
-  const gatedReads = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
-    !isInternalVerifierRead(read.meta)
-  ).map((read) => ({
+  const gatedReads = [
+    ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
+      !isInternalVerifierRead(read.meta)
+    ),
+    // §8.9.2 / SC-3 (H5): the trigger reads join the gate when enabled — a
+    // handler scheduled by a labeled write must satisfy requiredIntegrity even
+    // if its branch never re-reads that write. Empty when the flag is off.
+    ...triggerReadSources(tx),
+  ].map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
     label: effectiveReadLabel(
@@ -3076,7 +3119,15 @@ const collectConsumedConfidentiality = (
   tx: IExtendedStorageTransaction,
 ): readonly unknown[] => {
   const atoms: unknown[] = [];
-  for (const read of tx.getReadActivities?.() ?? []) {
+  for (
+    const read of [
+      ...(tx.getReadActivities?.() ?? []),
+      // §8.9.2 / SC-3 (H5): a handler scheduled by a confidential write must not
+      // egress past a sink ceiling just because its branch never re-read that
+      // write. Empty when the trigger-read gate is off.
+      ...triggerReadSources(tx),
+    ]
+  ) {
     if (isInternalVerifierRead(read.meta)) continue;
     const metadata = storedMetadataFor(
       tx,
