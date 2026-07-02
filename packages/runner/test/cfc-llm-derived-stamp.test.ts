@@ -52,6 +52,16 @@ const stampingMessagesSchema = {
 } as const satisfies JSONSchema;
 
 describe("CFC LlmDerived stamping mechanism", () => {
+  it("mints the atom with and without a model binding", () => {
+    // The default mint omits `model` so the persisted atom stays canonical
+    // across models; the model arm exists for audit/display consumers.
+    expect(cfcAtom.llmDerived()).toEqual(LLM_DERIVED_ATOM);
+    expect(cfcAtom.llmDerived("mock-model")).toEqual({
+      ...LLM_DERIVED_ATOM,
+      model: "mock-model",
+    });
+  });
+
   it("stamps exactly the element pushed through the addIntegrity schema", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
