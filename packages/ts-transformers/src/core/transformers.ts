@@ -52,10 +52,23 @@ export interface CapabilityParamSummary {
   readonly defaults?: readonly CapabilityParamDefault[];
 }
 
+/**
+ * A cell argument that flows to an out-of-file parameter whose declared type the
+ * capability contract cannot read (bare `Cell<T>`, a mixed union, an unbounded
+ * generic, or a non-branded cell-like interface). The capability silently
+ * degrades, so the caller surfaces this as a diagnostic.
+ */
+export interface UnreadableCellArgument {
+  readonly node: ts.Node;
+  readonly message: string;
+}
+
 export interface FunctionCapabilitySummary {
   readonly params: readonly CapabilityParamSummary[];
   /** True when analysis was short-circuited due to recursion. */
   readonly recursive?: boolean;
+  /** Cell arguments passed to parameters the contract could not classify. */
+  readonly unreadableCellArguments?: readonly UnreadableCellArgument[];
 }
 
 export type PatternCoverageKind = "runtime";

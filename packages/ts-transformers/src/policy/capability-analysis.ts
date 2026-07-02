@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   classifyArrayCallbackContainerCall,
+  getNodeText,
   isCellLikeType,
   isWildcardTraversalCall,
 } from "../ast/mod.ts";
@@ -9,7 +10,9 @@ import {
   type FunctionCapabilitySummary,
   type ReactiveCapability,
   resolvesToCommonFabricSymbol,
+  type UnreadableCellArgument,
 } from "../core/mod.ts";
+import { isBrandedCellType } from "../transformers/cell-type.ts";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -219,6 +222,245 @@ function isInterproceduralSummaryTarget(
 ): declaration is CapabilityAnalyzableFunction {
   return isCapabilityAnalyzableFunction(declaration) &&
     declaration.getSourceFile() === sourceFile;
+}
+
+// Body analysis cannot see writes performed inside a callee whose body lives in
+// another file. The callee's declared parameter type is the only available
+// description of what it does with the cell, so it is treated as a contract for
+// the one capability the body cannot reveal: a hidden write.
+function isSignatureDeclaredOutsideSourceFile(
+  signature: ts.Signature,
+  sourceFile: ts.SourceFile,
+): boolean {
+  const declaration = signature.declaration;
+  return !!declaration && declaration.getSourceFile() !== sourceFile;
+}
+
+function getParameterAtArgument(
+  signature: ts.Signature,
+  argumentIndex: number,
+): ts.Symbol | undefined {
+  const parameters = signature.getParameters();
+  if (argumentIndex < parameters.length) {
+    return parameters[argumentIndex];
+  }
+  const lastParameter = parameters[parameters.length - 1];
+  const declaration = lastParameter?.valueDeclaration;
+  return declaration && ts.isParameter(declaration) &&
+      declaration.dotDotDotToken
+    ? lastParameter
+    : undefined;
+}
+
+type SignatureCellKind =
+  | "opaque"
+  | "cell"
+  | "stream"
+  | "comparable"
+  | "readonly"
+  | "writeonly"
+  | "sqlite";
+
+// Read the capability an imported callee declares for a parameter from its
+// Common Fabric cell wrapper type. `Writable<T>` is a structural alias of
+// `Cell<T>` (an identical type), so the two are distinguished only by the
+// spelling on the declared type node; the wrapper is matched nominally, by name,
+// rather than by the resolved type. The other wrappers (`ReadonlyCell`,
+// `WriteonlyCell`, etc.) carry distinct brands and are genuinely different
+// types. A type that is not a recognized Common Fabric wrapper returns undefined
+// and leaves the conservative default in place.
+// In a union type node, `undefined` parses as a keyword type node but `null`
+// parses as a LiteralTypeNode wrapping a null literal, so a bare NullKeyword
+// check never matches. Skip both so a nullable wrapper such as
+// `Writable<T> | null` is still recognized by its non-null member.
+function isNullOrUndefinedTypeNode(typeNode: ts.TypeNode): boolean {
+  if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return true;
+  return ts.isLiteralTypeNode(typeNode) &&
+    typeNode.literal.kind === ts.SyntaxKind.NullKeyword;
+}
+
+// A bounded generic parameter (`<C extends Writable<T>>`) carries the capability
+// of its constraint, so read the constraint node. Unbounded generics have no
+// constraint and stay unreadable.
+function getTypeParameterConstraintTypeNode(
+  symbol: ts.Symbol | undefined,
+): ts.TypeNode | undefined {
+  for (const declaration of symbol?.getDeclarations() ?? []) {
+    if (ts.isTypeParameterDeclaration(declaration) && declaration.constraint) {
+      return declaration.constraint;
+    }
+  }
+  return undefined;
+}
+
+function getExplicitCellKindFromTypeNode(
+  typeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  depth = 0,
+): SignatureCellKind | undefined {
+  // The depth guard bounds the type-parameter-constraint recursion below
+  // against a circular constraint on ill-typed input.
+  if (!typeNode || depth > 16) return undefined;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return getExplicitCellKindFromTypeNode(typeNode.type, checker, depth + 1);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    const kinds = new Set<SignatureCellKind>();
+    for (const member of typeNode.types) {
+      if (isNullOrUndefinedTypeNode(member)) {
+        continue;
+      }
+      const kind = getExplicitCellKindFromTypeNode(member, checker, depth + 1);
+      if (!kind) {
+        return undefined;
+      }
+      kinds.add(kind);
+    }
+    return kinds.size === 1 ? kinds.values().next().value : undefined;
+  }
+
+  if (!ts.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(typeNode.typeName);
+  // `Writable<T>` is the spelling that declares write intent. Bare `Cell<T>` is
+  // the neutral base alias and is intentionally not matched here: a callee that
+  // writes a cell argument must declare `Writable<T>` (or `WriteonlyCell<T>`),
+  // so an ambiguous `Cell<T>` parameter stays conservative and does not grant
+  // the caller write authority it has not demonstrated.
+  if (resolvesToCommonFabricSymbol(symbol, checker, "Writable")) {
+    return "cell";
+  }
+  if (resolvesToCommonFabricSymbol(symbol, checker, "ReadonlyCell")) {
+    return "readonly";
+  }
+  if (resolvesToCommonFabricSymbol(symbol, checker, "WriteonlyCell")) {
+    return "writeonly";
+  }
+  if (resolvesToCommonFabricSymbol(symbol, checker, "Stream")) {
+    return "stream";
+  }
+  if (resolvesToCommonFabricSymbol(symbol, checker, "ComparableCell")) {
+    return "comparable";
+  }
+  if (
+    resolvesToCommonFabricSymbol(symbol, checker, "OpaqueCell") ||
+    resolvesToCommonFabricSymbol(symbol, checker, "OpaqueRef")
+  ) {
+    return "opaque";
+  }
+  if (resolvesToCommonFabricSymbol(symbol, checker, "SqliteDb")) {
+    return "sqlite";
+  }
+  const constraint = getTypeParameterConstraintTypeNode(symbol);
+  if (constraint) {
+    return getExplicitCellKindFromTypeNode(constraint, checker, depth + 1);
+  }
+  return undefined;
+}
+
+// The declared type node that governs a single argument at this parameter: the
+// element type for a rest parameter, otherwise the parameter's own type.
+function getEffectiveParameterTypeNode(
+  parameter: ts.Symbol | undefined,
+): ts.TypeNode | undefined {
+  const declaration = parameter?.valueDeclaration;
+  if (!declaration || !ts.isParameter(declaration)) {
+    return undefined;
+  }
+  if (declaration.dotDotDotToken) {
+    return getRestParameterElementTypeNode(declaration.type);
+  }
+  return declaration.type;
+}
+
+function getParameterDeclaredCellKind(
+  parameter: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): SignatureCellKind | undefined {
+  return getExplicitCellKindFromTypeNode(
+    getEffectiveParameterTypeNode(parameter),
+    checker,
+  );
+}
+
+// A missing annotation (implicit any) or an explicit `any`/`unknown` parameter
+// A union parameter that mixes a recognized cell wrapper with a member the
+// contract cannot collapse to the same capability — for example
+// `AuthCell | Writable<Auth>`, or `Writable<Auth> | ReadonlyCell<Auth>`. Such a
+// union defeats classification: overload resolution can't pick the intended
+// capability, so a cell argument silently degrades. This is deliberately narrow
+// — it does not fire for value-or-cell framework types (`FactoryInput<T>`,
+// `U | AnyBrandedCell<U>`), which are unions with no recognized-wrapper member
+// (or not unions at all), nor for bare `Cell<T>`, generics, or `any`/`unknown`.
+function isAmbiguousCellWrapperUnion(
+  typeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  let node = typeNode;
+  while (node && ts.isParenthesizedTypeNode(node)) {
+    node = node.type;
+  }
+  if (!node || !ts.isUnionTypeNode(node)) return false;
+  // If the union collapses to a single capability it is readable; only flag when
+  // it does not, yet at least one member is a recognized cell wrapper.
+  if (getExplicitCellKindFromTypeNode(node, checker)) return false;
+  return node.types.some((member) =>
+    !isNullOrUndefinedTypeNode(member) &&
+    getExplicitCellKindFromTypeNode(member, checker) !== undefined
+  );
+}
+
+function buildUnreadableCellArgumentMessage(
+  typeNode: ts.TypeNode | undefined,
+): string {
+  const typeText = typeNode ? getNodeText(typeNode) : "unknown";
+  return `Cell argument flows to an imported parameter typed \`${typeText}\`, ` +
+    `a union that mixes cell capabilities the analysis cannot resolve to one ` +
+    `kind. Split the callee into overloads (one per cell wrapper, such as ` +
+    `\`Writable<T>\` and the other type) so overload resolution selects the ` +
+    `intended capability; otherwise the argument silently degrades to a ` +
+    `read-only cell and a needed write is denied at runtime.`;
+}
+
+// A rest parameter declares an array, but each variadic argument has the
+// element type. Unwrap `T[]`, `readonly T[]`, `Array<T>`, and `ReadonlyArray<T>`
+// to the element.
+function getRestParameterElementTypeNode(
+  typeNode: ts.TypeNode | undefined,
+): ts.TypeNode | undefined {
+  if (!typeNode) return undefined;
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return getRestParameterElementTypeNode(typeNode.type);
+  }
+  if (
+    ts.isTypeOperatorNode(typeNode) &&
+    typeNode.operator === ts.SyntaxKind.ReadonlyKeyword
+  ) {
+    return getRestParameterElementTypeNode(typeNode.type);
+  }
+  if (ts.isArrayTypeNode(typeNode)) {
+    return typeNode.elementType;
+  }
+  if (
+    ts.isTypeReferenceNode(typeNode) &&
+    ts.isIdentifier(typeNode.typeName) &&
+    (typeNode.typeName.text === "Array" ||
+      typeNode.typeName.text === "ReadonlyArray") &&
+    typeNode.typeArguments?.length === 1
+  ) {
+    return typeNode.typeArguments[0];
+  }
+  return undefined;
+}
+
+function isRestParameter(parameter: ts.Symbol | undefined): boolean {
+  const declaration = parameter?.valueDeclaration;
+  return !!declaration && ts.isParameter(declaration) &&
+    !!declaration.dotDotDotToken;
 }
 
 function isLiteralElement(
@@ -1369,6 +1611,8 @@ export function analyzeFunctionCapabilities(
     // the blanket read if the alias already has a more specific path.
     const aliasesWithSpecificPaths = new Set<string>();
     const identityArrayLocals = collectArrayLocalsPassedToSet(fn.body, checker);
+    const signatureCapabilityArgumentUses = new WeakSet<ts.Expression>();
+    const unreadableCellArguments: UnreadableCellArgument[] = [];
 
     const getIdentifierName = (
       expression: ts.Expression,
@@ -1998,6 +2242,110 @@ export function analyzeFunctionCapabilities(
       });
     };
 
+    // Apply the capability an out-of-file callee declares for a cell argument
+    // through its Common Fabric wrapper parameter type. Body analysis cannot see
+    // what the callee does with the cell, so the declared wrapper type is the
+    // contract: it accounts for that argument at that call and replaces the
+    // conservative default. Returns the handled argument indices so the
+    // whole-cell root fallback skips them; the argument's usage site is recorded
+    // so ordinary identifier handling does not add a second, broader read.
+    const applySignatureCellCapabilities = (
+      call: ts.CallExpression | ts.NewExpression,
+    ): Set<number> => {
+      const handled = new Set<number>();
+      if (!checker) return handled;
+
+      const signature = checker.getResolvedSignature(call);
+      if (!signature) return handled;
+      if (!isSignatureDeclaredOutsideSourceFile(signature, summarySourceFile)) {
+        return handled;
+      }
+
+      const args = call.arguments;
+      if (!args) return handled;
+
+      for (let index = 0; index < args.length; index++) {
+        const argument = args[index];
+        if (!argument) continue;
+
+        const parameter = getParameterAtArgument(signature, index);
+        const isSpreadArgument = ts.isSpreadElement(argument);
+        // An array spread has unknown runtime length, so it cannot be matched to
+        // later fixed parameters; stop signature mapping there. A spread into a
+        // rest parameter is a collection of rest elements, recorded below at the
+        // representative array-item path.
+        if (isSpreadArgument && !isRestParameter(parameter)) break;
+
+        const capabilityArgument = isSpreadArgument
+          ? argument.expression
+          : argument;
+        const source = resolveSourceRef(capabilityArgument);
+        if (!source) continue;
+
+        const cellKind = getParameterDeclaredCellKind(parameter, checker);
+        if (!cellKind) {
+          // The parameter type is not a recognized wrapper. Flag only the
+          // genuinely ambiguous shape: a union that mixes a cell wrapper with an
+          // unresolvable member (the overload-split case), and only when an
+          // actual cell argument flows there. Value-or-cell framework types and
+          // bare `Cell<T>`/generics/`any` are intentionally not flagged.
+          const effectiveTypeNode = getEffectiveParameterTypeNode(parameter);
+          if (
+            isAmbiguousCellWrapperUnion(effectiveTypeNode, checker) &&
+            isBrandedCellType(
+              checker.getTypeAtLocation(capabilityArgument),
+              checker,
+            )
+          ) {
+            unreadableCellArguments.push({
+              node: capabilityArgument,
+              message: buildUnreadableCellArgumentMessage(effectiveTypeNode),
+            });
+          }
+          continue;
+        }
+
+        handled.add(index);
+        signatureCapabilityArgumentUses.add(
+          unwrapExpressionUsageSite(capabilityArgument),
+        );
+
+        if (source.dynamic) {
+          markWildcard(source.root);
+          continue;
+        }
+
+        const sourcePath = isSpreadArgument
+          ? [...source.path, "0"]
+          : source.path;
+
+        switch (cellKind) {
+          case "cell":
+            trackRead(source.root, sourcePath);
+            trackWrite(source.root, sourcePath);
+            break;
+          case "readonly":
+            trackRead(source.root, sourcePath);
+            break;
+          case "writeonly":
+            trackWrite(source.root, sourcePath);
+            break;
+          case "comparable":
+            recordComparablePath(source.root, sourcePath, {
+              cellLike: true,
+            });
+            break;
+          case "opaque":
+          case "stream":
+          case "sqlite":
+            recordOpaquePath(source.root, sourcePath);
+            break;
+        }
+      }
+
+      return handled;
+    };
+
     const visitScopedFunctionBody = (
       callback: CapabilityAnalyzableFunction,
       paramBindings?: ReadonlyMap<number, AliasBinding>,
@@ -2236,6 +2584,11 @@ export function analyzeFunctionCapabilities(
               // aware so it sees through synthetic `any` params — routes
               // primitives to the full read above instead of into this skip.
             } else if (
+              signatureCapabilityArgumentUses.has(usage)
+            ) {
+              // Explicit Common Fabric cell parameter types account for this
+              // argument.
+            } else if (
               !(
                 parent &&
                 ts.isPropertyAccessExpression(parent) &&
@@ -2353,7 +2706,13 @@ export function analyzeFunctionCapabilities(
           if (
             !(parent && ts.isCallExpression(parent) &&
               parent.expression === node) &&
-            !isOptionalAliasInitializerMemberUsage(node)
+            !isOptionalAliasInitializerMemberUsage(node) &&
+            // A member-access argument (e.g. `state.auth`) whose callee parameter
+            // type already supplied the capability is accounted for, same as a
+            // destructured identifier; don't add a second read here.
+            !signatureCapabilityArgumentUses.has(
+              unwrapExpressionUsageSite(node),
+            )
           ) {
             const ref = resolveSourceRef(node);
             if (ref) {
@@ -2420,7 +2779,7 @@ export function analyzeFunctionCapabilities(
 
         const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
         const identityArgumentCall = isKnownIdentityArgumentCall(node, checker);
-        const interproceduralHandledArgs = new Set<number>();
+        const capabilityHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
         if (calleeSummary) {
           const count = Math.min(
@@ -2434,7 +2793,7 @@ export function analyzeFunctionCapabilities(
 
             const source = resolveSourceRef(argument);
             if (!source) continue;
-            interproceduralHandledArgs.add(index);
+            capabilityHandledArgs.add(index);
 
             if (source.dynamic || paramSummary.wildcard) {
               markWildcard(source.root);
@@ -2506,6 +2865,10 @@ export function analyzeFunctionCapabilities(
                 paramSummary.identityOnly ? { identityOnly: true } : undefined,
               );
             }
+          }
+        } else if (!identityArgumentCall) {
+          for (const index of applySignatureCellCapabilities(node)) {
+            capabilityHandledArgs.add(index);
           }
         }
 
@@ -2638,7 +3001,7 @@ export function analyzeFunctionCapabilities(
         // indirect traversal/mutation; conservatively disable shrinking.
         if (!identityArgumentCall) {
           for (let index = 0; index < node.arguments.length; index++) {
-            if (interproceduralHandledArgs.has(index)) {
+            if (capabilityHandledArgs.has(index)) {
               continue;
             }
             const argument = node.arguments[index];
@@ -2671,6 +3034,10 @@ export function analyzeFunctionCapabilities(
         }
 
         visitInlineEagerCallbackArguments(node);
+      }
+
+      if (ts.isNewExpression(node)) {
+        applySignatureCellCapabilities(node);
       }
 
       if (ts.isVariableDeclaration(node)) {
@@ -2854,7 +3221,9 @@ export function analyzeFunctionCapabilities(
       params.push(buildCapabilityParamSummary(summaryName, state));
     }
 
-    const result = { params };
+    const result: FunctionCapabilitySummary = unreadableCellArguments.length
+      ? { params, unreadableCellArguments }
+      : { params };
     summaryCache.set(fn, result);
     return result;
   } finally {
