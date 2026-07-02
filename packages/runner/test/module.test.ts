@@ -17,6 +17,7 @@ import {
   action,
   handler,
   lift,
+  isEagerSourceAnnotationEnabled,
   parseStackFrame,
   resolveSourceLocationFromStack,
   setEagerSourceAnnotation,
@@ -419,6 +420,38 @@ describe("module", () => {
 
       // If we reach here, the types compiled correctly
       expect(true).toBe(true);
+    });
+  });
+
+  describe("eagerSourceAnnotation runtime option", () => {
+    afterEach(() => setEagerSourceAnnotation(false));
+
+    it("propagates an explicit option to the ambient flag; undefined leaves it alone", async () => {
+      const mk = (experimental?: { eagerSourceAnnotation?: boolean }) =>
+        new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          ...(experimental ? { experimental } : {}),
+        });
+
+      // Explicit true / false propagate (and read back on `experimental`).
+      const on = mk({ eagerSourceAnnotation: true });
+      expect(isEagerSourceAnnotationEnabled()).toBe(true);
+      expect(on.experimental.eagerSourceAnnotation).toBe(true);
+      await on.dispose();
+
+      const off = mk({ eagerSourceAnnotation: false });
+      expect(isEagerSourceAnnotationEnabled()).toBe(false);
+      expect(off.experimental.eagerSourceAnnotation).toBe(false);
+      await off.dispose();
+
+      // Undefined must NOT stomp the ambient flag — it doubles as the test
+      // seam (`setEagerSourceAnnotation` toggled directly around runtimes).
+      setEagerSourceAnnotation(true);
+      const inherit = mk();
+      expect(isEagerSourceAnnotationEnabled()).toBe(true);
+      expect(inherit.experimental.eagerSourceAnnotation).toBe(true);
+      await inherit.dispose();
     });
   });
 

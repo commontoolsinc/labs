@@ -28,6 +28,10 @@ import {
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
+import {
+  isEagerSourceAnnotationEnabled,
+  setEagerSourceAnnotation,
+} from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
   ChangeGroup,
@@ -172,6 +176,15 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
+   * module evaluation. Debug-only — identity never reads `.src` — and OFF by
+   * default: the resolution (a stack capture + source-map walk per primitive)
+   * is the boot floor's largest single cost (~80ms+ per cold piece boot).
+   * Shell development builds turn it on so `.src` debugging keeps working;
+   * see `setEagerSourceAnnotation` (builder/module.ts).
+   */
+  eagerSourceAnnotation?: boolean | undefined;
 }
 
 /**
@@ -428,6 +441,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
 
@@ -455,6 +469,14 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
+    // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
+    // directly around runtime construction), and an unconditional
+    // `undefined -> default` write would stomp it.
+    if (this.experimental.eagerSourceAnnotation !== undefined) {
+      setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
+    }
+    this.experimental.eagerSourceAnnotation = isEagerSourceAnnotationEnabled();
 
     this.commitBackpressure = resolveCommitBackpressure(
       options.commitBackpressure,

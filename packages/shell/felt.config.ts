@@ -49,6 +49,9 @@ const config: Config = {
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
+      "$EXPERIMENTAL_EAGER_SOURCE_ANNOTATION": Deno.env.get(
+        "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
+      ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

@@ -580,9 +580,17 @@ export function __setSrcAnnotationTransformForTest(
  * CFC verified-identity were re-rooted off `.src` (content-addressed
  * `{ identity, symbol }` provenance — see cfc/implementation-identity.ts and the
  * `src-garble-identity-invariant` harness), so nothing load-bearing reads them.
- * With this OFF the resolution is skipped and that cost is not paid; a debug
- * session turns it on via {@link setEagerSourceAnnotation}. `.preview` (a cheap
- * `fn.toString` slice) is always kept.
+ * With this OFF the resolution is skipped and that cost is not paid; `.preview`
+ * (a cheap `fn.toString` slice) is always kept.
+ *
+ * Enablement: shell DEVELOPMENT builds turn this on by default (so `.src`
+ * debugging keeps working locally — `ENVIRONMENT === "development"` in
+ * shell/src/lib/env.ts), production builds leave it off; either is overridable
+ * via the `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` define/env everywhere the
+ * experimental flags flow (shell, toolshed, background-piece-service, cf CLI —
+ * `ExperimentalOptions.eagerSourceAnnotation`). Tests toggle the ambient flag
+ * directly via {@link setEagerSourceAnnotation}; the Runtime constructor only
+ * propagates an EXPLICIT option so it never stomps that seam.
  */
 let eagerSourceAnnotationEnabled = false;
 
