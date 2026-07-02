@@ -512,6 +512,10 @@ type QueryState = {
   result?: unknown[];
   error?: unknown;
   requestHash?: string;
+  /** CFC Phase 3.b read-time clearance audit: how many rows the acting reader
+   *  could not read were withheld (a declared existence release). Absent when
+   *  no clearance was requested. */
+  withheld?: number;
 };
 
 /** sqliteQuery: reactive server-side read. */
@@ -543,6 +547,10 @@ export function sqliteQuery(
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
       maxConfidentiality?: unknown[];
       onExceed?: unknown;
+      // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
+      // acting reader may read (a declared existence release). Requires the
+      // touched rule-bearing table to permit it (rowLabelReadClearance).
+      readClearance?: unknown;
     } | undefined;
 
     // The query result holds rows from a scope-partitioned db, so it must be at
@@ -588,6 +596,7 @@ export function sqliteQuery(
       // them re-issues the query (pre-existing queries re-hash once — benign).
       maxConfidentiality: inputs.maxConfidentiality ?? null,
       onExceed: inputs.onExceed ?? null,
+      readClearance: inputs.readClearance ?? null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
@@ -685,11 +694,17 @@ export function sqliteQuery(
             staticConfidentiality: staticConfidentialityOf(labelSchema),
             ceiling,
             onExceed: inputs.onExceed,
+            // Phase 3.b read-time clearance: the reader is the acting principal
+            // (same identity the ceiling placeholders resolve against).
+            readClearance: inputs.readClearance
+              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+              : undefined,
           });
           if ("error" in rowLabels) {
             await failQuery(rowLabels.error);
             return;
           }
+          const withheld = rowLabels.withheld;
           // onExceed:"skip" — drop rows the declared ceiling does not admit
           // (a declared, observable existence release; 06-cfc.md ceiling).
           const keep = rowLabels.keep;
@@ -724,6 +739,7 @@ export function sqliteQuery(
               pending: false,
               result: resultRows,
               requestHash: hash,
+              ...(withheld !== undefined ? { withheld } : {}),
             });
             // Per-row label attachment (CFC Phase 3): each row split into its
             // own entity doc above; write each labeled row doc DIRECTLY (its

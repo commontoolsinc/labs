@@ -6,7 +6,7 @@
 // attach, ceiling"; "Fail-closed rules").
 
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -550,5 +550,143 @@ describe("resolveCeilingPlaceholders", () => {
       { actingPrincipal: "did:key:zMe" },
     );
     assert("error" in noOwner);
+  });
+});
+
+describe("computeRowLabelRead — read-time clearance (Phase 3.b, Epic E3)", () => {
+  // A per-user mailbox: each row readable by the owner OR its sender OR its
+  // recipient (a disjunctive rule, un-reserved in E1), opted into clearance.
+  const mailboxTables = {
+    msgs: table(
+      { id: "integer", from: "text", to: "text", body: "text" },
+      (f) => ({
+        confidentiality: any(
+          dbOwner(),
+          principal("mailto", match(f.from, ADDR)),
+          principal("mailto", match(f.to, ADDR)),
+        ),
+      }),
+      { allowReadClearance: true },
+    ),
+  };
+  const MB_COLS = [
+    col("id", "msgs", "id"),
+    col("from", "msgs", "from"),
+    col("to", "msgs", "to"),
+    col("body", "msgs", "body"),
+  ];
+  const MB_ROWS = [
+    { id: 1, from: "alice@a.example", to: "bob@x.example", body: "hi bob" },
+    { id: 2, from: "carol@c.example", to: "dave@d.example", body: "hi dave" },
+    { id: 3, from: "bob@x.example", to: "erin@e.example", body: "to erin" },
+  ];
+  // Principal atoms are `did:mailto:<addr>` (see evalPrincipal).
+  const BOB = "did:mailto:bob@x.example";
+
+  it("keeps only rows the acting reader may read; withheld count is exact", () => {
+    const res = expectOk(computeRowLabelRead({
+      tables: mailboxTables,
+      columns: MB_COLS,
+      rows: MB_ROWS,
+      owner: OWNER,
+      readClearance: { reader: BOB },
+    }));
+    // bob is recipient of row 1 and sender of row 3; row 2 is carol↔dave.
+    assertEquals(res.keep, [true, false, true]);
+    assertEquals(res.withheld, 1);
+    // Kept rows still carry their per-row label for the row-doc write.
+    assert(res.labels[0]?.confidentiality);
+  });
+
+  it("the db owner is a common reader — sees every row, withholds none", () => {
+    const res = expectOk(computeRowLabelRead({
+      tables: mailboxTables,
+      columns: MB_COLS,
+      rows: MB_ROWS,
+      owner: OWNER,
+      readClearance: { reader: OWNER },
+    }));
+    assertEquals(res.keep, [true, true, true]);
+    assertEquals(res.withheld, 0);
+  });
+
+  it("intersects with a declared ceiling keep-mask — both must admit the row", () => {
+    // A permissive ceiling naming the owner fits every row (each clause lists
+    // the owner), so the combined mask is exactly the clearance mask.
+    const res = expectOk(computeRowLabelRead({
+      tables: mailboxTables,
+      columns: MB_COLS,
+      rows: MB_ROWS,
+      owner: OWNER,
+      ceiling: [OWNER],
+      onExceed: "skip",
+      readClearance: { reader: BOB },
+    }));
+    assertEquals(res.keep, [true, false, true]);
+    assertEquals(res.withheld, 1);
+  });
+
+  it("refuses when the table's policy does not opt into clearance", () => {
+    const noPolicy = {
+      msgs: table(
+        { id: "integer", from: "text", to: "text", body: "text" },
+        (f) => ({
+          confidentiality: any(
+            dbOwner(),
+            principal("mailto", match(f.from, ADDR)),
+            principal("mailto", match(f.to, ADDR)),
+          ),
+        }),
+      ),
+    };
+    const res = computeRowLabelRead({
+      tables: noPolicy,
+      columns: MB_COLS,
+      rows: MB_ROWS,
+      owner: OWNER,
+      readClearance: { reader: BOB },
+    });
+    expectError(res, "not permitted by the governing policy");
+  });
+
+  it("never applies to an aggregate (null-origin) projection", () => {
+    const res = computeRowLabelRead({
+      tables: mailboxTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 3 }],
+      owner: OWNER,
+      readClearance: { reader: BOB },
+    });
+    expectError(res, "aggregate");
+  });
+
+  it("refuses without an acting reader (fail closed)", () => {
+    const res = computeRowLabelRead({
+      tables: mailboxTables,
+      columns: MB_COLS,
+      rows: MB_ROWS,
+      owner: OWNER,
+      readClearance: { reader: undefined },
+    });
+    expectError(res, "acting reader");
+  });
+
+  it("refuses when the query touches no rule-bearing table", () => {
+    const res = computeRowLabelRead({
+      tables: { plain: table({ id: "integer", x: "text" }) },
+      columns: [col("id", "plain", "id"), col("x", "plain", "x")],
+      rows: [{ id: 1, x: "a" }],
+      owner: OWNER,
+      readClearance: { reader: BOB },
+    });
+    expectError(res, "touches none");
+  });
+
+  it("table() rejects allowReadClearance without a rowLabel rule", () => {
+    assertThrows(
+      () => table({ id: "integer" }, undefined, { allowReadClearance: true }),
+      Error,
+      "needs a rowLabel rule",
+    );
   });
 });

@@ -62,6 +62,8 @@ export default pattern(() => {
         authoredBy(principal("mailto", match(f.from_addr, ADDR, { min: 1 }))),
       ),
     }),
+    // Phase 3.b: opt the table into read-time clearance.
+    { allowReadClearance: true },
   );
 
   const db = sqliteDatabase({ tables: { emails } });
@@ -94,5 +96,16 @@ export default pattern(() => {
     },
   );
 
-  return { q, qCount, qSkim, seed: seed({ db }) };
+  // Phase 3.b read-time clearance: the acting reader is the db owner (a
+  // did:key), but every emails row's CONJUNCTIVE rule also requires the row's
+  // did:mailto participants — which the owner is not — so the owner may read no
+  // row. A cleared query therefore returns zero rows and reports withheld: 2 (a
+  // declared, audited existence release). Proves the whole path end-to-end:
+  // option -> reader resolution -> per-row reader test -> withheld surfaced.
+  const qClear = db.query<{ id: number; body: string }>(
+    "SELECT id, from_addr, to_addrs, auth, body FROM emails ORDER BY id",
+    { reactOn: db, readClearance: true },
+  );
+
+  return { q, qCount, qSkim, qClear, seed: seed({ db }) };
 });

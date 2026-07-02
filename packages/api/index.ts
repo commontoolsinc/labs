@@ -2330,8 +2330,15 @@ export interface ISqliteQueryable {
       maxConfidentiality?: ReadonlyArray<unknown>;
       /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
       onExceed?: "fail" | "skip";
+      /** CFC Phase 3.b: filter rows to those the acting reader may read (a
+       *  declared existence release). Requires the table to opt in via
+       *  `table(…, { allowReadClearance: true })`; never for aggregates. The
+       *  count of withheld rows is reported as `withheld`. */
+      readClearance?: boolean;
     },
-  ): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+  ): Reactive<
+    { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+  >;
 }
 
 /**
@@ -2387,10 +2394,18 @@ export type SqliteQueryParams = {
    *  refuse the whole query) or `"skip"` (drop the offending rows; a declared
    *  existence release, row-returning queries only — never aggregates). */
   onExceed?: "fail" | "skip";
+  /** CFC Phase 3.b read-time clearance: when `true`, filter rows to those the
+   *  acting reader may read (a declared existence release under §8.17/inv-14).
+   *  Requires the touched rule-bearing table to opt in via
+   *  `table(…, { allowReadClearance: true })`; never for aggregates. The number
+   *  of withheld rows is reported back as `withheld`. */
+  readClearance?: boolean;
 };
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
-) => Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+) => Reactive<
+  { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
@@ -2414,6 +2429,10 @@ export type SqliteRowLabelRule = (
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
   rule?: SqliteRowLabelRule,
+  /** CFC Phase 3.b: `{ allowReadClearance: true }` opts the table into
+   *  read-time clearance (reader-filtered `db.query({ readClearance: true })`).
+   *  Needs a `rule` — throws at `table()` time without one. */
+  opts?: { allowReadClearance?: boolean },
 ) => JSONSchema;
 
 /**
