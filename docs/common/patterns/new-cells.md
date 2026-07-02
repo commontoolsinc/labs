@@ -84,12 +84,12 @@ becomes a writable cell.
 This makes each state explicit. It also lets TypeScript narrow the value before
 code passes it to a handler or provider client.
 
-Provider pattern files can import `authIsReady` from
-`../auth/auth-types.ts`.
+Provider pattern files can import `authIsReady` from their relative path to
+`packages/patterns/auth/auth-types.ts`.
 
 ```typescript
 import { Writable } from "commonfabric";
-import { authIsReady } from "../auth/auth-types.ts";
+import { authIsReady } from "../../../packages/patterns/auth/auth-types.ts";
 
 type AuthData = { token: string };
 
