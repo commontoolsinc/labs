@@ -2428,6 +2428,23 @@ const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
     integrity.every(isNonEndorsementProvenanceAtom);
 };
 
+/**
+ * Exact-match membership for `requiredIntegrity` floors: the carried integrity
+ * set satisfies a floor iff every required atom appears in it (deepEqual).
+ * This is the single shared kernel for both floor surfaces — the commit-time
+ * write gate (`verifyInputRequirements`) and the invoke-time tool-input gate
+ * (llm-dialog, Epic D2) — so the two cannot drift. D5 upgrades this one seam
+ * to `matchAtomPattern` + `TrustResolver.conceptSatisfied` for concept-level
+ * floors.
+ */
+export const integritySatisfiesFloor = (
+  integrity: readonly unknown[],
+  requiredIntegrity: readonly unknown[],
+): boolean =>
+  requiredIntegrity.every((required) =>
+    integrity.some((actual) => deepEqual(actual, required))
+  );
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -2532,11 +2549,7 @@ const verifyInputRequirements = (
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
       const ok = gatedReads.every((read) =>
-        requiredIntegrity.every((required) =>
-          (read.label?.integrity ?? []).some((actual) =>
-            deepEqual(actual, required)
-          )
-        )
+        integritySatisfiesFloor(read.label?.integrity ?? [], requiredIntegrity)
       );
       if (!ok) {
         return `requiredIntegrity failed at /${entry.path.join("/")}`;

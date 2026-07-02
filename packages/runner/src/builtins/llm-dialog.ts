@@ -28,7 +28,6 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -84,6 +83,7 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
+import { integritySatisfiesFloor } from "../cfc/prepare.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -2023,10 +2023,9 @@ function toolInputRequiredIntegrityFailure(
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
-      const satisfied = required.every((req) =>
-        integrity.some((have) => deepEqual(have, req))
-      );
-      if (!satisfied) {
+      // Same membership kernel as the commit-time write gate
+      // (verifyInputRequirements) — the two floor surfaces must not drift.
+      if (!integritySatisfiesFloor(integrity, required)) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +
           `reference, not a literal)`;
