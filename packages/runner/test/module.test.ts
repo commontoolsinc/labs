@@ -427,6 +427,16 @@ describe("module", () => {
   describe("eagerSourceAnnotation runtime option", () => {
     afterEach(() => setEagerSourceAnnotation(false));
 
+    it("skips annotation entirely for a non-extensible implementation", () => {
+      // Hardened/frozen fns cannot carry the debug annotation; the annotator
+      // must early-return rather than throw (with eager on OR off).
+      setEagerSourceAnnotation(true);
+      const frozen = Object.freeze((n: number) => n * 5);
+      const fact = lift(frozen);
+      expect(isModule(fact)).toBe(true);
+      expect((frozen as { src?: string }).src).toBe(undefined);
+    });
+
     it("annotates the RAW (unmapped) stack location when eager annotation is on", () => {
       // Builder calls from plain test code have no source map behind them, so
       // the stack walk takes the raw-resolution arm (`file:line:col` of the
@@ -667,11 +677,12 @@ describe("module", () => {
     });
   });
 
-  describe("resolveLocationFromFunctionSource", () => {
-    // The `indexOf`-into-script path — the eager annotation's fallback when
-    // the stack capture yields nothing (in-worker, SES-censored stacks make
-    // this the MAIN path). Annotation is off by default now, so exercise the
-    // helper directly with an explicit frame.
+  describe("source-location resolution helpers (direct)", () => {
+    // Annotation is off by default now, so these arms are only reachable
+    // through eager-on paths — exercise the helpers directly.
+    // resolveLocationFromFunctionSource is the `indexOf`-into-script path,
+    // the eager annotation's fallback when the stack capture yields nothing
+    // (in-worker, SES-censored stacks make it the MAIN path).
     const makeFrame = (script: string, nextSearchOffset = 0) =>
       ({
         sourceLocationContext: {
@@ -705,6 +716,20 @@ describe("module", () => {
       expect(resolveLocationFromFunctionSource(fn, makeFrame("// nothing")))
         .toBe(null);
       expect(resolveLocationFromFunctionSource(fn, undefined)).toBe(null);
+    });
+
+    it("skips unmapped frames from the capturing file itself (thisFile)", () => {
+      // The first parsed frame names the file doing the capture; an unmapped
+      // frame from that same file later in the walk is self-referential and
+      // must be skipped in favor of the first genuinely external frame.
+      const stack = [
+        "Error",
+        "    at capture (/probe/self.ts:10:5)",
+        "    at alsoSelf (/probe/self.ts:11:9)",
+        "    at userCode (/probe/user-code.ts:42:7)",
+      ].join("\n");
+      const result = resolveSourceLocationFromStack(stack, () => null);
+      expect(result.location).toBe("/probe/user-code.ts:42:7");
     });
 
     it("returns null for an empty fn source", () => {
