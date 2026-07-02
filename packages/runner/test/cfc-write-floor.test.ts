@@ -459,6 +459,107 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
+  it("an ancestor link cannot smuggle an unendorsed value under a nested floor", async () => {
+    // Floor at /out/secret; the write links /out (an ANCESTOR) to a source
+    // whose .secret carries no integrity. The nested value reconstructs as
+    // undefined through the link, so without the ancestor-link check the floor
+    // entry would be skipped entirely — the bypass this test pins closed.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(
+        runtime,
+        "wf-anc-src-bad",
+        { secret: "unendorsed" },
+        {},
+      );
+      const nestedFloor = {
+        type: "object",
+        properties: {
+          out: {
+            type: "object",
+            properties: {
+              secret: {
+                type: "string",
+                ifc: { requiredIntegrity: [ADMIN_ATOM] },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const src = runtime.getCell(
+        signer.did(),
+        "wf-anc-src-bad",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-anc-sink-bad",
+        nestedFloor,
+        tx,
+      );
+      sink.set({ out: src as unknown as { secret: string } });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed at /out/secret",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("an ancestor link whose source carries the nested floor atom passes", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(
+        runtime,
+        "wf-anc-src-good",
+        { secret: "endorsed" },
+        { integrity: [ADMIN_ATOM] },
+        ["secret"],
+      );
+      const nestedFloor = {
+        type: "object",
+        properties: {
+          out: {
+            type: "object",
+            properties: {
+              secret: {
+                type: "string",
+                ifc: { requiredIntegrity: [ADMIN_ATOM] },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const src = runtime.getCell(
+        signer.did(),
+        "wf-anc-src-good",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-anc-sink-good",
+        nestedFloor,
+        tx,
+      );
+      sink.set({ out: src as unknown as { secret: string } });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("clearing a floor-declaring path (delete) is not a floored write", async () => {
     // Establish the floor field with an endorsed value, then delete it. A
     // delete writes no value at the path, so the floor (which governs values,
@@ -495,6 +596,30 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("the enforce pin cannot be weakened mid-transaction", async () => {
+    // Once the runtime sets `enforce` at tx creation, code that can reach the
+    // transaction must not be able to dial the floor back down and slip a
+    // violation through (mirrors the flow-labels persist pin).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const tx = runtime.edit();
+      expect(() => tx.setCfcWriteFloorMode("off")).toThrow(
+        "cannot be weakened",
+      );
+      expect(() => tx.setCfcWriteFloorMode("observe")).toThrow(
+        "cannot be weakened",
+      );
+      // Re-asserting enforce is fine.
+      tx.setCfcWriteFloorMode("enforce");
+      expect(tx.getCfcState().writeFloorMode).toBe("enforce");
+      await tx.commit();
     } finally {
       await runtime.dispose();
       await storageManager.close();

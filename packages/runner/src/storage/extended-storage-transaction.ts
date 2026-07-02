@@ -140,6 +140,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // off — same shape as the enforcement floor (audit S3): code holding a
   // Cell must not disable propagation mid-transaction to launder a value.
   private cfcFlowLabelsPinned = false;
+  private cfcWriteFloorPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -210,7 +211,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
+    // Anti-downgrade pin (mirrors flow labels): once `enforce` is set — by the
+    // runtime at tx creation — pattern/handler code that reaches the tx cannot
+    // weaken it to `observe`/`off` to slip an SC-18 floor violation through
+    // (cubic review). Strengthening to `enforce` is always allowed.
+    if (this.cfcWriteFloorPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
+          `is pinned at "enforce"`,
+      );
+    }
     this.cfcState.writeFloorMode = mode;
+    if (mode === "enforce") {
+      this.cfcWriteFloorPinned = true;
+    }
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {

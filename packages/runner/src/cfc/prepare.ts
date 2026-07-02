@@ -3216,7 +3216,20 @@ const verifyWriteFloor = (
       : [];
     if (floor.length === 0) continue;
     if (entry.path.includes("*")) continue;
+    // A link written at a strict ANCESTOR of the floor path swaps the whole
+    // container: the value now living at the floor path is the linked source's
+    // value at the corresponding nested path. This case must be checked even
+    // when `ifcEntryAppliesToAttemptedWrite` is false — for a fresh doc the
+    // nested value reconstructs as `undefined` through the link and the entry
+    // would otherwise be SKIPPED, letting an unendorsed linked child enter a
+    // floor-protected slot unchecked (codex/cubic review).
+    const ancestorLinks = ctx.linkWriteInputs.filter((input) => {
+      const linkPath = canonicalizeLogicalPath(input.target.path);
+      return linkPath.length < entry.path.length &&
+        concretePathHasPrefix(entry.path, linkPath);
+    });
     if (
+      ancestorLinks.length === 0 &&
       !ifcEntryAppliesToAttemptedWrite(
         tx,
         target,
@@ -3256,6 +3269,31 @@ const verifyWriteFloor = (
       // An underivable link (`reason` set, `label` undefined) contributes empty
       // integrity — it fails the floor, fail-closed, alongside the persist
       // loop's own missing-source reason (both reject).
+      contributions.push(derived.label?.integrity ?? []);
+    }
+    for (const input of ancestorLinks) {
+      // Re-point the derivation at the floor path INSIDE the linked source:
+      // the value at the floor path is source.path + (floor − linkPath), so
+      // the credit is the source's own label at that nested path (an endorsed
+      // nested value passes; an unendorsed one fails, fail-closed).
+      const linkPath = canonicalizeLogicalPath(input.target.path);
+      const relative = entry.path.slice(linkPath.length);
+      const derived = derivePersistedLinkLabel(
+        tx,
+        {
+          ...input,
+          source: {
+            ...input.source,
+            path: [
+              ...canonicalizeLogicalPath(input.source.path),
+              ...relative,
+            ],
+          },
+          target: { ...input.target, path: entry.path },
+        },
+        ctx.candidateSchemas,
+        ctx.identityForInput(input),
+      );
       contributions.push(derived.label?.integrity ?? []);
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
@@ -3535,7 +3573,12 @@ export const prepareBoundaryCommit = (
         identityForInput,
         linkWriteInputs,
         candidateSchemas: candidates,
-        flowIntegrity: flowMode === "off" ? [] : flowIntegrity,
+        // Only PERSISTED flow integrity may credit the floor: `observe` mode
+        // computes the join for diagnostics but stores nothing on the value, so
+        // crediting it would let a plain write pass a floor with integrity that
+        // never lands (codex/cubic review). Only `persist` writes the derived
+        // component.
+        flowIntegrity: flowPersist ? flowIntegrity : [],
       });
       if (floorFailures.length > 0) {
         if (state.writeFloorMode === "enforce") {
