@@ -66,6 +66,7 @@ import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
   flowLabelWorkExists,
@@ -239,6 +240,14 @@ export interface RuntimeOptions {
    * boundary; it derives and persists labels but never rejects by itself.
    */
   cfcFlowLabels?: CfcFlowLabelsMode;
+  /**
+   * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3).
+   * Defaults to `off`. `observe` evaluates the floor and emits diagnostics;
+   * `enforce` records a prepare reason on a floor miss (rejecting the commit
+   * under the enforcing enforcement modes). The floor tests the written
+   * value's integrity, never the consumed-read set.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -374,6 +383,7 @@ export class Runtime {
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
+  readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -495,6 +505,7 @@ export class Runtime {
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
+    this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -744,6 +755,7 @@ export class Runtime {
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
+    wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
