@@ -408,8 +408,8 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       await waitForMessages(t.result, 6);
 
       // The central invariant: the injected recipient was never mailed.
-      const emails = ((await t.result.key("emails").pull()) ?? []) as
-        SentEmail[];
+      const emails =
+        ((await t.result.key("emails").pull()) ?? []) as SentEmail[];
       expect(emails).toEqual([]);
 
       // Refusal surface: the sendMail tool-result is an error the model can
@@ -492,8 +492,8 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       // The direct-command send SUCCEEDED — the floor is satisfied by the
       // referenced cell's kernel-bound integrity, so the gate does not block
       // the legitimate path.
-      const emails = ((await t.result.key("emails").pull()) ?? []) as
-        SentEmail[];
+      const emails =
+        ((await t.result.key("emails").pull()) ?? []) as SentEmail[];
       expect(emails.length).toBe(1);
       expect(emails[0].route).toBe("safe-parent");
       expect(emails[0].recipient).toBe(USER_EMAIL_RECIPIENT);
