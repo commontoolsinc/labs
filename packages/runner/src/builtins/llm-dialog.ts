@@ -28,6 +28,7 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -71,6 +72,10 @@ import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
@@ -1977,6 +1982,142 @@ function toolAllowsObservedConfidentiality(
   return cfcObservationFitsCeiling(observedConfidentiality, maxConfidentiality);
 }
 
+// The integrity a model-supplied tool-input value carries (Epic D2). A value
+// the model passed BY REFERENCE (a `{"@link":…}` to a cell) carries that
+// cell's stored integrity; a value the model emitted as a plain literal
+// carries none — it is model output (stamped at most `LlmDerived`, D1), which
+// by construction lacks any endorsement family. `traverseAndCellify` is the
+// same resolver the invoke path uses, so a reference is read identically here.
+function toolInputValueIntegrity(
+  runtime: Runtime,
+  space: MemorySpace,
+  value: unknown,
+): unknown[] {
+  const cellified = traverseAndCellify(runtime, space, value);
+  if (!isCell(cellified)) {
+    return [];
+  }
+  const view = cfcLabelViewForCellFailClosed(cellified);
+  return (view?.entries ?? []).flatMap((entry) => entry.label.integrity ?? []);
+}
+
+// Walk a tool's `inputSchema` for fields declaring `ifc.requiredIntegrity` and
+// verify the model-supplied value at each carries every required atom (Epic D2,
+// docs/specs/cfc-trusted-agent-tool-integrity.md piece A/C). A control/routing
+// field (e.g. `sendMail.recipient`) declaring the agent-kernel integrity floor
+// can only be satisfied by an integrity-bearing reference the model passed, not
+// by a string it copied out of a hostile briefing — that fails closed. Returns
+// the first failing field's reason, or undefined if all floors are satisfied.
+function toolInputRequiredIntegrityFailure(
+  runtime: Runtime,
+  space: MemorySpace,
+  schema: unknown,
+  value: unknown,
+  path: string,
+): string | undefined {
+  if (!isRecord(schema)) {
+    return undefined;
+  }
+  const ifc = schema.ifc;
+  if (isRecord(ifc) && Array.isArray(ifc.requiredIntegrity)) {
+    const required = ifc.requiredIntegrity;
+    if (required.length > 0) {
+      const integrity = toolInputValueIntegrity(runtime, space, value);
+      const satisfied = required.every((req) =>
+        integrity.some((have) => deepEqual(have, req))
+      );
+      if (!satisfied) {
+        return `field "${path || "(root)"}" requires integrity the ` +
+          `model-supplied value does not carry (pass an integrity-bearing ` +
+          `reference, not a literal)`;
+      }
+    }
+  }
+  if (isRecord(schema.properties)) {
+    for (const [key, childSchema] of Object.entries(schema.properties)) {
+      // Only gate fields the model actually supplied. An absent (e.g. optional)
+      // field carries no value to gate; treating it as `undefined` would fail
+      // an optional field's floor and over-block the call. A required field the
+      // model omitted is a structural error handled by ordinary input
+      // validation, not a floor bypass — there is no injected value to gate.
+      if (!isRecord(value) || !Object.hasOwn(value, key)) {
+        continue;
+      }
+      const failure = toolInputRequiredIntegrityFailure(
+        runtime,
+        space,
+        childSchema,
+        value[key],
+        path ? `${path}.${key}` : key,
+      );
+      if (failure !== undefined) {
+        return failure;
+      }
+    }
+  }
+  // Array items: a floor under `items` gates every model-supplied element
+  // (e.g. `recipients: { items: { ifc: { requiredIntegrity } } }`).
+  if (isRecord(schema.items) && Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const failure = toolInputRequiredIntegrityFailure(
+        runtime,
+        space,
+        schema.items,
+        value[index],
+        `${path}[${index}]`,
+      );
+      if (failure !== undefined) {
+        return failure;
+      }
+    }
+  }
+  // Compound schemas: mirror the IFC schema walker — descend into every
+  // branch. For a required-integrity FLOOR, requiring the union across
+  // branches is the fail-safe (over-require) direction, matching walkIfcSchema.
+  for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+    const branches = schema[key];
+    if (Array.isArray(branches)) {
+      for (const branch of branches) {
+        const failure = toolInputRequiredIntegrityFailure(
+          runtime,
+          space,
+          branch,
+          value,
+          path,
+        );
+        if (failure !== undefined) {
+          return failure;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+// The (schema, input) the D2 integrity gate checks for a resolved tool call.
+// For the generic `invoke` builtin the target is the resolved handler /
+// pattern, whose ARGUMENT schema carries the requiredIntegrity floors — its
+// own `path`/`args` builtin schema declares none — and the value is the
+// resolved args (path stripped). External tools keep the catalog input schema
+// and the raw model input. Other management builtins (pin/read/schema/…) have
+// fixed floor-free schemas, so their check is a no-op.
+function integrityGateTarget(
+  resolved: ResolvedToolCall,
+  part: BuiltInLLMToolCallPart,
+  toolCatalog: ToolCatalog,
+): { schema: unknown; input: unknown } {
+  if (resolved.type === "invoke") {
+    const schema = resolved.pattern?.argumentSchema ??
+      (resolved.handler as unknown as { schema?: unknown } | undefined)
+        ?.schema;
+    return { schema, input: resolved.call.input };
+  }
+  return {
+    schema: toolCatalog.llmTools[part.toolName]?.inputSchema,
+    input: part.input,
+  };
+}
+
 async function executeToolCalls(
   runtime: Runtime,
   space: MemorySpace,
@@ -2006,6 +2147,38 @@ async function executeToolCalls(
       }
 
       const resolved = resolveToolCall(runtime, space, part, toolCatalog);
+
+      // Epic D2: gate the model-supplied input against the TARGET's
+      // requiredIntegrity floors before the handler runs, so an injected
+      // control-field value (e.g. a recipient copied from a hostile briefing)
+      // is refused rather than executed. Runs AFTER resolveToolCall so the
+      // generic `invoke` builtin is checked against the resolved handler /
+      // pattern argument schema (its own path/args schema declares no floors),
+      // closing the invoke bypass. Only DENIES in enforcing modes — observe is
+      // diagnostic and must not block — and is a no-op for tools declaring no
+      // requiredIntegrity.
+      if (
+        cfcEnforcementStrictness(runtime.cfcEnforcementMode) >=
+          CFC_ENFORCING_STRICTNESS
+      ) {
+        const gate = integrityGateTarget(resolved, part, toolCatalog);
+        const integrityFailure = toolInputRequiredIntegrityFailure(
+          runtime,
+          space,
+          gate.schema,
+          gate.input,
+          "",
+        );
+        if (integrityFailure !== undefined) {
+          results.push({
+            id: part.toolCallId,
+            toolName: part.toolName,
+            error: `Tool call denied: ${integrityFailure}`,
+          });
+          continue;
+        }
+      }
+
       const resultValue = await invokeToolCall(
         runtime,
         space,
