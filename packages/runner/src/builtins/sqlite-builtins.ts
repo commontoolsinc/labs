@@ -482,11 +482,6 @@ export function sqliteDatabase(
       const id = (isEntityRef(handle.entityId)
         ? entityRefToString(handle.entityId)
         : undefined) ?? JSON.stringify(handle.getAsLink());
-      // The db's owner: the principal creating this handle (CFC Phase 3 —
-      // resolves the row rule's dbOwner(); a FIXED property of the db, not
-      // the acting reader). "creator" would be wrong for linked dbs; the
-      // handle's creation is where ownership is minted.
-      const owner = runtime.trustSnapshotProvider()?.actingPrincipal;
       // Grow-only merge the per-column `ifc` against any prior committed handle
       // value at this (causally-stable) id: the store's effective label is
       // monotone, so a re-derivation reading a weaker `tables` input cannot lower
@@ -494,6 +489,18 @@ export function sqliteDatabase(
       // creation (no prior) passes the declared tables through unchanged.
       const prior = handle.withTx(tx).get() as SqliteDbRef | undefined;
       const tables = growOnlyMergeDbTables(prior?.tables, options?.tables);
+      // The db's owner: the principal creating this handle (CFC Phase 3 —
+      // resolves the row rule's dbOwner(); a FIXED property of the db, not
+      // the acting reader). Minted ONLY when there is no prior committed
+      // handle: this init re-runs in every runtime that opens the piece (the
+      // `initialized` guard is per-runtime-instance), and re-minting would
+      // rotate ownership to the last opener — dbOwner() row rules and
+      // {__ctDbOwner} ceiling placeholders would then admit the wrong
+      // principal. An ownerless prior handle stays ownerless (dbOwner()
+      // fails closed) rather than adopting a later opener.
+      const owner = prior !== undefined
+        ? prior.owner
+        : runtime.trustSnapshotProvider()?.actingPrincipal;
       handle.withTx(tx).set({
         id,
         tables,
