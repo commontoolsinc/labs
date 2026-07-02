@@ -50,6 +50,7 @@ export {
   isCfcEnforcementMode,
 } from "./types.ts";
 export {
+  canonicalizeCfcLabel,
   canonicalizeCfcMetadata,
   canonicalizeDereferenceTrace,
   canonicalizeLogicalPath,
@@ -58,6 +59,14 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
+export type { CfcConfClause, CfcOrClause } from "./clause.ts";
+export {
+  clauseAlternatives,
+  clausesEqual,
+  clauseSubsumes,
+  isOrClause,
+  normalizeClause,
+} from "./clause.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
