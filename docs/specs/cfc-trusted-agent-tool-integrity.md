@@ -1,12 +1,14 @@
 # Scope: trusted-agent tool-input integrity (llmDialog / generateObject)
 
-**Status:** Scoping (not implemented). Tracks the "trusted agent" work split
-out of the agent prompt-injection demo investigation. The demo *loads* (it was
-made SES-loadable by #4222, which moved the CFC authoring vocabulary into the
-`commonfabric/cfc` host module, and is guarded by `cf check` per #4153), but its
-central security invariant is not enforced — verified still-broken on current
-`main` by the `it.ignore`'d
-`packages/runner/test/cfc-agent-tool-input-integrity.test.ts`.
+**Status:** Implemented — (B) landed as Epic D1, (A)+(C) as Epic D2 (#4474).
+Tracks the "trusted agent" work split out of the agent prompt-injection demo
+investigation. The demo *loads* (made SES-loadable by #4222, guarded by
+`cf check` per #4153), and its central security invariant is now enforced at
+invoke time — guarded green by
+`packages/runner/test/cfc-agent-tool-input-integrity.test.ts` (no longer
+ignored) and the end-to-end demo drive in
+`packages/runner/test/cfc-agent-prompt-injection-demo.test.ts`. The problem
+statement below is kept in its original (pre-fix) tense.
 
 ## Problem
 
@@ -92,11 +94,27 @@ stays the deferred end-state.
    a by-reference value) vs. hard commit rejection. Recommend error tool-result
    for agent ergonomics, with the sink write still gated at commit as defense in
    depth.
-2. **By-reference contract.** How does a legit recipient reach `sendMail` with
-   integrity intact? The direct-command value must be passed as an opaque
-   handle/link the kernel resolves, not re-emitted as text by the model. Does
-   the demo already model this, or does it need a "bind direct-command field"
-   affordance?
+2. **By-reference contract.** ~~How does a legit recipient reach `sendMail`
+   with integrity intact?~~ **Settled (Epic D2, #4474).** The model passes the
+   value as an LLM-friendly link to the integrity-bearing cell, in either
+   form the dialog resolver (`traverseAndCellify`,
+   `packages/runner/src/builtins/llm-dialog.ts`) already accepts:
+   - a JSON object `{ "@link": "/of:…" }` (single `@link` key, LLM-friendly
+     pointer syntax), or
+   - the same object JSON-serialized into a string (models frequently
+     stringify it).
+
+   The invoke-time gate resolves the reference with that same resolver, reads
+   the referenced cell's stored label view, and checks the floor against the
+   carried integrity — so a reference to a kernel-bound direct-command cell
+   passes while a reference to an unlabeled cell fails exactly like a
+   literal. No new binding affordance was needed at this layer: "bind
+   direct-command field" reduces to the kernel (a builtin identity — the
+   atoms are runtime-minted) persisting the value with the required integrity
+   and handing the model its link. Covered by
+   `packages/runner/test/cfc-agent-tool-input-integrity.test.ts` (allowed
+   path, string form, unlabeled-reference negative) and the demo drive in
+   `packages/runner/test/cfc-agent-prompt-injection-demo.test.ts`.
 3. **Scope of enforcement.** Only fields declaring `requiredIntegrity`
    (opt-in, demo works) vs. all control fields by default. Recommend opt-in
    first.
@@ -106,15 +124,22 @@ stays the deferred end-state.
 
 ## Test plan
 
-- Un-ignore `packages/runner/test/cfc-agent-tool-input-integrity.test.ts`
-  (injected recipient refused) — the red→green guard for (A).
-- Add: a by-reference recipient carrying the required integrity is **allowed**
-  (proves (A) doesn't over-block the legitimate path).
-- Add: a confidential tool result is stamped `LlmDerived` and cannot satisfy a
-  later `requiredIntegrity` field (guards (B)).
-- End-to-end: drive the demo's two agents via the mock; the unsafe agent's
-  injected `sendMail` is refused, the safe agent's direct-command `sendMail`
-  succeeds.
+All landed in `packages/runner/test/`:
+
+- ✅ Un-ignore `cfc-agent-tool-input-integrity.test.ts` (injected recipient
+  refused) — the red→green guard for (A). Landed with #4474, plus the invoke
+  bypass, optional-field, and array-items cases.
+- ✅ A by-reference recipient carrying the required integrity is **allowed**
+  (proves (A) doesn't over-block the legitimate path) — object and
+  JSON-string link forms, plus the discriminating negative (a reference to an
+  unlabeled cell is refused).
+- ✅ A tool result stamped `LlmDerived` cannot satisfy a later
+  `requiredIntegrity` field (guards (B)) — the D1↔D2 composition guard in the
+  same file: the stamp is real, positive integrity and still fails the floor.
+- ✅ End-to-end: `cfc-agent-prompt-injection-demo.test.ts` drives the demo's
+  two agents via the mock; the unsafe agent's injected `sendMail` is refused
+  (error tool-result, loop continues), the safe agent's direct-command
+  `sendMail` succeeds by reference.
 
 ## Risk / blast radius
 

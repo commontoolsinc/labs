@@ -42,7 +42,11 @@ import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
-import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
+import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloor,
+  uniqueCfcAtoms,
+} from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -2532,10 +2536,9 @@ const verifyInputRequirements = (
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
       const ok = gatedReads.every((read) =>
-        requiredIntegrity.every((required) =>
-          (read.label?.integrity ?? []).some((actual) =>
-            deepEqual(actual, required)
-          )
+        cfcIntegritySatisfiesFloor(
+          read.label?.integrity ?? [],
+          requiredIntegrity,
         )
       );
       if (!ok) {
