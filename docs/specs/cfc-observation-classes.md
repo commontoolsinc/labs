@@ -59,12 +59,13 @@ So C is a *refinement* of existing axes, not new machinery.
 Add an optional consumption axis to the persisted entry, orthogonal to `origin`:
 
 ```ts
+// Shown for illustration only.
 type LabelObservationClass = "value" | "shape" | "enumerate" | "followRef";
 
 type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
-  origin?: LabelEntryOrigin;      // update discipline (unchanged)
+  origin?: LabelEntryOrigin; // update discipline (unchanged)
   observes?: LabelObservationClass; // consumption class (NEW; absent = covering)
 };
 ```
@@ -125,9 +126,19 @@ via `nonRecursive` / followRef via `linkResolutionProbe`) and select entries by
 class-compatibility rather than the boolean. `excludeLinkOrigin` becomes class
 selection: link-origin entries are consumed by `followRef` reads.
 
-Parity contract for C1: with only legacy covering entries present (no
-`observes` set anywhere), the derived join must be **byte-identical** to today
-— every read consumes every covering entry, which is the current behavior.
+Parity contract for C1 — **scoped, because SC-8 is an intentional behavioral
+change, not a refactor.** Today `forEachFlowObservation` *skips*
+`linkResolutionProbe` reads and `deriveFlowJoin` *drops* `origin==="link"`
+entries via `excludeLinkOrigin: true` (`prepare.ts`). Two distinct effects:
+
+- **value / shape / enumerate reads** must stay **byte-identical** on legacy
+  covering entries — every such read consumes every covering entry, the current
+  behavior. This is the real parity test.
+- **the `followRef` path** deliberately **changes**: making a slot-pointer read
+  consume the link-origin entry is exactly the SC-8 fix, so the derived join for
+  that path is *wider* than today by design. The parity test must exempt this
+  path (or assert the new, wider result) — it is not, and must not be, claimed
+  byte-identical.
 
 ## 7. Observation ceiling (LLM path) and render
 
@@ -153,12 +164,27 @@ max). That precision win is what pays for the epic on the LLM/agent surface.
 
 ## 9. Rollout
 
-No dial needed — entries are additive and legacy readers treat them as
-covering, so mixed-version behavior is fail-safe by construction. Perf: the
-labelMap grows ~2× entries per written path; bench `cfc-label-sync-strategy`
-and `cfc-canonicalize` before/after. A spec PR to `commontoolsinc/specs`
-records the §4.6.3 read-classification table and the SC-4 grow-vs-replace split
-when this doc settles (tracked in `cfc-spec-changes.md`).
+Two rollout regimes, because the mixed-version fail-safe holds for the additive
+classes but **not** for the SC-8 change:
+
+- **`value` / `shape` / `enumerate` — additively safe, no dial.** These are new
+  covering-compatible entries; a class-unaware (old) reader consumes them as
+  covering entries and **over-taints** (fail-safe). Persist-before-read is fine.
+- **`followRef` (SC-8) — needs a reader-first (or dialed) rollout.** The
+  fail-safe-by-construction claim does **not** hold here: a class-unaware reader
+  does not treat a `origin:"link"` entry as covering — `deriveFlowJoin` **drops**
+  it via `excludeLinkOrigin`. So if a new writer persists
+  `origin:"link", observes:"followRef"` entries while old readers are live,
+  those readers keep *dropping* the slot-pointer label — an **under-taint**, not
+  a conservative over-taint. C2 must therefore either deploy the class-aware
+  reader before the writer, or gate followRef persistence behind a dial flipped
+  only after readers understand it. State this as a hard prerequisite for the
+  SC-8 slice.
+
+Perf: the labelMap grows ~2× entries per written path; bench
+`cfc-label-sync-strategy` and `cfc-canonicalize` before/after. A spec PR to
+`commontoolsinc/specs` records the §4.6.3 read-classification table and the SC-4
+grow-vs-replace split when this doc settles (tracked in `cfc-spec-changes.md`).
 
 ## Provenance
 
