@@ -1598,6 +1598,7 @@ describe("runtimeOptionsFromInitializationData", () => {
         identity: {} as never,
         spaceDid: "did:key:space",
         cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "observe",
         trustSnapshot: {
           id: "principal:did:key:worker",
           actingPrincipal: "did:key:worker",
@@ -1608,6 +1609,7 @@ describe("runtimeOptionsFromInitializationData", () => {
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcFlowLabels).toBe("observe");
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",

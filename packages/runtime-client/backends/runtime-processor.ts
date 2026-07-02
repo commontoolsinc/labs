@@ -169,6 +169,7 @@ export function runtimeOptionsFromInitializationData(
     telemetry,
     experimental: data.experimental,
     cfcEnforcementMode: data.cfcEnforcementMode,
+    cfcFlowLabels: data.cfcFlowLabels,
     trustSnapshotProvider: data.trustSnapshot
       ? () => data.trustSnapshot
       : undefined,
