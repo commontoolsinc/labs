@@ -192,9 +192,16 @@ function stampDefiningModule(
     }
     // Match what `recordModuleProvenance` keys provenance on: the artifact's
     // `.implementation` function, or the value itself when it is a function.
-    const implementation =
-      (value as { implementation?: unknown }).implementation ??
-        value;
+    // Read via the OWN data-property descriptor, never a normal get: this walk
+    // runs over every export BEFORE any trust gate, so a plain `.implementation`
+    // read would execute a module-authored accessor during this host-initiated
+    // pass — a throwing getter would fail the module load after its factory
+    // succeeded, and a getter's return value must never receive this module's
+    // defining stamp. Real builder factories carry `.implementation` as an own
+    // data property, so legitimate artifacts are unaffected.
+    const implementation = typeof value === "function"
+      ? value
+      : Object.getOwnPropertyDescriptor(value, "implementation")?.value;
     if (typeof implementation === "function") {
       recordDefiningModule(implementation, identity);
     }
