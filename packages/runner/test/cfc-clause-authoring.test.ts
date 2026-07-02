@@ -5,7 +5,8 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { isOrClause } from "../src/cfc/clause.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-clause-authoring");
 
@@ -71,6 +72,36 @@ describe("CFC authored disjunctive confidentiality", () => {
     }
   });
 
+  it("admits a flat atom alongside an OR-clause with a string alternative", async () => {
+    // Exercises the non-clause `continue` and non-record-alternative branches
+    // of the boundary's authored-clause validator: a flat atom is skipped (not
+    // an OR-clause), a string alternative is not a forbidden typed atom, and a
+    // record alternative that is not Caveat/Expires passes — so the write
+    // commits.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const schema = {
+        type: "string",
+        ifc: {
+          confidentiality: [userA, { anyOf: ["did:key:carol", userB] }],
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const cell = runtime.getCell(signer.did(), "authored-mixed", schema, tx);
+      cell.set("ok");
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects a Caveat alternative fail-closed (spec §3.1.8)", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
@@ -101,6 +132,38 @@ describe("CFC authored disjunctive confidentiality", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("schema-merge treats order-differing OR-clauses as equivalent (not a weakening)", () => {
+    // Two schema inputs presenting the same clause with alternatives in a
+    // different order must merge without a "cannot be weakened" reject — the
+    // merge normalizes clauses before the subset check (Epic A4 review fix).
+    const merged = mergeCfcSchemaEnvelopes(
+      { type: "string", ifc: { confidentiality: [{ anyOf: [userA, userB] }] } },
+      { type: "string", ifc: { confidentiality: [{ anyOf: [userB, userA] }] } },
+    ) as JSONSchemaObj;
+    const conf = (merged.ifc?.confidentiality ?? []) as unknown[];
+    // Coalesces to ONE clause (not two order-variants, not a merged/unioned
+    // superset clause).
+    expect(conf).toHaveLength(1);
+    expect(isOrClause(conf[0])).toBe(true);
+    expect((conf[0] as { anyOf: unknown[] }).anyOf).toHaveLength(2);
+  });
+
+  it("schema-merge still rejects a genuinely narrower clause set as weakening", () => {
+    // Dropping a conjunctive clause IS a weakening and must still reject.
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        {
+          type: "string",
+          ifc: { confidentiality: [{ anyOf: [userA, userB] }, userA] },
+        },
+        {
+          type: "string",
+          ifc: { confidentiality: [{ anyOf: [userB, userA] }] },
+        },
+      )
+    ).toThrow("cannot be weakened");
   });
 
   it("rejects an Expires alternative fail-closed", async () => {
