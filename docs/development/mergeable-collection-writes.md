@@ -1,5 +1,10 @@
 # Mergeable collection writes (operation-based append, add-unique, increment, remove-by-value)
 
+> For how a patch operation is put together across the codebase — the registries
+> that define each op once and how to add a new one — see
+> [patch-operations.md](./patch-operations.md). This note covers *why* the
+> mergeable ops exist.
+
 ## The problem
 
 The runtime is local-first and optimistic. A handler write applies to local
@@ -114,8 +119,8 @@ The same machinery carries three mergeable ops. `append` is described below;
   `append` case that returns the array path, the same as `splice`.
 
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
-  `recordArrayAppend(address, count)` records, per document and path, a mergeable
-  intent (`mergeableOps` on the writable entry). At commit:
+  `recordMergeableOp(address, { op: "append", count })` records, per document and
+  path, a mergeable intent (`mergeableOps` on the writable entry). At commit:
   - The op builder emits an `append` op for each recorded array path. With a
     base present, only `count` tail elements are the append; with the array
     absent from the base (a fresh or not-yet-loaded entity) the whole working
@@ -209,7 +214,8 @@ first, since the op carries only the delta.
 - **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) and the
   query-result-proxy's `push` (`packages/runner/src/query-result-proxy.ts`,
   which routes array mutators through `diffAndUpdate`) both call
-  `recordArrayAppend` after writing the combined array, so id anchoring,
+  `recordMergeableOp` with an `append` delta after writing the combined array, so
+  id anchoring,
   cross-space link elements, and CFC write-policy recording continue to run
   through the existing `diffAndUpdate` path unchanged.
 
