@@ -192,6 +192,46 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     }
   });
 
+  it("flag ON: a cid: trigger read is excluded (content-addressed docs never gate)", async () => {
+    // Trigger entries for content-addressed schema/program docs (cid:) are
+    // structural plumbing, dropped at ingest by addCfcTriggerReads
+    // (flowReadExcluded), so a run whose only trigger is a cid: address has an
+    // empty trigger set and egresses freely even with the gate on.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-cid-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id:
+          `cid:${CONFIDENTIAL_SCHEMA.taggedHashString}` as `${string}:${string}`,
+        type: "application/json",
+        path: ["value"],
+      }]);
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:cid",
+        createFrozenRequestSnapshot({ url: "https://example.com/ok" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("the input-requirement gate also consults trigger reads under the flag", async () => {
     // A requiredIntegrity-floored write whose only consumed input is a TRIGGER
     // read that lacks the required atom: flag OFF passes (empty gate set), flag

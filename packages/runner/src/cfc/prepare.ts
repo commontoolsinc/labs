@@ -186,11 +186,12 @@ const effectiveReadLabel = (
 // addresses whose invalidating writes scheduled this run — the §8.9.2 trigger
 // reads. Enabled only under the H5 gate (`triggerReadGating`); yields nothing
 // otherwise, so the enforcement consumed sets are byte-identical to today when
-// the flag is off. `cid:` triggers (content-addressed schema/program docs) are
-// excluded as they are on the flow side. Treated as RECURSIVE reads (the
-// conservative direction: the whole triggering value could have influenced the
-// decision to run). No `meta` — trigger entries never carry the
-// internal-verifier marker, so they always count.
+// the flag is off. `cid:`/runtime-surface triggers are already excluded at
+// ingest (`addCfcTriggerReads` applies `flowReadExcluded`), so entries here are
+// user-data addresses only. Treated as RECURSIVE reads (the conservative
+// direction: the whole triggering value could have influenced the decision to
+// run). No `meta` — trigger entries never carry the internal-verifier marker,
+// so they always count.
 const triggerReadSources = (
   tx: IExtendedStorageTransaction,
 ): Array<{
@@ -203,20 +204,15 @@ const triggerReadSources = (
   meta: Record<never, never>;
 }> => {
   if (!tx.getCfcState().triggerReadGating) return [];
-  const out = [];
-  for (const trigger of tx.getCfcState().triggerReads) {
-    if (trigger.id.startsWith("cid:")) continue;
-    out.push({
-      space: trigger.space,
-      id: trigger.id as URI,
-      scope: normalizeCellScope(trigger.scope),
-      path: canonicalizeLogicalPath(trigger.path),
-      type: "application/json" as const,
-      nonRecursive: false,
-      meta: {},
-    });
-  }
-  return out;
+  return tx.getCfcState().triggerReads.map((trigger) => ({
+    space: trigger.space,
+    id: trigger.id as URI,
+    scope: normalizeCellScope(trigger.scope),
+    path: canonicalizeLogicalPath(trigger.path),
+    type: "application/json" as const,
+    nonRecursive: false,
+    meta: {},
+  }));
 };
 
 const mergeLabelValues = (
