@@ -66,6 +66,7 @@ import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcTriggerReadGating,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
@@ -248,6 +249,14 @@ export interface RuntimeOptions {
    * value's integrity, never the consumed-read set.
    */
   cfcWriteFloor?: CfcWriteFloorMode;
+  /**
+   * Trigger-read gating on the enforcement side (§8.9.2 / SC-3, Epic H5).
+   * Defaults to `false`. When true, the addresses whose invalidating writes
+   * scheduled a reactive rerun join the consumed set the sink-request egress
+   * ceiling and input-requirement gates quantify over (fail-closed; extra
+   * metadata resolution per prepare).
+   */
+  cfcTriggerReadGating?: CfcTriggerReadGating;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -384,6 +393,7 @@ export class Runtime {
   readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
+  readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -506,6 +516,7 @@ export class Runtime {
       "enforce-explicit";
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
+    this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -756,6 +767,7 @@ export class Runtime {
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
+    wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;

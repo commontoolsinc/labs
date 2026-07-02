@@ -31,6 +31,7 @@ export type {
   CfcStreamChannel,
   CfcStreamObservation,
   CfcStreamSegment,
+  CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
   ConsumedRead,
@@ -48,6 +49,7 @@ export {
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   isCfcEnforcementMode,
 } from "./types.ts";

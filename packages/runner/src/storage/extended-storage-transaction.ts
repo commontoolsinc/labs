@@ -62,11 +62,13 @@ import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcTriggerReadGating,
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
@@ -122,6 +124,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
+    triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     triggerReads: [],
@@ -225,6 +228,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (mode === "enforce") {
       this.cfcWriteFloorPinned = true;
     }
+  }
+
+  setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
+    this.cfcState.triggerReadGating = enabled;
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
@@ -1191,6 +1198,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
     this.wrapped.setCfcWriteFloorMode(mode);
+  }
+
+  setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
+    this.wrapped.setCfcTriggerReadGating(enabled);
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
