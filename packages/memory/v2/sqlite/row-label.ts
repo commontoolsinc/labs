@@ -772,6 +772,63 @@ export function evaluateRowLabel(
   }
 }
 
+// The STATIC UNCONDITIONAL readers of one confidentiality conjunct — atoms
+// guaranteed (for EVERY row, without data dependence) to satisfy that clause:
+// `dbOwner()` and `constant()`, including such alternatives of an `any()`.
+// A `principal(match)` is data-dependent (varies per row) and a `when()` is
+// conditional, so neither contributes. Used by `ruleCommonAlternatives`.
+function staticUnconditionalAlternatives(
+  node: unknown,
+  ctx: { dbOwner?: string },
+): unknown[] {
+  if (!isRecord(node)) return [];
+  if (node.dbOwner === true) {
+    return ctx.dbOwner !== undefined ? [ctx.dbOwner] : [];
+  }
+  if ("constant" in node) return [node.constant];
+  if ("anyOf" in node && Array.isArray(node.anyOf)) {
+    return node.anyOf.flatMap((alt) =>
+      staticUnconditionalAlternatives(alt, ctx)
+    );
+  }
+  return [];
+}
+
+/**
+ * The atoms that are a reader of EVERY row this rule could label — the
+ * "common-alternative" set (CFC spec §8.17.4, Epic E2). An atom is common iff
+ * it is a static unconditional reader of every conjunctive clause of the rule
+ * (the intersection across conjuncts). Only `dbOwner()`/`constant()` qualify;
+ * a rule with any purely data-dependent conjunct (`principal(match)` — the
+ * conjunctive email form) has NO common alternative, correctly. A member of
+ * this set satisfies the join of all row labels, so it can soundly read a
+ * COUNT/SUM aggregate over the table with no declassification.
+ */
+export function ruleCommonAlternatives(
+  spec: RowLabelSpec,
+  ctx: { dbOwner?: string },
+): unknown[] {
+  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  if (conf === undefined) return [];
+  const conjuncts = isRecord(conf) && Array.isArray(conf.allOf)
+    ? conf.allOf
+    : [conf];
+  if (conjuncts.length === 0) return [];
+  let common: Map<string, unknown> | undefined;
+  for (const c of conjuncts) {
+    const alts = new Map<string, unknown>();
+    for (const a of staticUnconditionalAlternatives(c, ctx)) {
+      alts.set(atomKey(a), a);
+    }
+    if (alts.size === 0) return []; // this clause has no guaranteed reader
+    common = common === undefined
+      ? alts
+      : new Map([...common].filter(([k]) => alts.has(k)));
+    if (common.size === 0) return [];
+  }
+  return common === undefined ? [] : [...common.values()];
+}
+
 /** The rule attached to a (possibly wire-supplied) table schema, or undefined.
  *  Presence gates all Phase 3 work, so rule-less tables pay nothing. */
 export function rowLabelSpecOf(tableSchema: unknown): RowLabelSpec | undefined {

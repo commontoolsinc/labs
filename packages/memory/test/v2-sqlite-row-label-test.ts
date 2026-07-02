@@ -18,6 +18,7 @@ import {
   match,
   principal,
   type RowLabelSpec,
+  ruleCommonAlternatives,
   validateRowLabelSpec,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
@@ -190,6 +191,53 @@ Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B�
       })),
     Error,
   );
+});
+
+Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)", () => {
+  const OWNER = "did:key:zOwner";
+  // An unconditional dbOwner() in a single OR-clause → the owner is common.
+  const orRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(orRule, { dbOwner: OWNER }), [OWNER]);
+
+  // dbOwner in every conjunct's OR-clause → still common.
+  const cnfRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(cnfRule, { dbOwner: OWNER }), [OWNER]);
+
+  // The CONJUNCTIVE email rule (all(principal, …, dbOwner)) has NO common
+  // reader — a principal() conjunct is data-dependent, so nobody reads every
+  // row. This is why an aggregate over it must still refuse.
+  assertEquals(ruleCommonAlternatives(emailSpec(), { dbOwner: OWNER }), []);
+
+  // dbOwner unconditional as a top-level conjunct is NOT a common reader of
+  // the OTHER conjuncts (a principal clause it doesn't satisfy).
+  const mixed = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(mixed, { dbOwner: OWNER }), []);
+
+  // constant() is a static reader too.
+  const constRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      constant("did:key:public"),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(constRule, { dbOwner: OWNER }), [
+    "did:key:public",
+  ]);
 });
 
 Deno.test("a rule referencing an unknown column throws", () => {

@@ -14,6 +14,7 @@ import {
 import { table } from "@commonfabric/memory/sqlite/schema";
 import {
   all,
+  any,
   authoredBy,
   dbOwner,
   match,
@@ -180,7 +181,7 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     expectError(res, "provenance");
   });
 
-  it("an aggregate / null-origin column on a rule-bearing db refuses (COUNT(*))", () => {
+  it("an aggregate on the CONJUNCTIVE rule refuses — no common reader (COUNT(*))", () => {
     const res = computeRowLabelRead({
       tables: emailTables,
       columns: [col("cnt", null, null)],
@@ -188,6 +189,49 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
       owner: OWNER,
     });
     expectError(res, "aggregate");
+  });
+
+  it("an aggregate is allowed when the rule has a common reader (Epic E2)", () => {
+    // A rule with an unconditional dbOwner() alternative → the owner reads
+    // every row → soundly reads a COUNT(*). The aggregate row is labeled by
+    // the common alternative (the owner), and a ceiling naming the owner fits.
+    const orTables = {
+      emails: table(
+        { id: "integer", from: "text", to: "text", body: "text" },
+        (f) => ({
+          confidentiality: all(
+            any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+            any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+          ),
+        }),
+      ),
+    };
+    const res = expectOk(computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+    }));
+    assertEquals(res.labels, [{ confidentiality: [OWNER] }]);
+
+    // ...and it fits a ceiling naming the owner, but not one that omits it.
+    const kept = expectOk(computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+      ceiling: [OWNER],
+    }));
+    assertEquals(kept.keep, [true]);
+
+    const missed = computeRowLabelRead({
+      tables: orTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+      ceiling: ["did:key:someone-else"],
+    });
+    expectError(missed, "ceiling");
   });
 
   it("a well-formed anyOf wire spec is accepted; a malformed one refuses (Epic E1)", () => {
