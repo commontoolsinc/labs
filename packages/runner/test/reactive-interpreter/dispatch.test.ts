@@ -89,20 +89,19 @@ async function runOnce(
 }
 
 describe("interpreter dispatch differential (W3c)", () => {
-  it("pure lift+str+control pattern: flag-on == flag-off, and it interprets", async () => {
+  it("pure lift+str pattern: flag-on == flag-off, and it interprets", async () => {
     const buildPattern = () =>
-      pattern<{ a: number; b: number; flag: boolean }>((input) => {
+      pattern<{ a: number; b: number }>((input) => {
         const sum = lift(({ a, b }: { a: number; b: number }) => a + b)({
           a: input.a,
           b: input.b,
         });
         const doubled = lift((v: { s: number }) => v.s * 2)({ s: sum });
         const label = str`sum=${sum}, doubled=${doubled}`;
-        const picked = ifElse(input.flag, sum, doubled);
-        return { sum, doubled, label, picked };
+        return { sum, doubled, label };
       }) as unknown as Pattern;
 
-    const argument = { a: 2, b: 3, flag: true };
+    const argument = { a: 2, b: 3 };
     const edit = { path: ["a"], value: 10 };
 
     const legacy = await runOnce(false, buildPattern, argument, edit);
@@ -120,19 +119,45 @@ describe("interpreter dispatch differential (W3c)", () => {
       sum: 5,
       doubled: 10,
       label: "sum=5, doubled=10",
-      picked: 5,
     });
     assertEquals(legacy.afterEdit, {
       sum: 13,
       doubled: 26,
       label: "sum=13, doubled=26",
-      picked: 13,
     });
 
     // Never green-via-fallback: the flag-on run must have interpreted.
     assert(
       census.interpreted >= 1,
       `expected interpreted>=1, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  it("control pattern: flag-on == flag-off via the reference-semantics fallback", async () => {
+    // ifElse/when/unless are gated (`control_reference_semantics`) until
+    // control emission writes branch LINKS like the legacy builtins. This
+    // oracle pins that the gate is safe: equal outputs, census shows the
+    // fallback (not an interpretation).
+    const buildPattern = () =>
+      pattern<{ flag: boolean; a: number; b: number }>((input) => ({
+        picked: ifElse(input.flag, input.a, input.b),
+      })) as unknown as Pattern;
+
+    const argument = { flag: true, a: 1, b: 2 };
+    const edit = { path: ["flag"], value: false };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { picked: 1 });
+    assertEquals(legacy.afterEdit, { picked: 2 });
+    assert(
+      (census.fallbackByReason["control_reference_semantics"] ?? 0) >= 1,
+      `expected control fallback, census=${JSON.stringify(census)}`,
     );
   });
 });

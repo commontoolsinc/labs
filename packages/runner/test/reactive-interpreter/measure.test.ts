@@ -10,7 +10,7 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { pattern, popFrame, pushFrame } from "../../src/builder/pattern.ts";
 import { lift } from "../../src/builder/module.ts";
-import { ifElse, str } from "../../src/builder/built-in.ts";
+import { str } from "../../src/builder/built-in.ts";
 import type { Pattern } from "../../src/builder/types.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
@@ -38,7 +38,7 @@ interface Measurement {
 const num = lift((v: { x: number; y: number }) => v.x + v.y);
 
 function buildComputeHeavyPattern(): Pattern {
-  return pattern<{ a: number; b: number; flag: boolean }>((input) => {
+  return pattern<{ a: number; b: number }>((input) => {
     const s1 = num({ x: input.a, y: input.b });
     const s2 = num({ x: s1, y: input.a });
     const s3 = num({ x: s2, y: input.b });
@@ -46,9 +46,8 @@ function buildComputeHeavyPattern(): Pattern {
     const s5 = num({ x: s4, y: s2 });
     const s6 = num({ x: s5, y: s3 });
     const label1 = str`s4=${s4}`;
-    const label2 = str`s6=${s6} (${label1})`;
-    const picked = ifElse(input.flag, s5, s6);
-    return { s6, label2, picked };
+    const label2 = str`s6=${s6} s5=${s5} (${label1})`;
+    return { s6, label2 };
   }) as unknown as Pattern;
 }
 
@@ -74,7 +73,7 @@ async function measureOnce(interpreter: boolean): Promise<Measurement> {
     const result = runtime.run(
       undefined,
       trustExecutable(runtime, factory) as never,
-      { a: 2, b: 3, flag: false } as never,
+      { a: 2, b: 3 } as never,
       resultCell as never,
     );
     const value = JSON.parse(JSON.stringify(await result.pull()));

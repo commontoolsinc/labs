@@ -36,12 +36,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
+          experimentalInterpreter: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -54,12 +56,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
+          experimentalInterpreter: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: true,
       });
       await runtime.dispose();
       await sm.close();
@@ -70,12 +74,13 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: {},
+        experimental: { experimentalInterpreter: false },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -90,6 +95,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
+          experimentalInterpreter: true,
         },
       });
 

@@ -80,6 +80,26 @@ export type DispatchPlan =
   | { kind: "interpret"; nodes: SyntheticNode[] }
   | { kind: "fallback"; reason: string };
 
+/** Recursive key-walk for scope-routing markers in serialized pattern data. */
+function containsScopeMarker(value: unknown, depth = 0): boolean {
+  if (depth > 64 || value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((v) => containsScopeMarker(v, depth + 1));
+  }
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    // The default "space" scope rides on every serialized alias — only a
+    // NARROWED scope (user/session/any) or explicit routing is a marker.
+    if (key === "scope" && v !== undefined && v !== "space") return true;
+    if (
+      (key === "defaultScope" || key === "targetSpace") && v !== undefined
+    ) {
+      return true;
+    }
+    if (containsScopeMarker(v, depth + 1)) return true;
+  }
+  return false;
+}
+
 function fallback(reason: string): DispatchPlan {
   const key = reason.split(":")[0];
   census.fallbackByReason[key] = (census.fallbackByReason[key] ?? 0) + 1;
@@ -144,6 +164,30 @@ export function planInterpreterDispatch(
 
   const leafGate = findLeafGate(built, options.leafTrust);
   if (leafGate) return fallback(leafGate);
+
+  // SCOPE-NARROWING gate (v1 D-EMISSION-SCOPE parity): the legacy javascript
+  // action tracks the narrowest scope read per run and routes outputs to
+  // their effective scope (`tx.resetNarrowestReadScope` + scoped aliases /
+  // `.asScope()` / `.inSpace()` / scoped result schemas). The segment action
+  // implements none of that yet, so ANY scope marker in the serialized
+  // pattern → legacy. Key-walk (not substring) over nodes + result schema;
+  // a user-data key literally named "scope" over-blocks — fail-closed.
+  if (
+    containsScopeMarker(pattern.nodes) ||
+    containsScopeMarker(pattern.resultSchema) ||
+    containsScopeMarker(pattern.result)
+  ) {
+    return fallback("scope_narrowing");
+  }
+
+  // CONTROL REFERENCE-SEMANTICS gate: the legacy ifElse/when/unless builtins
+  // write a LINK to the selected branch (write-once on re-trigger; aliasing
+  // observable via Cell.push through the output). The evaluator resolves
+  // VALUES — equal under deep reads, divergent under aliasing/write-shape.
+  // Until control emission writes links, any control op → legacy.
+  if (built.rog.ops.some((op) => op.kind === "control")) {
+    return fallback("control_reference_semantics");
+  }
 
   const part = partition({ built });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
