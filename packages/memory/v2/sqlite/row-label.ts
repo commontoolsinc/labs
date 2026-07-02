@@ -281,6 +281,13 @@ function validateAnyOfAlternative(
       "all()/any() — a conjunction or nested disjunction cannot be an " +
       "OR-clause alternative (CFC spec §3.1.8)";
   }
+  if (isRecord(node)) {
+    // Before the `when` branch below follows the gate: a dual-op alternative
+    // (e.g. {when, then, principal}) would be validated as a when() here but
+    // EVALUATED as a principal (evalConf dispatches on `principal` first).
+    const amb = ambiguousOpReason(node, "any()-alternative");
+    if (amb) return amb;
+  }
   if (isRecord(node) && "when" in node) {
     const test = (node as { when?: unknown }).when;
     const gate = isRecord(test) && "match" in test
@@ -347,11 +354,46 @@ function unknownOp(node: Record<string, unknown>, position: string): string {
     `{${Object.keys(node).join(", ")}}`;
 }
 
+// Every recognized op key — a node must carry EXACTLY ONE. The validator, the
+// evaluator, and the static common-alternative analysis each dispatch on these
+// by their own key precedence, so a hand-crafted dual-op wire node (e.g.
+// {principal, dbOwner}) would validate as one op, evaluate as another, and be
+// statically analyzed as a third — an unsoundness: a COUNT(*) labeled by the
+// owner while no contributing row's label names the owner (CFC spec §8.17.4).
+// Ambiguous nodes refuse everywhere. (`then` is not an op — it rides `when`.)
+const OP_KEYS = [
+  "anyOf",
+  "allOf",
+  "intersect",
+  "principal",
+  "dbOwner",
+  "constant",
+  "when",
+  "authoredBy",
+  "endorsedBy",
+] as const;
+
+function presentOps(node: Record<string, unknown>): string[] {
+  return OP_KEYS.filter((k) => k in node);
+}
+
+function ambiguousOpReason(
+  node: Record<string, unknown>,
+  position: string,
+): string | undefined {
+  const ops = presentOps(node);
+  if (ops.length <= 1) return undefined;
+  return `ambiguous rowLabel node in ${position} position: ` +
+    `{${ops.join(", ")}} — exactly one op per node (fail closed)`;
+}
+
 function validateConfTerm(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
   if (!isRecord(node)) return "malformed confidentiality term";
+  const amb = ambiguousOpReason(node, "confidentiality");
+  if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
   if ("intersect" in node) {
     return "intersect() is integrity-only (the trust-floor meet); " +
@@ -384,6 +426,8 @@ function validateConfExpr(
   columns: ReadonlySet<string>,
 ): string | undefined {
   if (!isRecord(node)) return "malformed confidentiality expression";
+  const amb = ambiguousOpReason(node, "confidentiality");
+  if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
   if ("allOf" in node) {
     const terms = node.allOf;
@@ -404,6 +448,8 @@ function validateIntegTerm(
   columns: ReadonlySet<string>,
 ): string | undefined {
   if (!isRecord(node)) return "malformed integrity term";
+  const amb = ambiguousOpReason(node, "integrity");
+  if (amb) return amb;
   if ("anyOf" in node) {
     return "disjunctive integrity does not exist (CFC spec §3.1.8): " +
       "integrity is a conjunction combined by meet";
@@ -640,6 +686,11 @@ function evalConf(
   ctx: { dbOwner?: string },
 ): unknown[] {
   if (!isRecord(node)) return fail("malformed confidentiality term");
+  // Defense in depth against a wire spec that bypassed validation: a dual-op
+  // node must refuse, never be resolved by this dispatch's key precedence
+  // (the validator and the static analysis each have their own).
+  const amb = ambiguousOpReason(node, "confidentiality");
+  if (amb) return fail(amb);
   if ("anyOf" in node) {
     const terms = node.anyOf;
     if (!Array.isArray(terms)) return fail("malformed any()");
@@ -694,6 +745,8 @@ function evalInteg(
   ctx: { dbOwner?: string },
 ): unknown[] {
   if (!isRecord(node)) return fail("malformed integrity term");
+  const amb = ambiguousOpReason(node, "integrity");
+  if (amb) return fail(amb);
   if ("anyOf" in node) return fail("disjunctive integrity does not exist");
   if ("authoredBy" in node || "endorsedBy" in node) {
     const kind = "authoredBy" in node
@@ -785,6 +838,10 @@ function staticUnconditionalAlternatives(
   ctx: { dbOwner?: string },
 ): unknown[] {
   if (!isRecord(node)) return [];
+  // A dual-op node is ambiguous (the evaluator dispatches by a DIFFERENT key
+  // precedence — e.g. {principal, dbOwner} labels rows with only the
+  // principal): it contributes no static reader, so the aggregate refuses.
+  if (presentOps(node).length > 1) return [];
   if (node.dbOwner === true) {
     return ctx.dbOwner !== undefined ? [ctx.dbOwner] : [];
   }
