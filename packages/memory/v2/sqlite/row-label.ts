@@ -617,6 +617,20 @@ function evalPrincipal(
   );
 }
 
+// True if an `any()` alternative is (directly, or via a `when()` gate) a
+// conjunction/nested disjunction — the shape the evaluator must reject rather
+// than union-flatten. Mirrors `validateAnyOfAlternative`'s recursion so eval
+// fails closed on the same shape the validator rejects, even for a wire spec
+// that bypassed validation.
+function anyOfAlternativeHasConjunction(node: unknown): boolean {
+  if (!isRecord(node)) return false;
+  if ("allOf" in node || "anyOf" in node) return true;
+  if ("when" in node) {
+    return anyOfAlternativeHasConjunction((node as { then?: unknown }).then);
+  }
+  return false;
+}
+
 function evalConf(
   node: unknown,
   row: Record<string, unknown>,
@@ -638,10 +652,11 @@ function evalConf(
     // `(A∧B)∨C` into `A∨B∨C` (readable by A alone).
     const alternatives: unknown[] = [];
     for (const t of terms) {
-      if (isRecord(t) && ("allOf" in t || "anyOf" in t)) {
+      if (anyOfAlternativeHasConjunction(t)) {
         return fail(
-          "an any() alternative must not be all()/any() — a conjunction " +
-            "cannot be an OR-clause alternative (CFC spec §3.1.8)",
+          "an any() alternative must not be all()/any() (directly or under " +
+            "a when() gate) — a conjunction cannot be an OR-clause " +
+            "alternative (CFC spec §3.1.8)",
         );
       }
       alternatives.push(...evalConf(t, row, ctx));

@@ -552,6 +552,41 @@ Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
   ]);
 });
 
+Deno.test("evalConf fails closed on a conjunctive any() alternative that bypassed validation (Epic E1)", () => {
+  // A raw wire spec (not built through table(), so validation was skipped)
+  // with a conjunction as an any() alternative must fail closed at eval —
+  // never union-flatten (A∧B)∨C into A∨B∨C. Both the direct all() and the
+  // when()-wrapped all() shapes are rejected.
+  const direct: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      anyOf: [
+        { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        { dbOwner: true },
+      ],
+    } as never,
+  };
+  const dRes = evaluateRowLabel(direct, {}, { dbOwner: OWNER });
+  assert("error" in dRes && dRes.error.includes("conjunction"));
+
+  const gated: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      anyOf: [
+        {
+          when: { match: { field: "from", source: ADDR.source, flags: "" } },
+          then: { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        },
+        { dbOwner: true },
+      ],
+    } as never,
+  };
+  const gRes = evaluateRowLabel(gated, { from: "a@b.example" }, {
+    dbOwner: OWNER,
+  });
+  assert("error" in gRes && gRes.error.includes("conjunction"));
+});
+
 Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
   // all(any(owner ∨ from), to-participants) → (owner∨from) ∧ to.
   const spec = table(EMAIL_COLUMNS, (f) => ({
