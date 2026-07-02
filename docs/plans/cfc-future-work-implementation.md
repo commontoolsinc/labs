@@ -745,11 +745,12 @@ enforcement×propagation matrix per SC-13). File those against the specs repo
 when the design docs settle, keeping `cfc-spec-changes.md` the single tracking
 list.
 
-**Known-inaccuracy fix.** `docs/specs/cfc-runner-future-work.md` §"Default
-posture" says enforcement "defaults to `disabled`" citing the types-level
-constant; the effective Runtime/shell default is `enforce-explicit` (the
-types constant is the bare-transaction fallback). Correct that line when this
-plan lands.
+**Known-inaccuracy fix (applied alongside this plan).**
+`docs/specs/cfc-runner-future-work.md` §"Default posture" said enforcement
+"defaults to `disabled`", citing the types-level constant; the effective
+Runtime/shell default is `enforce-explicit` (the types constant is the
+bare-transaction fallback). That doc's "Default posture" paragraph and Epic H
+bullet were corrected in the same change that landed this plan.
 
 **Test infrastructure reused.** Multi-runtime worker harness for cross-runtime
 label-flow tests (reader isolation matters for E3/H5); `cf test` console-error
