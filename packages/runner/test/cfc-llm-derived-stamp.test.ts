@@ -330,4 +330,110 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       await storageManager.close();
     }
   });
+
+  it("does not stamp when CFC enforcement is disabled", async () => {
+    // The disabled dial must be a strict no-op: messages flow through the
+    // plain push path and no CFC metadata is minted on the message docs.
+    enableMockMode();
+    clearMockResponses();
+    loadConversationFixture({
+      description: "LlmDerived stamping: disabled dial",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Hello"], messageCount: 1 },
+          response: { role: "assistant", content: "Hi there!", id: "d1-r2" },
+        },
+      ],
+    });
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, llmDialog, Cell } = commonfabric;
+
+    try {
+      const resultSchema = {
+        type: "object",
+        properties: {
+          addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+          pending: { type: "boolean" },
+          messages: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+        required: ["addMessage"],
+      } as const satisfies JSONSchema;
+
+      const testPattern = pattern(
+        () => {
+          const messages = Cell.of<BuiltInLLMMessage[]>([]);
+          const dialog = llmDialog({ messages });
+          return {
+            addMessage: dialog.addMessage,
+            pending: dialog.pending,
+            messages,
+          };
+        },
+        false,
+        resultSchema,
+      );
+
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "llm-derived-e2e-disabled",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      tx.commit();
+
+      const addMessage = await result.key("addMessage").pull();
+      addMessage.send({ role: "user", content: "Hello" });
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Timeout waiting for assistant reply")),
+          5000,
+        );
+        const cancel = result.sink(
+          ({ pending, messages }: {
+            pending?: boolean;
+            messages?: readonly unknown[];
+          } = {}) => {
+            if (pending === false && messages?.length === 2) {
+              clearTimeout(timeout);
+              cancel();
+              resolve();
+            }
+          },
+        );
+      });
+      await runtime.idle();
+
+      const messagesCell = result.key("messages");
+      const rtx = runtime.edit();
+      const raw = messagesCell.withTx(rtx).key(1).getRaw();
+      const link = parseLink(raw);
+      expect(link?.id).toBeDefined();
+      const metadata = readStoredCfcMetadata(rtx, {
+        space: link!.space ?? signer.did(),
+        id: link!.id!,
+        scope: link!.scope === "inherit" ? undefined : link!.scope,
+      });
+      expect(metadata).toBeUndefined();
+      rtx.commit();
+    } finally {
+      clearMockResponses();
+      await runtime.idle();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
