@@ -97,6 +97,20 @@ export function hasKeyPathRead(
   });
 }
 
+/**
+ * The evaluated first argument of every emitted `<receiver>.for(<cause>, true)`
+ * stable-cause call, in source order. A cause is a string (`"foo"`), an array
+ * path (`["__patternResult", "foo"]`), or a stream descriptor
+ * (`{ stream: "save" }`), so each entry is the JS value that argument denotes.
+ * Lets a test assert on the exact cause the transformer attached instead of
+ * matching printed `.for(...)` text.
+ */
+export function forCauses(root: ts.Node): unknown[] {
+  return callsNamed(root, "for")
+    .filter((call) => call.arguments.length >= 1)
+    .map((call) => literalToValue(call.arguments[0]!));
+}
+
 /** Unwrap parenthesized / `as` / `satisfies` / non-null wrappers. */
 function unwrap(node: ts.Expression): ts.Expression {
   let current = node;
