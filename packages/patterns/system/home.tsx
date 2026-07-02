@@ -1,5 +1,6 @@
 import {
   computed,
+  equals,
   handler,
   NAME,
   pattern,
@@ -94,15 +95,24 @@ const addFavorite = handler<
 const removeFavorite = handler<
   { piece?: Writable<unknown>; id?: string },
   { favorites: Writable<Favorite[]> }
->(({ id }, { favorites }) => {
-  // Drop the membership entry addressed by the piece's identity; concurrent
-  // unfavorites of distinct pieces merge. Clear the entity too, since it
-  // outlives its link — a later re-favorite reads it back to decide whether to
-  // seed fresh.
-  if (!id) return;
-  favorites.removeByValue(favorites.elementById(id));
-  const entry: Writable<Favorite | undefined> = favorites.elementById(id);
-  entry.set(undefined);
+>(({ piece, id }, { favorites }) => {
+  // A favorite added through the keyed path has an entity at elementById(id).
+  // Drop its membership by identity (concurrent unfavorites of distinct pieces
+  // merge) and clear the entity, since it outlives its link — a later
+  // re-favorite reads it back to decide whether to seed fresh.
+  if (id) {
+    const entry: Writable<Favorite | undefined> = favorites.elementById(id);
+    if (entry.get()) {
+      favorites.removeByValue(favorites.elementById(id));
+      entry.set(undefined);
+      return;
+    }
+  }
+  // A favorite added before keyed addressing has no such entity; remove it by
+  // matching its piece cell. This rewrites the whole list, but keyed entries
+  // keep their addressing.
+  if (!piece) return;
+  favorites.set(favorites.get().filter((f) => f && !equals(f.cell, piece)));
 });
 
 // Handler to add a journal entry (kept for schema compatibility)

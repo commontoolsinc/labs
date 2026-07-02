@@ -129,4 +129,40 @@ describe("home favorites handlers", () => {
       (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [],
     ).toEqual([]);
   });
+
+  it("removes a legacy favorite (no keyed entity) via the piece-cell fallback", async () => {
+    const { piece, id } = makePiece("legacy-piece");
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Simulate a favorite added before keyed addressing: push a wrapper with no
+    // id straight onto the list, so it lives at a per-event entity id the key
+    // cannot reach.
+    home.key("favorites").withTx(tx).push({
+      cell: piece,
+      tags: [],
+      userTags: [],
+    });
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+    const seeded =
+      (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [];
+    expect(seeded.length).toBe(1);
+    expect(seeded[0].id).toBeUndefined();
+
+    // The keyed removal cannot reach it, so removeFavorite falls back to
+    // matching the piece cell and still deletes it.
+    home.key("removeFavorite").send({ piece, id });
+    for (let i = 0; i < 20; i++) {
+      await runtime.idle();
+      const favs =
+        (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [];
+      if (favs.length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(
+      (home.key("favorites").get() as FavoriteEntry[] | undefined) ?? [],
+    ).toEqual([]);
+  });
 });

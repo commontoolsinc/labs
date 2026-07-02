@@ -26,15 +26,22 @@ const onRemoveFavorite = handler<
   {
     favorites: Writable<Array<Favorite> | Default<[]>>;
     id?: string;
+    item?: Writable<unknown>;
   }
->((_, { favorites, id }) => {
-  // Drop the membership entry addressed by the favorite's stored id — the same
-  // key home's addFavorite used, so both reach the same entity. Clear the
-  // entity too, since it outlives its link.
-  if (!id) return;
-  favorites.removeByValue(favorites.elementById(id));
-  const entry: Writable<Favorite | undefined> = favorites.elementById(id);
-  entry.set(undefined);
+>((_, { favorites, id, item }) => {
+  // A favorite added through the keyed path carries an id. Drop its membership
+  // by that id — the same key home's addFavorite used, so both reach the same
+  // entity — and clear the entity, since it outlives its link.
+  if (id) {
+    favorites.removeByValue(favorites.elementById(id));
+    const entry: Writable<Favorite | undefined> = favorites.elementById(id);
+    entry.set(undefined);
+    return;
+  }
+  // A favorite added before keyed addressing has no id; remove it by matching
+  // its piece cell.
+  if (!item) return;
+  favorites.set(favorites.get().filter((f) => !f.cell.equals(item)));
 });
 
 const onUpdateUserTags = handler<
@@ -65,6 +72,7 @@ export default pattern<Record<string, never>>((_) => {
                   onClick={onRemoveFavorite({
                     favorites: favorites!,
                     id: item.id,
+                    item: item.cell,
                   })}
                 >
                   Remove
