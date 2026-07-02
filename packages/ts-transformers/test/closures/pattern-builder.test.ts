@@ -1,9 +1,10 @@
-import { assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { CrossStageState, TransformationContext } from "../../src/core/mod.ts";
 import type { CaptureTreeNode } from "../../src/utils/capture-tree.ts";
 import { PatternBuilder } from "../../src/closures/utils/pattern-builder.ts";
+import { collect, parseModule } from "../transformed-ast.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -99,5 +100,16 @@ Deno.test("PatternBuilder avoids capture collisions with nested explicit binding
     sourceFile,
   );
 
-  assertStringIncludes(printed, "isExpanded_1");
+  // The nested explicit `isExpanded` binding forces the captured `isExpanded`
+  // to be rebound under the fresh name `isExpanded_1`.
+  const root = parseModule(printed);
+  const renamed = collect(root, ts.isBindingElement).find((element) =>
+    element.propertyName !== undefined &&
+    ts.isIdentifier(element.propertyName) &&
+    element.propertyName.text === "isExpanded" &&
+    ts.isIdentifier(element.name)
+  );
+  assert(renamed, "expected an `isExpanded` binding element to be renamed");
+  assert(ts.isIdentifier(renamed.name));
+  assertEquals(renamed.name.text, "isExpanded_1");
 });

@@ -1,6 +1,13 @@
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
+import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import {
+  collect,
+  emittedSchemas,
+  parseModule,
+  patternSchemas,
+} from "./transformed-ast.ts";
 
 /**
  * Drives the SchemaGeneratorTransformer end to end through the pipeline. Each
@@ -11,60 +18,117 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
  * the option-object value evaluator.
  */
 
-async function schemaLiteral(source: string): Promise<string> {
+/**
+ * Parse the transformed output and return the single emitted schema object
+ * evaluated to its JS value. Fails if the source produced no schema literal.
+ */
+async function schemaValue(source: string): Promise<Record<string, unknown>> {
   const out = await transformSource(source, { types: COMMONFABRIC_TYPES });
-  const match = out.match(
-    /const s = [\s\S]*?satisfies __cfHelpers\.JSONSchema/,
+  const schemas = emittedSchemas(parseModule(out));
+  assertEquals(schemas.length, 1, `expected one emitted schema in:\n${out}`);
+  return schemas[0]!;
+}
+
+/** Unwrap `{...} as const satisfies ...JSONSchema` to the object literal. */
+function schemaObjectLiteral(root: ts.SourceFile): ts.ObjectLiteralExpression {
+  const sat = collect(root, ts.isSatisfiesExpression).find((node) =>
+    /JSONSchema/.test(node.type.getText(root))
   );
-  assert(match, `no schema literal found in output:\n${out}`);
-  return match[0];
+  assert(sat, "no `... satisfies ...JSONSchema` expression found");
+  let expr: ts.Expression = sat.expression;
+  while (ts.isAsExpression(expr) || ts.isParenthesizedExpression(expr)) {
+    expr = expr.expression;
+  }
+  assert(ts.isObjectLiteralExpression(expr), "schema is not an object literal");
+  return expr;
+}
+
+/** The initializer expression of property `key` on an object literal. */
+function propInitializer(
+  object: ts.ObjectLiteralExpression,
+  key: string,
+): ts.Expression | undefined {
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property)) continue;
+    const name = property.name;
+    const text = ts.isIdentifier(name) || ts.isStringLiteralLike(name)
+      ? name.text
+      : undefined;
+    if (text === key) return property.initializer;
+  }
+  return undefined;
 }
 
 Deno.test("numeric-literal types lower to NaN, Infinity, -Infinity and negatives", async () => {
   // NaN has no numeric-literal form (emitted as the global NaN), positive and
   // negative infinity emit the Infinity identifier with an optional unary minus,
   // and a negative literal emits a unary-minus wrapper around a positive value.
-  const literal = await schemaLiteral(`/// <cts-enable />
+  // These non-finite values cannot be evaluated to JS numbers by the literal
+  // evaluator, so assert on the emitted expression text of the schema AST.
+  const out = await transformSource(
+    `/// <cts-enable />
 import { toSchema } from "commonfabric";
 const enum E { NaNValue = 0 / 0 }
 interface C { big: 1e999; small: -1e999; neg: -7; tag: E.NaNValue; }
 const s = toSchema<C>({ maximum: E.NaNValue });
 export { s };
-`);
-  assertStringIncludes(literal, '"enum": [Infinity]');
-  assertStringIncludes(literal, '"enum": [-Infinity]');
-  assertStringIncludes(literal, '"enum": [-7]');
-  assertStringIncludes(literal, '"enum": [NaN]');
-  assertStringIncludes(literal, "maximum: NaN");
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(out);
+  const schema = schemaObjectLiteral(root);
+
+  const enumText = (
+    owner: ts.ObjectLiteralExpression,
+    key: string,
+  ): string[] => {
+    const sub = propInitializer(owner, key) as ts.ObjectLiteralExpression;
+    assert(sub && ts.isObjectLiteralExpression(sub), `missing ${key} schema`);
+    const arr = propInitializer(sub, "enum") as ts.ArrayLiteralExpression;
+    assert(arr && ts.isArrayLiteralExpression(arr), `missing ${key} enum`);
+    return arr.elements.map((element) => element.getText(root));
+  };
+
+  const props = propInitializer(
+    schema,
+    "properties",
+  ) as ts.ObjectLiteralExpression;
+  assertEquals(enumText(props, "big"), ["Infinity"]);
+  assertEquals(enumText(props, "small"), ["-Infinity"]);
+  assertEquals(enumText(props, "neg"), ["-7"]);
+
+  const defs = propInitializer(schema, "$defs") as ts.ObjectLiteralExpression;
+  assertEquals(enumText(defs, "NaNValue"), ["NaN"]);
+
+  assertEquals(propInitializer(schema, "maximum")!.getText(root), "NaN");
 });
 
 Deno.test("WriteAuthorizedBy attaches a writer-identity marker with file and path", async () => {
   // The second type argument `typeof saver` is a simple identifier type-query,
   // so the schema gains an `ifc.writeAuthorizedBy.__ctWriterIdentityOf` marker
   // carrying the source file and the binding path.
-  const literal = await schemaLiteral(`/// <cts-enable />
+  const schema = await schemaValue(`/// <cts-enable />
 import { toSchema, WriteAuthorizedBy, handler } from "commonfabric";
 const saver = handler({}, {}, () => {});
 const s = toSchema<WriteAuthorizedBy<{ title: string }, typeof saver>>();
 export { s };
 `);
-  assertStringIncludes(literal, "writeAuthorizedBy");
-  assertStringIncludes(literal, "__ctWriterIdentityOf");
-  assertStringIncludes(literal, 'path: ["saver"]');
-  assertStringIncludes(literal, 'file: "/test.tsx"');
+  const marker = (schema.ifc as any).writeAuthorizedBy.__ctWriterIdentityOf;
+  assertEquals(marker.file, "/test.tsx");
+  assertEquals(marker.path, ["saver"]);
 });
 
 Deno.test("WriteAuthorizedBy with a qualified typeof binding attaches no marker", async () => {
   // A qualified `typeof container.save` is not a plain identifier type-query, so
   // the identity extraction bails and no writer-identity marker is emitted.
-  const literal = await schemaLiteral(`/// <cts-enable />
+  const schema = await schemaValue(`/// <cts-enable />
 import { toSchema, WriteAuthorizedBy } from "commonfabric";
 const container = { save() {} };
 const s = toSchema<WriteAuthorizedBy<{ title: string }, typeof container.save>>();
 export { s };
 `);
-  assertStringIncludes(literal, 'type: "object"');
-  assert(!literal.includes("writeAuthorizedBy"));
+  assertEquals(schema.type, "object");
+  assertEquals(schema.ifc, undefined);
 });
 
 Deno.test("UI-contract hint attaches to an object $UI property schema", async () => {
@@ -80,9 +144,11 @@ export default pattern<{ title: string }>((state) => ({
 `,
     { types: COMMONFABRIC_TYPES },
   );
-  assertStringIncludes(out, "uiContract");
-  assertStringIncludes(out, '"UiAction"');
-  assertStringIncludes(out, '"SubmitDirectCommand"');
+  const { output } = patternSchemas(parseModule(out));
+  const contract = ((output.properties as any).$UI.ifc as any)
+    .uiContract as any;
+  assertEquals(contract.helper, "UiAction");
+  assertEquals(contract.action, "SubmitDirectCommand");
 });
 
 Deno.test("UI-contract hint wraps a boolean-true $UI property as an ifc-only schema", async () => {
@@ -99,9 +165,11 @@ export default pattern<{ title: string }, Out>((state) => ({
 `,
     { types: COMMONFABRIC_TYPES },
   );
-  assertStringIncludes(out, "$UI: {");
-  assertStringIncludes(out, "uiContract");
-  assertStringIncludes(out, '"SubmitDirectCommand"');
+  const { output } = patternSchemas(parseModule(out));
+  const uiSchema = (output.properties as any).$UI;
+  // The property schema is the ifc-only object: no `type`, just `ifc`.
+  assertEquals(Object.keys(uiSchema), ["ifc"]);
+  assertEquals((uiSchema.ifc as any).uiContract.action, "SubmitDirectCommand");
 });
 
 Deno.test("UI-contract hint on a whole boolean-true schema becomes an ifc-only schema", async () => {
@@ -117,9 +185,9 @@ export default pattern<{ title: string }, any>((state) => ({
 `,
     { types: COMMONFABRIC_TYPES },
   );
-  assertStringIncludes(out, "uiContract");
-  assertStringIncludes(out, '"SubmitDirectCommand"');
-  assert(!out.includes("not: true"), `unexpected not:true in ${out}`);
+  const { output } = patternSchemas(parseModule(out));
+  assertEquals((output.ifc as any).uiContract.action, "SubmitDirectCommand");
+  assertEquals(output.not, undefined);
 });
 
 Deno.test("UI-contract hint on a whole boolean-false schema negates via not:true", async () => {
@@ -135,15 +203,16 @@ export default pattern<{ title: string }, never>((state) => ({
 `,
     { types: COMMONFABRIC_TYPES },
   );
-  assertStringIncludes(out, "not: true");
-  assertStringIncludes(out, "uiContract");
+  const { output } = patternSchemas(parseModule(out));
+  assertEquals(output.not, true);
+  assertEquals((output.ifc as any).uiContract.action, "SubmitDirectCommand");
 });
 
 Deno.test("toSchema option object evaluates literals, arrays, nested objects and constants", async () => {
   // The options bag is spread onto the emitted schema; booleans, null, arrays,
   // nested object literals and enum-constant references are all evaluated, while
   // an undefined-valued option is dropped.
-  const literal = await schemaLiteral(`/// <cts-enable />
+  const schema = await schemaValue(`/// <cts-enable />
 import { toSchema } from "commonfabric";
 const enum E { V = 5 }
 interface C { value: number; }
@@ -158,12 +227,11 @@ const s = toSchema<C>({
 });
 export { s };
 `);
-  assertStringIncludes(literal, "flagTrue: true");
-  assertStringIncludes(literal, "flagFalse: false");
-  assertStringIncludes(literal, "nothing: null");
-  assertStringIncludes(literal, 'list: [1, "a", true, null]');
-  assertStringIncludes(literal, "inner: 3");
-  assertStringIncludes(literal, 'x: "y"');
-  assertStringIncludes(literal, "constant: 5");
-  assert(!literal.includes("undef:"), "undefined option should be dropped");
+  assertEquals(schema.flagTrue, true);
+  assertEquals(schema.flagFalse, false);
+  assertEquals(schema.nothing, null);
+  assertEquals(schema.list, [1, "a", true, null]);
+  assertEquals(schema.nested, { inner: 3, deep: { x: "y" } });
+  assertEquals(schema.constant, 5);
+  assert(!("undef" in schema), "undefined option should be dropped");
 });

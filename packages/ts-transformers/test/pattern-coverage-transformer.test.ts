@@ -1,8 +1,9 @@
 import ts from "typescript";
-import { assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import {
   PatternCoverageTransformer,
 } from "../src/transformers/pattern-coverage.ts";
+import { collect, literalToValue, parseModule } from "./transformed-ast.ts";
 import { CommonFabricTransformerPipeline } from "../src/cf-pipeline.ts";
 import {
   type PatternCoverageOptions,
@@ -102,6 +103,21 @@ function transformWithDirectCall(source: string): string {
   ]);
 
   return printResult(result);
+}
+
+// Every emitted `(globalThis.__cfPatternCoverage?.hit)(file, id)` call, with its
+// arguments evaluated to their JS values. The callee is a parenthesized
+// optional-chain member access, so it is matched by unwrapping the parens and
+// checking the `.hit` member name rather than by a simple call-name lookup.
+function hitCallArgs(root: ts.Node): unknown[][] {
+  return collect(root, ts.isCallExpression)
+    .filter((call) => {
+      let callee: ts.Expression = call.expression;
+      while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      return ts.isPropertyAccessExpression(callee) &&
+        callee.name.text === "hit";
+    })
+    .map((call) => call.arguments.map((arg) => literalToValue(arg)));
 }
 
 function sourceTextForSpan(source: string, span: PatternCoverageSpan): string {
@@ -281,11 +297,24 @@ export {};
   expectSpanContaining(spans, source, "return this.value;");
   expectSpanContaining(spans, source, "this.value = value;");
   expectSpanContaining(spans, source, "return arrowExpression(this.value);");
-  assertStringIncludes(
-    output,
-    '(globalThis.__cfPatternCoverage?.hit)("mapped:/pattern.tsx", 1001);',
+  const root = parseModule(output);
+  // The first mapped span (id 1 + 1000) becomes a hit call keyed by the mapped
+  // file name and mapped id.
+  assert(
+    hitCallArgs(root).some((args) =>
+      args.length === 2 && args[0] === "mapped:/pattern.tsx" && args[1] === 1001
+    ),
+    "expected a hit call for the mapped file and id 1001",
   );
-  assertStringIncludes(output, "function declaredFunction(flag: boolean) {");
+  // The authored `declaredFunction(flag: boolean)` signature survives the
+  // instrumenting transform.
+  const declared = collect(root, ts.isFunctionDeclaration).find((fn) =>
+    fn.name?.text === "declaredFunction"
+  );
+  assert(declared, "expected declaredFunction to be emitted");
+  const flag = declared.parameters[0];
+  assert(flag && ts.isIdentifier(flag.name) && flag.name.text === "flag");
+  assertEquals(flag.type?.kind, ts.SyntaxKind.BooleanKeyword);
   assertMatch(
     output,
     /function declaredFunction\(flag: boolean\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,

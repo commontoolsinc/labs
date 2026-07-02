@@ -10,6 +10,73 @@ import {
   applyShrinkAndWrap,
   printTypeNode,
 } from "../src/transformers/type-shrinking.ts";
+import { collect, parseModule } from "./transformed-ast.ts";
+
+// ---------------------------------------------------------------------------
+// Structural inspection of printed type nodes.
+//
+// `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
+// `assertStringIncludes` is weak: it matches on formatting and cannot tell a
+// property named `title` apart from the word `title` appearing anywhere. These
+// helpers reparse the printed type node and expose its members as real AST
+// nodes so tests can assert on property names, optional flags, exact member
+// types, and the shape of the root node.
+// ---------------------------------------------------------------------------
+
+/** Reparse a printed type node into a `ts.TypeNode`. */
+function parseType(printed: string): ts.TypeNode {
+  const decl = collect(
+    parseModule(`type __T = ${printed};`),
+    ts.isTypeAliasDeclaration,
+  )[0];
+  if (!decl) throw new Error(`Could not parse type node: ${printed}`);
+  return decl.type;
+}
+
+interface PropInfo {
+  optional: boolean;
+  type: string;
+}
+
+/**
+ * Every property signature reachable under `node`, keyed by name, carrying its
+ * optional flag and the printed text of its declared type. Nested literals
+ * contribute their own members, so `unused` being absent from the map means it
+ * appears nowhere in the shape.
+ */
+function props(node: ts.Node): Map<string, PropInfo> {
+  const sf = node.getSourceFile();
+  const out = new Map<string, PropInfo>();
+  for (const signature of collect(node, ts.isPropertySignature)) {
+    const name = ts.isIdentifier(signature.name)
+      ? signature.name.text
+      : signature.name.getText(sf);
+    out.set(name, {
+      optional: !!signature.questionToken,
+      type: signature.type ? signature.type.getText(sf) : "",
+    });
+  }
+  return out;
+}
+
+/** Reparse the printed shrink result and return its member map. */
+function shrunkProps(result: ts.TypeNode, sourceFile: ts.SourceFile): {
+  node: ts.TypeNode;
+  props: Map<string, PropInfo>;
+} {
+  const node = parseType(printTypeNode(result, sourceFile));
+  return { node, props: props(node) };
+}
+
+/** True when `node` contains a reference to the qualified name `left.right`. */
+function hasQualifiedRef(node: ts.Node, left: string, right: string): boolean {
+  return collect(node, ts.isTypeReferenceNode).some((ref) => {
+    const name = ref.typeName;
+    return ts.isQualifiedName(name) &&
+      ts.isIdentifier(name.left) && name.left.text === left &&
+      name.right.text === right;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Harness (mirrors test/type-shrinking.test.ts so cases stay comparable).
@@ -139,13 +206,16 @@ Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed field
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "title: string;");
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("title")?.type, "string");
   // The `Array<Item>` reference is rebuilt with the shrunk element, staying an
-  // Array<...> reference rather than collapsing to a numeric-key object.
-  assertStringIncludes(printed, "Array<{");
-  assertEquals(printed.includes("unused"), false);
-  assertEquals(printed.includes("id"), false);
+  // Array<...> reference around a type literal rather than collapsing to a
+  // numeric-key object.
+  assert(ts.isTypeReferenceNode(node));
+  assertEquals((node.typeName as ts.Identifier).text, "Array");
+  assert(ts.isTypeLiteralNode(node.typeArguments![0]!));
+  assertEquals(members.has("unused"), false);
+  assertEquals(members.has("id"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -203,10 +273,10 @@ Deno.test("applyShrinkAndWrap shrinks each member of a source-authored union", (
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "shared: string;");
-  assertEquals(printed.includes("onlyA"), false);
-  assertEquals(printed.includes("onlyB"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("shared")?.type, "string");
+  assertEquals(members.has("onlyA"), false);
+  assertEquals(members.has("onlyB"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -239,11 +309,12 @@ Deno.test("applyShrinkAndWrap collapses a shrunk union to its single non-nullish
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: string;");
-  assertEquals(printed.includes("drop"), false);
-  // Single non-nullish member survived; undefined was dropped after collapse.
-  assertEquals(printed.includes("undefined"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "string");
+  assertEquals(members.has("drop"), false);
+  // Single non-nullish member survived; undefined was dropped after collapse,
+  // so the root is the bare object literal rather than a union.
+  assert(ts.isTypeLiteralNode(node));
 });
 
 // ---------------------------------------------------------------------------
@@ -275,10 +346,14 @@ Deno.test("applyShrinkAndWrap re-appends undefined when type-driven shrinking a 
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: string;");
-  assertStringIncludes(printed, "undefined");
-  assertEquals(printed.includes("drop"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "string");
+  assertEquals(members.has("drop"), false);
+  // The nullable object is rebuilt as a union that re-appends `undefined`.
+  assert(ts.isUnionTypeNode(node));
+  assert(
+    node.types.some((member) => member.kind === ts.SyntaxKind.UndefinedKeyword),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -309,10 +384,11 @@ Deno.test("applyShrinkAndWrap keeps nested primitive leaves intact under type-dr
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "text: string;");
-  assertEquals(printed.includes("length: number"), false);
-  assertEquals(printed.includes("other"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  // `text` keeps its string leaf rather than shrinking to `{ length }`.
+  assertEquals(members.get("text")?.type, "string");
+  assertEquals(members.has("length"), false);
+  assertEquals(members.has("other"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -343,10 +419,10 @@ Deno.test("applyShrinkAndWrap represents index-signature access as an optional m
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "anyKey?:");
-  assertStringIncludes(printed, "name: string;");
-  assertEquals(printed.includes("unused"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("anyKey")?.optional, true);
+  assertEquals(members.get("name")?.type, "string");
+  assertEquals(members.has("unused"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -377,10 +453,10 @@ Deno.test("applyShrinkAndWrap resolves an interface reference and drops unaccess
 
   // The reference resolves to its declared members and the unaccessed `z` is
   // dropped, so the shrink differs from the original (isUnchangedShrink false).
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "x: number;");
-  assertStringIncludes(printed, "y: number;");
-  assertEquals(printed.includes("z:"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("x")?.type, "number");
+  assertEquals(members.get("y")?.type, "number");
+  assertEquals(members.has("z"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -411,10 +487,10 @@ Deno.test("applyShrinkAndWrap merges inherited interface members and honors over
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "baseOnly: number;");
-  assertStringIncludes(printed, "derivedOnly: boolean;");
-  assertEquals(printed.includes("shared"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("baseOnly")?.type, "number");
+  assertEquals(members.get("derivedOnly")?.type, "boolean");
+  assertEquals(members.has("shared"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -661,12 +737,12 @@ Deno.test("applyShrinkAndWrap applies defaults-only fallback across the base typ
     "defaults_only",
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(
-    printed,
-    'title: __cfHelpers.Default<string, "Untitled">',
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(
+    members.get("title")?.type,
+    '__cfHelpers.Default<string, "Untitled">',
   );
-  assertStringIncludes(printed, "count: number;");
+  assertEquals(members.get("count")?.type, "number");
 });
 
 // ---------------------------------------------------------------------------
@@ -694,8 +770,12 @@ Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a tuple i
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, 'name?: __cfHelpers.Default<string, "Anon">');
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("name")?.optional, true);
+  assertEquals(
+    members.get("name")?.type,
+    '__cfHelpers.Default<string, "Anon">',
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -723,8 +803,8 @@ Deno.test("applyCapabilityDefaultsToTypeNode ignores an out-of-range tuple index
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertEquals(printed.includes("__cfHelpers.Default"), false);
+  const node = parseType(printTypeNode(result, sourceFile));
+  assertEquals(hasQualifiedRef(node, "__cfHelpers", "Default"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -753,12 +833,18 @@ Deno.test("applyShrinkAndWrap replaces identity-only union roots per member", ()
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
+  const node = parseType(printTypeNode(result, sourceFile));
   // Each non-nullish member collapses to `unknown`; undefined is preserved.
-  assertStringIncludes(printed, "unknown");
-  assertStringIncludes(printed, "undefined");
-  assertEquals(printed.includes("a:"), false);
-  assertEquals(printed.includes("b:"), false);
+  assert(ts.isUnionTypeNode(node));
+  assert(
+    node.types.some((member) => member.kind === ts.SyntaxKind.UnknownKeyword),
+  );
+  assert(
+    node.types.some((member) => member.kind === ts.SyntaxKind.UndefinedKeyword),
+  );
+  const members = props(node);
+  assertEquals(members.has("a"), false);
+  assertEquals(members.has("b"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -819,9 +905,9 @@ Deno.test("applyShrinkAndWrap descends identity item paths through Array<T> refe
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
 });
 
 // ---------------------------------------------------------------------------
@@ -857,10 +943,10 @@ Deno.test("applyShrinkAndWrap applies identity paths across union members", () =
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
-  assertStringIncludes(printed, "other: boolean");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
+  assertEquals(members.get("other")?.type, "boolean");
 });
 
 // ---------------------------------------------------------------------------
@@ -928,8 +1014,8 @@ Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized li
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "value: __cfHelpers.ReadonlyCell<number>");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("value")?.type, "__cfHelpers.ReadonlyCell<number>");
 });
 
 // ---------------------------------------------------------------------------
@@ -987,7 +1073,13 @@ Deno.test("applyShrinkAndWrap keeps a readonly array unchanged for an unresolved
     ts.factory,
   );
 
-  assertStringIncludes(printTypeNode(result, sourceFile), "readonly Item[]");
+  const node = parseType(printTypeNode(result, sourceFile));
+  // The readonly-array node is returned unchanged: a `readonly` type operator
+  // over an `Item[]` array.
+  assert(ts.isTypeOperatorNode(node));
+  assertEquals(node.operator, ts.SyntaxKind.ReadonlyKeyword);
+  assert(ts.isArrayTypeNode(node.type));
+  assertEquals(node.type.elementType.getText(node.getSourceFile()), "Item");
 });
 
 // Identity path through a parenthesized literal that DOES change a leaf: the
@@ -1017,9 +1109,9 @@ Deno.test("applyShrinkAndWrap rebuilds a parenthesized identity root when a leaf
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
 });
 
 // Identity path through a Cell-like wrapper reference descends into the inner
@@ -1048,11 +1140,12 @@ Deno.test("applyShrinkAndWrap descends identity paths through a Cell-like wrappe
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
+  const { node, props: members } = shrunkProps(result, sourceFile);
   // The Cell wrapper is retained; its inner `keep` leaf is wrapped in place.
-  assertStringIncludes(printed, "Cell<");
-  assertStringIncludes(printed, "keep: __cfHelpers.OpaqueCell<unknown>");
-  assertStringIncludes(printed, "drop: number");
+  assert(ts.isTypeReferenceNode(node));
+  assertEquals((node.typeName as ts.Identifier).text, "Cell");
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.get("drop")?.type, "number");
 });
 
 // Node-driven array shrink where the base node is a type alias resolving to an
@@ -1110,10 +1203,11 @@ Deno.test("applyShrinkAndWrap shrinks array-like type literals with numeric inde
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "title: string;");
-  assert(printed.endsWith("[]"), `expected array shape, got: ${printed}`);
-  assertEquals(printed.includes("unused"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  // The array-like literal shrinks into an array of the shrunk element.
+  assert(ts.isArrayTypeNode(node));
+  assertEquals(members.get("title")?.type, "string");
+  assertEquals(members.has("unused"), false);
 });
 
 // findPropertySymbol resolves a property that lives only on one union
@@ -1141,8 +1235,8 @@ Deno.test("applyShrinkAndWrap resolves a union-only property during type-driven 
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "common: string;");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("common")?.type, "string");
 });
 
 // Type-driven shrink where a deeper path fails to materialise on a nested
@@ -1171,9 +1265,9 @@ Deno.test("applyShrinkAndWrap drops an unresolved deep child during type-driven 
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "present: string;");
-  assertStringIncludes(printed, "other: number;");
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("present")?.type, "string");
+  assertEquals(members.get("other")?.type, "number");
 });
 
 // applyCapabilityDefaultsToTypeNode applies a default through a union member
@@ -1198,8 +1292,9 @@ Deno.test("applyCapabilityDefaultsToTypeNode applies a default through a union m
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, 'a?: __cfHelpers.Default<string, "x">');
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("a")?.optional, true);
+  assertEquals(members.get("a")?.type, '__cfHelpers.Default<string, "x">');
 });
 
 // defaults-only fallback where a default is nested under a property: the
@@ -1228,14 +1323,14 @@ Deno.test("applyShrinkAndWrap expands nested defaults-only fallback leaves", () 
     "defaults_only",
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(
-    printed,
-    'title: __cfHelpers.Default<string, "Untitled">',
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(
+    members.get("title")?.type,
+    '__cfHelpers.Default<string, "Untitled">',
   );
   // Sibling leaf under the same parent is retained in the expanded fallback.
-  assertStringIncludes(printed, "note: string;");
-  assertStringIncludes(printed, "count: number;");
+  assertEquals(members.get("note")?.type, "string");
+  assertEquals(members.get("count")?.type, "number");
 });
 
 // Identity-only root whose resolved semantic type is undefined falls back to the
@@ -1291,9 +1386,9 @@ Deno.test("applyShrinkAndWrap selects writable capability for read-and-write cel
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "field: __cfHelpers.Writable<number>");
-  assertEquals(printed.includes("untouched"), false);
+  const { props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("field")?.type, "__cfHelpers.Writable<number>");
+  assertEquals(members.has("untouched"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -1357,11 +1452,12 @@ Deno.test("applyShrinkAndWrap collapses a one-member union node to the shrunk me
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "keep: string;");
-  assertEquals(printed.includes("drop"), false);
-  // Collapsed to the single shrunk member, so no union `|` remains.
-  assertEquals(printed.includes("|"), false);
+  const { node, props: members } = shrunkProps(result, sourceFile);
+  assertEquals(members.get("keep")?.type, "string");
+  assertEquals(members.has("drop"), false);
+  // Collapsed to the single shrunk member, so the root is a bare object literal
+  // rather than a union.
+  assert(ts.isTypeLiteralNode(node));
 });
 
 // A union node with only nullish members is returned unchanged
@@ -1385,9 +1481,19 @@ Deno.test("applyShrinkAndWrap leaves an all-nullish union node unchanged", () =>
     ts.factory,
   );
 
-  const printed = printTypeNode(result, sourceFile);
-  assertStringIncludes(printed, "undefined");
-  assertStringIncludes(printed, "null");
+  const node = parseType(printTypeNode(result, sourceFile));
+  // The all-nullish union is returned unchanged: both the `undefined` keyword
+  // and the `null` literal member survive.
+  assert(ts.isUnionTypeNode(node));
+  assert(
+    node.types.some((member) => member.kind === ts.SyntaxKind.UndefinedKeyword),
+  );
+  assert(
+    node.types.some((member) =>
+      ts.isLiteralTypeNode(member) &&
+      member.literal.kind === ts.SyntaxKind.NullKeyword
+    ),
+  );
 });
 
 // A valid tuple index whose nested default path does not resolve leaves the
@@ -1414,8 +1520,6 @@ Deno.test("applyCapabilityDefaultsToTypeNode ignores a tuple default whose neste
   );
 
   // The nested path names no member, so no default wrapper is applied.
-  assertEquals(
-    printTypeNode(result, sourceFile).includes("__cfHelpers.Default"),
-    false,
-  );
+  const node = parseType(printTypeNode(result, sourceFile));
+  assertEquals(hasQualifiedRef(node, "__cfHelpers", "Default"), false);
 });

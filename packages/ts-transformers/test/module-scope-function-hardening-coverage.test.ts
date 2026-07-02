@@ -1,6 +1,39 @@
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert } from "@std/assert";
+import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callsNamed, collect, parseModule } from "./transformed-ast.ts";
+
+/** The single default-export assignment's expression, if any. */
+function defaultExportExpression(
+  root: ts.SourceFile,
+): ts.Expression | undefined {
+  const assignment = collect(root, ts.isExportAssignment).find((node) =>
+    !node.isExportEquals
+  );
+  return assignment?.expression;
+}
+
+/** The variable declaration whose name starts with `prefix`, if any. */
+function variableNamed(
+  root: ts.SourceFile,
+  prefix: string,
+): ts.VariableDeclaration | undefined {
+  return collect(root, ts.isVariableDeclaration).find((decl) =>
+    ts.isIdentifier(decl.name) && decl.name.text.startsWith(prefix)
+  );
+}
+
+/** The `__cfHardenFn(...)` call whose first argument is a function expression. */
+function hardenedFunctionExpression(
+  root: ts.SourceFile,
+): ts.FunctionExpression | undefined {
+  for (const call of callsNamed(root, "__cfHardenFn")) {
+    const arg = call.arguments[0];
+    if (arg && ts.isFunctionExpression(arg)) return arg;
+  }
+  return undefined;
+}
 
 // Module-scope function hardening freezes every top-level callable and, for
 // callables a `WriteAuthorizedBy` / `TrustedActionWrite` type references,
@@ -28,9 +61,18 @@ Deno.test(
     // The nameless default export cannot be referenced by name, so it is
     // lowered into a hoisted `const` bound to a hardened function expression and
     // re-exported by that generated name.
-    assertStringIncludes(output, "const __cfDefaultFn");
-    assertStringIncludes(output, "export default __cfDefaultFn");
-    assertStringIncludes(output, "__cfHardenFn(function () { return 1; })");
+    const root = parseModule(output);
+    const decl = variableNamed(root, "__cfDefaultFn");
+    assert(decl, "expected a `const __cfDefaultFn` declaration");
+    const exported = defaultExportExpression(root);
+    assert(exported && ts.isIdentifier(exported));
+    assert(exported.text.startsWith("__cfDefaultFn"));
+    const wrapped = hardenedFunctionExpression(root);
+    assert(wrapped, "expected __cfHardenFn to wrap a function expression");
+    assert(
+      !wrapped.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword),
+      "expected the wrapped function to be non-async",
+    );
   },
 );
 
@@ -46,9 +88,18 @@ Deno.test(
     // Only the `async` modifier survives on the generated function expression;
     // the export/default modifiers are dropped because the const carries the
     // export.
-    assertStringIncludes(output, "const __cfDefaultFn");
-    assertStringIncludes(output, "__cfHardenFn(async function () {");
-    assertStringIncludes(output, "export default __cfDefaultFn");
+    const root = parseModule(output);
+    const decl = variableNamed(root, "__cfDefaultFn");
+    assert(decl, "expected a `const __cfDefaultFn` declaration");
+    const exported = defaultExportExpression(root);
+    assert(exported && ts.isIdentifier(exported));
+    assert(exported.text.startsWith("__cfDefaultFn"));
+    const wrapped = hardenedFunctionExpression(root);
+    assert(wrapped, "expected __cfHardenFn to wrap a function expression");
+    assert(
+      wrapped.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword),
+      "expected the wrapped function expression to keep its async modifier",
+    );
   },
 );
 
@@ -69,11 +120,27 @@ Deno.test(
     // exported. The identity annotation and the hardening wrap are therefore
     // emitted as separate statements after the declaration rather than inlined
     // into the initializer.
+    const root = parseModule(output);
+    const saveTitle = variableNamed(root, "saveTitle");
+    assert(saveTitle?.initializer, "expected a `saveTitle` declaration");
     assert(
-      !output.includes("const saveTitle = __cfBindVerifiedBinding("),
-      "expected the annotation to be statement-form, not inlined",
+      ts.isArrowFunction(saveTitle.initializer),
+      "expected the annotation to be statement-form, not inlined into the initializer",
     );
-    assertStringIncludes(output, "__cfBindVerifiedBinding(saveTitle, {");
-    assertStringIncludes(output, "__cfHardenFn(saveTitle)");
+
+    const argIsSaveTitle = (call: ts.CallExpression): boolean => {
+      const arg = call.arguments[0];
+      return !!arg && ts.isIdentifier(arg) && arg.text === "saveTitle";
+    };
+    assert(
+      callsNamed(root, "__cfBindVerifiedBinding").some((call) =>
+        argIsSaveTitle(call) && ts.isObjectLiteralExpression(call.arguments[1]!)
+      ),
+      "expected a statement-form __cfBindVerifiedBinding(saveTitle, { ... }) call",
+    );
+    assert(
+      callsNamed(root, "__cfHardenFn").some(argIsSaveTitle),
+      "expected a separate __cfHardenFn(saveTitle) hardening call",
+    );
   },
 );

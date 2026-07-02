@@ -841,6 +841,205 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
   assert(typeof reason === "string");
 });
 
+// ---------------------------------------------------------------------------
+// Ambiguous dual-op nodes: a node carrying TWO recognized op keys must refuse
+// everywhere. The validator, the evaluator, and the static common-alternative
+// analysis each dispatch by their own key precedence, so a hand-crafted
+// {principal, dbOwner} node used to validate as a principal, evaluate to only
+// the principal, and STATICALLY count the owner as a common reader — labeling
+// a COUNT(*) [owner] although the owner is not an alternative in any row's
+// label (CFC spec §8.17.4 violation).
+// ---------------------------------------------------------------------------
+
+const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
+  version: 1,
+  confidentiality: {
+    principal: {
+      protocol: "mailto",
+      of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+    },
+    dbOwner: true,
+  } as never,
+};
+
+Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous, fail closed)", () => {
+  // The probe from the report: {principal, dbOwner}.
+  const reason = validateRowLabelSpec(DUAL_PRINCIPAL_OWNER, ["from"]);
+  assert(typeof reason === "string", "a dual-op node must not validate");
+  assert(reason.includes("ambiguous"), `unexpected reason: ${reason}`);
+
+  // The other class: {constant, principal} (eval picks the principal, static
+  // analysis used to count the constant).
+  const constantPrincipal = {
+    version: 1,
+    confidentiality: {
+      constant: "did:key:public",
+      principal: {
+        protocol: "mailto",
+        of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assert(
+    typeof validateRowLabelSpec(constantPrincipal, ["from"]) === "string",
+  );
+
+  // The validateConfExpr entry point (top level / under all()): an allOf node
+  // smuggling a sibling op key is just as ambiguous.
+  const allOfConstant = {
+    version: 1,
+    confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(allOfConstant, ["from"]) === "string");
+
+  // The anyOf-alternative entry point: a when-gated alternative that ALSO
+  // carries a principal key — the validator used to follow the when gate
+  // while the evaluator dispatches on the principal.
+  const whenPrincipalAlt = {
+    version: 1,
+    confidentiality: {
+      anyOf: [{
+        when: { match: { field: "from", source: ADDR.source, flags: "" } },
+        then: { dbOwner: true },
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      }],
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(whenPrincipalAlt, ["from"]) === "string");
+});
+
+Deno.test("a dual-op integrity node in a wire spec is rejected (ambiguous, fail closed)", () => {
+  const authoredConstant = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      constant: "x",
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(authoredConstant, ["from"]) === "string");
+
+  const authoredEndorsed = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      endorsedBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "to", source: ADDR.source, flags: "g" } },
+        },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assert(
+    typeof validateRowLabelSpec(authoredEndorsed, ["from", "to"]) === "string",
+  );
+
+  const intersectAllOf = {
+    version: 1,
+    integrity: {
+      intersect: [{ constant: "a" }],
+      allOf: [{ constant: "b" }],
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(intersectAllOf, ["from"]) === "string");
+});
+
+Deno.test("ruleCommonAlternatives never counts a dual-op node's owner as a common reader", () => {
+  // The exact unsoundness: eval labels each row with ONLY the extracted
+  // principal, so the owner is not an alternative in ANY row's label — the
+  // static analysis must not report it (an ambiguous node contributes no
+  // static reader; the aggregate refuses).
+  assertEquals(
+    ruleCommonAlternatives(DUAL_PRINCIPAL_OWNER, { dbOwner: OWNER }),
+    [],
+  );
+  // Same for a smuggled constant.
+  const constantPrincipal = {
+    version: 1,
+    confidentiality: {
+      constant: "did:key:public",
+      principal: {
+        protocol: "mailto",
+        of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(constantPrincipal, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwrap past the guard)", () => {
+  // {allOf: [...], constant: X} — flattenConfConjuncts must NOT dispatch on
+  // the allOf key alone and unwrap it: that silently drops the smuggled
+  // sibling op and hands the inner conjuncts to the static analysis, which
+  // would report a guaranteed reader for a node the evaluator refuses.
+  const ambiguousWrapper = {
+    version: 1,
+    confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(ambiguousWrapper, { dbOwner: OWNER }),
+    [],
+  );
+  // ...and the wrapper still COUNTS as a confidentiality constraint: an
+  // ambiguous {allOf: [], constant} must not read as the degenerate empty
+  // conjunction (which would make the aggregate public).
+  const emptyAllOfConstant = {
+    version: 1,
+    confidentiality: { allOf: [], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(emptyAllOfConstant), true);
+  assertEquals(
+    ruleCommonAlternatives(emptyAllOfConstant, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("evaluateRowLabel fails closed on a dual-op node that bypassed validation", () => {
+  // Defense in depth (like the conjunctive-anyOf-alternative check): a wire
+  // spec that skipped validation must refuse at eval, never silently pick one
+  // op by precedence.
+  expectError(
+    DUAL_PRINCIPAL_OWNER,
+    { from: "alice@a.example" },
+    { dbOwner: OWNER },
+    "ambiguous",
+  );
+  const authoredConstant = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      constant: "x",
+    },
+  } as unknown as RowLabelSpec;
+  expectError(
+    authoredConstant,
+    { from: "alice@a.example" },
+    { dbOwner: OWNER },
+    "ambiguous",
+  );
+});
+
 Deno.test("a wire match without the global flag still evaluates (forced, no throw)", () => {
   const spec: RowLabelSpec = {
     version: 1,

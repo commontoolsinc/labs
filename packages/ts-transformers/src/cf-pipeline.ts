@@ -4,6 +4,7 @@ import {
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
+  MergeablePushValidationTransformer,
   ModuleScopeCfDataTransformer,
   ModuleScopeFunctionHardeningTransformer,
   ModuleScopeShadowingTransformer,
@@ -48,6 +49,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "PatternContextValidationTransformer",
     create: (options) => new PatternContextValidationTransformer(options),
+  },
+  {
+    name: "MergeablePushValidationTransformer",
+    create: (options) => new MergeablePushValidationTransformer(options),
   },
   {
     name: "JsxExpressionSiteRouterTransformer",
