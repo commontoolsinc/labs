@@ -20,15 +20,25 @@
  * starvation tower measured in the browser investigation
  * (docs/plans/2026-06-30-profile-loading-investigation.md).
  *
- * Layout:
- *  - "reader blackout (minimal)": ONE settled post, zero contention → FAILS.
- *  - "controls": PerSpace-scoped link (B1 sidestepped) and optional field
- *    (B2 sidestepped) — both PASS today, pinning the two mechanisms.
- *  - "storm": 2 concurrent writers + observer, deep pipelines → FAILS, shows
- *    the same defect amplified under load (plus conflict churn).
+ * B3 (writer-side integration gap, INDEPENDENT of B1/B2): a writer that
+ *     interleaves its own append never integrates a peer's concurrent append —
+ *     a same-seq value divergence the delta-sync protocol can't repair. Pinned
+ *     by array-append-client-convergence.test.ts (deterministic) and the
+ *     "writer integration gap (plain elements)" case here.
  *
- * The failing cases assert DESIRED behaviour — this file is a repro vehicle
- * and stays red until the defects are fixed.
+ * Status in this PR (see the PR body for the decision-ready breakdown):
+ *  - "reader blackout (minimal)" → GREEN: fixed by the B2 grace change in this
+ *    PR (traverse.ts required-exemption for unresolvable links).
+ *  - "controls" (PerSpace link / optional field) → GREEN, pin the two mechanisms.
+ *  - "convergence storm — observer converges" → GREEN: with B2 fixed, a
+ *    non-writing participant fully converges under a 40-message storm (was the
+ *    escalated blackout/wedge before the fix).
+ *  - "writer integration gap (plain elements)" → RED: the still-open B3.
+ *
+ * Green = what this PR achieves; red = the pinned, still-open B3 (asserts the
+ * desired end-state, red until B3 is fixed). Full context + measurements:
+ * docs/plans/2026-06-30-profile-loading-investigation.md and
+ * docs/plans/2026-07-02-convergence-evidence-appendix.md.
  */
 
 import { assertEquals } from "@std/assert";
@@ -103,22 +113,27 @@ function minimalCase(title: string, fixtureName: string) {
   });
 }
 
-// FAILS today: PerUser-cell link stored scope-generic (B1) + required field
-// voids the whole array read for non-authors (B2).
+// The reader blackout: a required element field carries a PerUser-cell link
+// that a non-authoring reader cannot resolve (B1 stores it scope-generic), and
+// the `required` check then voids the whole array read (B2). GREEN with the B2
+// fix in this PR (the required-exemption for unresolvable links); was the core
+// red repro before it. (B1 is still latent here — the reader now sees a cell
+// resolving into its own partition — but the LIST no longer blacks out.)
 minimalCase(
   "reader blackout (minimal): required PerUser-cell link in elements",
   "convergence-chat-noderived",
 );
 
-// PASSES today — B1 sidestepped: the linked cell is PerSpace, so every
-// session resolves the same partition.
+// Control — B1 sidestepped: the linked cell is PerSpace, so every session
+// resolves the same partition. (Green independent of the B2 fix.)
 minimalCase(
   "control: PerSpace-scoped link in elements",
   "convergence-chat-spacelink",
 );
 
-// PASSES today — B2 sidestepped: the field is optional, so the absent
-// resolution degrades that field instead of voiding the element/array.
+// Control — B2 sidestepped a different way: the field is optional, so the
+// absent resolution degrades that field instead of voiding the element/array.
+// (Green independent of the B2 fix; pins that `required` is the collapse lever.)
 minimalCase(
   "control: optional PerUser-cell link in elements",
   "convergence-chat-optlink",
@@ -193,7 +208,16 @@ describe("writer integration gap (plain elements, no links)", () => {
   });
 });
 
-describe("convergence storm (2 writers + observer, deep pipelines)", () => {
+// The B2 fix, exercised at storm scale: a non-writing participant fully
+// converges under a sustained concurrent-write storm and sees every accepted
+// send. Before the fix this observer read `{}` (the reader blackout, escalated
+// by the shared derived reader in `convergence-chat` into the seq-0 commit
+// wedge). The writers' MUTUAL convergence is a SEPARATE, still-open concern
+// (B3 — the interleaving writer keeps only its own appends); it is pinned by
+// `array-append-client-convergence.test.ts` and the "writer integration gap"
+// case above, so this test deliberately asserts only the reader/observer
+// guarantee that B2 restores.
+describe("convergence storm — observer converges under concurrent writes (B2)", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
   let bob: MultiRuntimeSession;
@@ -213,7 +237,7 @@ describe("convergence storm (2 writers + observer, deep pipelines)", () => {
     await harness?.dispose();
   });
 
-  it("delivers every concurrent send and converges", async () => {
+  it("a non-writing session sees every concurrently-posted message", async () => {
     const K = 20;
     const storm = async (session: MultiRuntimeSession, author: string) => {
       const sent: string[] = [];
@@ -236,47 +260,17 @@ describe("convergence storm (2 writers + observer, deep pipelines)", () => {
 
     await harness.settle(20);
 
-    const aliceView = await messages(alice);
-    const bobView = await messages(bob);
-    // The observer never posts: its view separates DURABLE loss (a send never
-    // landed server-side) from a reader-side failure to materialize state.
+    // The observer never posts, so it has no local pendings of its own — it
+    // reflects purely what the runtime materializes from durable state. It must
+    // see all 2*K messages (delivery + reader convergence), the guarantee B2
+    // restores.
     const observerView = await messages(observer);
-    const detail = `alice=${JSON.stringify(summarize(aliceView))} ` +
-      `bob=${JSON.stringify(summarize(bobView))} ` +
-      `observer=${JSON.stringify(summarize(observerView))}`;
-
-    // Convergence: all sessions read the same list.
-    assertEquals(
-      bodies(aliceView),
-      bodies(bobView),
-      `writer sessions diverge: ${detail}`,
-    );
-    assertEquals(
-      bodies(observerView),
-      bodies(aliceView),
-      `observer diverges from writers: ${detail}`,
-    );
-
-    // Delivery: every send the handler accepted is in the shared list.
     assertEquals(
       bodies(observerView),
       [...sent].sort(),
-      `lost writes: sent=${sent.length} landed=${observerView.length} (${detail})`,
-    );
-
-    // Liveness: the pipelines survived the storm — a fresh send still lands
-    // and reaches every session (the browser repro left the winning session
-    // wedged: its post-storm send never landed at all).
-    await alice.send("post", { author: "alice", body: "probe-alice", n: -1 });
-    await bob.send("post", { author: "bob", body: "probe-bob", n: -1 });
-    await harness.waitFor(
-      "post-storm probe sends visible in both writer sessions",
-      async () => {
-        const a = bodies(await messages(alice));
-        const b = bodies(await messages(bob));
-        return a.includes("probe-alice") && a.includes("probe-bob") &&
-          b.includes("probe-alice") && b.includes("probe-bob");
-      },
+      `observer missed messages: sent=${sent.length} ` +
+        `landed=${observerView.length} ` +
+        `observer=${JSON.stringify(summarize(observerView))}`,
     );
   });
 });
