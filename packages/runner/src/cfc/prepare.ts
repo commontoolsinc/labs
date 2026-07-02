@@ -40,6 +40,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
@@ -1650,6 +1651,50 @@ const unsupportedTrustSensitiveReason = (
   return undefined;
 };
 
+// Atom types forbidden as alternatives of an AUTHORED OR-clause (spec §3.1.8):
+// alternatives must be principal-like. `Caveat` as an alternative would make a
+// risk obligation dischargeable by identity ("readable by Bob OR if screened"),
+// collapsing the caveat discipline; `Expires` semantics is most-restrictive-
+// wins, which inverts to least-restrictive-wins as an alternative
+// (`[[User(A) ∨ Expires(t)]]` world-readable until t). Both are conservative
+// fail-closed rejections, relaxable later by a profile that defines the wanted
+// semantics. (`Expires` is not yet a registered `CFC_ATOM_TYPE` — it arrives
+// with the exchange-rule atoms in Epic B1 — so match its spec type URI too.)
+const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.Caveat,
+  "https://commonfabric.org/cfc/atom/Expires",
+]);
+
+const disallowedAuthoredClauseReason = (
+  schema: JSONSchema,
+  path: readonly string[],
+): string | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+  const confidentiality = (schema.ifc as Record<string, unknown>)
+    .confidentiality;
+  if (!Array.isArray(confidentiality)) {
+    return undefined;
+  }
+  for (const clause of confidentiality) {
+    if (!isOrClause(clause)) {
+      continue;
+    }
+    for (const alternative of clauseAlternatives(clause)) {
+      if (
+        isRecord(alternative) && typeof alternative.type === "string" &&
+        FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES.has(alternative.type)
+      ) {
+        return `authored OR-clause alternative of type ${alternative.type} ` +
+          `is not permitted at /${path.join("/")} (spec §3.1.8: alternatives ` +
+          `must be principal-like; Expires/Caveat forbidden as alternatives)`;
+      }
+    }
+  }
+  return undefined;
+};
+
 const exactCopySourcePath = (
   schema: JSONSchema,
 ): readonly string[] | undefined => {
@@ -2454,6 +2499,13 @@ const verifyInputRequirements = (
     if (unsupportedTrustSensitive !== undefined) {
       return unsupportedTrustSensitive;
     }
+    const disallowedClause = disallowedAuthoredClauseReason(
+      entry.schema,
+      entry.path,
+    );
+    if (disallowedClause !== undefined) {
+      return disallowedClause;
+    }
     const currentPrincipalFailure = currentPrincipalIntegrityReason(
       tx,
       entry.schema,
@@ -2616,9 +2668,14 @@ const derivePersistedLabel = (
     ? sourceEntryLabels.get(pathKey(exactCopySourcePath(schema)!))
     : undefined;
   return {
+    // Normalize confidentiality clauses on persist (Epic A4): an authored or
+    // copied `{anyOf:[…]}` clause is deduped/canonically-ordered/singleton-
+    // unwrapped so the stored labelMap entry is canonical and two equivalent
+    // clauses coalesce. `normalizeClause` is identity on flat atoms, so flat
+    // labels are unchanged. Integrity carries no OR-clauses.
     confidentiality: mergeLabelValues(
-      schemaLabel.confidentiality,
-      copiedInputLabel?.confidentiality,
+      schemaLabel.confidentiality?.map(normalizeClause),
+      copiedInputLabel?.confidentiality?.map(normalizeClause),
     ),
     integrity: mergeLabelValues(
       resolveCurrentPrincipalLabelValues(
