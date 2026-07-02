@@ -57,7 +57,7 @@ describe("CFC authored disjunctive confidentiality", () => {
         id: runtime.getCell(signer.did(), "authored-or", schema, readTx)
           .getAsNormalizedFullLink().id,
       });
-      readTx.commit();
+      await readTx.commit();
 
       const conf = (metadata?.labelMap.entries ?? []).flatMap(
         (entry) => entry.label.confidentiality ?? [],
@@ -108,7 +108,7 @@ describe("CFC authored disjunctive confidentiality", () => {
         id: runtime.getCell(signer.did(), "mixed-version", schema, readTx)
           .getAsNormalizedFullLink().id,
       });
-      readTx.commit();
+      await readTx.commit();
 
       const label = (metadata?.labelMap.entries ?? []).flatMap(
         (entry) => entry.label.confidentiality ?? [],
