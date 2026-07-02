@@ -11,7 +11,7 @@
 // Usage:
 //   deno task provision-ingest-channel \
 //     --space did:key:<user-space> --install-id <stable-id> \
-//     [--cause-prefix location] [--name <label>]
+//     [--cause-prefix location] [--name <label>] [--force]
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -20,12 +20,14 @@ import { identity } from "@/lib/identity.ts";
 import {
   channelId,
   generateIngestSecret,
+  getRegistration,
   isValidSegment,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 
 const flags = parseArgs(Deno.args, {
   string: ["space", "install-id", "cause-prefix", "name"],
+  boolean: ["force"],
 });
 
 const space = flags.space;
@@ -33,7 +35,20 @@ const installId = flags["install-id"];
 if (!space || !installId) {
   console.error(
     "usage: deno task provision-ingest-channel --space <did:key:...> " +
-      "--install-id <id> [--cause-prefix location] [--name <label>]",
+      "--install-id <id> [--cause-prefix location] [--name <label>] [--force]",
+  );
+  Deno.exit(2);
+}
+// A typo'd space durably writes marked data into a garbage space (loom's reader
+// silently orphaned); installId is the mark's audience AND a `\n`-separated input
+// to channelId, so whitespace/newlines corrupt the cross-repo join key.
+if (!space.startsWith("did:")) {
+  console.error(`Invalid --space '${space}': must be a DID (did:...).`);
+  Deno.exit(2);
+}
+if (!isValidSegment(installId)) {
+  console.error(
+    `Invalid --install-id '${installId}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
   );
   Deno.exit(2);
 }
@@ -62,6 +77,21 @@ try {
   // Deterministic id: re-running for the same space+install rotates the token in
   // place (overwrites the one registration) rather than leaving a stale one live.
   const id = channelId(space, installId);
+
+  // Re-provisioning with a different --cause-prefix would rotate the token AND
+  // silently move where data lands (orphaning loom's existing read path), since
+  // channelId derives from (space, installId) only. Refuse unless --force.
+  const existing = await getRegistration(runtime, identity.did(), id);
+  if (existing && existing.causePrefix !== causePrefix && !flags.force) {
+    console.error(
+      `Channel ${id} already exists with cause-prefix '${existing.causePrefix}', ` +
+        `not '${causePrefix}'. Re-run with --force to repoint (this orphans the ` +
+        `old read path), or keep the existing prefix.`,
+    );
+    Deno.exit(2);
+  }
+  if (existing) console.log(`rotating token for existing channel ${id}`);
+
   const { secret, secretHash } = generateIngestSecret();
 
   await saveRegistration(runtime, identity.did(), {
@@ -70,6 +100,7 @@ try {
     space,
     causePrefix,
     installId,
+    sink: "journal",
     secretHash,
     createdBy: identity.did(),
     createdAt: new Date().toISOString(),

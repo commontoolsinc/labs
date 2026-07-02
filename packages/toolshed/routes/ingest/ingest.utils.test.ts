@@ -8,7 +8,9 @@ import {
   appendToJournal,
   channelId,
   generateIngestSecret,
+  getLastSeen,
   getRegistration,
+  getRegistrationIndex,
   type IngestRegistration,
   isValidPartition,
   journalCell,
@@ -21,6 +23,11 @@ import {
 // Golden cell id for cause "location/2026-07-01" — pins the cross-repo cell
 // address so a fabric hash-format change fails CI loudly (loom recomputes it).
 const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
+
+// Golden channel id — rotate-in-place is a security property, so pin the exact
+// derivation: a drift means "rotation" mints a NEW registration and leaves the
+// old token live. A failure = coordinate a change, never just update the literal.
+const GOLDEN_CHANNEL_ID = "ing_jMjaGfRO0Kg0BUegs9mzwImZ-CKcmlVw-wDbmV41_bs";
 
 // The journal sink is the security-critical write path (durable, marked, into a
 // caller-provided space). These exercise it directly against an emulated store
@@ -71,6 +78,7 @@ describe("ingest journal sink", () => {
     space,
     causePrefix: "location",
     installId: "install-1",
+    sink: "journal",
     secretHash: "unused",
     createdBy: space,
     createdAt: "2026-07-01T00:00:00.000Z",
@@ -203,6 +211,8 @@ describe("ingest journal sink", () => {
     expect(channelId("did:key:space1", "install-2")).not.toBe(a);
     expect(channelId("did:key:space2", "install-1")).not.toBe(a);
     expect(a.startsWith("ing_")).toBe(true);
+    // Pinned derivation (see GOLDEN_CHANNEL_ID).
+    expect(a).toBe(GOLDEN_CHANNEL_ID);
   });
 
   it("round-trips a registration in the service space", async () => {
@@ -326,5 +336,54 @@ describe("ingest journal sink", () => {
       records,
     });
     expect(res.status).toBe(413);
+  });
+
+  it("processIngest: wrong-sink channel -> identical 401, no write", async () => {
+    const { secret, r } = await savedReg({ id: "ing_stream" });
+    // Force a non-journal sink at rest (a future stream channel).
+    await saveRegistration(runtime, space, {
+      ...r,
+      sink: "stream",
+    } as unknown as IngestRegistration);
+    const res = await processIngest(runtime, space, "ing_stream", secret, {
+      partition: "2026-07-01",
+      records: [{ x: 1 }],
+    });
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Invalid request" });
+    const cell = journalCell(runtime, r, "2026-07-01");
+    await cell.sync();
+    expect(cell.get()).toBeUndefined();
+  });
+
+  it("saveRegistration indexes ids exactly once", async () => {
+    await saveRegistration(runtime, space, reg({ id: "ing_i1" }));
+    await saveRegistration(runtime, space, reg({ id: "ing_i2" }));
+    await saveRegistration(runtime, space, reg({ id: "ing_i1" })); // re-provision
+    const idx = await getRegistrationIndex(runtime, space);
+    expect(idx.filter((x) => x === "ing_i1").length).toBe(1);
+    expect(idx).toContain("ing_i1");
+    expect(idx).toContain("ing_i2");
+  });
+
+  it("last-seen bumps on successful ingest, unchanged on auth failure", async () => {
+    const { secret } = await savedReg({ id: "ing_seen" });
+    expect(await getLastSeen(runtime, space, "ing_seen")).toBeNull();
+
+    const ok = await processIngest(runtime, space, "ing_seen", secret, {
+      partition: "2026-07-07",
+      records: [{ x: 1 }],
+    });
+    expect(ok.status).toBe(200);
+    const seen = await getLastSeen(runtime, space, "ing_seen");
+    expect(seen).not.toBeNull();
+    expect(Number.isNaN(Date.parse(seen as string))).toBe(false);
+
+    // A wrong token must not touch last-seen.
+    await processIngest(runtime, space, "ing_seen", "ingsec_wrong", {
+      partition: "2026-07-07",
+      records: [{ x: 1 }],
+    });
+    expect(await getLastSeen(runtime, space, "ing_seen")).toBe(seen);
   });
 });

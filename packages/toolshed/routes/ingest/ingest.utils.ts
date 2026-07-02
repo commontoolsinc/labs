@@ -2,6 +2,7 @@ import type { JSONSchema, MemorySpace, Runtime } from "@commonfabric/runner";
 import {
   custodyIngest,
   durableSet,
+  durableUpdate,
   type VouchedChannel,
 } from "@/lib/custody-ingest.ts";
 import { sha256 } from "@commonfabric/content-hash";
@@ -48,6 +49,13 @@ export interface IngestRegistration {
   causePrefix: string;
   /** Stable source identifier: recorded on the mark + the cross-repo join key. */
   installId: string;
+  /**
+   * The sink discriminator. Only `"journal"` (durable, append-only, marked)
+   * exists in iteration 1; `"stream"` (today's webhook dispatch) joins the union
+   * when webhooks are subsumed onto ingest channels. Required so a future
+   * stream-channel id can never silently be given journal semantics here.
+   */
+  sink: "journal";
   secretHash: string;
   createdBy: string;
   createdAt: string;
@@ -62,6 +70,7 @@ const RegistrationSchema = {
     space: { type: "string" },
     causePrefix: { type: "string" },
     installId: { type: "string" },
+    sink: { type: "string" },
     secretHash: { type: "string" },
     createdBy: { type: "string" },
     createdAt: { type: "string" },
@@ -73,6 +82,7 @@ const RegistrationSchema = {
     "space",
     "causePrefix",
     "installId",
+    "sink",
     "secretHash",
     "createdBy",
     "createdAt",
@@ -88,6 +98,13 @@ export const JournalSchema = {
   type: "array",
   items: { type: "object", additionalProperties: true },
 } as const satisfies JSONSchema;
+
+// Service-space bookkeeping schemas (no `default`, so absent reads as undefined).
+const IndexSchema = {
+  type: "array",
+  items: { type: "string" },
+} as const satisfies JSONSchema;
+const TimestampSchema = { type: "string" } as const satisfies JSONSchema;
 
 function randomBase62(length: number): string {
   // Rejection sampling to avoid modulo bias (256 % 62 != 0); discard >= 248.
@@ -151,6 +168,25 @@ const registrationCell = (runtime: Runtime, serviceSpace: string, id: string) =>
     RegistrationSchema,
   );
 
+// A service-space index of all channel ids, so channels are enumerable/auditable
+// (content-addressed registration cells have no listing otherwise). Mirrors the
+// webhook service index.
+const indexCell = (runtime: Runtime, serviceSpace: string) =>
+  runtime.getCell<string[]>(
+    serviceSpace as MemorySpace,
+    "cf:ingest:index",
+    IndexSchema,
+  );
+
+// Per-channel last-seen timestamp, in its OWN cell (not a registration field) so
+// a per-POST status bump never contends with token rotation on one document.
+const lastSeenCell = (runtime: Runtime, serviceSpace: string, id: string) =>
+  runtime.getCell<string>(
+    serviceSpace as MemorySpace,
+    `cf:ingest:last-seen:${id}`,
+    TimestampSchema,
+  );
+
 export async function getRegistration(
   runtime: Runtime,
   serviceSpace: string,
@@ -160,6 +196,29 @@ export async function getRegistration(
   await cell.sync();
   await runtime.storageManager.synced();
   return (cell.get() as IngestRegistration | undefined) ?? null;
+}
+
+/** All provisioned channel ids in this service space (for audit / future list). */
+export async function getRegistrationIndex(
+  runtime: Runtime,
+  serviceSpace: string,
+): Promise<string[]> {
+  const cell = indexCell(runtime, serviceSpace);
+  await cell.sync();
+  await runtime.storageManager.synced();
+  return (cell.get() as string[] | undefined) ?? [];
+}
+
+/** The last time a channel successfully ingested, or null if never. */
+export async function getLastSeen(
+  runtime: Runtime,
+  serviceSpace: string,
+  id: string,
+): Promise<string | null> {
+  const cell = lastSeenCell(runtime, serviceSpace, id);
+  await cell.sync();
+  await runtime.storageManager.synced();
+  return (cell.get() as string | undefined) ?? null;
 }
 
 export async function saveRegistration(
@@ -172,6 +231,23 @@ export async function saveRegistration(
   await runtime.storageManager.synced();
   // Operator write, not ingest — no ExternalIngest mark.
   await durableSet(cell, registration);
+
+  // Maintain the enumeration index. A failure here must NOT fail provisioning —
+  // the channel is already functional, just not yet listed.
+  try {
+    const idx = indexCell(runtime, serviceSpace);
+    await idx.sync();
+    await runtime.storageManager.synced();
+    await durableUpdate(
+      idx,
+      (ids) =>
+        (ids ?? []).includes(registration.id)
+          ? (ids ?? [])
+          : [...(ids ?? []), registration.id],
+    );
+  } catch (error) {
+    console.warn(`ingest: failed to update registration index: ${error}`);
+  }
 }
 
 /** The partition cell for a channel — `${causePrefix}/${partition}` in the user's space. */
@@ -255,9 +331,12 @@ export async function processIngest(
     return { status: 502, body: { error: "Failed to process request" } };
   }
 
-  if (!registration || !registration.enabled) {
-    // Match the real verification path so missing/disabled channels can't be
-    // distinguished from a wrong token by timing.
+  // A missing, disabled, or wrong-sink channel is rejected identically to a
+  // wrong token — same equalized 401, no write — so a stream-channel id POSTed
+  // here can never get journal semantics and nothing distinguishable leaks.
+  if (
+    !registration || !registration.enabled || registration.sink !== "journal"
+  ) {
     verifyIngestSecret(token, DUMMY_HASH);
     return { status: 401, body: { error: "Invalid request" } };
   }
@@ -297,6 +376,16 @@ export async function processIngest(
       partition,
       records as Record<string, unknown>[],
     );
+    // Best-effort last-seen bump (operator status, not ingest — no mark) so a
+    // dead beacon is visible. Failure must not fail the POST.
+    try {
+      const seen = lastSeenCell(runtime, serviceSpace, id);
+      await seen.sync();
+      await runtime.storageManager.synced();
+      await durableSet(seen, new Date().toISOString());
+    } catch (error) {
+      logger?.error({ error, id }, "ingest: failed to bump last-seen");
+    }
     logger?.info({ id, partition, appended }, "ingest: appended records");
     // received === appended in v1 (no server dedup); `appended` is a distinct
     // field only to leave room for a future dedup story without a wire change.
