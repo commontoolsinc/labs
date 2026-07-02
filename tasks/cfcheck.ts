@@ -12,7 +12,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/cfc/prompt-injection/schemas.ts",
   "packages/patterns/cfc/prompt-injection/tools.ts",
   "packages/patterns/deprecated/calendar-v512.tsx",
   "packages/patterns/deprecated/piece-ref-in-cell.tsx",
