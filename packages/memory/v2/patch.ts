@@ -462,13 +462,26 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  *   commit-conflict and scheduler reader-dirty matchers in `engine.ts` and the
  *   client-side pending-replay path computation in `runner storage/v2.ts` all
  *   derive from it (see {@link touchedPointerPaths}).
- * - `structural` is true for ops that add, remove, or reorder a container's keys
- *   (`add`, `remove`, `move`). A shape-only (nonRecursive) reader of the
- *   container must be invalidated at the parent path, and the client replay
- *   resolves the target against live state. Value-only ops
- *   (`replace`, `splice`, `append`, `add-unique`, `remove-by-value`,
- *   `increment`) are false: they touch the leaf/array path itself, which a
- *   reader of that path already prefixes.
+ * - `structural` is true for ops that UNCONDITIONALLY restructure a container's
+ *   key set — `add`, `remove`, `move` — which add, drop, or relocate a child key
+ *   on every apply. For those, a shape-only (nonRecursive) reader of the parent
+ *   must be invalidated at the parent path (the parent injection in
+ *   `touchedPathsForPatch`), and the client replay resolves the target against
+ *   live state. `replace` / `splice` / `append` / `add-unique` /
+ *   `remove-by-value` / `increment` are false: they touch the leaf/array path
+ *   itself, which a reader of that path already prefixes.
+ *
+ *   Known limitation: `append` / `add-unique` / `increment` DO change the
+ *   parent's key set in one case — when they materialize a previously-absent
+ *   path (their apply creates the array/scalar and the path to it). Because that
+ *   is conditional on the pre-state, this static flag cannot express it, and a
+ *   cross-session shape-only reader of the parent is not invalidated by such a
+ *   create. Marking these ops structural instead would over-conflict every
+ *   parent shape reader against an ordinary append to an already-present child —
+ *   exactly the write-contention the mergeable ops exist to avoid — so the
+ *   correct fix is a state-aware matcher that injects the parent only when the op
+ *   actually created the key. Tracked as follow-up; see
+ *   docs/specs/memory-v2/08-conflict-granularity.md.
  *
  * Adding a new wire op is a single new entry here: the `Record<PatchOp["op"],
  * …>` type makes a missing entry (or an entry for a tag not in the `PatchOp`
