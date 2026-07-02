@@ -44,9 +44,19 @@ describe("ProcessModuleByteCache", () => {
     const cache = new ProcessModuleByteCache();
     cache.putAll(RT, [
       { identity: "a", js: "JS_A" },
-      { identity: "b", js: "JS_B", sourceMap: "MAP_B" },
+      {
+        identity: "b",
+        js: "JS_B",
+        sourceMap: "MAP_B",
+        patternCoverageSpans: [SPAN],
+      },
     ]);
     expect(cache.getCompleteSet(RT, ["a", "b"])?.size).toBe(2);
+    expect(cache.get(RT, "b")).toEqual({
+      js: "JS_B",
+      sourceMap: "MAP_B",
+      patternCoverageSpans: [SPAN],
+    });
     cache.clear();
     expect(cache.getCompleteSet(RT, ["a", "b"])).toBeUndefined();
     expect(cache.stats().entries).toBe(0);

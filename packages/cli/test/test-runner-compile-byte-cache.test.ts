@@ -7,11 +7,16 @@ import {
   restoreCompileByteCacheForTesting,
   writeCompileByteCacheForTesting,
 } from "@commonfabric/test-support/compile-byte-cache";
+import { runMultiUserTestPattern } from "../lib/multi-user-test-runner.ts";
 import { runTests } from "../lib/test-runner.ts";
 import { cf, checkStderr, withEnv } from "./utils.ts";
 
 const FIXTURES = resolve(import.meta.dirname!, "fixtures/pattern-coverage");
 const TEST_FILE = join(FIXTURES, "single.test.tsx").replaceAll("\\", "/");
+const COMPILE_BYTE_CACHE_MODULE = new URL(
+  "../lib/compile-byte-cache.ts",
+  import.meta.url,
+);
 
 class CountingProcessModuleByteCache extends ProcessModuleByteCache {
   fullHits = 0;
@@ -44,10 +49,97 @@ async function readCoverageText(coverageDir: string): Promise<string> {
   return chunks.join("\n");
 }
 
+async function importFreshCompileByteCacheModule(): Promise<
+  typeof import("../lib/compile-byte-cache.ts")
+> {
+  const url = new URL(COMPILE_BYTE_CACHE_MODULE);
+  url.searchParams.set("testRun", crypto.randomUUID());
+  return await import(url.href);
+}
+
 describe(
   "cf test compile byte cache",
   { sanitizeOps: false, sanitizeResources: false },
   () => {
+    it("flushes safely before the default cache is initialized", async () => {
+      const module = await importFreshCompileByteCacheModule();
+
+      module.flushDefaultModuleByteCache();
+    });
+
+    it("flushes the default cache to CF_COMPILE_CACHE_FILE", async () => {
+      const dir = await Deno.makeTempDir({
+        prefix: "cf-test-default-compile-byte-cache-",
+      });
+      const cacheFile = join(dir, "cache.json");
+
+      try {
+        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
+          const module = await importFreshCompileByteCacheModule();
+          const cache = module.getDefaultModuleByteCache();
+          cache.putAll("rt", [{ identity: "id", js: "JS" }]);
+
+          module.flushDefaultModuleByteCache();
+
+          const entries = JSON.parse(await Deno.readTextFile(cacheFile));
+          expect(entries).toEqual([{ key: "rt\0id", js: "JS" }]);
+        });
+      } finally {
+        globalThis.addEventListener("unload", () => {
+          try {
+            Deno.removeSync(dir, { recursive: true });
+          } catch {
+            // The test may have already removed the directory.
+          }
+        });
+        await Deno.remove(dir, { recursive: true }).catch(() => {});
+      }
+    });
+
+    it("reports default cache flush failures", async () => {
+      const dir = await Deno.makeTempDir({
+        prefix: "cf-test-default-compile-byte-cache-error-",
+      });
+      const cacheFile = join(dir, "cache.json");
+      const originalOpenSync = Deno.openSync;
+      const originalError = console.error;
+      const errors: string[] = [];
+
+      console.error = (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      };
+
+      try {
+        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
+          const module = await importFreshCompileByteCacheModule();
+          const cache = module.getDefaultModuleByteCache();
+          cache.putAll("rt", [{ identity: "id", js: "JS" }]);
+
+          Deno.openSync = (() => {
+            throw new Error("lock unavailable");
+          }) as typeof Deno.openSync;
+          module.flushDefaultModuleByteCache();
+        });
+
+        expect(
+          errors.some((line) =>
+            line.includes("[compile-byte-cache] failed to write cache file:")
+          ),
+        ).toBe(true);
+      } finally {
+        Deno.openSync = originalOpenSync;
+        console.error = originalError;
+        globalThis.addEventListener("unload", () => {
+          try {
+            Deno.removeSync(dir, { recursive: true });
+          } catch {
+            // The test may have already removed the directory.
+          }
+        });
+        await Deno.remove(dir, { recursive: true }).catch(() => {});
+      }
+    });
+
     it("restores compiled modules from disk for a later compile", async () => {
       const dir = await Deno.makeTempDir({
         prefix: "cf-test-compile-byte-cache-",
@@ -169,6 +261,33 @@ describe(
             });
           });
         });
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("flushes a multi-user worker cache when participant init fails", async () => {
+      const dir = await Deno.makeTempDir({
+        prefix: "cf-test-multi-user-init-failure-",
+      });
+      const missingTest = join(dir, "missing.test.tsx");
+      const cacheFile = join(dir, "cache.json");
+
+      try {
+        let result:
+          | Awaited<ReturnType<typeof runMultiUserTestPattern>>
+          | undefined;
+        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
+          result = await runMultiUserTestPattern(
+            missingTest,
+            { participants: [{ name: "alice", user: "alice" }] },
+            { root: dir },
+          );
+        });
+
+        if (result === undefined) throw new Error("missing test result");
+        expect(result.error).toBeDefined();
+        expect(JSON.parse(await Deno.readTextFile(cacheFile))).toEqual([]);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
