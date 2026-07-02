@@ -42,7 +42,11 @@ import { atomPropagationClass } from "./atom-classes.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
-import { atomsOutsideCeiling, uniqueCfcAtoms } from "./observation.ts";
+import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloor,
+  uniqueCfcAtoms,
+} from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -2428,23 +2432,6 @@ const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
     integrity.every(isNonEndorsementProvenanceAtom);
 };
 
-/**
- * Exact-match membership for `requiredIntegrity` floors: the carried integrity
- * set satisfies a floor iff every required atom appears in it (deepEqual).
- * This is the single shared kernel for both floor surfaces — the commit-time
- * write gate (`verifyInputRequirements`) and the invoke-time tool-input gate
- * (llm-dialog, Epic D2) — so the two cannot drift. D5 upgrades this one seam
- * to `matchAtomPattern` + `TrustResolver.conceptSatisfied` for concept-level
- * floors.
- */
-export const integritySatisfiesFloor = (
-  integrity: readonly unknown[],
-  requiredIntegrity: readonly unknown[],
-): boolean =>
-  requiredIntegrity.every((required) =>
-    integrity.some((actual) => deepEqual(actual, required))
-  );
-
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -2549,7 +2536,10 @@ const verifyInputRequirements = (
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
       const ok = gatedReads.every((read) =>
-        integritySatisfiesFloor(read.label?.integrity ?? [], requiredIntegrity)
+        cfcIntegritySatisfiesFloor(
+          read.label?.integrity ?? [],
+          requiredIntegrity,
+        )
       );
       if (!ok) {
         return `requiredIntegrity failed at /${entry.path.join("/")}`;

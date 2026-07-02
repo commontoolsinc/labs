@@ -77,13 +77,13 @@ import {
 } from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
+  cfcIntegritySatisfiesFloor,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
   joinCfcObservedConfidentiality,
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
-import { integritySatisfiesFloor } from "../cfc/prepare.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -2023,9 +2023,10 @@ function toolInputRequiredIntegrityFailure(
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
-      // Same membership kernel as the commit-time write gate
-      // (verifyInputRequirements) — the two floor surfaces must not drift.
-      if (!integritySatisfiesFloor(integrity, required)) {
+      // The single shared floor predicate (observation.ts) — the same
+      // membership the commit-boundary gates use; D5 upgrades it in one place.
+      const satisfied = cfcIntegritySatisfiesFloor(integrity, required);
+      if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +
           `reference, not a literal)`;
