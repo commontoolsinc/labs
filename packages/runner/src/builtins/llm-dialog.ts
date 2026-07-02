@@ -73,6 +73,10 @@ import {
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
 import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "../cfc/types.ts";
+import {
   cfcConfidentialityForObservationNode,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
@@ -2044,7 +2048,67 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
+  // Array items: a floor under `items` gates every model-supplied element
+  // (e.g. `recipients: { items: { ifc: { requiredIntegrity } } }`).
+  if (isRecord(schema.items) && Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const failure = toolInputRequiredIntegrityFailure(
+        runtime,
+        space,
+        schema.items,
+        value[index],
+        `${path}[${index}]`,
+      );
+      if (failure !== undefined) {
+        return failure;
+      }
+    }
+  }
+  // Compound schemas: mirror the IFC schema walker — descend into every
+  // branch. For a required-integrity FLOOR, requiring the union across
+  // branches is the fail-safe (over-require) direction, matching walkIfcSchema.
+  for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+    const branches = schema[key];
+    if (Array.isArray(branches)) {
+      for (const branch of branches) {
+        const failure = toolInputRequiredIntegrityFailure(
+          runtime,
+          space,
+          branch,
+          value,
+          path,
+        );
+        if (failure !== undefined) {
+          return failure;
+        }
+      }
+    }
+  }
   return undefined;
+}
+
+// The (schema, input) the D2 integrity gate checks for a resolved tool call.
+// For the generic `invoke` builtin the target is the resolved handler /
+// pattern, whose ARGUMENT schema carries the requiredIntegrity floors — its
+// own `path`/`args` builtin schema declares none — and the value is the
+// resolved args (path stripped). External tools keep the catalog input schema
+// and the raw model input. Other management builtins (pin/read/schema/…) have
+// fixed floor-free schemas, so their check is a no-op.
+function integrityGateTarget(
+  resolved: ResolvedToolCall,
+  part: BuiltInLLMToolCallPart,
+  toolCatalog: ToolCatalog,
+): { schema: unknown; input: unknown } {
+  if (resolved.type === "invoke") {
+    const schema = resolved.pattern?.argumentSchema ??
+      (resolved.handler as unknown as { schema?: unknown } | undefined)
+        ?.schema;
+    return { schema, input: resolved.call.input };
+  }
+  return {
+    schema: toolCatalog.llmTools[part.toolName]?.inputSchema,
+    input: part.input,
+  };
 }
 
 async function executeToolCalls(
@@ -2059,30 +2123,6 @@ async function executeToolCalls(
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
-      // Epic D2: gate the model-supplied input against the tool's
-      // requiredIntegrity floors before the handler runs, so an injected
-      // control-field value (e.g. a recipient copied from a hostile briefing)
-      // is refused rather than executed. Only fires for tools whose
-      // inputSchema declares requiredIntegrity — no behavior change otherwise
-      // — and is skipped entirely when CFC enforcement is disabled.
-      if (runtime.cfcEnforcementMode !== "disabled") {
-        const integrityFailure = toolInputRequiredIntegrityFailure(
-          runtime,
-          space,
-          toolCatalog.llmTools[part.toolName]?.inputSchema,
-          part.input,
-          "",
-        );
-        if (integrityFailure !== undefined) {
-          results.push({
-            id: part.toolCallId,
-            toolName: part.toolName,
-            error: `Tool call denied: ${integrityFailure}`,
-          });
-          continue;
-        }
-      }
-
       if (
         !toolAllowsObservedConfidentiality(
           toolCatalog,
@@ -2100,6 +2140,38 @@ async function executeToolCalls(
       }
 
       const resolved = resolveToolCall(runtime, space, part, toolCatalog);
+
+      // Epic D2: gate the model-supplied input against the TARGET's
+      // requiredIntegrity floors before the handler runs, so an injected
+      // control-field value (e.g. a recipient copied from a hostile briefing)
+      // is refused rather than executed. Runs AFTER resolveToolCall so the
+      // generic `invoke` builtin is checked against the resolved handler /
+      // pattern argument schema (its own path/args schema declares no floors),
+      // closing the invoke bypass. Only DENIES in enforcing modes — observe is
+      // diagnostic and must not block — and is a no-op for tools declaring no
+      // requiredIntegrity.
+      if (
+        cfcEnforcementStrictness(runtime.cfcEnforcementMode) >=
+          CFC_ENFORCING_STRICTNESS
+      ) {
+        const gate = integrityGateTarget(resolved, part, toolCatalog);
+        const integrityFailure = toolInputRequiredIntegrityFailure(
+          runtime,
+          space,
+          gate.schema,
+          gate.input,
+          "",
+        );
+        if (integrityFailure !== undefined) {
+          results.push({
+            id: part.toolCallId,
+            toolName: part.toolName,
+            error: `Tool call denied: ${integrityFailure}`,
+          });
+          continue;
+        }
+      }
+
       const resultValue = await invokeToolCall(
         runtime,
         space,
