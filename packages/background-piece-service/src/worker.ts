@@ -310,7 +310,7 @@ export async function runPiece(data: RunData): Promise<void> {
     }
 
     // Find the updater stream
-    const updater = runningPiece.key("bgUpdater") as unknown as Stream<unknown>;
+    const updater: unknown = runningPiece.key("bgUpdater");
     if (!updater || !streamValidator(updater)) {
       throw new Error(`No updater stream found for piece: ${pieceId}`);
     }
