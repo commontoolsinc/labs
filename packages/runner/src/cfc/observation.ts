@@ -5,6 +5,7 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
+import { clauseAlternatives, clauseSubsumes } from "./clause.ts";
 
 export type CfcObservedConfidentiality = readonly unknown[];
 export type CfcObservationMaxConfidentiality =
@@ -19,6 +20,17 @@ export type CfcObservationMaxConfidentiality =
 // UNGRANTABLE — an observation carrying it never fits a ceiling, even one that
 // names the marker, so it cannot be allow-listed by an author-supplied ceiling.
 export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
+
+// A clause "bears" the ungrantable read-failed marker if the marker is the
+// clause itself OR any of its alternatives. Checking alternatives (not just
+// whole-clause equality) is load-bearing: a marker wrapped in an OR-clause —
+// `{anyOf:[MARKER, …]}` — must still be ungrantable, otherwise a ceiling that
+// names the marker would subsume the wrapping clause and admit it, reopening
+// the allow-list bypass the marker exists to prevent (audit item 22).
+const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
+  clauseAlternatives(clause).some((alternative) =>
+    deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM)
+  );
 
 export interface CfcOpaqueLink {
   "@link": string;
@@ -94,12 +106,10 @@ export const cfcObservationFitsCeiling = (
   // exported string, so an author-supplied ceiling could otherwise allow-list it
   // and defeat the fail-closed redaction (audit item 22). atomsOutsideCeiling
   // already forces the marker outside every declared ceiling; keep this explicit
-  // rejection too as defense in depth for the redaction path.
-  if (
-    confidentiality.some((value) =>
-      deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
-    )
-  ) {
+  // rejection too as defense in depth for the redaction path. Inspect clause
+  // alternatives, not just whole-clause equality, so a wrapped marker
+  // (`{anyOf:[MARKER]}`) cannot slip past into subsumption.
+  if (confidentiality.some(clauseBearsReadFailedMarker)) {
     return false;
   }
 
@@ -108,10 +118,20 @@ export const cfcObservationFitsCeiling = (
 };
 
 /**
- * The confidentiality atoms in `confidentiality` that fall OUTSIDE `ceiling`
- * (the membership complement that makes `cfcObservationFitsCeiling` false). An
- * `undefined` ceiling means "no ceiling" — nothing is outside it. A declared but
- * empty ceiling is "public only", so every confidential atom is outside it.
+ * The confidentiality CLAUSES in `confidentiality` that fall OUTSIDE `ceiling`
+ * (the complement that makes `cfcObservationFitsCeiling` false). Fit is CNF
+ * clause subsumption (spec §8.10.3, Epic A2): a label clause `l` is admitted
+ * iff SOME ceiling clause `c` subsumes it — `alts(c) ⊆ alts(l)` — so a reader
+ * the ceiling admits (satisfying `c`) is entitled to data guarded by `l`.
+ *
+ * On flat labels (every clause a singleton) this is byte-for-byte the previous
+ * membership check: `clauseSubsumes(a, l)` reduces to `deepEqual(a, l)`, so
+ * `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in the allowlist". The
+ * clause form additionally makes a **reader-enumeration** ceiling clause
+ * `{anyOf:[r₁,…,rₖ]}` require EVERY listed reader to satisfy each label clause
+ * (`∀reader ∀clause`) — closing the quantifier hole where a multi-party label
+ * `[User(A),User(B)]` (nobody alone may read) wrongly fit a flat `[A,B]`
+ * ceiling and was then shown to A alone.
  *
  * `CFC_LABEL_READ_FAILED_ATOM` is UNGRANTABLE (audit item 22): it is always
  * outside a DECLARED ceiling, even one that explicitly lists it, so a config
@@ -122,7 +142,7 @@ export const cfcObservationFitsCeiling = (
  *
  * Shared by the prepare-time sink-request ceiling check so the gate and the
  * fits-test agree on membership semantics — including the ungrantable marker —
- * by construction (deep-equal over structured atoms).
+ * by construction.
  */
 export const atomsOutsideCeiling = (
   confidentiality: readonly unknown[],
@@ -131,9 +151,9 @@ export const atomsOutsideCeiling = (
   if (ceiling === undefined) {
     return [];
   }
-  return confidentiality.filter((value) =>
-    deepEqual(value, CFC_LABEL_READ_FAILED_ATOM) ||
-    !ceiling.some((allowed) => deepEqual(allowed, value))
+  return confidentiality.filter((clause) =>
+    clauseBearsReadFailedMarker(clause) ||
+    !ceiling.some((allowed) => clauseSubsumes(allowed, clause))
   ) as ImmutableJSONValue[];
 };
 
@@ -153,6 +173,17 @@ export const atomsOutsideCeiling = (
  * Used to fold a deployment per-sink ceiling into a pattern-supplied observation
  * bound so post-commit LLM tool-loop reads cannot exceed the deployment ceiling
  * (review follow-up to #3993).
+ *
+ * Clause note (Epic A2): both operands are deployment/pattern-supplied ceilings,
+ * which are flat atom lists today. An OR-clause is compared by structural
+ * equality here — kept only when BOTH inputs list the identical clause — which
+ * is the conservative (more-restrictive) direction and composes safely with the
+ * clause-aware fit above (a dropped clause only removes a subsumer, tightening
+ * the effective bound). A general clause-meet (pairwise alternative
+ * intersection) is deferred until authored `anyOf` ceilings actually reach this
+ * seam (Epic A4+); it needs a soundness proof first — naive pairwise
+ * intersection is NOT sound (it can admit a label neither parent admits), so it
+ * is intentionally not implemented here.
  */
 export const meetCfcObservationCeilings = (
   a: CfcObservationMaxConfidentiality,
