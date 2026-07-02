@@ -2294,3 +2294,178 @@ Deno.test("memory v2 engine persists fabric patch values at the storage boundary
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 engine: nonRecursive shape read conflicts with a mergeable create-from-absent (createsKey) but not an append to an existing array", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+  const scope = "space" as const;
+  const created = "entity:created";
+  const existing = "entity:existing";
+
+  try {
+    // `created`: seq 1 sets a container with NO `items`; seq 2 pushes the first
+    // element, materializing `items` — the append carries `createsKey`.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: created, scope, value: toEntityDocument({}) },
+        ],
+      },
+    });
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: created,
+          scope,
+          patches: [{
+            op: "append",
+            path: "/value/items",
+            values: ["a"],
+            createsKey: true,
+          }],
+        }],
+      },
+    });
+
+    // `existing`: seq 3 sets a container WITH `items`; seq 4 appends to it — no
+    // `createsKey`, because the key already existed.
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: existing,
+          scope,
+          value: toEntityDocument({ items: ["a"] }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: existing,
+          scope,
+          patches: [{ op: "append", path: "/value/items", values: ["b"] }],
+        }],
+      },
+    });
+
+    // B (checked first so its commit seq is deterministic): a SHAPE reader of the
+    // parent MUST NOT conflict with an append to an ALREADY-PRESENT child array —
+    // only the array's contents changed, not the parent's key set.
+    const ok = applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 5,
+        reads: {
+          confirmed: [{
+            id: existing,
+            scope,
+            path: toDocumentPath(["value"]),
+            seq: 3,
+            nonRecursive: true,
+          }],
+          pending: [],
+        },
+        operations: [
+          {
+            op: "set",
+            id: "entity:sinkB",
+            scope,
+            value: toEntityDocument("b"),
+          },
+        ],
+      },
+    });
+    assertEquals(ok.seq, 5);
+
+    // A: a SHAPE reader of the parent, observed BEFORE the create, MUST conflict
+    // with the create-from-absent append — the parent gained the `items` key.
+    // This is the gap the `createsKey` flag closes.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 6,
+            reads: {
+              confirmed: [{
+                id: created,
+                scope,
+                path: toDocumentPath(["value"]),
+                seq: 1,
+                nonRecursive: true,
+              }],
+              pending: [],
+            },
+            operations: [
+              {
+                op: "set",
+                id: "entity:sinkA",
+                scope,
+                value: toEntityDocument("a"),
+              },
+            ],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    // C: a SHAPE reader of the ARRAY ITSELF still conflicts with the append — its
+    // own key set (indices / length) changed. Independent of `createsKey`.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 7,
+            reads: {
+              confirmed: [{
+                id: existing,
+                scope,
+                path: toDocumentPath(["value", "items"]),
+                seq: 3,
+                nonRecursive: true,
+              }],
+              pending: [],
+            },
+            operations: [
+              {
+                op: "set",
+                id: "entity:sinkC",
+                scope,
+                value: toEntityDocument("c"),
+              },
+            ],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

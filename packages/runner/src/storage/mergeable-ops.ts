@@ -65,11 +65,15 @@ export type OpSuppression = {
  * undefined when the path does not hold an array); `hadInitialArray` is whether
  * the transaction's initial snapshot already had an array there — with no base,
  * the whole working array is the payload, so a stale-empty base does not drop
- * locally created prefix elements.
+ * locally created prefix elements. `hadInitialValue` is whether the base held
+ * ANY value at the path: when false the op materializes a previously-absent
+ * path, so it stamps the wire op's `createsKey` flag (the parent's key set
+ * changed — see the field in `@commonfabric/memory/v2`).
  */
 export interface MergeableBuildContext {
   readonly workingArray?: readonly FabricValue[];
   readonly hadInitialArray: boolean;
+  readonly hadInitialValue: boolean;
 }
 
 export interface MergeableBuildResult {
@@ -147,7 +151,12 @@ const buildTailOp = (
     return { ops: [], suppress: [] };
   }
   return {
-    ops: [{ op: intent.op, path: encodePointer(intent.path), values }],
+    ops: [{
+      op: intent.op,
+      path: encodePointer(intent.path),
+      values,
+      ...(ctx.hadInitialValue ? {} : { createsKey: true }),
+    }],
     suppress: [{ path: intent.path, tailStart: start }],
   };
 };
@@ -177,10 +186,15 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
     }),
     // Increments that summed to zero (a +1 and a -1) are a no-op: the working
     // value already reflects no change, so emit nothing (and nothing to suppress).
-    build: (intent) =>
+    build: (intent, ctx) =>
       intent.by === 0 ? { ops: [], suppress: [] } : {
         ops: [
-          { op: "increment", path: encodePointer(intent.path), by: intent.by },
+          {
+            op: "increment",
+            path: encodePointer(intent.path),
+            by: intent.by,
+            ...(ctx.hadInitialValue ? {} : { createsKey: true }),
+          },
         ],
         suppress: [{ path: intent.path }],
       },

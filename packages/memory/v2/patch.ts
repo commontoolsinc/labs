@@ -471,16 +471,16 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  *   `remove-by-value` / `increment` are false: they touch the leaf/array path
  *   itself, which a reader of that path already prefixes.
  *
- *   Known limitation: `append` / `add-unique` / `increment` DO change the
- *   parent's key set in one case — when they materialize a previously-absent
- *   path (their apply creates the array/scalar and the path to it). Because that
- *   is conditional on the pre-state, this static flag cannot express it, and a
- *   cross-session shape-only reader of the parent is not invalidated by such a
- *   create. Marking these ops structural instead would over-conflict every
- *   parent shape reader against an ordinary append to an already-present child —
- *   exactly the write-contention the mergeable ops exist to avoid — so the
- *   correct fix is a state-aware matcher that injects the parent only when the op
- *   actually created the key. Tracked as follow-up; see
+ *   `append` / `add-unique` / `increment` DO change the parent's key set in one
+ *   case — when they materialize a previously-absent path (their apply creates
+ *   the array/scalar and the path to it). That is conditional on the pre-state,
+ *   which this static flag cannot express, so it is carried per-instance by the
+ *   op's `createsKey` field (stamped by the writer that saw the path absent) and
+ *   folded in by {@link patchOpChangesParentKeySet}, which is what the shape-read
+ *   conflict matcher uses instead of `structural`. Marking these ops structural
+ *   unconditionally would instead over-conflict every parent shape reader against
+ *   an ordinary append to an already-present child — the write-contention the
+ *   mergeable ops exist to avoid. See
  *   docs/specs/memory-v2/08-conflict-granularity.md.
  *
  * Adding a new wire op is a single new entry here: the `Record<PatchOp["op"],
@@ -580,6 +580,20 @@ export const touchedPointerPaths = (op: PatchOp): string[][] =>
  */
 export const patchOpIsStructural = (op: PatchOp): boolean =>
   patchOpDescriptors[op.op].structural;
+
+/**
+ * Whether the op changes its parent container's key set, so a shape-only
+ * (nonRecursive) reader of the parent must be invalidated. True for the
+ * unconditionally-structural ops (`patchOpIsStructural`) AND for a mergeable op
+ * instance that materialized a previously-absent path (its `createsKey` flag —
+ * a value-dependent fact the writer records, since the static op kind cannot
+ * express it; see the `structural` doc above and the `createsKey` field in
+ * `../v2.ts`). Used only by the shape-read conflict matcher; the replay and
+ * indexed-array-guard sites use the static `patchOpIsStructural`.
+ */
+export const patchOpChangesParentKeySet = (op: PatchOp): boolean =>
+  patchOpDescriptors[op.op].structural ||
+  (op as { createsKey?: boolean }).createsKey === true;
 
 /**
  * The names of the op's JSON-Pointer-valued fields (`["path"]`, or
