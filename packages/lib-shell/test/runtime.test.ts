@@ -297,6 +297,9 @@ describe("RuntimeInternals", () => {
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    // Epic H1: shell hosts run the flow-label dial at "observe" by default —
+    // the measurement stage before "persist" (H2).
+    expect(options.cfcFlowLabels).toBe("observe");
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),
@@ -329,10 +332,12 @@ describe("RuntimeInternals", () => {
       session,
       apiUrl: new URL("http://shell.test/"),
       cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
       trustSnapshot,
     });
 
     expect(options.cfcEnforcementMode).toBe("observe");
+    expect(options.cfcFlowLabels).toBe("off");
     expect(options.trustSnapshot).toBe(trustSnapshot);
 
     const withoutTrust = createRuntimeClientOptions({
