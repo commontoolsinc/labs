@@ -957,6 +957,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         {computed(() =>
                           ranked.map((tally) => (
                             <div
+                              data-all-option-id={tally.option.id}
+                              data-all-option-title={tally.option.title}
                               style={{
                                 display: "flex",
                                 alignItems: "center",
@@ -989,6 +991,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   <span
                                     title={voter.name}
                                     data-vote-swatch-name={voter.name}
+                                    data-vote-swatch-option-id={tally.option.id}
+                                    data-vote-swatch-type={voter.voteType}
                                     style={{
                                       display: "inline-flex",
                                       alignItems: "center",

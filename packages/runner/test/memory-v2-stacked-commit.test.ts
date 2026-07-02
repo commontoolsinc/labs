@@ -3,7 +3,9 @@ import {
   assertEquals,
   assertExists,
   assertStrictEquals,
+  assertThrows,
 } from "@std/assert";
+import { CloneForMutationError } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   valueFromJson,
@@ -38,6 +40,7 @@ import type {
   IStorageProviderWithReplica,
   StorageNotification,
 } from "../src/storage/interface.ts";
+import { cloneWithPendingReplayValueAtPath } from "../src/storage/v2.ts";
 import {
   NotificationRecorder,
   SingleSessionFactory,
@@ -72,7 +75,7 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
-type RootValue = FabricValue;
+type RootValue = FabricValue | undefined;
 type DocState = {
   seq: number;
   value: RootValue;
@@ -2126,6 +2129,205 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
     });
 
     await assertResultOk(right);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 pending replay: stale non-container bases rebuild synchronously", () => {
+  assertEquals(
+    cloneWithPendingReplayValueAtPath({ value: null }, ["value", "right"], 2),
+    { value: { right: 2 } },
+  );
+  assertEquals(
+    cloneWithPendingReplayValueAtPath(
+      { value: null },
+      ["value", "items", "0", "name"],
+      "b",
+    ),
+    { value: { items: [{ name: "b" }] } },
+  );
+});
+
+Deno.test("memory v2 pending replay: sibling data survives stale-spine rebuilds", () => {
+  assertEquals(
+    cloneWithPendingReplayValueAtPath(
+      { value: 5, other: 7 },
+      ["value", "x"],
+      1,
+    ),
+    { value: { x: 1 }, other: 7 },
+  );
+  assertEquals(
+    cloneWithPendingReplayValueAtPath(
+      { value: { mid: 5, keep: 7 } },
+      ["value", "mid", "x"],
+      1,
+    ),
+    { value: { mid: { x: 1 }, keep: 7 } },
+  );
+});
+
+Deno.test("memory v2 pending replay: stale array append markers rebuild synchronously", () => {
+  assertEquals(
+    cloneWithPendingReplayValueAtPath(
+      { value: 5, other: 7 },
+      ["value", "-"],
+      { name: "b" },
+    ),
+    { value: [{ name: "b" }], other: 7 },
+  );
+});
+
+Deno.test("memory v2 pending replay: array object-key writes remain strict", () => {
+  const error = assertThrows(
+    () => cloneWithPendingReplayValueAtPath([], ["name"], "b"),
+    Error,
+  );
+  assertEquals(
+    error.message,
+    "pending replay cannot write non-index array key name",
+  );
+});
+
+Deno.test("memory v2 pending replay: unrelated clone errors remain strict", () => {
+  const error = assertThrows(
+    () => cloneWithPendingReplayValueAtPath(5, ["x"], 1),
+    CloneForMutationError,
+  );
+  assertEquals(error.kind, "non-mutable-root");
+});
+
+Deno.test("memory v2 stacked commits: dropping parent materialization does not crash surviving child patch", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { left: 1, right: 2 });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { right: 2 });
+
+    await assertResultOk(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropped parent replay rebuilds object-backed primitive roots", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, new FabricEpochNsec(1n));
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { left: 1, right: 2 });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { right: 2 });
+
+    await assertConflict(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: dropped parent replay rebuilds numeric array spines", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { items: ["a"] },
+      }],
+      { items: ["a"] },
+    );
+
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/items/0/name",
+        value: "b",
+      }],
+      { items: [{ name: "b" }] },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { items: [{ name: "b" }] });
+
+    await assertConflict(parent);
+
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, { items: [{ name: "b" }] });
+
+    await assertConflict(child);
   } finally {
     await harness.close();
   }

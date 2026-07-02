@@ -44,6 +44,7 @@ import {
   isPlainContainer,
   isRecord,
 } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -110,11 +111,7 @@ const isSamePath = (
 ): boolean =>
   a.length === b.length && a.every((segment, index) => b[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  hasValueAtPath,
-  isArrayIndexSegment,
-  readValueAtPath,
-} from "./v2-path.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -134,11 +131,6 @@ export type { SessionFactory } from "./v2-remote-session.ts";
 const logger = getLogger("storage.v2", {
   enabled: true,
   level: "error",
-});
-const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
-  enabled: true,
-  level: "warn",
-  logCountEvery: 0,
 });
 
 function withCommitTiming<T>(
@@ -278,12 +270,6 @@ type DocumentRecord = {
   materialized?: PendingMaterializationCache;
 };
 
-type PendingPatchLogContext = {
-  space: MemorySpace;
-  id: URI;
-  scope?: CellScope;
-};
-
 type ConfirmedCommitRead = {
   id: URI;
   scope?: CellScope;
@@ -381,44 +367,6 @@ const changedPathsForPendingPatch = (
     }
   });
 
-// Finds the first existing prefix in `base` that blocks a pending nested write.
-// cloneWithValueAtPath can create missing containers when applying the selected
-// write path.
-const firstExistingPrefixThatBlocksPendingPath = (
-  base: EntityDocument | undefined,
-  path: readonly string[],
-): string[] | undefined => {
-  for (let length = 1; length < path.length; length += 1) {
-    const prefix = path.slice(0, length);
-    if (!hasValueAtPath(base, prefix)) {
-      // Once a prefix is missing, by definition everything else in the path
-      // can be written, so nothing is blocking it.
-      return undefined;
-    }
-    const value = readValueAtPath(base, prefix);
-    const nextSegment = path[length]!;
-    if (
-      !isPlainContainer(value) ||
-      (Array.isArray(value) && !isArrayIndexSegment(nextSegment))
-    ) {
-      return prefix;
-    }
-  }
-  return undefined;
-};
-
-const pendingSetPathForBase = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  path: readonly string[],
-): readonly string[] => {
-  const prefix = firstExistingPrefixThatBlocksPendingPath(base, path);
-  if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
-    return path;
-  }
-  return prefix;
-};
-
 const compactChangedPaths = (paths: readonly string[][]): string[][] => {
   const sorted = [...paths].sort((left, right) => left.length - right.length);
   const retained: string[][] = [];
@@ -431,10 +379,121 @@ const compactChangedPaths = (paths: readonly string[][]): string[][] => {
   return retained;
 };
 
+type PendingReplayContainer = Record<string, FabricValue> | FabricValue[];
+
+const isPendingReplayContainer = (
+  value: unknown,
+): value is PendingReplayContainer => isPlainContainer(value);
+
+const isReplayArrayKey = (key: string): boolean =>
+  isArrayIndexPropertyName(key) || key === "-";
+
+const emptyReplayContainerForNextKey = (
+  nextKey: string,
+): PendingReplayContainer => isReplayArrayKey(nextKey) ? [] : {};
+
+const canReuseReplayContainer = (
+  value: unknown,
+  nextKey: string,
+): value is PendingReplayContainer =>
+  isPendingReplayContainer(value) &&
+  (!Array.isArray(value) || isReplayArrayKey(nextKey));
+
+const childAtReplayKey = (
+  container: PendingReplayContainer,
+  key: string,
+): FabricValue => {
+  if (Array.isArray(container)) {
+    if (key === "-") {
+      return undefined;
+    }
+    if (!isArrayIndexPropertyName(key)) {
+      return undefined;
+    }
+    return container[Number(key)];
+  }
+  return container[key];
+};
+
+const setChildAtReplayKey = (
+  container: PendingReplayContainer,
+  key: string,
+  value: FabricValue,
+): void => {
+  if (Array.isArray(container)) {
+    if (key === "-") {
+      container.push(value);
+      return;
+    }
+    if (!isArrayIndexPropertyName(key)) {
+      throw new Error(`pending replay cannot write non-index array key ${key}`);
+    }
+    container[Number(key)] = value;
+    return;
+  }
+  container[key] = value;
+};
+
+type MutableReplaySpine = {
+  root: PendingReplayContainer;
+  parent: PendingReplayContainer;
+};
+
+const baseWithMutableReplaySpine = (
+  base: PendingReplayContainer,
+  path: readonly string[],
+): MutableReplaySpine => {
+  // Pending patches are replayed against the latest confirmed value after
+  // earlier optimistic materializations may have been dropped. If the surviving
+  // patch was built through that dropped parent, the confirmed value can be a
+  // stale non-container at the same path. Rebuild only the mutable spine needed
+  // for this replay; normal cloneWithValueAtPath/cloneForMutation remain strict.
+  const root = cloneIfNecessary(base, { frozen: false, deep: false });
+  let current = root;
+
+  for (let index = 0; index < path.length - 1; index++) {
+    const key = path[index]!;
+    const nextKey = path[index + 1]!;
+    const existing = childAtReplayKey(current, key);
+    const next = canReuseReplayContainer(existing, nextKey)
+      ? cloneIfNecessary(existing, { frozen: false, deep: false })
+      : emptyReplayContainerForNextKey(nextKey);
+    setChildAtReplayKey(current, key, next);
+    current = next;
+  }
+
+  return { root, parent: current };
+};
+
+const cloneWithReplayValueAtPath = (
+  base: PendingReplayContainer,
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue => {
+  const { root, parent } = baseWithMutableReplaySpine(base, path);
+  setChildAtReplayKey(
+    parent,
+    path[path.length - 1]!,
+    cloneIfNecessary(value),
+  );
+  return cloneIfNecessary(root);
+};
+
+/** @internal Exported for testing only. */
+export const cloneWithPendingReplayValueAtPath = (
+  base: FabricValue,
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue => {
+  if (path.length === 0 || !isPendingReplayContainer(base)) {
+    return cloneWithValueAtPath(base, path, value);
+  }
+  return cloneWithReplayValueAtPath(base, path, value);
+};
+
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
-  logContext: PendingPatchLogContext,
 ): EntityDocument | undefined => {
   switch (pending.op) {
     case "delete":
@@ -449,24 +508,10 @@ const applyPendingVersion = (
         )
       ) {
         if (hasValueAtPath(pending.value, path)) {
-          const setPath = pendingSetPathForBase(next, pending.value, path);
-          if (!isSamePath(setPath, path)) {
-            pendingPatchLogger.warn("pending-branch-replace", () => [
-              "pending patch visibility replaced data at an existing branch that blocked the nested write",
-              {
-                space: logContext.space,
-                id: logContext.id,
-                scope: normalizeCellScope(logContext.scope),
-                localSeq: pending.localSeq,
-                path,
-                replacementPath: setPath,
-              },
-            ]);
-          }
-          next = cloneWithValueAtPath(
+          next = cloneWithPendingReplayValueAtPath(
             next,
-            setPath,
-            readValueAtPath(pending.value, setPath),
+            path,
+            readValueAtPath(pending.value, path),
           ) as EntityDocument;
           continue;
         }
@@ -496,7 +541,6 @@ const ensurePendingMaterializationCache = (
 
 const materializedVersionThroughPending = (
   record: DocumentRecord,
-  logContext: PendingPatchLogContext,
   pendingCount = record.pending.length,
 ): MaterializedVersion => {
   if (pendingCount <= 0) {
@@ -512,7 +556,7 @@ const materializedVersionThroughPending = (
     const pending = record.pending[nextIndex]!;
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
+      value: applyPendingVersion(base.value, pending),
       transactionValue: UNCACHED_TRANSACTION_VALUE,
     });
   }
@@ -2626,7 +2670,6 @@ class SpaceReplica implements ISpaceReplica {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
-            { space: this.#space, id, scope },
             lastPendingIndex + 1,
           );
           const cache = ensurePendingMaterializationCache(record);
@@ -2641,11 +2684,7 @@ class SpaceReplica implements ISpaceReplica {
         } else {
           promoted = confirmedVersion(
             applied.seq,
-            applyPendingVersion(record.confirmed.value, pending, {
-              space: this.#space,
-              id,
-              scope,
-            }),
+            applyPendingVersion(record.confirmed.value, pending),
           );
         }
       }
@@ -2694,11 +2733,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     return {
       record,
-      version: materializedVersionThroughPending(record, {
-        space: this.#space,
-        id,
-        scope,
-      }),
+      version: materializedVersionThroughPending(record),
     };
   }
 

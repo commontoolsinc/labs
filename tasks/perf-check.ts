@@ -620,6 +620,7 @@ const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
   ...[1, 2, 3, 4].map((shard) =>
     `coverage-profile-pattern-integration-${shard}`
   ),
+  "coverage-profile-pattern-integration-lunch-poll-contention",
   "coverage-profile-pattern-reload",
   ...[1, 2, 3, 4, 5].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
 ];

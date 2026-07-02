@@ -11,6 +11,17 @@ export { parseShard };
 // per-file shard assignment below.
 const ALL_PATTERNS_FILE = "all.test.ts";
 
+// These long-running or deliberately high-contention integration tests have
+// dedicated CI jobs so they can run in parallel with the regular four shards
+// instead of making one shard the bottleneck.
+export const INDEPENDENT_PATTERN_INTEGRATION_FILES = [
+  "lunch-poll-contention.test.ts",
+] as const;
+
+const independentPatternIntegrationFiles = new Set<string>(
+  INDEPENDENT_PATTERN_INTEGRATION_FILES,
+);
+
 // Explicit assignments balance the four browser-integration shards by
 // wall-time, using observed CI per-file timings. The heaviest end-to-end tests
 // are parking-coordinator (~43s), cfc-group-chat-demo-two-browsers (~41s),
@@ -60,7 +71,10 @@ export function assignPatternIntegrationShards(
   const assignment = new Map<string, number>();
   let roundRobin = 0;
   for (
-    const name of files.filter((name) => name !== ALL_PATTERNS_FILE).sort()
+    const name of files.filter((name) =>
+      name !== ALL_PATTERNS_FILE &&
+      !independentPatternIntegrationFiles.has(name)
+    ).sort()
   ) {
     const pinned = total === 4 ? FOUR_SHARD_ASSIGNMENTS[name] : undefined;
     assignment.set(name, pinned ?? (roundRobin++ % total) + 1);
@@ -69,8 +83,9 @@ export function assignPatternIntegrationShards(
 }
 
 // Select the files for one shard. `all.test.ts` is included in every shard (it
-// shards its own pattern list internally); the remaining files are assigned to
-// exactly one shard each.
+// shards its own pattern list internally); the remaining shard-managed files
+// are assigned to exactly one shard each. Independently-run files are excluded
+// here and covered by dedicated workflow jobs.
 export function selectPatternIntegrationFiles(
   files: string[],
   shard: { index: number; total: number },

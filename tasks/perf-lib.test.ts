@@ -310,6 +310,34 @@ Deno.test("extractMetrics records pattern reload integration job", () => {
   );
 });
 
+Deno.test("extractMetrics records lunch poll contention integration job", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Pattern Integration Test (Lunch Poll contention)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:30Z",
+      [
+        makeStep(
+          "🧩 Run Lunch Poll contention integration test",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:20Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Pattern Integration Test (Lunch Poll contention)")
+      ?.durationSeconds,
+    90,
+  );
+  assertEquals(
+    metrics.get("step: lunch poll contention integration")?.durationSeconds,
+    70,
+  );
+});
+
 Deno.test("extractMetrics aggregates generated patterns matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
@@ -410,6 +438,12 @@ Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   assertEquals(
     timingArtifactLabel("test-timing-pattern-integration-1"),
     "pattern-integration",
+  );
+  assertEquals(
+    timingArtifactLabel(
+      "test-timing-pattern-integration-lunch-poll-contention",
+    ),
+    "pattern-integration-lunch-poll-contention",
   );
   assertEquals(
     timingArtifactLabel("test-timing-pattern-reload-integration"),
