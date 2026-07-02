@@ -45,3 +45,36 @@ builder bug, caught by the differential oracle).
 before commit. Harvest order: rog.ts (W1), interpret.ts + partition.ts +
 measurement harness (W3), collection-interpreter mechanics (W4), test
 oracles per work order.
+
+## D-V2-ROG-SIDETABLE — ROG lives in a WeakMap side-table, never in the pattern JSON (2026-07-02)
+
+Recon (builder pipeline, cited to main): pattern identity is content-addressed
+from serialized bytes, so ANY new serialized field breaks identity stability
+for every existing pattern. Also: compiled patterns are constructed by
+EXECUTING the factory once at module load (`pattern(fn)` pushes a frame, runs
+fn, collects nodes — builder/pattern.ts:122-168), and `$patternRef`-loaded
+patterns resolve through the artifact index back to that factory. So:
+
+- The ROG is built at `pattern()` FINALIZATION from live objects (NodeRefs
+  with live modules, live input/output cells) — direct Map lookups, zero
+  shape recognition. `str` emits `interpolate` (the builder holds the static
+  template), `ifElse`/`when`/`unless` emit tagged `control`, builtin refs
+  classify by NAME into effect ops — v1's recognizers become emissions.
+- Attached via WeakMap (pattern-metadata idiom): identity-neutral by
+  construction, no serialization change at all.
+- A pattern that arrives as PLAIN JSON with no live factory has no ROG →
+  legacy instantiation (exactly D-V2-ARTIFACT's "old artifacts on the legacy
+  loader"). Coverage census tracks how often this occurs.
+- ROG construction is ALWAYS-ON (cheap, inert data); the flag gates dispatch
+  only. An unsupported builder shape marks the ROG incomplete with a reason
+  (fail-closed → legacy dispatch) rather than failing construction.
+
+Amends 02-ir.md §3 (serialization) and D-V2-SEQ's "versioned optional `rog`
+field" — superseded by the side-table.
+
+## D-V2-INTERNALS-TABLE — internals are table-indexed, not string-keyed (2026-07-02)
+
+v1 keyed internal cells by `JSON.stringify`ed partialCause strings. v2: each
+Rog carries `internals: InternalDecl[]` ({partialCause, schema?}) and
+`internal` ValueRefs point by INDEX. Nested Rogs have their own table (frames
+fall out structurally; no FrameId needed).
