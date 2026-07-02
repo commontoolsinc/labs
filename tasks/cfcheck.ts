@@ -12,7 +12,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/base/family-member.tsx",
   "packages/patterns/base/person.tsx",
   "packages/patterns/battleship/multiplayer/repro-minimal.tsx",
   "packages/patterns/cfc-agent-prompt-injection-demo/main.tsx",
