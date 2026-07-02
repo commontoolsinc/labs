@@ -49,7 +49,12 @@ const compareByCanonicalHash = (left: unknown, right: unknown): number => {
  *   canonical value hash, so two clauses that differ only in alternative
  *   insertion order canonicalize (and hash) identically;
  * - a singleton `{anyOf: [a]}` unwraps to the bare atom `a` (semantically
- *   identical, so the two spellings must not hash differently);
+ *   identical, so the two spellings must not hash differently) — UNLESS `a`
+ *   is itself clause-shaped: `{anyOf: [{anyOf: […]}]}` is malformed (the
+ *   reserved key must not appear in atom position), and its sole alternative
+ *   is an opaque, unsatisfiable atom. Unwrapping would PROMOTE that inner
+ *   value into an active OR-clause, loosening what the raw label admits —
+ *   the wrong direction. Malformed nesting stays wrapped and opaque;
  * - an empty `{anyOf: []}` is kept as-is: it is an unsatisfiable clause
  *   (see `clauseSubsumes` for how both positions treat it fail-closed).
  *
@@ -61,7 +66,7 @@ const compareByCanonicalHash = (left: unknown, right: unknown): number => {
 export const normalizeClause = (clause: CfcConfClause): CfcConfClause => {
   if (!isOrClause(clause)) return clause;
   const unique = uniqueCfcAtoms(clause.anyOf);
-  if (unique.length === 1) return unique[0];
+  if (unique.length === 1 && !isOrClause(unique[0])) return unique[0];
   return { anyOf: unique.sort(compareByCanonicalHash) };
 };
 

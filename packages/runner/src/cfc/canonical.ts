@@ -158,8 +158,24 @@ export const canonicalizeWritePolicyInput = (
       };
     case "trusted-event":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
+    // Clause-canonicalization coverage note: the digest hashes label-bearing
+    // material in two places beyond the labelMap. Carried `link-write` label
+    // views are RUNTIME-DERIVED (view merges can order alternatives
+    // differently across derivations), so their clause interiors are
+    // canonicalized here. `schema` inputs are deliberately NOT touched: a
+    // schema is a content-addressed authored artifact whose bytes are its
+    // identity (`schemaHash`) — rewriting `ifc` clause interiors inside the
+    // digest view would diverge it from the schema's own hash, and a single
+    // artifact's internal ordering is stable by construction anyway.
     case "link-write": {
-      const cfcLabelView = cloneCfcLabelView(input.cfcLabelView);
+      const cloned = cloneCfcLabelView(input.cfcLabelView);
+      const cfcLabelView = cloned === undefined ? undefined : {
+        version: cloned.version,
+        entries: cloned.entries.map((entry) => ({
+          path: entry.path,
+          label: canonicalizeCfcLabel(entry.label),
+        })),
+      };
       return {
         ...input,
         target: canonicalizeAttemptedWrite(input.target),

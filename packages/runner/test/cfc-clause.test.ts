@@ -8,8 +8,15 @@ import {
   isOrClause,
   normalizeClause,
 } from "../src/cfc/clause.ts";
-import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
-import type { CfcMetadata } from "../src/cfc/types.ts";
+import {
+  canonicalizeCfcMetadata,
+  canonicalizeWritePolicyInput,
+} from "../src/cfc/canonical.ts";
+import type {
+  CfcAddress,
+  CfcMetadata,
+  WritePolicyInput,
+} from "../src/cfc/types.ts";
 
 // Epic A1 (docs/plans/cfc-future-work-implementation.md): the CNF clause
 // kernel. Pure helpers — no runtime behavior change; A2 wires subsumption
@@ -77,6 +84,20 @@ describe("CFC clause kernel", () => {
 
     it("keeps the empty (unsatisfiable) clause as-is", () => {
       expect(normalizeClause({ anyOf: [] })).toEqual({ anyOf: [] });
+    });
+
+    it("never promotes a malformed nested clause via singleton unwrap", () => {
+      // {anyOf:[{anyOf:[A,B]}]} is malformed: the reserved key in atom
+      // position makes the sole alternative an opaque, unsatisfiable atom.
+      // Unwrapping would turn it into an ACTIVE OR-clause — admitting at a
+      // ceiling naming A what the raw label never would. It must stay
+      // wrapped and opaque.
+      const malformed = { anyOf: [{ anyOf: [userA, userB] }] };
+      const normalized = normalizeClause(malformed);
+      expect(normalized).toEqual(malformed);
+      // The soundness assertion: no loosening through normalization.
+      expect(clauseSubsumes(userA, normalized)).toBe(false);
+      expect(clauseSubsumes(userA, malformed)).toBe(false);
     });
 
     it("never dedups across a singleton and an OR-clause containing it", () => {
@@ -172,6 +193,36 @@ describe("CFC clause kernel", () => {
       expect(canonical.labelMap.entries[0].label).toBe(
         flat.labelMap.entries[0].label,
       );
+    });
+  });
+
+  describe("canonicalizeWritePolicyInput carried label views", () => {
+    const address = (id: string): CfcAddress =>
+      ({
+        space: "did:key:space" as CfcAddress["space"],
+        id,
+        scope: "space",
+        path: [],
+      }) as CfcAddress;
+
+    const linkWriteWith = (confidentiality: unknown[]): WritePolicyInput => ({
+      kind: "link-write",
+      target: address("of:target"),
+      source: address("of:source"),
+      cfcLabelView: {
+        version: 1,
+        entries: [{ path: ["field"], label: { confidentiality } }],
+      },
+    });
+
+    it("digests link-write label views identically across alternative order", () => {
+      const forward = canonicalizeWritePolicyInput(
+        linkWriteWith([{ anyOf: [userA, userB] }, userC]),
+      );
+      const backward = canonicalizeWritePolicyInput(
+        linkWriteWith([{ anyOf: [userB, userA] }, userC]),
+      );
+      expect(hashStringOf(forward)).toBe(hashStringOf(backward));
     });
   });
 });
