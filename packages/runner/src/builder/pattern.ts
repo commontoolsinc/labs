@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type CellScope,
   type FactoryInput,
@@ -307,6 +308,19 @@ function factoryFromPattern<T, R>(
   };
 
   const assignedInternalPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
+  // Canonical keys of the causes already assigned. Testing a candidate cause for
+  // collision is then an O(1) `Set` lookup instead of a `deepEqual` scan over
+  // every previously-assigned cause — the scan made this loop O(N²) in the number
+  // of internal cells (negligible for small patterns, but a scaling cliff for
+  // large ones, and it runs on every pattern instantiation, not just at boot).
+  const assignedCauseKeys = new Set<string>();
+  // The canonical value hash is exactly the collision test the previous
+  // `deepEqual` scan performed: records hash key-order-insensitively (keys are
+  // fed in sorted UTF-8 byte order), numbers hash by their float64 bits with a
+  // dedicated `-0` cache entry, and `NaN` hashes canonically — i.e. `Object.is`
+  // primitive semantics and order-insensitive records, matching `deepEqual` on
+  // the JSON values causes are made of.
+  const causeKey = (cause: JSONValue): string => hashStringOf(cause);
   let anonymousPartialCauseCount = 0;
   const nextAnonymousPartialCause = (isStream: boolean): JSONObject => {
     const generated = { $generated: anonymousPartialCauseCount++ };
@@ -325,17 +339,16 @@ function factoryFromPattern<T, R>(
     let partialCause = name === undefined
       ? nextAnonymousPartialCause(isStream)
       : name as JSONValue;
-    while (
-      Array.from(assignedInternalPartialCauses.values()).some((used) =>
-        deepEqual(used, partialCause)
-      )
-    ) {
+    let key = causeKey(partialCause);
+    while (assignedCauseKeys.has(key)) {
       const generated = nextAnonymousPartialCause(isStream);
       partialCause = name === undefined
         ? generated
         : { name: name as JSONValue, ...generated };
+      key = causeKey(partialCause);
     }
     assignedInternalPartialCauses.set(top, partialCause);
+    assignedCauseKeys.add(key);
   });
 
   const cellReferenceForCell = (
