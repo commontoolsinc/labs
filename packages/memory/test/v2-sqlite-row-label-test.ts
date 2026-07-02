@@ -983,6 +983,33 @@ Deno.test("ruleCommonAlternatives never counts a dual-op node's owner as a commo
   );
 });
 
+Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwrap past the guard)", () => {
+  // {allOf: [...], constant: X} — flattenConfConjuncts must NOT dispatch on
+  // the allOf key alone and unwrap it: that silently drops the smuggled
+  // sibling op and hands the inner conjuncts to the static analysis, which
+  // would report a guaranteed reader for a node the evaluator refuses.
+  const ambiguousWrapper = {
+    version: 1,
+    confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(ambiguousWrapper, { dbOwner: OWNER }),
+    [],
+  );
+  // ...and the wrapper still COUNTS as a confidentiality constraint: an
+  // ambiguous {allOf: [], constant} must not read as the degenerate empty
+  // conjunction (which would make the aggregate public).
+  const emptyAllOfConstant = {
+    version: 1,
+    confidentiality: { allOf: [], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(emptyAllOfConstant), true);
+  assertEquals(
+    ruleCommonAlternatives(emptyAllOfConstant, { dbOwner: OWNER }),
+    [],
+  );
+});
+
 Deno.test("evaluateRowLabel fails closed on a dual-op node that bypassed validation", () => {
   // Defense in depth (like the conjunctive-anyOf-alternative check): a wire
   // spec that skipped validation must refuse at eval, never silently pick one

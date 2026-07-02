@@ -861,9 +861,15 @@ function staticUnconditionalAlternatives(
 // `all(A, B)` as one opaque term with no static reader and refuse an aggregate
 // that is in fact satisfiable. Leaves (anyOf/principal/when/dbOwner/constant)
 // pass through unchanged; an `any(...)` never wraps an `allOf` (E1 rejects that
-// at authoring), so only allOf nesting needs flattening.
+// at authoring), so only allOf nesting needs flattening. Only a PURE allOf node
+// unwraps: a dual-op wrapper ({allOf, constant}) stays one opaque conjunct so
+// it reaches the ambiguity guard in `staticUnconditionalAlternatives` instead
+// of silently shedding the smuggled sibling op — and an ambiguous
+// {allOf: [], constant} keeps counting as a constraint rather than reading as
+// the degenerate empty conjunction (which would make an aggregate public).
 function flattenConfConjuncts(conf: unknown): unknown[] {
-  return isRecord(conf) && Array.isArray(conf.allOf)
+  return isRecord(conf) && Array.isArray(conf.allOf) &&
+      presentOps(conf).length === 1
     ? conf.allOf.flatMap(flattenConfConjuncts)
     : [conf];
 }
