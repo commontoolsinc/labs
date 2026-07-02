@@ -120,16 +120,3 @@ export function readBindingIdentity(
   }
   return { sourceFile, bindingPath: [...bindingPath] };
 }
-
-/**
- * Derive the module content identity from a function's canonical source
- * location (`cf:module/<identity>/<path>:line:col`), or undefined for
- * non-canonical sources (host functions, builtins).
- */
-export function identityFromCanonicalSource(
-  src: unknown,
-): string | undefined {
-  if (typeof src !== "string") return undefined;
-  const match = /^cf:module\/([^/]+)\//.exec(src);
-  return match ? match[1] : undefined;
-}

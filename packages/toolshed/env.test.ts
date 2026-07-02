@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { EnvSchema } from "@/env.ts";
+import { EnvSchema, runtimeExperimentalOptions } from "@/env.ts";
 
 // Regression guard for the z.coerce.boolean() footgun: Boolean("false") === true,
 // which would silently enable telemetry (and, with the all-span exporter, ship
@@ -36,4 +36,27 @@ Deno.test("DISABLE_LOG_REQ_RES / PLAID_SYNC_ALL_TRANSACTIONS parse strictly", ()
     assertEquals(flag(key, "0"), false);
     assertEquals(flag(key, undefined), false);
   }
+});
+
+Deno.test("runtimeExperimentalOptions maps env flags with tri-state fidelity", () => {
+  const base = EnvSchema.parse({});
+  // Unset flags stay undefined — the runner distinguishes "unset" from an
+  // explicit false (an unset eagerSourceAnnotation must not stomp the
+  // runner's ambient default).
+  assertEquals(runtimeExperimentalOptions(base), {
+    modernCellRep: undefined,
+    persistentSchedulerState: undefined,
+    eagerSourceAnnotation: undefined,
+  });
+
+  const explicit = EnvSchema.parse({
+    EXPERIMENTAL_MODERN_CELL_REP: "true",
+    EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "false",
+    EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: "true",
+  });
+  assertEquals(runtimeExperimentalOptions(explicit), {
+    modernCellRep: true,
+    persistentSchedulerState: false,
+    eagerSourceAnnotation: true,
+  });
 });

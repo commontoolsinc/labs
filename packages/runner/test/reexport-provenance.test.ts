@@ -7,6 +7,7 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 import {
   getDefiningModule,
   getVerifiedProvenance,
+  recordDefiningModule,
 } from "../src/harness/verified-provenance.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
@@ -106,4 +107,18 @@ describe("re-export provenance", () => {
     });
     expect(identity?.kind).toBe("verified");
   });
+});
+
+Deno.test("defining-module stamps: non-function values are ignored; first write wins", () => {
+  // Non-functions never enter the WeakMap (mirrors recordVerifiedProvenance).
+  recordDefiningModule({ not: "a function" }, "MODULE_X");
+  expect(getDefiningModule({ not: "a function" })).toBe(undefined);
+  expect(getDefiningModule("also not")).toBe(undefined);
+
+  // First-write-wins: the defining (dependency-first) module's stamp sticks;
+  // a later re-exporter's stamp is a no-op.
+  const fn = () => {};
+  recordDefiningModule(fn, "DEFINER");
+  recordDefiningModule(fn, "REEXPORTER");
+  expect(getDefiningModule(fn)).toBe("DEFINER");
 });

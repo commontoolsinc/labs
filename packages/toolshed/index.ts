@@ -1,5 +1,5 @@
 import app from "@/app.ts";
-import env from "@/env.ts";
+import env, { runtimeExperimentalOptions } from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -25,11 +25,7 @@ const initializeRuntime = () => {
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
-      experimental: {
-        modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
-        persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
-        eagerSourceAnnotation: env.EXPERIMENTAL_EAGER_SOURCE_ANNOTATION,
-      },
+      experimental: runtimeExperimentalOptions(env),
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);

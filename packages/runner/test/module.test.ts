@@ -19,6 +19,7 @@ import {
   isEagerSourceAnnotationEnabled,
   lift,
   parseStackFrame,
+  resolveLocationFromFunctionSource,
   resolveSourceLocationFromStack,
   setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
@@ -426,6 +427,20 @@ describe("module", () => {
   describe("eagerSourceAnnotation runtime option", () => {
     afterEach(() => setEagerSourceAnnotation(false));
 
+    it("annotates the RAW (unmapped) stack location when eager annotation is on", () => {
+      // Builder calls from plain test code have no source map behind them, so
+      // the stack walk takes the raw-resolution arm (`file:line:col` of the
+      // first external frame). On main this arm ran for every unit-test
+      // builder call; with the annotation default-off it is only reachable
+      // through eager-on tests — keep it exercised.
+      setEagerSourceAnnotation(true);
+      const dbl = lift((n: number) => n * 2);
+      const impl = (dbl as unknown as Module).implementation as {
+        src?: string;
+      };
+      expect(impl.src).toMatch(/module\.test\.ts:\d+:\d+$/);
+    });
+
     it("propagates an explicit option to the ambient flag; undefined leaves it alone", async () => {
       const mk = (experimental?: { eagerSourceAnnotation?: boolean }) =>
         new Runtime({
@@ -649,6 +664,78 @@ describe("module", () => {
           testCase.label,
         ).not.toContain("main.tsx:1:23");
       }
+    });
+  });
+
+  describe("resolveLocationFromFunctionSource", () => {
+    // The `indexOf`-into-script path — the eager annotation's fallback when
+    // the stack capture yields nothing (in-worker, SES-censored stacks make
+    // this the MAIN path). Annotation is off by default now, so exercise the
+    // helper directly with an explicit frame.
+    const makeFrame = (script: string, nextSearchOffset = 0) =>
+      ({
+        sourceLocationContext: {
+          filename: "/probe.tsx",
+          script,
+          nextSearchOffset,
+        },
+        runtime: { harness: { mapPosition: () => null } },
+      }) as unknown as Frame;
+
+    it("resolves file:line:col by locating the fn source in the script", () => {
+      const fn = (n: number) => n * 2;
+      const script = `// header line\nconst dbl = ${fn.toString()};\n`;
+      const result = resolveLocationFromFunctionSource(fn, makeFrame(script));
+      expect(result).toBe("/probe.tsx:2:12");
+    });
+
+    it("restarts the scan from the top when the offset overshoots", () => {
+      const fn = (n: number) => n + 1;
+      const script = `const inc = ${fn.toString()};\n// tail`;
+      // nextSearchOffset past the match forces the second indexOf pass.
+      const result = resolveLocationFromFunctionSource(
+        fn,
+        makeFrame(script, script.length - 3),
+      );
+      expect(result).toBe("/probe.tsx:1:12");
+    });
+
+    it("returns null when the source is not in the script or no frame context", () => {
+      const fn = (n: number) => n - 1;
+      expect(resolveLocationFromFunctionSource(fn, makeFrame("// nothing")))
+        .toBe(null);
+      expect(resolveLocationFromFunctionSource(fn, undefined)).toBe(null);
+    });
+
+    it("returns null for an empty fn source", () => {
+      const fn = (n: number) => n;
+      Object.defineProperty(fn, "toString", { value: () => "" });
+      expect(resolveLocationFromFunctionSource(fn, makeFrame("anything")))
+        .toBe(null);
+    });
+
+    it("prefers the source-mapped location when the range maps", () => {
+      const fn = (n: number) => n * 3;
+      const script = `const tri = ${fn.toString()};`;
+      const frame = {
+        sourceLocationContext: {
+          filename: "/probe.tsx",
+          script,
+          nextSearchOffset: 0,
+        },
+        runtime: {
+          harness: {
+            mapPosition: () => ({
+              source: "/authored.tsx",
+              line: 7,
+              column: 3,
+              name: null,
+            }),
+          },
+        },
+      } as unknown as Frame;
+      const result = resolveLocationFromFunctionSource(fn, frame);
+      expect(result).toBe("/authored.tsx:7:3");
     });
   });
 
