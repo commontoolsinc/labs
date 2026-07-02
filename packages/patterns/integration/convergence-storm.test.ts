@@ -124,6 +124,75 @@ minimalCase(
   "convergence-chat-optlink",
 );
 
+// FAILS today — B3 (writer-side integration gap, distinct from B1/B2): with
+// PLAIN elements (no links, so no blackout), all sends land durably and a
+// non-writing observer converges — but the writer that lost the interleaving
+// race permanently keeps a stale array holding ONLY ITS OWN appends, through
+// 20 settle rounds and pulling reads (5/5 reproducible via storm-driver.ts
+// `20 2 pipeline 0 convergence-chat-plain`).
+describe("writer integration gap (plain elements, no links)", () => {
+  let harness: MultiRuntimeHarness;
+  let alice: MultiRuntimeSession;
+  let bob: MultiRuntimeSession;
+  let observer: MultiRuntimeSession;
+
+  beforeAll(async () => {
+    harness = await MultiRuntimeHarness.create({
+      programPath: fixture("convergence-chat-plain"),
+      rootPath: ROOT_PATH,
+      sessions: ["plain-alice", "plain-bob", "plain-observer"],
+    });
+    [alice, bob, observer] = harness.sessions;
+    await harness.settle();
+  });
+
+  afterAll(async () => {
+    await harness?.dispose();
+  });
+
+  it("both writers converge after concurrent posting", async () => {
+    const K = 20;
+    const storm = async (session: MultiRuntimeSession, author: string) => {
+      for (let n = 0; n < K; n++) {
+        await session.send(
+          "post",
+          { author, body: `${author}-${n}`, n },
+          undefined,
+          { idle: false },
+        );
+      }
+    };
+    await Promise.all([storm(alice, "alice"), storm(bob, "bob")]);
+    await harness.settle(20);
+
+    const aliceView = await messages(alice);
+    const bobView = await messages(bob);
+    const observerView = await messages(observer);
+    const detail = `alice=${JSON.stringify(summarize(aliceView))} ` +
+      `bob=${JSON.stringify(summarize(bobView))} ` +
+      `observer=${JSON.stringify(summarize(observerView))}`;
+
+    // The observer converges and shows full delivery (passes today) — the
+    // defect is confined to the racing writers' own replicas.
+    assertEquals(
+      observerView.length,
+      2 * K,
+      `observer missed durable sends: ${detail}`,
+    );
+    // One racing writer keeps a stale own-appends-only array (fails today).
+    assertEquals(
+      bodies(aliceView),
+      bodies(observerView),
+      `alice's replica is stale: ${detail}`,
+    );
+    assertEquals(
+      bodies(bobView),
+      bodies(observerView),
+      `bob's replica is stale: ${detail}`,
+    );
+  });
+});
+
 describe("convergence storm (2 writers + observer, deep pipelines)", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
