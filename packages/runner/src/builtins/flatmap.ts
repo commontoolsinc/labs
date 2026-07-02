@@ -38,6 +38,7 @@ import {
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
+import { createResumeRecovery } from "./resume-recover.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
@@ -89,6 +90,17 @@ export function flatMap(
   // until sync completes; elements from later (post-resume) reconciles are fresh
   // and must not wait. Cleared once a non-empty resume batch is processed.
   let resumeBatchAwaitSync = !!awaitSync;
+
+  // Whether this coordinator was started from a resume (its inputs are streaming
+  // in from storage). Set once, never cleared — a fresh runtime never arms the
+  // post-sync recovery below.
+  const wasResumed = !!awaitSync;
+  const resumeRecovery = createResumeRecovery({
+    runtime,
+    space: parentCell.space,
+    elementRuns,
+    logger,
+  });
 
   // Rebuild the flattened list from the per-element results: spread an array
   // result one level deep, push a defined scalar directly, and treat an undefined
@@ -330,6 +342,19 @@ export function flatMap(
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
+
+        // An element first seen after the resume batch cleared, while the space
+        // may still be syncing: its inline op write rode on this reconcile's
+        // transaction and is reverted if the commit is preempted. Arm a post-sync
+        // recovery so the value is re-applied once the space settles.
+        if (wasResumed && !elementAwaitSync) {
+          resumeRecovery.schedule(
+            elementKey,
+            resultCell,
+            opPattern,
+            (index) => createRunInput(list[i], index),
+          );
+        }
       }
 
       // Read per-element result and flatten one level into output.
