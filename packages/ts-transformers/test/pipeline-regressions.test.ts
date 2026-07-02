@@ -218,6 +218,7 @@ Deno.test(
       "EmptyArrayOfValidationTransformer",
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
+      "MergeablePushValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
       "LiftLoweringTransformer",
       "ClosureTransformer",
