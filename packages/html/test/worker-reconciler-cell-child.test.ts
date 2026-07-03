@@ -72,6 +72,17 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     }
   }
 
+  const renderCell = (cell: MockCell): Cell<WorkerRenderNode> => cell as any;
+  const unknownCell = (cell: MockCell): Cell<unknown> => cell as any;
+  const cellNode = (cell: MockCell): WorkerRenderNode => cell as any;
+  const uiNode = (
+    node: WorkerVNode,
+    toJSON?: () => string,
+  ): WorkerRenderNode => ({
+    [UI]: node,
+    ...(toJSON ? { toJSON } : {}),
+  } as any);
+
   await t.step(
     "updates child Cell VNode in place when tag matches",
     async () => {
@@ -101,7 +112,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const rootCell = new MockCell(rootVNode);
 
       // Mount
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const createOps = collector.getOpsOfType("create-element");
@@ -173,10 +184,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(childCell)],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -262,10 +273,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(childCell)],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -318,10 +329,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(childCell)],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -369,10 +380,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(childCell)],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -421,10 +432,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [firstChild as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(firstChild)],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -432,7 +443,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [secondChild as unknown as Cell<WorkerRenderNode>],
+        children: [renderCell(secondChild)],
       } as WorkerVNode);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -465,11 +476,11 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           type: "vnode",
           name: "div",
           props: {},
-          children: [oldChild as unknown as WorkerRenderNode],
+          children: [cellNode(oldChild)],
         } satisfies WorkerVNode,
       );
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -553,7 +564,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         ],
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -611,7 +622,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: mappedChildren,
       });
 
-      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      reconciler.mount(renderCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -760,11 +771,11 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           type: "vnode",
           name: "cf-screen",
           props: {},
-          children: [header as unknown as WorkerRenderNode],
+          children: [cellNode(header)],
         } satisfies WorkerVNode,
       );
 
-      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      reconciler.mount(unknownCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       const screenCreate = collector.getOpsOfType("create-element").find(
         (op) => "tagName" in op && op.tagName === "cf-screen",
@@ -841,11 +852,11 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           type: "vnode",
           name: "div",
           props: {},
-          children: [summary as unknown as WorkerRenderNode],
+          children: [cellNode(summary)],
         } satisfies WorkerVNode,
       );
 
-      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      reconciler.mount(unknownCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -891,22 +902,18 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         onOps: collector.onOps,
       });
 
-      const beforeChild = {
-        [UI]: {
-          type: "vnode",
-          name: "span",
-          props: {},
-          children: ["Before"],
-        } satisfies WorkerVNode,
-      } as unknown as WorkerRenderNode;
-      const afterChild = {
-        [UI]: {
-          type: "vnode",
-          name: "button",
-          props: {},
-          children: ["After"],
-        } satisfies WorkerVNode,
-      } as unknown as WorkerRenderNode;
+      const beforeChild = uiNode({
+        type: "vnode",
+        name: "span",
+        props: {},
+        children: ["Before"],
+      });
+      const afterChild = uiNode({
+        type: "vnode",
+        name: "button",
+        props: {},
+        children: ["After"],
+      });
 
       const rootCell = new MockCell(
         {
@@ -917,7 +924,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         } satisfies WorkerVNode,
       );
 
-      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      reconciler.mount(unknownCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const spanCreate = collector.getOpsOfType("create-element").find(
@@ -1344,10 +1351,8 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
       });
-      const subpatternOutput = (node: WorkerVNode): WorkerRenderNode => ({
-        [UI]: node,
-        toJSON: () => "stable-subpattern-output",
-      } as unknown as WorkerRenderNode);
+      const subpatternOutput = (node: WorkerVNode): WorkerRenderNode =>
+        uiNode(node, () => "stable-subpattern-output");
 
       const rootCell = new MockCell(
         {
@@ -1365,7 +1370,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         } satisfies WorkerVNode,
       );
 
-      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      reconciler.mount(unknownCell(rootCell));
       await new Promise((resolve) => setTimeout(resolve, 10));
       const spanCreate = collector.getOps().find((op) =>
         op.op === "create-element" && "tagName" in op &&
@@ -1447,7 +1452,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       } satisfies WorkerVNode,
     );
 
-    reconciler.mount(rootCell as unknown as Cell<unknown>);
+    reconciler.mount(unknownCell(rootCell));
     await new Promise((resolve) => setTimeout(resolve, 10));
     const spanCreate = collector.getOpsOfType("create-element").find((op) =>
       "tagName" in op && op.tagName === "span"
