@@ -195,7 +195,16 @@ export interface FnDef {
 
 /** Kind-specific detail. */
 export type KindDetail =
-  | { kind: "leaf"; caps?: LeafCaps }
+  | {
+    kind: "leaf";
+    caps?: LeafCaps;
+    /** Legacy `argumentSchema === false` bypass: the node runs even when its
+     * resolved input is `undefined` (the no-argument lift the transformer
+     * emits for capture-less computeds — `lift(() => ..., false)`). Without
+     * this, the undefined-argument run-gate would starve constant
+     * producers. */
+    ungated?: true;
+  }
   | {
     kind: "pattern";
     /** Serialized nested pattern's content-addressed handle (when known). */

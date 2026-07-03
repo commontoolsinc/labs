@@ -454,13 +454,18 @@ function buildRog(input: RogBuildInput): BuiltRog {
         leafImpls.set(id, mod.implementation as (input: unknown) => unknown);
         // Fail-closed capability annotations from the LIVE source + declared
         // schemas (leaf-caps.ts — the v1 static scans at capture time).
+        const argumentSchema =
+          (mod as { argumentSchema?: unknown }).argumentSchema;
         const caps = computeLeafCaps(
           mod.implementation,
-          (mod as { argumentSchema?: unknown }).argumentSchema,
+          argumentSchema,
           mod.resultSchema,
         );
-        const detail = caps ? { kind: "leaf" as const, caps } : {
+        const detail = {
           kind: "leaf" as const,
+          ...(caps && { caps }),
+          // Legacy `argumentSchema === false` = run-without-argument bypass.
+          ...(argumentSchema === false && { ungated: true as const }),
         };
         const dataInput = refForValue(node.inputs);
         if (!dataInput) {

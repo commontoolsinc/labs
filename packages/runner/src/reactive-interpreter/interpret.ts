@@ -298,7 +298,9 @@ export function evalRog(
         // UNDEFINED-ARGUMENT RUN-GATE (legacy parity; leaves ONLY — see
         // module doc). Chained lifts: an upstream throw isolates to
         // `undefined`, and the downstream leaf must NOT execute against it.
-        if (input === undefined) return undefined;
+        // `ungated` = the legacy `argumentSchema === false` bypass (the
+        // transformer's capture-less computeds run with undefined).
+        if (input === undefined && !d.ungated) return undefined;
         return impl(input);
       }
       case "interpolate": {

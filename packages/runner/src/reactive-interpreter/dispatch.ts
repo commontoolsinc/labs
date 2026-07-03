@@ -137,6 +137,15 @@ function containsScopeMarker(value: unknown, depth = 0): boolean {
   return false;
 }
 
+function safeJson(value: unknown): string {
+  try {
+    const s = JSON.stringify(value);
+    return s && s.length > 400 ? s.slice(0, 400) + "…" : s ?? "undefined";
+  } catch {
+    return "<unserializable>";
+  }
+}
+
 function fallback(reason: string): DispatchPlan {
   const key = reason.split(":")[0];
   census.fallbackByReason[key] = (census.fallbackByReason[key] ?? 0) + 1;
@@ -435,6 +444,13 @@ function makeSegmentImplementation(
         const out: Record<string, unknown> = {};
         for (const opId of outputOpIds) {
           out[String(opId)] = opValues.get(opId);
+        }
+        if (RI2_DEBUG) {
+          console.log(
+            `[ri2] run ${segmentId}: bound=${safeJson(bound)} out=${
+              safeJson(out)
+            }`,
+          );
         }
         // Per-op containment parity: a throwing op's slot is written as
         // `undefined` (evalRog isolated it), siblings keep their values —
