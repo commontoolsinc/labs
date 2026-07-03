@@ -27,10 +27,10 @@ describe("UnknownValue", () => {
   describe("instance members", () => {
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: recurses state, freezes in place", () => {
-        const child = { y: 2 };
+        const child = { y: 2 } satisfies FabricValue;
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = deepFreeze(uv);
         expect(result).toBe(uv);
@@ -40,10 +40,10 @@ describe("UnknownValue", () => {
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {
-        const child = { y: 2 };
+        const child = { y: 2 } satisfies FabricValue;
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = uv[DEEP_FREEZE](subFreeze);
         expect(result).toBe(uv);
