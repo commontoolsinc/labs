@@ -1,19 +1,110 @@
 import { render } from "@commonfabric/html/client";
 import { UI } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { loadManager } from "./piece.ts";
 import { PiecesController } from "@commonfabric/piece/ops";
 import type { PieceConfig } from "./piece.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { MockDoc } from "../../html/src/mock-doc.ts";
-import { CellHandle, VNode } from "@commonfabric/runtime-client";
+import type { VNode } from "@commonfabric/runtime-client";
 
 const logger = getLogger("piece-render", { level: "info", enabled: false });
+const cliRendererVDOMSchema = {
+  $defs: {
+    vdomRenderNode: {
+      anyOf: [
+        { $ref: "#/$defs/vdomNode" },
+        { $ref: "#/$defs/vdomRenderableObject" },
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+        { type: "null" },
+        { type: "undefined" },
+        {
+          type: "array",
+          items: { $ref: "#/$defs/vdomRenderNode" },
+        },
+      ],
+    },
+    vdomNode: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          properties: {
+            style: { anyOf: [{ type: "object" }, { type: "string" }] },
+          },
+          additionalProperties: {
+            anyOf: [
+              { type: "string" },
+              { type: "number" },
+              { type: "boolean" },
+              { type: "null" },
+              { type: "undefined" },
+              {
+                type: "object",
+                properties: {},
+              },
+              {
+                type: "array",
+                items: { type: "unknown" },
+              },
+            ],
+          },
+        },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/vdomRenderNode" },
+        },
+        [UI]: { $ref: "#/$defs/vdomNode" },
+      },
+      required: ["type", "name"],
+    },
+    vdomRenderableObject: {
+      type: "object",
+      properties: {
+        [UI]: { $ref: "#/$defs/vdomNode" },
+      },
+      required: [UI],
+    },
+  },
+  $ref: "#/$defs/vdomRenderNode",
+} as const;
 
 export interface RenderOptions {
   watch?: boolean;
   onUpdate?: (html: string) => void;
   start?: boolean;
+}
+
+interface RenderPieceManager {
+  runtime: { idle(): Promise<unknown> };
+}
+
+interface RenderPieceCell {
+  asSchema(schema: unknown): RenderPieceMaterializedCell;
+}
+
+interface RenderPieceMaterializedCell {
+  get(): { [UI]?: unknown } | undefined;
+  sink(
+    callback: (value: { [UI]?: unknown } | undefined) => void,
+  ): () => void;
+}
+
+interface RenderPieceController {
+  getCell(): RenderPieceCell;
+}
+
+export interface RenderPieceDependencies {
+  loadManager?: (config: PieceConfig) => Promise<RenderPieceManager>;
+  loadPiece?: (
+    manager: RenderPieceManager,
+    config: PieceConfig,
+    start: boolean,
+  ) => Promise<RenderPieceController>;
+  render?: typeof render;
 }
 
 /**
@@ -23,25 +114,31 @@ export interface RenderOptions {
 export async function renderPiece(
   config: PieceConfig,
   options: RenderOptions = {},
+  deps: RenderPieceDependencies = {},
 ): Promise<string | (() => void)> {
   const mock = new MockDoc(
     '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
   );
   const { document, renderOptions } = mock;
+  const renderHtml = deps.render ?? render;
 
   // 2. Get piece controller to access the Cell
-  const manager = await loadManager(config);
-  const pieces = new PiecesController(manager);
-  const piece = await pieces.get(
-    config.piece,
-    options.start ?? true,
-    undefined,
-    config.pieceScope,
-  );
+  const start = options.start ?? true;
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const piece = deps.loadPiece
+    ? await deps.loadPiece(manager, config, start)
+    : await new PiecesController(
+      manager as Awaited<ReturnType<typeof loadManager>>,
+    ).get(
+      config.piece,
+      start,
+      undefined,
+      config.pieceScope,
+    );
   const cell = piece.getCell().asSchema({
     type: "object",
     properties: {
-      [UI]: rendererVDOMSchema,
+      [UI]: cliRendererVDOMSchema,
     },
     required: [UI],
   });
@@ -59,21 +156,30 @@ export async function renderPiece(
   }
 
   if (options.watch) {
-    // 4a. Reactive rendering - pass the Cell directly
-    const uiCell = cell.key(UI);
-    const cancel = render(
+    // 4a. Reactive rendering
+    let cancelRender = renderHtml(
       container,
-      uiCell as unknown as CellHandle<VNode>,
+      staticValue[UI] as VNode,
       renderOptions,
     ); // FIXME: types
 
     // 5a. Set up monitoring for changes
+    let disposed = false;
     let updateCount = 0;
+    let updateVersion = 0;
     const unsubscribe = cell.sink((value) => {
       if (value?.[UI]) {
-        updateCount++;
+        const version = ++updateVersion;
         // Wait for all runtime computations to complete
         manager.runtime.idle().then(() => {
+          if (disposed || version !== updateVersion) return;
+          updateCount++;
+          cancelRender();
+          cancelRender = renderHtml(
+            container,
+            value[UI] as VNode,
+            renderOptions,
+          ); // FIXME: types
           const html = container.innerHTML;
           logger.info(
             "piece-render",
@@ -88,13 +194,14 @@ export async function renderPiece(
 
     // Return cleanup function
     return () => {
-      cancel();
+      disposed = true;
       unsubscribe();
+      cancelRender();
     };
   } else {
     // 4b. Static rendering - render once with current value
     const vnode = staticValue[UI];
-    render(container, vnode as VNode, renderOptions); // FIXME: types
+    renderHtml(container, vnode as VNode, renderOptions); // FIXME: types
 
     // 5b. Return the rendered HTML
     return container.innerHTML;

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/lib/piece-render.ts": [
-    "66:13:1x0ujt7",
-  ],
   "packages/cli/lib/test-runner.ts": [
     "356:23:12wj75o",
     "378:23:12wj75o",
