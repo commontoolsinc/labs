@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/test/worker-reconciler-cfc-atom-admission.test.ts": [
-    "25:20:88gmxm",
-  ],
   "packages/html/test/worker-reconciler-diffing.test.ts": [
     "411:41:ermw5x",
   ],
