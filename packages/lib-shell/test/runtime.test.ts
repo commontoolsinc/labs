@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
+import type { CellHandle, RuntimeClient } from "@commonfabric/runtime-client";
 
 type MockRuntimeClientEvents = {
   console: [unknown];
@@ -146,6 +147,14 @@ function createMockSpaceRoot(sentEvents: SentRootEvent[]) {
   };
 }
 
+function mockRuntimeClient(client: MockRuntimeClient): RuntimeClient {
+  return client as unknown as RuntimeClient;
+}
+
+function mockCell(cell: { id(): string; space(): DID }): CellHandle<unknown> {
+  return cell as unknown as CellHandle<unknown>;
+}
+
 type NavigationDetail = {
   spaceDid: DID;
   pieceId: string;
@@ -171,7 +180,7 @@ describe("RuntimeInternals", () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     client.slugByPageId.set("piece-789", "demo");
-    const runtime = new RuntimeInternals(client as any);
+    const runtime = new RuntimeInternals(mockRuntimeClient(client));
 
     try {
       await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
@@ -186,7 +195,7 @@ describe("RuntimeInternals", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new RuntimeInternals(client as any);
+    const runtime = new RuntimeInternals(mockRuntimeClient(client));
 
     await runtime.dispose();
 
@@ -199,7 +208,7 @@ describe("RuntimeInternals", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new RuntimeInternals(client as any);
+    const runtime = new RuntimeInternals(mockRuntimeClient(client));
 
     runtime.registerNavigatedPiece = async () => {};
 
@@ -238,7 +247,7 @@ describe("RuntimeInternals", () => {
     const client = new MockRuntimeClient();
     const navigationReceived = deferred<NavigationDetail>();
     const runtime = new RuntimeInternals(
-      client as any,
+      mockRuntimeClient(client),
       {
         navigate: (navigation: unknown) => {
           navigationReceived.resolve(navigation as NavigationDetail);
@@ -292,7 +301,7 @@ describe("RuntimeInternals", () => {
     client.synced = () => Promise.reject(new Error("convergence failed"));
 
     let navigated = false;
-    const runtime = new RuntimeInternals(client as any, {
+    const runtime = new RuntimeInternals(mockRuntimeClient(client), {
       navigate: () => {
         navigated = true;
       },
@@ -330,7 +339,7 @@ describe("RuntimeInternals", () => {
     client.synced = () => syncedGate;
 
     let navigated = false;
-    const runtime = new RuntimeInternals(client as any, {
+    const runtime = new RuntimeInternals(mockRuntimeClient(client), {
       navigate: () => {
         navigated = true;
       },
@@ -715,7 +724,7 @@ describe("RuntimeInternals", () => {
     async function makeRuntime() {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       return { client, runtime };
     }
 
@@ -825,14 +834,14 @@ describe("RuntimeInternals", () => {
     it("targets the navigated cell's space", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       const cellSpace = "did:key:z6Mk-lib-shell-runtime-foreign" as DID;
       try {
         await runtime.registerNavigatedPiece(
-          {
+          mockCell({
             id: () => "piece-9",
             space: () => cellSpace,
-          } as any,
+          }),
         );
         expect(client.spaceRootCalls).toEqual([cellSpace]);
       } finally {
@@ -845,7 +854,7 @@ describe("RuntimeInternals", () => {
     it("exposes the client's lifetime signal", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       try {
         expect(runtime.signal).toBe(client.signal);
       } finally {
@@ -896,7 +905,7 @@ describe("RuntimeInternals", () => {
     it("absorbs a failed root-pattern lookup and logs once while alive", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       const space = "did:key:z6Mk-lib-shell-runtime-recent" as DID;
 
       const errors: unknown[][] = [];
@@ -917,7 +926,7 @@ describe("RuntimeInternals", () => {
     it("stays silent when the lookup fails after disposal", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       const space = "did:key:z6Mk-lib-shell-runtime-recent-disposed" as DID;
       // Reject only after the runtime has been disposed, so the catch takes
       // the silent branch.
@@ -953,7 +962,7 @@ describe("RuntimeInternals", () => {
     async function makeRuntime() {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(client as any);
+      const runtime = new RuntimeInternals(mockRuntimeClient(client));
       return { client, runtime };
     }
 
