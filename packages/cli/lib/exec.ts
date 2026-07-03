@@ -1,4 +1,4 @@
-import type { PieceManager } from "@commonfabric/piece";
+import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { basename, dirname, join, relative, resolve } from "@std/path";
 import {
@@ -10,6 +10,7 @@ import {
   callableCommandSpec,
   type CallableManagerLike,
   type CallablePieceLike,
+  CF_RUNTIME_ERROR_LOG,
   detectCallableKind,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
@@ -47,6 +48,7 @@ export interface ResolvedMountedCallableFile {
 export interface ExecDependencies {
   stateDir?: string;
   loadManager?: (config: SpaceConfig) => Promise<CallableManagerLike>;
+  loadPieceManager?: (config: SpaceConfig) => Promise<PieceManager>;
   loadPiece?: (
     manager: CallableManagerLike,
     pieceId: string,
@@ -75,13 +77,71 @@ export interface ExecutedMountedCallableFile {
 }
 
 async function defaultLoadPiece(
-  manager: CallableManagerLike,
+  manager: PieceManager | CallableManagerLike,
   pieceId: string,
 ): Promise<CallablePieceLike> {
-  return await new PiecesController(manager as unknown as PieceManager).get(
-    pieceId,
-    true,
-  );
+  return await new MountedPiecesController(manager).get(pieceId, true);
+}
+
+type MountedPiecesControllerConstructor = new (
+  manager: PieceManager | CallableManagerLike,
+) => Pick<PiecesController, "get">;
+
+const MountedPiecesController =
+  PiecesController as MountedPiecesControllerConstructor;
+
+type PieceRuntime = PieceManager["runtime"];
+type PieceRuntimeTransaction = ReturnType<PieceRuntime["edit"]>;
+type PieceRuntimeSpace = ReturnType<PieceManager["getSpace"]>;
+
+function callableManagerFromPieceManager(
+  manager: PieceManager,
+): CallableManagerLike {
+  const runtime = manager.runtime;
+  const runtimeErrors = Reflect.get(runtime, CF_RUNTIME_ERROR_LOG);
+  const resultCells = new WeakMap<
+    object,
+    Parameters<PieceRuntime["run"]>[3]
+  >();
+  return {
+    runtime: {
+      [CF_RUNTIME_ERROR_LOG]: Array.isArray(runtimeErrors)
+        ? runtimeErrors
+        : undefined,
+      storageManager: runtime.storageManager,
+      idle: () => runtime.idle(),
+      edit: () => runtime.edit(),
+      getCell: (space, id, schema, tx, scope) => {
+        const cell = runtime.getCell(
+          space as PieceRuntimeSpace,
+          id,
+          schema,
+          tx as PieceRuntimeTransaction,
+          scope,
+        );
+        resultCells.set(cell, cell);
+        return cell;
+      },
+      run: (tx, pattern, input, resultCell) => {
+        const runtimeResultCell = resultCells.get(resultCell);
+        if (!runtimeResultCell) {
+          throw new Error(
+            "Callable result cell was not created by this runtime",
+          );
+        }
+        return runtime.run(
+          tx as PieceRuntimeTransaction,
+          pattern as Parameters<PieceRuntime["run"]>[1],
+          input,
+          runtimeResultCell,
+        );
+      },
+      prepareTxForCommit: (tx) =>
+        runtime.prepareTxForCommit(tx as PieceRuntimeTransaction),
+    },
+    synced: () => manager.synced(),
+    getSpace: () => manager.getSpace(),
+  };
 }
 
 async function readMountedPieceMeta(
@@ -214,21 +274,26 @@ export async function resolveMountedCallableFile(
 
   await assertMountedCallableFileExists(canonicalAbsPath, deps);
   const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
-  const manager = deps.loadManager
-    ? await deps.loadManager({
-      apiUrl: mount.entry.apiUrl,
-      identity: mount.entry.identity,
-      space: callablePath.spaceName,
-    })
-    : await loadManager({
-      apiUrl: mount.entry.apiUrl,
-      identity: mount.entry.identity,
-      space: callablePath.spaceName,
-    }) as unknown as CallableManagerLike;
-  const piece = await (deps.loadPiece ?? defaultLoadPiece)(
-    manager,
-    pieceMeta.id,
-  );
+  let pieceManager: PieceManager | undefined;
+  const managerConfig = {
+    apiUrl: mount.entry.apiUrl,
+    identity: mount.entry.identity,
+    space: callablePath.spaceName,
+  };
+  let manager: CallableManagerLike;
+  if (deps.loadManager) {
+    manager = await deps.loadManager(managerConfig);
+  } else {
+    const loadPieceManager = deps.loadPieceManager ?? loadManager;
+    pieceManager = await loadPieceManager(managerConfig);
+    manager = callableManagerFromPieceManager(pieceManager);
+  }
+  const piece = deps.loadPiece
+    ? await deps.loadPiece(manager, pieceMeta.id)
+    : await defaultLoadPiece(
+      pieceManager ?? manager,
+      pieceMeta.id,
+    );
   const rootCell = await piece[callablePath.cellProp].getCell();
   const childCell = rootCell.key(callablePath.cellKey);
   const callableCell = childCell.asSchemaFromLinks?.() ?? childCell;

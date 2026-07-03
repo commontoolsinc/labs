@@ -12,6 +12,7 @@ import {
   resolveParsedExecInput,
 } from "../lib/exec-schema.ts";
 import {
+  type ExecDependencies,
   executeMountedCallableFile,
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
@@ -1330,6 +1331,190 @@ describe("mounted callable resolution and execution", () => {
     }
 
     expect(runItArgs).toEqual([true]);
+  });
+
+  it("adapts production piece managers for mounted tool execution", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+    });
+    const storageManager = { synced: () => Promise.resolve() };
+    const runtimeErrors = [{ message: "Mounted runtime failed" }];
+    const schema = {
+      type: "object",
+      properties: { query: { type: "string" } },
+    } satisfies JSONSchema;
+    const tx = { commit: () => Promise.resolve() };
+    const runtimeCell = createMockCell(undefined, schema);
+    const runReturn = { sink: () => () => {} };
+    let idleCalls = 0;
+    let syncedCalls = 0;
+    let getCellArgs: unknown[] | undefined;
+    let runArgs: unknown[] | undefined;
+    let preparedTx: unknown;
+    type PieceManagerForExec = Awaited<
+      ReturnType<NonNullable<ExecDependencies["loadPieceManager"]>>
+    >;
+    const pieceManager: PieceManagerForExec = Object.assign(
+      Object.create(null),
+      {
+        runtime: {
+          [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+          storageManager,
+          idle: () => {
+            idleCalls++;
+            return Promise.resolve();
+          },
+          edit: () => tx,
+          getCell: (
+            space: string,
+            id: string,
+            receivedSchema: JSONSchema | undefined,
+            receivedTx: unknown,
+            scope?: unknown,
+          ) => {
+            getCellArgs = [space, id, receivedSchema, receivedTx, scope];
+            return runtimeCell;
+          },
+          run: (
+            receivedTx: unknown,
+            pattern: unknown,
+            input: unknown,
+            resultCell: unknown,
+          ) => {
+            runArgs = [receivedTx, pattern, input, resultCell];
+            return runReturn;
+          },
+          prepareTxForCommit: (receivedTx: unknown) => {
+            preparedTx = receivedTx;
+          },
+        },
+        synced: () => {
+          syncedCalls++;
+          return Promise.resolve();
+        },
+        getSpace: () => "did:key:mounted-space",
+      },
+    );
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    let loadPieceManagerCalls = 0;
+    let loadPieceManagerConfig: unknown;
+    let wrappedManagerForLoadPiece: unknown;
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadPieceManager: (config) => {
+        loadPieceManagerCalls++;
+        loadPieceManagerConfig = config;
+        return Promise.resolve(pieceManager);
+      },
+      loadPiece: (manager, pieceId) => {
+        wrappedManagerForLoadPiece = manager;
+        expect(pieceId).toBe("of:piece-123");
+        return Promise.resolve(harness.piece);
+      },
+    });
+    const manager = resolved.manager;
+
+    expect(loadPieceManagerCalls).toBe(1);
+    expect(loadPieceManagerConfig).toEqual({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      space: "home",
+    });
+    expect(manager).not.toBe(pieceManager);
+    expect(wrappedManagerForLoadPiece).toBe(manager);
+    expect(manager.runtime[CF_RUNTIME_ERROR_LOG]).toBe(runtimeErrors);
+    expect(manager.runtime.storageManager).toBe(storageManager);
+    await manager.runtime.idle();
+    const adapterTx = manager.runtime.edit();
+    const resultCell = manager.runtime.getCell(
+      "did:key:result-space",
+      "result-id",
+      schema,
+      adapterTx,
+      undefined,
+    );
+    const pattern = { argumentSchema: schema };
+    const input = { query: "tea" };
+
+    expect(() =>
+      manager.runtime.run(
+        adapterTx,
+        pattern,
+        input,
+        createMockCell(undefined, schema),
+      )
+    ).toThrow(/not created by this runtime/);
+    expect(manager.runtime.run(adapterTx, pattern, input, resultCell)).toBe(
+      runReturn,
+    );
+    manager.runtime.prepareTxForCommit?.(adapterTx);
+    await manager.synced();
+
+    expect(idleCalls).toBe(1);
+    expect(syncedCalls).toBe(1);
+    expect(manager.getSpace?.()).toBe("did:key:mounted-space");
+    expect(getCellArgs).toEqual([
+      "did:key:result-space",
+      "result-id",
+      schema,
+      tx,
+      undefined,
+    ]);
+    expect(runArgs).toEqual([tx, pattern, input, runtimeCell]);
+    expect(preparedTx).toBe(tx);
+
+    const pieceManagerWithoutRuntimeErrors: PieceManagerForExec = Object.assign(
+      Object.create(null),
+      {
+        ...pieceManager,
+        runtime: Object.assign({}, pieceManager.runtime, {
+          [CF_RUNTIME_ERROR_LOG]: "invalid",
+        }),
+      },
+    );
+    const resolvedWithoutRuntimeErrors = await resolveMountedCallableFile(
+      filePath,
+      {
+        stateDir,
+        loadPieceManager: () =>
+          Promise.resolve(pieceManagerWithoutRuntimeErrors),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+    expect(resolvedWithoutRuntimeErrors.manager.runtime[CF_RUNTIME_ERROR_LOG])
+      .toBeUndefined();
   });
 
   it("dispatches handlers through the same piece-property path used by FUSE writes", async () => {

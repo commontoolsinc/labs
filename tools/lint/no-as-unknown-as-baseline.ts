@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/lib/exec.ts": [
-    "78:44:rgvcbn",
-    "182:7:2lcotr",
-  ],
   "packages/cli/lib/multi-user-test-worker.ts": [
     "342:51:10onyy8",
     "427:10:v188bh",
