@@ -2343,12 +2343,11 @@ describe("wish built-in", () => {
       expect((favorites as any[])[0].tag).toEqual("test favorite");
     });
 
-    // Helper: stand up the home space with a single favorite carrying the given
-    // discovery/user tags, then resolve `#favorites/<term>` against it.
     async function resolveFavoritesTerm(
       label: string,
       entry: { tags?: string[]; userTags?: string[] },
       term: string,
+      options?: { value?: unknown; path?: string[] },
     ) {
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const defaultPatternCell = runtime.getCell(
@@ -2364,7 +2363,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      favoriteItem.set({ name: "My Favorite", value: 42 });
+      favoriteItem.set(options?.value ?? { name: "My Favorite", value: 42 });
       favoritesCell.set([
         {
           cell: favoriteItem,
@@ -2379,7 +2378,11 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishPattern = pattern(() => {
-        return { result: wish({ query: `#favorites/${term}` }) };
+        return {
+          result: wish({
+            query: ["#favorites", term, ...(options?.path ?? [])].join("/"),
+          }),
+        };
       });
       const resultCell = runtime.getCell<{
         result?: { result?: unknown; error?: string };
@@ -2396,10 +2399,6 @@ describe("wish built-in", () => {
       return result.key("result").get();
     }
 
-    // A `#favorites/<term>` query finds a favorite whose discovery tag or user
-    // tag matches `term`. These tests assert the match decision (no "No favorite
-    // found" error when one matches; the error when none do) — that is the code
-    // path the favorite matchers own.
     it("matches a #favorites/<term> query by a structured discovery tag", async () => {
       const resolved = await resolveFavoritesTerm(
         "tag",
@@ -2418,6 +2417,32 @@ describe("wish built-in", () => {
       expect(resolved?.error).toBeUndefined();
     });
 
+    it("resolves #favorites/<term> to the matched favorite", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "weather-value",
+        { userTags: ["weather"] },
+        "weather",
+        { value: { name: "My Favorite", value: 42 } },
+      );
+      expect(resolved?.result).toEqual({
+        name: "My Favorite",
+        value: 42,
+      });
+    });
+
+    it("resolves #favorites/<term>/<subpath> inside the matched favorite", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "weather-subpath",
+        { userTags: ["weather"] },
+        "weather",
+        {
+          value: { name: "My Favorite", forecast: { temp: 72 } },
+          path: ["forecast", "temp"],
+        },
+      );
+      expect(resolved?.result).toBe(72);
+    });
+
     it("reports an error for #favorites/<term> when nothing matches", async () => {
       const resolved = await resolveFavoritesTerm(
         "nomatch",
@@ -2428,8 +2453,6 @@ describe("wish built-in", () => {
       expect(resolved?.error).toMatch(/No favorite found matching/);
     });
 
-    // Other well-known home-space targets resolve to fixed paths under the home
-    // default pattern.
     async function resolveHomeTarget(
       label: string,
       key: string,
@@ -2488,6 +2511,17 @@ describe("wish built-in", () => {
       );
       expect(resolved?.error).toBeUndefined();
       expect((resolved?.result as any)?.summary).toBe("a learned summary");
+    });
+
+    it("resolves #learnedSummary to the home learned summary", async () => {
+      const resolved = await resolveHomeTarget(
+        "learned-summary",
+        "learned",
+        { summary: "Known facts" },
+        "#learnedSummary",
+      );
+      expect(resolved?.error).toBeUndefined();
+      expect(resolved?.result).toBe("Known facts");
     });
 
     it("resolves well-known profile targets from the home default profile link", async () => {
