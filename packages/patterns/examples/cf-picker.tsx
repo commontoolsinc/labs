@@ -1,4 +1,11 @@
-import { computed, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  type CellLike,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
@@ -52,8 +59,10 @@ export default pattern<Input, Result>(
           </cf-card>
 
           <cf-card>
-            {/* The cast is because OpaqueCell does not satisfy CellLike, but... it is */}
-            <cf-picker $items={items as any} $selectedIndex={selectedIndex} />
+            <cf-picker
+              $items={items as CellLike<unknown[]>}
+              $selectedIndex={selectedIndex}
+            />
           </cf-card>
         </cf-vstack>
       ),
