@@ -1373,36 +1373,17 @@ const forEachFlowObservation = (
   // "dep changed" leaks one bit per change through the timing/existence of
   // writes the rerun makes. Runtime-surface addresses were already dropped
   // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization and applies `flowReadExcluded`); the `cid:` check
-  // stays as defense in depth for trigger entries that arrive by other
-  // construction paths.
+  // canonicalization and applies `flowReadExcluded`). The path half of that
+  // exclusion cannot be rechecked here — stored paths are canonical, where
+  // a user `value.source` is indistinguishable from the raw `["source"]`
+  // surface — but the id-based `cid:` check stays as defense in depth for
+  // trigger entries that arrive by other construction paths: `cid:` docs
+  // sit on an unverified write path any same-space writer can reach (audit
+  // S5), so a poisoned labelMap on one must not join the flow derivation.
   for (const trigger of tx.getCfcState().triggerReads) {
     if (trigger.id.startsWith("cid:")) {
       continue;
     }
-    if (
-      consume(
-        trigger.space,
-        trigger.id as URI,
-        normalizeCellScope(trigger.scope),
-        "application/json",
-        trigger.path,
-        { shape: "value", nonRecursive: false },
-      )
-    ) {
-      return true;
-    }
-  }
-  // Trigger reads (§8.9.2): the addresses whose invalidating writes
-  // scheduled this run. The decision to run now was influenced by their
-  // values even when this run's branch never re-reads them — without this,
-  // "dep changed" leaks one bit per change through the timing/existence of
-  // writes the rerun makes. Runtime-surface addresses were already dropped
-  // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization), so no `flowReadExcluded` check here — the stored
-  // path is canonical, where a user `value.source` is indistinguishable
-  // from the raw `["source"]` surface.
-  for (const trigger of tx.getCfcState().triggerReads) {
     if (
       consume(
         trigger.space,
