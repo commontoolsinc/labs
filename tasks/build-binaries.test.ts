@@ -111,6 +111,10 @@ async function makeFakeRepo(): Promise<string> {
     "export const pretransform = 1;",
   );
   await writeFile(
+    `${root}/packages/runner/src/pattern-coverage.ts`,
+    "export const patternCoverage = 1;",
+  );
+  await writeFile(
     `${root}/packages/runner/src/sandbox/module-record-verifier.ts`,
     "export const verifier = 1;",
   );

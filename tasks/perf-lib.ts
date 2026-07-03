@@ -1450,7 +1450,7 @@ export function coverageGroupForChangedFile(filename: string): string | null {
   if (parts[0] === "packages" && parts[1]) {
     return `packages/${parts[1]}`;
   }
-  if (parts[0] === "tasks" || parts[0] === "scripts") {
+  if (parts[0] === "tasks") {
     return parts[0];
   }
   return null;

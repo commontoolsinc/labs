@@ -736,6 +736,7 @@ Deno.test("coverage debt gating follows changed source groups", () => {
     "packages/patterns/README.md",
     "packages/ui/src/button.test.tsx",
     "tasks/perf-check.ts",
+    "scripts/build.ts",
   ]);
 
   assertEquals([...groups].sort(), ["packages/runner", "packages/ui", "tasks"]);

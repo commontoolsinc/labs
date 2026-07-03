@@ -216,6 +216,7 @@ export type {
   TransformationOptions,
   TransformMode,
   TypeRegistry,
+  UnreadableCellArgument,
 } from "./transformers.ts";
 export {
   HelpersOnlyTransformer,

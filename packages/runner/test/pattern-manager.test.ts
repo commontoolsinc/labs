@@ -101,6 +101,79 @@ describe("PatternManager program persistence", () => {
   });
 });
 
+describe("PatternManager.loadPatternByIdentity single-flight", () => {
+  it("concurrent loads of one identity share a single evaluation's artifact", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    // Runtime A persists the closure; a FRESH runtime B then loads it with
+    // cold in-memory indexes, so concurrent calls all miss the sync fast
+    // paths and race into the storage/eval tail. Without the single-flight
+    // dedup, each call ran its own full SES evaluation of the closure
+    // (measured as 4 identical evaluations per cold worker boot); with it,
+    // one leader evaluates and every caller resolves to the same shared
+    // content-addressed artifact — the behavior sequential callers get.
+    const runtimeA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    let runtimeB: Runtime | undefined;
+    try {
+      const txA = runtimeA.edit();
+      const compiled = await runtimeA.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { pattern, lift } from 'commonfabric';",
+            "const inc = lift((x:number)=>x+1);",
+            "export default pattern<{ value: number }>(({ value }) => {",
+            "  return { result: inc(value) };",
+            "});",
+          ].join("\n"),
+        }],
+      }, { space, tx: txA });
+      const { identity: entryIdentity, symbol } = runtimeA.patternManager
+        .getArtifactEntryRef(compiled)!;
+      // Make the closure durable before runtime B reads it.
+      await runtimeA.patternManager.flushCompileCacheWrites();
+      await txA.commit();
+      await storageManager.synced();
+
+      // Runtime B shares the storage but has cold in-memory indexes, so the
+      // three concurrent loads all miss the sync fast paths and race into
+      // the single-flight tail.
+      runtimeB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const [first, second, third] = await Promise.all([
+        runtimeB.patternManager.loadPatternByIdentity(
+          entryIdentity,
+          symbol,
+          space,
+        ),
+        runtimeB.patternManager.loadPatternByIdentity(
+          entryIdentity,
+          symbol,
+          space,
+        ),
+        runtimeB.patternManager.loadPatternByIdentity(
+          entryIdentity,
+          symbol,
+          space,
+        ),
+      ]);
+      expect(first).toBeDefined();
+      // One artifact, not three: followers resolve from the leader's indexes.
+      expect(second).toBe(first);
+      expect(third).toBe(first);
+    } finally {
+      await runtimeB?.dispose();
+      await runtimeA.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
 describe("PatternManager.loadPatternByIdentity error handling", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;

@@ -28,7 +28,6 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -78,6 +77,7 @@ import {
 } from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
+  cfcIntegritySatisfiesFloor,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
   joinCfcObservedConfidentiality,
@@ -2023,9 +2023,9 @@ function toolInputRequiredIntegrityFailure(
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
-      const satisfied = required.every((req) =>
-        integrity.some((have) => deepEqual(have, req))
-      );
+      // The single shared floor predicate (observation.ts) — the same
+      // membership the commit-boundary gates use; D5 upgrades it in one place.
+      const satisfied = cfcIntegritySatisfiesFloor(integrity, required);
       if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +

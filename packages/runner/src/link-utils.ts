@@ -1,6 +1,7 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -422,6 +423,15 @@ export enum KeepAsCell {
   All = "All",
 }
 
+// Identity-keyed memo for `sanitizeSchemaForLinks` (see the function body).
+// Values are always deep-frozen OBJECT schemas: boolean/undefined inputs take
+// the early return and never reach the memo, and outputs are frozen before
+// caching (their sub-trees are shared across callers).
+const _sanitizeCache = new WeakMap<
+  object,
+  Map<KeepAsCell, JSONSchema & object>
+>();
+
 /**
  * Traverse schema and remove all asCell flags.
  * Also handles circular references by using JSON Schema $ref.
@@ -447,6 +457,24 @@ export function sanitizeSchemaForLinks(
     return schema;
   }
 
+  // Memoize by input identity: sanitize is a pure function of
+  // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen
+  // schema is sanitized repeatedly — measured ~46% of calls repeat a frozen
+  // input, carrying ~half of the total strip time. Only deep-frozen inputs are
+  // memoized (a mutable input's identity could go stale), matching the
+  // identity-keyed-memo guard `traverse.ts` uses; `isDeepFrozen` is O(1) for the
+  // already-frozen/cached inputs we hit here. The cache holds the canonical strip
+  // result, DEEP-FROZEN for share-safety (see the store site below); every call
+  // returns a fresh SHALLOW CLONE of it. The clone matters:
+  // the reactive graph keys on the sanitized schema's top-level object identity
+  // (returning a shared object changes recomputation), so each call needs its own
+  // top — while still reusing the (expensive) stripped sub-tree from the cache.
+  const memoizable = isDeepFrozen(schema);
+  if (memoizable) {
+    const hit = _sanitizeCache.get(schema)?.get(keepAsCell);
+    if (hit !== undefined) return { ...hit };
+  }
+
   // Collect existing $defs names to avoid collisions
   const existingDefNames = new Set<string>();
   if ("$defs" in schema) {
@@ -468,23 +496,34 @@ export function sanitizeSchemaForLinks(
     keepAsCell,
   };
 
-  const result = recursiveStripAsCellFromSchema(
-    schema,
-    context,
-    0,
-  );
+  const stripped = recursiveStripAsCellFromSchema(schema, context, 0);
 
-  // If we generated any $defs, add them to the root schema
-  if (Object.keys(context.defs).length > 0) {
-    // Merge with any existing $defs
-    const existingDefs = result?.$defs || {};
-    return {
-      ...result,
-      $defs: { ...existingDefs, ...context.defs },
-    };
+  // If we generated any $defs, add them to the root schema (merging existing).
+  const output = Object.keys(context.defs).length > 0
+    ? {
+      ...stripped,
+      $defs: { ...(stripped?.$defs || {}), ...context.defs },
+    }
+    : stripped;
+
+  if (memoizable) {
+    let byMode = _sanitizeCache.get(schema);
+    if (byMode === undefined) {
+      byMode = new Map();
+      _sanitizeCache.set(schema, byMode);
+    }
+    // Deep-freeze the cached result: every memo hit hands out a fresh top that
+    // SHARES this sub-tree across callers, so a consumer mutating a nested node
+    // would otherwise silently poison every later same-schema build — frozen,
+    // such a mutation throws loudly instead. Freezing only touches objects this
+    // call built: the strip rebuilds every node, and its depth-capped bail
+    // returns sub-trees of the input, which is deep-frozen on this path.
+    const frozen = deepFreeze(output) as JSONSchema & object;
+    byMode.set(keepAsCell, frozen);
+    return { ...frozen };
   }
 
-  return result;
+  return output;
 }
 
 interface SanitizeContext {

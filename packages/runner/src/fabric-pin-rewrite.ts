@@ -1,4 +1,8 @@
-import ts from "typescript";
+import type ts from "typescript";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./harness/deferred-compiler-stack.ts";
 import {
   type FabricRef,
   formatFabricRef,
@@ -6,8 +10,6 @@ import {
   pinnedIdentity,
   withPin,
 } from "./sandbox/fabric-import-specifier.ts";
-
-const REWRITE_TARGET = ts.ScriptTarget.ES2023;
 
 export interface PinRewrite {
   specifier: string;
@@ -35,10 +37,11 @@ export async function rewriteFabricPins(
     specifier: string,
   ) => Promise<string | null>,
 ): Promise<{ contents: string; rewrites: PinRewrite[] }> {
-  const sourceFile = ts.createSourceFile(
+  const { ts: tsc } = await ensureCompilerStack();
+  const sourceFile = tsc.createSourceFile(
     "fabric-pin-rewrite.tsx",
     contents,
-    REWRITE_TARGET,
+    tsc.ScriptTarget.ES2023,
     true,
   );
   const literals = collectImportSpecifierLiterals(sourceFile);
@@ -85,33 +88,34 @@ export async function rewriteFabricPins(
 function collectImportSpecifierLiterals(
   sourceFile: ts.SourceFile,
 ): ts.StringLiteral[] {
+  const { ts: tsc } = compilerStack();
   const literals: ts.StringLiteral[] = [];
 
   function visit(node: ts.Node) {
-    if (ts.isImportDeclaration(node)) {
+    if (tsc.isImportDeclaration(node)) {
       const moduleSpecifier = node.moduleSpecifier;
-      if (ts.isStringLiteral(moduleSpecifier)) {
+      if (tsc.isStringLiteral(moduleSpecifier)) {
         literals.push(moduleSpecifier);
       }
     }
 
-    if (ts.isExportDeclaration(node)) {
+    if (tsc.isExportDeclaration(node)) {
       const moduleSpecifier = node.moduleSpecifier;
-      if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
+      if (moduleSpecifier && tsc.isStringLiteral(moduleSpecifier)) {
         literals.push(moduleSpecifier);
       }
     }
 
-    if (ts.isImportTypeNode(node)) {
+    if (tsc.isImportTypeNode(node)) {
       const argument = node.argument;
       if (
-        ts.isLiteralTypeNode(argument) && ts.isStringLiteral(argument.literal)
+        tsc.isLiteralTypeNode(argument) && tsc.isStringLiteral(argument.literal)
       ) {
         literals.push(argument.literal);
       }
     }
 
-    ts.forEachChild(node, visit);
+    tsc.forEachChild(node, visit);
   }
 
   visit(sourceFile);

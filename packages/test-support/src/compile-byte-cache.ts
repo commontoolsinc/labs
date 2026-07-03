@@ -6,26 +6,36 @@ import { dirname } from "@std/path";
 // place an instance is created. So the cache is, by construction, a single
 // feature that exists only when tests install it — never in production.
 //
-// `createCompileByteCache` returns the instance to inject into the runtimes a
-// test builds. The in-memory cache is always created (cross-runtime reuse within
-// the process). Disk persistence is added only when `CF_COMPILE_CACHE_FILE` is
-// set — which only the CI workflow sets — so a run reuses bytes it compiled on a
-// previous run. Cross-run correctness rests on the CI cache key (see the
-// workflow): the persisted bytes are a function of the compiler / transformer
-// build, which a module's content identity does not cover, so the key folds in a
-// hash of the compiler sources + lockfile and invalidates the whole file when
-// the code that emits the bytes changes.
+// `createCompileByteCache` returns the instance to inject into test runtimes.
+// The in-memory cache is always created for cross-runtime reuse within the
+// process. Disk persistence is added only when `CF_COMPILE_CACHE_FILE` is set,
+// so a run can reuse bytes it compiled on a previous run. Cross-run correctness
+// rests on the cache key used by the caller: the persisted bytes are a function
+// of the compiler and transformer build, which a module's content identity does
+// not cover.
 
 /** A serialized {@link ProcessModuleByteCache} entry (for disk persistence). */
 export interface SerializedModuleBytes {
   key: string;
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: CachedPatternCoverageSpan[];
+}
+
+export interface CachedPatternCoverageSpan {
+  fileName: string;
+  id: number;
+  kind: "runtime";
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: CachedPatternCoverageSpan[];
 }
 
 export interface ModuleByteCache {
@@ -36,9 +46,11 @@ export interface ModuleByteCache {
 
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void;
 }
+
+const cacheFiles = new WeakMap<ProcessModuleByteCache, string>();
 
 /**
  * Process-level, content-addressed cache of compiled module bytes. An entry is
@@ -70,6 +82,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     let size = artifact.js.length;
     if (typeof artifact.sourceMap === "string") {
       size += artifact.sourceMap.length;
+    }
+    if (artifact.patternCoverageSpans !== undefined) {
+      size += JSON.stringify(artifact.patternCoverageSpans).length;
     }
     return size;
   }
@@ -104,15 +119,27 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     identity: string,
     artifact: CompiledModuleArtifact,
   ): void {
-    this.insert(ProcessModuleByteCache.key(runtimeVersion, identity), artifact);
+    this.insert(
+      ProcessModuleByteCache.key(runtimeVersion, identity),
+      artifact,
+      { replaceExisting: true },
+    );
   }
 
-  private insert(key: string, artifact: CompiledModuleArtifact): void {
+  private insert(
+    key: string,
+    artifact: CompiledModuleArtifact,
+    options: { replaceExisting: boolean },
+  ): void {
     const existing = this.entries.get(key);
     if (existing !== undefined) {
       this.entries.delete(key);
-      this.entries.set(key, existing);
-      return;
+      this.totalBytes -= existing.size;
+      if (!options.replaceExisting) {
+        this.entries.set(key, existing);
+        this.totalBytes += existing.size;
+        return;
+      }
     }
     const size = ProcessModuleByteCache.sizeOf(artifact);
     this.entries.set(key, { artifact, size });
@@ -122,16 +149,10 @@ export class ProcessModuleByteCache implements ModuleByteCache {
 
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void {
     for (const module of modules) {
-      this.put(
-        runtimeVersion,
-        module.identity,
-        module.sourceMap === undefined
-          ? { js: module.js }
-          : { js: module.js, sourceMap: module.sourceMap },
-      );
+      this.put(runtimeVersion, module.identity, artifactFromModule(module));
     }
   }
 
@@ -149,11 +170,16 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   snapshot(): SerializedModuleBytes[] {
     const out: SerializedModuleBytes[] = [];
     for (const [key, { artifact }] of this.entries) {
-      out.push(
-        artifact.sourceMap === undefined
-          ? { key, js: artifact.js }
-          : { key, js: artifact.js, sourceMap: artifact.sourceMap },
-      );
+      const serialized: SerializedModuleBytes = { key, js: artifact.js };
+      if (artifact.sourceMap !== undefined) {
+        serialized.sourceMap = artifact.sourceMap;
+      }
+      if (artifact.patternCoverageSpans !== undefined) {
+        serialized.patternCoverageSpans = artifact.patternCoverageSpans.map(
+          copyPatternCoverageSpan,
+        );
+      }
+      out.push(serialized);
     }
     return out;
   }
@@ -167,11 +193,22 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (entry === null || typeof entry !== "object") continue;
       const e = entry as Partial<SerializedModuleBytes>;
       if (typeof e.key !== "string" || typeof e.js !== "string") continue;
+      const patternCoverageSpans = normalizePatternCoverageSpans(
+        e.patternCoverageSpans,
+      );
+      if (
+        e.patternCoverageSpans !== undefined &&
+        patternCoverageSpans === undefined
+      ) continue;
+      const artifact: CompiledModuleArtifact = { js: e.js };
+      if (e.sourceMap !== undefined) artifact.sourceMap = e.sourceMap;
+      if (patternCoverageSpans !== undefined) {
+        artifact.patternCoverageSpans = patternCoverageSpans;
+      }
       this.insert(
         e.key,
-        e.sourceMap === undefined
-          ? { js: e.js }
-          : { js: e.js, sourceMap: e.sourceMap },
+        artifact,
+        { replaceExisting: false },
       );
     }
   }
@@ -186,12 +223,64 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   }
 }
 
+function artifactFromModule(
+  module: { identity: string } & CompiledModuleArtifact,
+): CompiledModuleArtifact {
+  const artifact: CompiledModuleArtifact = { js: module.js };
+  if (module.sourceMap !== undefined) artifact.sourceMap = module.sourceMap;
+  if (module.patternCoverageSpans !== undefined) {
+    artifact.patternCoverageSpans = module.patternCoverageSpans.map(
+      copyPatternCoverageSpan,
+    );
+  }
+  return artifact;
+}
+
+function normalizePatternCoverageSpans(
+  spans: unknown,
+): CachedPatternCoverageSpan[] | undefined {
+  if (spans === undefined) return undefined;
+  if (!Array.isArray(spans)) return undefined;
+  const normalized: CachedPatternCoverageSpan[] = [];
+  for (const span of spans) {
+    if (!isPatternCoverageSpan(span)) return undefined;
+    normalized.push(copyPatternCoverageSpan(span));
+  }
+  return normalized;
+}
+
+function isPatternCoverageSpan(
+  span: unknown,
+): span is CachedPatternCoverageSpan {
+  if (span === null || typeof span !== "object") return false;
+  const s = span as Partial<CachedPatternCoverageSpan>;
+  return typeof s.fileName === "string" &&
+    typeof s.id === "number" &&
+    s.kind === "runtime" &&
+    typeof s.startLine === "number" &&
+    typeof s.endLine === "number" &&
+    typeof s.startColumn === "number" &&
+    typeof s.endColumn === "number";
+}
+
+function copyPatternCoverageSpan(
+  span: CachedPatternCoverageSpan,
+): CachedPatternCoverageSpan {
+  return {
+    fileName: span.fileName,
+    id: span.id,
+    kind: span.kind,
+    startLine: span.startLine,
+    endLine: span.endLine,
+    startColumn: span.startColumn,
+    endColumn: span.endColumn,
+  };
+}
+
 /**
- * Create the compiled-module-byte cache and return it for injection into the
- * runtimes a test builds (via `PiecesController.initialize`'s `moduleByteCache`).
- * When `CF_COMPILE_CACHE_FILE` is set, the cache is also seeded from that file
- * now and written back at process exit. Unset everywhere but CI, so locally the
- * cache is in-memory only.
+ * Create the compiled-module-byte cache and return it for injection into test
+ * runtimes. When `CF_COMPILE_CACHE_FILE` is set, the cache is seeded from that
+ * file now and written back at process exit.
  */
 export function createCompileByteCache(): ModuleByteCache {
   const cache = new ProcessModuleByteCache();
@@ -205,9 +294,10 @@ export function createCompileByteCache(): ModuleByteCache {
     );
   }
 
+  cacheFiles.set(cache, cacheFile);
   globalThis.addEventListener("unload", () => {
     try {
-      const written = writeCompileByteCache(cache, cacheFile);
+      const written = flushCompileByteCache(cache);
       console.log(
         `[compile-byte-cache] wrote ${written} modules to ${cacheFile}`,
       );
@@ -220,6 +310,15 @@ export function createCompileByteCache(): ModuleByteCache {
   });
 
   return cache;
+}
+
+export function flushCompileByteCache(
+  cache: ModuleByteCache,
+): number | undefined {
+  if (!(cache instanceof ProcessModuleByteCache)) return undefined;
+  const cacheFile = cacheFiles.get(cache);
+  if (cacheFile === undefined) return undefined;
+  return writeCompileByteCache(cache, cacheFile);
 }
 
 function restoreCompileByteCache(

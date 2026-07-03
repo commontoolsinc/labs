@@ -170,6 +170,31 @@ function schedulerActionLinkIdentity(link: NormalizedFullLink) {
   };
 }
 
+/**
+ * A source-location-INDEPENDENT, per-instance discriminator for a scheduler
+ * action: a short hash of the action's `{ process, reads, writes }` cell links.
+ * Two instances of the same hoisted op (e.g. one `lift` called twice) differ in
+ * their reads/writes, so this distinguishes them; the links are reload-stable,
+ * so it is too. Unlike `schedulerJavaScriptActionName`/`schedulerRawActionName`
+ * it folds in NO source-derived name, so it is independent of `fn.src` and the
+ * debug annotation. It is appended to the content-addressed action id
+ * (`cf:module/<hash>:<symbol>:<instanceKey>`, `getSchedulerActionId`) so that the
+ * per-symbol content address stays the implementation *fingerprint* while the
+ * action id — the `actionStats` key and the durable observation key — stays
+ * per-*instance*. Without it, N instances of one symbol collide on a single id.
+ */
+function schedulerActionInstanceKey(parts: {
+  process?: NormalizedFullLink;
+  reads?: readonly NormalizedFullLink[];
+  writes?: readonly NormalizedFullLink[];
+}): string {
+  return hashOf({
+    process: parts.process ? schedulerActionLinkIdentity(parts.process) : null,
+    reads: (parts.reads ?? []).map(schedulerActionLinkIdentity),
+    writes: (parts.writes ?? []).map(schedulerActionLinkIdentity),
+  }).hashString.slice(0, 12);
+}
+
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
@@ -2521,21 +2546,28 @@ export class Runner {
   }
 
   /**
-   * Attach a stable, content-addressed implementation identity to an action,
-   * derived from its bundle-relative source location. No-op when the harness
-   * cannot resolve the location (built-in or unmapped sources); the scheduler
-   * then falls back to the raw source location for its implementation
-   * fingerprint. See docs/specs/module-loading.md.
+   * Attach a stable, content-addressed implementation identity
+   * (`cf:module/<identity>:<symbol>`) to an action, derived from its module
+   * implementation's verified provenance — NOT from the source location. This
+   * keeps action identity / fingerprints independent of `.src` and its (broken)
+   * source-map resolution: the discriminator is the hoisted `__cfReg`/export
+   * `symbol`, not `:line:col`. No-op for implementations with no verified
+   * provenance (host / dynamic / test builders); the scheduler then resolves
+   * `getVerifiedProvenance` live or falls to a generated id.
+   * See docs/specs/content-addressed-action-identity.md.
    */
   private applyImplementationHash(
     action: Action,
-    sourceLocation: string,
+    implementation: unknown,
   ): void {
-    const implementationHash = this.runtime.harness
-      .implementationHashForSource?.(sourceLocation);
-    if (implementationHash) {
+    const provenance = typeof implementation === "function"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    if (provenance?.identity) {
       (action as { implementationHash?: string }).implementationHash =
-        implementationHash;
+        provenance.symbol
+          ? `cf:module/${provenance.identity}:${provenance.symbol}`
+          : `cf:module/${provenance.identity}`;
     }
   }
 
@@ -3538,7 +3570,18 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
-      this.applyImplementationHash(action, name);
+      // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
+      // not `module.implementation`: an `$implRef`-resolved module (reloaded from
+      // a serialized graph) carries the ref, not the live function, so reading
+      // provenance off `module.implementation` would drop the content-addressed
+      // scheduler identity on reload.
+      this.applyImplementationHash(action, fn);
+      (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+        schedulerActionInstanceKey({
+          process: processCell.getAsNormalizedFullLink(),
+          reads,
+          writes,
+        });
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3985,9 +4028,9 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
-    if (impl.src) {
-      this.applyImplementationHash(action, impl.src);
-    }
+    this.applyImplementationHash(action, impl);
+    (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+      schedulerActionInstanceKey({ reads: inputCells, writes: outputCells });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.

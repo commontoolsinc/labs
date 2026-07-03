@@ -36,7 +36,7 @@ import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { getTopFrame } from "./builder/pattern.ts";
+import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
@@ -404,7 +404,7 @@ declare module "@commonfabric/api" {
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
-    value: T;
+    __debugValue: T;
     cellLink: SigilLink;
     space: MemorySpace;
     entityId: EntityRef;
@@ -753,6 +753,9 @@ export class CellImpl<T extends FabricValue>
    * Set a cause for this cell. This is used to create a link when the cell doesn't have one yet.
    * This affects all sibling cells (created via .key(), .asSchema(), .withTx()) since they
    * share the same container.
+   *
+   * Record causes may not use the top-level key `$generated` — it is
+   * reserved for system-generated causes.
    * @param cause - The cause to associate with this cell
    * @param allowIfSet - If true, treat as suggestion and silently ignore if cause already set. If false (default), throw error if cause already set.
    * @returns This cell for method chaining
@@ -770,6 +773,11 @@ export class CellImpl<T extends FabricValue>
         );
       }
     }
+
+    // Reject reserved keys before the cause can take effect: a user cause
+    // carrying a top-level `$generated` key would mimic the pattern builder's
+    // generated-cause namespace.
+    assertNoReservedCauseKeys(cause);
 
     // Store the cause in the shared container - all siblings will see this
     this._causeContainer.cause = cause;
@@ -1466,7 +1474,10 @@ export class CellImpl<T extends FabricValue>
 
     // Record the append intent so the commit emits a tail-relative, mergeable
     // operation instead of a position diffed against a possibly-stale base.
-    this.tx.recordArrayAppend?.(resolvedLink, value.length);
+    this.tx.recordMergeableOp?.(resolvedLink, {
+      op: "append",
+      count: value.length,
+    });
   }
 
   addUnique(
@@ -1547,7 +1558,10 @@ export class CellImpl<T extends FabricValue>
       [...existing, ...toAdd],
       cause,
     );
-    this.tx.recordAddUnique?.(resolvedLink, toAdd.length);
+    this.tx.recordMergeableOp?.(resolvedLink, {
+      op: "add-unique",
+      count: toAdd.length,
+    });
   }
 
   increment(by: number = 1): void {
@@ -1587,7 +1601,7 @@ export class CellImpl<T extends FabricValue>
     // Record the increment intent so the commit emits a mergeable increment the
     // server resolves against durable state instead of a value diffed against a
     // possibly-stale read.
-    this.tx.recordIncrement?.(resolvedLink, by);
+    this.tx.recordMergeableOp?.(resolvedLink, { op: "increment", by });
   }
 
   // Remove every element of this array equal to `ref` by stored value. A cell
@@ -1653,7 +1667,10 @@ export class CellImpl<T extends FabricValue>
       this._frame?.cause,
     );
     for (const element of removed) {
-      this.tx.recordRemoveByValue?.(resolvedLink, element as FabricValue);
+      this.tx.recordMergeableOp?.(resolvedLink, {
+        op: "remove-by-value",
+        value: element as FabricValue,
+      });
     }
   }
 
@@ -2529,7 +2546,7 @@ export class CellImpl<T extends FabricValue>
     return createSigilLinkFromParsedLink(this.link);
   }
 
-  get value(): T {
+  get __debugValue(): T {
     return this.get();
   }
 

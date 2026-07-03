@@ -549,6 +549,26 @@ export function action<T>(_event: (event?: T) => void): Stream<T> {
   );
 }
 
+/**
+ * TEST-ONLY seam. When set, the registered transform replaces the location
+ * string that {@link annotateFunctionDebugMetadata} writes to the debug
+ * `.src`/`name` annotation. It lets a test deliberately *garble* `.src` to
+ * prove that scheduler action ids and the durable implementation fingerprint
+ * are independent of `.src` (re-rooted onto content-addressed
+ * `{ identity, symbol }` provenance — see
+ * docs/specs/content-addressed-action-identity.md and
+ * test/src-garble-identity-invariant.test.ts). It is also the natural gate for
+ * deferring annotation entirely (the lazy/debug-only `.src` follow-up). Never
+ * set in production.
+ */
+let srcAnnotationTransformForTest: ((location: string) => string) | undefined;
+
+export function __setSrcAnnotationTransformForTest(
+  transform: ((location: string) => string) | undefined,
+): void {
+  srcAnnotationTransformForTest = transform;
+}
+
 function annotateFunctionDebugMetadata(
   fn: (...args: any[]) => unknown,
 ): void {
@@ -558,7 +578,11 @@ function annotateFunctionDebugMetadata(
 
   const { location, sample } = getExternalSourceLocation();
   const fallbackLocation = location ?? resolveLocationFromFunctionSource(fn);
-  const finalLocation = fallbackLocation;
+  // The test-only seam garbles the annotated location (both `.src` and the
+  // `name` mirror below); identity must not move as a result.
+  const finalLocation = fallbackLocation && srcAnnotationTransformForTest
+    ? srcAnnotationTransformForTest(fallbackLocation)
+    : fallbackLocation;
   if (finalLocation) {
     if (location) {
       Object.defineProperty(fn, "name", {

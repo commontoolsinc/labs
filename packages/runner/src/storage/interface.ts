@@ -17,6 +17,7 @@ import type {
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   type Assertion,
   type AuthorizationError as IAuthorizationError,
@@ -42,7 +43,9 @@ import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcTriggerReadGating,
   CfcTxState,
+  CfcWriteFloorMode,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -633,17 +636,18 @@ export interface IStorageTransaction {
   ): void;
 
   /**
-   * Record a mergeable write against the document at `address`: `count` elements
-   * appended at the array's tail, `count` elements set-added by identity, or a
-   * numeric `by` increment. The commit emits these as the corresponding
-   * mergeable op (which the server resolves against durable state) and drops the
-   * op's path from the commit's conflict read set, so concurrent and stale-base
-   * writes merge rather than clobber.
+   * Record one mergeable-write delta against the document at `address` (see
+   * {@link MergeableOpDelta}): elements appended at the array's tail or set-added
+   * by identity, a numeric increment, or a value removed by identity. The commit
+   * emits these as the corresponding mergeable op (which the server resolves
+   * against durable state) and drops the op's path from the commit's conflict
+   * read set, so concurrent and stale-base writes merge rather than clobber. The
+   * op catalog and folding rules live in ./mergeable-ops.ts.
    */
-  recordArrayAppend?(address: IMemorySpaceAddress, count: number): void;
-  recordAddUnique?(address: IMemorySpaceAddress, count: number): void;
-  recordIncrement?(address: IMemorySpaceAddress, by: number): void;
-  recordRemoveByValue?(address: IMemorySpaceAddress, value: FabricValue): void;
+  recordMergeableOp?(
+    address: IMemorySpaceAddress,
+    delta: MergeableOpDelta,
+  ): void;
 
   /**
    * The document addresses for which this transaction recorded a mergeable op.
@@ -832,18 +836,19 @@ export interface IExtendedStorageTransaction
   ): void;
 
   /**
-   * Record a mergeable write against the document addressed by `link` — a tail
-   * append, a set-add by identity, or a numeric increment — forwarded to the
-   * underlying transaction after resolving the link to a memory address.
+   * Record one mergeable-write delta against the document addressed by `link`
+   * (see {@link MergeableOpDelta}), forwarded to the underlying transaction after
+   * resolving the link to a memory address.
    */
-  recordArrayAppend?(link: NormalizedFullLink, count: number): void;
-  recordAddUnique?(link: NormalizedFullLink, count: number): void;
-  recordIncrement?(link: NormalizedFullLink, by: number): void;
-  recordRemoveByValue?(link: NormalizedFullLink, value: FabricValue): void;
+  recordMergeableOp?(link: NormalizedFullLink, delta: MergeableOpDelta): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
+  /** Set the write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18). */
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void;
+  /** Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3). */
+  setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation

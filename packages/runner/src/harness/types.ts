@@ -3,6 +3,7 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import type { MemorySpace } from "../runtime.ts";
 import type {
   CachedCompiledModule,
@@ -86,10 +87,11 @@ export interface ResolvedFabricPin {
   chain: string[];
 }
 
-/** A cached/compiled per-module artifact: emitted JS plus optional source map. */
+/** A cached/compiled per-module artifact: emitted JS plus optional metadata. */
 export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
+  patternCoverageSpans?: PatternCoverageSpan[];
 }
 
 /**
@@ -97,17 +99,13 @@ export interface CompiledModuleArtifact {
  * later reload) one module, surfaced by `compileToRecordGraph` in identity
  * space — callers never see the engine's internal `/<id>` path prefix.
  */
-export interface CacheableModule {
+export interface CacheableModule extends CompiledModuleArtifact {
   /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
   identity: string;
   /** Normalized authored module path (no `/<id>` prefix; e.g. `/main.tsx`). */
   filename: string;
   /** Resolved TypeScript source whose bytes are folded into `identity`. */
   source: string;
-  /** Compiled CommonJS body. */
-  js: string;
-  /** Per-module source map, when available. */
-  sourceMap?: unknown;
   /** Internal import edges: specifier → the dependency module's identity. */
   imports: { specifier: string; targetIdentity: string }[];
 }
@@ -208,13 +206,6 @@ export interface Harness extends EventTarget {
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void;
-
-  // Translate a source-location string (`/<id>/file.tsx:line:col`, as found on
-  // an action's `src`) into a stable, content-addressed implementation hash
-  // (`cf:module/<moduleHash>:line:col`). Returns undefined when the source
-  // location does not correspond to a loaded module, in which case callers fall
-  // back to the raw source location. See docs/specs/module-loading.md.
-  implementationHashForSource?(sourceLocation: string): string | undefined;
 
   // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`, as
   // returned by `mapPosition`) into the reload-stable canonical source

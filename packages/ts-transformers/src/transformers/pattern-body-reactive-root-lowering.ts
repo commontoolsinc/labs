@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { MERGEABLE_OP_METHODS } from "@commonfabric/api";
 import {
   getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
@@ -61,17 +62,16 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
 
 // Mutating methods on cells / reactive arrays. A write of any of these in the
 // pattern body is not lowerable, and the remedy is a module-scope handler<> —
-// NOT computed(), which is read-only (CT-1641).
+// NOT computed(), which is read-only (CT-1641). The mergeable-op methods (push,
+// addUnique, increment, removeByValue) come from the canonical catalog in
+// @commonfabric/api, so a new mergeable op is covered by registering it there.
 const WRITE_METHODS = new Set([
   // Cell write API
   "set",
   "update",
-  "push",
-  "addUnique",
-  "increment",
+  ...MERGEABLE_OP_METHODS.map((op) => op.method),
   "remove",
   "removeAll",
-  "removeByValue",
   // Array mutators (in case the author reaches for them on a reactive array)
   "pop",
   "shift",
