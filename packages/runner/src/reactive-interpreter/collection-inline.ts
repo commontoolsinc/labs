@@ -274,8 +274,29 @@ export function makeInlineMapImplementation(
       const listPending = rawList === undefined ||
         (Array.isArray(rawList) && rawList.length === 0);
       if (resumeAwaitSync && priorLen > 0 && listPending) {
+        // Legacy awaitInputThenSettle: await the input; once CONFIRMED
+        // empty, clear the container (a non-empty confirmation re-triggers
+        // this reconcile via the journaled read instead).
         runtime.storageManager.trackUntilSettled(
-          listCell.sync().then(() => undefined).catch(() => undefined),
+          listCell.sync().then(() =>
+            runtime.editWithRetry((settleTx) => {
+              const raw = settleTx.runWithAmbientReadMeta(
+                linkResolutionProbe,
+                () => listCell.withTx(settleTx).getRaw() as unknown,
+              );
+              if (
+                raw === undefined ||
+                (Array.isArray(raw) && raw.length === 0)
+              ) {
+                settleTx.runWithAmbientReadMeta(
+                  linkResolutionProbe,
+                  () =>
+                    resultCell.asSchema(RESULT_PRESENCE_SCHEMA)
+                      .withTx(settleTx).set([]),
+                );
+              }
+            }).then(() => undefined)
+          ).catch(() => undefined),
         );
         return;
       }
