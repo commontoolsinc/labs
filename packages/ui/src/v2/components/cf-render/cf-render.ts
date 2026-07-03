@@ -5,12 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { CHIP_UI, TILE_UI, type VNode } from "@commonfabric/runtime-client";
-import {
-  appViewToUrlPath,
-  navigate,
-  preserveAppViewMode,
-  urlToAppView,
-} from "@commonfabric/shell/shared";
+import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 import "../cf-loader/index.ts";
 import "../cf-cell-link/index.ts";
 
@@ -359,13 +354,7 @@ export class CFRender extends BaseElement {
       };
       // Cmd (Mac) / Ctrl (Win/Linux) opens in a new tab.
       if (e.metaKey || e.ctrlKey) {
-        const url = appViewToUrlPath(
-          preserveAppViewMode(
-            urlToAppView(new URL(globalThis.location.href)),
-            view,
-          ),
-        );
-        globalThis.open(url, "_blank");
+        openInNewTab(view);
       } else {
         navigate(view);
       }
