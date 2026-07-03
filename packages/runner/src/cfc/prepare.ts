@@ -158,8 +158,9 @@ const labelAtPath = (
 // `followRef` class of the C0 §3 carve-out), while followRef observations
 // now consume exactly them. Content taint still arrives when the target is
 // actually dereferenced, as an ordinary read of the target document.
-// Covering (class-less) entries may conflate pointer and content labels
-// and are consumed by every read class — over-taint, fail-safe.
+// Covering (class-less) entries conflate the content channels and are
+// consumed by every content read class (value/shape/enumerate) — over-taint,
+// fail-safe — but never by followRef observations (C0 §6.1).
 const effectiveReadLabel = (
   metadata: CfcMetadata | undefined,
   path: readonly string[],
