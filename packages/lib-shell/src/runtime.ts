@@ -96,6 +96,12 @@ export function defaultRenderConfidentialityCeiling(
 
 export type RuntimeNavigationTarget = { spaceDid: DID; pieceId: string };
 
+type SpaceRootPieceEvent = { piece: CellHandle<unknown> };
+type SpaceRootHandlers = {
+  trackRecent: SpaceRootPieceEvent;
+  addPiece: SpaceRootPieceEvent;
+};
+
 export type RuntimeInternalsCallbacks = {
   navigate?: (target: RuntimeNavigationTarget) => void;
   onConsole?: (event: RuntimeClientEvents["console"][0]) => void;
@@ -184,6 +190,12 @@ class NavigationEvent extends CustomEvent<RuntimeNavigationTarget> {
 
 function defaultNavigate(command: RuntimeNavigationTarget) {
   globalThis.dispatchEvent(new NavigationEvent(command));
+}
+
+function spaceRootHandlersCell(
+  page: PageHandle<NameSchema>,
+): CellHandle<SpaceRootHandlers> {
+  return page.cell() as unknown as CellHandle<SpaceRootHandlers>;
 }
 
 /**
@@ -520,10 +532,10 @@ export class RuntimeInternals extends EventTarget {
       // Shell compatibility: assumes the space-root pattern exposes a
       // `trackRecent` handler accepting `{ piece }`.
       const spaceRoot = await this.getSpaceRootPattern(space);
-      const trackRecent = spaceRoot.cell().key("trackRecent" as any);
+      const trackRecent = spaceRootHandlersCell(spaceRoot).key("trackRecent");
       const page = await this.#client.getPage(pieceId, space);
       if (!page) return;
-      await (trackRecent as any).send({ piece: page.cell() });
+      await trackRecent.send({ piece: page.cell() });
     } catch (e) {
       if (this.#disposed) return;
       console.error("[RuntimeInternals] Failed to track recent piece:", e);
@@ -537,8 +549,8 @@ export class RuntimeInternals extends EventTarget {
       // Shell compatibility: assumes the space-root pattern exposes an
       // `addPiece` handler accepting `{ piece }`.
       const spaceRoot = await this.getSpaceRootPattern(cell.space());
-      const addPiece = spaceRoot.cell().key("addPiece" as any);
-      await (addPiece as any).send({ piece: cell });
+      const addPiece = spaceRootHandlersCell(spaceRoot).key("addPiece");
+      await addPiece.send({ piece: cell });
       await spaceRoot.cell().sync();
     } catch (e) {
       if (this.#disposed) return;

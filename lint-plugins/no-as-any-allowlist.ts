@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/lib-shell/src/runtime.ts",
   "packages/lib-shell/test/runtime.test.ts",
   "packages/llm/src/client.ts",
   "packages/llm/src/types.ts",

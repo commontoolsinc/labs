@@ -10,6 +10,24 @@ type MockRuntimeClientEvents = {
   versionskew: [unknown];
 };
 
+type MockRuntimeCell = {
+  id?: () => string;
+  space?: () => DID;
+  key?: (key: string) => MockRuntimeCell;
+  send?: (event: unknown) => Promise<void>;
+  sync?: () => Promise<unknown>;
+};
+
+type MockRuntimePage = {
+  id: () => string;
+  cell: () => MockRuntimeCell;
+};
+
+type SentRootEvent = {
+  handler: string;
+  event: unknown;
+};
+
 class MockRuntimeClient {
   readonly signal: AbortSignal = new AbortController().signal;
   idleCalls = 0;
@@ -62,7 +80,7 @@ class MockRuntimeClient {
   /** Records which space each root-pattern request targeted. */
   spaceRootCalls: DID[] = [];
 
-  getSpaceRootPattern(space: DID): Promise<never> {
+  getSpaceRootPattern(space: DID): Promise<MockRuntimePage> {
     this.spaceRootCalls.push(space);
     // Reject so registerNavigatedPiece's try/catch absorbs it — the
     // tests only assert WHERE the registration was addressed.
@@ -80,9 +98,9 @@ class MockRuntimeClient {
     pageId: string,
     space: DID,
     runIt?: boolean,
-  ): Promise<{ id: () => string }> {
+  ): Promise<MockRuntimePage> {
     this.getPageCalls.push({ pageId, runIt, space });
-    return Promise.resolve({ id: () => pageId });
+    return Promise.resolve({ id: () => pageId, cell: () => ({}) });
   }
 
   dispose(): Promise<void> {
@@ -101,6 +119,31 @@ function deferred<T>(): Deferred<T> {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+function createMockSpaceRoot(sentEvents: SentRootEvent[]) {
+  let syncCalls = 0;
+  const rootCell = {
+    key(handler: string) {
+      return {
+        send(event: unknown) {
+          sentEvents.push({ handler, event });
+          return Promise.resolve();
+        },
+      };
+    },
+    sync() {
+      syncCalls += 1;
+      return Promise.resolve();
+    },
+  };
+
+  return {
+    page: { id: () => "space-root", cell: () => rootCell },
+    get syncCalls() {
+      return syncCalls;
+    },
+  };
 }
 
 type NavigationDetail = {
@@ -745,6 +788,40 @@ describe("RuntimeInternals", () => {
   // A navigated piece registers in ITS OWN space's root pattern — the
   // cell's space, not any notion of a current space.
   describe("registerNavigatedPiece", () => {
+    it("sends the navigated cell to the addPiece handler", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(
+        client as unknown as ConstructorParameters<typeof RuntimeInternals>[0],
+      );
+      const cellSpace = "did:key:z6Mk-lib-shell-runtime-register" as DID;
+      const sentEvents: SentRootEvent[] = [];
+      const spaceRoot = createMockSpaceRoot(sentEvents);
+      client.getSpaceRootPattern = (space: DID) => {
+        client.spaceRootCalls.push(space);
+        return Promise.resolve(spaceRoot.page);
+      };
+      const cell = {
+        id: () => "piece-registered",
+        space: () => cellSpace,
+      };
+
+      try {
+        await runtime.registerNavigatedPiece(
+          cell as unknown as Parameters<
+            typeof runtime.registerNavigatedPiece
+          >[0],
+        );
+        expect(client.spaceRootCalls).toEqual([cellSpace]);
+        expect(sentEvents.length).toBe(1);
+        expect(sentEvents[0]?.handler).toBe("addPiece");
+        expect((sentEvents[0]?.event as { piece?: unknown }).piece).toBe(cell);
+        expect(spaceRoot.syncCalls).toBe(1);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
     it("targets the navigated cell's space", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
@@ -778,6 +855,44 @@ describe("RuntimeInternals", () => {
   });
 
   describe("trackRecentPiece", () => {
+    it("sends the retrieved page cell to the trackRecent handler", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(
+        client as unknown as ConstructorParameters<typeof RuntimeInternals>[0],
+      );
+      const space = "did:key:z6Mk-lib-shell-runtime-track-recent" as DID;
+      const sentEvents: SentRootEvent[] = [];
+      const spaceRoot = createMockSpaceRoot(sentEvents);
+      client.getSpaceRootPattern = (s: DID) => {
+        client.spaceRootCalls.push(s);
+        return Promise.resolve(spaceRoot.page);
+      };
+      const pageCell = {
+        id: () => "piece-recent",
+        space: () => space,
+      };
+      client.getPage = (pageId: string, s: DID, runIt?: boolean) => {
+        client.getPageCalls.push({ pageId, runIt, space: s });
+        return Promise.resolve({ id: () => pageId, cell: () => pageCell });
+      };
+
+      try {
+        await runtime.trackRecentPiece(space, "piece-recent");
+        expect(client.spaceRootCalls).toEqual([space]);
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-recent", runIt: undefined, space },
+        ]);
+        expect(sentEvents.length).toBe(1);
+        expect(sentEvents[0]?.handler).toBe("trackRecent");
+        expect((sentEvents[0]?.event as { piece?: unknown }).piece).toBe(
+          pageCell,
+        );
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
     it("absorbs a failed root-pattern lookup and logs once while alive", async () => {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
