@@ -3,7 +3,10 @@ import {
   $conn,
   CellHandle,
   type CellRef,
+  type InitializedRuntimeConnection,
   type RuntimeClient,
+  type RuntimeConnection,
+  type VNode,
 } from "@commonfabric/runtime-client";
 import { MockDoc } from "../src/mock-doc.ts";
 import { VDomRenderer } from "../src/main/renderer.ts";
@@ -109,6 +112,37 @@ class MockConnection {
   }
 }
 
+type DispatchableNode = {
+  dispatchEvent(event: {
+    type: string;
+    target: DispatchableNode;
+    isTrusted: boolean;
+  }): void;
+};
+
+function runtimeConnection(connection: MockConnection): RuntimeConnection {
+  return connection as unknown as RuntimeConnection;
+}
+
+function initializedConnection(
+  connection: MockConnection,
+): InitializedRuntimeConnection {
+  return connection as unknown as InitializedRuntimeConnection;
+}
+
+function runtimeClient(connection: MockConnection): RuntimeClient {
+  return {
+    [$conn]: () => initializedConnection(connection),
+  } as unknown as RuntimeClient;
+}
+
+function dispatchableNode(node: Node | undefined): DispatchableNode {
+  if (!node || !("dispatchEvent" in node)) {
+    throw new Error("expected node to dispatch DOM events");
+  }
+  return node as unknown as DispatchableNode;
+}
+
 Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", async () => {
   const removedNodes: unknown[] = [];
   const parentNode = {
@@ -120,8 +154,8 @@ Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", 
   const connection = new MockConnection();
 
   const renderer = new VDomRenderer({
-    runtimeClient: {} as any,
-    connection: connection as any,
+    runtimeClient: runtimeClient(connection),
+    connection: runtimeConnection(connection),
     document: {
       createElement: (tagName: string) => ({ tagName }),
       createTextNode: (text: string) => ({ text }),
@@ -148,8 +182,8 @@ Deno.test("VDomRenderer - forwards trusted event provenance through delivery", a
     '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
   );
   const renderer = new VDomRenderer({
-    runtimeClient: {} as any,
-    connection: connection as any,
+    runtimeClient: runtimeClient(connection),
+    connection: runtimeConnection(connection),
     document: mock.document,
   });
 
@@ -175,7 +209,7 @@ Deno.test("VDomRenderer - forwards trusted event provenance through delivery", a
     ],
   });
 
-  const button = renderer.getApplicator().getNode(1) as any;
+  const button = dispatchableNode(renderer.getApplicator().getNode(1));
   button.dispatchEvent({
     type: "click",
     target: button,
@@ -205,8 +239,8 @@ Deno.test("VDomRenderer - acknowledges applied batches", async () => {
     '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
   );
   const renderer = new VDomRenderer({
-    runtimeClient: {} as any,
-    connection: connection as any,
+    runtimeClient: runtimeClient(connection),
+    connection: runtimeConnection(connection),
     document: mock.document,
   });
 
@@ -244,8 +278,8 @@ Deno.test("VDomRenderer - constructs without throwing against an already-dispose
   connection.abort();
 
   const renderer = new VDomRenderer({
-    runtimeClient: {} as any,
-    connection: connection as any,
+    runtimeClient: runtimeClient(connection),
+    connection: runtimeConnection(connection),
     document: {
       createElement: (tagName: string) => ({ tagName }),
       createTextNode: (text: string) => ({ text }),
@@ -272,8 +306,8 @@ Deno.test("VDomRenderer - constructs without throwing against an already-dispose
 function workerCellHandle(
   connection: MockConnection,
   id: string,
-): CellHandle<unknown> {
-  const worker = { [$conn]: () => connection } as unknown as RuntimeClient;
+): CellHandle<VNode> {
+  const worker = runtimeClient(connection);
   const cellRef = {
     space: "did:key:test",
     id,
@@ -294,7 +328,7 @@ Deno.test("render() drives worker rendering and tears down via the connection", 
 
   const cancel = render(
     container as unknown as HTMLElement,
-    cellHandle as CellHandle<any>,
+    cellHandle,
     { document: mock.document },
   );
 
@@ -331,7 +365,7 @@ Deno.test("render() reports a mount failure through onError while alive", async 
   const errors: Error[] = [];
   const cancel = render(
     container as unknown as HTMLElement,
-    cellHandle as CellHandle<any>,
+    cellHandle,
     { document: mock.document, onError: (error) => errors.push(error) },
   );
 
