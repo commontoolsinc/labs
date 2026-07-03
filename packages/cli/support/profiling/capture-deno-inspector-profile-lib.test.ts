@@ -67,6 +67,7 @@ class FakeCelestial {
   closeError: unknown;
   closePromise: Promise<void> | undefined;
   closeStarted: PromiseWithResolvers<void> | undefined;
+  closeThrow: unknown;
   starts = 0;
   stops = 0;
   removedListeners: string[] = [];
@@ -146,6 +147,7 @@ class FakeCelestial {
   close(): Promise<void> {
     this.calls.push("close");
     this.closeStarted?.resolve();
+    if (this.closeThrow) throw this.closeThrow;
     if (this.closeError) return Promise.reject(this.closeError);
     return this.closePromise ?? Promise.resolve();
   }
@@ -1262,6 +1264,35 @@ describe("capture-deno-inspector-profile helpers", () => {
       }
 
       assertEquals((caught as Error).message, "close failed");
+    });
+  });
+
+  it("reports inspector client close throws after successful capture", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.closeThrow = new Error("close threw");
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "done" });
+
+      let caught: unknown;
+      try {
+        await done;
+      } catch (error) {
+        caught = error;
+      }
+
+      assertEquals((caught as Error).message, "close threw");
     });
   });
 
