@@ -14,10 +14,62 @@ import {
 import { createDomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
-import { $conn, type CellRef } from "@commonfabric/runtime-client";
+import {
+  $conn,
+  type CellRef,
+  type RuntimeClient,
+} from "@commonfabric/runtime-client";
+
+type MockDomEvent = {
+  type: string;
+  target?: unknown;
+  isTrusted?: boolean;
+  [key: string]: unknown;
+};
+
+type MockDomNode = {
+  _id: string;
+  nodeType: number;
+  tagName: string;
+  textContent: string;
+  parentNode: MockDomNode | null;
+  childNodes: MockDomNode[];
+  readonly dataset: Record<string, string>;
+  localName?: string;
+  requestUpdate?: (name?: PropertyKey) => void;
+  cell?: unknown;
+  value?: unknown;
+  setAttribute(name: string, value: string): void;
+  getAttribute(name: string): string | null;
+  hasAttribute(name: string): boolean;
+  removeAttribute(name: string): void;
+  appendChild(child: MockDomNode): MockDomNode;
+  insertBefore(child: MockDomNode, reference: MockDomNode | null): MockDomNode;
+  removeChild(child: MockDomNode): MockDomNode;
+  addEventListener(
+    type: string,
+    listener: (event: MockDomEvent) => void,
+  ): void;
+  removeEventListener(
+    type: string,
+    listener: (event: MockDomEvent) => void,
+  ): void;
+  dispatchEvent(event: MockDomEvent): void;
+};
+
+function mockNode(node: Node | null | undefined): MockDomNode {
+  assertExists(node);
+  return node as unknown as MockDomNode;
+}
+
+function constructorName(value: unknown): string | undefined {
+  return typeof value === "object" && value !== null
+    ? value.constructor.name
+    : undefined;
+}
 
 // Mock RuntimeClient for testing
-const createMockRuntimeClient = () => {
+const createMockRuntimeClient = (): RuntimeClient => {
   const conn = {
     request: () => Promise.resolve({}),
     subscribe: () => Promise.resolve(),
@@ -29,7 +81,7 @@ const createMockRuntimeClient = () => {
       subscribe: () => Promise.resolve(),
       unsubscribe: () => Promise.resolve(),
     }),
-  } as any;
+  } as unknown as RuntimeClient;
 };
 
 // Create a minimal DOM environment for testing
@@ -39,11 +91,15 @@ function createMockDocument() {
 
   const createElement = (tagName: string) => {
     const attributes = new Map<string, string>();
-    const eventListeners = new Map<string, ((event: unknown) => void)[]>();
-    const childNodes: any[] = [];
+    const eventListeners = new Map<
+      string,
+      ((event: MockDomEvent) => void)[]
+    >();
+    const childNodes: MockDomNode[] = [];
 
-    const element: Record<string, any> = {
+    const element: MockDomNode = {
       tagName: tagName.toUpperCase(),
+      textContent: "",
       _id: `mock-${idCounter++}`,
       nodeType: 1, // ELEMENT_NODE
       parentNode: null,
@@ -75,7 +131,7 @@ function createMockDocument() {
       removeAttribute(name: string) {
         attributes.delete(name);
       },
-      appendChild(child: any) {
+      appendChild(child: MockDomNode) {
         // Remove from current position if already a child (handles move)
         const existingIndex = childNodes.indexOf(child);
         if (existingIndex >= 0) {
@@ -86,7 +142,7 @@ function createMockDocument() {
         childNodes.push(child);
         return child;
       },
-      insertBefore(child: any, reference: any) {
+      insertBefore(child: MockDomNode, reference: MockDomNode | null) {
         // Remove from current parent if already attached (handles move)
         const existingIndex = childNodes.indexOf(child);
         if (existingIndex >= 0) {
@@ -106,7 +162,7 @@ function createMockDocument() {
         }
         return child;
       },
-      removeChild(child: any) {
+      removeChild(child: MockDomNode) {
         const index = childNodes.indexOf(child);
         if (index >= 0) {
           childNodes.splice(index, 1);
@@ -114,13 +170,19 @@ function createMockDocument() {
         }
         return child;
       },
-      addEventListener(type: string, listener: (event: unknown) => void) {
+      addEventListener(
+        type: string,
+        listener: (event: MockDomEvent) => void,
+      ) {
         if (!eventListeners.has(type)) {
           eventListeners.set(type, []);
         }
         eventListeners.get(type)!.push(listener);
       },
-      removeEventListener(type: string, listener: (event: unknown) => void) {
+      removeEventListener(
+        type: string,
+        listener: (event: MockDomEvent) => void,
+      ) {
         const listeners = eventListeners.get(type);
         if (listeners) {
           const index = listeners.indexOf(listener);
@@ -129,7 +191,7 @@ function createMockDocument() {
           }
         }
       },
-      dispatchEvent(event: any) {
+      dispatchEvent(event: MockDomEvent) {
         const listeners = eventListeners.get(event.type) ?? [];
         listeners.forEach((listener) => listener(event));
       },
@@ -171,7 +233,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 
     const node = applicator.getNode(1);
     assertExists(node);
-    assertEquals((node as any).tagName, "DIV");
+    assertEquals(mockNode(node).tagName, "DIV");
   });
 
   await t.step("creates a text node from create-text op", () => {
@@ -191,7 +253,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 
     const node = applicator.getNode(1);
     assertExists(node);
-    assertEquals((node as any).textContent, "Hello World");
+    assertEquals(mockNode(node).textContent, "Hello World");
   });
 
   await t.step("creates multiple elements in one batch", () => {
@@ -214,9 +276,9 @@ Deno.test("DomApplicator - create elements", async (t) => {
     assertExists(applicator.getNode(1));
     assertExists(applicator.getNode(2));
     assertExists(applicator.getNode(3));
-    assertEquals((applicator.getNode(1) as any).tagName, "DIV");
-    assertEquals((applicator.getNode(2) as any).tagName, "SPAN");
-    assertEquals((applicator.getNode(3) as any).textContent, "Hello");
+    assertEquals(mockNode(applicator.getNode(1)).tagName, "DIV");
+    assertEquals(mockNode(applicator.getNode(2)).tagName, "SPAN");
+    assertEquals(mockNode(applicator.getNode(3)).textContent, "Hello");
   });
 
   await t.step("updates text nodes without DOM globals", () => {
@@ -241,7 +303,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
       ops: [{ op: "update-text", nodeId: 2, text: "1" }],
     });
 
-    const textNode = applicator.getNode(2) as any;
+    const textNode = mockNode(applicator.getNode(2));
     assertExists(textNode);
     assertEquals(textNode.textContent, "1");
   });
@@ -265,8 +327,8 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ],
     });
 
-    const parent = applicator.getNode(1) as any;
-    const child = applicator.getNode(2) as any;
+    const parent = mockNode(applicator.getNode(1));
+    const child = mockNode(applicator.getNode(2));
     assertEquals(parent.childNodes.length, 1);
     assertEquals(parent.childNodes[0], child);
     assertEquals(child.parentNode, parent);
@@ -291,7 +353,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ],
     });
 
-    const parent = applicator.getNode(1) as any;
+    const parent = mockNode(applicator.getNode(1));
     assertEquals(parent.childNodes.length, 2);
     assertEquals(parent.childNodes[0].tagName, "P");
     assertEquals(parent.childNodes[1].tagName, "SPAN");
@@ -547,7 +609,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ops: [{ op: "move-child", parentId: 1, childId: 2, beforeId: null }],
     });
 
-    const parent = applicator.getNode(1) as any;
+    const parent = mockNode(applicator.getNode(1));
     assertEquals(parent.childNodes.length, 3);
     assertEquals(parent.childNodes[0].tagName, "B");
     assertEquals(parent.childNodes[1].tagName, "C");
@@ -576,7 +638,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ops: [{ op: "remove-node", nodeId: 2 }],
     });
 
-    const parent = applicator.getNode(1) as any;
+    const parent = mockNode(applicator.getNode(1));
     assertEquals(parent.childNodes.length, 0);
     assertEquals(applicator.getNode(2), undefined);
   });
@@ -657,7 +719,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
     });
 
     // Simulate a click
-    const node = applicator.getNode(1) as any;
+    const node = mockNode(applicator.getNode(1));
     node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
     assertEquals(events.length, 1);
@@ -706,7 +768,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ],
     });
 
-    const node = applicator.getNode(1) as any;
+    const node = mockNode(applicator.getNode(1));
     node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
     assertEquals(events[0].event.target?.dataset, {
@@ -764,7 +826,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ],
     });
 
-    const node = applicator.getNode(2) as any;
+    const node = mockNode(applicator.getNode(2));
     node.dispatchEvent({ type: "click", target: node, isTrusted: true });
 
     assertEquals(events[0].event.provenance, {
@@ -803,7 +865,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
     });
 
     // Simulate a click - should not trigger event
-    const node = applicator.getNode(1) as any;
+    const node = mockNode(applicator.getNode(1));
     node.dispatchEvent({ type: "click", target: node });
 
     assertEquals(events.length, 0);
@@ -831,7 +893,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ops: [{ op: "set-event", nodeId: 1, eventType: "click", handlerId: 2 }],
     });
 
-    const node = applicator.getNode(1) as any;
+    const node = mockNode(applicator.getNode(1));
     node.dispatchEvent({ type: "click", target: node });
 
     // Should only have one event with the new handler ID
@@ -865,7 +927,7 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
       ],
     });
 
-    const node = applicator.getNode(1) as any;
+    const node = mockNode(applicator.getNode(1));
     const firstHandle = node.cell;
     assertExists(firstHandle);
 
@@ -907,7 +969,7 @@ Deno.test("DomApplicator - batch with rootId", async (t) => {
 
     const root = applicator.getRootNode();
     assertExists(root);
-    assertEquals((root as any).tagName, "DIV");
+    assertEquals(mockNode(root).tagName, "DIV");
   });
 
   await t.step("updates root when rootId changes", () => {
@@ -931,7 +993,7 @@ Deno.test("DomApplicator - batch with rootId", async (t) => {
     });
 
     const root = applicator.getRootNode();
-    assertEquals((root as any).tagName, "SPAN");
+    assertEquals(mockNode(root).tagName, "SPAN");
   });
 });
 
@@ -953,8 +1015,8 @@ Deno.test("DomApplicator - mountInto", async (t) => {
     const container = doc.createElement("section") as unknown as HTMLElement;
     applicator.mountInto(container, 1);
 
-    assertEquals((container as any).childNodes.length, 1);
-    assertEquals((container as any).childNodes[0].tagName, "DIV");
+    assertEquals(mockNode(container).childNodes.length, 1);
+    assertEquals(mockNode(container).childNodes[0].tagName, "DIV");
   });
 });
 
@@ -994,8 +1056,8 @@ Deno.test("DomApplicator - setContainer", async (t) => {
       ],
     });
 
-    assertEquals((container as any).childNodes.length, 1);
-    assertEquals((container as any).childNodes[0].tagName, "DIV");
+    assertEquals(mockNode(container).childNodes.length, 1);
+    assertEquals(mockNode(container).childNodes[0].tagName, "DIV");
   });
 });
 
@@ -1080,7 +1142,7 @@ Deno.test("DomApplicator - bindings", async (t) => {
         ops: [{ op: "create-element", nodeId: 1, tagName: "cf-cfc-label" }],
       });
 
-      const node = applicator.getNode(1) as any;
+      const node = mockNode(applicator.getNode(1));
       const requested: PropertyKey[] = [];
       node.localName = "cf-cfc-label";
       node.requestUpdate = (name?: PropertyKey) => {
@@ -1107,7 +1169,7 @@ Deno.test("DomApplicator - bindings", async (t) => {
 
         await Promise.resolve();
 
-        assertEquals(node.value.constructor.name, "CellHandle");
+        assertEquals(constructorName(node.value), "CellHandle");
         assertEquals(requested, ["value"]);
       } finally {
         if (customElementsDescriptor) {
