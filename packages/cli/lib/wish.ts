@@ -125,14 +125,26 @@ export async function resolveWish(
   };
 }
 
+/** What {@link readWish} needs from a connected manager. */
+export interface WishRuntimeHost {
+  runtime: Runtime;
+  getSpace(): MemorySpace;
+}
+
+/** Injectable connection dep, mirroring lib/piece.ts's `RootPatternDeps`. */
+export interface ReadWishDeps {
+  loadManager?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
+}
+
 /**
  * The blessed, headless read: connect a real identity/session-backed runtime via
  * {@link loadManager}, then {@link resolveWish}. See {@link WishReadConfig}.
  */
 export async function readWish(
   config: WishReadConfig,
+  deps: ReadWishDeps = {},
 ): Promise<WishReadResult> {
-  const manager = await loadManager(config);
+  const manager = await (deps.loadManager ?? loadManager)(config);
   return await resolveWish(manager.runtime, manager.getSpace(), {
     query: config.query,
     path: config.path,

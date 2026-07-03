@@ -1,5 +1,5 @@
 import { Command, ValidationError } from "@cliffy/command";
-import type { DID } from "@commonfabric/identity";
+import { type DID, isDID } from "@commonfabric/identity";
 import { parseCellPath } from "@commonfabric/runner";
 import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
@@ -7,6 +7,92 @@ import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
 import { normalizeApiUrl, setQuietMode } from "./piece.ts";
 import { readWish } from "../lib/wish.ts";
+
+/** Options the `cf wish` action receives (cliffy-parsed flags + env). */
+export interface WishCommandOptions {
+  apiUrl?: string;
+  identity?: string;
+  space?: string;
+  path?: string;
+  scope?: string[];
+  quiet?: boolean;
+  allowEmpty?: boolean;
+}
+
+/** Injectable effects so the action body is unit-testable in-process. */
+export interface WishCommandDeps {
+  readWish: typeof readWish;
+  exit: (code: number) => void;
+}
+
+/**
+ * Narrow `--scope` values to what the wish builtin accepts ("~" | "." |
+ * "profile" | space DID), rejecting anything else up front instead of casting.
+ */
+export function parseScopeFlags(
+  values: string[] | undefined,
+): (DID | "~" | "." | "profile")[] | undefined {
+  if (!values || values.length === 0) return undefined;
+  return values.map((value) => {
+    if (value === "~" || value === "." || value === "profile") return value;
+    if (isDID(value)) return value;
+    throw new ValidationError(
+      `Invalid --scope "${value}". Expected "~", ".", "profile", or a space DID.`,
+      { exitCode: 1 },
+    );
+  });
+}
+
+/**
+ * The `cf wish` action body, extracted so tests can drive it with a stubbed
+ * {@link readWish} / exit (same in-process idiom as test/inspect-remote).
+ */
+export async function wishAction(
+  options: WishCommandOptions,
+  target: string,
+  deps: WishCommandDeps = { readWish, exit: Deno.exit },
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+
+  if (!options.identity) {
+    throw new ValidationError(
+      `Missing required option: "--identity", or "CF_IDENTITY".`,
+      { exitCode: 1 },
+    );
+  }
+  if (!options.apiUrl) {
+    throw new ValidationError(
+      `Missing required option: "--api-url", or "CF_API_URL".`,
+      { exitCode: 1 },
+    );
+  }
+
+  const identity = absPath(options.identity);
+  // Profile / home targets resolve against the identity's own home space, so a
+  // space is optional. Default to the identity's DID (its home space) so
+  // `cf wish '#profile'` works with just an identity.
+  const space = options.space ?? (await getDidFromFile(identity));
+
+  const path = options.path ? parseCellPath(options.path).map(String) : [];
+  const scope = parseScopeFlags(options.scope);
+
+  const { result, error } = await deps.readWish({
+    apiUrl: normalizeApiUrl(options.apiUrl),
+    space,
+    identity,
+    query: target,
+    path,
+    scope,
+  });
+
+  if (error && result === null && !options.allowEmpty) {
+    console.error(`wish "${target}": ${error}`);
+    deps.exit(1);
+    return; // Reached only when a test injects a non-terminating exit.
+  }
+
+  render(result, { json: true });
+}
 
 const description = cliText(
   `Resolve a wish target headlessly and print its value (CT-1834).
@@ -81,45 +167,5 @@ export const wish = new Command()
   )
   .arguments("<target:string>")
   .action(async (options, target) => {
-    setQuietMode(!!options.quiet);
-
-    if (!options.identity) {
-      throw new ValidationError(
-        `Missing required option: "--identity", or "CF_IDENTITY".`,
-        { exitCode: 1 },
-      );
-    }
-    if (!options.apiUrl) {
-      throw new ValidationError(
-        `Missing required option: "--api-url", or "CF_API_URL".`,
-        { exitCode: 1 },
-      );
-    }
-
-    const identity = absPath(options.identity);
-    // Profile / home targets resolve against the identity's own home space, so a
-    // space is optional. Default to the identity's DID (its home space) so
-    // `cf wish '#profile'` works with just an identity.
-    const space = options.space ?? (await getDidFromFile(identity));
-
-    const path = options.path ? parseCellPath(options.path).map(String) : [];
-    const scope = options.scope && options.scope.length > 0
-      ? (options.scope as (DID | "~" | "." | "profile")[])
-      : undefined;
-
-    const { result, error } = await readWish({
-      apiUrl: normalizeApiUrl(options.apiUrl),
-      space,
-      identity,
-      query: target,
-      path,
-      scope,
-    });
-
-    if (error && result === null && !options.allowEmpty) {
-      console.error(`wish "${target}": ${error}`);
-      Deno.exit(1);
-    }
-
-    render(result, { json: true });
+    await wishAction(options, target);
   });

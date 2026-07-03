@@ -426,14 +426,15 @@ run_wish() {
   # A fresh identity has no profile yet: `cf wish '#profile'` must resolve
   # through the wish builtin's headless path, surface the zero-profile WishError,
   # print it to stderr and exit non-zero.
+  WISH_ERR_FILE=$(mktemp)
   set +e
-  WISH_OUT=$(cf wish '#profile' --api-url="$API_URL" --identity="$IDENTITY" 2>/tmp/cf-wish-err.txt)
+  WISH_OUT=$(cf wish '#profile' --api-url="$API_URL" --identity="$IDENTITY" 2>"$WISH_ERR_FILE")
   WISH_CODE=$?
   set -e
   if [ "$WISH_CODE" == "0" ]; then
     error "cf wish '#profile' with no profile should exit non-zero, got 0 (stdout: $WISH_OUT)"
   fi
-  grep -q "No profile exists yet" /tmp/cf-wish-err.txt ||
+  grep -q "No profile exists yet" "$WISH_ERR_FILE" ||
     error "cf wish '#profile' with no profile should mention the missing profile on stderr"
 
   # --allow-empty turns the same empty read into 'null' on stdout with exit 0.

@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { resolveWish } from "../lib/wish.ts";
+import { readWish, resolveWish } from "../lib/wish.ts";
 
 // Exercises the headless wish read core (`resolveWish`) against an emulated
 // runtime — no live server. The full `readWish` (which adds a session-backed
@@ -105,5 +105,54 @@ describe("cf wish headless read (resolveWish)", () => {
     });
     expect(result).toBeNull();
     expect(error).toBe("No profile exists yet");
+  });
+
+  it("appends extra path segments to the resolved target", async () => {
+    await seedProfile();
+    const { result, error } = await resolveWish(runtime, userIdentity.did(), {
+      query: "#profile",
+      path: ["bio"],
+    });
+    expect(error).toBeUndefined();
+    expect(result).toBe("Mathematician & first programmer.");
+  });
+
+  it("projects the result through a provided schema", async () => {
+    await seedProfile();
+    const { result, error } = await resolveWish(runtime, userIdentity.did(), {
+      query: "#profile",
+      schema: {
+        type: "object",
+        properties: { name: { type: "string" } },
+      },
+    });
+    expect(error).toBeUndefined();
+    expect((result as { name?: string })?.name).toBe("Ada Lovelace");
+  });
+
+  it("readWish connects through the injected manager and resolves", async () => {
+    await seedProfile();
+    const seen: string[] = [];
+    const { result, error } = await readWish(
+      {
+        apiUrl: "http://127.0.0.1:8000",
+        space: "ignored-by-fake",
+        identity: "/nonexistent.key",
+        query: "#profileName",
+      },
+      {
+        loadManager: (config) => {
+          seen.push(config.apiUrl, config.space);
+          return Promise.resolve({
+            runtime,
+            getSpace: () => userIdentity.did(),
+          });
+        },
+      },
+    );
+    expect(error).toBeUndefined();
+    expect(result).toBe("Ada Lovelace");
+    // The wrapper passes the connection config through to the dep.
+    expect(seen).toEqual(["http://127.0.0.1:8000", "ignored-by-fake"]);
   });
 });
