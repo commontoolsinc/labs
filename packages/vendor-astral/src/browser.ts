@@ -15,6 +15,11 @@ import { WEBSOCKET_ENDPOINT_REGEX, websocketReady } from "./util.ts";
 import { DEBUG } from "./debug.ts";
 import { generateBinArgs } from "./bin_args.ts";
 
+function childProcessAlreadyTerminated(error: unknown): boolean {
+  return error instanceof TypeError &&
+    error.message.includes("Child process has already terminated");
+}
+
 async function runCommand(
   command: Deno.Command,
   { retries = 60 } = {},
@@ -157,12 +162,18 @@ export class Browser implements AsyncDisposable {
         // ask nicely first
         process.kill();
         await deadline(process.status, 10 * 1000);
-      } catch {
+      } catch (error) {
+        if (childProcessAlreadyTerminated(error)) {
+          await process.status;
+          return;
+        }
         // then force
         try {
           process.kill("SIGKILL");
-        } catch {
-          // Already terminated between the polite close and the SIGKILL.
+        } catch (error) {
+          if (!childProcessAlreadyTerminated(error)) {
+            throw error;
+          }
         }
         await process.status;
       }

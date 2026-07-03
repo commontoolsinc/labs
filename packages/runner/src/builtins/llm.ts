@@ -238,6 +238,24 @@ function summarizeGenerateObjectRequest(details: {
   };
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalLLMMessages(
+  value: unknown,
+): readonly BuiltInLLMMessage[] | undefined {
+  return Array.isArray(value)
+    ? value as readonly BuiltInLLMMessage[]
+    : undefined;
+}
+
+function promptMessage(
+  prompt: unknown,
+): BuiltInLLMMessage {
+  return { role: "user", content: prompt as BuiltInLLMMessage["content"] };
+}
+
 function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
   const labelView = cfcLabelViewForCellFailClosed(cell.resolveAsCell());
   if (labelView === undefined) {
@@ -687,7 +705,7 @@ export function llm(
     const llmParams: LLMRequest = {
       system: ((system ?? "") + contextDocs.docs).trim() ||
         "You are a helpful assistant.",
-      messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
+      messages: optionalLLMMessages(messages) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -715,9 +733,7 @@ export function llm(
       toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
     );
     const hash = hashOf(requestSnapshot).toString();
-    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
-      | string
-      | undefined;
+    const queueName = optionalString(inputs.key("queue").withTx(tx).get());
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -770,9 +786,7 @@ export function llm(
           try {
             const doWork = () =>
               executeWithToolsLoop({
-                initialMessages:
-                  (messages as unknown as readonly BuiltInLLMMessage[]) ??
-                    [],
+                initialMessages: optionalLLMMessages(messages) ?? [],
                 llmParams: requestSnapshot,
                 toolCatalog,
                 initialObservedConfidentiality:
@@ -1017,8 +1031,8 @@ export function generateText(
 
     // Convert prompt to messages if provided, otherwise use messages directly
     const requestMessages: readonly BuiltInLLMMessage[] =
-      (messages as unknown as readonly BuiltInLLMMessage[]) ||
-      [{ role: "user", content: prompt! }];
+      optionalLLMMessages(messages) ??
+        [promptMessage(prompt!)];
 
     const llmParams: LLMRequest = {
       system: ((system ?? "") + contextDocs.docs).trim() ||
@@ -1049,9 +1063,7 @@ export function generateText(
       toolCatalog ? { ...llmParams, tools: toolCatalog.llmTools } : llmParams,
     );
     const hash = hashOf(requestSnapshot).toString();
-    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
-      | string
-      | undefined;
+    const queueName = optionalString(inputs.key("queue").withTx(tx).get());
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
     const currentError = errorWithLog.get();
@@ -1323,8 +1335,8 @@ export function generateObject<T extends Record<string, unknown>>(
 
     // Convert prompt to messages if provided, otherwise use messages directly
     const requestMessages: readonly BuiltInLLMMessage[] =
-      (messages as unknown as readonly BuiltInLLMMessage[]) ||
-      [{ role: "user", content: prompt! }];
+      optionalLLMMessages(messages) ??
+        [promptMessage(prompt!)];
 
     // Build context documentation from context cells and append to system prompt
     const pinnedCellsSchema = {
@@ -1437,9 +1449,7 @@ export function generateObject<T extends Record<string, unknown>>(
         ),
       );
       const hash = hashOf(requestSnapshot).toString();
-      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
-        | string
-        | undefined;
+      const queueName = optionalString(inputs.key("queue").withTx(tx).get());
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
@@ -1788,9 +1798,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schemaSanitizePromptInjection,
       });
       const hash = hashOf(requestSnapshot).toString();
-      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
-        | string
-        | undefined;
+      const queueName = optionalString(inputs.key("queue").withTx(tx).get());
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();

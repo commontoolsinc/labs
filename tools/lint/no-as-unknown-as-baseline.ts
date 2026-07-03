@@ -1,14 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builtins/llm.ts": [
-    "540:26:y1p8ky",
-    "568:59:kwrgew",
-    "624:28:y1p8ky",
-    "856:16:y1p8ky",
-    "888:59:kwrgew",
-    "1148:16:y1p8ky",
-    "1262:61:1461csw",
-    "1606:61:1461csw",
-  ],
   "packages/runner/src/builtins/map.ts": [
     "178:16:1029mof",
   ],
