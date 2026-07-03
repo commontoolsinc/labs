@@ -404,7 +404,7 @@ declare module "@commonfabric/api" {
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
-    value: T;
+    __debugValue: T;
     cellLink: SigilLink;
     space: MemorySpace;
     entityId: EntityRef;
@@ -2538,7 +2538,7 @@ export class CellImpl<T extends FabricValue>
     return createSigilLinkFromParsedLink(this.link);
   }
 
-  get value(): T {
+  get __debugValue(): T {
     return this.get();
   }
 
