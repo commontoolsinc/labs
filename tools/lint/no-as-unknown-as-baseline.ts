@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/fuse/platform-linux.ts": [
-    "189:32:c442fh",
-    "196:23:c442fh",
-    "346:26:o4d2cp",
-  ],
   "packages/fuse/tree-builder.test.ts": [
     "1104:33:m227fj",
     "1107:16:pw6ppk",

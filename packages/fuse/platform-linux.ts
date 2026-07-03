@@ -186,14 +186,14 @@ let fullLib: LinuxLib | null = null;
 
 const linuxPlatform: FusePlatform = {
   openFuse(): FuseLib {
-    if (fullLib) return fullLib as unknown as FuseLib;
+    if (fullLib) return fullLib as FuseLib;
 
     const errors: string[] = [];
     for (const path of LIBFUSE_PATHS) {
       try {
         fullLib = Deno.dlopen(path, LINUX_SYMBOLS);
         console.log(`Loaded ${path}`);
-        return fullLib as unknown as FuseLib;
+        return fullLib as FuseLib;
       } catch (e) {
         errors.push(`  ${path}: ${e}`);
       }
@@ -343,7 +343,7 @@ const linuxPlatform: FusePlatform = {
       throw new Error("fuse_session_new failed");
     }
 
-    const mp = mountpoint as unknown as BufferSource;
+    const mp = mountpoint as BufferSource;
     const rc = lib.symbols.fuse_session_mount(session, mp);
     if (rc !== 0) {
       lib.symbols.fuse_session_destroy(session);
