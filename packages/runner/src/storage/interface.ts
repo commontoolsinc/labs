@@ -951,6 +951,13 @@ export interface IExtendedStorageTransaction
   ): void;
 
   /**
+   * Appends a CFC diagnostic message. The sanctioned write path for the CFC
+   * machinery's observe-mode notes — getCfcState() returns a read-only view.
+   * Diagnostics are advisory and never feed an enforcement decision.
+   */
+  noteCfcDiagnostic(message: string): void;
+
+  /**
    * Enqueues a side effect to run from the CFC outbox after a successful
    * commit. See ownership note above.
    */

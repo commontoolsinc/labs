@@ -3463,7 +3463,7 @@ export const prepareBoundaryCommit = (
     flowTargets.size > 0 &&
     flowHasLabels
   ) {
-    state.diagnostics.push(
+    tx.noteCfcDiagnostic(
       `flow-labels(observe): would derive ${flowConfidentiality.length} ` +
         `confidentiality / ${flowIntegrity.length} integrity atom(s) onto ` +
         `${flowTargets.size} written doc(s)`,
@@ -3674,7 +3674,7 @@ export const prepareBoundaryCommit = (
           ingestVerificationFailed = true;
         } else {
           for (const failure of floorFailures) {
-            state.diagnostics.push(`write-floor(observe): ${failure}`);
+            tx.noteCfcDiagnostic(`write-floor(observe): ${failure}`);
           }
         }
       }

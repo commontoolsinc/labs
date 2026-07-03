@@ -106,6 +106,68 @@ type CfcInstrumentationHooks = {
   ): void;
 };
 
+// Read-only view of the transaction's CFC state, returned by getCfcState().
+// `Readonly<CfcTxState>` is compile-time only, so handing out the live state
+// object would let handler code reaching the tx via `cell.tx` flip
+// `triggerReadGating` past its setter pin, clear `relevant`, forge
+// `prepare.status`, or truncate `triggerReads`/`writePolicyInputs` — every
+// enforcement decision reads this state (cubic/codex review on #4517).
+//
+// The view forwards reads to the live object (later recording stays visible
+// through a view captured earlier) and throws on every mutation path.
+// deepFrozen values pass through raw rather than wrapped: they are already
+// immutable, and their reference identity is load-bearing — the recording
+// API freezes records on entry (see the ownership-transfer contract in
+// interface.ts) and `writePolicyInputIdentities` is keyed by those record
+// references. Functions also pass raw: called with the view as receiver, a
+// mutating method like Array.prototype.push [[Set]]s through the view and
+// lands in the throwing trap.
+const readOnlyCfcViews = new WeakMap<object, object>();
+
+const throwCfcReadOnly = (): never => {
+  throw new Error(
+    "CFC transaction state is read-only: use the IExtendedStorageTransaction methods",
+  );
+};
+
+const readOnlyCfcView = <T>(value: T): T => {
+  if (value === null || typeof value !== "object") return value;
+  if (Object.isFrozen(value)) return value;
+  const cached = readOnlyCfcViews.get(value);
+  if (cached !== undefined) return cached as T;
+  const view = value instanceof Map
+    ? new Proxy(value, {
+      // Map methods work on an internal slot, so they must be called on the
+      // real Map, not the proxy — read methods are forwarded bound, the
+      // mutating ones throw.
+      get(target, prop) {
+        if (prop === "set" || prop === "delete" || prop === "clear") {
+          return throwCfcReadOnly;
+        }
+        const member = Reflect.get(target, prop, target);
+        return typeof member === "function"
+          ? member.bind(target)
+          : readOnlyCfcView(member);
+      },
+      set: throwCfcReadOnly,
+      defineProperty: throwCfcReadOnly,
+      deleteProperty: throwCfcReadOnly,
+      setPrototypeOf: throwCfcReadOnly,
+    })
+    : new Proxy(value, {
+      get(target, prop, receiver) {
+        const member = Reflect.get(target, prop, receiver);
+        return typeof member === "function" ? member : readOnlyCfcView(member);
+      },
+      set: throwCfcReadOnly,
+      defineProperty: throwCfcReadOnly,
+      deleteProperty: throwCfcReadOnly,
+      setPrototypeOf: throwCfcReadOnly,
+    });
+  readOnlyCfcViews.set(value, view);
+  return view as T;
+};
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
     (
@@ -120,7 +182,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
   private narrowestReadScope: CellScope = "space";
-  private cfcState: CfcTxState = {
+  // ECMAScript-private (#), like #privilegedSystemWriteDepth below: the CFC
+  // state is the enforcement substrate (dials, pins, relevance, trigger
+  // reads, policy inputs, prepare status), and handler code reaching the tx
+  // via `(cell.tx as any)` must not be able to grab the raw object and
+  // mutate it. Reads go through getCfcState(), which returns a read-only
+  // view (see readOnlyCfcView).
+  #cfcState: CfcTxState = {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
@@ -138,14 +206,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
+  // The pins below are ECMAScript-private for the same reason as #cfcState:
+  // a TS-`private` pin could be cleared via `(cell.tx as any)` and the dial
+  // then legally weakened through its setter.
   // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
-  private cfcEnforcementFloor = 0;
+  #cfcEnforcementFloor = 0;
   // Once flow-label persistence is on for this tx it cannot be turned back
   // off — same shape as the enforcement floor (audit S3): code holding a
   // Cell must not disable propagation mid-transaction to launder a value.
-  private cfcFlowLabelsPinned = false;
-  private cfcWriteFloorPinned = false;
-  private cfcTriggerReadGatingPinned = false;
+  #cfcFlowLabelsPinned = false;
+  #cfcWriteFloorPinned = false;
+  #cfcTriggerReadGatingPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -170,14 +241,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
   ): void {
-    this.cfcState.diagnostics.push(
+    this.#cfcState.diagnostics.push(
       `sink-request release rejected for ${info.sink} (${info.effectId}): ${info.detail}`,
     );
     this.cfcInstrumentation.onSinkReleaseReject?.(info);
   }
 
+  // Append-only diagnostics seam for the CFC machinery outside this class
+  // (prepare's observe-mode notes). getCfcState() is a read-only view, so
+  // this is the one sanctioned write path; diagnostics are advisory text and
+  // never feed an enforcement decision, so exposing append is harmless.
+  noteCfcDiagnostic(message: string): void {
+    this.#cfcState.diagnostics.push(message);
+  }
+
   getCfcState(): Readonly<CfcTxState> {
-    return this.cfcState;
+    // Read-only view, not the live object — see readOnlyCfcView. Internal
+    // code mutates `this.#cfcState` directly and never goes through here.
+    return readOnlyCfcView(this.#cfcState);
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
@@ -187,31 +268,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code holding a Cell from disabling enforcement mid-transaction to commit a
     // policy violation. `disabled`/`observe` impose no floor (neither enforces),
     // so they may still be juggled before any enforcing mode is set.
-    if (cfcEnforcementStrictness(mode) < this.cfcEnforcementFloor) {
+    if (cfcEnforcementStrictness(mode) < this.#cfcEnforcementFloor) {
       throw new Error(
         `CFC enforcement mode cannot be weakened to "${mode}": transaction is ` +
-          `pinned at strictness ${this.cfcEnforcementFloor} or higher`,
+          `pinned at strictness ${this.#cfcEnforcementFloor} or higher`,
       );
     }
-    this.cfcState.enforcementMode = mode;
+    this.#cfcState.enforcementMode = mode;
     if (cfcEnforcementStrictness(mode) >= CFC_ENFORCING_STRICTNESS) {
-      this.cfcEnforcementFloor = Math.max(
-        this.cfcEnforcementFloor,
+      this.#cfcEnforcementFloor = Math.max(
+        this.#cfcEnforcementFloor,
         cfcEnforcementStrictness(mode),
       );
     }
   }
 
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void {
-    if (this.cfcFlowLabelsPinned && mode !== "persist") {
+    if (this.#cfcFlowLabelsPinned && mode !== "persist") {
       throw new Error(
         `CFC flow-labels mode cannot be weakened to "${mode}": transaction ` +
           `is pinned at "persist"`,
       );
     }
-    this.cfcState.flowLabelsMode = mode;
+    this.#cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
-      this.cfcFlowLabelsPinned = true;
+      this.#cfcFlowLabelsPinned = true;
     }
   }
 
@@ -220,15 +301,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // runtime at tx creation — pattern/handler code that reaches the tx cannot
     // weaken it to `observe`/`off` to slip an SC-18 floor violation through
     // (cubic review). Strengthening to `enforce` is always allowed.
-    if (this.cfcWriteFloorPinned && mode !== "enforce") {
+    if (this.#cfcWriteFloorPinned && mode !== "enforce") {
       throw new Error(
         `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
           `is pinned at "enforce"`,
       );
     }
-    this.cfcState.writeFloorMode = mode;
+    this.#cfcState.writeFloorMode = mode;
     if (mode === "enforce") {
-      this.cfcWriteFloorPinned = true;
+      this.#cfcWriteFloorPinned = true;
     }
   }
 
@@ -238,20 +319,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // the tx cannot turn it off before prepareCfc() and empty the
     // triggerReadSources the H5 gates consume (cubic/codex review on #4488).
     // Re-asserting enabled is always allowed.
-    if (this.cfcTriggerReadGatingPinned && !enabled) {
+    if (this.#cfcTriggerReadGatingPinned && !enabled) {
       throw new Error(
         `CFC trigger-read gating cannot be disabled: transaction is pinned ` +
           `at enabled`,
       );
     }
-    this.cfcState.triggerReadGating = enabled;
+    this.#cfcState.triggerReadGating = enabled;
     if (enabled) {
-      this.cfcTriggerReadGatingPinned = true;
+      this.#cfcTriggerReadGatingPinned = true;
     }
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trigger-reads-after-prepare");
     }
     for (const read of reads) {
@@ -262,7 +343,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       if (flowReadExcluded(read.id, read.path)) {
         continue;
       }
-      this.cfcState.triggerReads.push(deepFreeze({
+      this.#cfcState.triggerReads.push(deepFreeze({
         space: read.space,
         id: read.id,
         scope: normalizeCellScope(read.scope),
@@ -276,22 +357,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // code holding a Cell can't relax a configured ceiling mid-transaction. Not
   // on the public tx interface for the same reason (audit S3 posture).
   setCfcSinkMaxConfidentiality(map: SinkMaxConfidentiality): void {
-    if (this.cfcState.sinkMaxConfidentiality !== undefined) return;
+    if (this.#cfcState.sinkMaxConfidentiality !== undefined) return;
     // Deep-freeze on store so the ceiling is immutable regardless of caller —
     // TS `Readonly<>` is compile-time only, so storing a bare reference would
     // let later mutation change the egress policy (review on #3993). Cheap:
     // deepFreeze short-circuits on the Runtime's already-frozen config.
-    this.cfcState.sinkMaxConfidentiality = deepFreeze(map);
+    this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
   }
 
   markCfcRelevant(reason?: string): void {
-    this.cfcState.relevant = true;
+    this.#cfcState.relevant = true;
     if (!this.reportedCfcRelevant) {
       this.reportedCfcRelevant = true;
       this.cfcInstrumentation.onRelevantTx?.();
     }
     if (reason) {
-      this.cfcState.diagnostics.push(reason);
+      this.#cfcState.diagnostics.push(reason);
     }
   }
 
@@ -331,7 +412,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // write (path[0] is a user key) or a path-[] full-document write is not it.
     if (address.path[0] !== "cfc") return;
     this.markCfcRelevant("unprivileged-cfc-metadata-write");
-    this.cfcState.unprivilegedSystemWrites.push(
+    this.#cfcState.unprivilegedSystemWrites.push(
       `${address.id}/${address.path.join("/")}`,
     );
   }
@@ -348,9 +429,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // also keeping the summary stable across prepare/invalidate/re-prepare.
   private noteWriteIdentity(): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
-    const summary = this.cfcState.writeIdentity;
+    const summary = this.#cfcState.writeIdentity;
     if (summary.multiple) return;
-    const current = this.cfcState.implementationIdentity;
+    const current = this.#cfcState.implementationIdentity;
     if (!summary.sawWrite) {
       summary.sawWrite = true;
       summary.identity = current;
@@ -363,16 +444,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   invalidateCfc(reason: string): void {
-    const wasPrepared = this.cfcState.prepare.status === "prepared";
-    const previousDigest = this.cfcState.prepare.status === "prepared"
-      ? this.cfcState.prepare.digest
-      : this.cfcState.prepare.status === "invalidated"
-      ? this.cfcState.prepare.digest
+    const wasPrepared = this.#cfcState.prepare.status === "prepared";
+    const previousDigest = this.#cfcState.prepare.status === "prepared"
+      ? this.#cfcState.prepare.digest
+      : this.#cfcState.prepare.status === "invalidated"
+      ? this.#cfcState.prepare.digest
       : undefined;
-    const reasons = this.cfcState.prepare.status === "invalidated"
-      ? [...this.cfcState.prepare.reasons, reason]
+    const reasons = this.#cfcState.prepare.status === "invalidated"
+      ? [...this.#cfcState.prepare.reasons, reason]
       : [reason];
-    this.cfcState.prepare = {
+    this.#cfcState.prepare = {
       status: "invalidated",
       digest: previousDigest,
       reasons,
@@ -483,15 +564,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // identity-stable. Mirrors the chokepoint pattern on
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
-    this.cfcState.dereferenceTraces.push(deepFreeze(trace));
-    if (this.cfcState.prepare.status === "prepared") {
+    this.#cfcState.dereferenceTraces.push(deepFreeze(trace));
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("dereference-trace-added");
     }
   }
 
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
-    this.cfcState.trustSnapshot = snapshot;
-    if (this.cfcState.prepare.status === "prepared") {
+    this.#cfcState.trustSnapshot = snapshot;
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trust-snapshot-changed");
     }
   }
@@ -499,8 +580,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   setCfcImplementationIdentity(
     identity: ImplementationIdentity | undefined,
   ): void {
-    this.cfcState.implementationIdentity = identity;
-    if (this.cfcState.prepare.status === "prepared") {
+    this.#cfcState.implementationIdentity = identity;
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("implementation-identity-changed");
     }
   }
@@ -511,15 +592,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // existing WeakMap. The within-sort tiebreaker in
     // `compareWritePolicyInput` then re-hashes each element via the cache.
     const frozen = deepFreeze(input);
-    this.cfcState.writePolicyInputs.push(frozen);
+    this.#cfcState.writePolicyInputs.push(frozen);
     // Capture the identity active right now so writeAuthorizedBy is verified
     // against the trust context that authored this write, even if a later run
     // in the same transaction changes the identity.
-    this.cfcState.writePolicyInputIdentities.set(
+    this.#cfcState.writePolicyInputIdentities.set(
       frozen,
-      this.cfcState.implementationIdentity,
+      this.#cfcState.implementationIdentity,
     );
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
   }
@@ -531,11 +612,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return;
     }
     this.outboxIdempotencyKeys.add(key);
-    this.cfcState.outbox.push(effect);
+    this.#cfcState.outbox.push(effect);
   }
 
   hasPendingPostCommitEffects(): boolean {
-    return this.cfcState.outbox.length > 0;
+    return this.#cfcState.outbox.length > 0;
   }
 
   private buildPreparedDigestInput(): PreparedDigestInput {
@@ -585,11 +666,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       consumedReads,
       attemptedWrites,
       writes,
-      dereferenceTraces: [...this.cfcState.dereferenceTraces],
-      triggerReads: [...this.cfcState.triggerReads],
-      writePolicyInputs: [...this.cfcState.writePolicyInputs],
-      implementationIdentity: this.cfcState.implementationIdentity,
-      trustSnapshot: this.cfcState.trustSnapshot,
+      dereferenceTraces: [...this.#cfcState.dereferenceTraces],
+      triggerReads: [...this.#cfcState.triggerReads],
+      writePolicyInputs: [...this.#cfcState.writePolicyInputs],
+      implementationIdentity: this.#cfcState.implementationIdentity,
+      trustSnapshot: this.#cfcState.trustSnapshot,
     };
   }
 
@@ -610,16 +691,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
-      this.cfcState.prepare = {
+      this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
       };
-      this.cfcState.diagnostics.push(...reasons);
+      this.#cfcState.diagnostics.push(...reasons);
       return "";
     }
     const preparedInput = this.buildPreparedDigestInput();
     const digest = preparedDigestFor(preparedInput);
-    this.cfcState.prepare = {
+    this.#cfcState.prepare = {
       status: "prepared",
       digest,
       input: preparedInput,
@@ -753,7 +834,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
     options = this.#withAmbientReadMeta(options);
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
     this.recordReadScope(address);
@@ -765,7 +846,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Immutable<FabricValue> {
     options = this.#withAmbientReadMeta(options);
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
     this.recordReadScope(address);
@@ -799,7 +880,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.assertWritable("write()");
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
@@ -814,7 +895,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.assertWritable("writeOrThrow()");
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
-    if (this.cfcState.prepare.status === "prepared") {
+    if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
@@ -946,10 +1027,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
     this.statusOverride = undefined;
-    this.cfcState.outbox = [];
+    this.#cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
-    this.cfcState.prepare = { status: "unprepared" };
-    this.cfcState.dereferenceTraces = [];
+    this.#cfcState.prepare = { status: "unprepared" };
+    this.#cfcState.dereferenceTraces = [];
     return this.tx.abort(reason);
   }
 
@@ -970,7 +1051,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private clearPostCommitOutbox(): void {
-    this.cfcState.outbox = [];
+    this.#cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
   }
 
@@ -1006,10 +1087,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // probe reads metadata, and a read after prepare would invalidate the
       // digest of a transaction that already did its flow work.
       if (
-        !this.cfcState.relevant &&
-        this.cfcState.prepare.status === "unprepared" &&
-        this.cfcState.flowLabelsMode !== "off" &&
-        this.cfcState.enforcementMode !== "disabled" &&
+        !this.#cfcState.relevant &&
+        this.#cfcState.prepare.status === "unprepared" &&
+        this.#cfcState.flowLabelsMode !== "off" &&
+        this.#cfcState.enforcementMode !== "disabled" &&
         flowLabelWorkExists(this)
       ) {
         this.markCfcRelevant("flow-labels");
@@ -1028,28 +1109,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // (so this guard is moot) or read nothing confidential (consumed set
       // empty — nothing to gate), so only the non-prepared states need this.
       if (
-        !this.cfcState.relevant &&
-        this.cfcState.prepare.status !== "prepared" &&
-        this.cfcState.enforcementMode !== "disabled" &&
+        !this.#cfcState.relevant &&
+        this.#cfcState.prepare.status !== "prepared" &&
+        this.#cfcState.enforcementMode !== "disabled" &&
         gatedSinkRequestExists(this)
       ) {
         this.markCfcRelevant("sink-request-ceiling");
       }
       if (
-        this.cfcState.relevant &&
-        this.cfcState.enforcementMode === "observe" &&
-        this.cfcState.prepare.status === "unprepared"
+        this.#cfcState.relevant &&
+        this.#cfcState.enforcementMode === "observe" &&
+        this.#cfcState.prepare.status === "unprepared"
       ) {
         this.prepareCfc();
       }
       if (
-        this.cfcState.relevant &&
-        this.cfcState.enforcementMode !== "disabled" &&
-        this.cfcState.enforcementMode !== "observe" &&
-        this.cfcState.prepare.status !== "prepared"
+        this.#cfcState.relevant &&
+        this.#cfcState.enforcementMode !== "disabled" &&
+        this.#cfcState.enforcementMode !== "observe" &&
+        this.#cfcState.prepare.status !== "prepared"
       ) {
-        const detail = this.cfcState.prepare.status === "invalidated"
-          ? `: ${this.cfcState.prepare.reasons[0]}`
+        const detail = this.#cfcState.prepare.status === "invalidated"
+          ? `: ${this.#cfcState.prepare.reasons[0]}`
           : "";
         return this.rejectCommitBeforeStorage({
           error: {
@@ -1061,13 +1142,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         });
       }
 
-      if (this.cfcState.prepare.status === "prepared") {
+      if (this.#cfcState.prepare.status === "prepared") {
         const currentDigest = preparedDigestFor(
           this.buildPreparedDigestInput(),
         );
-        if (currentDigest !== this.cfcState.prepare.digest) {
+        if (currentDigest !== this.#cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");
-          if (this.cfcState.enforcementMode !== "observe") {
+          if (this.#cfcState.enforcementMode !== "observe") {
             return this.rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
@@ -1099,7 +1180,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const result = await promise;
     if (result.ok && !readOnly) {
-      for (const effect of this.cfcState.outbox) {
+      for (const effect of this.#cfcState.outbox) {
         try {
           await effect.flush(this);
           this.cfcInstrumentation.onOutboxFlush?.(effect);
@@ -1215,6 +1296,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   markCfcRelevant(reason?: string): void {
     this.wrapped.markCfcRelevant(reason);
+  }
+
+  noteCfcDiagnostic(message: string): void {
+    this.wrapped.noteCfcDiagnostic(message);
   }
 
   invalidateCfc(reason: string): void {

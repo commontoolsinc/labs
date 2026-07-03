@@ -285,6 +285,78 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     }
   });
 
+  it("getCfcState() is a read-only view — direct state mutation cannot bypass the pin", async () => {
+    // `Readonly<CfcTxState>` is compile-time only: without a runtime guard,
+    // handler code reaching the tx via `cell.tx` could skip the pinned
+    // setter and flip the gate (or truncate the trigger set, or un-mark
+    // relevance, or forge the prepare status) directly on the object
+    // `getCfcState()` returns (cubic/codex review on #4517).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-view-secret");
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-view-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id: secretId as `${string}:${string}`,
+        type: "application/json",
+        path: ["value", "secret"],
+      }]);
+      const state = tx.getCfcState() as unknown as {
+        triggerReadGating: boolean;
+        relevant: boolean;
+        triggerReads: unknown[];
+        prepare: { status: string };
+      };
+      expect(() => {
+        state.triggerReadGating = false;
+      }).toThrow("read-only");
+      expect(() => {
+        state.triggerReads.length = 0;
+      }).toThrow("read-only");
+      expect(() => {
+        state.triggerReads.pop();
+      }).toThrow("read-only");
+      expect(() => {
+        state.relevant = false;
+      }).toThrow("read-only");
+      expect(() => {
+        state.prepare.status = "prepared";
+      }).toThrow("read-only");
+      // The backing state is not reachable around the view either: the field
+      // is ECMAScript-private, so `(tx as any).cfcState` finds nothing.
+      expect((tx as unknown as Record<string, unknown>).cfcState)
+        .toBeUndefined();
+      // Nothing stuck: the state is intact and the gate still enforces.
+      expect(tx.getCfcState().triggerReadGating).toBe(true);
+      expect(tx.getCfcState().triggerReads.length).toBe(1);
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:h5-view",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message)).toContain(
+        "exceeds ceiling for fetchJson",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("the input-requirement gate also consults trigger reads under the flag", async () => {
     // A requiredIntegrity-floored write whose only consumed input is a TRIGGER
     // read that lacks the required atom: flag OFF passes (empty gate set), flag
