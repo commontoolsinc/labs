@@ -74,12 +74,10 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    const document = storageManager!.open(space).replica.getDocument(
+      id as `${string}:${string}`,
+    ) as { cfc?: { labelMap?: { entries: StoredEntry[] } } } | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
   const derivedConfidentiality = (id: string): string[] | undefined =>
