@@ -83,6 +83,19 @@ if (resolvedRuntimeVersion === undefined) {
 }
 const runtimeVersion = resolvedRuntimeVersion;
 
+async function replicateClosuresForTest(
+  target: object,
+  entryIdentity: string,
+  fromSpace: string,
+  toSpace: string,
+): Promise<void> {
+  const replicateClosures = Reflect.get(target, "replicateClosures");
+  if (typeof replicateClosures !== "function") {
+    throw new Error("replicateClosures is not a function");
+  }
+  await replicateClosures.call(target, entryIdentity, fromSpace, toSpace);
+}
+
 // Step 4.3.1–4.3.3 — content-addressed cache document model. The cache operates
 // in identity space on the engine's `CacheableModule[]`; these tests synthesize
 // an equivalent module set from a small program (computing the same per-module
@@ -1169,14 +1182,12 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     wtx.prepareCfc();
     await wtx.commit();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
-    await manager.replicateClosures(importerIdentity, spaceA, spaceB);
+    await replicateClosuresForTest(
+      runtime.patternManager,
+      importerIdentity,
+      spaceA,
+      spaceB,
+    );
 
     const rtx = runtime.edit();
     const importerSource = await loadVerifiedSourceClosure(

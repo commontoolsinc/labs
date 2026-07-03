@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cell-cache.test.ts": [
-    "879:43:1aozhk0",
-  ],
   "packages/runner/test/cell-callbacks.test.ts": [
     "856:32:rbhadh",
     "897:32:rbhadh",
