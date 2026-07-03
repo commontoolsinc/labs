@@ -42,7 +42,7 @@ export const journalEntrySchema = {
     timestamp: { type: "number" },
     eventType: {
       type: "string",
-      enum: journalEventTypes as unknown as string[],
+      enum: journalEventTypes,
     },
     // Live cell reference (may update over time)
     // we use type unknown to validate, but avoid including children

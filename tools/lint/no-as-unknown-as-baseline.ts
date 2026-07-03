@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/home-schemas/journal.ts": [
-    "45:30:p4o8qc",
-  ],
   "packages/html/src/h.ts": [
     "33:20:aw8ryo",
     "44:36:131nvn4",
