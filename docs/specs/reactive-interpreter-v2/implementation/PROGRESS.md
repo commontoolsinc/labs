@@ -134,3 +134,18 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   imports). Shepherding continues per bot feedback. NEXT: filter/flatMap on
   the inline chassis, no_rog(14)/incomplete(10) headroom, W5b transformer
   native ops (D-V2-STR-DIRECT), rehydration identity.
+
+- (2026-07-03) **FLAG-ON FULLY GREEN MILESTONE.** (1) External-cell refs
+  landed → `incomplete` census class 10→0 (external ValueRef + per-Rog
+  externals table binding the exact legacy reference form). (2) The LAST
+  flag-ON failure resolved: probed the interpreter segment action's
+  persisted scheduler snapshot — id `raw:ri2:seg…` STABLE across runtimes,
+  persisted CLEAN (no directDirtySeq/staleSeq), reload rehydration HITS
+  (ok>0, missNoSnapshot=0, no re-run); the CT-1623 reload guard is now
+  flag-aware (1 clean segment snapshot vs 3 computed snapshots). RESULT:
+  **root `deno task test` ALL PACKAGES GREEN under
+  CF_EXPERIMENTAL_INTERPRETER=1** (223.6s) — flag-ON == flag-off across the
+  monorepo. Remaining non-marginal gaps: filter/flatMap inline (~11% of
+  reactive collection usage), W5b transformer native ops (hygiene — live
+  capture already removed SES from the interpreted path), function
+  lowering (the W6 arc), control link-emission (engagement).
