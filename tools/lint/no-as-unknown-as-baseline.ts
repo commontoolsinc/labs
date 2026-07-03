@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/codec-common/BigIntCodec.test.ts": [
-    "85:28:owpis5",
-    "107:28:owpis5",
-  ],
   "packages/data-model/test/codec-common/SpecialNumberCodec.test.ts": [
     "67:23:owpis5",
     "76:23:owpis5",

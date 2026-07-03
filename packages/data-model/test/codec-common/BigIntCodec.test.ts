@@ -82,7 +82,7 @@ describe("BigIntCodec", () => {
           context,
         );
         expect(result).toBeInstanceOf(ProblematicValue);
-        const prob = result as unknown as ProblematicValue;
+        const prob = result as ProblematicValue;
         expect(prob.wireTypeTag).toBe("BigInt@1");
         expect(prob.state).toBe(42);
       });
@@ -104,7 +104,7 @@ describe("BigIntCodec", () => {
       it("decodes empty base64 string to `ProblematicValue`", () => {
         const result = codec.decode(expectedTag, "", context);
         expect(result).toBeInstanceOf(ProblematicValue);
-        const prob = result as unknown as ProblematicValue;
+        const prob = result as ProblematicValue;
         expect(prob.wireTypeTag).toBe("BigInt@1");
       });
     });
