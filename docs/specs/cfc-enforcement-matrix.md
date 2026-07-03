@@ -4,14 +4,14 @@ _Epic H, stage H4 (first sub-step), of
 [`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
 Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
 the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
-**which combinations of the three CFC dials are conforming deployment states and
+**which combinations of the CFC dials are conforming deployment states and
 in what order a deployment may advance them**, before H4 lands `enforce-strict`
 behavior and before H2/H3a flip any shipped host — so the rollout ordering is
 written down first._
 
-## 1. The three dials (all runtime-configured, all orthogonal)
+## 1. The four dials (all runtime-configured, all orthogonal)
 
-CFC has three independent runtime dials. Each is a monotone ladder; none
+CFC has four independent runtime dials. Each is a monotone ladder; none
 subsumes another. Their current homes and defaults:
 
 | Dial | Values (weak → strict) | `Runtime` default | Governs |
@@ -19,14 +19,16 @@ subsumes another. Their current homes and defaults:
 | `cfcEnforcementMode` | `disabled` · `observe` · `enforce-explicit` · `enforce-strict` | `enforce-explicit` | whether a boundary **reason rejects** the commit ([types.ts](../../packages/runner/src/cfc/types.ts) `cfcEnforcementStrictness`) |
 | `cfcFlowLabels` | `off` · `observe` · `persist` | `off` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
 | `cfcWriteFloor` | `off` · `observe` · `enforce` | `off` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
+| `cfcTriggerReadGating` | `false` · `true` | `false` | whether the **§8.9.2 trigger reads** (the addresses whose invalidating writes scheduled a rerun) join the enforcement consumed sets (SC-3, Epic H5, #4488) |
 
 They are orthogonal because they gate different things: the **enforcement mode**
 decides what happens to a recorded reason (ignore / diagnose / reject); the
 **flow dial** decides whether derived labels come into existence; the **write
 floor** is one more reason-source, itself dialable so it can be observed before
-it rejects. A deployment picks a point in the 4 × 3 × 3 cube — but most points
-are not conforming, and the conforming ones are reachable only along a partial
-order.
+it rejects; the **trigger-read gate** widens the consumed sets the existing
+gates quantify over. A deployment picks a point in the 4 × 3 × 3 × 2 cube — but
+most points are not conforming, and the conforming ones are reachable only
+along a partial order.
 
 ### What each enforcement level means
 
@@ -78,6 +80,15 @@ flow `off` (the floor and the explicit gate need no derived labels), and may
 advance `cfcWriteFloor` on its own schedule. The only forbidden moves are
 advancing a *consuming* enforcement ahead of the *production* dial it consumes.
 
+`cfcTriggerReadGating` (H5) adds no ordering constraint: it consumes only
+**stored** labels of the trigger addresses (not flow-derived ones), and it is
+fail-closed — folding trigger reads into the consumed sets can only reject
+*more*, never less, so turning it on is sound at any point in the cube (and a
+no-op unless something enforces). Like the other dials it is anti-downgrade
+pinned per transaction: once the runtime enables it at tx creation, code
+reaching the tx cannot turn it off. It ships `false` pending the per-prepare
+metadata-read cost measurement called for in the H5 plan.
+
 ```
 cfcFlowLabels:   off ──▶ observe ──▶ persist ─────────┐
                                                        ├─▶ enforce-strict on
@@ -105,6 +116,12 @@ the dial isn't producing); `cfcFlowLabels: persist` with `cfcEnforcementMode:
 disabled` is *permitted but pointless* (labels written, never consulted) — a
 warning, not an error.
 
+The trigger-read gate composes freely with every state above: each state ×
+`cfcTriggerReadGating ∈ {false, true}` is conforming wherever the state is
+(fail-closed widening, §2). The expected move is dialing it `true` from any
+enforcing state once the H5 cost measurement clears; with `cfcEnforcementMode:
+disabled` it is *permitted but pointless*, like `persist`-without-enforcement.
+
 ## 4. What `enforce-strict` adds (the H4 implementation contract)
 
 H4's code step (separate PR) implements the strict-only rejects at the
@@ -129,16 +146,17 @@ carries distinct behavior.
 ## 5. Spec-owed
 
 A spec PR to `commontoolsinc/specs` records the §18.6.3 conformance text: the
-three-dial matrix, the "no consuming enforcement ahead of its producing dial"
+dial matrix, the "no consuming enforcement ahead of its producing dial"
 ordering constraint, and the `enforce-strict` reject set. File it once H4's code
 step lands and the strict rejects have concrete reason contracts to cite.
 Tracked in [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-13.
 
 ## Provenance
 
-Grounded in the three implemented dials — `cfcEnforcementMode`
-([types.ts](../../packages/runner/src/cfc/types.ts)), `cfcFlowLabels` (H1), and
-`cfcWriteFloor` (D3, #4479) — plus the SC-13 rollout constraint in
+Grounded in the four implemented dials — `cfcEnforcementMode`
+([types.ts](../../packages/runner/src/cfc/types.ts)), `cfcFlowLabels` (H1),
+`cfcWriteFloor` (D3, #4479), and `cfcTriggerReadGating` (H5, #4488) — plus the
+SC-13 rollout constraint in
 `cfc-spec-changes.md` and the current shell posture
 ([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
 `enforce-explicit` + flow `persist`, H2).
