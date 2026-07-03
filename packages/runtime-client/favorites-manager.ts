@@ -11,6 +11,7 @@ import { RuntimeClient } from "./runtime-client.ts";
 import type { CellRef } from "./protocol/types.ts";
 import {
   FavoriteEntry,
+  favoriteKey,
   favoriteListSchema,
   Home,
   homeSchema,
@@ -50,7 +51,11 @@ export class FavoritesManager {
     const handler = await this.#getHandler("addFavorite");
     const pieceCellRef = this.#createPieceRef(space, pieceId);
     const tags = await this.#deriveTags(space, pieceId, tag);
-    await handler.send({ piece: pieceCellRef, tags, spaceName });
+    // The favorite is addressed by the piece's identity, so a re-favorite dedups
+    // and an unfavorite removes by identity. Pattern code cannot introspect the
+    // piece cell's link, so the key is computed here from the piece address.
+    const id = favoriteKey(pieceCellRef);
+    await handler.send({ piece: pieceCellRef, tags, spaceName, id });
   }
 
   /**
@@ -88,7 +93,10 @@ export class FavoritesManager {
   async removeFavorite(space: DID, pieceId: string): Promise<void> {
     const handler = await this.#getHandler("removeFavorite");
     const pieceCellRef = this.#createPieceRef(space, pieceId);
-    await handler.send({ piece: pieceCellRef });
+    // Address the favorite entity by the same key add used, so the removal
+    // reaches it regardless of the whole list's contents.
+    const id = favoriteKey(pieceCellRef);
+    await handler.send({ piece: pieceCellRef, id });
   }
 
   /**
