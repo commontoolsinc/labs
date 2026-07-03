@@ -313,6 +313,43 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("alice");
   });
 
+  // A link write replacing a labeled slot is skipped by the stamp loops
+  // (the link machinery owns that path), so the cleared existence lands as
+  // a bare shape entry at the written path — the leftover branch.
+  it("link overwrite of a labeled slot keeps existence as a bare shape entry", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-link-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret"] } },
+    ]);
+    // Doc with a derived pair at ["slot"]: create clean, then taint the slot.
+    const outId = await writeTainted(rt, undefined, "ec-link-out", {
+      slot: 0,
+    });
+    const taint = rt.edit();
+    taint.readOrThrow(readAddress(sourceId, []));
+    taint.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "slot"] },
+      { copied: true },
+    );
+    taint.prepareCfc();
+    expect((await taint.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["slot"]).length).toBe(1);
+
+    // Replace the slot with a LINK (a clean tx): the link machinery owns
+    // the slot's label now, but the existence history must survive.
+    await seedDoc(rt, "ec-link-target", { n: 2 }, []);
+    const linkTx = rt.edit();
+    const outCell = rt.getCell(space, "ec-link-out", undefined, linkTx);
+    const otherCell = rt.getCell(space, "ec-link-target", undefined, linkTx);
+    outCell.key("slot").set(otherCell);
+    linkTx.prepareCfc();
+    expect((await linkTx.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["slot"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toContainEqual("secret");
+  });
+
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite
   // must not churn the metadata — the grown existence entry re-derives
   // identically.

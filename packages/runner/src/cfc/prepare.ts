@@ -3906,6 +3906,21 @@ export const prepareBoundaryCommit = (
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
+        // A link write replacing a previously content-labeled path drops
+        // the old derived/structure entries here (the link machinery owns
+        // the slot's label now) — their existence history still folds into
+        // the SC-4 pool like any other clear.
+        if (
+          flowPersist &&
+          currentLinkWritePaths.has(key) &&
+          (entry.origin === "derived" || entry.origin === "structure") &&
+          (entry.label.confidentiality?.length ?? 0) > 0
+        ) {
+          clearedExistence.push({
+            path: entryPath,
+            confidentiality: entry.label.confidentiality!,
+          });
+        }
         continue;
       }
       // A fresh ingest re-mints the ExternalIngest mark for this doc below, so
