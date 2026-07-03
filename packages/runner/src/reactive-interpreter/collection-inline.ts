@@ -44,6 +44,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveOpPattern } from "../builtins/op-pattern-ref.ts";
 import { map as legacyMapBuiltin } from "../builtins/map.ts";
+import { filter as legacyFilterBuiltin } from "../builtins/filter.ts";
 import type { BuiltRog } from "./from-builder.ts";
 import { evalRog } from "./interpret.ts";
 
@@ -440,6 +441,239 @@ export function makeInlineMapImplementation(
       probeScoped(() =>
         resultPresence.withTx(tx).set(slots as unknown as unknown[])
       );
+    };
+  };
+}
+
+/** The synthetic raw-node implementation for one eligible inline `filter`.
+ *
+ * Per element, a read-isolated effect evaluates the PREDICATE ROG and
+ * writes its result to a per-element predicate cell; the coordinator keeps
+ * the ORIGINAL element links where the predicate settled truthy, drops
+ * defined-falsy, and treats undefined as still-pending (the journaled
+ * predicate read re-triggers the rebuild when it lands — legacy's two-pass
+ * convergence, minus the child-pattern latency).
+ *
+ * RESUMED coordinators degrade to the legacy builtin IMMEDIATELY: the
+ * resume-republish/recovery machinery (stale aggregates vs streaming
+ * predicate cells) stays on the battle-tested path; fresh runtimes get the
+ * inline win.
+ */
+export function makeInlineFilterImplementation(
+  elementBuilt: BuiltRog,
+  _elementFactory: unknown,
+  usage: { usesElement: boolean; usesIndex: boolean; usesParams: boolean },
+) {
+  return function ri2InlineFilter(
+    inputsCell: Cell<{ list: unknown[]; op: unknown; params?: unknown }>,
+    sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+    addCancel: AddCancel,
+    _cause: unknown,
+    // deno-lint-ignore no-explicit-any
+    parentCell: Cell<any>,
+    runtime: Runtime,
+    outputBinding?: NormalizedFullLink,
+    awaitSync?: boolean,
+  ): Action {
+    // deno-lint-ignore no-explicit-any
+    let result: Cell<any> | undefined;
+    let legacyAction: Action | undefined;
+    const degrade = (): Action => {
+      legacyAction ??= legacyFilterBuiltin(
+        // deno-lint-ignore no-explicit-any
+        inputsCell as unknown as Cell<any>,
+        sendResult,
+        addCancel,
+        _cause as never,
+        parentCell,
+        runtime,
+        outputBinding,
+        awaitSync,
+      ) as unknown as Action;
+      return legacyAction;
+    };
+    const elementRuns = new Map<string, {
+      // deno-lint-ignore no-explicit-any
+      predicateCell: Cell<any>;
+      lastIndex: number;
+      cancel?: Cancel;
+    }>();
+    const degradeNow = (tx: IExtendedStorageTransaction): void => {
+      for (const run of elementRuns.values()) run.cancel?.();
+      elementRuns.clear();
+      degrade()(tx);
+    };
+
+    return (tx: IExtendedStorageTransaction) => {
+      if (legacyAction) return legacyAction(tx);
+      // Resume machinery stays legacy (see module doc).
+      if (awaitSync) return degradeNow(tx);
+      const probeScoped = <T>(fn: () => T): T =>
+        tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
+
+      {
+        const rawOp = probeScoped(() =>
+          inputsCell.key("op").withTx(tx).getRaw() as unknown
+        );
+        resolveOpPattern(runtime, rawOp, "filter");
+      }
+
+      const listCell = probeScoped(() =>
+        inputsCell.key("list").withTx(tx).resolveAsCell()
+      );
+      const listScope = resolveLink(
+        runtime,
+        tx,
+        inputsCell.key("list").getAsNormalizedFullLink(),
+        "writeRedirect",
+      ).scope;
+      if ((listScope ?? "space") !== "space") return degradeNow(tx);
+
+      if (!result) {
+        const outputSpot = outputSpotFromBinding(outputBinding);
+        if (!outputSpot) {
+          throw new Error("ri2InlineFilter: needs an output binding");
+        }
+        // deno-lint-ignore no-explicit-any
+        const baseResult = runtime.getCell<any>(
+          parentCell.space,
+          { filter: parentCell.entityId, outputSpot },
+          listResultSchema(),
+          tx,
+        );
+        result = scopedCell(runtime, tx, baseResult, listScope);
+        setResultCell(result, parentCell);
+        setPatternCell(result, parentCell.key("pattern"));
+        sendResult(tx, result);
+      }
+      const resultCell = result;
+      const resultPresence = resultCell.asSchema(RESULT_PRESENCE_SCHEMA);
+
+      const rawList = probeScoped(() =>
+        listCell.withTx(tx).getRaw() as unknown
+      );
+      if (rawList === undefined) {
+        probeScoped(() => resultPresence.withTx(tx).set([]));
+        for (const run of elementRuns.values()) run.cancel?.();
+        elementRuns.clear();
+        return;
+      }
+      if (!Array.isArray(rawList)) {
+        throw new Error("filter currently only supports arrays");
+      }
+      const len = rawList.length;
+
+      const slotLink = (i: number): NormalizedFullLink =>
+        probeScoped(() => {
+          const elemCell = listCell.key(i as never).withTx(tx).resolveAsCell();
+          return resolveLink(
+            runtime,
+            tx,
+            elemCell.getAsNormalizedFullLink(),
+            "value",
+          );
+        });
+
+      const keyCounts = new Map<string, number>();
+      // deno-lint-ignore no-explicit-any
+      const kept: any[] = [];
+      for (let i = 0; i < len; i++) {
+        if (!(i in (rawList as unknown[]))) continue;
+        const index = i;
+        const link = slotLink(index);
+        if ((link.scope ?? "space") !== "space") return degradeNow(tx);
+        const linkKey = [link.space, link.id, link.scope, link.path] as const;
+        const dedupKey = JSON.stringify(linkKey);
+        const occurrence = keyCounts.get(dedupKey) ?? 0;
+        keyCounts.set(dedupKey, occurrence + 1);
+        const elementKey = JSON.stringify([...linkKey, occurrence]);
+
+        let run = elementRuns.get(elementKey);
+        if (!run) {
+          // deno-lint-ignore no-explicit-any
+          const predicateCell = runtime.getCell<any>(
+            parentCell.space,
+            { filter: resultCell, elementKey },
+            undefined,
+            tx,
+          );
+          setResultCell(predicateCell, parentCell);
+          run = { predicateCell, lastIndex: -1 };
+          elementRuns.set(elementKey, run);
+        }
+        const needsSubscribe = !run.cancel ||
+          (usage.usesIndex && run.lastIndex !== index);
+        if (needsSubscribe) {
+          run.cancel?.();
+          const predicateCell = run.predicateCell;
+          const paramsAddr = usage.usesParams
+            ? toMemorySpaceAddress(
+              inputsCell.key("params").getAsNormalizedFullLink(),
+            )
+            : undefined;
+          const elementAction: Action = (childTx) => {
+            const elemValue = runtime.getCellFromLink(
+              link,
+              undefined,
+              childTx,
+            )!.withTx(childTx).get() as unknown;
+            const argument: Record<string, unknown> = {};
+            if (usage.usesElement) argument.element = elemValue;
+            if (usage.usesIndex) argument.index = index;
+            if (usage.usesParams) {
+              argument.params = inputsCell.key("params").withTx(childTx)
+                .get();
+            }
+            const { result: out, errors } = evalRog(elementBuilt.rog, {
+              argument,
+              leafImpls: elementBuilt.leafImpls,
+              children: elementBuilt.children,
+            });
+            predicateCell.withTx(childTx).setRawUntyped(
+              fabricFromNativeValue(convertCellsToLinks(out)),
+            );
+            if (errors.length > 0) throw errors[0].error;
+          };
+          run.cancel = runtime.scheduler.subscribe(
+            elementAction,
+            {
+              reads: paramsAddr
+                ? [toMemorySpaceAddress(link), paramsAddr]
+                : [toMemorySpaceAddress(link)],
+              shallowReads: [],
+              writes: [
+                toMemorySpaceAddress(predicateCell.getAsNormalizedFullLink()),
+              ],
+            },
+            { isEffect: true },
+          );
+          addCancel(run.cancel);
+        }
+        run.lastIndex = index;
+
+        // Legacy contribute(): keep the ORIGINAL element where the predicate
+        // settled truthy; drop defined-falsy; undefined = pending (the
+        // journaled read below re-triggers this rebuild when it lands).
+        const included = run.predicateCell.withTx(tx).get() as unknown;
+        if (RI2_DEBUG) {
+          console.log(
+            `[ri2] filter-elem ${index}: included=${
+              JSON.stringify(included)
+            }`,
+          );
+        }
+        if (included) {
+          kept.push(
+            exposedResultCell(
+              runtime,
+              tx,
+              runtime.getCellFromLink(link, undefined, tx)!,
+            ),
+          );
+        }
+      }
+
+      probeScoped(() => resultPresence.withTx(tx).set(kept));
     };
   };
 }

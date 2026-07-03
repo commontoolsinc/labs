@@ -227,4 +227,51 @@ describe("interpreter dispatch differential (W3c)", () => {
       `expected exactly one pattern boundary, census=${JSON.stringify(census)}`,
     );
   });
+
+  it("inline filter: predicate-kept originals, byte-equal, reactive", async () => {
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const IsBig = pattern<{ element: { n: number } }>(
+          (i) => lift((v: { n: number }) => v.n > 10)({ n: i.element.n }),
+          {
+            type: "object",
+            properties: {
+              element: {
+                type: "object",
+                properties: { n: { type: "number" } },
+                required: ["n"],
+              },
+            },
+            required: ["element"],
+          },
+        );
+        const big = (input.items as unknown as {
+          filterWithPattern: (op: unknown, params: unknown) => unknown;
+        }).filterWithPattern(IsBig as unknown, {}) as never;
+        return { big };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 5 }, { n: 20 }, { n: 7 }, { n: 30 }] };
+    // Flip element 0 across the predicate threshold.
+    const edit = {
+      path: ["items"],
+      value: [{ n: 50 }, { n: 20 }, { n: 7 }, { n: 30 }],
+    };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { big: [{ n: 20 }, { n: 30 }] });
+    assertEquals(legacy.afterEdit, {
+      big: [{ n: 50 }, { n: 20 }, { n: 30 }],
+    });
+    assert(
+      (census.boundariesByKind["collection-inlined"] ?? 0) >= 1,
+      `expected inline filter engagement, census=${JSON.stringify(census)}`,
+    );
+  });
 });

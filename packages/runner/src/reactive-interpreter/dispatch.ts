@@ -41,6 +41,7 @@ import { evalRog } from "./interpret.ts";
 import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
 import {
   elementArgumentUsage,
+  makeInlineFilterImplementation,
   makeInlineMapImplementation,
 } from "./collection-inline.ts";
 
@@ -395,8 +396,12 @@ function tryBuildInlineCollectionNode(
     return undefined;
   };
   const op = built.rog.ops[opId];
-  if (op?.detail.kind !== "collection" || op.detail.op !== "map") {
-    return refuse(`not_map:${op?.detail.kind}`);
+  if (op?.detail.kind !== "collection") {
+    return refuse(`not_collection:${op?.detail.kind}`);
+  }
+  const collectionOp = op.detail.op;
+  if (collectionOp !== "map" && collectionOp !== "filter") {
+    return refuse(`op_pending:${collectionOp}`); // flatMap stays legacy
   }
   const elementFactory = built.collectionElements.get(opId);
   if (elementFactory === undefined) return refuse("no_element_factory");
@@ -428,19 +433,23 @@ function tryBuildInlineCollectionNode(
       | undefined
       | Record<string, unknown>;
 
+  const implementation = collectionOp === "map"
+    ? makeInlineMapImplementation(
+      elementBuilt,
+      elementFactory,
+      elementResultSchema as never,
+      usage,
+    )
+    : makeInlineFilterImplementation(elementBuilt, elementFactory, usage);
+
   return {
     module: {
       type: "raw",
-      implementation: makeInlineMapImplementation(
-        elementBuilt,
-        elementFactory,
-        elementResultSchema as never,
-        usage,
-      ),
-      debugName: "ri2:map-inline",
+      implementation,
+      debugName: `ri2:${collectionOp}-inline`,
       // Keep the CT-1623 by-identity op protocol (compact sentinel through
       // the session artifact index; loud on miss).
-      ri2SubstituteOpRefs: "map",
+      ri2SubstituteOpRefs: collectionOp,
     } as unknown as Module,
     inputs: original.inputs,
     outputs: original.outputs,
