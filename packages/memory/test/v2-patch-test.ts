@@ -1,5 +1,10 @@
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { applyPatch } from "../v2/patch.ts";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
+import { applyPatch, touchedPointerPaths } from "../v2/patch.ts";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricInstance } from "@commonfabric/data-model/interface";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -175,6 +180,13 @@ Deno.test("memory v2 patch applies multiple operations without mutating the inpu
     profile: { name: "Bob", title: "Dr" },
     tags: ["one", "two", "three"],
   });
+});
+
+Deno.test("memory v2 patch rejects malformed operation tags", () => {
+  const malformedOp = { op: "bogus", path: "/a" } as never;
+
+  assertThrows(() => applyPatch({}, [malformedOp]), Error);
+  assertThrows(() => touchedPointerPaths(malformedOp), Error);
 });
 
 Deno.test("memory v2 patch can replace the root and continue patching the replacement", () => {

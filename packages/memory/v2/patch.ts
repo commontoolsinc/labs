@@ -67,7 +67,7 @@ export const applyPatch = (
 };
 
 const applyOp = (state: FabricValue, op: PatchOp): FabricValue =>
-  patchOpDescriptors[op.op].apply(state, op);
+  dispatchPatchOp(state, op);
 
 /**
  * Copy-on-write thaw of the spine of `root` down to `thawPath`, returning the
@@ -483,11 +483,21 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  *   mergeable ops exist to avoid. See
  *   docs/specs/memory-v2/08-conflict-granularity.md.
  *
- * Adding a new wire op is a single new entry here: the `Record<PatchOp["op"],
- * …>` type makes a missing entry (or an entry for a tag not in the `PatchOp`
- * union) a compile error, so `apply` and the path matchers can never silently
- * fall out of step with the union.
+ * Adding a new wire op requires a descriptor entry and switch cases below. The
+ * descriptor map and `never` fallbacks make missing entries compile errors, so
+ * `apply` and the path matchers stay in step with the union.
  */
+type PointerField<Op extends PatchOp> = Op extends PatchOp ? Exclude<
+    Extract<
+      {
+        [Key in keyof Op]: Op[Key] extends string ? Key : never;
+      }[keyof Op],
+      string
+    >,
+    "op"
+  >
+  : never;
+
 export interface PatchOpDescriptor<Op extends PatchOp = PatchOp> {
   readonly op: Op["op"];
   readonly pointerFields: readonly string[];
@@ -495,11 +505,22 @@ export interface PatchOpDescriptor<Op extends PatchOp = PatchOp> {
   readonly apply: (state: FabricValue, op: Op) => FabricValue;
 }
 
-const descriptor = <Op extends PatchOp>(
-  d: PatchOpDescriptor<Op>,
-): PatchOpDescriptor => d as unknown as PatchOpDescriptor;
+interface TypedPatchOpDescriptor<Op extends PatchOp> {
+  readonly op: Op["op"];
+  readonly pointerFields: readonly PointerField<Op>[];
+  readonly structural: boolean;
+  readonly apply: (state: FabricValue, op: Op) => FabricValue;
+}
 
-export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
+type PatchOpDescriptorMap = {
+  [Op in PatchOp as Op["op"]]: TypedPatchOpDescriptor<Op>;
+};
+
+const descriptor = <Op extends PatchOp>(
+  d: TypedPatchOpDescriptor<Op>,
+): TypedPatchOpDescriptor<Op> => d;
+
+const patchOpDescriptorMap = {
   replace: descriptor<Extract<PatchOp, { op: "replace" }>>({
     op: "replace",
     pointerFields: ["path"],
@@ -558,7 +579,75 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
     structural: false,
     apply: (state, op) => incrementAtPath(state, parsePointer(op.path), op.by),
   }),
+} satisfies PatchOpDescriptorMap;
+
+const descriptorForExport = <Op extends PatchOp>(
+  descriptor: TypedPatchOpDescriptor<Op>,
+): PatchOpDescriptor => ({
+  op: descriptor.op,
+  pointerFields: descriptor.pointerFields,
+  structural: descriptor.structural,
+  apply: (state, op) => descriptor.apply(state, op as Op),
+});
+
+export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
+  replace: descriptorForExport(patchOpDescriptorMap.replace),
+  add: descriptorForExport(patchOpDescriptorMap.add),
+  remove: descriptorForExport(patchOpDescriptorMap.remove),
+  move: descriptorForExport(patchOpDescriptorMap.move),
+  splice: descriptorForExport(patchOpDescriptorMap.splice),
+  append: descriptorForExport(patchOpDescriptorMap.append),
+  "add-unique": descriptorForExport(patchOpDescriptorMap["add-unique"]),
+  "remove-by-value": descriptorForExport(
+    patchOpDescriptorMap["remove-by-value"],
+  ),
+  increment: descriptorForExport(patchOpDescriptorMap.increment),
 };
+
+const applyWithDescriptor = <Op extends PatchOp>(
+  state: FabricValue,
+  op: Op,
+  descriptor: TypedPatchOpDescriptor<Op>,
+): FabricValue => descriptor.apply(state, op);
+
+const unsupportedPatchOp = (op: never): never => {
+  const tag = (op as { op?: unknown }).op;
+  throw new Error(`unsupported patch op ${String(tag)}`);
+};
+
+const dispatchPatchOp = (state: FabricValue, op: PatchOp): FabricValue => {
+  switch (op.op) {
+    case "replace":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.replace);
+    case "add":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.add);
+    case "remove":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.remove);
+    case "move":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.move);
+    case "splice":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.splice);
+    case "append":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.append);
+    case "add-unique":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap["add-unique"]);
+    case "remove-by-value":
+      return applyWithDescriptor(
+        state,
+        op,
+        patchOpDescriptorMap["remove-by-value"],
+      );
+    case "increment":
+      return applyWithDescriptor(state, op, patchOpDescriptorMap.increment);
+  }
+  return unsupportedPatchOp(op);
+};
+
+const pointerPathsWithDescriptor = <Op extends PatchOp>(
+  op: Op,
+  descriptor: TypedPatchOpDescriptor<Op>,
+): string[][] =>
+  descriptor.pointerFields.map((field) => parsePointer(op[field] as string));
 
 /**
  * The JSON-Pointer paths a patch op names, parsed to segment arrays: `["path"]`
@@ -568,10 +657,35 @@ export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
  * `touchedLeafPathsForPatch`), and the base from which the parent-injecting
  * (shape-read) and client pending-replay path computations are built.
  */
-export const touchedPointerPaths = (op: PatchOp): string[][] =>
-  patchOpDescriptors[op.op].pointerFields.map((field) =>
-    parsePointer((op as unknown as Record<string, string>)[field])
-  );
+export const touchedPointerPaths = (op: PatchOp): string[][] => {
+  switch (op.op) {
+    case "replace":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.replace);
+    case "add":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.add);
+    case "remove":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.remove);
+    case "move":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.move);
+    case "splice":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.splice);
+    case "append":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.append);
+    case "add-unique":
+      return pointerPathsWithDescriptor(
+        op,
+        patchOpDescriptorMap["add-unique"],
+      );
+    case "remove-by-value":
+      return pointerPathsWithDescriptor(
+        op,
+        patchOpDescriptorMap["remove-by-value"],
+      );
+    case "increment":
+      return pointerPathsWithDescriptor(op, patchOpDescriptorMap.increment);
+  }
+  return unsupportedPatchOp(op);
+};
 
 /**
  * Whether the op adds, removes, or reorders a container's keys (`add`, `remove`,
