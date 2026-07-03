@@ -282,7 +282,7 @@ function freezeArray(
   converted: WeakMap<object, ModuleSafeValue>,
 ): readonly ModuleSafeValue[] {
   const result = new Array(value.length) as ModuleSafeValue[];
-  converted.set(value, result as unknown as ModuleSafeValue);
+  converted.set(value, result);
 
   copyOwnProperties(value, result, path, converted, { skipLength: true });
 
@@ -315,7 +315,7 @@ function freezeMap(
 ): ReadonlyMap<ModuleSafeValue, ModuleSafeValue> {
   const builder = FrozenMap.createBuilder<ModuleSafeValue, ModuleSafeValue>();
   const result = builder.wrapper;
-  converted.set(value as object, result as unknown as ModuleSafeValue);
+  converted.set(value, result);
 
   let index = 0;
   for (const [key, entryValue] of protoEntries(value)) {
@@ -348,7 +348,7 @@ function freezeSet(
 ): ReadonlySet<ModuleSafeValue> {
   const builder = FrozenSet.createBuilder<ModuleSafeValue>();
   const result = builder.wrapper;
-  converted.set(value as object, result as unknown as ModuleSafeValue);
+  converted.set(value, result);
 
   let index = 0;
   for (const entryValue of protoValues(value)) {

@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/sandbox/plain-data.ts": [
-    "285:30:146tvds",
-    "318:40:146tvds",
-    "351:40:146tvds",
-  ],
   "packages/runner/src/storage/inspector.ts": [
     "312:26:1000cb7",
   ],
