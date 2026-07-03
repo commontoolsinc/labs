@@ -47,7 +47,7 @@ describe("SymbolCodec", () => {
           context,
         );
         expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        expect((result as ProblematicValue).wireTypeTag).toBe(
           "Symbol@1",
         );
       });

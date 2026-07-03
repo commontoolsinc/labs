@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/codec-common/SymbolCodec.test.ts": [
-    "50:23:owpis5",
-  ],
   "packages/data-model/test/codec-json/CodecRegistry.test.ts": [
     "97:30:78wfmo",
   ],
