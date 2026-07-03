@@ -116,7 +116,7 @@ describe("JsonEncodingContext", () => {
     it("produces valid JSON bytes from `encodeToBytes()`", () => {
       const { context } = makeTestContext();
       const bytes = context.encodeToBytes(
-        { a: 1 } as unknown as FabricValue,
+        { a: 1 } as FabricValue,
       );
       const json = new TextDecoder().decode(bytes);
       expect(JSON.parse(json)).toEqual({ a: 1 });
@@ -137,7 +137,7 @@ describe("JsonEncodingContext", () => {
       const value = {
         name: "test",
         count: 42,
-      } as unknown as FabricValue;
+      } as FabricValue;
       const bytes = context.encodeToBytes(value);
       const result = context.decodeFromBytes(
         bytes,
@@ -156,7 +156,7 @@ describe("JsonEncodingContext", () => {
         runtime,
       );
       expect(result).toBeInstanceOf(FabricError);
-      const se = result as unknown as FabricError;
+      const se = result as FabricError;
       expect(se.toNativeValue(true)).toBeInstanceOf(TypeError);
       expect(se.message).toBe("oops");
     });
@@ -174,7 +174,7 @@ describe("JsonEncodingContext", () => {
         users: [{ name: "Alice" }, { name: "Bob" }],
         error: FabricError.fromNativeError(new Error("fail")),
         nothing: undefined,
-      } as unknown as FabricValue;
+      } as FabricValue;
       const bytes = context.encodeToBytes(value);
       const result = context.decodeFromBytes(
         bytes,
@@ -254,7 +254,7 @@ describe("JsonEncodingContext", () => {
       expect(1 in arrResult).toBe(true); // not a hole
       expect(arrResult[2]).toBe(3);
 
-      const obj = { a: 1, b: undefined } as unknown as FabricValue;
+      const obj = { a: 1, b: undefined } as FabricValue;
       const objResult = roundTrip(obj) as Record<string, FabricValue>;
       expect(objResult.a).toBe(1);
       expect(objResult.b).toBe(undefined);
@@ -264,13 +264,13 @@ describe("JsonEncodingContext", () => {
     it("round-trips `bigint` at top level, in arrays, and as object values", () => {
       expect(roundTrip(42n as FabricValue)).toBe(42n);
 
-      const arr = [1, 42n, "hello"] as unknown as FabricValue;
+      const arr = [1, 42n, "hello"] as FabricValue;
       const arrResult = roundTrip(arr) as FabricValue[];
       expect(arrResult[0]).toBe(1);
       expect(arrResult[1]).toBe(42n);
       expect(arrResult[2]).toBe("hello");
 
-      const obj = { a: 1, b: 42n } as unknown as FabricValue;
+      const obj = { a: 1, b: 42n } as FabricValue;
       const objResult = roundTrip(obj) as Record<string, FabricValue>;
       expect(objResult.a).toBe(1);
       expect(objResult.b).toBe(42n);
@@ -298,7 +298,7 @@ describe("JsonEncodingContext", () => {
         nan: NaN,
         pinf: Infinity,
         ninf: -Infinity,
-      } as unknown as FabricValue;
+      } as FabricValue;
       const objResult = roundTrip(obj) as Record<string, number>;
       expect(Object.is(objResult.nz, -0)).toBe(true);
       expect(Number.isNaN(objResult.nan)).toBe(true);
@@ -315,7 +315,7 @@ describe("JsonEncodingContext", () => {
         Symbol.for("a"),
         1,
         Symbol.for("b"),
-      ] as unknown as FabricValue;
+      ] as FabricValue;
       const arrResult = roundTrip(arr) as unknown[];
       expect(arrResult[0]).toBe(Symbol.for("a"));
       expect(arrResult[1]).toBe(1);
@@ -324,7 +324,7 @@ describe("JsonEncodingContext", () => {
       const obj = {
         kind: Symbol.for("event"),
         flag: Symbol.for("ready"),
-      } as unknown as FabricValue;
+      } as FabricValue;
       const objResult = roundTrip(obj) as Record<string, unknown>;
       expect(objResult.kind).toBe(Symbol.for("event"));
       expect(objResult.flag).toBe(Symbol.for("ready"));
@@ -343,17 +343,17 @@ describe("JsonEncodingContext", () => {
     it("round-trips `FabricEpochNsec` at top level and in nested structures", () => {
       const top = roundTrip(
         new FabricEpochNsec(1704067200000000000n) as FabricValue,
-      ) as unknown as FabricEpochNsec;
+      ) as FabricEpochNsec;
       expect(top).toBeInstanceOf(FabricEpochNsec);
       expect(top.value).toBe(1704067200000000000n);
 
       const obj = {
         timestamp: new FabricEpochNsec(42000000000n),
         label: "test",
-      } as unknown as FabricValue;
+      } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.label).toBe("test");
-      const ts = result.timestamp as unknown as FabricEpochNsec;
+      const ts = result.timestamp as FabricEpochNsec;
       expect(ts).toBeInstanceOf(FabricEpochNsec);
       expect(ts.value).toBe(42000000000n);
     });
@@ -361,17 +361,17 @@ describe("JsonEncodingContext", () => {
     it("round-trips `FabricEpochDays` at top level and in nested structures", () => {
       const top = roundTrip(
         new FabricEpochDays(19723n) as FabricValue,
-      ) as unknown as FabricEpochDays;
+      ) as FabricEpochDays;
       expect(top).toBeInstanceOf(FabricEpochDays);
       expect(top.value).toBe(19723n);
 
       const obj = {
         date: new FabricEpochDays(19723n),
         label: "birthday",
-      } as unknown as FabricValue;
+      } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.label).toBe("birthday");
-      const d = result.date as unknown as FabricEpochDays;
+      const d = result.date as FabricEpochDays;
       expect(d).toBeInstanceOf(FabricEpochDays);
       expect(d.value).toBe(19723n);
     });
@@ -379,7 +379,7 @@ describe("JsonEncodingContext", () => {
     it("round-trips `FabricRegExp` at top level and in nested structures", () => {
       const top = roundTrip(
         new FabricRegExp(/ab+c/gi) as FabricValue,
-      ) as unknown as FabricRegExp;
+      ) as FabricRegExp;
       expect(top).toBeInstanceOf(FabricRegExp);
       expect(top.source).toBe("ab+c");
       expect(top.flags).toBe("gi");
@@ -388,10 +388,10 @@ describe("JsonEncodingContext", () => {
       const obj = {
         pattern: new FabricRegExp(/\d+/g),
         label: "digits",
-      } as unknown as FabricValue;
+      } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.label).toBe("digits");
-      const re = result.pattern as unknown as FabricRegExp;
+      const re = result.pattern as FabricRegExp;
       expect(re).toBeInstanceOf(FabricRegExp);
       expect(re.source).toBe("\\d+");
       expect(re.flags).toBe("g");
@@ -409,7 +409,7 @@ describe("JsonEncodingContext", () => {
       // A non-plain object that is neither a FabricInstance nor codec-handled
       // must fail loudly, not be mis-encoded as a plain object.
       const { context } = makeTestContext();
-      expect(() => context.encode(new Map() as unknown as FabricValue))
+      expect(() => context.encode(new Map() as FabricValue))
         .toThrow("no applicable codec");
     });
   });
@@ -550,7 +550,7 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips simple object", () => {
-      const obj = { a: 1, b: "two", c: true } as unknown as FabricValue;
+      const obj = { a: 1, b: "two", c: true } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.a).toBe(1);
       expect(result.b).toBe("two");
@@ -558,7 +558,7 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips nested objects", () => {
-      const obj = { outer: { inner: 42 } } as unknown as FabricValue;
+      const obj = { outer: { inner: 42 } } as FabricValue;
       const result = roundTrip(obj) as Record<
         string,
         Record<string, FabricValue>
@@ -567,7 +567,7 @@ describe("JsonEncodingContext", () => {
     });
 
     it("preserves `undefined` values in objects", () => {
-      const obj = { a: 1, b: undefined } as unknown as FabricValue;
+      const obj = { a: 1, b: undefined } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.a).toBe(1);
       expect(result.b).toBe(undefined);
@@ -576,15 +576,15 @@ describe("JsonEncodingContext", () => {
 
     describe("key ordering (Section 10)", () => {
       it("emits keys in UTF-8 byte order for a bare plain object", () => {
-        const obj = { c: 3, a: 1, b: 2 } as unknown as FabricValue;
+        const obj = { c: 3, a: 1, b: 2 } as FabricValue;
         const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
         expect(Object.keys(wire)).toEqual(["a", "b", "c"]);
       });
 
       it("emits keys in UTF-8 byte order regardless of insertion order", () => {
-        const obj1 = { x: 1, y: 2, z: 3 } as unknown as FabricValue;
-        const obj2 = { z: 3, x: 1, y: 2 } as unknown as FabricValue;
-        const obj3 = { y: 2, z: 3, x: 1 } as unknown as FabricValue;
+        const obj1 = { x: 1, y: 2, z: 3 } as FabricValue;
+        const obj2 = { z: 3, x: 1, y: 2 } as FabricValue;
+        const obj3 = { y: 2, z: 3, x: 1 } as FabricValue;
         const ctx = new JsonEncodingContext();
         expect(ctx.encode(obj1)).toBe(ctx.encode(obj2));
         expect(ctx.encode(obj1)).toBe(ctx.encode(obj3));
@@ -594,7 +594,7 @@ describe("JsonEncodingContext", () => {
         const obj = {
           b: { z: 1, a: 2 },
           a: 0,
-        } as unknown as FabricValue;
+        } as FabricValue;
         const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
         expect(Object.keys(wire)).toEqual(["a", "b"]);
         const inner = wire.b as Record<string, JsonWireValue>;
@@ -608,7 +608,7 @@ describe("JsonEncodingContext", () => {
         const obj = {
           ["\u{10000}"]: 1,
           [""]: 2,
-        } as unknown as FabricValue;
+        } as FabricValue;
         const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
         expect(Object.keys(wire)).toEqual(["", "\u{10000}"]);
       });
@@ -624,7 +624,7 @@ describe("JsonEncodingContext", () => {
           b: 2,
           ["﻿"]: 3,
           a: 4,
-        } as unknown as FabricValue;
+        } as FabricValue;
         const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
         expect(Object.keys(wire)).toEqual([...utf8SortedKeysOf(obj as object)]);
       });
@@ -634,48 +634,48 @@ describe("JsonEncodingContext", () => {
   describe("/object escaping", () => {
     describe("/quote: literal-only /-keyed objects", () => {
       it("emits `/quote` for single-key literal `/`-prefixed object", () => {
-        const obj = { "/myKey": "val" } as unknown as FabricValue;
+        const obj = { "/myKey": "val" } as FabricValue;
         expect(toWireFormat(obj)).toEqual({ "/quote": { "/myKey": "val" } });
       });
 
       it('round-trips `{ "/myKey": "val" }`', () => {
-        const obj = { "/myKey": "val" } as unknown as FabricValue;
+        const obj = { "/myKey": "val" } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/myKey"]).toBe("val");
       });
 
       it('emits `/quote` for `{ "/Link@1": "fake" }` (looks like tag but is literal user data)', () => {
-        const obj = { "/Link@1": "fake" } as unknown as FabricValue;
+        const obj = { "/Link@1": "fake" } as FabricValue;
         expect(toWireFormat(obj)).toEqual({ "/quote": { "/Link@1": "fake" } });
       });
 
       it('round-trips `{ "/Link@1": "fake" }`', () => {
-        const obj = { "/Link@1": "fake" } as unknown as FabricValue;
+        const obj = { "/Link@1": "fake" } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/Link@1"]).toBe("fake");
       });
 
       it("emits `/quote` for multi-key literal object with one `/`-prefixed key", () => {
-        const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
+        const obj = { a: 1, "/b": 2 } as FabricValue;
         expect(toWireFormat(obj)).toEqual({ "/quote": { a: 1, "/b": 2 } });
       });
 
       it("round-trips multi-key literal object with one `/`-prefixed key", () => {
-        const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
+        const obj = { a: 1, "/b": 2 } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["a"]).toBe(1);
         expect(result["/b"]).toBe(2);
       });
 
       it("emits `/quote` for multi-key literal object with multiple `/`-prefixed keys", () => {
-        const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
+        const obj = { "/a": 1, "/b": 2, c: 3 } as FabricValue;
         expect(toWireFormat(obj)).toEqual({
           "/quote": { "/a": 1, "/b": 2, c: 3 },
         });
       });
 
       it("round-trips multi-key literal object with multiple `/`-prefixed keys", () => {
-        const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
+        const obj = { "/a": 1, "/b": 2, c: 3 } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/a"]).toBe(1);
         expect(result["/b"]).toBe(2);
@@ -683,12 +683,12 @@ describe("JsonEncodingContext", () => {
       });
 
       it("emits `/quote` when value is a plain nested object (no `/`-keys inside)", () => {
-        const obj = { "/x": { a: 1 } } as unknown as FabricValue;
+        const obj = { "/x": { a: 1 } } as FabricValue;
         expect(toWireFormat(obj)).toEqual({ "/quote": { "/x": { a: 1 } } });
       });
 
       it("round-trips `/`-keyed object whose value is a plain nested object", () => {
-        const obj = { "/x": { a: 1 } } as unknown as FabricValue;
+        const obj = { "/x": { a: 1 } } as FabricValue;
         const result = roundTrip(obj) as Record<
           string,
           Record<string, FabricValue>
@@ -699,7 +699,7 @@ describe("JsonEncodingContext", () => {
 
     describe("/object: any value requires encoding", () => {
       it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
-        const obj = { "/x": { "/y": 123 } } as unknown as FabricValue;
+        const obj = { "/x": { "/y": 123 } } as FabricValue;
         const wire = toWireFormat(obj);
         // Whole subtree is deep-literal → single /quote wrap of original structure.
         expect(wire).toEqual({
@@ -714,7 +714,7 @@ describe("JsonEncodingContext", () => {
 
       it("boundary contrast: literal subtree uses `/quote`, Fabric type uses `/object`", () => {
         // All-literal: single /quote wraps the whole structure.
-        const literal = { "/x": { "/y": 123 } } as unknown as FabricValue;
+        const literal = { "/x": { "/y": 123 } } as FabricValue;
         expect(toWireFormat(literal)).toEqual({
           "/quote": { "/x": { "/y": 123 } },
         });
@@ -722,7 +722,7 @@ describe("JsonEncodingContext", () => {
         // Fabric type as value: /object with the epoch encoded as its tagged form.
         const withEpoch = {
           "/x": new FabricEpochDays(42n),
-        } as unknown as FabricValue;
+        } as FabricValue;
         expect(toWireFormat(withEpoch)).toEqual({
           "/object": { "/x": { "/EpochDays@1": expect.anything() } },
         });
@@ -730,34 +730,34 @@ describe("JsonEncodingContext", () => {
 
       it("emits `/object` for `/`-keyed object with `FabricError` value", () => {
         const err = FabricError.fromNativeError(new TypeError("eep!"));
-        const obj = { "/x": err } as unknown as FabricValue;
+        const obj = { "/x": err } as FabricValue;
         const wire = toWireFormat(obj);
         expect(Object.keys(wire as object)).toEqual(["/object"]);
       });
 
       it("round-trips `FabricError` as value inside `/`-prefixed key object", () => {
         const err = FabricError.fromNativeError(new TypeError("eep!"));
-        const obj = { "/x": err } as unknown as FabricValue;
+        const obj = { "/x": err } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/x"]).toBeInstanceOf(FabricError);
-        expect((result["/x"] as unknown as FabricError).message).toBe(
+        expect((result["/x"] as FabricError).message).toBe(
           "eep!",
         );
       });
 
       it("round-trips `FabricEpochDays` as value inside `/`-prefixed key object", () => {
         const day = new FabricEpochDays(42n);
-        const obj = { "/x": day } as unknown as FabricValue;
+        const obj = { "/x": day } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/x"]).toBeInstanceOf(FabricEpochDays);
-        expect((result["/x"] as unknown as FabricEpochDays).value).toBe(42n);
+        expect((result["/x"] as FabricEpochDays).value).toBe(42n);
       });
 
       it("emits `/object` for mixed: literal and encoded values", () => {
         const obj = {
           "/a": "literal",
           "/b": FabricError.fromNativeError(new Error("oops")),
-        } as unknown as FabricValue;
+        } as FabricValue;
         const wire = toWireFormat(obj);
         expect(Object.keys(wire as object)).toEqual(["/object"]);
       });
@@ -766,7 +766,7 @@ describe("JsonEncodingContext", () => {
         const obj = {
           "/a": "literal",
           "/b": FabricError.fromNativeError(new Error("oops")),
-        } as unknown as FabricValue;
+        } as FabricValue;
         const result = roundTrip(obj) as Record<string, FabricValue>;
         expect(result["/a"]).toBe("literal");
         expect(result["/b"]).toBeInstanceOf(FabricError);
@@ -792,7 +792,7 @@ describe("JsonEncodingContext", () => {
       });
 
       it("does not wrap plain object with no `/`-prefixed keys", () => {
-        const obj = { a: 1, b: 2 } as unknown as FabricValue;
+        const obj = { a: 1, b: 2 } as FabricValue;
         expect(toWireFormat(obj)).toEqual({ a: 1, b: 2 });
       });
 
@@ -804,7 +804,7 @@ describe("JsonEncodingContext", () => {
       });
 
       it("round-trips nested object containing `/`-prefixed key", () => {
-        const obj = { outer: { "/inner": 1 } } as unknown as FabricValue;
+        const obj = { outer: { "/inner": 1 } } as FabricValue;
         const result = roundTrip(obj) as Record<
           string,
           Record<string, FabricValue>
@@ -819,7 +819,7 @@ describe("JsonEncodingContext", () => {
         const data = { "/Future@7": { id: "x" } } as JsonWireValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
-        expect((result as unknown as UnknownValue).wireTypeTag).toBe(
+        expect((result as UnknownValue).wireTypeTag).toBe(
           "Future@7",
         );
       });
@@ -837,7 +837,7 @@ describe("JsonEncodingContext", () => {
       it("round-trips object whose value is a `/quote`-keyed literal", () => {
         // { "/x": { "/quote": "inner" } } — the value at "/x" is user data that
         // happens to have a /quote key. Must survive encode→decode intact.
-        const obj = { "/x": { "/quote": "inner" } } as unknown as FabricValue;
+        const obj = { "/x": { "/quote": "inner" } } as FabricValue;
         const result = roundTrip(obj) as Record<
           string,
           Record<string, FabricValue>
@@ -895,7 +895,7 @@ describe("JsonEncodingContext", () => {
       } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
-      const unknown = result as unknown as UnknownValue;
+      const unknown = result as UnknownValue;
       expect(unknown.wireTypeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
@@ -913,7 +913,7 @@ describe("JsonEncodingContext", () => {
       const us = new UnknownValue("FutureType@2", { some: "data" });
       const result = roundTrip(us as FabricValue);
       expect(result).toBeInstanceOf(UnknownValue);
-      const unknown = result as unknown as UnknownValue;
+      const unknown = result as UnknownValue;
       expect(unknown.wireTypeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
@@ -922,7 +922,7 @@ describe("JsonEncodingContext", () => {
       const data = { "/hole": 5 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
-      const unknown = result as unknown as UnknownValue;
+      const unknown = result as UnknownValue;
       expect(unknown.wireTypeTag).toBe("hole");
       expect(unknown.state).toBe(5);
     });
@@ -972,8 +972,8 @@ describe("JsonEncodingContext", () => {
     });
 
     it("allows shared references (same object at multiple positions)", () => {
-      const shared = { val: 42 } as unknown as FabricValue;
-      const obj = { a: shared, b: shared } as unknown as FabricValue;
+      const shared = { val: 42 } as FabricValue;
+      const obj = { a: shared, b: shared } as FabricValue;
       // Should not throw -- shared references are fine, only cycles are rejected.
       const result = toWireFormat(obj);
       expect(result).toEqual({ a: { val: 42 }, b: { val: 42 } });
@@ -1003,7 +1003,7 @@ describe("JsonEncodingContext", () => {
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
-      const prob = result as unknown as ProblematicValue;
+      const prob = result as ProblematicValue;
       expect(prob.wireTypeTag).toBe("BigInt@1");
     });
 
@@ -1021,7 +1021,7 @@ describe("JsonEncodingContext", () => {
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
-      const prob = result as unknown as ProblematicValue;
+      const prob = result as ProblematicValue;
       expect(prob.wireTypeTag).toBe("Map@1");
     });
   });
@@ -1046,7 +1046,7 @@ describe("JsonEncodingContext", () => {
         [1, 2, 3] as JsonWireValue,
       ) as FabricValue[];
       expect(() => {
-        (result as unknown as number[])[0] = 99;
+        (result as number[])[0] = 99;
       }).toThrow();
     });
 
@@ -1193,7 +1193,7 @@ describe("JsonEncodingContext", () => {
       expect(Object.isFrozen(result.outer)).toBe(true);
       expect(Object.isFrozen(result.outer.inner)).toBe(true);
       expect(() => {
-        (result.outer.inner as unknown as number[])[0] = 99;
+        (result.outer.inner as number[])[0] = 99;
       }).toThrow();
       expect(() => {
         (result.outer as Record<string, unknown>).added = true;
@@ -1224,7 +1224,7 @@ describe("JsonEncodingContext", () => {
       const value = {
         "/a": 1,
         "/b": { plain: [1, 2] },
-      } as unknown as FabricValue;
+      } as FabricValue;
       const result = roundTrip(value);
       expect(isDeepFrozen(result)).toBe(true);
       expect(result).toEqual({ "/a": 1, "/b": { plain: [1, 2] } });
@@ -1254,7 +1254,7 @@ describe("JsonEncodingContext", () => {
       const encoded = ctx.encode(se as FabricValue);
       const decoded = ctx.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
-      expect((decoded as unknown as FabricError).message).toBe("test");
+      expect((decoded as FabricError).message).toBe("test");
     });
 
     it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
@@ -1263,7 +1263,7 @@ describe("JsonEncodingContext", () => {
       const data = {
         name: "test",
         error: FabricError.fromNativeError(new Error("fail")),
-      } as unknown as FabricValue;
+      } as FabricValue;
       const bytes = ctx.encodeToBytes(data);
       expect(bytes).toBeInstanceOf(Uint8Array);
       const decoded = ctx.decodeFromBytes(bytes, runtime) as Record<
@@ -1293,7 +1293,7 @@ describe("JsonEncodingContext", () => {
           { name: "Bob", scores: [] },
         ],
         meta: { version: 1, debug: undefined },
-      } as unknown as FabricValue;
+      } as FabricValue;
 
       const result = roundTrip(value) as Record<string, FabricValue>;
       const users = result.users as FabricValue[];
@@ -1313,12 +1313,12 @@ describe("JsonEncodingContext", () => {
 
     it("round-trips `FabricError` in array", () => {
       const se = FabricError.fromNativeError(new Error("oops"));
-      const arr = [1, se, 3] as unknown as FabricValue;
+      const arr = [1, se, 3] as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(FabricError);
       expect(
-        (result[1] as unknown as FabricError).message,
+        (result[1] as FabricError).message,
       ).toBe("oops");
       expect(result[2]).toBe(3);
     });
@@ -1327,11 +1327,11 @@ describe("JsonEncodingContext", () => {
       const obj = {
         error: FabricError.fromNativeError(new Error("fail")),
         code: 500,
-      } as unknown as FabricValue;
+      } as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.error).toBeInstanceOf(FabricError);
       expect(
-        (result.error as unknown as FabricError).message,
+        (result.error as FabricError).message,
       ).toBe("fail");
       expect(result.code).toBe(500);
     });
