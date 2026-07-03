@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/cfc/prompt-injection/sub-agent.tsx",
   "packages/patterns/chatbot.tsx",
   "packages/patterns/examples/cf-picker.tsx",
   "packages/patterns/experimental/chat-note.tsx",

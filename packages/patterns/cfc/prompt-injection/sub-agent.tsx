@@ -16,7 +16,7 @@ import {
 type SubAgentInput = {
   prompt: BuiltInLLMContent;
   messages?: BuiltInLLMMessage[];
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
   resultSchema: ResultSchemaInput;
   system?: string;
   tools?: Record<string, BuiltInLLMTool>;
@@ -25,6 +25,7 @@ type SubAgentInput = {
   observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   schemaSanitizePromptInjection?: boolean;
 };
+type SubAgentOutput = unknown | undefined;
 
 const parseResultSchema = lift<
   { resultSchema: ResultSchemaInput },
@@ -41,7 +42,7 @@ const appendTaskToSystem = lift<
   return `${system ?? ""}\n\nSub-agent task:\n${promptText}`.trim();
 });
 
-export const subAgentPattern = pattern<SubAgentInput, any>((
+export const subAgentPattern = pattern<SubAgentInput, SubAgentOutput>((
   {
     prompt,
     messages,
@@ -58,18 +59,30 @@ export const subAgentPattern = pattern<SubAgentInput, any>((
   const parsedResultSchema = parseResultSchema({ resultSchema });
   const requestSystem = appendTaskToSystem({ system, prompt });
 
-  const response = generateObject({
-    prompt,
-    messages,
-    context,
-    system: requestSystem,
-    tools,
-    model,
-    maxTokens,
-    observationMaxConfidentiality,
-    schemaSanitizePromptInjection,
-    schema: parsedResultSchema,
-  } as any);
+  const response = messages !== undefined
+    ? generateObject<unknown>({
+      prompt,
+      messages: messages as never,
+      context,
+      system: requestSystem,
+      tools,
+      model,
+      maxTokens,
+      observationMaxConfidentiality,
+      schemaSanitizePromptInjection,
+      schema: parsedResultSchema,
+    })
+    : generateObject<unknown>({
+      prompt,
+      context,
+      system: requestSystem,
+      tools,
+      model,
+      maxTokens,
+      observationMaxConfidentiality,
+      schemaSanitizePromptInjection,
+      schema: parsedResultSchema,
+    });
 
   return response.error ? { error: response.error } : response.result;
 });
