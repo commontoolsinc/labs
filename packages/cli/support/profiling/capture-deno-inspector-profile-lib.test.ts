@@ -1073,6 +1073,51 @@ describe("capture-deno-inspector-profile helpers", () => {
     });
   });
 
+  it("ignores profiler start markers after a stop signal", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      celestial.startError = new Error("WebSocket closed");
+      const logs: string[] = [];
+      const errors: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const signalHandlers: Partial<Record<Deno.Signal, () => void>> = {};
+      const outputPath = `${tmpDir}/profile.cpuprofile`;
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${outputPath}`,
+          "--profile-start-pattern=Usage",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({
+          celestial,
+          logs,
+          errors,
+          resumed,
+          signalHandlers,
+        }),
+      );
+
+      await resumed.promise;
+      signalHandlers.SIGINT?.();
+      celestial.dispatchConsole({ value: "Usage:" });
+
+      assertEquals(await done, 1);
+      assertEquals(celestial.starts, 0);
+      assertEquals(
+        errors.some((line) => line.includes("Profiler.start failed")),
+        false,
+      );
+      assertStringIncludes(
+        errors.join("\n"),
+        "Profile start pattern was not observed: Usage",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(profileErrorOutputPath(outputPath)),
+        "Profile start pattern was not observed: Usage",
+      );
+    });
+  });
+
   it("fails when the inspector websocket closes before a required profile start marker", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();

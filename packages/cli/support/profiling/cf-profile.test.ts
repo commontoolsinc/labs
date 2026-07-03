@@ -120,7 +120,6 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
         "-A",
         scriptPath,
         `--profile-output=${profilePath}`,
-        "--profile-start-pattern=Usage",
         "--profile-stop-pattern=Usage",
         "--help",
       ],
@@ -142,7 +141,7 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
     const meta = JSON.parse(await Deno.readTextFile(metaPath));
     assertEquals(meta.command, ["--help"]);
     assertEquals("profileDoneMarker" in meta, false);
-    assertEquals(meta.profileStartPattern, "Usage");
+    assertEquals("profileStartPattern" in meta, false);
     assertEquals(meta.profileStopPattern, "Usage");
     assertEquals(meta.cliStatus.success, true);
     assertEquals(meta.captureStatus.success, true);
