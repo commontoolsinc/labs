@@ -145,6 +145,25 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     expect((r.rows[0] as { c: number }).c).toBe(1);
   });
 
+  it("accepts named params", async () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-named-${crypto.randomUUID()}`,
+      tables: { notes: table({ id: "integer primary key", body: "text" }) },
+    };
+    const tx = runtime.edit();
+    const db = sqliteDb(dbRef, tx, "db-h");
+    db.exec("INSERT INTO notes (body) VALUES (:body)", { body: "hi" });
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+
+    const provider = storageManager.open(space);
+    const r = await provider.sqliteQuery!(
+      dbRef,
+      "SELECT body FROM notes",
+    );
+    expect(r.rows).toEqual([{ body: "hi" }]);
+  });
+
   it("encodes a _cf_link cell param (round-trips to the same entity)", async () => {
     const dbRef: SqliteDbRef = {
       id: `of:exec-link-${crypto.randomUUID()}`,

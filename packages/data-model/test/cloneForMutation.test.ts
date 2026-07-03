@@ -55,7 +55,7 @@ describe("cloneForMutation", () => {
       const err = FabricError.fromNativeError(new Error("test"));
       Object.freeze(err);
       const { value, pathValue } = cloneForMutation(
-        err as unknown as FabricValue,
+        err as FabricValue,
         [],
       );
       expect(value).not.toBe(err);
@@ -63,7 +63,7 @@ describe("cloneForMutation", () => {
       expect(Object.isFrozen(value)).toBe(false);
       expect(pathValue).toBe(value);
       // `shallowUnfrozenClone` preserves the FabricValue-shaped state.
-      const cloned = value as unknown as FabricError;
+      const cloned = value as FabricError;
       expect(cloned.type).toBe(err.type);
       expect(cloned.name).toBe(err.name);
       expect(cloned.message).toBe(err.message);
@@ -83,14 +83,14 @@ describe("cloneForMutation", () => {
 
       expect(value).not.toBe(root);
       expect(pathValue).toBe(
-        (value as unknown as Record<string, unknown>).a,
+        (value as Record<string, unknown>).a,
       );
       expect(pathValue).not.toBe(inner); // had to thaw it
       expect(Object.isFrozen(value)).toBe(false);
       expect(Object.isFrozen(pathValue)).toBe(false);
 
       // Critical: the sibling subtree is preserved by identity.
-      expect((value as unknown as Record<string, unknown>).b).toBe(sibling);
+      expect((value as Record<string, unknown>).b).toBe(sibling);
     });
 
     it("descends into a single-element array", () => {
@@ -103,15 +103,15 @@ describe("cloneForMutation", () => {
       const { value, pathValue } = cloneForMutation(root, ["notes"]);
 
       expect(Array.isArray(pathValue)).toBe(true);
-      expect((pathValue as unknown as unknown[]).length).toBe(2);
+      expect((pathValue as unknown[]).length).toBe(2);
 
       // The note objects inside the freshly-thawed array are still the
       // original frozen instances -- shallow-thaw shares references.
-      expect((pathValue as unknown as unknown[])[0]).toBe(noteA);
-      expect((pathValue as unknown as unknown[])[1]).toBe(noteB);
+      expect((pathValue as unknown[])[0]).toBe(noteA);
+      expect((pathValue as unknown[])[1]).toBe(noteB);
 
       // The spliced-in array lives inside the new root.
-      expect((value as unknown as Record<string, unknown>).notes).toBe(
+      expect((value as Record<string, unknown>).notes).toBe(
         pathValue,
       );
     });
@@ -178,7 +178,7 @@ describe("cloneForMutation", () => {
       // Every spine container is freshly cloned (or at minimum,
       // distinct from the input's frozen original).
       expect(value).not.toBe(root);
-      const newA = (value as unknown as Record<string, unknown>)
+      const newA = (value as Record<string, unknown>)
         .a as Record<
           string,
           unknown
@@ -197,7 +197,7 @@ describe("cloneForMutation", () => {
       //   - The off-spine peer at depth `b` is `a.a2`... no, `a` only has
       //     children `b` and `a2`. So `a2` is off-spine relative to the
       //     descent into `b`.
-      expect((value as unknown as Record<string, unknown>).a2).toBe(a2);
+      expect((value as Record<string, unknown>).a2).toBe(a2);
       expect(newA.a2).toBe(a2);
       expect(newB.b2).toBe(b2);
 
@@ -221,7 +221,7 @@ describe("cloneForMutation", () => {
         ["notes", "1"],
       );
 
-      const newNotes = (value as unknown as Record<string, unknown>).notes;
+      const newNotes = (value as Record<string, unknown>).notes;
       expect(Array.isArray(newNotes)).toBe(true);
       expect(newNotes).not.toBe(notes);
       // Other (off-spine) element preserved by identity.
@@ -247,7 +247,7 @@ describe("cloneForMutation", () => {
       // The sibling subtree is preserved by identity AND retains its
       // place in the deep-frozen cache (so future `isDeepFrozen` checks
       // and `cloneIfNecessary` short-circuits stay O(1)).
-      expect((value as unknown as Record<string, unknown>).b).toBe(sibling);
+      expect((value as Record<string, unknown>).b).toBe(sibling);
       expect(isDeepFrozen(sibling)).toBe(true);
     });
   });
@@ -264,11 +264,11 @@ describe("cloneForMutation", () => {
       expect(pathValue).not.toBe(err);
       expect(Object.isFrozen(pathValue)).toBe(false);
       // The FabricValue-shaped state is preserved (shallowClone).
-      const cloned = pathValue as unknown as FabricError;
+      const cloned = pathValue as FabricError;
       expect(cloned.type).toBe(err.type);
       expect(cloned.message).toBe(err.message);
       // And spliced into the new spine.
-      expect((value as unknown as Record<string, unknown>).payload).toBe(
+      expect((value as Record<string, unknown>).payload).toBe(
         pathValue,
       );
     });
@@ -281,14 +281,14 @@ describe("cloneForMutation", () => {
 
       const { value, pathValue } = cloneForMutation(root, ["notes"]);
 
-      (pathValue as unknown as Array<Record<string, unknown>>).push({
+      (pathValue as Array<Record<string, unknown>>).push({
         id: 3,
       });
 
-      expect((value as unknown as Record<string, unknown>).notes).toBe(
+      expect((value as Record<string, unknown>).notes).toBe(
         pathValue,
       );
-      expect((pathValue as unknown as unknown[]).length).toBe(3);
+      expect((pathValue as unknown[]).length).toBe(3);
       // Input is untouched.
       expect(notes.length).toBe(2);
     });
@@ -301,10 +301,10 @@ describe("cloneForMutation", () => {
 
       const { value, pathValue } = cloneForMutation(root, []);
 
-      delete (pathValue as unknown as Record<string, unknown>).drop;
+      delete (pathValue as Record<string, unknown>).drop;
 
       expect(value).toEqual({ keep: 1 });
-      expect((root as unknown as Record<string, unknown>).drop).toBe(2);
+      expect((root as Record<string, unknown>).drop).toBe(2);
     });
 
     it("does not touch the input on `force=true` even with mutable input", () => {
@@ -312,14 +312,14 @@ describe("cloneForMutation", () => {
       const root = { inner };
 
       const { value, pathValue } = cloneForMutation(
-        root as unknown as FabricValue,
+        root as FabricValue,
         ["inner"],
         { force: true },
       );
 
-      (pathValue as unknown as Record<string, unknown>).x = 999;
+      (pathValue as Record<string, unknown>).x = 999;
 
-      expect((value as unknown as Record<string, unknown>).inner).toBe(
+      expect((value as Record<string, unknown>).inner).toBe(
         pathValue,
       );
       // Input untouched.
@@ -336,7 +336,7 @@ describe("cloneForMutation", () => {
         ["a", "new"],
         { createMissing: true, nextKeyAfterPath: "key" },
       );
-      const newA = (value as unknown as Record<string, unknown>)
+      const newA = (value as Record<string, unknown>)
         .a as Record<
           string,
           unknown
@@ -357,7 +357,7 @@ describe("cloneForMutation", () => {
         ["a", "items"],
         { createMissing: true, nextKeyAfterPath: "0" },
       );
-      const newA = (value as unknown as Record<string, unknown>)
+      const newA = (value as Record<string, unknown>)
         .a as Record<
           string,
           unknown
@@ -407,7 +407,7 @@ describe("cloneForMutation", () => {
         ["notes", "0", "title"],
         { createMissing: true },
       );
-      const newRoot = value as unknown as Record<string, unknown>;
+      const newRoot = value as Record<string, unknown>;
       expect(Array.isArray(newRoot.notes)).toBe(true);
       const notes = newRoot.notes as unknown[];
       expect(notes.length).toBe(1);
@@ -430,7 +430,7 @@ describe("cloneForMutation", () => {
         ["notes", "0", "newKey"],
         { createMissing: true, nextKeyAfterPath: "leaf" },
       );
-      const newRoot = value as unknown as Record<string, unknown>;
+      const newRoot = value as Record<string, unknown>;
       const newNotes = newRoot.notes as unknown[];
       // The existing element was thawed (spine touches it) but the
       // sibling identity of `existingNotes[0].kept` is preserved.
@@ -479,10 +479,10 @@ describe("cloneForMutation", () => {
         { createMissing: true },
       );
       expect(value).not.toBe(root); // root was force-copied
-      expect((value as unknown as Record<string, unknown>).existing).toBe(
+      expect((value as Record<string, unknown>).existing).toBe(
         1,
       );
-      expect((value as unknown as Record<string, unknown>).new).toBe(
+      expect((value as Record<string, unknown>).new).toBe(
         pathValue,
       );
     });
@@ -601,7 +601,7 @@ describe("cloneForMutation", () => {
     it("throws when descending through a `FabricPrimitive`", () => {
       const epoch = new FabricEpochNsec(123n);
       const root = Object.freeze({
-        epoch: epoch as unknown as FabricValue,
+        epoch: epoch as FabricValue,
       }) as FabricValue;
       expect(() => cloneForMutation(root, ["epoch", "anything"]))
         .toThrow("cannot descend into");
@@ -616,7 +616,7 @@ describe("cloneForMutation", () => {
     it("throws when the leaf is a `FabricPrimitive` (not mutable)", () => {
       const epoch = new FabricEpochNsec(123n);
       const root = Object.freeze({
-        epoch: epoch as unknown as FabricValue,
+        epoch: epoch as FabricValue,
       }) as FabricValue;
       expect(() => cloneForMutation(root, ["epoch"]))
         .toThrow("cannot mutate");
@@ -636,7 +636,7 @@ describe("cloneForMutation", () => {
       // A FabricInstance is OK at the leaf but not as the root of a
       // non-empty path (we don't descend into FabricInstance internals).
       const err = FabricError.fromNativeError(new Error("test"));
-      expect(() => cloneForMutation(err as unknown as FabricValue, ["x"]))
+      expect(() => cloneForMutation(err as FabricValue, ["x"]))
         .toThrow("cannot descend into");
     });
   });
