@@ -1,10 +1,12 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-existence-channel");
@@ -348,6 +350,74 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     const shape = shapeEntriesAt(outId, ["slot"]);
     expect(shape.length).toBe(1);
     expect(shape[0].label.confidentiality).toContainEqual("secret");
+  });
+
+  // A declared entry re-minting at the same path (a schema policy input
+  // covering the write) drops the old derived pair through a different
+  // carry-forward skip than the flow-clear — its existence must fold into
+  // the pool all the same (review finding on this PR).
+  it("declared re-mint at the same path still folds existence", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-declared-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["old-secret"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-declared-out", {
+      secret: "seed",
+    });
+    const taint = rt.edit();
+    taint.readOrThrow(readAddress(sourceId, []));
+    taint.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      "tainted",
+    );
+    taint.prepareCfc();
+    expect((await taint.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["secret"]).length).toBe(1);
+
+    // Clean overwrite that ALSO records a schema policy input covering the
+    // path: the declared entry re-mints at ["secret"], which drops the old
+    // derived pair via the persisted-entry skip, not the flow-clear.
+    const declared = internSchema(
+      {
+        type: "string",
+        ifc: { confidentiality: ["base"] },
+      } as JSONSchema,
+      true,
+    );
+    const clean = rt.edit();
+    clean.writeValueOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      "fresh",
+    );
+    clean.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: {
+        space,
+        scope: "space",
+        id: uri(outId),
+        path: ["value", "secret"],
+      },
+      schemaHash: declared.taggedHashString,
+      schema: declared.schema,
+    });
+    clean.prepareCfc();
+    expect((await clean.commit()).ok).toBeDefined();
+
+    const stored = entriesOf(outId);
+    // The declared entry re-minted…
+    expect(
+      stored.some((e) =>
+        e.path.join("/") === "secret" &&
+        (e.label.confidentiality ?? []).includes("base")
+      ),
+    ).toBe(true);
+    // …and the existence history survived at a covering path (the fold
+    // anchors at the written path, which may be a coarser ancestor —
+    // a sound over-approximation).
+    const shapeConf = stored
+      .filter((e) => e.observes === "shape")
+      .flatMap((e) => e.label.confidentiality ?? []);
+    expect(shapeConf).toContainEqual("old-secret");
   });
 
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite

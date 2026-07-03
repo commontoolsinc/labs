@@ -3906,13 +3906,13 @@ export const prepareBoundaryCommit = (
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
-        // A link write replacing a previously content-labeled path drops
-        // the old derived/structure entries here (the link machinery owns
-        // the slot's label now) — their existence history still folds into
+        // A link write replacing a previously content-labeled path — or a
+        // declared entry re-minting at the same path — drops the old
+        // derived/structure entries here, through a different skip than
+        // the flow-clear below; their existence history still folds into
         // the SC-4 pool like any other clear.
         if (
           flowPersist &&
-          currentLinkWritePaths.has(key) &&
           (entry.origin === "derived" || entry.origin === "structure") &&
           (entry.label.confidentiality?.length ?? 0) > 0
         ) {
