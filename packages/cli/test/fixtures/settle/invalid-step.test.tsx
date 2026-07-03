@@ -6,7 +6,6 @@ import { pattern } from "commonfabric";
 
 export default pattern(() => {
   return {
-    // deno-lint-ignore no-explicit-any
-    tests: [{ notAValidStep: true } as any],
+    tests: [{}],
   };
 });
