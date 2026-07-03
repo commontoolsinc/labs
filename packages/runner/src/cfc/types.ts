@@ -181,8 +181,11 @@ export type LabelEntryOrigin =
  * read observation consumes the entry's label. Orthogonal to `origin`, which
  * stays the update-discipline axis.
  *
- * Absent `observes` = a covering entry, consumed by every read class — with
- * one carve-out: an entry with `origin:"link"` and absent `observes` is
+ * Absent `observes` = a covering entry, consumed by every CONTENT read class
+ * (`value`/`shape`/`enumerate`) but never by `followRef` observations — a
+ * pointer read does not read content, and covering consumption there would
+ * taint blind pass-throughs with the target's content label (C0 §6.1). One
+ * carve-out: an entry with `origin:"link"` and absent `observes` is
  * implicitly `observes:"followRef"`, consumed by followRef reads only and
  * never as a covering entry (see `entryObservationClass`). That reproduces
  * the pointer/content split legacy link entries already had (value reads

@@ -3098,18 +3098,25 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
 const coalesceLabelEntries = (
   entries: ReadonlyArray<LabelMapEntry>,
 ): Array<LabelMapEntry> => {
-  // Coalesce per (path, origin): same-component entries at one path merge;
-  // entries of different components stay separate so each can follow its
-  // own update discipline (declared monotone, link/derived per-value).
+  // Coalesce per (path, origin, observes): same-component same-class entries
+  // at one path merge; entries of different components stay separate so each
+  // can follow its own update discipline (declared monotone, link/derived
+  // per-value), and entries of different observation classes stay separate
+  // so each keeps its own consumers — merging a `value` and a `shape` entry
+  // into one covering entry would both widen consumption and destroy the
+  // SC-4 grow-vs-replace split (C2).
   const byKey = new Map<string, LabelMapEntry>();
   for (const entry of entries) {
     const path = [...entry.path];
-    const key = `${entry.origin ?? ""}\u0000${pathKey(path)}`;
+    const key = `${entry.origin ?? ""}\u0000${entry.observes ?? ""}\u0000${
+      pathKey(path)
+    }`;
     const existing = byKey.get(key);
     byKey.set(key, {
       path,
       label: mergeLabels(existing?.label, cloneLabel(entry.label)),
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+      ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     });
   }
   return [...byKey.values()].sort((left, right) => {
@@ -3120,7 +3127,16 @@ const coalesceLabelEntries = (
     }
     const leftOrigin = left.origin ?? "";
     const rightOrigin = right.origin ?? "";
-    return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
+    if (leftOrigin !== rightOrigin) {
+      return leftOrigin < rightOrigin ? -1 : 1;
+    }
+    const leftObserves = left.observes ?? "";
+    const rightObserves = right.observes ?? "";
+    return leftObserves < rightObserves
+      ? -1
+      : leftObserves > rightObserves
+      ? 1
+      : 0;
   });
 };
 

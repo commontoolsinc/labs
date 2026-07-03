@@ -2,8 +2,10 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
@@ -335,26 +337,83 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     ]);
 
     const rt = makeRuntime();
-    const id = await seedDoc(rt, "occ-carry-forward", {
-      slot: { "/": { "link@1": {} } },
-      other: 1,
-    }, [
-      {
-        path: ["slot"],
-        label: { confidentiality: ["ref-secret"] },
-        origin: "derived",
-        observes: "followRef",
+    // The persist region only rewrites a doc whose stored schemaHash loads
+    // (and skips docs entirely when the flow join is empty), so exercising
+    // carry-forward needs a real interned schema + its cid: document + a
+    // labeled read making the flow join non-empty.
+    const guarded = internSchema({ type: "object" } as JSONSchema, true);
+    const seed = rt.edit();
+    const cell0 = rt.getCell(space, "occ-carry-forward", undefined, seed);
+    const id = cell0.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      value: { slot: { "/": { "link@1": {} } }, other: 1 },
+      cfc: {
+        version: 1,
+        schemaHash: guarded.taggedHashString,
+        labelMap: {
+          version: 1,
+          entries: [
+            {
+              path: ["slot"],
+              label: { confidentiality: ["ref-secret"] },
+              origin: "derived",
+              observes: "followRef",
+            },
+            // The C2 persist-split shape: same (path, origin), distinct
+            // classes. Coalescing keys per class — merging these into one
+            // covering entry would both widen (value reads would consume
+            // the existence label) and destroy the SC-4 grow-vs-replace
+            // split.
+            {
+              path: ["v"],
+              label: { confidentiality: ["v-content"] },
+              origin: "derived",
+              observes: "value",
+            },
+            {
+              path: ["v"],
+              label: { confidentiality: ["v-existence"] },
+              origin: "derived",
+              observes: "shape",
+            },
+          ],
+        },
       },
+    });
+    seed.writeOrThrow({
+      space,
+      scope: "space",
+      id: `cid:${guarded.taggedHashString}`,
+      path: [],
+    }, { value: guarded.schema });
+    expect((await seed.commit()).ok).toBeDefined();
+    const taintId = await seedDoc(rt, "occ-carry-forward-taint", { n: 1 }, [
+      { path: [], label: { confidentiality: ["taint"] } },
     ]);
 
     const tx = rt.edit();
+    tx.readOrThrow(readAddress(taintId, []));
     const cell = rt.getCell(space, "occ-carry-forward", undefined, tx);
     cell.key("other").set(2);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    const entry = entriesOf(id).find((e) => e.path.join("/") === "slot");
-    expect(entry).toBeDefined();
-    expect(entry!.observes).toBe("followRef");
+    const stored = entriesOf(id);
+    // The write really did rewrite the labelMap (the flow stamp landed) —
+    // without this the assertions below pass trivially on untouched
+    // metadata.
+    expect(
+      stored.find((e) => e.origin === "derived" && e.path.join("/") === "other")
+        ?.label.confidentiality,
+    ).toEqual(["taint"]);
+    const slotEntry = stored.find((e) => e.path.join("/") === "slot");
+    expect(slotEntry).toBeDefined();
+    expect(slotEntry!.observes).toBe("followRef");
+    const vClasses = stored.filter((e) => e.path.join("/") === "v")
+      .map((e) => [e.observes, ...(e.label.confidentiality ?? [])]);
+    expect(vClasses.sort()).toEqual([
+      ["shape", "v-existence"],
+      ["value", "v-content"],
+    ]);
   });
 });
