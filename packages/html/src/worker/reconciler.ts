@@ -101,6 +101,8 @@ const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
+type RenderableObject = Record<typeof UI, unknown>;
+type RenderableNode = WorkerRenderNode | RenderableObject;
 // Mirrors CFC_ATOM_TYPE.Caveat in @commonfabric/api/cfc (not a dependency of
 // this package).
 const CFC_CAVEAT_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Caveat";
@@ -326,7 +328,7 @@ export class WorkerReconciler {
   /**
    * Check if a value is a valid render node (VNode, string, number, object with [UI], or null/undefined).
    */
-  private isValidRenderNode(value: unknown): value is WorkerRenderNode {
+  private isValidRenderNode(value: unknown): value is RenderableNode {
     if (value === null || value === undefined) return true;
     if (typeof value === "string" || typeof value === "number") return true;
     if (typeof value === "boolean") return true;
@@ -1451,7 +1453,7 @@ export class WorkerReconciler {
     return !this.canRenderCellTextUnderPolicy(cell, policy);
   }
 
-  private isRenderableObject(value: unknown): boolean {
+  private isRenderableObject(value: unknown): value is RenderableObject {
     return value !== null && typeof value === "object" && UI in value;
   }
 
@@ -1570,14 +1572,13 @@ export class WorkerReconciler {
     // Follow [UI] chain with cycle detection
     const visited = new Set<object>();
     let current: unknown = node;
-    while (current && typeof current === "object" && UI in current) {
-      if (visited.has(current as object)) {
+    while (this.isRenderableObject(current)) {
+      if (visited.has(current)) {
         // Cycle detected, return null
         return null;
       }
-      visited.add(current as object);
-      // deno-lint-ignore no-explicit-any
-      current = (current as any)[UI];
+      visited.add(current);
+      current = current[UI];
     }
 
     return isWorkerVNode(current) ? current : null;
@@ -2514,7 +2515,7 @@ export class WorkerReconciler {
    */
   private renderNode(
     ctx: ReconcileContext,
-    inputNode: WorkerRenderNode,
+    inputNode: RenderableNode,
     visited: Set<object>,
     policy: RenderPolicy,
   ): NodeState | null {
@@ -2537,19 +2538,12 @@ export class WorkerReconciler {
 
     // Follow [UI] chain (for objects with $UI property)
     let node: unknown = inputNode;
-    while (
-      node &&
-      typeof node === "object" &&
-      UI in node &&
-      // deno-lint-ignore no-explicit-any
-      (node as any)[UI]
-    ) {
-      if (visited.has(node as object)) {
+    while (this.isRenderableObject(node) && node[UI]) {
+      if (visited.has(node)) {
         return this.createCyclePlaceholder(ctx, policy);
       }
-      visited.add(node as object);
-      // deno-lint-ignore no-explicit-any
-      node = (node as any)[UI];
+      visited.add(node);
+      node = node[UI];
     }
 
     // After following [UI] chain, node may have become a primitive
@@ -3790,13 +3784,10 @@ export class WorkerReconciler {
     }
 
     // Handle objects with [UI] property (pattern outputs)
-    // deno-lint-ignore no-explicit-any
-    if (
-      child && typeof child === "object" && UI in child && (child as any)[UI]
-    ) {
+    if (this.isRenderableObject(child) && child[UI]) {
       const state = this.renderNode(
         ctx,
-        child as WorkerRenderNode,
+        child,
         new Set(visited),
         policy,
       );
