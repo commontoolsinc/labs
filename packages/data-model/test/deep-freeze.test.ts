@@ -251,7 +251,7 @@ describe("deep-freeze", () => {
         // frozen and every enumerable slot is a frozen primitive, but the
         // extras bag holds a mutable array -> not deep-frozen.
         const fe = FabricError.fromNativeError(new Error("has-extras"));
-        fe.setExtra("payload", [1, 2, 3] as unknown as FabricValue);
+        fe.setExtra("payload", [1, 2, 3] as FabricValue);
         Object.freeze(fe);
         expect(isDeepFrozen(fe)).toBe(false);
       });
@@ -308,7 +308,7 @@ describe("deep-freeze", () => {
 
       it("recurses into nested `FabricValue`s", () => {
         const fe = FabricError.fromNativeError(new Error("e"));
-        const container = { wrapped: fe as unknown as FabricValue, n: 1 };
+        const container = { wrapped: fe as FabricValue, n: 1 };
         deepFreeze(container);
         expect(Object.isFrozen(container)).toBe(true);
         expect(Object.isFrozen(fe)).toBe(true);
@@ -335,7 +335,7 @@ describe("deep-freeze", () => {
 
     it("returns `true` for a deep-frozen `FabricInstance` nested in a tree", () => {
       const fe = FabricError.fromNativeError(new Error("nested"));
-      const tree = deepFreeze({ a: 1, e: fe as unknown as FabricValue });
+      const tree = deepFreeze({ a: 1, e: fe as FabricValue });
       expect(isDeepFrozenFabricValue(tree)).toBe(true);
     });
 

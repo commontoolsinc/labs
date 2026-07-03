@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/deep-freeze.test.ts": [
-    "254:41:xwvoxp",
-    "311:40:1fdb32o",
-    "338:44:1fdb32o",
-  ],
   "packages/data-model/test/fabric-instances/BaseFabricInstance.test.ts": [
     "38:16:1t51425",
   ],
