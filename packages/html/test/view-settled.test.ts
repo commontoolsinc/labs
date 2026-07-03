@@ -12,11 +12,22 @@ import { assertEquals } from "@std/assert";
 import { stub } from "@std/testing/mock";
 import { drainViewUpdates, viewSettled } from "../src/debug.ts";
 
-interface FakeEl {
+type FakeEl = Element & {
   children: FakeEl[];
   shadowRoot: { children: FakeEl[] } | null;
   updateComplete?: Promise<boolean>;
   isUpdatePending?: boolean;
+};
+
+type FakeElementFields = {
+  children: FakeEl[];
+  shadowRoot: { children: FakeEl[] } | null;
+  updateComplete?: Promise<boolean>;
+  isUpdatePending?: boolean;
+};
+
+function fakeElement(fields: FakeElementFields): FakeEl {
+  return fields as FakeEl;
 }
 
 function lit(
@@ -24,23 +35,23 @@ function lit(
   opts: { isUpdatePending?: boolean; children?: FakeEl[]; shadow?: FakeEl[] } =
     {},
 ): FakeEl {
-  return {
+  return fakeElement({
     children: opts.children ?? [],
     shadowRoot: opts.shadow ? { children: opts.shadow } : null,
     updateComplete,
     isUpdatePending: opts.isUpdatePending ?? false,
-  };
+  });
 }
 
 function plain(opts: { children?: FakeEl[]; shadow?: FakeEl[] } = {}): FakeEl {
-  return {
+  return fakeElement({
     children: opts.children ?? [],
     shadowRoot: opts.shadow ? { children: opts.shadow } : null,
-  };
+  });
 }
 
 function roots(...els: FakeEl[]): Iterable<Element> {
-  return els as unknown as Iterable<Element>;
+  return els;
 }
 
 Deno.test("drainViewUpdates - churn detection", async (t) => {

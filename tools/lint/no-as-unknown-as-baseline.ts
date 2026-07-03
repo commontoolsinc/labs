@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/test/view-settled.test.ts": [
-    "43:13:wnswtz",
-  ],
   "packages/html/test/worker-events.test.ts": [
     "172:41:12r38dw",
     "180:7:1u2o5ad",
