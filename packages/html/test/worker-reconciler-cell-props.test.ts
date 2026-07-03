@@ -1,13 +1,18 @@
 import { assertEquals } from "@std/assert";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerVNode } from "../src/worker/types.ts";
+import type { WorkerProps, WorkerVNode } from "../src/worker/types.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { KeepAsCell, Runtime } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+
+type VDomOpType = VDomOp["op"];
+type VDomOpOfType<T extends VDomOpType> = Extract<VDomOp, { op: T }>;
+type RuntimeCellConstructor = new (...args: unknown[]) => object;
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -29,8 +34,22 @@ function createOpsCollector() {
       allOps.length = 0;
     },
     hasOp: (opType: string) => allOps.some((op) => op.op === opType),
-    getOpsOfType: (opType: string) => allOps.filter((op) => op.op === opType),
+    getOpsOfType: <T extends VDomOpType>(
+      opType: T,
+    ): VDomOpOfType<T>[] =>
+      allOps.filter((op): op is VDomOpOfType<T> => op.op === opType),
   };
+}
+
+function firstOp<T extends VDomOpType>(
+  ops: VDomOpOfType<T>[],
+  opType: T,
+): VDomOpOfType<T> {
+  const op = ops[0];
+  if (op === undefined) {
+    throw new Error(`expected ${opType} op`);
+  }
+  return op;
 }
 
 Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
@@ -55,7 +74,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     const CellImplConstructor = dummyCell.constructor;
 
     // MockCell extending CellImpl for basic Cell behavior
-    class MockCell extends (CellImplConstructor as any) {
+    const MockCellBase =
+      CellImplConstructor as unknown as RuntimeCellConstructor;
+
+    class MockCell extends MockCellBase {
       private subscribers = new Set<(value: any) => void>();
 
       constructor(public value: any) {
@@ -204,7 +226,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     const mountReconciler = (
       reconciler: WorkerReconciler,
       rootCell: MockCell,
-    ): () => void => reconciler.mount(rootCell as any);
+    ): () => void => reconciler.mount(rootCell as unknown as Cell<unknown>);
+
+    const workerProps = (cell: MockPropsCell): Cell<WorkerProps> =>
+      cell as unknown as Cell<WorkerProps>;
 
     // --- Test cases ---
 
@@ -231,21 +256,21 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const setPropOps = collector.getOpsOfType("set-prop");
-        const classOp = setPropOps.find((op: any) => op.key === "className");
-        const titleOp = setPropOps.find((op: any) => op.key === "title");
+        const classOp = setPropOps.find((op) => op.key === "className");
+        const titleOp = setPropOps.find((op) => op.key === "title");
 
         assertEquals(
           classOp !== undefined,
           true,
           "Should emit set-prop for className",
         );
-        assertEquals((classOp as any)?.value, "foo");
+        assertEquals(classOp?.value, "foo");
         assertEquals(
           titleOp !== undefined,
           true,
           "Should emit set-prop for title",
         );
-        assertEquals((titleOp as any)?.value, "bar");
+        assertEquals(titleOp?.value, "bar");
       } finally {
         cancel();
       }
@@ -275,13 +300,13 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const setPropOps = collector.getOpsOfType("set-prop");
-        const classOp = setPropOps.find((op: any) => op.key === "className");
+        const classOp = setPropOps.find((op) => op.key === "className");
         assertEquals(
           classOp !== undefined,
           true,
           "Should emit set-prop for updated className",
         );
-        assertEquals((classOp as any)?.value, "bar");
+        assertEquals(classOp?.value, "bar");
       } finally {
         cancel();
       }
@@ -311,13 +336,13 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const setPropOps = collector.getOpsOfType("set-prop");
-        const titleOp = setPropOps.find((op: any) => op.key === "title");
+        const titleOp = setPropOps.find((op) => op.key === "title");
         assertEquals(
           titleOp !== undefined,
           true,
           "Should emit set-prop for new title",
         );
-        assertEquals((titleOp as any)?.value, "new");
+        assertEquals(titleOp?.value, "new");
       } finally {
         cancel();
       }
@@ -350,9 +375,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const removePropOps = collector.getOpsOfType("remove-prop");
-        const titleRemoved = removePropOps.some((op: any) =>
-          op.key === "title"
-        );
+        const titleRemoved = removePropOps.some((op) => op.key === "title");
         assertEquals(titleRemoved, true, "Should emit remove-prop for title");
       } finally {
         cancel();
@@ -380,7 +403,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const setPropOps = collector.getOpsOfType("set-prop");
-        const styleOp = setPropOps.find((op: any) => op.key === "style");
+        const styleOp = setPropOps.find((op) => op.key === "style");
         assertEquals(
           styleOp !== undefined,
           true,
@@ -421,7 +444,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
           const setPropOps = collector.getOpsOfType("set-prop");
           assertEquals(
-            setPropOps.some((op: any) =>
+            setPropOps.some((op) =>
               op.key === "style" && op.value === undefined
             ),
             true,
@@ -454,7 +477,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
 
         const setPropOps = collector.getOpsOfType("set-prop");
-        const itemsOp = setPropOps.find((op: any) => op.key === "items");
+        const itemsOp = setPropOps.find((op) => op.key === "items");
         assertEquals(
           itemsOp !== undefined,
           true,
@@ -488,7 +511,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
         const setEventOps = collector.getOpsOfType("set-event");
         assertEquals(setEventOps.length >= 1, true, "Should emit set-event");
-        assertEquals((setEventOps[0] as any).eventType, "click");
+        assertEquals(firstOp(setEventOps, "set-event").eventType, "click");
       } finally {
         cancel();
       }
@@ -720,7 +743,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
 
           assertEquals(
-            collector.getOpsOfType("remove-event").some((op: any) =>
+            collector.getOpsOfType("remove-event").some((op) =>
               op.eventType === "click"
             ),
             true,
@@ -840,7 +863,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           true,
           "Should emit set-binding",
         );
-        assertEquals((setBindingOps[0] as any).propName, "value");
+        assertEquals(firstOp(setBindingOps, "set-binding").propName, "value");
       } finally {
         cancel();
       }
@@ -1181,7 +1204,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         const rootVNode: WorkerVNode = {
           type: "vnode",
           name: "div",
-          props: propsCell as any,
+          props: workerProps(propsCell),
           children: [],
         };
         const rootCell = new MockCell(rootVNode);
@@ -1195,7 +1218,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           rootCell.set({
             type: "vnode",
             name: "div",
-            props: propsCell as any,
+            props: workerProps(propsCell),
             children: [],
           });
           await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1241,7 +1264,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           assertEquals(initialEvents.length >= 1, true, "Initial set-event");
           const initialProps = collector.getOpsOfType("set-prop");
           assertEquals(
-            initialProps.some((op: any) => op.key === "className"),
+            initialProps.some((op) => op.key === "className"),
             true,
             "Initial className",
           );
@@ -1268,7 +1291,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
           const reProps = collector.getOpsOfType("set-prop");
           assertEquals(
-            reProps.some((op: any) => op.key === "className"),
+            reProps.some((op) => op.key === "className"),
             true,
             "Must re-set className after props were cleared",
           );
@@ -1326,11 +1349,11 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             "Should emit exactly one set-prop for the changed value",
           );
           assertEquals(
-            (updatedOps[0] as any).key,
+            firstOp(updatedOps, "set-prop").key,
             "title",
             "Changed prop should be title",
           );
-          assertEquals((updatedOps[0] as any).value, "baz");
+          assertEquals(firstOp(updatedOps, "set-prop").value, "baz");
         } finally {
           cancel();
         }
@@ -1368,7 +1391,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
 
           const keys = collector.getOpsOfType("set-prop")
-            .map((op: any) => op.key);
+            .map((op) => op.key);
           assertEquals(
             keys.includes("value"),
             true,
@@ -1416,7 +1439,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
 
           const keys = collector.getOpsOfType("set-prop")
-            .map((op: any) => op.key);
+            .map((op) => op.key);
           assertEquals(
             keys.includes("name"),
             true,
@@ -1472,7 +1495,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
 
         // Verify primitive prop
         const setPropOps = collector.getOpsOfType("set-prop");
-        const classOp = setPropOps.find((op: any) => op.key === "className");
+        const classOp = setPropOps.find((op) => op.key === "className");
         assertEquals(
           classOp !== undefined,
           true,
@@ -1480,7 +1503,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         );
 
         // Verify style (object → per-prop sink)
-        const styleOp = setPropOps.find((op: any) => op.key === "style");
+        const styleOp = setPropOps.find((op) => op.key === "style");
         assertEquals(styleOp !== undefined, true, "Should have style set-prop");
 
         // Verify event handler
@@ -1494,7 +1517,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           true,
           "Should have set-binding",
         );
-        assertEquals((setBindingOps[0] as any).propName, "value");
+        assertEquals(firstOp(setBindingOps, "set-binding").propName, "value");
       } finally {
         cancel();
       }
