@@ -97,6 +97,16 @@ describe("lunch poll: two users vote on a shared option", () => {
       identity: hostIdentity,
     });
 
+    // Create the space-root (default) pattern up front, the way a real space
+    // gets it at creation time — so each browser's `pattern:getSpaceRoot` is a
+    // storage-RESUME boot (byte-cache read + evaluate) rather than a create.
+    // Without this, both browsers race ensureDefaultPattern and each
+    // cold-compiles default-app inside its worker (~2s locally, 5-10s on
+    // 2-core CI); those synchronous compile stretches wedge the worker event
+    // loop, stall unrelated IPC for seconds, and under enough load starve the
+    // first fill's commit ack — the "second-boot slow window".
+    await cc.ensureDefaultPattern();
+
     const sourcePath = join(
       import.meta.dirname!,
       "..",
