@@ -164,6 +164,16 @@ type HarnessTestStepMeta = {
 
 type HarnessTestStepCell = Cell<unknown>;
 
+interface DefaultPatternSeed {
+  allPieces: unknown[];
+  recentPieces: unknown[];
+  backlinksIndex: { mentionable: unknown[] };
+}
+
+interface SpaceSeed {
+  defaultPattern: Cell<DefaultPatternSeed>;
+}
+
 const testStepPeekSchema = internSchema(
   {
     type: "object",
@@ -1072,19 +1082,24 @@ export async function runTestPattern(
     // access allPieces, recentPieces, etc. work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
-      const spaceCell = runtime.getCell(space, space, undefined, setupTx);
-      const defaultPatternCell = runtime.getCell(
+      const spaceCell = runtime.getCell<SpaceSeed>(
+        space,
+        space,
+        undefined,
+        setupTx,
+      );
+      const defaultPatternCell = runtime.getCell<DefaultPatternSeed>(
         space,
         "default-pattern",
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
-      (defaultPatternCell as any).key("recentPieces").set([]);
-      (defaultPatternCell as any).key("backlinksIndex").set({
+      defaultPatternCell.key("allPieces").set([]);
+      defaultPatternCell.key("recentPieces").set([]);
+      defaultPatternCell.key("backlinksIndex").set({
         mentionable: [],
       });
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+      spaceCell.key("defaultPattern").set(defaultPatternCell);
       runtime.prepareTxForCommit?.(setupTx);
       await setupTx.commit();
       await runtime.idle();
