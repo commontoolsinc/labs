@@ -2,7 +2,9 @@ import { isRecord } from "@commonfabric/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
+  BuiltInLLMContentPart,
   BuiltInLLMMessage,
+  BuiltInLLMTextPart,
   JSONSchema,
 } from "@commonfabric/api";
 
@@ -175,6 +177,12 @@ export const isLLMMessages = (isArrayOf<BuiltInLLMMessage>).bind(
   isLLMMessage,
 );
 
+function isBuiltInLLMTextPart(
+  part: BuiltInLLMContentPart,
+): part is BuiltInLLMTextPart {
+  return part.type === "text";
+}
+
 /**
  * Extract text content from LLMResponse, handling both string and content parts array
  */
@@ -186,8 +194,8 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
   if (Array.isArray(response.content)) {
     // Extract text from all text parts and join them
     return response.content
-      .filter((part) => part.type === "text")
-      .map((part) => (part as any).text)
+      .filter(isBuiltInLLMTextPart)
+      .map((part) => part.text)
       .join(" ");
   }
 
