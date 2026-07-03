@@ -13,7 +13,6 @@ import {
   type MIME,
   type Signer,
   type Transaction,
-  type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
 import { assert, unclaimed } from "@commonfabric/memory/fact";
@@ -3050,7 +3049,7 @@ class SpaceReplica implements ISpaceReplica {
       name: "ConflictError",
       message:
         `commit preempted: read set stale until caughtUpLocalSeq>=${threshold}`,
-      transaction: commit as unknown as Transaction,
+      transaction: commit as ClientCommit & Transaction,
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
@@ -3476,5 +3475,5 @@ const toRejectedError = (
       code: 500,
     },
     transaction: commit as Transaction,
-  } as unknown as TransactionError;
+  };
 };

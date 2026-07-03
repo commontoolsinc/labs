@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/storage/v2.ts": [
-    "2504:26:1q6nbz2",
-    "2898:4:kgzoiy",
-  ],
   "packages/runner/src/storage/v2-transaction.ts": [
     "676:14:4464ka",
   ],
