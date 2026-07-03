@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/native-type-tags.test.ts": [
-    "104:10:1xzfhxj",
-  ],
   "packages/data-model/test/schema-hash.test.ts": [
     "541:8:njoaea",
   ],

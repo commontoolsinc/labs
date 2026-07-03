@@ -100,8 +100,8 @@ describe("native-type-tags", () => {
     // In practice, functions with toJSON() are handled separately in
     // the conversion path, not via tagFromNativeValue.
     it("returns `Primitive` for functions (even with `toJSON`)", () => {
-      const fn = () => {};
-      (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
+      const fn: (() => void) & { toJSON?: () => string } = () => {};
+      fn.toJSON = () => "converted";
       expect(tagFromNativeValue(fn)).toBe(NATIVE_TAGS.Primitive);
     });
   });
