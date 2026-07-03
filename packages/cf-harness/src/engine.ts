@@ -163,10 +163,14 @@ interface ToolOutputWithId {
   outputId: string;
 }
 
+export type HarnessRunStateInput =
+  | HarnessRunState
+  | (Omit<HarnessRunState, "currentDir"> & { currentDir?: undefined });
+
 export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
-  runState?: HarnessRunState;
+  runState?: HarnessRunStateInput;
   workspaceHostPath?: string;
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
@@ -192,6 +196,10 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
   value !== null &&
   "outputId" in value &&
   typeof value.outputId === "string";
+
+const hasRunStateCurrentDir = (
+  runState: HarnessRunStateInput,
+): runState is HarnessRunState => runState.currentDir !== undefined;
 
 interface ResolveSandboxConfigOptions {
   workspaceHostPath?: string;
@@ -251,17 +259,23 @@ const resolveInitialCurrentDir = (
   runState?: HarnessRunState,
 ): string => {
   if (runState !== undefined) {
-    if (runState.currentDir === undefined) {
-      throw new Error(
-        "run state is missing currentDir; older cf-harness runs cannot be resumed",
-      );
-    }
     return runState.currentDir;
   }
   if (config.cwd !== undefined) {
     return sandbox.resolvePath(config.cwd);
   }
   return sandbox.defaultWorkingDirectory();
+};
+
+const requireRunStateCurrentDir = (
+  runState: HarnessRunStateInput,
+): HarnessRunState => {
+  if (hasRunStateCurrentDir(runState)) {
+    return runState;
+  }
+  throw new Error(
+    "run state is missing currentDir; older cf-harness runs cannot be resumed",
+  );
 };
 
 const normalizeSandboxRoot = (path: string): string => {
@@ -379,12 +393,15 @@ export class CfHarnessEngine {
           runId,
         })
         : undefined);
+    const runState = options.runState === undefined
+      ? undefined
+      : requireRunStateCurrentDir(options.runState);
     const currentDir = resolveInitialCurrentDir(
       this.sandbox,
       this.config,
-      options.runState,
+      runState,
     );
-    this.#runState = options.runState ??
+    this.#runState = runState ??
       createHarnessRunState({
         runId,
         cfcEnforcementMode: this.config.cfcEnforcementMode,

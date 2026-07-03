@@ -969,20 +969,22 @@ Deno.test("CfHarnessEngine getRunState returns a deep clone", () => {
 });
 
 Deno.test("CfHarnessEngine rejects legacy run state snapshots without currentDir", () => {
+  const legacyRunState = {
+    runId: "run-legacy",
+    status: "completed",
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:01.000Z",
+    cfcEnforcementMode: "observe",
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  } satisfies Omit<HarnessRunState, "currentDir">;
+
   assertThrows(
     () =>
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
-        runState: {
-          runId: "run-legacy",
-          status: "completed",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:01.000Z",
-          cfcEnforcementMode: "observe",
-          policyEvents: [],
-          toolOutputs: [],
-          failureRecords: [],
-        } as unknown as HarnessRunState,
+        runState: legacyRunState,
       }),
     Error,
     "older cf-harness runs cannot be resumed",
