@@ -9,8 +9,12 @@ import {
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
-// deno-lint-ignore no-explicit-any
-const obj = (v: unknown) => v as any;
+type InspectableValue = {
+  [index: number]: InspectableValue;
+  [key: string]: InspectableValue;
+};
+
+const obj = (v: unknown): InspectableValue => v as InspectableValue;
 
 describe("value-clone", () => {
   describe("cloneWithValueAtPath", () => {

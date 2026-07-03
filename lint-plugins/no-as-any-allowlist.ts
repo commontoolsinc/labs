@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/data-model/test/value-clone.test.ts",
   "packages/generated-patterns/integration/patterns/counter-nested-parameterized.pattern.ts",
   "packages/generated-patterns/integration/patterns/ct-1334-fetchjson-derive-subpattern.pattern.ts",
   "packages/html/src/main/applicator.ts",
