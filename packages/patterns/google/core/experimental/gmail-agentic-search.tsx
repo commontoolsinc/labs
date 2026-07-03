@@ -28,6 +28,7 @@ import {
   Default,
   generateObject,
   handler,
+  type JSONSchema,
   NAME,
   navigateTo,
   nonPrivateRandom,
@@ -97,9 +98,9 @@ export interface DebugLogEntry {
 // NOTE: Stream.send() only takes 1 argument (the event), no onCommit callback
 type RefreshStreamType = Stream<Record<string, never>>;
 
-// Tool definition for additional tools
 export interface ToolDefinition {
   description: string;
+  inputSchema?: JSONSchema;
   handler: Stream<any>;
 }
 

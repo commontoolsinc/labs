@@ -13,6 +13,7 @@ import {
   defineItemSchema,
   InferItem,
   listTool,
+  listToolHandler,
 } from "../core/util/agentic-tools.ts";
 
 // ============================================================================
@@ -196,7 +197,8 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
         reportFood: {
           description:
             "Report a discovered food preference. Call this IMMEDIATELY when you identify a food the user likes.",
-          handler: reportFood, // Already bound - no second call needed!
+          inputSchema: reportFood.inputSchema,
+          handler: listToolHandler(reportFood.state),
         },
       },
       title: "🍕 Favorite Foods Finder",

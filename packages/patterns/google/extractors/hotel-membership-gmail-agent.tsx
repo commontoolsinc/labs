@@ -23,6 +23,7 @@ import {
   defineItemSchema,
   InferItem,
   listTool,
+  listToolHandler,
 } from "../core/util/agentic-tools.ts";
 
 // Scan mode: "full" = comprehensive all-time search, "recent" = last 7 days only
@@ -431,7 +432,8 @@ Report memberships as you find them. Don't wait until the end.`,
         reportMembership: {
           description:
             "Report a found membership number. Call this IMMEDIATELY when you find a valid membership number. It will be saved automatically.",
-          handler: reportMembership, // Already bound - no second call needed!
+          inputSchema: reportMembership.inputSchema,
+          handler: listToolHandler(reportMembership.state),
         },
       },
       title: "🏨 Hotel Membership Extractor",
