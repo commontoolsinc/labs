@@ -12,7 +12,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/google/extractors/hotel-membership-gmail-agent.tsx",
   "packages/patterns/google/extractors/pge-bill-tracker.tsx",
   "packages/patterns/google/extractors/united-flight-tracker.tsx",
   "packages/patterns/google/extractors/usps-informed-delivery.tsx",
