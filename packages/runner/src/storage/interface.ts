@@ -847,7 +847,10 @@ export interface IExtendedStorageTransaction
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
   /** Set the write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18). */
   setCfcWriteFloorMode(mode: CfcWriteFloorMode): void;
-  /** Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3). */
+  /**
+   * Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3).
+   * Anti-downgrade pinned: once enabled, disabling throws.
+   */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run

@@ -145,6 +145,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // Cell must not disable propagation mid-transaction to launder a value.
   private cfcFlowLabelsPinned = false;
   private cfcWriteFloorPinned = false;
+  private cfcTriggerReadGatingPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -232,7 +233,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
+    // Anti-downgrade pin (mirrors the write floor): once the gate is on —
+    // set by the runtime at tx creation — pattern/handler code that reaches
+    // the tx cannot turn it off before prepareCfc() and empty the
+    // triggerReadSources the H5 gates consume (cubic/codex review on #4488).
+    // Re-asserting enabled is always allowed.
+    if (this.cfcTriggerReadGatingPinned && !enabled) {
+      throw new Error(
+        `CFC trigger-read gating cannot be disabled: transaction is pinned ` +
+          `at enabled`,
+      );
+    }
     this.cfcState.triggerReadGating = enabled;
+    if (enabled) {
+      this.cfcTriggerReadGatingPinned = true;
+    }
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {

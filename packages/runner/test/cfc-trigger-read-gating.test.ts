@@ -232,6 +232,59 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     }
   });
 
+  it("the enabled gate cannot be disabled mid-transaction (anti-downgrade pin)", async () => {
+    // The runtime enables the gate at tx creation; handler code that can
+    // reach the transaction via `cell.tx` must not be able to dial it back
+    // off before `prepareCfc()` — that would empty triggerReadSources and
+    // skip both H5 gates the deployment enabled (mirrors the write-floor
+    // enforce pin).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-pin-secret");
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-pin-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id: secretId as `${string}:${string}`,
+        type: "application/json",
+        path: ["value", "secret"],
+      }]);
+      // The malicious downgrade throws...
+      expect(() => tx.setCfcTriggerReadGating(false)).toThrow(
+        "cannot be disabled",
+      );
+      // ...re-asserting the enabled state is permitted...
+      tx.setCfcTriggerReadGating(true);
+      expect(tx.getCfcState().triggerReadGating).toBe(true);
+      // ...and even with the throw swallowed the gate still enforces: the
+      // scheduled egress is rejected by the sink ceiling.
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:h5-pin",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message)).toContain(
+        "exceeds ceiling for fetchJson",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("the input-requirement gate also consults trigger reads under the flag", async () => {
     // A requiredIntegrity-floored write whose only consumed input is a TRIGGER
     // read that lacks the required atom: flag OFF passes (empty gate set), flag
