@@ -197,7 +197,7 @@ async function readCfcLabelProbe(page: Page): Promise<CfcLabelProbe> {
     const elements: Element[] = [];
     collect(document, elements);
     const hosts = await Promise.all(elements.map(async (element) => {
-      const value = (element as unknown as { value?: unknown }).value;
+      const value = (element as Element & { value?: unknown }).value;
       const ref = typeof (value as { ref?: unknown } | undefined)?.ref ===
           "function"
         ? (value as { ref(): unknown }).ref()

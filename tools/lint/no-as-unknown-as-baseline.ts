@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/cfc-spec-gallery.test.ts": [
-    "191:29:1vb38hx",
-  ],
   "packages/patterns/integration/multi-runtime-worker.ts": [
     "332:10:v188bh",
   ],
