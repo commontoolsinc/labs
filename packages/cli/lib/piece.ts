@@ -1229,8 +1229,8 @@ async function inspectSlugTargetCell(
 }
 
 export async function getPieceView(config: PieceConfig): Promise<unknown> {
-  const data = (await inspectPiece(config)) as any;
-  return data.result?.[UI] as VNode;
+  const { result } = await inspectPiece(config);
+  return isRecord(result) ? result[UI] : undefined;
 }
 
 export function formatViewTree(view: unknown): string {
