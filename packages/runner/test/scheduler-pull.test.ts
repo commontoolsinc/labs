@@ -1,5 +1,6 @@
 // Pull scheduler core behavior and stale dependency propagation tests.
 
+import { createDirtyDependencyTraceContext } from "../src/scheduler/diagnostics.ts";
 import {
   afterEach,
   beforeEach,
@@ -1068,6 +1069,34 @@ describe("pull-based scheduling", () => {
     expect(forward.memo.get(rightEffect)).toBe(true);
     expect(reverse.memo.get(leftEffect)).toBe(true);
     expect(reverse.memo.get(rightEffect)).toBe(true);
+
+    // The trace-enabled memo-hit bookkeeping in dirty-dependencies.ts is
+    // otherwise reached only when a pull-event preflight trace happens to be
+    // active during a memo hit, which depends on event-batch interleaving and
+    // so varies run to run. Re-collect from the already-memoized dirty
+    // computation with a fresh work set and a trace attached so the counters
+    // are asserted deterministically.
+    const trace = createDirtyDependencyTraceContext();
+    const schedulerWithTrace = runtime.scheduler as unknown as {
+      dirtyDependencyTraceContext?: ReturnType<
+        typeof createDirtyDependencyTraceContext
+      >;
+    };
+    schedulerWithTrace.dirtyDependencyTraceContext = trace;
+    try {
+      const tracedWorkSet = new Set<Action>();
+      const result = schedulerInternal.collectDirtyDependencies(
+        computation,
+        tracedWorkSet,
+        forward.memo,
+      );
+      expect(result).toBe(true);
+      expect(tracedWorkSet.has(computation)).toBe(true);
+      expect(trace.memoHitCount).toBe(1);
+      expect(trace.workSetAddCount).toBe(1);
+    } finally {
+      schedulerWithTrace.dirtyDependencyTraceContext = undefined;
+    }
   });
 
   it("should recompute multi-hop chains before running effects in pull mode", async () => {
