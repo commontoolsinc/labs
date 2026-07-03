@@ -39,14 +39,14 @@ CREATE TABLE branch (
 INSERT INTO branch (name, head_seq, status) VALUES ('', 1, 'active');
 `;
 
-let dbBytes: Uint8Array;
+let dbBytes: Uint8Array<ArrayBuffer>;
 let keyPath: string;
 let tmpRoot: string;
 const realFetch = globalThis.fetch;
 const prevIdentity = Deno.env.get("CF_IDENTITY");
 const prevApiUrl = Deno.env.get("CF_API_URL");
 
-async function buildDbBytes(): Promise<Uint8Array> {
+async function buildDbBytes(): Promise<Uint8Array<ArrayBuffer>> {
   const dir = await Deno.makeTempDir({ prefix: "cli-remote-seed-" });
   const path = `${dir}/space.sqlite`;
   const db = new Database(path, { create: true });
@@ -90,8 +90,7 @@ function stubFetch(opts: StubOpts = {}): void {
       );
     }
     if (url.pathname.startsWith(`${DUMP_BASE}/`)) {
-      // deno-lint-ignore no-explicit-any
-      return Promise.resolve(new Response(dbBytes as any, { status: 200 }));
+      return Promise.resolve(new Response(dbBytes, { status: 200 }));
     }
     return Promise.resolve(new Response("nope", { status: 404 }));
   }) as typeof fetch;
