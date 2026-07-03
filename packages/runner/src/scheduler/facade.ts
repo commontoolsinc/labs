@@ -865,6 +865,19 @@ export class Scheduler {
    */
   setDebounce(action: Action, ms: number): void {
     this.gates.setDebounce(action, ms);
+    // Configuring a debounce on an already-invalid computation starts its
+    // trailing window now — the same re-arm an invalidation would do
+    // (arming is otherwise the invalidation path's job; queries stay pure).
+    const record = this.nodes.get(action);
+    if (
+      ms > 0 && record?.kind === "computation" && this.isInvalidAction(action)
+    ) {
+      this.gates.onInvalidated(
+        record,
+        performance.now(),
+        this.createDebouncedComputationContext(),
+      );
+    }
   }
 
   /**
@@ -1910,6 +1923,17 @@ export class Scheduler {
       this.clearNodeBackoff(record);
     }
     markInvalidRecord(this.nodes, action, cause);
+    // Trailing computation debounce re-arms on every invalidation (§8.1:
+    // debounceReadyAt resets while gated). Arming here — in the one
+    // invalid-setter — covers every path (channel, registration, retry), so
+    // gate QUERIES stay side-effect-free.
+    if (record.kind === "computation") {
+      this.gates.onInvalidated(
+        record,
+        performance.now(),
+        this.createDebouncedComputationContext(),
+      );
+    }
   }
 
   private clearInvalidAction(action: Action): void {
@@ -1928,9 +1952,6 @@ export class Scheduler {
   ): void {
     this.markActionInvalid(action, cause);
 
-    if (this.nodes.computations.has(action)) {
-      this.scheduleComputationDebounce(action);
-    }
     if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {
       this.scheduleWithDebounce(action);
       return;
@@ -2060,13 +2081,6 @@ export class Scheduler {
 
   private isDebouncedComputationWaiting(action: Action): boolean {
     return this.gates.isDebouncedComputationWaiting(
-      action,
-      this.createDebouncedComputationContext(),
-    );
-  }
-
-  private scheduleComputationDebounce(action: Action): void {
-    this.gates.scheduleComputationDebounce(
       action,
       this.createDebouncedComputationContext(),
     );

@@ -58,6 +58,31 @@ export type PendingRequestDiagnostic = {
   ageMs: number;
 };
 
+/**
+ * One entry of the bounded boot-window request timeline: when the request was
+ * sent and when its response settled, as offsets (ms) from the connection's
+ * construction. Aggregate stats say a request was slow; this timeline says
+ * WHEN it was slow and what else was in flight — the ordering evidence the
+ * per-type histograms cannot carry. Only the first `REQUEST_TIMELINE_CAP`
+ * requests are recorded, which covers a page boot.
+ */
+export type RequestTimelineEntry = {
+  msgId: number;
+  type: RequestType;
+  sentAtMs: number;
+  doneAtMs?: number;
+  error?: boolean;
+};
+
+const REQUEST_TIMELINE_CAP = 96;
+
+// Sampling period for the event-loop lag probe. Each tick records how far
+// beyond schedule the timer fired — a direct measure of how long this
+// thread's event loop was unable to run macrotasks (long synchronous work,
+// GC, or CPU starvation). The histogram lands in the same timing stats the
+// load summaries read, so a wedged stretch shows up as a large `max`.
+const LOOP_LAG_SAMPLE_MS = 100;
+
 type SubscriptionCounterName =
   | "localSubscribes"
   | "localUnsubscribes"
@@ -126,11 +151,33 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #transport: RuntimeTransport;
   #subscribed = new Map<string, Set<CellHandle>>();
   #subscriptionDiagnostics = new Map<string, SubscriptionCounterTotals>();
+  #constructedAt = performance.now();
+  #requestTimeline: RequestTimelineEntry[] = [];
+  #timelineByMsgId = new Map<number, RequestTimelineEntry>();
+  #loopLagTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(transport: RuntimeTransport) {
     super();
     this.#transport = transport;
     this.#transport.on("message", this._handleMessage);
+    // Main-thread event-loop lag probe: records into the "runtime-client"
+    // timing stats as `loop/mainLag`, next to the `ipc/*` round-trips it
+    // contextualizes. A slow round-trip with a quiet mainLag histogram is
+    // worker-side; a matching mainLag spike says this thread starved the
+    // response handling itself.
+    let expected = performance.now() + LOOP_LAG_SAMPLE_MS;
+    this.#loopLagTimer = setInterval(() => {
+      const now = performance.now();
+      const lag = now - expected;
+      if (lag > 0) ipcLogger.time(expected, now, "loop", "mainLag");
+      expected = now + LOOP_LAG_SAMPLE_MS;
+    }, LOOP_LAG_SAMPLE_MS);
+    this.#lifetime.signal.addEventListener("abort", () => {
+      if (this.#loopLagTimer !== undefined) {
+        clearInterval(this.#loopLagTimer);
+        this.#loopLagTimer = undefined;
+      }
+    }, { once: true });
   }
 
   /**
@@ -185,7 +232,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return Promise.reject(signal.reason);
     }
     const msgId = this.#nextMsgId++;
-    const message = { msgId, data };
+    // `sentEpochMs` rides the envelope so the worker can compute delivery
+    // delay across the thread boundary (performance.now() origins differ per
+    // context; timeOrigin+now is comparable). Optional: older workers ignore
+    // it, the guard tolerates extra fields.
+    const message = {
+      msgId,
+      data,
+      sentEpochMs: performance.timeOrigin + performance.now(),
+    };
 
     const deferred = defer<CommandResponse<T>, Error>();
 
@@ -217,6 +272,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     }
 
     this.#pendingRequests.set(msgId, pending as PendingRequest);
+    if (this.#requestTimeline.length < REQUEST_TIMELINE_CAP) {
+      const entry: RequestTimelineEntry = {
+        msgId,
+        type: data.type,
+        sentAtMs: Math.round(pending.startTime - this.#constructedAt),
+      };
+      this.#requestTimeline.push(entry);
+      this.#timelineByMsgId.set(msgId, entry);
+    }
     if (DEBUG_IPC) {
       console.log(
         `[IPC(\x1B[1m${message.msgId}\x1B[0m)\x1B[96m=>\x1B[0m]`,
@@ -355,6 +419,17 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       .sort((a, b) => b.ageMs - a.ageMs);
   }
 
+  /**
+   * The bounded send/settle timeline of the first requests on this
+   * connection (see RequestTimelineEntry). Entries without `doneAtMs` were
+   * still unsettled (pending, timed out, or cancelled) when read.
+   */
+  getRequestTimelineDiagnostics(): RequestTimelineEntry[] {
+    // Copy so a caller cannot mutate the ledger, and late responses cannot
+    // mutate what a caller already captured.
+    return this.#requestTimeline.map((entry) => ({ ...entry }));
+  }
+
   getSubscriptionDiagnostics(): SubscriptionDiagnostics {
     const keys = new Set<string>([
       ...this.#subscriptionDiagnostics.keys(),
@@ -444,6 +519,14 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
     // Record IPC round-trip time using hierarchical keys
     ipcLogger.time(pending.startTime, "ipc", pending.type);
+    const timelineEntry = this.#timelineByMsgId.get(msgId);
+    if (timelineEntry) {
+      timelineEntry.doneAtMs = Math.round(
+        performance.now() - this.#constructedAt,
+      );
+      if ("error" in message && message.error) timelineEntry.error = true;
+      this.#timelineByMsgId.delete(msgId);
+    }
 
     if ("error" in message && message.error) {
       if (DEBUG_IPC) {

@@ -1130,10 +1130,11 @@ describe("scheduler v2 cutover fixtures", () => {
     expect(isLive(state, nodes.get(cycleB)!)).toBe(false);
   });
 
-  it("plans wake times for first-run debounced computations", () => {
-    // The waiting check and the wake-time planner must agree on the
-    // first-run debounce gate: if one schedules a debounce the other must
-    // report its ready time, or planners spin without a wake.
+  it("plans wake times for invalidation-armed debounced computations", () => {
+    // Arming happens at invalidation time (the facade's markActionInvalid →
+    // gates.onInvalidated); the waiting check and the wake-time planner are
+    // pure reads of that armed state, so they agree by construction — and a
+    // query on an un-armed gate must stay a no-op (no lazy self-arming).
     const nodes = new NodeRegistry();
     const action: Action = function debouncedFirstRun() {};
     nodes.register(action, "computation");
@@ -1156,6 +1157,11 @@ describe("scheduler v2 cutover fixtures", () => {
     };
 
     try {
+      // Pure query on an un-armed gate: reports nothing and does not arm.
+      expect(gates.isDebouncedComputationWaiting(action, context)).toBe(false);
+      expect(gates.getNextDebounceRunTime(action, context)).toBeUndefined();
+      // Invalidation arms the trailing debounce; both reads then agree.
+      gates.onInvalidated(nodes.get(action)!, performance.now(), context);
       expect(gates.isDebouncedComputationWaiting(action, context)).toBe(true);
       expect(gates.getNextDebounceRunTime(action, context)).toBeDefined();
     } finally {

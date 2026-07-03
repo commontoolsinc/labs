@@ -210,28 +210,14 @@ export class SchedulerGates {
       : undefined;
   }
 
+  // Pure query: arming happens at invalidation time (the facade's
+  // markActionInvalid → onInvalidated), never as a side effect of asking.
   isDebouncedComputationWaiting(
     action: Action,
     context: DebouncedComputationContext,
   ): boolean {
-    if (
-      this.shouldDebouncePullComputation(action, context) &&
-      context.isInvalid(action) &&
-      this.gate(action)?.debounceReadyAt === undefined
-    ) {
-      this.scheduleComputationDebounce(action, context);
-    }
     const readyAt = this.getNextDebounceRunTime(action, context);
     return readyAt !== undefined && readyAt > performance.now();
-  }
-
-  scheduleComputationDebounce(
-    action: Action,
-    context: DebouncedComputationContext,
-  ): void {
-    const record = this.state.nodes.get(action);
-    if (!record) return;
-    this.onInvalidated(record, performance.now(), context);
   }
 
   scheduleWithDebounce(

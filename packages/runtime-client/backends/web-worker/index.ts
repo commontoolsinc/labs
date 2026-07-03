@@ -27,6 +27,34 @@ import { getLogger } from "@commonfabric/utils/logger";
 // returned; both present means the response was lost in transit.
 const ipcLogger = getLogger("runtime-worker.ipc", { enabled: false });
 
+// Worker-side request decomposition, recorded into timing stats (they record
+// even while the logger is disabled) under a `runner.`-prefixed logger so the
+// integration-test load summaries pick them up:
+//   runner.ipc/delivery/<type> — postMessage send → this handler running,
+//     i.e. how long the request sat in the worker's macrotask queue. Uses the
+//     envelope's `sentEpochMs` (timeOrigin-based, comparable across threads).
+//   runner.ipc/handle/<type>   — handleRequest start → settled.
+// A slow client round-trip decomposes as delivery (worker starved) vs handle
+// (handler awaited something slow) vs the residue (response return path).
+const ipcTimingLogger = getLogger("runner.ipc", { enabled: false });
+
+// Worker event-loop lag probe (`runner.loop/workerLag`): each tick records how
+// far past schedule the timer fired — long synchronous stretches (compile,
+// large traverses, GC) and CPU starvation show up as its max/p95. Companion to
+// the main-thread `loop/mainLag`; together they attribute a slow round-trip to
+// a wedged thread rather than a slow handler. Lives for the worker's lifetime.
+const LOOP_LAG_SAMPLE_MS = 100;
+const loopLagLogger = getLogger("runner.loop", { enabled: false });
+{
+  let expected = performance.now() + LOOP_LAG_SAMPLE_MS;
+  setInterval(() => {
+    const now = performance.now();
+    const lag = now - expected;
+    if (lag > 0) loopLagLogger.time(expected, now, "workerLag");
+    expected = now + LOOP_LAG_SAMPLE_MS;
+  }, LOOP_LAG_SAMPLE_MS);
+}
+
 let worker: RuntimeProcessor | undefined;
 let workerInitialization: Promise<RuntimeProcessor> | undefined;
 
@@ -125,6 +153,19 @@ self.addEventListener("message", async (event: MessageEvent) => {
     }
     const { msgId, data: request } = message;
     ipcLogger.debug(`received/${request.type}`, () => []);
+    const receivedAt = performance.now();
+    const sentEpochMs = (message as { sentEpochMs?: number }).sentEpochMs;
+    if (typeof sentEpochMs === "number") {
+      const deliveryMs = performance.timeOrigin + receivedAt - sentEpochMs;
+      if (deliveryMs > 0) {
+        ipcTimingLogger.time(
+          receivedAt - deliveryMs,
+          receivedAt,
+          "delivery",
+          request.type,
+        );
+      }
+    }
 
     if (request.type === RequestType.Initialize) {
       if (workerInitialization) {
@@ -162,7 +203,9 @@ self.addEventListener("message", async (event: MessageEvent) => {
       return;
     }
 
+    const handleStart = performance.now();
     const response = await worker.handleRequest(request);
+    ipcTimingLogger.time(handleStart, "handle", request.type);
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
