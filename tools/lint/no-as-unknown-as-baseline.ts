@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/storage/inspector.ts": [
-    "312:26:1000cb7",
-  ],
   "packages/runner/src/storage/mergeable-ops.ts": [
     "115:31:1hjwfhv",
   ],

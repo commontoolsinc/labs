@@ -309,7 +309,7 @@ const receive = (
     case "task/effect":
       return integrate(state, time, {
         url: receipt.of,
-        value: receipt.is as unknown as FabricValue,
+        value: receipt.is,
       });
     case "task/return":
       return complete(state, time, receipt);
