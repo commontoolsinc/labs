@@ -61,6 +61,17 @@ function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {
   });
 }
 
+// Under the reactive interpreter the three computeds collapse into ONE
+// segment action (`raw:ri2:seg…`); the invariants (persisted CLEAN, reload
+// rehydrates without misses, no re-run) apply to that action instead.
+const interpreterOn = (() => {
+  try {
+    return Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 async function mainTsxSnapshots(runtime: Runtime) {
   const provider = runtime.storageManager.open(space) as {
     listSchedulerActionSnapshots?: (
@@ -78,7 +89,9 @@ async function mainTsxSnapshots(runtime: Runtime) {
     limit: 1000,
   });
   return res.snapshots.filter((s) =>
-    (s.observation.actionId ?? "").includes("main.tsx")
+    (s.observation.actionId ?? "").includes(
+      interpreterOn ? "ri2:seg" : "main.tsx",
+    )
   );
 }
 
@@ -116,7 +129,7 @@ Deno.test("reload: sibling-field computeds persist clean and do not re-run", asy
   // All three computeds persisted; NONE should carry a spurious dirty/stale seq.
   // (Before the fix, dbl + plusOne persisted with directDirtySeq set.)
   const snaps = await mainTsxSnapshots(runtimeA);
-  expect(snaps.length).toBe(3);
+  expect(snaps.length).toBe(interpreterOn ? 1 : 3);
   for (const s of snaps) {
     expect(s.directDirtySeq).toBeUndefined();
     expect(s.staleSeq).toBeUndefined();
