@@ -95,16 +95,16 @@ interface MergeableOpDescriptor<
   Delta extends MergeableOpDelta = MergeableOpDelta,
 > {
   readonly op: Intent["op"];
-  readonly isNoopDelta?: (delta: Delta) => boolean;
-  readonly fold: (
+  isNoopDelta?(delta: Delta): boolean;
+  fold(
     existing: MergeableOpIntent | undefined,
     path: readonly string[],
     delta: Delta,
-  ) => Intent;
-  readonly build: (
+  ): Intent;
+  build(
     intent: Intent,
     ctx: MergeableBuildContext,
-  ) => MergeableBuildResult;
+  ): MergeableBuildResult;
 }
 
 const descriptor = <
@@ -112,7 +112,7 @@ const descriptor = <
   Delta extends MergeableOpDelta,
 >(
   d: MergeableOpDescriptor<Intent, Delta>,
-): MergeableOpDescriptor => d as unknown as MergeableOpDescriptor;
+): MergeableOpDescriptor => d;
 
 type AppendIntent = Extract<MergeableOpIntent, { op: "append" | "add-unique" }>;
 type AppendDelta = Extract<MergeableOpDelta, { op: "append" | "add-unique" }>;
