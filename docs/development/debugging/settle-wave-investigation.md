@@ -52,6 +52,11 @@ Use a simple, repeatable shell flow and keep it fixed across runs:
    per run hides the problem. In the integration harness, prefer
    `SPACE_NAME=...` over a random space.
 
+For integration-test FAILURES, start with the self-diagnosing failure
+output (fill phase ledger, pending-IPC table, worker request ledger) before
+reaching for traces — see
+[Browser Integration Test Diagnostics](integration-test-diagnostics.md).
+
 For a scripted browser reproduction instead of manual console work, the
 default-app integration flow supports trace capture:
 

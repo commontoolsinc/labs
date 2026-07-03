@@ -35,3 +35,15 @@ dev-local` in `packages/shell`, then point the test at both with
 `API_URL=… FRONTEND_URL=… deno test -A integration/<file>`. Without
 `FRONTEND_URL` the shell is missing and every tree fails identically at
 `goto` — a misleading non-repro.
+
+## When the probe is not enough
+
+The probe names the stuck layer; these siblings go deeper:
+
+- [Debugging Settle Waves](settle-wave-investigation.md) — scripted trace
+  capture for the default-app integration flow (`CF_CAPTURE_TRIGGER_TRACE=1`),
+  Chrome performance traces, and the `commonfabric.rt` console workflow for
+  inspecting the browser worker live (baselines, settle stats, trigger /
+  action-run / write traces).
+- [Console Commands](console-commands.md) — reading logger counts, timing
+  baselines, and worker IPC from the page console.
