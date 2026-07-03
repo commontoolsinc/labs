@@ -32,17 +32,86 @@ const createMockRuntimeClient = () => {
   } as any;
 };
 
+type MockDomEvent = {
+  type: string;
+  target?: unknown;
+  isTrusted?: boolean;
+};
+
+type MockNode = MockElement | MockTextNode;
+
+type MockElement = {
+  tagName: string;
+  _id: string;
+  nodeType: 1;
+  parentNode: MockElement | null;
+  childNodes: MockNode[];
+  dataset: Record<string, string>;
+  setAttribute(name: string, value: string): void;
+  getAttribute(name: string): string | null;
+  hasAttribute(name: string): boolean;
+  removeAttribute(name: string): void;
+  appendChild(child: MockNode): MockNode;
+  insertBefore(child: MockNode, reference: MockNode | null): MockNode;
+  removeChild(child: MockNode): MockNode;
+  addEventListener(type: string, listener: (event: MockDomEvent) => void): void;
+  removeEventListener(
+    type: string,
+    listener: (event: MockDomEvent) => void,
+  ): void;
+  dispatchEvent(event: MockDomEvent): boolean;
+};
+
+type MockHTMLElement = HTMLElement & MockElement;
+
+type MockTextNode = {
+  _id: string;
+  nodeType: 3;
+  textContent: string;
+  parentNode: MockElement | null;
+};
+
+type MockText = Text & MockTextNode;
+
+type MockDocument = Document & {
+  createElement(tagName: string): MockHTMLElement;
+  createTextNode(text: string): MockText;
+};
+
+function mockElement(node: unknown): MockElement {
+  if (typeof node === "object" && node !== null) {
+    const candidate = node as {
+      nodeType?: unknown;
+      tagName?: unknown;
+      childNodes?: unknown;
+    };
+    if (
+      candidate.nodeType === 1 &&
+      typeof candidate.tagName === "string" &&
+      Array.isArray(candidate.childNodes)
+    ) {
+      return node as MockElement;
+    }
+  }
+
+  throw new Error("Expected mock element");
+}
+
+function mockChildTagNames(element: MockElement): string[] {
+  return element.childNodes.map((child) => mockElement(child).tagName);
+}
+
 // Create a minimal DOM environment for testing
 // Note: This doesn't fully replicate HTMLElement behavior
-function createMockDocument() {
+function createMockDocument(): MockDocument {
   let idCounter = 0;
 
   const createElement = (tagName: string) => {
     const attributes = new Map<string, string>();
-    const eventListeners = new Map<string, ((event: unknown) => void)[]>();
-    const childNodes: any[] = [];
+    const eventListeners = new Map<string, ((event: MockDomEvent) => void)[]>();
+    const childNodes: MockNode[] = [];
 
-    const element: Record<string, any> = {
+    const element = {
       tagName: tagName.toUpperCase(),
       _id: `mock-${idCounter++}`,
       nodeType: 1, // ELEMENT_NODE
@@ -75,7 +144,7 @@ function createMockDocument() {
       removeAttribute(name: string) {
         attributes.delete(name);
       },
-      appendChild(child: any) {
+      appendChild(child: MockNode) {
         // Remove from current position if already a child (handles move)
         const existingIndex = childNodes.indexOf(child);
         if (existingIndex >= 0) {
@@ -86,7 +155,7 @@ function createMockDocument() {
         childNodes.push(child);
         return child;
       },
-      insertBefore(child: any, reference: any) {
+      insertBefore(child: MockNode, reference: MockNode | null) {
         // Remove from current parent if already attached (handles move)
         const existingIndex = childNodes.indexOf(child);
         if (existingIndex >= 0) {
@@ -106,7 +175,7 @@ function createMockDocument() {
         }
         return child;
       },
-      removeChild(child: any) {
+      removeChild(child: MockNode) {
         const index = childNodes.indexOf(child);
         if (index >= 0) {
           childNodes.splice(index, 1);
@@ -129,11 +198,12 @@ function createMockDocument() {
           }
         }
       },
-      dispatchEvent(event: any) {
+      dispatchEvent(event: MockDomEvent) {
         const listeners = eventListeners.get(event.type) ?? [];
         listeners.forEach((listener) => listener(event));
+        return true;
       },
-    };
+    } as MockHTMLElement;
 
     return element;
   };
@@ -144,13 +214,13 @@ function createMockDocument() {
       nodeType: 3, // TEXT_NODE
       textContent: text,
       parentNode: null,
-    };
+    } as MockText;
   };
 
   return {
     createElement,
     createTextNode,
-  } as unknown as Document;
+  } as MockDocument;
 }
 
 Deno.test("DomApplicator - create elements", async (t) => {
@@ -316,11 +386,9 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ],
       });
 
-      const parent = applicator.getNode(1) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
+      const parent = mockElement(applicator.getNode(1));
       assertEquals(parent.childNodes.length, 1);
-      assertEquals(parent.childNodes[0].tagName, "SPAN");
+      assertEquals(mockElement(parent.childNodes[0]).tagName, "SPAN");
     },
   );
 
@@ -345,15 +413,9 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ],
       });
 
-      const laterParent = applicator.getNode(1) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
-      const staleParent = applicator.getNode(2) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
-      assertEquals(laterParent.childNodes.map((child) => child.tagName), [
-        "SPAN",
-      ]);
+      const laterParent = mockElement(applicator.getNode(1));
+      const staleParent = mockElement(applicator.getNode(2));
+      assertEquals(mockChildTagNames(laterParent), ["SPAN"]);
       assertEquals(staleParent.childNodes, []);
     },
   );
@@ -381,14 +443,8 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ],
       });
 
-      const parent = applicator.getNode(1) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
-      assertEquals(parent.childNodes.map((child) => child.tagName), [
-        "A",
-        "B",
-        "C",
-      ]);
+      const parent = mockElement(applicator.getNode(1));
+      assertEquals(mockChildTagNames(parent), ["A", "B", "C"]);
     },
   );
 
@@ -409,10 +465,8 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ],
     });
 
-    const parent = applicator.getNode(1) as unknown as {
-      childNodes: Array<{ tagName: string }>;
-    };
-    assertEquals(parent.childNodes.map((child) => child.tagName), ["SPAN"]);
+    const parent = mockElement(applicator.getNode(1));
+    assertEquals(mockChildTagNames(parent), ["SPAN"]);
   });
 
   await t.step(
@@ -435,14 +489,9 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ],
       });
 
-      const parent = applicator.getNode(1) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
+      const parent = mockElement(applicator.getNode(1));
       assertEquals(parent.childNodes, []);
-      assertEquals(
-        (applicator.getNode(2) as unknown as { tagName: string }).tagName,
-        "SPAN",
-      );
+      assertEquals(mockElement(applicator.getNode(2)).tagName, "SPAN");
     },
   );
 
@@ -472,10 +521,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     assertEquals(applicator.getNode(1), undefined);
     assertEquals(applicator.getNode(2), undefined);
     assertEquals(applicator.getNode(3), undefined);
-    const pendingChild = applicator.getNode(4) as unknown as {
-      parentNode: unknown;
-      tagName: string;
-    };
+    const pendingChild = mockElement(applicator.getNode(4));
     assertEquals(pendingChild.tagName, "A");
     assertEquals(pendingChild.parentNode, null);
   });
@@ -500,13 +546,8 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ],
       });
 
-      const parent = applicator.getNode(1) as unknown as {
-        childNodes: Array<{ tagName: string }>;
-      };
-      const pendingChild = applicator.getNode(2) as unknown as {
-        parentNode: unknown;
-        tagName: string;
-      };
+      const parent = mockElement(applicator.getNode(1));
+      const pendingChild = mockElement(applicator.getNode(2));
       assertEquals(parent.childNodes, []);
       assertEquals(pendingChild.parentNode, null);
 
@@ -515,7 +556,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
         ops: [{ op: "remove-node", nodeId: 3 }],
       });
 
-      assertEquals(parent.childNodes.map((child) => child.tagName), ["A"]);
+      assertEquals(mockChildTagNames(parent), ["A"]);
       assertEquals(pendingChild.parentNode, parent);
     },
   );
@@ -601,20 +642,8 @@ Deno.test("DomApplicator - child operations", async (t) => {
       ],
     });
 
-    const parentNode = applicator.getNode(1) as unknown as {
-      dispatchEvent(event: {
-        type: string;
-        target: unknown;
-        isTrusted: boolean;
-      }): void;
-    };
-    const childNode = applicator.getNode(2) as unknown as {
-      dispatchEvent(event: {
-        type: string;
-        target: unknown;
-        isTrusted: boolean;
-      }): void;
-    };
+    const parentNode = mockElement(applicator.getNode(1));
+    const childNode = mockElement(applicator.getNode(2));
 
     applicator.applyBatch({
       batchId: 2,
@@ -950,7 +979,7 @@ Deno.test("DomApplicator - mountInto", async (t) => {
       rootId: 1,
     });
 
-    const container = doc.createElement("section") as unknown as HTMLElement;
+    const container = doc.createElement("section");
     applicator.mountInto(container, 1);
 
     assertEquals((container as any).childNodes.length, 1);
@@ -967,7 +996,7 @@ Deno.test("DomApplicator - setContainer", async (t) => {
       onEvent: () => {},
     });
 
-    const container = doc.createElement("section") as unknown as HTMLElement;
+    const container = doc.createElement("section");
     applicator.setContainer(container);
 
     // Verify container is registered with ID 0
@@ -982,7 +1011,7 @@ Deno.test("DomApplicator - setContainer", async (t) => {
       onEvent: () => {},
     });
 
-    const container = doc.createElement("section") as unknown as HTMLElement;
+    const container = doc.createElement("section");
     applicator.setContainer(container);
 
     // Insert a child directly into the container (node 0)

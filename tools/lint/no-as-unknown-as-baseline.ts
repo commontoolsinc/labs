@@ -1,22 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/test/main-applicator.test.ts": [
-    "153:4:nusjh5",
-    "319:43:1rn7zub",
-    "348:48:1rn7zub",
-    "351:48:109ssdo",
-    "384:43:1rn7zub",
-    "412:41:fkfyd7",
-    "438:43:1rn7zub",
-    "443:31:wcunrf",
-    "475:47:9os9o1",
-    "503:43:1rn7zub",
-    "506:49:1slqcir",
-    "604:45:9rly38",
-    "611:44:1x5p1jz",
-    "953:51:1oxwspg",
-    "970:51:1oxwspg",
-    "985:51:1oxwspg",
-  ],
   "packages/html/test/main-renderer.test.ts": [
     "128:6:bo7cbj",
     "136:4:1o8qiyz",
