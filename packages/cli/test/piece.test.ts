@@ -8,7 +8,7 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { SlugResolutionError } from "@commonfabric/piece";
+import { type PieceManager, SlugResolutionError } from "@commonfabric/piece";
 import {
   normalizeApiUrl,
   parseLink,
@@ -22,6 +22,10 @@ const PIECE = "abcdefghijklmnopqrstuvwxyz";
 const ID = "~/.my.key";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
+
+function stubPieceManager(): PieceManager {
+  return {} as unknown as PieceManager;
+}
 
 describe("cli piece parsing", () => {
   it("normalizes API URLs for app route hints", () => {
@@ -296,9 +300,9 @@ describe("cli piece parsing", () => {
     }, {
       loadManager: (config) => {
         seen.config = config;
-        const manager = {};
+        const manager = stubPieceManager();
         seen.manager = manager;
-        return Promise.resolve(manager as any);
+        return Promise.resolve(manager);
       },
       createController: (manager) => {
         expect(manager).toBe(seen.manager);
@@ -414,7 +418,7 @@ describe("cli piece parsing", () => {
   });
 
   it("resolves slug piece config through storage", async () => {
-    const manager = {};
+    const manager = stubPieceManager();
     const resolved = await resolvePieceConfig({
       apiUrl: API_URL,
       space: SPACE,
@@ -423,7 +427,7 @@ describe("cli piece parsing", () => {
     }, {
       loadManager: (config: SpaceConfig) => {
         expect(config.space).toBe(SPACE);
-        return Promise.resolve(manager as any);
+        return Promise.resolve(manager);
       },
       resolvePieceAddress: (seenManager: unknown, token: string) => {
         expect(seenManager).toBe(manager);
@@ -442,7 +446,7 @@ describe("cli piece parsing", () => {
       identity: ID,
       piece: "of:fid1:piece-123",
     }, {
-      loadManager: () => Promise.resolve({} as any),
+      loadManager: () => Promise.resolve(stubPieceManager()),
     });
 
     expect(resolved.piece).toBe("of:fid1:piece-123");
@@ -450,19 +454,22 @@ describe("cli piece parsing", () => {
 
   it("preserves URI link endpoints without slug lookup", async () => {
     const token = "of:fid1:piece-123";
-    const resolved = await resolveLinkEndpointAddress({} as any, token);
+    const resolved = await resolveLinkEndpointAddress(
+      stubPieceManager(),
+      token,
+    );
 
     expect(resolved).toBe(token);
   });
 
   it("rejects a bare endpoint with no slug document, even with the fallback", async () => {
-    const manager = {};
+    const manager = stubPieceManager();
     // A colon-less token (a bare name, or a legacy CID) is not an id-shaped
     // endpoint, so the missing-slug fallback does not preserve it; with no slug
     // document it is genuinely missing rather than a usable raw id.
     const token = "a-bare-name";
     await expect(resolveLinkEndpointAddress(
-      manager as any,
+      manager,
       token,
       () =>
         Promise.reject(
@@ -473,10 +480,10 @@ describe("cli piece parsing", () => {
   });
 
   it("rejects missing destination slug endpoints", async () => {
-    const manager = {};
+    const manager = stubPieceManager();
     const token = "demo";
     await expect(resolveLinkEndpointAddress(
-      manager as any,
+      manager,
       token,
       () =>
         Promise.reject(
