@@ -2733,9 +2733,7 @@ function narrowSchema(
 function elementAt<T>(array: T[], path: string): T | undefined {
   // Only access as array index if path is a valid index string.
   // Out-of-bounds access returns undefined (standard JS behavior).
-  return isArrayIndexPropertyName(path)
-    ? (array as unknown as Record<string, T>)[path]
-    : undefined;
+  return isArrayIndexPropertyName(path) ? array[Number(path)] : undefined;
 }
 
 type Primitive = string | number | boolean | null | undefined | symbol | bigint;

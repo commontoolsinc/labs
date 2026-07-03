@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/traverse.ts": [
-    "2469:13:1mxyqq4",
-  ],
   "packages/runner/test/action-fingerprint.test.ts": [
     "9:24:lqf4o0",
   ],
