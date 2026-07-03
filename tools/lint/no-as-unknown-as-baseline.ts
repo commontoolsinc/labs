@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/test/view-session-gate2.test.ts": [
-    "37:31:1cx6li8",
-  ],
   "packages/data-model/src/codec-common/BigIntCodec.ts": [
     "32:41:le169c",
   ],

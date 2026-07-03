@@ -34,64 +34,74 @@ type SessionPrivates = {
   openPickedFile(absPath: string): void;
   adjustHunkCounts(oldDelta: number, newDelta: number): void;
 };
-const priv = (s: Session) => s as unknown as SessionPrivates;
+
+function callPrivate<K extends keyof SessionPrivates>(
+  session: Session,
+  name: K,
+  ...args: Parameters<SessionPrivates[K]>
+): ReturnType<SessionPrivates[K]> {
+  const method: (
+    ...args: Parameters<SessionPrivates[K]>
+  ) => ReturnType<SessionPrivates[K]> = Reflect.get(session, name);
+  return method.apply(session, args);
+}
 
 Deno.test("selectNode: an out-of-range index leaves the selection untouched", () => {
   const s = makeSession();
-  priv(s).selectNode(-1);
+  callPrivate(s, "selectNode", -1);
   assertEquals(s.view().selected, null);
-  priv(s).selectNode(s.doc.flatStructure.length + 5);
+  callPrivate(s, "selectNode", s.doc.flatStructure.length + 5);
   assertEquals(s.view().selected, null);
 });
 
 Deno.test("moveCardSelection: a no-op when no info overlay is open", () => {
   const s = makeSession();
-  priv(s).moveCardSelection(1);
+  callPrivate(s, "moveCardSelection", 1);
   assertEquals(s.view().overlay, null);
 });
 
 Deno.test("revealMatch: a no-op when there are no matches", () => {
   const s = makeSession();
   const top = s.top;
-  priv(s).revealMatch();
+  callPrivate(s, "revealMatch");
   assertEquals(s.top, top);
 });
 
 Deno.test("handleOverlayKey: a no-op when no overlay is open", () => {
   const s = makeSession();
-  priv(s).handleOverlayKey({ name: "down" });
+  callPrivate(s, "handleOverlayKey", { name: "down" });
   assertEquals(s.view().overlay, null);
 });
 
 Deno.test("prepareContextEdit: a no-op on a plain file (no diff policy)", () => {
   const s = makeSession();
-  priv(s).prepareContextEdit();
+  callPrivate(s, "prepareContextEdit");
   assertEquals(s.view().overlay, null);
 });
 
 Deno.test("editStart: column 0 when there is no diff policy", () => {
   const s = makeSession();
-  assertEquals(priv(s).editStart(), 0);
+  assertEquals(callPrivate(s, "editStart"), 0);
 });
 
 Deno.test("ensureCursorVisible: a no-op when there is no edit buffer", () => {
   const s = makeSession();
   const top = s.top;
-  priv(s).ensureCursorVisible();
+  callPrivate(s, "ensureCursorVisible");
   assertEquals(s.top, top);
 });
 
 Deno.test("computeEditedFiles: empty when there is no source or buffer", () => {
   const s = makeSession();
-  assertEquals(priv(s).computeEditedFiles(), []);
+  assertEquals(callPrivate(s, "computeEditedFiles"), []);
 });
 
 Deno.test("the file-picker helpers are no-ops without a file gateway", () => {
   const s = makeSession();
-  priv(s).refreshPicker();
-  priv(s).pickerUp();
-  priv(s).activatePicked();
-  priv(s).openPickedFile("/anywhere/main.ts");
+  callPrivate(s, "refreshPicker");
+  callPrivate(s, "pickerUp");
+  callPrivate(s, "activatePicked");
+  callPrivate(s, "openPickedFile", "/anywhere/main.ts");
   // The picker was never entered, so no overlay was opened.
   assertEquals(s.view().overlay, null);
 });
@@ -99,6 +109,6 @@ Deno.test("the file-picker helpers are no-ops without a file gateway", () => {
 Deno.test("adjustHunkCounts: a no-op with no diff policy", () => {
   const s = makeSession();
   const top = s.top;
-  priv(s).adjustHunkCounts(0, 0);
+  callPrivate(s, "adjustHunkCounts", 0, 0);
   assertEquals(s.top, top);
 });
