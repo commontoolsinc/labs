@@ -82,6 +82,9 @@
     "**/.doccheck*"
   ],
   "lint": {
+    "plugins": [
+      "./lint-plugins/no-as-any.ts"
+    ],
     "exclude": [
       ".agents/",
       ".claude/",
