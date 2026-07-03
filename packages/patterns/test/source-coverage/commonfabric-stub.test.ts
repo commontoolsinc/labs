@@ -29,6 +29,8 @@ let generateTextResult: {
   result: "",
   error: undefined,
 };
+let fetchJsonUncheckedResult: unknown = { stargazers_count: 123 };
+let llmDialogParams: Array<Record<string, unknown>> = [];
 
 export function setWishResult(query: string, result: unknown): void {
   wishResults.set(query, result);
@@ -52,6 +54,18 @@ export function clearGenerateTextResult(): void {
     result: "",
     error: undefined,
   };
+}
+
+export function setFetchJsonUncheckedResult(result: unknown): void {
+  fetchJsonUncheckedResult = result;
+}
+
+export function clearLlmDialogParams(): void {
+  llmDialogParams = [];
+}
+
+export function getLlmDialogParams(): Array<Record<string, unknown>> {
+  return llmDialogParams;
 }
 
 export class Writable<T = unknown> {
@@ -164,11 +178,15 @@ function writeKey(value: unknown, key: PropertyKey, nextValue: unknown): void {
   (value as Record<PropertyKey, unknown>)[key] = nextValue;
 }
 
-export const Cell = {
-  of<T>(value: T): Writable<T> {
+export class Cell<T = unknown> extends Writable<T> {
+  constructor(value: T, _schema?: unknown) {
+    super(value);
+  }
+
+  static of<T>(value: T): Writable<T> {
     return new Writable(value);
-  },
-};
+  }
+}
 
 export function pattern<TInput, TOutput>(
   body: (input: TInput) => TOutput,
@@ -267,7 +285,7 @@ export function fetchJsonUnchecked(
 ): { pending: false; result: unknown; error: undefined } {
   return {
     pending: false,
-    result: { stargazers_count: 123 },
+    result: fetchJsonUncheckedResult,
     error: undefined,
   };
 }
@@ -313,16 +331,19 @@ export function generateText<T>(
 }
 
 export function llmDialog<T>(
-  _params: Record<string, unknown>,
+  params: Record<string, unknown>,
 ): {
   pending: false;
   result?: T;
   addMessage: Stream<BuiltInLLMMessage>;
+  cancelGeneration: Stream<void>;
   error?: string;
 } {
+  llmDialogParams.push(params);
   return {
     pending: false,
     addMessage: handler<BuiltInLLMMessage, Record<string, never>>(() => {})({}),
+    cancelGeneration: action(() => {}),
   };
 }
 

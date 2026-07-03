@@ -1,8 +1,11 @@
 import {
   clearGenerateTextResult,
+  clearLlmDialogParams,
   clearWishResults,
   findEventHandlers,
+  getLlmDialogParams,
   NAME,
+  setFetchJsonUncheckedResult,
   setGenerateTextResult,
   setWishResult,
   textContent,
@@ -24,6 +27,25 @@ function uiOf(value) {
 
 function sendCountOf(value) {
   return value.sendCount;
+}
+
+function findNodesByType(node, type) {
+  const nodes = [];
+  const seen = new WeakSet();
+  const visit = (value) => {
+    if (value == null || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (value.type === type) nodes.push(value);
+    visit(value.children);
+    visit(value.props?.children);
+  };
+  visit(node);
+  return nodes;
 }
 
 if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
@@ -194,6 +216,84 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       textContent(uiOf(journal)).includes("Journal subject"),
       "journal renders entries with typed subject cells",
     );
+
+    const { default: PromptInjectionDemo } = await import(
+      "../../../cfc-agent-prompt-injection-demo/main.tsx"
+    );
+    clearLlmDialogParams();
+    const promptInjectionDemo = instantiatePattern(PromptInjectionDemo, {});
+    assert(
+      textContent(uiOf(promptInjectionDemo)).includes(
+        "Prompt injection against mail-sending agents",
+      ),
+      "prompt injection demo renders its title",
+    );
+    assert(
+      promptInjectionDemo.parentModel.get() === "gateway:z-ai/glm-5",
+      "prompt injection demo exposes the default parent model",
+    );
+    const dialogParams = getLlmDialogParams();
+    assert(
+      dialogParams.length === 2,
+      "prompt injection demo creates two agent dialogs",
+    );
+    const unsafeTools = dialogParams[0].tools;
+    const safeTools = dialogParams[1].tools;
+    const unsafeReadResult = new Writable(null);
+    unsafeTools.readRawBriefing.handler.send({ result: unsafeReadResult });
+    assert(
+      unsafeReadResult.get().body.includes("Status: NOT APPROVED"),
+      "unsafe briefing reader returns the raw briefing body",
+    );
+    const safeReadResult = new Writable(null);
+    safeTools.readRawBriefing.handler.send({ result: safeReadResult });
+    assert(
+      safeReadResult.get().body.redacted === true,
+      "safe briefing reader returns the redacted body marker",
+    );
+    const sendResult = new Writable(null);
+    unsafeTools.sendMail.handler.send({
+      recipient: "john@example.org",
+      subject: "not approved",
+      body: { "@link": "/of:summary" },
+      result: sendResult,
+    });
+    assert(
+      sendResult.get().ok === true &&
+        promptInjectionDemo.emails.get()[0].body ===
+          "[opaque link: /of:summary]",
+      "mail tool logs opaque-link bodies as display strings",
+    );
+    const promptDemoClickHandlers = findEventHandlers(
+      uiOf(promptInjectionDemo),
+      "onClick",
+    );
+    assert(
+      promptDemoClickHandlers.length >= 6,
+      "prompt injection demo renders its control buttons",
+    );
+    for (const click of promptDemoClickHandlers) click();
+    setFetchJsonUncheckedResult("not a model directory");
+    const fallbackPromptInjectionDemo = instantiatePattern(
+      PromptInjectionDemo,
+      {},
+    );
+    const fallbackModelValues = findNodesByType(
+      uiOf(fallbackPromptInjectionDemo),
+      "cf-select",
+    ).map((select) => select.props.items.map((item) => item.value).join("\n"));
+    assert(
+      fallbackModelValues.length === 2 &&
+        fallbackModelValues.every((values) =>
+          values === [
+            "gateway:z-ai/glm-5",
+            "anthropic:claude-sonnet-4.6",
+            "gateway:claude-sonnet-4-6",
+          ].join("\n")
+        ),
+      "prompt injection demo uses fallback model items for invalid model directories",
+    );
+    setFetchJsonUncheckedResult({ stargazers_count: 123 });
 
     const { default: ExtractorModule } = await import(
       "../../../record/extraction/extractor-module.tsx"

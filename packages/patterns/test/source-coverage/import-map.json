@@ -1,6 +1,7 @@
 {
   "imports": {
     "commonfabric": "./commonfabric-stub.test.ts",
+    "commonfabric/cfc": "./commonfabric-cfc-stub.test.ts",
     "@commonfabric/html/jsx-runtime": "./jsx-runtime-stub.test.ts"
   }
 }
