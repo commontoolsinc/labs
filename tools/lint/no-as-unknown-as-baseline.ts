@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/fabric-instances/FabricError.ts": [
-    "151:15:4c869",
-    "238:31:75f0ok",
-    "310:13:1g2l5rp",
-  ],
   "packages/data-model/src/fabric-instances/FabricLink.ts": [
     "77:31:75f0ok",
   ],

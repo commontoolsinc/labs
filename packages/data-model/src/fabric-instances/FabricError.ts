@@ -146,10 +146,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
       if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
         continue;
       }
-      extras.push([
-        key,
-        (error as unknown as Record<string, FabricValue>)[key],
-      ]);
+      extras.push([key, (error as Error & Record<string, FabricValue>)[key]]);
     }
     return new FabricError({
       type,
@@ -235,7 +232,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
     for (const value of this.#extras.values()) {
       subFreeze(value);
     }
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
@@ -307,7 +304,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
     if (this.stack !== undefined) error.stack = this.stack;
     if (this.cause !== undefined) error.cause = this.cause;
     for (const [key, value] of this.#extras) {
-      (error as unknown as Record<string, unknown>)[key] = value;
+      (error as Error & Record<string, unknown>)[key] = value;
     }
     return frozen ? Object.freeze(error) : error;
   }
