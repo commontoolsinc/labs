@@ -143,14 +143,21 @@ describe("lunch poll: two users vote on a shared option", () => {
             }),
           ]),
       );
-      await Promise.all([
-        waitForRuntimeIdle(hostPage, { timeout: PROPAGATION_TIMEOUT }),
-        waitForRuntimeIdle(guestPage, { timeout: PROPAGATION_TIMEOUT }),
-      ]);
+      await timer.run(
+        "both runtimes idle",
+        () =>
+          Promise.all([
+            waitForRuntimeIdle(hostPage, { timeout: PROPAGATION_TIMEOUT }),
+            waitForRuntimeIdle(guestPage, { timeout: PROPAGATION_TIMEOUT }),
+          ]),
+      );
 
       // Host joins first -> becomes host/admin. The roster chip carrying the
       // host's name appears once the join lands.
-      await fillCfInput(hostPage, "#lp-join-name", HOST);
+      await timer.run(
+        "host name filled",
+        () => fillCfInput(hostPage, "#lp-join-name", HOST),
+      );
       await clickCfButton(hostPage, "#lp-join-button");
       await timer.run(
         "host joined (name in roster)",

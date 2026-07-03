@@ -46,6 +46,18 @@ interface PendingRequest<T = unknown> {
   onAbort?: () => void;
 }
 
+/**
+ * One in-flight request: sent to the worker, no response yet. `ageMs` is how
+ * long it has been outstanding. A request that sits here far beyond the norm
+ * names the layer a stalled caller is blocked on (worker starvation, a lost
+ * response, or a handler that never returns).
+ */
+export type PendingRequestDiagnostic = {
+  msgId: number;
+  type: RequestType;
+  ageMs: number;
+};
+
 type SubscriptionCounterName =
   | "localSubscribes"
   | "localUnsubscribes"
@@ -323,6 +335,24 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
   async [Symbol.asyncDispose]() {
     await this.dispose();
+  }
+
+  /**
+   * Snapshot of every request sent to the worker whose response has not yet
+   * arrived (and whose timeout/abort has not fired). Main-thread state only —
+   * safe to call even when the worker is wedged, which is exactly when it is
+   * most useful: a probe reading this from a stuck page sees which request
+   * types are stalled and for how long.
+   */
+  getPendingRequestDiagnostics(): PendingRequestDiagnostic[] {
+    const now = performance.now();
+    return [...this.#pendingRequests.values()]
+      .map((pending) => ({
+        msgId: pending.msgId,
+        type: pending.type,
+        ageMs: Math.round(now - pending.startTime),
+      }))
+      .sort((a, b) => b.ageMs - a.ageMs);
   }
 
   getSubscriptionDiagnostics(): SubscriptionDiagnostics {

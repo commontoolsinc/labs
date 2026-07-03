@@ -14,6 +14,18 @@ import {
   RequestType,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+// Count-only ledger of request traffic as seen by the worker: one
+// `received/<type>` per request that reached this message handler and one
+// `responded/<type>` (or `responded-error/<type>`) per reply posted back.
+// Counts increment even while the logger is disabled and the lazy args are
+// never evaluated, so this costs ~nothing per request. Read back through
+// `getLoggerCounts()`, and paired with the main thread's pending-request
+// table it classifies a stuck request: absent from `received` means delivery
+// starved; received without a matching `responded` means the handler never
+// returned; both present means the response was lost in transit.
+const ipcLogger = getLogger("runtime-worker.ipc", { enabled: false });
 
 let worker: RuntimeProcessor | undefined;
 let workerInitialization: Promise<RuntimeProcessor> | undefined;
@@ -112,6 +124,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       throw new Error(`Invalid IPC request: ${JSON.stringify(message)}`);
     }
     const { msgId, data: request } = message;
+    ipcLogger.debug(`received/${request.type}`, () => []);
 
     if (request.type === RequestType.Initialize) {
       if (workerInitialization) {
@@ -122,6 +135,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId: message.msgId });
       return;
     }
@@ -131,6 +145,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
       return;
     }
@@ -142,6 +157,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
       return;
     }
@@ -150,9 +166,12 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
+    ipcLogger.debug(`responded/${request.type}`, () => []);
     self.postMessage(payload);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
+    const type = isIPCClientMessage(message) ? message.data.type : "invalid";
+    ipcLogger.debug(`responded-error/${type}`, () => []);
     self.postMessage({
       msgId: message.msgId,
       error: error instanceof Error ? error.message : String(error),
