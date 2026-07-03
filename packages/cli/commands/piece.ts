@@ -40,6 +40,11 @@ import ports from "@commonfabric/ports" with { type: "json" };
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
 
+interface LinkOpts {
+  resolveBeforeLinking?: unknown;
+  allowNonExisting?: unknown;
+}
+
 export function setQuietMode(quiet: boolean) {
   quietMode = quiet;
 }
@@ -304,7 +309,7 @@ export const piece = new Command()
       source.path || [],
       {
         sourceScope: source.scope,
-        resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+        resolveBeforeLinking: !!(options as LinkOpts).resolveBeforeLinking,
       },
     );
     render(`Set slug ${slug} to ${sourceRef}`);
@@ -680,7 +685,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
         target.path,
         {
           start: options.start,
-          allowNonExisting: !!(options as any).allowNonExisting,
+          allowNonExisting: !!(options as LinkOpts).allowNonExisting,
           sourceScope: source.scope,
           targetScope: target.scope,
         },
