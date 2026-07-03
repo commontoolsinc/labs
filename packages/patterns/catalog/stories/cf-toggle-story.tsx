@@ -52,7 +52,7 @@ export default pattern<ToggleStoryInput, ToggleStoryOutput>(() => {
             label="variant"
             description="Visual style"
             defaultValue="default"
-            value={variant as any}
+            value={variant}
             items={[
               { label: "default", value: "default" },
               { label: "outline", value: "outline" },
@@ -62,7 +62,7 @@ export default pattern<ToggleStoryInput, ToggleStoryOutput>(() => {
             label="size"
             description="Toggle size"
             defaultValue="default"
-            value={size as any}
+            value={size}
             items={[
               { label: "default", value: "default" },
               { label: "sm", value: "sm" },
