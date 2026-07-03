@@ -48,9 +48,9 @@ export interface ResolveHarnessConfigOptions {
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
   artifactRoot?: string;
-  cfcEnforcementMode?: CfcEnforcementMode;
-  inheritedCfcEnforcementMode?: CfcEnforcementMode;
-  cfcEnforcementModeOverride?: string | CfcEnforcementMode;
+  cfcEnforcementMode?: CfcEnforcementMode | null;
+  inheritedCfcEnforcementMode?: CfcEnforcementMode | null;
+  cfcEnforcementModeOverride?: string | CfcEnforcementMode | null;
   trustSnapshot?: TrustSnapshot;
   sandbox?: HarnessSandboxConfig;
   runManifest?: HarnessRunManifest;

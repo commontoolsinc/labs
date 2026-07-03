@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cf-harness/test/config.test.ts": [
-    "133:39:jp6vf5",
-    "140:39:jp6vf5",
-    "147:31:jp6vf5",
-  ],
   "packages/cf-harness/test/engine.test.ts": [
     "985:10:5u6sr5",
   ],

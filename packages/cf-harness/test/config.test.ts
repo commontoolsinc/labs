@@ -130,21 +130,21 @@ Deno.test("resolveCfcEnforcementModeSource identifies the winning mode source", 
 Deno.test("resolveCfcEnforcementModeSource treats null like absent mode values", () => {
   assertEquals(
     resolveCfcEnforcementMode({
-      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementModeOverride: null,
       cfcEnforcementMode: "observe",
     }),
     "observe",
   );
   assertEquals(
     resolveCfcEnforcementModeSource({
-      cfcEnforcementModeOverride: null as unknown as CfcEnforcementMode,
+      cfcEnforcementModeOverride: null,
       cfcEnforcementMode: "observe",
     }),
     "explicit-config",
   );
   assertEquals(
     resolveCfcEnforcementModeSource({
-      cfcEnforcementMode: null as unknown as CfcEnforcementMode,
+      cfcEnforcementMode: null,
       inheritedCfcEnforcementMode: "enforce-explicit",
     }),
     "inherited",
