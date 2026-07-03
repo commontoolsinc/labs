@@ -1938,8 +1938,8 @@ type ToolCallExecutionResult = {
  * declares a ceiling for this sink must additionally bound every value that can
  * reach the model — including the post-commit tool-loop reads, which carry no
  * `sink-request` input and so are never gated by `prepareBoundaryCommit`
- * (#3993 review). The meet (`pattern ∧ deployment`) is the intersection of the
- * two allowlists: pattern omitted → deployment ceiling alone; sink has no
+ * (#3993 review). The meet (`pattern ∧ deployment`) admits exactly the values
+ * both allowlists admit: pattern omitted → deployment ceiling alone; sink has no
  * deployment ceiling → pattern bound alone (unchanged behavior); declared empty
  * deployment ceiling → public-only regardless of the pattern bound.
  */
