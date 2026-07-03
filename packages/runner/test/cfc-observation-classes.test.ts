@@ -301,9 +301,12 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    const derived = entriesOf(outId).find((e) => e.origin === "derived");
-    expect(derived).toBeDefined();
-    expect(derived!.label.integrity ?? []).toContainEqual(certified);
+    // C2 splits the derived stamp into a value + shape pair (integrity
+    // rides the value entry) — collect across the pair.
+    const derived = entriesOf(outId).filter((e) => e.origin === "derived");
+    expect(derived.length).toBeGreaterThan(0);
+    expect(derived.flatMap((e) => e.label.integrity ?? []))
+      .toContainEqual(certified);
   });
 
   // The class axis survives persistence: canonicalization keeps `observes`

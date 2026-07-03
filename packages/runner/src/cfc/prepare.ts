@@ -1373,36 +1373,17 @@ const forEachFlowObservation = (
   // "dep changed" leaks one bit per change through the timing/existence of
   // writes the rerun makes. Runtime-surface addresses were already dropped
   // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization and applies `flowReadExcluded`); the `cid:` check
-  // stays as defense in depth for trigger entries that arrive by other
-  // construction paths.
+  // canonicalization and applies `flowReadExcluded`). The path half of that
+  // exclusion cannot be rechecked here — stored paths are canonical, where
+  // a user `value.source` is indistinguishable from the raw `["source"]`
+  // surface — but the id-based `cid:` check stays as defense in depth for
+  // trigger entries that arrive by other construction paths: `cid:` docs
+  // sit on an unverified write path any same-space writer can reach (audit
+  // S5), so a poisoned labelMap on one must not join the flow derivation.
   for (const trigger of tx.getCfcState().triggerReads) {
     if (trigger.id.startsWith("cid:")) {
       continue;
     }
-    if (
-      consume(
-        trigger.space,
-        trigger.id as URI,
-        normalizeCellScope(trigger.scope),
-        "application/json",
-        trigger.path,
-        { shape: "value", nonRecursive: false },
-      )
-    ) {
-      return true;
-    }
-  }
-  // Trigger reads (§8.9.2): the addresses whose invalidating writes
-  // scheduled this run. The decision to run now was influenced by their
-  // values even when this run's branch never re-reads them — without this,
-  // "dep changed" leaks one bit per change through the timing/existence of
-  // writes the rerun makes. Runtime-surface addresses were already dropped
-  // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization), so no `flowReadExcluded` check here — the stored
-  // path is canonical, where a user `value.source` is indistinguishable
-  // from the raw `["source"]` surface.
-  for (const trigger of tx.getCfcState().triggerReads) {
     if (
       consume(
         trigger.space,
@@ -4023,6 +4004,16 @@ export const prepareBoundaryCommit = (
         ) {
           continue;
         }
+        // C2 persist split (C0 §5/§8): the per-tx join lands as two
+        // per-class entries instead of one covering entry. The `value`
+        // entry carries the full J and keeps §8.12.8 replace-on-overwrite;
+        // the `shape` (existence) entry carries confidentiality only —
+        // existence is a confidentiality channel (SC-4: "this path was
+        // once written"), and integrity there would be joined by C3's
+        // grow-on-overwrite, which for integrity claims is an over-claim
+        // (integrity meets, never joins). Same conf atoms either way, so a
+        // class-unaware reader consuming both as covering entries sees
+        // exactly today's label — additively safe, no dial (C0 §9).
         persistedLabelEntries.push({
           path,
           label: {
@@ -4034,7 +4025,16 @@ export const prepareBoundaryCommit = (
               : {}),
           },
           origin: "derived",
+          observes: "value",
         });
+        if (flowConfidentiality.length > 0) {
+          persistedLabelEntries.push({
+            path,
+            label: { confidentiality: [...flowConfidentiality] },
+            origin: "derived",
+            observes: "shape",
+          });
+        }
       }
       for (const path of structureStampPaths) {
         // A covering derived stamp at-or-above already labels the shape;
@@ -4047,10 +4047,15 @@ export const prepareBoundaryCommit = (
         ) {
           continue;
         }
+        // C2: structure stamps state their class explicitly. Pre-C2
+        // structure entries (absent `observes`) stay covering — unchanged
+        // compat; the flow join is unaffected either way since value reads
+        // consume the `shape` class too (C0 §4).
         persistedLabelEntries.push({
           path,
           label: { confidentiality: [...flowConfidentiality] },
           origin: "structure",
+          observes: "shape",
         });
       }
     }
