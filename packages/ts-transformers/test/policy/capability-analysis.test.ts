@@ -812,6 +812,707 @@ const fn = (input) => helper(input);`;
   },
 );
 
+Deno.test(
+  "Capability analysis records write intent from imported Writable parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.readPaths.includes("auth"));
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for a nullable imported Writable parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth> | null): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for a null-and-undefined imported Writable parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(
+          auth: Writable<Auth> | null | undefined,
+        ): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent from imported WriteonlyCell parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { WriteonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: WriteonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("auth"));
+    // A write-only parameter records only a write; the passing-read is
+    // suppressed, so the destructured argument stays write-only.
+    assertEquals(state.readPaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps a member-access WriteonlyCell argument write-only",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { WriteonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function persist(auth: WriteonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { persist, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          state: { auth: Writable<Auth> },
+        ) => {
+          persist(state.auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "state");
+
+    // A member-access argument (state.auth) must be treated the same as a
+    // destructured one: the write-only parameter records only a write.
+    assert(state.writePaths.includes("auth"));
+    assertEquals(state.readPaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent from imported Cell parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Cell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Cell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assert(state.readPaths.includes("auth"));
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis ignores imported Writable type names from other libraries",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        export type Auth = { token: string };
+        export type Writable<T> = any;
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assert(state.readPaths.includes("auth"));
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis selects the Writable overload for imported clients",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export interface AuthCell {
+          get(): Auth | undefined;
+          update(values: { token?: string }): void;
+        }
+        export interface ClientFactory {
+          (auth: Writable<Auth>): void;
+          (auth: AuthCell): void;
+        }
+        export const createClient: ClientFactory;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent from imported Writable constructors",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export class Client {
+          constructor(auth: Writable<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent from imported Cell constructors",
+  () => {
+    // A constructor whose auth parameter is declared bare `Cell<Auth>` does not
+    // grant write authority. Write intent must be spelled `Writable<Auth>`; a
+    // client that writes the cell (such as a token refresh) must declare it that
+    // way rather than rely on the neutral `Cell<Auth>` alias.
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Cell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export class Client {
+          constructor(auth: Cell<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent for unmatched extra arguments",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient("ignored", auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis reads a generic constraint to classify an imported parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function persist<C extends Writable<Auth>>(auth: C): void;
+      `,
+      "/test.ts": `
+        import { persist, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          persist(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A bounded generic parameter carries the capability of its constraint.
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis reads a ReadonlyCell generic constraint as readonly",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function readAll<C extends ReadonlyCell<Auth>>(auth: C): void;
+      `,
+      "/test.ts": `
+        import { readAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          readAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported Writable rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: Writable<Auth>[]): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported Array rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: Array<Writable<Auth>>): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported readonly-array rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: readonly Writable<Auth>[]): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not map array spreads to imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(
+          first: Writable<Auth>,
+          second: Writable<Auth>,
+          third: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            rest,
+            later,
+          }: {
+            first: Writable<Auth>;
+            rest: Writable<Auth>[];
+            later: Writable<Auth>;
+          },
+        ) => {
+          createClient(first, ...rest, later);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assertEquals(state.writePaths.includes("rest.0"), false);
+    assertEquals(state.writePaths.includes("later"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis maps spread calls to imported Writable rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(
+          first: Writable<Auth>,
+          ...rest: Writable<Auth>[]
+        ): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            rest,
+            later,
+          }: {
+            first: Writable<Auth>;
+            rest: Writable<Auth>[];
+            later: Writable<Auth>;
+          },
+        ) => {
+          writeAll(first, ...rest, later);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assert(state.writePaths.includes("rest.0"));
+    assert(state.writePaths.includes("later"));
+  },
+);
+
+Deno.test(
+  "Capability analysis shrinks a root cell to readonly for a ReadonlyCell parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function readClient(auth: ReadonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { readClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (auth: Writable<Auth>) => {
+          readClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "auth");
+
+    // The declared read-only contract accounts for this argument, so the
+    // whole-cell root fallback does not also grant write. Passing a cell to a
+    // declared reader demonstrates only read need, and the handler is not given
+    // write authority it never uses. In well-typed code a `Writable<Auth>` value
+    // cannot be passed to a `ReadonlyCell<Auth>` parameter (distinct brands,
+    // TS2345), so this shape is reached through a `ReadonlyCell`-typed input or
+    // an explicit cast; the snippet exercises the parameter-type mapping the
+    // analysis applies at that call.
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes(""), false);
+    assertEquals(state.wildcard, false);
+  },
+);
+
 Deno.test("Capability analysis marks for...in over tracked source as wildcard", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
