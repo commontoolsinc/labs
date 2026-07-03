@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/fabric-instances/UnknownValue.ts": [
-    "29:31:75f0ok",
-  ],
   "packages/data-model/src/frozen-builtins.ts": [
     "320:26:f5e6dv",
     "331:27:f5e6dv",
