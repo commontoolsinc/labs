@@ -538,7 +538,7 @@ describe("schema-hash", () => {
         type: "object",
         title: `canon-sym-${Date.now()}-${Math.random()}`,
         [marker]: "kept",
-      } as unknown as JSONSchemaObj;
+      } satisfies JSONSchemaObj & { readonly [marker]: "kept" };
       const interned = internSchema(schema) as JSONSchemaObj;
       expect(Object.keys(interned)).toEqual(["title", "type"]); // string keys sorted
       expect((interned as Record<symbol, unknown>)[marker]).toBe("kept");
