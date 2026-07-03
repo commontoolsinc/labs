@@ -548,7 +548,7 @@ async function readAuthorshipProbe(
       isWithinContainer(element, targetContainerSelector)
     );
     const hosts = elements.map(async (element) => {
-      const typedElement = element as unknown as {
+      const typedElement = element as Element & {
         authorshipState?: string;
         textIntegrityState?: string;
         value?: {
