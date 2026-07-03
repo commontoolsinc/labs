@@ -4023,6 +4023,16 @@ export const prepareBoundaryCommit = (
         ) {
           continue;
         }
+        // C2 persist split (C0 §5/§8): the per-tx join lands as two
+        // per-class entries instead of one covering entry. The `value`
+        // entry carries the full J and keeps §8.12.8 replace-on-overwrite;
+        // the `shape` (existence) entry carries confidentiality only —
+        // existence is a confidentiality channel (SC-4: "this path was
+        // once written"), and integrity there would be joined by C3's
+        // grow-on-overwrite, which for integrity claims is an over-claim
+        // (integrity meets, never joins). Same conf atoms either way, so a
+        // class-unaware reader consuming both as covering entries sees
+        // exactly today's label — additively safe, no dial (C0 §9).
         persistedLabelEntries.push({
           path,
           label: {
@@ -4034,7 +4044,16 @@ export const prepareBoundaryCommit = (
               : {}),
           },
           origin: "derived",
+          observes: "value",
         });
+        if (flowConfidentiality.length > 0) {
+          persistedLabelEntries.push({
+            path,
+            label: { confidentiality: [...flowConfidentiality] },
+            origin: "derived",
+            observes: "shape",
+          });
+        }
       }
       for (const path of structureStampPaths) {
         // A covering derived stamp at-or-above already labels the shape;
@@ -4047,10 +4066,15 @@ export const prepareBoundaryCommit = (
         ) {
           continue;
         }
+        // C2: structure stamps state their class explicitly. Pre-C2
+        // structure entries (absent `observes`) stay covering — unchanged
+        // compat; the flow join is unaffected either way since value reads
+        // consume the `shape` class too (C0 §4).
         persistedLabelEntries.push({
           path,
           label: { confidentiality: [...flowConfidentiality] },
           origin: "structure",
+          observes: "shape",
         });
       }
     }
