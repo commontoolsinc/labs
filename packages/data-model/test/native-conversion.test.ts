@@ -79,7 +79,7 @@ describe("native-conversion", () => {
 
     it("unwraps a `FabricError` back to a native `Error`", () => {
       const error = new Error("test error");
-      const stored = fabricFromNativeValue(error as unknown as FabricValue);
+      const stored = fabricFromNativeValue(error);
       const restored = nativeFromFabricValue(stored);
       expect(restored).toBeInstanceOf(Error);
       expect((restored as Error).message).toBe("test error");
@@ -144,7 +144,7 @@ describe("native-conversion", () => {
       const obj = {
         error: se,
         code: 500,
-      } as unknown as FabricValue;
+      } satisfies FabricValue;
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -159,7 +159,7 @@ describe("native-conversion", () => {
     it("deeply unwraps `FabricError` in arrays (frozen)", () => {
       const err = new Error("array");
       const se = FabricError.fromNativeError(err);
-      const arr = [1, se, 3] as unknown as FabricValue;
+      const arr = [1, se, 3] satisfies FabricValue;
       const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(Error);
@@ -170,10 +170,12 @@ describe("native-conversion", () => {
     });
 
     it("leaves output unfrozen when `frozen=false`", () => {
-      const obj = Object.freeze({
-        a: 1,
-        b: "two",
-      }) as unknown as FabricValue;
+      const obj = Object.freeze(
+        {
+          a: 1,
+          b: "two",
+        } satisfies FabricValue,
+      );
       const result = nativeFromFabricValue(obj, false) as Record<
         string,
         unknown
@@ -185,7 +187,7 @@ describe("native-conversion", () => {
     });
 
     it("freezes output when `frozen=true` (default)", () => {
-      const obj = { a: 1, b: "two" } as unknown as FabricValue;
+      const obj = { a: 1, b: "two" } satisfies FabricValue;
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -209,7 +211,7 @@ describe("native-conversion", () => {
 
     it("passes through non-native `FabricInstance`", () => {
       const us = new UnknownValue("Test@1", null);
-      const obj = { thing: us } as unknown as FabricValue;
+      const obj = { thing: us } satisfies FabricValue;
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -222,7 +224,7 @@ describe("native-conversion", () => {
         ["x", 10],
       ] as [FabricValue, FabricValue][]);
       const sm = new FabricMap(map);
-      const obj = { data: sm } as unknown as FabricValue;
+      const obj = { data: sm } satisfies FabricValue;
       const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
@@ -234,7 +236,7 @@ describe("native-conversion", () => {
     it("deeply unwraps `FabricSet` to `FrozenSet`", () => {
       const set = new Set<FabricValue>([42] as FabricValue[]);
       const ss = new FabricSet(set);
-      const arr = [ss] as unknown as FabricValue;
+      const arr = [ss] satisfies FabricValue;
       const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenSet);
       expect((result[0] as Set<number>).has(42)).toBe(true);
@@ -246,7 +248,7 @@ describe("native-conversion", () => {
       const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      (outerErr as unknown as Record<string, unknown>).data = new FabricMap(
+      (outerErr as Error & Record<string, unknown>).data = new FabricMap(
         new Map([["k", 1]] as [FabricValue, FabricValue][]),
       );
       const outerSe = FabricError.fromNativeError(outerErr);
@@ -260,7 +262,7 @@ describe("native-conversion", () => {
       expect(result.cause).toBeInstanceOf(Error);
       expect((result.cause as Error).message).toBe("inner");
       // custom property should be unwrapped to FrozenMap.
-      const data = (result as unknown as Record<string, unknown>).data;
+      const data = (result as Error & Record<string, unknown>).data;
       expect(data).toBeInstanceOf(FrozenMap);
     });
 
@@ -351,7 +353,7 @@ describe("native-conversion", () => {
         [DEEP_FREEZE](
           _subFreeze: (value: FabricValue) => FabricValue,
         ): FabricValue {
-          return this as unknown as FabricValue;
+          return this;
         }
         [IS_DEEP_FROZEN](
           _subIsDeepFrozen: (value: FabricValue) => boolean,
@@ -384,7 +386,7 @@ describe("native-conversion", () => {
         type: "Error",
         name: null,
         message: "boom",
-      } as unknown as FabricValue;
+      } satisfies FabricValue;
       const frozen = FabricError[CODEC].decode(
         CODEC_TYPE_TAGS.Error,
         state,
@@ -401,7 +403,7 @@ describe("native-conversion", () => {
 
     it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       // Tag travels separately; the bare inner state is the codec payload.
-      const state = { x: 1 } as unknown as FabricValue;
+      const state = { x: 1 } satisfies FabricValue;
       const frozen = ProblematicValue[CODEC].decode("Bad@1", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = ProblematicValue[CODEC].decode(
@@ -413,7 +415,7 @@ describe("native-conversion", () => {
     });
 
     it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = { y: 2 } as unknown as FabricValue;
+      const state = { y: 2 } satisfies FabricValue;
       const frozen = UnknownValue[CODEC].decode("Fancy@3", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = UnknownValue[CODEC].decode("Fancy@3", state, mutableCtx);
@@ -650,8 +652,9 @@ describe("native-conversion", () => {
     describe("converts via `toJSON()` when available", () => {
       it("converts functions with `toJSON()`", () => {
         const fn = () => {};
-        (fn as unknown as { toJSON: () => unknown }).toJSON = () =>
-          "converted function";
+        Object.assign(fn, {
+          toJSON: () => "converted function",
+        });
         expect(shallowFabricFromNativeValue(fn)).toBe("converted function");
       });
 
@@ -835,8 +838,9 @@ describe("native-conversion", () => {
 
       it("converts function with `toJSON()`", () => {
         const fn = () => {};
-        (fn as unknown as { toJSON: () => string }).toJSON = () =>
-          "converted fn";
+        Object.assign(fn, {
+          toJSON: () => "converted fn",
+        });
         expect(shallowFabricFromNativeValue(fn)).toBe("converted fn");
       });
 
@@ -1345,16 +1349,18 @@ describe("native-conversion", () => {
 
       it("converts a nested function with `toJSON()` via its `toJSON()` method", () => {
         const fn = () => {};
-        (fn as unknown as { toJSON: () => unknown }).toJSON = () =>
-          "function with toJSON";
+        Object.assign(fn, {
+          toJSON: () => "function with toJSON",
+        });
         const result = fabricFromNativeValue({ a: 1, fn, b: 2 });
         expect(result).toEqual({ a: 1, fn: "function with toJSON", b: 2 });
       });
 
       it("converts a function with `toJSON()` in an array via its `toJSON()` method", () => {
         const fn = () => {};
-        (fn as unknown as { toJSON: () => unknown }).toJSON = () =>
-          "converted fn";
+        Object.assign(fn, {
+          toJSON: () => "converted fn",
+        });
         const result = fabricFromNativeValue([1, fn, 3]);
         expect(result).toEqual([1, "converted fn", 3]);
       });
