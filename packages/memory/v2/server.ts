@@ -1655,25 +1655,30 @@ export class Server {
           message.sessionId,
         );
       }
-      await this.runPostCommitSchedulerSideEffects(
-        message.space,
-        commit,
-        schedulerObservations,
-        previousReadSpaces,
-        session,
-      );
-      this.markSpaceDirty(
-        message.space,
-        message.commit.operations
-          .filter((operation) => operation.op !== "sqlite")
-          .map((operation) =>
-            toDirtyKey(operation.id, declaredScope(operation.scope))
-          ),
-        {
-          sessionId: message.sessionId,
-          seq: commit.seq,
-        },
-      );
+      // An acknowledged-but-dropped computed commit wrote no revisions:
+      // nothing to broadcast to other sessions, and its scheduler observation
+      // was deliberately not persisted, so there are no side effects to run.
+      if (commit.droppedComputed === undefined) {
+        await this.runPostCommitSchedulerSideEffects(
+          message.space,
+          commit,
+          schedulerObservations,
+          previousReadSpaces,
+          session,
+        );
+        this.markSpaceDirty(
+          message.space,
+          message.commit.operations
+            .filter((operation) => operation.op !== "sqlite")
+            .map((operation) =>
+              toDirtyKey(operation.id, declaredScope(operation.scope))
+            ),
+          {
+            sessionId: message.sessionId,
+            seq: commit.seq,
+          },
+        );
+      }
       return {
         type: "response",
         requestId: message.requestId,

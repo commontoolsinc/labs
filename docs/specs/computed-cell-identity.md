@@ -2,12 +2,19 @@
 
 ## Status
 
-Phase 1 (minting) implemented behind `EXPERIMENTAL_COMPUTED_CELL_IDS`:
-`createRef`/`FabricHash` kind support (preimage + `fid2:computed:` format),
-conservative builder classifier, kind-aware descriptor/manifest matching.
-Server-side conflict policy (phases 2-4) not started. Derived from a design
-discussion on 2026-06-30/07-01 about avoiding needless commit conflicts when
-multiple clients recompute the same derived values.
+Phases 1-3 implemented. Phase 1 (minting), behind
+`EXPERIMENTAL_COMPUTED_CELL_IDS`: `createRef`/`FabricHash` kind support
+(preimage + `fid2:computed:` format), conservative builder classifier,
+kind-aware descriptor/manifest matching. Phase 2 (server policy): the
+memory-v2 engine acknowledges-and-drops stale all-computed commits — a
+zero-revision commit row keeps replay dedupe, dependent pending reads, and
+origin-committed preconditions working — and the storage client reverts the
+optimistic pending value on a `droppedComputed` ack instead of promoting it
+(promotion would shadow the authoritative value behind the monotonic seq
+guard). Phase 3 (lineage) is verified by engine tests. Value-equality dedupe
+(phase 4) and the server-side action runner (phase 5) are not started.
+Derived from a design discussion on 2026-06-30/07-01 about avoiding needless
+commit conflicts when multiple clients recompute the same derived values.
 
 ## Summary
 
