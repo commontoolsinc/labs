@@ -112,6 +112,17 @@ const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
 // sub-agents), so the dialog needs a budget longer than a single model call.
 const TOOL_CALL_TIMEOUT = 1000 * 120; // 120 seconds
 const MAX_SERIALIZE_DEPTH = 100;
+type CellWithTransaction<T = unknown> = Cell<T> & {
+  tx?: IExtendedStorageTransaction;
+};
+type StreamCell<T> = Cell<T> & Stream<T>;
+type HandlerWithSchema = {
+  schema?: unknown;
+};
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
 /**
  * Remove the injected `result` field from a JSON schema so tools don't
@@ -908,7 +919,7 @@ function readCellValueForObservation(
   cell: Cell<unknown>,
 ): unknown {
   const readTx = cell.runtime.readTx(
-    (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
+    (cell as CellWithTransaction).tx,
   );
   const link = resolveLink(
     cell.runtime,
@@ -946,9 +957,7 @@ function collectToolEntries(
     legacy.push({
       name,
       tool,
-      cell: toolsCell.key(name) as unknown as Cell<
-        Schema<typeof LLMToolSchema>
-      >,
+      cell: toolsCell.key(name) as Cell<Schema<typeof LLMToolSchema>>,
     });
   }
 
@@ -1491,9 +1500,7 @@ function materializeDialogRequestSnapshot(
     userResultSchema,
     observationMaxConfidentiality,
     systemObservedConfidentiality: cellsDocs.observedConfidentiality,
-    queueName: inputs.key("queue").withTx(tx).get() as unknown as
-      | string
-      | undefined,
+    queueName: optionalString(inputs.key("queue").withTx(tx).get()),
   };
 }
 
@@ -1891,7 +1898,7 @@ function resolveToolCall(
     if (isStream(cellRef.resolveAsCell())) {
       return {
         type: "invoke",
-        handler: cellRef as unknown as Stream<any>,
+        handler: cellRef as StreamCell<any>,
         call: {
           id,
           name,
@@ -1901,7 +1908,7 @@ function resolveToolCall(
     }
 
     const pattern = cellRef.key("pattern")
-      .getRaw() as unknown as Readonly<Pattern> | undefined;
+      .getRaw() as Readonly<Pattern> | undefined;
     if (pattern) {
       return {
         type: "invoke",
@@ -2175,7 +2182,7 @@ function integrityGateTarget(
 ): { schema: unknown; input: unknown } {
   if (resolved.type === "invoke") {
     const schema = resolved.pattern?.argumentSchema ??
-      (resolved.handler as unknown as { schema?: unknown } | undefined)
+      (resolved.handler as HandlerWithSchema | undefined)
         ?.schema;
     return { schema, input: resolved.call.input };
   }
@@ -2636,7 +2643,7 @@ async function handleInvoke(
   let identityCell: Cell<any> | undefined;
 
   if (resolved.type === "external") {
-    pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
+    pattern = resolved.toolDef.key("pattern").getRaw() as
       | Readonly<Pattern>
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
@@ -3015,7 +3022,7 @@ export function llmDialog(
       // Declare `addMessage` handler and register
       createHandler<BuiltInLLMMessage>(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
-        result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
+        result.key("addMessage") as StreamCell<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
           if (
             pending.withTx(tx).get() && (
@@ -3103,7 +3110,7 @@ export function llmDialog(
 
       // Declare `cancelGeneration` handler and register
       createHandler<void>(
-        result.key("cancelGeneration") as unknown as Stream<any>,
+        result.key("cancelGeneration") as StreamCell<any>,
         (tx: IExtendedStorageTransaction, _event: void) => {
           // Cancel request by setting pending to false. This will trigger the
           // code below to be executed in all tabs.
@@ -3113,9 +3120,7 @@ export function llmDialog(
 
       // Declare `pinCell` handler and register
       createHandler<{ path: string; name: string }>(
-        result.key("pinCell") as unknown as Stream<
-          { path: string; name: string }
-        >,
+        result.key("pinCell") as StreamCell<{ path: string; name: string }>,
         (
           tx: IExtendedStorageTransaction,
           event: { path: string; name: string },
@@ -3154,7 +3159,7 @@ export function llmDialog(
 
       // Declare `unpinAllCells` handler and register
       createHandler<void>(
-        result.key("unpinAllCells") as unknown as Stream<void>,
+        result.key("unpinAllCells") as StreamCell<void>,
         (tx: IExtendedStorageTransaction, _event: void) => {
           // Clear user-pinned cells
           const userPaths = new Set(
@@ -3256,7 +3261,7 @@ async function startRequest(
 
   const { system, maxTokens, model } = inputs.get();
   const queueName = capturedRequest?.queueName ??
-    (inputs.key("queue").get() as unknown as string | undefined);
+    optionalString(inputs.key("queue").get());
   // The snapshot already carries the deployment-bounded ceiling. When there is
   // no snapshot, fold the deployment llmDialog ceiling in here too so a
   // direct/recovery path can't observe past it (#3993 review).

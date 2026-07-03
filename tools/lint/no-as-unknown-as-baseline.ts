@@ -1,18 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builtins/llm-dialog.ts": [
-    "850:10:ubq92t",
-    "888:32:j3eo29",
-    "1433:52:kwrgew",
-    "1833:25:1pe6338",
-    "1843:16:vby00l",
-    "2111:24:ko4han",
-    "2507:55:qqlyhz",
-    "2869:33:1igmdz",
-    "2957:39:122pajk",
-    "2967:30:do8u7y",
-    "3008:36:1c2sjjk",
-    "3110:31:sgx2j1",
-  ],
   "packages/runner/src/builtins/llm.ts": [
     "540:26:y1p8ky",
     "568:59:kwrgew",
