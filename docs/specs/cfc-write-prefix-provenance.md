@@ -189,9 +189,15 @@ Two requirements, both mandatory:
    post-prepare reorder that moves a read from one side of a write to the other
    flips its prefix membership **without changing the digest** — exactly the S2
    shape this section exists to close. Each consumed read's `journalIndex` (or,
-   equivalently, the full interleaved read|write activity order from
-   `tx.journal.activity()`) MUST be part of `PreparedDigestInput` and survive
-   canonicalization.
+   equivalently, the full interleaved read|write activity order) MUST be part
+   of `PreparedDigestInput` and survive canonicalization. **Source the order at
+   the extended-transaction/CFC recording layer, backend-independent** — a
+   per-transaction monotonic index stamped where `buildPreparedDigestInput`'s
+   inputs are recorded (`getReadActivities()` / the reactivity log,
+   `storage/extended-storage-transaction.ts`). Do NOT build the contract on
+   `tx.journal.activity()`: that is a legacy-journal seam —
+   `V2TransactionJournal.activity()` throws (`storage/v2-transaction.ts`), and
+   V2's reactivity log reconstructs writes by sorted path, not temporal order.
 
 Any post-prepare activity that changes the read/write interleaving then
 invalidates the preparation. This is the same discipline
@@ -241,7 +247,10 @@ profile), and §8.9 read-time-journaling rationale; the runner seams are
 `verifyInputRequirements`/`verifyWriteFloor` (`cfc/prepare.ts`),
 `ifcEntryAppliesToAttemptedWrite` (`cfc/prepare.ts`, the both-directions
 overlap predicate the §4 bound must match), `isProvenanceOnlyConsumedLabel`
-(the #14/S7 comment), `tx.journal.activity()` (the ordered read|write stream,
-`storage/interface.ts`), `ConsumedRead` (`cfc/types.ts`, which carries no
-journal position today), and `canonicalizePreparedDigestInput`
-(`cfc/canonical.ts`, the address-sort that motivates §6).
+(the #14/S7 comment), `buildPreparedDigestInput`/`getReadActivities`
+(`storage/extended-storage-transaction.ts`, the recording layer where §6's
+order stamp must live — the legacy `tx.journal.activity()` seam cannot carry
+it: `V2TransactionJournal.activity()` throws, `storage/v2-transaction.ts`),
+`ConsumedRead` (`cfc/types.ts`, which carries no journal position today), and
+`canonicalizePreparedDigestInput` (`cfc/canonical.ts`, the address-sort that
+motivates §6).
