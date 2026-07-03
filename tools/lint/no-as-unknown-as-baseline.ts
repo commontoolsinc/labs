@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/SchemaAndHash.test.ts": [
-    "63:15:2e69kz",
-    "86:15:2e69kz",
-    "109:15:2e69kz",
-  ],
   "packages/data-model/test/shallowMutableClone.test.ts": [
     "78:12:ynopry",
   ],

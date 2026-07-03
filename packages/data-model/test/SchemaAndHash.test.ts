@@ -60,7 +60,7 @@ describe("SchemaAndHash", () => {
       it("is not writable", () => {
         const sah = new SchemaAndHash(true, HASH_A);
         expect(() => {
-          (sah as unknown as Record<string, unknown>).schema = false;
+          (sah as { schema: unknown }).schema = false;
         }).toThrow();
       });
 
@@ -83,7 +83,7 @@ describe("SchemaAndHash", () => {
       it("is not writable", () => {
         const sah = new SchemaAndHash(true, HASH_A);
         expect(() => {
-          (sah as unknown as Record<string, unknown>).schemaOrUndefined = false;
+          (sah as { schemaOrUndefined: unknown }).schemaOrUndefined = false;
         }).toThrow();
       });
 
@@ -106,7 +106,7 @@ describe("SchemaAndHash", () => {
       it("is not writable", () => {
         const sah = new SchemaAndHash(true, HASH_A);
         expect(() => {
-          (sah as unknown as Record<string, unknown>).hash = "tampered";
+          (sah as { hash: unknown }).hash = "tampered";
         }).toThrow();
       });
 
