@@ -148,16 +148,18 @@ Integrity stays flat forever (no OR-integrity — spec §3.1.6; mixed integrity 
    over-restriction, but one that forfeits completeness (a pruned meet is
    strictly tighter than the true meet: `[{anyOf:[A,B]}]` fits `[A]` and
    `[B]` individually but not a meet whose cross pair was dropped). The
-   intersection of alternative sets is never sound. Status: A2 (#4470)
-   landed the conservative deepEqual-identical meet with the general meet
-   explicitly deferred (rationale documented at the site); the union meet
-   must land before clause ceilings first reach this seam (B5
-   `BoundaryContext`/sink ceilings, H3b render ceiling), with the property
-   test matched to the implementation: the full pairwise-union meet gets the
-   **both-direction** test `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧ fits(L,C2)`;
-   a cross-pair-pruning variant only ever gets the soundness direction
-   (`⟹`), stated as such. Prefer the full meet — the biconditional is the
-   guard worth having.
+   intersection of alternative sets is never sound. Status: **LANDED
+   (#4485)** — the full pairwise-union meet (no cross-pair pruning; equal
+   pairs collapse via the `normalizeClause` singleton unwrap; result clauses
+   dedup via `clausesEqual`) with the **both-direction** property test
+   `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧ fits(L,C2)` exhaustive over
+   flat+clause ceilings/labels in
+   `packages/runner/test/cfc-clause-meet.test.ts`. The seam is ready for B5
+   (`BoundaryContext`/sink ceilings) and H3b (render ceiling). If a future
+   large-ceiling consumer ever needs cross-pair pruning, it forfeits
+   completeness and must downgrade the property test to the soundness
+   direction (`⟹`), stated as such — prefer the full meet; the biconditional
+   is the guard worth having.
 
 ### Stages
 
@@ -173,9 +175,9 @@ ordering of alternatives in `canonical.ts` (`canonicalizeCfcMetadata` must sort
 Rewrite `atomsOutsideCeiling` → clause-subsumption membership (return offending
 label *clauses*); `cfcObservationFitsCeiling` signature unchanged; the
 ungrantable `CFC_LABEL_READ_FAILED_ATOM` handling unchanged (it can never be
-subsumed-in). `meetCfcObservationCeilings` per decision 6 (as landed in
-#4470: the conservative deepEqual meet; the union clause-meet is a
-follow-up owed before B5/H3b — see decision 6).
+subsumed-in). `meetCfcObservationCeilings` per decision 6 (#4470 landed the
+conservative deepEqual meet; the general union clause-meet + both-direction
+property test landed in #4485 — see decision 6).
 **Red first:** the multi-party counterexample — label `[[User(A)],[User(B)]]`
 (nobody alone may read) vs ceiling `[{anyOf:[User(A),User(B)]}]` (readers A or
 B) must **fail** fit. Also: OR-clause label `[{anyOf:[A,B]}]` vs flat ceiling
