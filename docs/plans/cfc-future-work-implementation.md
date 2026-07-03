@@ -560,6 +560,13 @@ floor-declaring schema + integrity-less write commits today under
 
 **D4 — per-write read-prefix provenance (the deferred end-state of
 `runner_cfc_implementation.md` "Potential and Final Write Sets").**
+_Design superseded by the soundness review
+[`docs/specs/cfc-write-prefix-provenance.md`](../specs/cfc-write-prefix-provenance.md):
+the bound below ("first attempt") is unsound under write re-attempts — the
+sound bound is the **last write overlapping the protected path** (both prefix
+directions), and consumed-read journal positions must join the digest
+alongside the write-attempt log. The review's §7 constraints are the contract
+for the code PR; the paragraph below is kept as the original sketch._
 Record a write-attempt log in `CfcTxState`: `{ target: CfcAddress,
 journalIndex: number }` per attempted write (the journal already orders
 activity). Gate scoping: `requiredIntegrity`/floor checks quantify over reads
