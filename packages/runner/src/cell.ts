@@ -1133,11 +1133,12 @@ export class CellImpl<T extends FabricValue>
         ".exec() is only available on a SqliteDb cell (invalid database handle)",
       );
     }
-    // Materialize `tables` through a RESOLVING read: a rowLabel rule's term
-    // lists (arrays of objects) split into per-element entity docs when the
-    // handle value is stored, so `getRaw` sees doc LINKS where the rule's AST
-    // nodes should be. The permissive schema bypasses the SqliteDb shape (no
-    // declared properties) that would shape `get()` down to `{}`.
+    // Materialize `tables` through a RESOLVING read: sqliteDatabase now
+    // stores the handle inline (self-contained), but a handle written before
+    // that fix can still hold doc LINKS where the rule's AST nodes should be,
+    // so `getRaw` alone would see links. The permissive schema bypasses the
+    // SqliteDb shape (no declared properties) that would shape `get()` down
+    // to `{}`.
     const materialized = this.asSchema(
       { type: "object", additionalProperties: true } as JSONSchema,
     ).withTx(this.tx).get() as { tables?: unknown } | undefined;
@@ -1217,9 +1218,14 @@ export class CellImpl<T extends FabricValue>
     //  - it serializes concurrent writers: each does a read-modify-write of
     //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
     //    revision (optimistic-concurrency mutex) and one retries.
+    // A LEAF write, not a whole-value set of `{...handle, rev}`: exec runs
+    // inside a handler frame, where a whole-value `.set()` [ID]-anchors every
+    // object-in-array and would split the handle's inline rule term lists
+    // back into per-element linked docs — the split sqliteDatabase stores the
+    // handle raw specifically to avoid (a second runtime can't load those).
     const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
-    this.withTx(this.tx).set(
-      { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
+    (this.withTx(this.tx) as unknown as Cell<{ rev: number }>).key("rev").set(
+      rev + 1,
     );
   }
 
