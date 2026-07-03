@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/tools/openapi-to-provider.ts": [
-    "116:23:hudewo",
-    "134:26:3adeps",
-    "144:44:1g58zyb",
-    "171:23:hudewo",
-    "185:23:hudewo",
-  ],
   "packages/runner/src/builder/built-in.ts": [
     "216:25:n6z91h",
   ],

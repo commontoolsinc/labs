@@ -56,30 +56,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-// ---------------------------------------------------------------------------
-// OpenAPI security scheme types
-// ---------------------------------------------------------------------------
-
-interface OAuthFlow {
-  authorizationUrl?: string;
-  tokenUrl?: string;
-  refreshUrl?: string;
-  scopes?: Record<string, string>;
-}
-
-interface SecurityScheme {
-  type: string; // "oauth2" | "apiKey" | "http" | "openIdConnect"
-  description?: string;
-  // oauth2
-  flows?: Record<string, OAuthFlow>;
-  // apiKey
-  name?: string;
-  in?: string; // "query" | "header" | "cookie"
-  // http
-  scheme?: string; // "bearer", "basic", etc.
-  bearerFormat?: string;
-  // openIdConnect
-  openIdConnectUrl?: string;
+function getString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,8 +95,9 @@ export function extractProviderConfig(
   // 1. Look for an OAuth2 security scheme
   for (const [_key, raw] of Object.entries(schemes)) {
     if (!isRecord(raw)) continue;
-    const scheme = raw as unknown as SecurityScheme;
-    if (scheme.type !== "oauth2" || !isRecord(scheme.flows)) continue;
+    const scheme = raw;
+    const flows = scheme["flows"];
+    if (scheme["type"] !== "oauth2" || !isRecord(flows)) continue;
 
     // Prefer authorizationCode flow; fall back to first available flow
     const preferredFlowOrder = [
@@ -125,23 +108,24 @@ export function extractProviderConfig(
     ];
 
     let chosenFlowName: string | undefined;
-    let chosenFlow: OAuthFlow | undefined;
+    let chosenFlow: Record<string, unknown> | undefined;
 
     for (const flowName of preferredFlowOrder) {
-      const flow = scheme.flows[flowName];
+      const flow = flows[flowName];
       if (isRecord(flow)) {
         chosenFlowName = flowName;
-        chosenFlow = flow as unknown as OAuthFlow;
+        chosenFlow = flow;
         break;
       }
     }
 
     // If none of the preferred names matched, grab the first key
     if (!chosenFlow) {
-      const firstKey = Object.keys(scheme.flows)[0];
-      if (firstKey && isRecord(scheme.flows[firstKey])) {
+      const firstKey = Object.keys(flows)[0];
+      const flow = firstKey ? flows[firstKey] : undefined;
+      if (firstKey && isRecord(flow)) {
         chosenFlowName = firstKey;
-        chosenFlow = scheme.flows[firstKey] as unknown as OAuthFlow;
+        chosenFlow = flow;
       }
     }
 
@@ -156,8 +140,8 @@ export function extractProviderConfig(
 
     return {
       name: providerName,
-      authorizationEndpoint: chosenFlow.authorizationUrl,
-      tokenEndpoint: chosenFlow.tokenUrl,
+      authorizationEndpoint: getString(chosenFlow, "authorizationUrl"),
+      tokenEndpoint: getString(chosenFlow, "tokenUrl"),
       scopes,
       defaultScopes: Object.keys(scopes).join(" "),
       securitySchemeType: "oauth2",
@@ -168,8 +152,8 @@ export function extractProviderConfig(
   // 2. Fall back to apiKey
   for (const [_key, raw] of Object.entries(schemes)) {
     if (!isRecord(raw)) continue;
-    const scheme = raw as unknown as SecurityScheme;
-    if (scheme.type === "apiKey") {
+    const scheme = raw;
+    if (scheme["type"] === "apiKey") {
       return {
         name: providerName,
         scopes: {},
@@ -182,13 +166,13 @@ export function extractProviderConfig(
   // 3. Fall back to http (bearer / basic)
   for (const [_key, raw] of Object.entries(schemes)) {
     if (!isRecord(raw)) continue;
-    const scheme = raw as unknown as SecurityScheme;
-    if (scheme.type === "http") {
+    const scheme = raw;
+    if (scheme["type"] === "http") {
       return {
         name: providerName,
         scopes: {},
         defaultScopes: "",
-        securitySchemeType: `http/${scheme.scheme ?? "unknown"}`,
+        securitySchemeType: `http/${getString(scheme, "scheme") ?? "unknown"}`,
       };
     }
   }
