@@ -408,7 +408,7 @@ Deno.test("worker reconciler diffing - same tag updates in place", async (t) => 
       await runtime.idle();
       collector.clear();
 
-      vnodeCell.withTx(tx).set(undefined as unknown as WorkerVNode);
+      vnodeCell.withTx(tx).set(undefined as never);
       await tx.commit();
       tx = runtime.edit();
       await runtime.idle();

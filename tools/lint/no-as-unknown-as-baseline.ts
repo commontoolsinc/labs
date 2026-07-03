@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/test/worker-reconciler-diffing.test.ts": [
-    "411:41:ermw5x",
-  ],
   "packages/js-compiler/source-map.ts": [
     "250:18:y6gcii",
     "320:4:18r1lo0",
