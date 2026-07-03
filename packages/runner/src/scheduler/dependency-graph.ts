@@ -2,7 +2,10 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
-import { readsOverlapWrites } from "./scheduling-writes.ts";
+import {
+  forEachOverlappingWriter,
+  readsOverlapWrites,
+} from "./scheduling-writes.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,
@@ -127,41 +130,17 @@ export function collectDirectWritersForLog(state: {
     state.trace.logShallowReadCount += log.shallowReads.length;
   }
 
-  for (const read of log.reads) {
-    const entity = entityKey(read);
-    const writers = state.writersByEntity.get(entity);
-    if (!writers) continue;
-
-    for (const writer of writers) {
-      if (state.effects.has(writer)) continue;
-      if (state.trace) state.trace.writerCandidateCount++;
-      const writes = state.getSchedulingWrites(writer) ?? [];
-      if (readsOverlapWrites([read], [], writes)) {
-        if (state.trace && !directWriters.has(writer)) {
-          state.trace.writerOverlapCount++;
-        }
-        directWriters.add(writer);
-      }
+  forEachOverlappingWriter(state, log.reads, log.shallowReads, (writer) => {
+    if (state.trace && !directWriters.has(writer)) {
+      state.trace.writerOverlapCount++;
     }
-  }
-
-  for (const read of log.shallowReads) {
-    const entity = entityKey(read);
-    const writers = state.writersByEntity.get(entity);
-    if (!writers) continue;
-
-    for (const writer of writers) {
-      if (state.effects.has(writer)) continue;
+    directWriters.add(writer);
+  }, {
+    filter: (writer) => !state.effects.has(writer),
+    onCandidate: () => {
       if (state.trace) state.trace.writerCandidateCount++;
-      const writes = state.getSchedulingWrites(writer) ?? [];
-      if (readsOverlapWrites([], [read], writes)) {
-        if (state.trace && !directWriters.has(writer)) {
-          state.trace.writerOverlapCount++;
-        }
-        directWriters.add(writer);
-      }
-    }
-  }
+    },
+  });
 
   return directWriters;
 }
@@ -178,38 +157,17 @@ export function collectReverseDependenciesForLog(
 ): Set<Action> {
   const dependencies = new Set<Action>();
 
-  // Group reads by entity for efficient writer lookups.
-  const readsByEntity = groupReadsByEntity(log.reads);
-  const nonRecursiveByEntity = groupReadsByEntity(log.shallowReads);
-  const allEntities = new Set([
-    ...readsByEntity.keys(),
-    ...nonRecursiveByEntity.keys(),
-  ]);
-
-  // For each entity we read from, find actions that write to it.
-  for (const entity of allEntities) {
-    const writers = state.writersByEntity.get(entity);
-    if (!writers) continue;
-
-    const entityReads = readsByEntity.get(entity) ?? [];
-    const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
-
-    for (const otherAction of writers) {
-      if (otherAction === action) continue;
-      if (dependencies.has(otherAction)) continue;
-
-      const otherWrites = state.getSchedulingWrites(otherAction) ?? [];
-      if (
-        readsOverlapWrites(
-          entityReads,
-          entityNonRecursiveReads,
-          otherWrites,
-        )
-      ) {
-        dependencies.add(otherAction);
-      }
-    }
-  }
+  forEachOverlappingWriter(
+    state,
+    log.reads,
+    log.shallowReads,
+    (writer) => {
+      dependencies.add(writer);
+    },
+    {
+      filter: (writer) => writer !== action && !dependencies.has(writer),
+    },
+  );
 
   return dependencies;
 }

@@ -179,3 +179,57 @@ export function readsOverlapWrites(
 
   return false;
 }
+
+/**
+ * Visit every writer whose static write surface overlaps one of `reads` /
+ * `shallowReads`, via the writersByEntity index. The one entity-pruned
+ * overlap scan behind collectDirectWritersForLog,
+ * collectReverseDependenciesForLog, the effect-resubscribe stale-input
+ * re-check, and the declared-read writer closure — call-site policy (which
+ * writers qualify, dedup, early exit) stays in the visitor.
+ *
+ * `filter` is the cheap pre-overlap writer filter; `onCandidate` fires once
+ * per (read, surviving writer) pair before the overlap test (trace
+ * bookkeeping). `visit` may be called more than once for the same writer
+ * (once per matching read) — visitors dedupe via their own set; returning
+ * true stops the whole scan.
+ */
+export function forEachOverlappingWriter(
+  state: {
+    readonly writersByEntity: ReadonlyMap<SpaceScopeAndURI, Set<Action>>;
+    readonly getSchedulingWrites: (
+      action: Action,
+    ) => readonly IMemorySpaceAddress[] | undefined;
+  },
+  reads: readonly IMemorySpaceAddress[],
+  shallowReads: readonly IMemorySpaceAddress[],
+  visit: (writer: Action) => boolean | void,
+  hooks: {
+    readonly filter?: (writer: Action) => boolean;
+    readonly onCandidate?: (writer: Action) => void;
+  } = {},
+): void {
+  const scan = (
+    read: IMemorySpaceAddress,
+    shallow: boolean,
+  ): boolean => {
+    const writers = state.writersByEntity.get(entityKey(read));
+    if (!writers) return false;
+    for (const writer of writers) {
+      if (hooks.filter && !hooks.filter(writer)) continue;
+      hooks.onCandidate?.(writer);
+      const writes = state.getSchedulingWrites(writer) ?? [];
+      const overlaps = shallow
+        ? readsOverlapWrites([], [read], writes)
+        : readsOverlapWrites([read], [], writes);
+      if (overlaps && visit(writer) === true) return true;
+    }
+    return false;
+  };
+  for (const read of reads) {
+    if (scan(read, false)) return;
+  }
+  for (const read of shallowReads) {
+    if (scan(read, true)) return;
+  }
+}

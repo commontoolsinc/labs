@@ -1,5 +1,6 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
+import type { SpaceScopeAndURI } from "./types.ts";
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
@@ -142,6 +143,7 @@ export interface SchedulerSettleLoopState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly filterStats: { filtered: number; executed: number };
   readonly materializerIndex: MaterializerIndexState;
+  readonly writersByEntity: ReadonlyMap<SpaceScopeAndURI, Set<Action>>;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;

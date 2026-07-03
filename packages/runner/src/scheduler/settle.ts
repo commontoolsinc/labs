@@ -6,7 +6,10 @@ import {
   collectMaterializerWritersForLog,
   type MaterializerIndexState,
 } from "./materializers.ts";
-import { readsOverlapWrites } from "./scheduling-writes.ts";
+import {
+  forEachOverlappingWriter,
+  readsOverlapWrites,
+} from "./scheduling-writes.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import {
   planBudgetBackoff,
@@ -105,6 +108,7 @@ function buildPullIterationWorkSet(state: {
   readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependencies: SchedulerSettleLoopState["dependencies"];
   readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+  readonly writersByEntity: SchedulerSettleLoopState["writersByEntity"];
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly getSchedulingWrites: (
     action: Action,
@@ -153,6 +157,7 @@ function addDeclaredReadWriterClosure(
   state: {
     readonly nodes: SchedulerSettleLoopState["nodes"];
     readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
+    readonly writersByEntity: SchedulerSettleLoopState["writersByEntity"];
     readonly getSchedulingWrites: (
       action: Action,
     ) => readonly IMemorySpaceAddress[] | undefined;
@@ -172,31 +177,41 @@ function addDeclaredReadWriterClosure(
         continue;
       }
 
-      for (const writer of state.nodes.nodes()) {
-        if (writer.action === readerAction || workSet.has(writer.action)) {
-          continue;
+      const consider = (writerAction: Action): void => {
+        if (writerAction === readerAction || workSet.has(writerAction)) {
+          return;
         }
-        if (!isInvalidOrNeverRan(writer)) continue;
+        const writer = state.nodes.get(writerAction);
+        if (!writer || !isInvalidOrNeverRan(writer)) return;
+        workSet.add(writerAction);
+        declaredReadPulledActions.add(writerAction);
+        changed = true;
+      };
 
-        const writes = [
-          ...(state.getSchedulingWrites(writer.action) ?? []),
-          ...(state.materializerIndex.getMaterializerWriteEnvelopes(
-            writer.action,
-          ) ?? []),
-        ];
-        if (
-          writes.length > 0 &&
-          readsOverlapWrites(reader.declaredReads, [], writes)
-        ) {
-          workSet.add(writer.action);
-          declaredReadPulledActions.add(writer.action);
-          changed = true;
-        }
+      // Static write surfaces via the writer index (previously an
+      // O(workSet x allNodes) full-registry fixpoint scan).
+      forEachOverlappingWriter(
+        {
+          writersByEntity: state.writersByEntity,
+          getSchedulingWrites: state.getSchedulingWrites,
+        },
+        reader.declaredReads,
+        [],
+        (writer) => consider(writer),
+      );
+      // Materializer write envelopes reach declared readers the same way.
+      for (
+        const writerAction of collectMaterializerWritersForLog(
+          state.materializerIndex,
+          { reads: reader.declaredReads, shallowReads: [], writes: [] },
+          { exclude: readerAction },
+        )
+      ) {
+        consider(writerAction);
       }
     }
   }
 }
-
 function addInvalidMaterializerPromotions(
   state: {
     readonly nodes: SchedulerSettleLoopState["nodes"];
@@ -414,6 +429,7 @@ function buildAndLogPullIterationWorkSet(
     nodes: state.nodes,
     dependencies: state.dependencies,
     materializerIndex: state.materializerIndex,
+    writersByEntity: state.writersByEntity,
     dependents: state.dependents,
     getSchedulingWrites: state.getSchedulingWrites,
     isLiveAction: state.isLiveAction,

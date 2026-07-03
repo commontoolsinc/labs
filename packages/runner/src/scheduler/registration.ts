@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { forEachOverlappingWriter } from "./scheduling-writes.ts";
 import type { Cancel } from "../cancel.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -342,41 +343,28 @@ function hasInvalidWriterForEffectReads(
   effectReads: readonly IMemorySpaceAddress[],
   effectShallowReads: readonly IMemorySpaceAddress[],
 ): boolean {
-  // Use writersByEntity index for efficient lookup.
-  const entities = new Set<SpaceScopeAndURI>();
-  for (const read of effectReads) {
-    entities.add(entityKey(read));
-  }
-  for (const read of effectShallowReads) {
-    entities.add(entityKey(read));
-  }
-
-  for (const entity of entities) {
-    const writers = state.writeIndex.writersByEntity.get(entity);
-    if (!writers) continue;
-
-    for (const writer of writers) {
-      if (writer === action) continue;
-      if (!state.isInvalid(writer)) continue;
-      if (state.effects.has(writer)) continue; // Only check computations
-      if (state.isThrottled(writer)) continue;
-      if (state.isDebouncedComputationWaiting(writer)) continue;
-
-      // Check path overlap.
-      const writerWrites = state.getSchedulingWrites(writer) ?? [];
-      if (
-        readsOverlapWrites(
-          effectReads,
-          effectShallowReads,
-          writerWrites,
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  let found = false;
+  forEachOverlappingWriter(
+    {
+      writersByEntity: state.writeIndex.writersByEntity,
+      getSchedulingWrites: (writer) => state.getSchedulingWrites(writer),
+    },
+    effectReads,
+    effectShallowReads,
+    () => {
+      found = true;
+      return true;
+    },
+    {
+      filter: (writer) =>
+        writer !== action &&
+        state.isInvalid(writer) &&
+        !state.effects.has(writer) && // only computations
+        !state.isThrottled(writer) &&
+        !state.isDebouncedComputationWaiting(writer),
+    },
+  );
+  return found;
 }
 
 export function updateSchedulerActionType(

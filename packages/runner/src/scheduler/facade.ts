@@ -1650,6 +1650,7 @@ export class Scheduler {
       dependents: this.dependents,
       filterStats: this.filterStats,
       materializerIndex: this.materializers,
+      writersByEntity: this.writeIndex.writersByEntity,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
