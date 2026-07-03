@@ -1,12 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/codec-json/JsonEncodingContext.ts": [
-    "377:16:mzx5a6",
-    "379:10:1m6seer",
-    "401:22:mzx5a6",
-    "403:16:ez0rc3",
-    "461:15:f2b5xl",
-    "463:10:1nrgo4h",
-  ],
   "packages/data-model/src/fabric-instances/FabricError.ts": [
     "151:15:4c869",
     "238:31:75f0ok",
