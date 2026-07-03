@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/src/main/events.ts": [
-    "145:25:b1vouf",
-    "147:18:1tqtrtz",
-    "158:28:1pswspc",
-    "160:26:1r694za",
-  ],
   "packages/html/test/main-applicator.test.ts": [
     "153:4:nusjh5",
     "319:43:1rn7zub",

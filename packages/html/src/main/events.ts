@@ -140,11 +140,14 @@ export function serializeEvent(event: Event): SerializedEvent {
     serialized.provenance = provenance;
   }
 
+  const eventRecord = event as object as Record<string, unknown>;
+  const serializedRecord = serialized as object as Record<string, unknown>;
+
   // Copy allowlisted event properties
   for (const prop of ALLOWLISTED_EVENT_PROPERTIES) {
-    const value = (event as unknown as Record<string, unknown>)[prop];
+    const value = eventRecord[prop];
     if (value !== undefined) {
-      (serialized as unknown as Record<string, unknown>)[prop] = value;
+      serializedRecord[prop] = value;
     }
   }
 
@@ -152,12 +155,17 @@ export function serializeEvent(event: Event): SerializedEvent {
   const target = event.target;
   if (target && typeof target === "object") {
     const serializedTarget: SerializedEventTarget = {};
+    const targetRecord = target as object as Record<string, unknown>;
+    const serializedTargetRecord = serializedTarget as object as Record<
+      string,
+      unknown
+    >;
     let hasTargetProps = false;
 
     for (const prop of ALLOWLISTED_TARGET_PROPERTIES) {
-      const value = (target as unknown as Record<string, unknown>)[prop];
+      const value = targetRecord[prop];
       if (value !== undefined) {
-        (serializedTarget as unknown as Record<string, unknown>)[prop] = value;
+        serializedTargetRecord[prop] = value;
         hasTargetProps = true;
       }
     }
