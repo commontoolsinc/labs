@@ -84,12 +84,21 @@ describe("sqliteDatabase handle owner", () => {
     runtime.run(tx2, dbPattern, {}, resultCell);
     await tx2.commit();
 
-    const after = await waitUntil<SqliteDbRef>(
-      runtime,
-      result,
-      (v) => v?.owner !== undefined,
-    );
-    expect(after.owner).toBe("did:test:alice");
+    // A correct re-initialization leaves the handle value UNCHANGED, so there
+    // is no value transition to wait for — a `waitUntil(owner defined)` here
+    // would be satisfied by the pre-restart state before the re-run executes.
+    // Instead drive the fresh builtin action under observation (pull-mode
+    // runs effects only while observed) and wait for full quiescence
+    // (red-checked: an unconditional re-mint IS observed after this wait).
+    const cancel = result.sink(() => {});
+    try {
+      await runtime.idle();
+      await runtime.settled();
+    } finally {
+      cancel();
+    }
+
+    expect((result.get() as SqliteDbRef).owner).toBe("did:test:alice");
   });
 });
 
