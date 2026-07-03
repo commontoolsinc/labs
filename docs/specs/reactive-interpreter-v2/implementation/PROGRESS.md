@@ -11,10 +11,10 @@ measured numbers (OFF vs ON, same commit) once W3 exists.
 | W1 — IR v2 core | ✅ done (`667ecf1bd`) | rog.ts + unit tests; internals table-indexed; normalized control tags |
 | W2 — builder-born ROG | ✅ done (`b01b75554`) | Zero-recognition front-end at pattern() finalization (WeakMap side-table); str→interpolate native; unknown refs fail-closed to effect boundaries; full runner suite 738/0 with construction ALWAYS-ON (baseline parity) |
 | W3 — flag-on dispatch + measurement harness | ✅ done (runner level) | W3a–W3f (`88d139fba`…`886ee0a8b`). Vertical slice green; differential + fallback oracles; measurement harness. Numbers (compute-heavy pure pattern): **nodes −58–64%, docs flat/−1, wall −70–75%**, census interpreted. Flag-ON triage 27→15→4→**1** (only reload-sibling-overdirty: legacy-topology introspection + interpreter-node REHYDRATION IDENTITY, tracked follow-up). **Flag-OFF 738/0** (byte-clean). Gates landed: liveTrusted leaf trust (SECURITY), leaf caps (instantiatesPattern/needsCellContext/writesInput; v1's schema suppression DROPPED as unsound), scope_narrowing + narrowest-read-scope threading (opt-in raw marker), control_reference_semantics (links vs values — emission follow-up), no_node_ops cost gate, pattern-inline reverted to opt-in (piece-identity contract). |
-| W4 — collections Option A | ⬜ | — |
+| W4 — multi-segment emission | ✅ done (`ba7bef58c`…`ab87218b7`) | Segments coalesce around VERBATIM legacy boundary nodes (handler/effect/control/collection/pattern/gated-leaf) — the original alias topology IS the wiring (v1 F1/F2/F3 dissolve by construction). **Full corpus census (generated-patterns, flag-ON, all green): 122/180 patterns interpret (67.8%); on engaged patterns 59.3% of node ops collapse; 1281 legacy actions → 845 scheduler nodes (−34%)**. Fallbacks: nothing_to_collapse 33 (cost gate), no_rog 14 + incomplete 10 (engagement headroom), scope 1. Fix trail: ungated leaves (argumentSchema===false bypass), schema-bound per-leaf reads for fully-external leaves (legacy readJavaScriptArgument parity — cleared calendar/proxy-length/reading-list). pattern-tests flag-ON **84/84**; chat sim flag-ON 12/0 (4.8s); runner flag-ON 737/1 / flag-OFF 738/0; root test all-pass; root integration 7/7. Collections per-element path moves to the next WO. |
 | W5 — transformer native ops | ⬜ | — |
 | W6 — function lowering | ⬜ | — |
-| W7 — suites + chat sim + measurements (continuous) | 🟡 running | **Root `deno task test` flag-off: ALL PASSING (207.5s; baseline 210.5s — no construction cost).** **Root integration 7/7** (after the str un-hoist fix; cli suite needed a pre-existing deno.jsonc fix reproduced broken on main). **Chat sim flag-ON 12/0 in 5.4s** — the v1 ~226× pathology does NOT reproduce (conservative gates keep group-chat legacy). Runner: flag-off 738/0, flag-ON 737/1. |
+| W7 — suites + chat sim + measurements (continuous) | 🟡 green at every milestone so far | **Root `deno task test` flag-off: ALL PASSING (207.5s; baseline 210.5s — no construction cost).** **Root integration 7/7** (after the str un-hoist fix; cli suite needed a pre-existing deno.jsonc fix reproduced broken on main). **Chat sim flag-ON 12/0 in 5.4s** — the v1 ~226× pathology does NOT reproduce (conservative gates keep group-chat legacy). Runner: flag-off 738/0, flag-ON 737/1. |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
 
@@ -95,3 +95,17 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   stderr; cli dev green both flags). NEXT: multi-segment emission (segments
   + preserved boundary nodes — the engagement unlock for handler/control/
   effect patterns), then W4 collections.
+
+- (2026-07-03) **W4 multi-segment MILESTONE.** Emission = segments +
+  verbatim boundaries; control ops preserved (D-V2-CONTROL-MODERNIZE);
+  gated leaves demoted to boundaries instead of pattern-wide fallback.
+  Two evaluator-parity fixes found by the pattern-tests corpus: (1)
+  `ungated` leaves — the transformer's capture-less computeds are
+  lift(fn, false) and legacy's argumentSchema===false bypass runs them
+  with undefined (fetch-delay's url starved without it); (2) schema-bound
+  per-leaf reads — fully-external leaves read their ORIGINAL alias tree
+  through their own argumentSchema (defaults/validation), fixing the
+  transient-partial-input throw class. Full gate green (see W4 row).
+  NEXT: engagement headroom (no_rog 14 = plain-JSON patterns without live
+  factory; incomplete 10 — census the reasons), W5 transformer native ops
+  (D-V2-STR-DIRECT), collections per-element docs, rehydration identity.
