@@ -962,7 +962,7 @@ describe("cycle detection", () => {
       children: [],
     };
     // Create cycle: node[UI] points to itself
-    (selfRefNode as any)[UI] = selfRefNode;
+    selfRefNode[UI] = selfRefNode;
 
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, selfRefNode, renderOptions);
@@ -989,8 +989,8 @@ describe("cycle detection", () => {
       children: [],
     };
     // Create cycle: A[UI] -> B[UI] -> A
-    (nodeA as any)[UI] = nodeB;
-    (nodeB as any)[UI] = nodeA;
+    nodeA[UI] = nodeB;
+    nodeB[UI] = nodeA;
 
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, nodeA, renderOptions);
