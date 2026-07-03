@@ -2907,7 +2907,10 @@ Deno.test(
     const findings = collectMergeablePushMisuses(
       `const fn = (input) => {
         const existing = input.key("users").get();
-        input.key("users").push({ position: existing.length });
+        input.key("users").push({
+          describe() { return "meta"; },
+          position: existing.length,
+        });
       };`,
     );
 
@@ -2945,6 +2948,198 @@ Deno.test(
     );
 
     assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a ternary-guarded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        existing.length < 5
+          ? input.key("users").push({ name: "a" })
+          : undefined;
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a coalescing-guarded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        existing.find((u) => u.name === "a") ??
+          input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a while-bounded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        while (existing.length < 2) {
+          input.key("users").push({ name: "a" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a for-condition-bounded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (let i = 0; i < existing.length; i++) {
+          input.key("users").push({ name: "a" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push inside iteration of the read as read-dependent",
+  () => {
+    // The pushed value is a constant, so this classifies through the loop's
+    // control dependence on the read, not through the pushed value.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (const u of existing) {
+          input.key("users").push({ name: "member" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push keyed by a for-in over the read as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (const k in existing) {
+          input.key("users").push({ name: k });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push inside a callback over the read as read-dependent",
+  () => {
+    // Checker-less analysis only descends into nested callbacks when asked;
+    // the transformer path gets the same descent from the checker's eager
+    // array-callback classification.
+    const findings: MergeablePushMisuse[] = [];
+    analyzeFunctionCapabilities(
+      parseFirstCallback(
+        `const fn = (input) => {
+          const existing = input.key("users").get();
+          existing.forEach(() => {
+            input.key("users").push({ name: "a" });
+          });
+        };`,
+      ),
+      {
+        includeNestedCallbacks: true,
+        mergeablePushMisuseSink: (finding) => findings.push(finding),
+      },
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: tracks read influence through assignment and destructuring",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        let snapshot;
+        snapshot = input.key("users").get();
+        const [, first] = snapshot;
+        if (first) return;
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a dedup guard inside a switch case as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        const existing = input.key("users").get();
+        switch (event.kind) {
+          case "add":
+            if (existing.some((u) => u.name === event.name)) return;
+            input.key("users").push({ name: event.name });
+            break;
+          default:
+            break;
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a destructuring iterate-dedup as read-dependent",
+  () => {
+    // The loop destructures the tainted element, dedups against it, and the
+    // guard statement keeps scanning past an unrelated callback before the
+    // early return; the push after the loop is still read-dependent.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        if (["reserved"].some((s) => s === event.name)) return;
+        for (const { name } of input.key("users")) {
+          if (name === event.name) return;
+          void name;
+        }
+        input.key("users").push({ name: event.name });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
   },
 );
 
