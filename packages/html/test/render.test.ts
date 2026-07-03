@@ -18,6 +18,40 @@ class KeyboardEvent extends SynthesizedEvent {}
 class InputEvent extends SynthesizedEvent {}
 class MouseEvent extends SynthesizedEvent {}
 
+function expectVNode(node: unknown): VNode {
+  if (
+    typeof node === "object" &&
+    node !== null &&
+    (node as { type?: unknown }).type === "vnode"
+  ) {
+    return node as VNode;
+  }
+  throw new Error("Expected VNode");
+}
+
+function testEvent(
+  type: string,
+  props: {
+    readonly isTrusted?: boolean;
+    readonly target?: unknown;
+    readonly composedPath?: () => readonly unknown[];
+  },
+): Event {
+  const event: Event & { composedPath?: () => readonly unknown[] } = Object
+    .create(Event.prototype);
+  Object.defineProperties(event, {
+    type: { value: type },
+    isTrusted: { value: props.isTrusted ?? false },
+    target: { value: props.target ?? null },
+  });
+  if (props.composedPath) {
+    Object.defineProperty(event, "composedPath", {
+      value: props.composedPath,
+    });
+  }
+  return event;
+}
+
 beforeEach(() => {
   mock = new MockDoc(
     `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
@@ -35,7 +69,7 @@ describe("render", () => {
     );
 
     const parent = document.getElementById("root")!;
-    render(parent, renderable as unknown as VNode, renderOptions);
+    render(parent, expectVNode(renderable), renderOptions);
 
     assert.equal(
       parent.getElementsByTagName("div")[0]!.getAttribute("id"),
@@ -55,7 +89,7 @@ describe("render", () => {
     });
 
     const parent = document.getElementById("root")!;
-    render(parent, renderable as unknown as VNode, renderOptions);
+    render(parent, expectVNode(renderable), renderOptions);
 
     const button = parent.getElementsByTagName("ct-button")[0]!;
     assert.equal(button.getAttribute("data-ui-action"), "SubmitDirectCommand");
@@ -451,8 +485,7 @@ describe("sanitizeEvent", () => {
         ordinaryHandlerData: "preserved",
       },
     };
-    const event = {
-      type: "click",
+    const event = testEvent("click", {
       isTrusted: true,
       target,
       composedPath: () => [
@@ -465,7 +498,7 @@ describe("sanitizeEvent", () => {
         },
         target,
       ],
-    } as unknown as Event;
+    });
 
     const result = sanitizeEvent(event) as {
       provenance?: {
