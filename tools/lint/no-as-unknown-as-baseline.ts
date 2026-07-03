@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/fs-sync-example/src/run-daemon.ts": [
-    "26:55:elsfat",
-    "82:39:1nrrqxc",
-    "83:39:avb6i8",
-    "84:53:1womgjh",
-    "87:51:itbspg",
-  ],
   "packages/fuse/cell-bridge.test.ts": [
     "97:16:1uj98w0",
     "104:7:19913k2",

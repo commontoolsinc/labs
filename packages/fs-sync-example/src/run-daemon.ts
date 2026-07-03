@@ -23,8 +23,8 @@ import type { Edit, FailedEdit, Todo } from "./types.ts";
 
 // Build a Cell constructor with .for() — must be called inside a reactive frame,
 // which the daemon's doSync() provides via pushFrameFromCause.
-const CellConstructor = cellConstructorFactory("cell") as unknown as {
-  for: (cause: unknown) => Cell<unknown>;
+const CellConstructor = cellConstructorFactory("cell") as {
+  for<T>(cause: unknown): Cell<T>;
 };
 
 // ---------------------------------------------------------------------------
@@ -79,14 +79,10 @@ console.log(`Connected to piece ${piece.id}`);
 const argCell = await piece.input.getCell();
 
 // Extract sub-cells using .key() — these match the pattern's Input interface
-const todosCell = argCell.key("todos") as unknown as Cell<Todo[]>;
-const editsCell = argCell.key("edits") as unknown as Cell<Edit[]>;
-const appliedEditsCell = argCell.key("appliedEdits") as unknown as Cell<
-  Edit[]
->;
-const failedEditsCell = argCell.key("failedEdits") as unknown as Cell<
-  FailedEdit[]
->;
+const todosCell = argCell.key("todos") as Cell<Todo[]>;
+const editsCell = argCell.key("edits") as Cell<Edit[]>;
+const appliedEditsCell = argCell.key("appliedEdits") as Cell<Edit[]>;
+const failedEditsCell = argCell.key("failedEdits") as Cell<FailedEdit[]>;
 
 // ---------------------------------------------------------------------------
 // Start the sync loop
