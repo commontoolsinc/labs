@@ -2,15 +2,8 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { topologicalSort } from "./topology.ts";
 import type { Action, SettleIterationStats } from "./types.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import {
-  collectMaterializerWritersForLog,
-  type MaterializerIndexState,
-} from "./materializers.ts";
-import {
-  forEachOverlappingWriter,
-  readsOverlapWrites,
-} from "./scheduling-writes.ts";
-import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
+import { collectMaterializerWritersForLog } from "./materializers.ts";
+import { forEachOverlappingWriter } from "./scheduling-writes.ts";
 import {
   planBudgetBackoff,
   recordSettleActionRun,
@@ -21,12 +14,10 @@ import {
 } from "./execution.ts";
 import { MAX_ITERS, PASS_RUN_BUDGET } from "./constants.ts";
 import {
-  isDirtyPullActionRunnable,
   isIdleMaterializerRunnable,
   isInvalidOrNeverRan,
   isPendingPullActionRunnable,
   isRunnableSchedulingSeed,
-  isTimeGated,
   type PullSchedulingState,
 } from "./work-oracle.ts";
 

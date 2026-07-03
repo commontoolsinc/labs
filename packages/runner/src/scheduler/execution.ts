@@ -383,11 +383,6 @@ export function planPullExecuteContinuation(state: {
   };
 }
 
-function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
-  const record = nodes.get(action);
-  return record !== undefined && isInvalidActionRecord(record);
-}
-
 function isInvalidActionRecord(record: SchedulerNode): boolean {
   return record.status === "invalid" || record.status === "never-ran";
 }

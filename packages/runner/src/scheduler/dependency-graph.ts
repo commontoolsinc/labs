@@ -2,10 +2,7 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
-import {
-  forEachOverlappingWriter,
-  readsOverlapWrites,
-} from "./scheduling-writes.ts";
+import { forEachOverlappingWriter } from "./scheduling-writes.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,

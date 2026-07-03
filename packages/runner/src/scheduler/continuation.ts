@@ -2,7 +2,7 @@ import { queueTask } from "./diagnostics.ts";
 import { isHeadEventParked } from "./events.ts";
 import { planPullExecuteContinuation } from "./execution.ts";
 import type { PullSchedulingState } from "./work-oracle.ts";
-import type { Action, QueuedEvent } from "./types.ts";
+import type { QueuedEvent } from "./types.ts";
 
 export interface ExecuteContinuationState {
   readonly pullScheduling: PullSchedulingState;

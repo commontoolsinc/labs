@@ -17,10 +17,7 @@ import {
   setSchedulerDependencies,
 } from "./dependency-updates.ts";
 import { filterIgnoredAddresses } from "./reactivity.ts";
-import {
-  readsOverlapWrites,
-  type WriterIndexState,
-} from "./scheduling-writes.ts";
+import { type WriterIndexState } from "./scheduling-writes.ts";
 import {
   type NodeKind,
   NodeRegistry,
@@ -31,13 +28,7 @@ import {
   ensureCancelForActionTriggers,
   type TriggerSubscriptionState,
 } from "./trigger-index.ts";
-import { entityKey } from "./keys.ts";
-import type {
-  Action,
-  ReactivityLog,
-  SpaceScopeAndURI,
-  TelemetryAnnotations,
-} from "./types.ts";
+import type { Action, ReactivityLog, TelemetryAnnotations } from "./types.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
