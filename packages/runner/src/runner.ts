@@ -4574,14 +4574,12 @@ export class Runner {
     if (!isRecord(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
     if (!isRecord(op)) return;
-    let ref = this.runtime.patternManager.getArtifactEntryRef(
-      op as unknown as object,
-    );
+    let ref = this.runtime.patternManager.getArtifactEntryRef(op);
     if (!ref) {
-      const original = resolveOriginal(op as unknown as object);
+      const original = resolveOriginal(op);
       if (isTrustedBuilderArtifact(original) && isPattern(original)) {
         ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
-          original as unknown as Pattern,
+          original,
         );
       }
     }

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/runner.ts": [
-    "3801:9:1dcukeb",
-  ],
   "packages/runner/src/runtime.ts": [
     "1222:39:15nagar",
   ],
