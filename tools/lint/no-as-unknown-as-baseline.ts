@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/lib/console-capture.ts": [
-    "51:28:6ngwuo",
-  ],
   "packages/cli/lib/exec.ts": [
     "78:44:rgvcbn",
     "182:7:2lcotr",
