@@ -240,7 +240,8 @@ declare module "@commonfabric/api" {
 export function isModule(value: unknown): value is Module {
   return (
     (typeof value === "function" || typeof value === "object") &&
-    value !== null && typeof (value as unknown as Module).type === "string"
+    value !== null &&
+    typeof (value as Record<PropertyKey, unknown> & Module).type === "string"
   );
 }
 

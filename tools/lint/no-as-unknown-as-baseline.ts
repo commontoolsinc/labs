@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builder/types.ts": [
-    "230:36:1g4cnfg",
-  ],
   "packages/runner/src/builtins/llm-dialog.ts": [
     "850:10:ubq92t",
     "888:32:j3eo29",
