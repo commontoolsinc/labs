@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/cfc-authorship-chat.test.ts": [
-    "149:35:62ruji",
-  ],
   "packages/patterns/integration/cfc-group-chat-demo.test.ts": [
     "407:35:2c4hk8",
   ],

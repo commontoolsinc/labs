@@ -201,7 +201,7 @@ async function readAuthorshipProbe(page: Page): Promise<AuthorshipProbe> {
     const elements: Element[] = [];
     collect(document, elements);
     const hosts = elements.map((element) => {
-      const typedElement = element as unknown as {
+      const typedElement = element as Element & {
         authorshipState?: string;
         textIntegrityState?: string;
       };
