@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/memory/v2/standalone.ts",
   "packages/patterns/catalog/stories/cf-slider-story.tsx",
   "packages/patterns/catalog/stories/cf-tab-list-story.tsx",
   "packages/patterns/catalog/stories/cf-toggle-story.tsx",
