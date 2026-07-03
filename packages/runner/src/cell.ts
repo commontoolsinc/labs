@@ -597,6 +597,14 @@ export function encodeSqliteParams(
   return out as SqliteParamsWire;
 }
 
+function asPublicCell<T>(cell: CellImpl<any>): Cell<T> {
+  return cell as CellImpl<any> & Cell<T>;
+}
+
+function asPublicOpaqueCell<T>(cell: CellImpl<any>): OpaqueCell<T> {
+  return cell as CellImpl<any> & OpaqueCell<T>;
+}
+
 export function createCell<T>(
   runtime: Runtime,
   link?: NormalizedLink,
@@ -605,15 +613,17 @@ export function createCell<T>(
   kind?: CellKind,
   cfcLabelView?: CfcLabelView,
 ): Cell<T> {
-  return new CellImpl(
-    runtime,
-    tx,
-    link, // Pass the link directly (or undefined)
-    synced,
-    undefined, // No shared causeContainer
-    kind,
-    cfcLabelView,
-  ) as unknown as Cell<T>; // Cast to set brand
+  return asPublicCell<T>(
+    new CellImpl(
+      runtime,
+      tx,
+      link, // Pass the link directly (or undefined)
+      synced,
+      undefined, // No shared causeContainer
+      kind,
+      cfcLabelView,
+    ),
+  );
 }
 
 /**
@@ -686,7 +696,7 @@ export class CellImpl<T extends FabricValue>
     // Use provided container or create one
     // If link has an id, extract it to the container
     this._causeContainer = causeContainer ?? {
-      cell: this as unknown as OpaqueCell<unknown>,
+      cell: asPublicOpaqueCell(this),
       id: this._link.id,
       space: this._link.space,
       cause: undefined,
@@ -765,7 +775,7 @@ export class CellImpl<T extends FabricValue>
     if (this._causeContainer.id || this._causeContainer.cause) {
       if (allowIfSet) {
         // Treat as suggestion - silently ignore
-        return this as unknown as Cell<T>;
+        return asPublicCell(this);
       } else {
         // Fail by default
         throw new Error(
@@ -782,7 +792,7 @@ export class CellImpl<T extends FabricValue>
     // Store the cause in the shared container - all siblings will see this
     this._causeContainer.cause = cause;
 
-    return this as unknown as Cell<T>;
+    return asPublicCell(this);
   }
 
   /**
@@ -1318,7 +1328,7 @@ export class CellImpl<T extends FabricValue>
       }
     }
 
-    return this as unknown as Cell<T>;
+    return asPublicCell(this);
   }
 
   send(
@@ -1407,10 +1417,10 @@ export class CellImpl<T extends FabricValue>
 
     // Now update each property
     for (const [key, value] of Object.entries(values)) {
-      (this as unknown as Cell<any>).key(key).set(value);
+      asPublicCell<any>(this).key(key).set(value);
     }
 
-    return this as unknown as Cell<T>;
+    return asPublicCell(this);
   }
 
   push(
@@ -1556,7 +1566,7 @@ export class CellImpl<T extends FabricValue>
           ? areLinksSame(
             element,
             candidate,
-            this as unknown as Cell<any>,
+            asPublicCell<any>(this),
             true,
             this.tx!,
             this.runtime,
@@ -1664,7 +1674,7 @@ export class CellImpl<T extends FabricValue>
         ? areLinksSame(
           element,
           ref,
-          this as unknown as Cell<any>,
+          asPublicCell<any>(this),
           true,
           this.tx!,
           this.runtime,
@@ -1732,7 +1742,7 @@ export class CellImpl<T extends FabricValue>
         areLinksSame(
           item,
           ref,
-          this as unknown as Cell<any>,
+          asPublicCell<any>(this),
           true, // resolveBeforeComparing
           this.tx,
           this.runtime,
@@ -1746,7 +1756,7 @@ export class CellImpl<T extends FabricValue>
     const newArray = [
       ...array.slice(0, index),
       ...array.slice(index + 1),
-    ] as unknown as T;
+    ] as ElemT[] & T;
     this.set(newArray);
   }
 
@@ -1765,13 +1775,13 @@ export class CellImpl<T extends FabricValue>
         ? !areLinksSame(
           item,
           ref,
-          this as unknown as Cell<any>,
+          asPublicCell<any>(this),
           true, // resolveBeforeComparing
           this.tx,
           this.runtime,
         )
         : item !== ref
-    ) as unknown as T;
+    ) as ElemT[] & T;
     this.set(newArray);
   }
 
@@ -1840,15 +1850,17 @@ export class CellImpl<T extends FabricValue>
       }
     }
 
-    return new CellImpl(
-      this.runtime,
-      this.tx,
-      currentLink,
-      this.synced,
-      this._causeContainer,
-      kind,
-      rebaseCfcLabelView(this._cfcLabelView, childPath),
-    ) as unknown as Cell<any>;
+    return asPublicCell<any>(
+      new CellImpl(
+        this.runtime,
+        this.tx,
+        currentLink,
+        this.synced,
+        this._causeContainer,
+        kind,
+        rebaseCfcLabelView(this._cfcLabelView, childPath),
+      ),
+    );
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -1866,15 +1878,17 @@ export class CellImpl<T extends FabricValue>
       schema: internCellLinkSchema(schema),
     };
 
-    return new CellImpl(
-      this.runtime,
-      this.tx,
-      siblingLink,
-      false, // Reset synced flag, since schema is changing
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
-    ) as unknown as Cell<any>;
+    return asPublicCell<any>(
+      new CellImpl(
+        this.runtime,
+        this.tx,
+        siblingLink,
+        false, // Reset synced flag, since schema is changing
+        this._causeContainer, // Share the causeContainer with siblings
+        this._kind,
+        this._cfcLabelView,
+      ),
+    );
   }
 
   /**
@@ -1897,32 +1911,36 @@ export class CellImpl<T extends FabricValue>
       this.link,
     );
 
-    return new CellImpl(
-      this.runtime,
-      this.tx,
-      {
-        ...this._link,
-        ...(schema !== undefined && { schema }),
-      },
-      false, // Reset synced flag, since schema is changing
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
-    ) as unknown as Cell<T>;
+    return asPublicCell<T>(
+      new CellImpl(
+        this.runtime,
+        this.tx,
+        {
+          ...this._link,
+          ...(schema !== undefined && { schema }),
+        },
+        false, // Reset synced flag, since schema is changing
+        this._causeContainer, // Share the causeContainer with siblings
+        this._kind,
+        this._cfcLabelView,
+      ),
+    );
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
     // withTx creates a sibling with same identity but different transaction
     // Share the causeContainer so .for() calls propagate
-    return new CellImpl(
-      this.runtime,
-      newTx,
-      this._link, // Use the same link
-      this.synced,
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
-    ) as unknown as Cell<T>;
+    return asPublicCell<T>(
+      new CellImpl(
+        this.runtime,
+        newTx,
+        this._link, // Use the same link
+        this.synced,
+        this._causeContainer, // Share the causeContainer with siblings
+        this._kind,
+        this._cfcLabelView,
+      ),
+    );
   }
 
   sink(
@@ -1974,7 +1992,7 @@ export class CellImpl<T extends FabricValue>
   sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);
-    return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
+    return this.runtime.storageManager.syncCell<T>(asPublicCell(this));
   }
 
   sinkMeta(
@@ -2267,7 +2285,7 @@ export class CellImpl<T extends FabricValue>
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
-        ? { $stream: true } as unknown as T
+        ? { $stream: true } as { $stream: true } & T
         : undefined,
       name: this._causeContainer.cause,
       external: this._link.id
@@ -2297,7 +2315,8 @@ export class CellImpl<T extends FabricValue>
   getAsReactiveProxy(
     boundTarget?: (...args: unknown[]) => unknown,
   ): Reactive<T> {
-    const self = this as unknown as Cell<T>;
+    const getSelfRef = () => this._selfRef;
+    const self = asPublicCell<T>(this);
     // `query`/`exec` are SqliteDb-only methods whose names are also common data
     // fields (e.g. wish's `query`). Only forward them as methods on a
     // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
@@ -2327,7 +2346,7 @@ export class CellImpl<T extends FabricValue>
           return true;
         } else if (prop === SELF) {
           // Return the self-reference if set (for pattern SELF symbol support)
-          return (self as unknown as CellImpl<T>)._selfRef;
+          return getSelfRef();
         } else if (typeof prop === "string" || typeof prop === "number") {
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
@@ -2340,10 +2359,12 @@ export class CellImpl<T extends FabricValue>
             (!isSqliteOnlyMethod || cellKind === "sqlite")
           ) {
             return nestedCell.getAsReactiveProxy(
-              (self as unknown as Record<
-                string,
-                (...args: unknown[]) => unknown
-              >)[prop]!
+              (self as
+                & Cell<T>
+                & Record<
+                  string,
+                  (...args: unknown[]) => unknown
+                >)[prop]!
                 .bind(self),
             );
           } else {
@@ -2354,7 +2375,7 @@ export class CellImpl<T extends FabricValue>
         return (target as any)[prop];
       },
     });
-    return proxy as unknown as Reactive<T>;
+    return proxy as typeof proxy & Reactive<T>;
   }
 
   /**
@@ -2431,7 +2452,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = mapFactory({
-      list: this as unknown as Reactive<T>,
+      list: this as IsThisObject & Reactive<T>,
       op: op,
       params: params,
     });
@@ -2457,7 +2478,7 @@ export class CellImpl<T extends FabricValue>
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
-    })(this as unknown as Reactive<any>);
+    })(this as IsThisObject & Reactive<any>);
   }
 
   /**
@@ -2486,7 +2507,7 @@ export class CellImpl<T extends FabricValue>
         throw new TypeError("findIndex called on non-array value");
       }
       return list.findIndex(fn);
-    })(this as unknown as Reactive<any>);
+    })(this as IsThisObject & Reactive<any>);
   }
 
   /**
@@ -2521,7 +2542,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = filterFactory({
-      list: this as unknown as Reactive<T>,
+      list: this as IsThisObject & Reactive<T>,
       op: op,
       params: params,
     });
@@ -2561,7 +2582,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     const result = flatMapFactory({
-      list: this as unknown as Reactive<T>,
+      list: this as IsThisObject & Reactive<T>,
       op: op,
       params: params,
     });
@@ -2616,7 +2637,7 @@ function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
     ? maybeToCell.call(cell)
     : cell;
   if (!isCell(unproxied)) return undefined;
-  return unproxied as unknown as CellImpl<FabricValue>;
+  return unproxied as Cell<unknown> & CellImpl<FabricValue>;
 }
 
 function subscribeToReferencedDocs<T>(
@@ -2798,7 +2819,7 @@ function maybeConvertArrayPathToDataURILink(
       if (!isArrayIndexPropertyName(segment)) {
         break;
       }
-      next = (current as unknown as Record<string, unknown>)[segment];
+      next = (current as Record<string, unknown>)[segment];
       if (isRecord(next) && !isCellLink(next)) {
         candidate = {
           value: next,
@@ -3396,22 +3417,26 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
     return Object.assign(constructor, {
       of: createWithDefault,
       for: createWithCause,
-    }) as unknown as ConstructableCellFactory<Wrap>;
+    }) as typeof constructor & ConstructableCellFactory<Wrap>;
   };
 
   const baseConstructor = createCellConstructor();
   return Object.assign(baseConstructor, {
-    perSpace: createCellConstructor("space") as unknown as CellTypeConstructor<
-      Wrap
-    >["perSpace"],
-    perUser: createCellConstructor("user") as unknown as CellTypeConstructor<
-      Wrap
-    >["perUser"],
+    perSpace: createCellConstructor("space") as
+      & ReturnType<
+        typeof createCellConstructor
+      >
+      & CellTypeConstructor<Wrap>["perSpace"],
+    perUser: createCellConstructor("user") as
+      & ReturnType<
+        typeof createCellConstructor
+      >
+      & CellTypeConstructor<Wrap>["perUser"],
     perSession: createCellConstructor(
       "session",
-    ) as unknown as CellTypeConstructor<
-      Wrap
-    >["perSession"],
+    ) as
+      & ReturnType<typeof createCellConstructor>
+      & CellTypeConstructor<Wrap>["perSession"],
 
     /**
      * Compare two cells or values for equality, after resolving them.
@@ -3446,5 +3471,5 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
     ): boolean {
       return areLinksSame(a, b);
     },
-  }) as unknown as CellTypeConstructor<Wrap>;
+  }) as typeof baseConstructor & CellTypeConstructor<Wrap>;
 }
