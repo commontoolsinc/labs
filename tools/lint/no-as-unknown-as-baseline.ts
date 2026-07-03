@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builder/built-in.ts": [
-    "216:25:n6z91h",
-  ],
   "packages/runner/src/builder/json-utils.ts": [
     "74:42:qreqci",
     "134:22:1uk0t57",

@@ -214,8 +214,7 @@ export const sqliteDatabase = createNodeFactory({
 
 // Shares the single `sqliteQuery` node factory with `db.query` (cell.ts) — see
 // builtins/sqlite/query-node.ts — so both construct the same node.
-export const sqliteQuery =
-  sqliteQueryNodeFactory as unknown as SqliteQueryFunction;
+export const sqliteQuery = sqliteQueryNodeFactory as SqliteQueryFunction;
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
