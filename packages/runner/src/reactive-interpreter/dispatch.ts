@@ -31,10 +31,18 @@ import type { Cell } from "../cell.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Frame, Module, Pattern } from "../builder/types.ts";
 import { popFrame } from "../builder/pattern.ts";
-import { type BuiltRog, getBuiltRog } from "./from-builder.ts";
+import {
+  type BuiltRog,
+  getBuiltRog,
+  getBuiltRogResolved,
+} from "./from-builder.ts";
 import { partition, type Segment } from "./partition.ts";
 import { evalRog } from "./interpret.ts";
 import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
+import {
+  elementArgumentUsage,
+  makeInlineMapImplementation,
+} from "./collection-inline.ts";
 
 const logger = getLogger("runner.reactive-interpreter", {
   enabled: false,
@@ -209,24 +217,38 @@ export function planInterpreterDispatch(
     for (const id of seg.nodeOps) collapsed.add(id);
   }
 
-  // COST GATE: collapsing fewer than two node actions is neutral at best
-  // (1→1) — plain legacy is strictly simpler. Also covers the all-boundary
-  // and node-less shapes.
-  if (collapsed.size < 2) {
-    return fallback(`nothing_to_collapse:${collapsed.size}`);
-  }
-
-  // Boundaries: the ORIGINAL nodes, verbatim.
+  // Boundaries: the ORIGINAL nodes verbatim — except an ELIGIBLE `map`
+  // boundary, which swaps its coordinator for the INLINE one (per-element
+  // evalRog over the LIVE element BuiltRog; one result doc + one effect per
+  // element instead of a whole child pattern). Same inputs/outputs bindings
+  // either way, so reads/writes/identity stay legacy-shaped.
+  const boundaryKinds: string[] = [];
+  let inlinedCollections = 0;
   for (const b of part.boundaries) {
     const original = pattern.nodes[b.opId];
     if (!original) return fallback(`boundary_without_node:${b.opId}`);
-    nodes.push({
-      module: original.module as Module,
-      inputs: original.inputs,
-      outputs: original.outputs,
-    });
-    census.boundariesByKind[b.kind] =
-      (census.boundariesByKind[b.kind] ?? 0) + 1;
+    const inline = b.kind === "collection"
+      ? tryBuildInlineCollectionNode(built, b.opId, original, options)
+      : undefined;
+    if (inline) inlinedCollections++;
+    nodes.push(
+      inline ?? {
+        module: original.module as Module,
+        inputs: original.inputs,
+        outputs: original.outputs,
+      },
+    );
+    boundaryKinds.push(inline ? "collection-inlined" : b.kind);
+  }
+
+  // COST GATE: collapsing fewer than two node actions is neutral at best
+  // (1→1) — UNLESS a collection inlined (a per-element win of ~3 docs +
+  // ~4 nodes per element all by itself).
+  if (collapsed.size < 2 && inlinedCollections === 0) {
+    return fallback(`nothing_to_collapse:${collapsed.size}`);
+  }
+  for (const kind of boundaryKinds) {
+    census.boundariesByKind[kind] = (census.boundariesByKind[kind] ?? 0) + 1;
   }
 
   census.interpreted++;
@@ -241,6 +263,105 @@ export function planInterpreterDispatch(
     );
   }
   return { kind: "interpret", nodes };
+}
+
+// ---------------------------------------------------------------------------
+// Inline-collection emission (W5).
+// ---------------------------------------------------------------------------
+
+/** Every op in this ROG is pure, resolvable, trusted, caps-clean — safe for
+ * whole-child in-memory evaluation. */
+function rogFullyInlinable(
+  built: BuiltRog,
+  leafTrust: DispatchOptions["leafTrust"],
+): boolean {
+  if (built.rog.incomplete?.length) return false;
+  for (const op of built.rog.ops) {
+    const d = op.detail;
+    if (d.kind === "leaf") {
+      const impl = built.leafImpls.get(op.id);
+      if (!impl || !leafTrust(impl) || d.caps) return false;
+      continue;
+    }
+    if (d.kind === "pattern") {
+      const child = built.children.get(op.id);
+      if (!child || !rogFullyInlinable(child, leafTrust)) return false;
+      continue;
+    }
+    if (
+      d.kind === "effect" || d.kind === "collection" || d.kind === "call"
+    ) {
+      return false;
+    }
+    if (d.kind === "control") return false; // link semantics (boundary-only)
+  }
+  return true;
+}
+
+/** Swap an eligible `map` boundary's coordinator for the inline one. Returns
+ * undefined when ineligible (verbatim legacy coordinator — whose per-element
+ * children still hit the serialization boundary and run full legacy). */
+function tryBuildInlineCollectionNode(
+  built: BuiltRog,
+  opId: OpId,
+  original: { module: unknown; inputs: unknown; outputs: unknown },
+  options: DispatchOptions,
+): SyntheticNode | undefined {
+  const refuse = (why: string): undefined => {
+    if (RI2_DEBUG) console.log(`[ri2] map-inline refused: ${why}`);
+    return undefined;
+  };
+  const op = built.rog.ops[opId];
+  if (op?.detail.kind !== "collection" || op.detail.op !== "map") {
+    return refuse(`not_map:${op?.detail.kind}`);
+  }
+  const elementFactory = built.collectionElements.get(opId);
+  if (elementFactory === undefined) return refuse("no_element_factory");
+  const elementBuilt = getBuiltRogResolved(elementFactory);
+  if (!elementBuilt) return refuse("element_no_rog");
+  if (!rogFullyInlinable(elementBuilt, options.leafTrust)) {
+    return refuse("element_not_inlinable");
+  }
+  const usage = elementArgumentUsage(elementBuilt);
+  if (RI2_DEBUG) {
+    console.log(
+      `[ri2] map-inline usage=${JSON.stringify(usage)} elementOps=${
+        JSON.stringify(
+          elementBuilt.rog.ops.map((o) => ({
+            k: o.kind,
+            in: o.inputs,
+            d: o.detail.kind === "construct" ? o.detail.template : undefined,
+          })),
+        ).slice(0, 600)
+      } result=${JSON.stringify(elementBuilt.rog.result)}`,
+    );
+  }
+  // `array` hands the child the whole list cell — incompatible with
+  // per-element read isolation; keep those on the legacy coordinator.
+  if (usage.usesArray) return refuse("uses_array");
+
+  const elementResultSchema =
+    (elementFactory as { resultSchema?: unknown }).resultSchema as
+      | undefined
+      | Record<string, unknown>;
+
+  return {
+    module: {
+      type: "raw",
+      implementation: makeInlineMapImplementation(
+        elementBuilt,
+        elementFactory,
+        elementResultSchema as never,
+        usage,
+      ),
+      debugName: "ri2:map-inline",
+      // Keep the CT-1623 by-identity op protocol (compact sentinel through
+      // the session artifact index; loud on miss).
+      ri2SubstituteOpRefs: "map",
+    } as unknown as Module,
+    inputs: original.inputs,
+    outputs: original.outputs,
+  };
 }
 
 // ---------------------------------------------------------------------------

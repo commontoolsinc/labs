@@ -35,6 +35,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import { resolveOriginal } from "../builder/pattern-metadata.ts";
 import { isStrInterpolation } from "./builtin-markers.ts";
 import { computeLeafCaps } from "./leaf-caps.ts";
 import {
@@ -81,12 +82,46 @@ export function setBuiltRog(patternOrFactory: unknown, built: BuiltRog): void {
   }
 }
 
+/**
+ * STRICT lookup (direct WeakMap keys only). The dispatch MUST use this for
+ * the top-level pattern: the ROG's op ids correspond POSITIONALLY to
+ * `pattern.nodes`, which holds only for the original factory/pattern objects
+ * the builder keyed — a derived COPY (a deserialized stored graph resolving
+ * to its live canonical) has its own nodes array and binding against the
+ * canonical's ROG would emit garbage.
+ */
 export function getBuiltRog(patternOrFactory: unknown): BuiltRog | undefined {
   if (
     (typeof patternOrFactory === "object" ||
       typeof patternOrFactory === "function") && patternOrFactory !== null
   ) {
     return rogByPattern.get(patternOrFactory as object);
+  }
+  return undefined;
+}
+
+/**
+ * Derivation-aware lookup, for STANDALONE evaluation only (the collection
+ * ELEMENT case: the element ROG evaluates against {element,index,params},
+ * never indexed against the copy's nodes). Build-time copies of a pattern
+ * (traverse-utils clones the factory into a structural Pattern object when
+ * it rides a node's input tree — the `op` of mapWithPattern) register with
+ * noteDerivedCopy; resolve the chain back to the original the side-table
+ * keyed.
+ */
+export function getBuiltRogResolved(
+  patternOrFactory: unknown,
+): BuiltRog | undefined {
+  const direct = getBuiltRog(patternOrFactory);
+  if (direct) return direct;
+  if (
+    (typeof patternOrFactory === "object" ||
+      typeof patternOrFactory === "function") && patternOrFactory !== null
+  ) {
+    const original = resolveOriginal(patternOrFactory);
+    if (original !== patternOrFactory && original !== null) {
+      return rogByPattern.get(original as object);
+    }
   }
   return undefined;
 }

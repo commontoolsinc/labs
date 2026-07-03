@@ -35,7 +35,7 @@ import {
   type Rog,
   type ValueRef,
 } from "./rog.ts";
-import { type BuiltRog, getBuiltRog } from "./from-builder.ts";
+import { type BuiltRog, getBuiltRogResolved } from "./from-builder.ts";
 
 // ---------------------------------------------------------------------------
 // Output contract (consumed by the dispatch — kept from v1, proven shape).
@@ -534,5 +534,5 @@ export function partition(input: PartitionInput): PartitionResult {
 }
 
 function resolveElementBuilt(factory: unknown): BuiltRog | undefined {
-  return getBuiltRog(factory);
+  return getBuiltRogResolved(factory);
 }

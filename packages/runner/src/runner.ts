@@ -3844,7 +3844,14 @@ export class Runner {
     // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
     // JSON round-trip, so the builtin resolves the live canonical pattern by
     // identity instead of deserializing the embedded graph.
-    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
+    // The reactive-interpreter's inline collection nodes are raw modules (no
+    // ref name) but must keep the SAME by-identity op protocol — they opt in
+    // via `ri2SubstituteOpRefs`.
+    this.substituteOpPatternRefs(
+      moduleRefName ??
+        (module as { ri2SubstituteOpRefs?: string }).ri2SubstituteOpRefs,
+      mappedInputBindings,
+    );
 
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
