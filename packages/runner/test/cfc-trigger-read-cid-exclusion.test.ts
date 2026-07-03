@@ -19,12 +19,10 @@ const replicaEntries = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
   id: string,
 ): StoredEntry[] => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      cfc?: { labelMap?: { entries: StoredEntry[] } };
-    } | undefined;
-  };
-  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const document = storageManager.open(signer.did()).replica.getDocument(
+    id as `${string}:${string}`,
+  ) as { cfc?: { labelMap?: { entries: StoredEntry[] } } } | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
 };
 
 // §8.9.2 trigger reads name runtime-surface documents only by accident or
@@ -125,12 +123,16 @@ describe("CFC trigger reads: cid: exclusion", () => {
       // that seals the external construction path this test used to
       // simulate.
       expect(() => {
-        (tx.getCfcState().triggerReads as unknown as unknown[]).push({
-          space: signer.did(),
-          id: cidId,
-          scope: "space",
-          path: ["secret"],
-        });
+        Reflect.apply(
+          Array.prototype.push,
+          tx.getCfcState().triggerReads,
+          [{
+            space: signer.did(),
+            id: cidId,
+            scope: "space",
+            path: ["secret"],
+          }],
+        );
       }).toThrow("read-only");
       // The guard still matters for INTERNAL construction paths that might
       // bypass the ingest filter, so exercise it directly: hand

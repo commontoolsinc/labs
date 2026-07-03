@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/frozen-builtins.ts": [
-    "320:26:f5e6dv",
-    "331:27:f5e6dv",
-  ],
   "packages/data-model/src/native-conversion.ts": [
     "640:10:uofkuc",
   ],

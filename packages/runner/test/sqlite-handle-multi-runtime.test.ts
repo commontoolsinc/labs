@@ -322,19 +322,11 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     // mode: B's sqliteDatabase re-init rewrote the handle — dropping `rev`,
     // re-deriving `tables` — so BOTH runtimes saw "new inputs", each write
     // invalidating the other's hash on the ONE shared result cell.)
-    const providerB = runtimeB.storageManager.open(space) as
-      & ReturnType<
-        Runtime["storageManager"]["open"]
-      >
-      & {
-        sqliteQuery: NonNullable<
-          ReturnType<Runtime["storageManager"]["open"]>["sqliteQuery"]
-        >;
-      };
-    const originalB = providerB.sqliteQuery.bind(providerB);
+    const providerB = runtimeB.storageManager.open(space);
+    const originalB = providerB.sqliteQuery!.bind(providerB);
     let issuesFromB = 0;
     providerB.sqliteQuery = (
-      ...args: Parameters<typeof providerB.sqliteQuery>
+      ...args: Parameters<NonNullable<typeof providerB.sqliteQuery>>
     ) => {
       issuesFromB++;
       return originalB(...args);

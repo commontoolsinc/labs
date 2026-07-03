@@ -317,7 +317,7 @@ export class FrozenSet<T> implements Set<T> {
   intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
     const result = new Set<T & U>();
     for (const value of this.values()) {
-      if (other.has(value as unknown as U)) {
+      if (other.has(value as T & U)) {
         result.add(value as T & U);
       }
     }
@@ -328,7 +328,7 @@ export class FrozenSet<T> implements Set<T> {
   difference<U>(other: ReadonlySetLike<U>): Set<T> {
     const result = new Set<T>();
     for (const value of this.values()) {
-      if (!other.has(value as unknown as U)) {
+      if (!other.has(value as T & U)) {
         result.add(value);
       }
     }

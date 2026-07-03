@@ -74,12 +74,9 @@ describe("CFC observation classes (C2 persist split)", () => {
   const rawDocOf = (
     id: string,
   ): { cfc?: { labelMap?: { entries: StoredEntry[] } } } | undefined => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id);
+    return storageManager!.open(space).replica.getDocument(
+      id as `${string}:${string}`,
+    ) as { cfc?: { labelMap?: { entries: StoredEntry[] } } } | undefined;
   };
 
   const entriesOf = (id: string): StoredEntry[] =>
