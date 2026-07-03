@@ -74,7 +74,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.#payload);
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**

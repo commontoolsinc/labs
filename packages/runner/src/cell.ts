@@ -1236,9 +1236,10 @@ export class CellImpl<T extends FabricValue>
     // back into per-element linked docs — the split sqliteDatabase stores the
     // handle raw specifically to avoid (a second runtime can't load those).
     const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
-    (this.withTx(this.tx) as unknown as Cell<{ rev: number }>).key("rev").set(
-      rev + 1,
-    );
+    const revCell = this.withTx(this.tx) as Cell<T> & {
+      key(key: "rev"): Cell<number>;
+    };
+    revCell.key("rev").set(rev + 1);
   }
 
   set(

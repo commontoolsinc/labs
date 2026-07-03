@@ -30,7 +30,7 @@ import {
   StorageManager,
 } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
+import { type Cell, createCell } from "../src/cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { isSigilLink } from "../src/link-utils.ts";
 
@@ -149,7 +149,9 @@ async function seedDbFile(
     tx,
     false,
     "sqlite",
-  ) as unknown as { exec(sql: string, params?: readonly unknown[]): void };
+  ) as Cell<unknown> & {
+    exec(sql: string, params?: readonly unknown[]): void;
+  };
   db.exec("INSERT INTO notes (body) VALUES (?)", ["seed"]);
   const res = await tx.commit();
   expect(res.error).toBeUndefined();
@@ -271,7 +273,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     const raw = handle.getRaw() as Record<string, unknown>;
     expect(raw).toBeDefined();
     // The rule survived storage (still a 2-term conjunction)…
-    const rowLabel = (handle.key("tables").key("emails") as unknown as {
+    const rowLabel = (handle.key("tables").key("emails") as {
       get: () => { rowLabel?: { confidentiality?: { allOf?: unknown[] } } };
     }).get()?.rowLabel;
     expect(rowLabel?.confidentiality?.allOf?.length).toBe(2);
@@ -320,12 +322,20 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     // mode: B's sqliteDatabase re-init rewrote the handle — dropping `rev`,
     // re-deriving `tables` — so BOTH runtimes saw "new inputs", each write
     // invalidating the other's hash on the ONE shared result cell.)
-    const providerB = runtimeB.storageManager.open(space) as unknown as {
-      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
-    };
+    const providerB = runtimeB.storageManager.open(space) as
+      & ReturnType<
+        Runtime["storageManager"]["open"]
+      >
+      & {
+        sqliteQuery: NonNullable<
+          ReturnType<Runtime["storageManager"]["open"]>["sqliteQuery"]
+        >;
+      };
     const originalB = providerB.sqliteQuery.bind(providerB);
     let issuesFromB = 0;
-    providerB.sqliteQuery = (...args) => {
+    providerB.sqliteQuery = (
+      ...args: Parameters<typeof providerB.sqliteQuery>
+    ) => {
       issuesFromB++;
       return originalB(...args);
     };
