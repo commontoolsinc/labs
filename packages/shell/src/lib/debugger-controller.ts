@@ -28,7 +28,6 @@ export interface GraphEdgeWithHistory extends SchedulerGraphEdge {
 export interface GraphWithHistory {
   nodes: SchedulerGraphSnapshot["nodes"];
   edges: GraphEdgeWithHistory[];
-  pullMode: boolean;
   timestamp: number;
 }
 
@@ -399,7 +398,6 @@ export class DebuggerController implements ReactiveController {
     return {
       nodes: this.currentSnapshot.nodes,
       edges,
-      pullMode: this.currentSnapshot.pullMode,
       timestamp: this.currentSnapshot.timestamp,
     };
   }

@@ -79,7 +79,7 @@ const timingKeys = [
 
 let blackhole = 0;
 
-export function createSchedulerBenchEnv(_pullMode = true): SchedulerBenchEnv {
+export function createSchedulerBenchEnv(): SchedulerBenchEnv {
   const storageManager = StorageManager.emulate({
     as: benchSigner,
   });

@@ -263,7 +263,6 @@ export interface SchedulerActionRunState {
   readonly idempotencyViolations: NonIdempotentReport[];
   readonly getRunningPromise: () => Promise<unknown> | undefined;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
-  readonly modeLabel: () => "pull" | "push";
   readonly getCollectActionRunTrace: () => boolean;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getIdempotencyCheckMode: () => boolean;
@@ -305,7 +304,6 @@ export async function runSchedulerAction(
 
   logger.debug("schedule-run-start", () => [
     `[RUN] Starting action: ${actionId}`,
-    `Scheduler mode: ${state.modeLabel()}`,
   ]);
 
   const runningPromise = state.getRunningPromise();
@@ -644,7 +642,7 @@ function attachSchedulerActionObservation(
       args.actionId,
       telemetry,
     ),
-    runtimeFingerprint: schedulerRuntimeFingerprint(state.modeLabel()),
+    runtimeFingerprint: schedulerRuntimeFingerprint(),
     // The memory engine overwrites this with the accepting head/commit seq.
     observedAtSeq: 0,
     transactionKind: "action-run",
@@ -727,7 +725,7 @@ export function schedulerImplementationFingerprint(
   return `action:${telemetryId}:${actionId}`;
 }
 
-export function schedulerRuntimeFingerprint(_mode?: "pull" | "push"): string {
+export function schedulerRuntimeFingerprint(): string {
   return "runner:scheduler:v2";
 }
 

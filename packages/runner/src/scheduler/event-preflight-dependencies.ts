@@ -98,8 +98,9 @@ export function collectInvalidUpstreamForLog(
 /**
  * True iff the handler `closure` is reachable downstream from `start` — i.e.
  * `start` is transitively upstream of the closure. Plain BFS with a visited
- * set: cycle-safe and bounded by `start`'s downstream cone. The adjacency is
- * the exact inverse of the forward `collectUpstreamWriters`.
+ * set: cycle-safe and bounded by `start`'s downstream cone. The adjacency
+ * mirrors the writer→reader edges the forward closure collection
+ * (`collectDirectWritersForLog` + materializer overlap) derives, inverted.
  */
 function reachesClosure(
   state: EventPreflightDependencyState,
@@ -133,8 +134,8 @@ function reachesClosure(
 }
 
 /**
- * Downstream readers of `node` — the exact inverse of the forward
- * `collectUpstreamWriters`. `dependents` is the maintained inverse of
+ * Downstream readers of `node` — the inverse adjacency of the forward
+ * writer collection. `dependents` is the maintained inverse of
  * `reverseDependencies` (dependency edges). Materializer edges all originate
  * from materializer writers, so they are mirrored only when `node` is a
  * materializer: an action whose reads overlap the materializer's write
@@ -185,7 +186,6 @@ export function snapshotEventPreflightTraceContext(
   context: EventPreflightTraceContext,
 ): SchedulerEventPreflightStats {
   const {
-    depth: _depth,
     actionSummaries,
     rootDirectWriterActions,
     ...stats
@@ -248,7 +248,6 @@ function getTraceActionSummary(
         ? "computation"
         : "unknown",
       visitCount: 0,
-      memoHitCount: 0,
       dirtyInputCount: 0,
       resultTrueCount: 0,
       reverseDependencyEdgeCount: 0,

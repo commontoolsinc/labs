@@ -104,7 +104,7 @@ import {
   type PullSchedulingState,
 } from "./settle.ts";
 import type { ExecuteContinuationState } from "./continuation.ts";
-import { applyPullExecuteContinuation } from "./pull-continuation.ts";
+import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
   markInvalid as markInvalidRecord,
@@ -712,7 +712,7 @@ export class Scheduler {
     const telemetry = getSchedulerActionTelemetryInfo(action);
     const matches = observation.implementationFingerprint ===
         schedulerImplementationFingerprint(action, actionId, telemetry) &&
-      observation.runtimeFingerprint === schedulerRuntimeFingerprint("pull");
+      observation.runtimeFingerprint === schedulerRuntimeFingerprint();
     if (!matches) logger.debug("rehydrate/miss/fingerprint", () => []);
     return matches;
   }
@@ -1786,7 +1786,6 @@ export class Scheduler {
       setRunningPromise: (promise) => {
         this.runningPromise = promise;
       },
-      modeLabel: () => "pull",
       getCollectActionRunTrace: () => this.collectActionRunTrace,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
@@ -1820,7 +1819,6 @@ export class Scheduler {
 
   private createGraphSnapshotState(): SchedulerGraphSnapshotState {
     return {
-      pullMode: true,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,

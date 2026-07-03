@@ -1,4 +1,6 @@
 import { queueTask } from "./diagnostics.ts";
+import { isHeadEventParked } from "./events.ts";
+import { planPullExecuteContinuation } from "./execution.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import type { Action, QueuedEvent } from "./types.ts";
@@ -94,4 +96,42 @@ function markNotScheduled(state: ExecuteContinuationState): void {
 function resolveIdlePromises(promises: (() => void)[]): void {
   for (const resolve of promises) resolve();
   promises.length = 0;
+}
+
+export function applyPullExecuteContinuation(
+  state: ExecuteContinuationState,
+): void {
+  // In pull mode, we consider ourselves done when there are no effects or
+  // effect-demanded computations to execute.
+  const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
+  const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
+    !isHeadEventParked(state) &&
+    !hasPendingLineageHeadEvent;
+  const hasParkedHeadEvent = state.eventQueue.length > 0 &&
+    (isHeadEventParked(state) || hasPendingLineageHeadEvent);
+  const shouldRerunAfterCurrentExecute = state
+    .consumeRerunAfterCurrentExecute();
+
+  const continuation = planPullExecuteContinuation({
+    pending: state.pending,
+    nodes: state.nodes,
+    effects: state.effects,
+    shouldRerunAfterCurrentExecute,
+    hasQueuedEventReadyNow,
+    hasParkedHeadEvent,
+    isDemandedPullComputation: state.isDemandedPullComputation,
+    materializerIndex: state.materializerIndex,
+    shouldRunFirstPullComputationInDemandContext:
+      state.shouldRunFirstPullComputationInDemandContext,
+    isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
+    getNextDebounceRunTime: state.getNextDebounceRunTime,
+    getNextEligibleRunTime: state.getNextEligibleRunTime,
+  });
+
+  if (!continuation.shouldQueueAnotherTick) {
+    applyQuiescentContinuation(state, continuation);
+    return;
+  }
+
+  queueAnotherExecutionTick(state);
 }

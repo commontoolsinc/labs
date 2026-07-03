@@ -12,7 +12,6 @@ import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface SchedulerGraphSnapshotState {
-  readonly pullMode: boolean;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
@@ -202,7 +201,6 @@ export function buildSchedulerGraphSnapshot(
   return {
     nodes,
     edges,
-    pullMode: state.pullMode,
     timestamp: now,
   };
 }

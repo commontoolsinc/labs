@@ -70,7 +70,6 @@ export type ReactivityLog = {
 };
 
 export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
-  depth: number;
   actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
   rootDirectWriterActions: Set<Action>;
 };

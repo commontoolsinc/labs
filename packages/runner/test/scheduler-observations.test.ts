@@ -602,7 +602,7 @@ describe("persistent scheduler observations", () => {
           actionId,
           undefined,
         ),
-        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
         observedAtSeq: 5,
         transactionKind: "action-run",
         transactionLog: {
@@ -1299,7 +1299,7 @@ describe("persistent scheduler observations", () => {
               "persistedReader",
               undefined,
             ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            runtimeFingerprint: schedulerRuntimeFingerprint(),
             observedAtSeq: 1,
             transactionKind: "action-run",
             transactionLog: {
@@ -1329,7 +1329,7 @@ describe("persistent scheduler observations", () => {
               "persistedWriter",
               undefined,
             ),
-            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            runtimeFingerprint: schedulerRuntimeFingerprint(),
             observedAtSeq: 1,
             transactionKind: "action-run",
             transactionLog: {
@@ -1365,7 +1365,7 @@ describe("persistent scheduler observations", () => {
         pieceId: "space:stale-process",
         processGeneration: 1,
         implementationFingerprint: "impl:old",
-        runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
         observedAtSeq: 5,
         transactionKind: "action-run",
         transactionLog: {

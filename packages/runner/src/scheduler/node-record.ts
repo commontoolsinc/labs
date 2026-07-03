@@ -29,7 +29,6 @@ export interface SchedulerNode {
   provisionalDemandPass?: number;
   gate: SchedulerGateState;
   passRuns: number;
-  retries: number;
 }
 
 export class NodeRegistry {
@@ -82,7 +81,6 @@ export class NodeRegistry {
       provisionalDemand: false,
       gate: { backoffStreak: 0 },
       passRuns: 0,
-      retries: 0,
     };
     this.records.set(action, record);
     const children = this.childActionsByParent.get(action);

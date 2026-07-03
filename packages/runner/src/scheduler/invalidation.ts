@@ -288,13 +288,6 @@ function planSkippedTriggeredAction(
   return undefined;
 }
 
-export function planPushTriggeredAction(
-  state: TriggeredActionSkipState,
-): TriggeredActionPlan {
-  return planSkippedTriggeredAction(state) ??
-    { decision: "schedule-push", operation: "schedule" };
-}
-
 export function planPullTriggeredAction(
   state: TriggeredActionSkipState & {
     readonly invalidBefore: boolean;
@@ -335,16 +328,6 @@ export function shouldRecordTriggerTraceEntry(
   entry: TriggerTraceEntry,
 ): boolean {
   return entry.triggered.length > 0 || entry.matchedActionCount > 0;
-}
-
-export function applyPushTriggeredActionPlan(
-  state: StorageNotificationState,
-  action: Action,
-  plan: TriggeredActionPlan,
-): void {
-  if (plan.operation === "schedule") {
-    state.scheduleWithDebounce(action);
-  }
 }
 
 export function applyPullTriggeredActionPlan(

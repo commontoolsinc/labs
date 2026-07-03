@@ -341,18 +341,6 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
   }
 }
 
-export function addTriggerPathsToIndex(
-  state: TriggerIndexState,
-  action: Action,
-  reads: IMemorySpaceAddress[],
-  shallowReads: IMemorySpaceAddress[],
-): {
-  entities: Set<SpaceScopeAndURI>;
-  triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
-} {
-  return state.addActionReads(action, reads, shallowReads);
-}
-
 export function applyActionReadDelta(
   state: TriggerIndexState,
   action: Action,
@@ -454,19 +442,4 @@ function pathsEqual(
     }
   }
   return true;
-}
-
-export function removeActionFromTriggerIndex(
-  state: TriggerIndexState,
-  action: Action,
-  entities: Iterable<SpaceScopeAndURI>,
-): void {
-  state.removeActionFromEntities(action, entities);
-}
-
-export function collectReadersForWrite(
-  state: TriggerIndexState,
-  write: IMemorySpaceAddress,
-): Set<Action> {
-  return state.collectReadersForWrite(write);
 }
