@@ -149,9 +149,16 @@ resolution-order assertion is marked pending CT-1829 in the test name.
 `packages/ui/src/v2/runtime-context.test.ts`.
 
 ```ts
-export const runtimeContext = createContext<RuntimeClient | undefined>("runtime");
-export const spaceContext = createContext<DID | undefined>("space");
+import { runtimeContext, spaceContext } from "@commonfabric/ui";
+
+// The published seam (packages/ui/src/v2/runtime-context.ts, 8 lines):
+//   runtimeContext = createContext<RuntimeClient | undefined>("runtime")
+//   spaceContext   = createContext<DID | undefined>("space")
+export const hostProvidedContexts = [runtimeContext, spaceContext] as const;
 ```
+
+(The import above is live — this doc block itself type-checks against the
+real export, so a rename fails the docs check.)
 
 These are the **only two contexts a host must provide**. Everything a
 mounted component needs from its environment that is host-specific comes
@@ -208,6 +215,8 @@ detail shapes:
    detail is a `RuntimeNavigationTarget`:
 
    ```ts
+   import type { DID } from "@commonfabric/identity";
+
    // packages/lib-shell/src/runtime.ts:46
    export type RuntimeNavigationTarget = { spaceDid: DID; pieceId: string };
    ```
@@ -224,10 +233,13 @@ detail shapes:
    (`packages/shell/shared/app/view.ts`):
 
    ```ts
-   type AppView =
+   import type { DID } from "@commonfabric/identity";
+
+   // Condensed from packages/shell/shared/app/view.ts
+   export type AppView =
      | { builtin: "home" }
      | { spaceName: string; pieceId?: string; pieceSlug?: string; mode?: "embed" }
-     | { spaceDid: DID;      pieceId?: string; pieceSlug?: string; mode?: "embed" };
+     | { spaceDid: DID; pieceId?: string; pieceSlug?: string; mode?: "embed" };
    ```
 
 **Host guidance:** bind to the minimal common fields — space (`spaceDid`
@@ -292,8 +304,13 @@ here by design** — it lands and is tested with CT-1830.
 A cell handle exposes:
 
 ```ts
-// packages/runtime-client/cell-handle.ts
-getCfcLabel(): Promise<CfcLabelView | undefined>
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
+
+// The queryable surface a cell handle exposes (mirrored by the
+// CfcLabelQueryable type in packages/ui/src/v2/core/cfc-label.ts):
+export interface CfcLabelQueryable {
+  getCfcLabel(): Promise<CfcLabelView | undefined>;
+}
 ```
 
 It is a **pure, non-blocking read of the current local store** (no sync
@@ -356,7 +373,10 @@ component's `index.ts` guards its `customElements.define` (normalized in
 labs#4286):
 
 ```ts
+// Shown at module scope.
 // e.g. packages/ui/src/v2/components/cf-render/index.ts
+import { CFRender } from "./cf-render.ts";
+
 if (!customElements.get("cf-render")) {
   customElements.define("cf-render", CFRender);
 }
@@ -443,7 +463,9 @@ of profile `elements` is `mutateElements` in `profile-home.tsx` (~L199),
 and the field is typed:
 
 ```ts
-// packages/patterns/system/profile-home.tsx
+// Shown for illustration only.
+// packages/patterns/system/profile-home.tsx (verbatim quote; the
+// contract is asserted against the real source by the seam test)
 type OwnerProtectedProfileWrite<T, Binding> = RepresentsCurrentUser<
   Cfc<
     WriteAuthorizedBy<T, Binding>,
@@ -461,7 +483,9 @@ surface in `profile-create.tsx`, where `uiContract` **does** appear — on
 `ProfileCreateSurface` trusted pattern:
 
 ```ts
-// packages/patterns/system/profile-create.tsx
+// Shown for illustration only.
+// packages/patterns/system/profile-create.tsx (verbatim quote; the
+// contract is asserted against the real source by the seam test)
 export type TrustedProfileLink = Cfc<
   WriteAuthorizedBy<Cell<ProfileHomeOutput>, typeof submitProfileCreation>,
   {
