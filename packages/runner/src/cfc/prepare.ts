@@ -50,6 +50,11 @@ import {
   cfcIntegritySatisfiesFloor,
   uniqueCfcAtoms,
 } from "./observation.ts";
+import {
+  type ReadClassSelection,
+  readConsumesEntry,
+  type ReadObservationShape,
+} from "./observation-classes.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -143,37 +148,37 @@ const labelAtPath = (
 // e.g. `getRaw()` records one recursive root read and hands over labeled
 // children with no further journal entries). Non-recursive reads observe
 // only the node itself and keep ancestor-or-equal resolution.
+//
+// `consumes` selects entries by observation class (C1, C0 §4/§6): a read
+// consumes only the entries whose class matches what it actually observed.
+// This subsumes the old `excludeLinkOrigin` pointer/content split (SC-8):
+// link-origin entries label the *reference* as transport (so links carry
+// their target's sensitivity to wherever they land), but reading a value is
+// not reading the pointer — value/shape reads skip them (the implicit
+// `followRef` class of the C0 §3 carve-out), while followRef observations
+// now consume exactly them. Content taint still arrives when the target is
+// actually dereferenced, as an ordinary read of the target document.
+// Covering (class-less) entries may conflate pointer and content labels
+// and are consumed by every read class — over-taint, fail-safe.
 const effectiveReadLabel = (
   metadata: CfcMetadata | undefined,
   path: readonly string[],
-  nonRecursive: boolean | undefined,
-  options?: { excludeLinkOrigin?: boolean },
+  read: {
+    nonRecursive: boolean | undefined;
+    consumes: ReadClassSelection;
+  },
 ): IFCLabel | undefined => {
-  // `excludeLinkOrigin` implements the SC-8 pointer/content split for flow
-  // derivation: link-origin entries label the *reference* as transport (so
-  // links carry their target's sensitivity to wherever they land), but
-  // reading a pointer is not reading the target's content. Flow taint
-  // arrives when the target is actually dereferenced — which appears as an
-  // ordinary read of the target document and resolves the target's own
-  // entries. Without this split, every routing transaction (the list
-  // builtins' coordinators, anything shuffling references) joins the labels
-  // of everything it passes along, and blind passing stops being cheap.
-  // Legacy (untagged) entries may conflate pointer and content labels and
-  // stay included — over-taint, fail-safe.
-  const excludeLink = options?.excludeLinkOrigin === true;
-  const view = excludeLink && metadata !== undefined
-    ? {
-      ...metadata,
-      labelMap: {
-        ...metadata.labelMap,
-        entries: metadata.labelMap.entries.filter((entry) =>
-          entry.origin !== "link"
-        ),
-      },
-    }
-    : metadata;
+  const view = read.consumes === "all" || metadata === undefined ? metadata : {
+    ...metadata,
+    labelMap: {
+      ...metadata.labelMap,
+      entries: metadata.labelMap.entries.filter((entry) =>
+        readConsumesEntry(read.consumes, entry)
+      ),
+    },
+  };
   const base = labelAtPath(view, path);
-  if (nonRecursive === true || view === undefined) {
+  if (read.nonRecursive === true || view === undefined) {
     return base;
   }
   let joined = base;
@@ -1261,38 +1266,92 @@ const forEachFlowObservation = (
     scope: ReturnType<typeof normalizeCellScope>,
     type: MediaType,
     logicalPath: readonly string[],
-    nonRecursive: boolean | undefined,
+    observation: {
+      shape: ReadObservationShape;
+      nonRecursive: boolean | undefined;
+    },
   ) => boolean,
 ): boolean => {
+  // Probe reads issued while FOLLOWING a reference are resolution machinery,
+  // not observations of their own (C0 §4's dereference row): the follow is
+  // journaled as a dereference trace, and the taint of what was actually
+  // read arrives via the ordinary reads of the target document. Recognize
+  // them by the recorded trace sources: a probe at-or-below a followed
+  // slot's path in the same document belongs to that dereference.
+  let traceSourcesByDoc: Map<string, (readonly string[])[]> | undefined;
+  const probeBelongsToDereference = (
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    logicalPath: readonly string[],
+  ): boolean => {
+    if (traceSourcesByDoc === undefined) {
+      traceSourcesByDoc = new Map();
+      for (const trace of tx.getCfcState().dereferenceTraces) {
+        const key = targetKey({
+          space: trace.source.space,
+          id: trace.source.id as URI,
+          scope: normalizeCellScope(trace.source.scope),
+        });
+        let sources = traceSourcesByDoc.get(key);
+        if (sources === undefined) {
+          sources = [];
+          traceSourcesByDoc.set(key, sources);
+        }
+        sources.push(canonicalizeLogicalPath(trace.source.path));
+      }
+    }
+    const sources = traceSourcesByDoc.get(targetKey({ space, id, scope }));
+    return sources !== undefined &&
+      sources.some((source) => isPrefix(source, logicalPath));
+  };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) {
-      continue;
-    }
-    // Link-resolution probes are shape observations of link topology, not
-    // content reads (SC-8): following a reference must not taint with the
-    // target's content label unless something actually reads its value
-    // (which appears as an ordinary, unmarked read).
-    if (isLinkResolutionProbe(read.meta)) {
       continue;
     }
     // Scheduler dependency seeding materializes declared deps so the
     // reactivity log covers them; it is scheduling machinery, not handler
     // consumption (§8.10.1) — the action body's own reads carry the taint.
+    // Checked before probe classification: seeding resolves links, and its
+    // probes carry both markers (ambient meta merges), so they stay
+    // machinery, not followRef observations.
     if (isSchedulerDependencyRead(read.meta)) {
       continue;
     }
     if (flowReadExcluded(read.id, read.path)) {
       continue;
     }
+    // Read classification (C1, C0 §4): a link-resolution probe that is NOT
+    // part of a dereference this transaction performed observed WHICH
+    // reference sits at the slot without following it — a followRef
+    // observation. These used to be skipped outright, which was the SC-8
+    // residual: the fact-of-which-element went unlabeled. They now consume
+    // followRef-class entries (the pointer's own link-origin label) — and
+    // only those; the target's content taint still arrives only via an
+    // ordinary read of the target document. `nonRecursive` reads (key-add,
+    // length, count) observe shape and membership; everything else is a
+    // recursive value read.
     const logicalPath = canonicalizeLogicalPath(read.path);
+    const space = read.space;
+    const id = read.id as URI;
+    const scope = normalizeCellScope(read.scope);
+    let shape: ReadObservationShape;
+    if (isLinkResolutionProbe(read.meta)) {
+      if (probeBelongsToDereference(space, id, scope, logicalPath)) {
+        continue;
+      }
+      shape = "followRef";
+    } else {
+      shape = read.nonRecursive === true ? "shape" : "value";
+    }
     if (
       consume(
-        read.space,
-        read.id as URI,
-        normalizeCellScope(read.scope),
+        space,
+        id,
+        scope,
         (read.type ?? "application/json") as MediaType,
         logicalPath,
-        read.nonRecursive,
+        { shape, nonRecursive: read.nonRecursive },
       )
     ) {
       return true;
@@ -1327,7 +1386,7 @@ const forEachFlowObservation = (
         normalizeCellScope(trigger.scope),
         "application/json",
         trigger.path,
-        false,
+        { shape: "value", nonRecursive: false },
       )
     ) {
       return true;
@@ -1350,7 +1409,7 @@ const forEachFlowObservation = (
         normalizeCellScope(trigger.scope),
         "application/json",
         trigger.path,
-        false,
+        { shape: "value", nonRecursive: false },
       )
     ) {
       return true;
@@ -1375,7 +1434,7 @@ const deriveFlowJoin = (
   const metadataByDoc = new Map<string, CfcMetadata | undefined>();
   forEachFlowObservation(
     tx,
-    (space, id, scope, type, logicalPath, nonRecursive) => {
+    (space, id, scope, type, logicalPath, observation) => {
       const key = targetKey({ space, id, scope });
       if (!metadataByDoc.has(key)) {
         metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
@@ -1383,11 +1442,24 @@ const deriveFlowJoin = (
       const label = effectiveReadLabel(
         metadataByDoc.get(key),
         logicalPath,
-        nonRecursive,
-        { excludeLinkOrigin: true },
+        {
+          nonRecursive: observation.nonRecursive,
+          consumes: observation.shape,
+        },
       );
       if (label?.confidentiality?.length) {
         atoms.push(...label.confidentiality);
+      }
+      // followRef observations contribute confidentiality only. The
+      // hereditary meet quantifies over the transformation's CONTENT inputs
+      // (§8.9.3 derives certification for what the tx computed from);
+      // pointer-topology observations are transport, whose integrity
+      // evidence is the LinkReference chain on the link entry itself.
+      // Letting them into the meet would empty it on every terminal
+      // resolution probe (probes rarely resolve a label), silently ending
+      // TransformedBy/PolicyCertified propagation everywhere.
+      if (observation.shape === "followRef") {
+        return false;
       }
       const hereditary = (label?.integrity ?? []).filter((atom) =>
         atomPropagationClass(atom) === "hereditary"
@@ -1464,38 +1536,41 @@ export const flowLabelWorkExists = (
   }
   const entriesByDoc = new Map<
     string,
-    { any: boolean; nonLink: boolean }
+    { any: boolean; entries: readonly LabelMapEntry[] }
   >();
   const docEntries = (
     space: MemorySpace,
     id: URI,
     scope: ReturnType<typeof normalizeCellScope>,
     type: MediaType,
-  ): { any: boolean; nonLink: boolean } => {
+  ): { any: boolean; entries: readonly LabelMapEntry[] } => {
     const key = targetKey({ space, id, scope });
     let known = entriesByDoc.get(key);
     if (known === undefined) {
       if (selfMintedDocs.has(key)) {
-        known = { any: false, nonLink: false };
+        known = { any: false, entries: [] };
       } else {
         const entries =
           storedMetadataFor(tx, space, id, scope, type)?.labelMap.entries ??
             [];
-        known = {
-          any: entries.length > 0,
-          nonLink: entries.some((entry) => entry.origin !== "link"),
-        };
+        known = { any: entries.length > 0, entries };
       }
       entriesByDoc.set(key, known);
     }
     return known;
   };
-  // Read side mirrors the J derivation's pointer/content split: link-origin
-  // entries don't contribute to J, so they don't make a tx relevant either.
+  // Read side mirrors the J derivation's class selection: an entry makes a
+  // tx relevant only when a read class the tx performed consumes it. A doc
+  // holding only link-origin (implicit followRef) entries is relevant to a
+  // standalone probe read — the SC-8 consumption — but still not to
+  // value/shape reads.
   if (
     forEachFlowObservation(
       tx,
-      (space, id, scope, type) => docEntries(space, id, scope, type).nonLink,
+      (space, id, scope, type, _logicalPath, observation) =>
+        docEntries(space, id, scope, type).entries.some((entry) =>
+          readConsumesEntry(observation.shape, entry)
+        ),
     )
   ) {
     return true;
@@ -2488,6 +2563,9 @@ const verifyInputRequirements = (
   // The consumed reads this gate quantifies over (provenance-only reads
   // excluded). Distinct from the egress side's transaction-global consumed
   // set (collectConsumedConfidentiality), which keeps every labeled read.
+  // Deliberately class-blind (`consumes: "all"`): the gate is a screen over
+  // everything the tx consumed, and over-inclusive quantification is the
+  // fail-safe direction for it; per-class narrowing of consumers is C4.
   const gatedReads = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
@@ -2508,7 +2586,7 @@ const verifyInputRequirements = (
         read.type ?? "application/json",
       ),
       canonicalizeLogicalPath(read.path),
-      read.nonRecursive,
+      { nonRecursive: read.nonRecursive, consumes: "all" },
     ),
   })).filter((read) =>
     read.label !== undefined &&
@@ -3826,11 +3904,13 @@ export const prepareBoundaryCommit = (
         (schemaEntry !== undefined && hasPersistedPolicyClaim(schemaEntry))
       ) {
         // Carry-forward of an untouched path preserves the entry's
-        // component (legacy entries stay legacy).
+        // component and consumption class (legacy entries stay legacy;
+        // covering entries stay covering).
         persistedLabelEntries.push({
           path: entryPath,
           label: cloneLabel(entry.label),
           ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+          ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
         });
       }
     }

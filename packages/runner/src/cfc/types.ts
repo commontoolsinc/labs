@@ -175,10 +175,36 @@ export type LabelEntryOrigin =
   | "structure"
   | "external-ingest";
 
+/**
+ * Consumption class of a persisted labelMap entry (Epic C,
+ * docs/specs/cfc-observation-classes.md §3-§4; spec §4.6.3): which kind of
+ * read observation consumes the entry's label. Orthogonal to `origin`, which
+ * stays the update-discipline axis.
+ *
+ * Absent `observes` = a covering entry, consumed by every read class — with
+ * one carve-out: an entry with `origin:"link"` and absent `observes` is
+ * implicitly `observes:"followRef"`, consumed by followRef reads only and
+ * never as a covering entry (see `entryObservationClass`). That reproduces
+ * the pointer/content split legacy link entries already had (value reads
+ * dropped them via `excludeLinkOrigin`), so old persisted data keeps its
+ * meaning without migration.
+ *
+ * The spec's fifth class, `count`, deliberately has no axis value: a count
+ * observation (cardinality without membership) is strictly weaker than
+ * `enumerate`, so count-shaped reads (length, COUNT) consume the `enumerate`
+ * class — a sound over-approximation (C0 §4).
+ */
+export type LabelObservationClass =
+  | "value"
+  | "shape"
+  | "enumerate"
+  | "followRef";
+
 export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
+  observes?: LabelObservationClass;
 };
 
 export type CfcMetadata = {
