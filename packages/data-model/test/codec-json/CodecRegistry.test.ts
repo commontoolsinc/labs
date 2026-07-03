@@ -94,7 +94,7 @@ describe("CodecRegistry", () => {
       const sourceName = classSource.name;
       const exampleStr = toCompactDebugString(example);
       const counterStr = toCompactDebugString(counter);
-      const cls = classSource as unknown as Constructor;
+      const cls = classSource as Constructor;
 
       it(`given ${exampleStr}, finds the ${sourceName} codec by class`, () => {
         const { first, handler, last, registry } = buildRegistry(

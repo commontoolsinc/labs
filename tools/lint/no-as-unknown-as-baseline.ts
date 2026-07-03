@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/codec-json/CodecRegistry.test.ts": [
-    "97:30:78wfmo",
-  ],
   "packages/data-model/test/codec-json/JsonEncodingContext.test.ts": [
     "119:17:1cfthxx",
     "140:8:wwt2yb",
