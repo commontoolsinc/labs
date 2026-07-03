@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/native-conversion.ts": [
-    "640:10:uofkuc",
-  ],
   "packages/data-model/test/cloneForMutation.test.ts": [
     "58:12:15uhxzs",
     "66:27:zoqtf5",

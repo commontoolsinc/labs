@@ -637,7 +637,7 @@ function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {
   }
 
   for (const [key, value] of fe.extraEntries()) {
-    (copy as unknown as Record<string, unknown>)[key] = nativeFromFabricValue(
+    (copy as Error & Record<string, unknown>)[key] = nativeFromFabricValue(
       value,
       frozen,
     );
