@@ -938,6 +938,18 @@ export interface BrowserLoadSummary {
   worker: TimingStatRow[];
   /** Conflict / re-run counters — see {@link ChurnCounters}. */
   churn: ChurnCounters;
+  /**
+   * Send/settle timeline of the first IPC requests (the boot window), offsets
+   * in ms from the runtime connection's construction. The aggregate rows say a
+   * request was slow; this says WHEN it ran and what overlapped it — e.g. a
+   * pattern:getSpaceRoot spanning the whole boot vs one that queued behind it.
+   */
+  requestTimeline: Array<{
+    type: string;
+    sentAtMs: number;
+    doneAtMs?: number;
+    error?: boolean;
+  }>;
 }
 
 /**
@@ -992,16 +1004,36 @@ export async function collectBrowserLoadSummary(
           getPendingRequests?: () => Array<
             { msgId: number; type: string; ageMs: number }
           >;
+          getRequestTimeline?: () => Array<{
+            msgId: number;
+            type: string;
+            sentAtMs: number;
+            doneAtMs?: number;
+            error?: boolean;
+          }>;
         };
       };
     }).commonfabric;
 
     const mainTiming = cf?.getTimingStatsBreakdown?.() ?? {};
-    const ipc = toRows(mainTiming["runtime-client"], 12);
+    const ipc = toRows(mainTiming["runtime-client"], 14);
     let pendingIpc: Array<{ type: string; ageMs: number }> = [];
+    let requestTimeline: Array<{
+      type: string;
+      sentAtMs: number;
+      doneAtMs?: number;
+      error?: boolean;
+    }> = [];
     try {
       pendingIpc = (cf?.rt?.getPendingRequests?.() ?? [])
         .map(({ type, ageMs }) => ({ type, ageMs }));
+      requestTimeline = (cf?.rt?.getRequestTimeline?.() ?? [])
+        .map(({ type, sentAtMs, doneAtMs, error }) => ({
+          type,
+          sentAtMs,
+          ...(doneAtMs !== undefined ? { doneAtMs } : {}),
+          ...(error ? { error } : {}),
+        }));
     } catch {
       // A disposed runtime still yields a useful summary without this.
     }
@@ -1022,7 +1054,10 @@ export async function collectBrowserLoadSummary(
       // Prefix-match so sub-loggers are included: storage commit/conflict
       // timings live under `storage.v2` (+ `.transaction`/`.multi-space-commit`),
       // not a bare `storage` logger; runner/scheduler similarly have sub-loggers.
-      const prefixes = ["scheduler", "runner", "storage"];
+      // `piece` carries the PieceManager/PiecesController phase timers (boot,
+      // default-pattern ensure/resume); `runner.ipc`/`runner.loop` (worker
+      // request delivery/handling + event-loop lag) ride the `runner` prefix.
+      const prefixes = ["scheduler", "runner", "storage", "piece"];
       const includeLogger = (name: string): boolean =>
         name === "runtime-client.cfc-label" ||
         prefixes.some((prefix) =>
@@ -1035,7 +1070,7 @@ export async function collectBrowserLoadSummary(
           selected[`${name}/${key}`] = stats;
         }
       }
-      worker = toRows(selected, 16);
+      worker = toRows(selected, 28);
 
       const counts: Record<string, Record<string, CountEntry>> =
         workerCounts?.counts ?? {};
@@ -1059,7 +1094,7 @@ export async function collectBrowserLoadSummary(
       // the contention story.
     }
 
-    return { ipc, pendingIpc, workerIpc, worker, churn };
+    return { ipc, pendingIpc, workerIpc, worker, churn, requestTimeline };
   });
   return {
     label,
@@ -1068,6 +1103,7 @@ export async function collectBrowserLoadSummary(
     workerIpc: collected.workerIpc,
     worker: collected.worker,
     churn: collected.churn,
+    requestTimeline: collected.requestTimeline,
   };
 }
 
@@ -1143,10 +1179,24 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
         return lines;
       }, [])
       .join("\n");
+  // One request per line, in send order: `sent..done type` (offsets ms from
+  // connection construction). `..pending` marks a request never settled. Slow
+  // requests visibly nest/overlap here in a way the aggregate table can't show.
+  const timelineLine = summary.requestTimeline.length === 0
+    ? "    (none)"
+    : summary.requestTimeline.map((row) =>
+      `    ${String(row.sentAtMs).padStart(7)}..${
+        row.doneAtMs !== undefined
+          ? String(row.doneAtMs).padStart(7)
+          : "pending"
+      } ${row.type}${row.error ? " ERROR" : ""}`
+    ).join("\n");
   console.log(
     `\n[${summary.label}] main-thread runtime-client IPC round-trips (ms):\n` +
       `${formatRows(summary.ipc)}\n` +
       `[${summary.label}] main-thread IPC still pending:\n${pendingLine}\n` +
+      `[${summary.label}] request timeline (sentAt..doneAt ms):\n` +
+      `${timelineLine}\n` +
       `[${summary.label}] worker request ledger (received/responded):\n` +
       `${workerIpcLine}\n` +
       `[${summary.label}] worker scheduler/runner/storage (ms):\n` +
