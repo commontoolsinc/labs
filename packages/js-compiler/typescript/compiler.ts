@@ -14,6 +14,7 @@ import type {
 import ts from "typescript";
 import * as path from "@std/path";
 import { getLogger } from "@commonfabric/utils/logger";
+import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import { getCompilerOptions, TARGET } from "./options.ts";
 import { parseSourceMap } from "../source-map.ts";
 import type { SourceMap } from "../interface.ts";
@@ -42,6 +43,13 @@ const vfsLogger = getLogger("virtualfs", {
 // authors see them, while server/library compile paths that keep the `error`
 // floor stay quiet.
 const transformerLogger = getLogger("transformer");
+
+// Compile-phase spans (`js-compiler/phase/<step>`): timing stats record even
+// while the logger is disabled, so a cold compile's cost decomposes into
+// program build vs type-check vs emit wherever timing stats are read (e.g.
+// the integration-test load summaries). Per-file steps record one span per
+// file — `n` is the file count, `max` the most expensive file.
+const compileTimingLogger = getLogger("js-compiler", { enabled: false });
 
 function surfaceTransformerWarnings(
   diagnostics: readonly TransformerDiagnosticInfo[],
@@ -316,11 +324,64 @@ export class TypeScriptCompiler {
    * Common Fabric transformer pipeline and emitting one CommonJS file per
    * source. Returns the compiled body + source map per original source name —
    * the inputs the ESM module-record loader and verifier consume.
+   *
+   * Synchronous: runs {@link compileToModulesSteps} to completion in one
+   * stretch. In an event-loop-sharing host (the browser runtime worker), use
+   * {@link compileToModulesInterleaved} instead so queued tasks interleave.
    */
   compileToModules(
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
   ): Map<string, { js: string; sourceMap?: SourceMap }> {
+    const steps = this.compileToModulesSteps(program, inputOptions);
+    for (;;) {
+      const next = steps.next();
+      if (next.done) return next.value;
+    }
+  }
+
+  /**
+   * {@link compileToModules}, yielding one macrotask turn between pipeline
+   * steps (program build, then each module's type-check / declaration-check /
+   * transform+emit). A cold compile is a multi-hundred-ms-to-seconds CPU-bound
+   * pipeline; run synchronously it wedges the host's event loop for its whole
+   * duration — in the browser runtime worker that stalls every queued IPC
+   * delivery (cell traffic) until the compile finishes. Yielding at module
+   * boundaries bounds the stall to the longest single step instead.
+   *
+   * Same inputs, outputs, errors, and step order as the synchronous driver —
+   * both drain {@link compileToModulesSteps}.
+   */
+  async compileToModulesInterleaved(
+    program: Program,
+    inputOptions: TypeScriptCompilerOptions = {},
+  ): Promise<Map<string, { js: string; sourceMap?: SourceMap }>> {
+    const steps = this.compileToModulesSteps(program, inputOptions);
+    for (;;) {
+      const next = steps.next();
+      if (next.done) return next.value;
+      await yieldToEventLoop();
+    }
+  }
+
+  /**
+   * The compile pipeline as a generator, yielding at module boundaries: after
+   * the TypeScript program build, and after each source file's type-check,
+   * declaration-check, and transform+emit. Drivers choose what a `yield`
+   * means: nothing ({@link compileToModules}) or one macrotask turn
+   * ({@link compileToModulesInterleaved}).
+   *
+   * Per-file emit is equivalent to the whole-program `emit(undefined)`: the
+   * files are emitted in the same program order, through the same transformer
+   * factories (one pipeline instance, so cross-file transformer state and
+   * collected diagnostics behave identically), and the emit diagnostics are
+   * aggregated across files before being checked — matching the single-call
+   * shape. Only the event-loop yield points differ.
+   */
+  private *compileToModulesSteps(
+    program: Program,
+    inputOptions: TypeScriptCompilerOptions,
+  ): Generator<void, Map<string, { js: string; sourceMap?: SourceMap }>, void> {
     const noCheck = inputOptions.noCheck ?? false;
     const runtimeModules = inputOptions.runtimeModules ?? [];
 
@@ -339,15 +400,34 @@ export class TypeScriptCompiler {
       runtimeModules,
       inputOptions.specifierAliases,
     );
+    const createStart = performance.now();
     const tsProgram = ts.createProgram(sourceNames, tsOptions, host);
+    compileTimingLogger.time(createStart, "phase", "createProgram");
+    yield;
 
     const checker = new Checker(tsProgram, {
       messageTransformer: inputOptions.diagnosticMessageTransformer,
     });
     if (!noCheck) {
-      checker.typeCheck();
+      const errors = [];
+      for (const sourceFile of checker.checkableSources()) {
+        const typeCheckStart = performance.now();
+        errors.push(...checker.collectSemanticErrors(sourceFile));
+        compileTimingLogger.time(typeCheckStart, "phase", "typeCheckFile");
+        yield;
+      }
+      checker.throwIfErrors(errors);
     }
-    checker.declarationCheck();
+    {
+      const errors = [];
+      for (const sourceFile of checker.checkableSources()) {
+        const declCheckStart = performance.now();
+        errors.push(...checker.collectDeclarationErrors(sourceFile));
+        compileTimingLogger.time(declCheckStart, "phase", "declCheckFile");
+        yield;
+      }
+      checker.throwIfErrors(errors);
+    }
 
     const { beforeTransformers, sourceCollector, getDiagnostics } =
       createTransformers(
@@ -355,15 +435,28 @@ export class TypeScriptCompiler {
         inputOptions,
       );
 
-    // Emit ALL source files (not just main), so every module gets a body.
-    const { diagnostics, emitSkipped } = tsProgram.emit(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { before: beforeTransformers },
-    );
-    checker.check(diagnostics);
+    // Emit ALL source files (not just main), so every module gets a body —
+    // one emit call per file (in program order) so the driver can interleave
+    // between modules; diagnostics aggregate across the calls exactly as the
+    // single whole-program emit call reported them.
+    const emitDiagnostics = [];
+    let emitSkipped = false;
+    for (const sourceFile of tsProgram.getSourceFiles()) {
+      if (sourceFile.fileName.endsWith(".d.ts")) continue;
+      const emitStart = performance.now();
+      const emitResult = tsProgram.emit(
+        sourceFile,
+        undefined,
+        undefined,
+        undefined,
+        { before: beforeTransformers },
+      );
+      compileTimingLogger.time(emitStart, "phase", "emitFile");
+      emitDiagnostics.push(...emitResult.diagnostics);
+      emitSkipped ||= emitResult.emitSkipped;
+      yield;
+    }
+    checker.check(emitDiagnostics);
 
     if (getDiagnostics) {
       const transformerDiagnostics = getDiagnostics();

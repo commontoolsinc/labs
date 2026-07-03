@@ -28,6 +28,7 @@ import {
   ensureCompilerStack,
 } from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
@@ -370,28 +371,36 @@ export class Engine extends EventTarget implements Harness {
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
-        const modules = compiler.compileToModules(resolvedForCompile, {
-          noCheck: options.noCheck,
-          runtimeModules: Engine.runtimeModuleNames(),
-          specifierAliases,
-          getTransformedProgram: options.getTransformedProgram
-            ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
-            : undefined,
-          diagnosticMessageTransformer: new (compilerStack()
-            .ReactiveErrorTransformer)({
-            verbose: options.verboseErrors,
-          }),
-          beforeTransformers: (program) => {
-            const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)({
-              patternCoverage,
-            });
-            return {
-              factories: pipeline.toFactories(program),
-              getDiagnostics: () => pipeline.getDiagnostics(),
-            };
+        // Interleaved: a cold compile is a seconds-long CPU-bound pipeline; in
+        // the browser runtime worker a synchronous run wedges the event loop
+        // and stalls every queued IPC delivery until it finishes (measured as
+        // runner.loop/workerLag ≈ the whole compile). Yielding per module
+        // bounds the stall to the longest single module step.
+        const modules = await compiler.compileToModulesInterleaved(
+          resolvedForCompile,
+          {
+            noCheck: options.noCheck,
+            runtimeModules: Engine.runtimeModuleNames(),
+            specifierAliases,
+            getTransformedProgram: options.getTransformedProgram
+              ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
+              : undefined,
+            diagnosticMessageTransformer: new (compilerStack()
+              .ReactiveErrorTransformer)({
+              verbose: options.verboseErrors,
+            }),
+            beforeTransformers: (program) => {
+              const pipeline = new (compilerStack()
+                .CommonFabricTransformerPipeline)({
+                patternCoverage,
+              });
+              return {
+                factories: pipeline.toFactories(program),
+                getDiagnostics: () => pipeline.getDiagnostics(),
+              };
+            },
           },
-        });
+        );
 
         // Every authored source must have an emitted body; a missing one would
         // otherwise be silently dropped and only fail later at import.
@@ -466,13 +475,16 @@ export class Engine extends EventTarget implements Harness {
       if (!trustBodies) {
         // Verify, and record which modules the verifier approved for hoist
         // registration — only those get the real `__cfReg` registrar (the rest
-        // get a throwing one, so a smuggled call fails closed).
+        // get a throwing one, so a smuggled call fails closed). Yield between
+        // modules: per-body SES verification is CPU-bound, and this path runs
+        // on cold compiles where the event loop is shared with IPC traffic.
         for (const [specifier, body] of graph.compiledBodies) {
           const { hasHoistRegistration } = verifyCompiledModuleBody(
             body,
             specifier,
           );
           if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+          await yieldToEventLoop();
         }
       } else {
         // Trusted integrity-gated bytes: SES verification — and its registration
@@ -1180,13 +1192,16 @@ export class Engine extends EventTarget implements Harness {
     // structural graph verify below always runs.
     if (options.trustedBodies !== true) {
       // Verify, and record which modules the verifier approved for hoist
-      // registration — only those get the real `__cfReg` registrar.
+      // registration — only those get the real `__cfReg` registrar. Yield
+      // between modules so queued event-loop work (worker IPC) interleaves
+      // with the CPU-bound per-body verification.
       for (const [specifier, body] of graph.compiledBodies) {
         const { hasHoistRegistration } = verifyCompiledModuleBody(
           body,
           specifier,
         );
         if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+        await yieldToEventLoop();
       }
     } else {
       // Trusted integrity-gated bytes: registration approval was sealed at
@@ -1202,6 +1217,11 @@ export class Engine extends EventTarget implements Harness {
       );
     }
     verifyModuleGraph(graph.records, mainSpecifier);
+
+    // The SES evaluation below is a single synchronous stretch (~100ms+ for a
+    // system pattern); yield first so IPC queued behind the load runs before
+    // it rather than after.
+    await yieldToEventLoop();
 
     return this.evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,
