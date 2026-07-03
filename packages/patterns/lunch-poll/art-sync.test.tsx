@@ -100,11 +100,12 @@ export default pattern(() => {
   // The INTENDED contract after `{ settle: true }` is:
   //   readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL   (persisted)
   //   findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
-  // Under the current pattern-test harness a SUB-PATTERN's generation fetch
-  // never starts (verified 2026-07-03: no mocked or real request is issued
-  // even for a direct, fully-input-supplied GeneratedArt instance with
-  // shouldGenerate=true — a remaining leg of the CT-1811 family), so the
-  // persisted value stays "". The assertion below PINS that gap: when the
+  // Under the current pattern-test harness the sub-pattern APPEARS inert, but
+  // instrumentation (CT-1836, 2026-07-03) showed the fetch RUNS and COMPLETES
+  // — the defect is that consumer lifts inside the instantiated sub-pattern
+  // never fire over the fetch node result record (never-ran ⇒ never-subscribed
+  // ⇒ never-woken), so fetchState/imageDataUrl/notifyState never compute and
+  // the persisted value stays "". The assertion below PINS that gap: when the
   // runtime fix lands this test goes red — replace it with the intended
   // contract above.
   const canary_generation_not_run_under_harness = computed(() =>
@@ -117,8 +118,8 @@ export default pattern(() => {
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },
-      // Would drive the mocked generation fetch + persistence sync to
-      // completion, once the harness runs sub-pattern fetches at all.
+      // Drives the mocked generation fetch (which runs and completes — see
+      // CT-1836); the persistence sync it feeds is what never fires.
       { settle: true },
       { assertion: canary_generation_not_run_under_harness },
     ],
