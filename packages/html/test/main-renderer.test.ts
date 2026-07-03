@@ -3,7 +3,7 @@ import {
   $conn,
   CellHandle,
   type CellRef,
-  type RuntimeClient,
+  RuntimeClient,
 } from "@commonfabric/runtime-client";
 import { MockDoc } from "../src/mock-doc.ts";
 import { VDomRenderer } from "../src/main/renderer.ts";
@@ -109,6 +109,38 @@ class MockConnection {
   }
 }
 
+function testDocument(): Document {
+  const document = Object.create(null);
+  document.createElement = (tagName: string) => ({ tagName });
+  document.createTextNode = (text: string) => ({ text });
+  return document;
+}
+
+function testCellRef(id = "cell-id"): CellRef {
+  return {
+    space: "did:key:test" as CellRef["space"],
+    id: id as CellRef["id"],
+    path: [],
+    scope: "space",
+    schema: { type: "object" },
+  };
+}
+
+function testElement(value: unknown = {}): HTMLElement {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Expected test element");
+  }
+  return value as HTMLElement;
+}
+
+function testRuntimeClient(connection: MockConnection): RuntimeClient {
+  const runtime: RuntimeClient = Object.create(RuntimeClient.prototype);
+  Object.defineProperty(runtime, $conn, {
+    value: () => connection,
+  });
+  return runtime;
+}
+
 Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", async () => {
   const removedNodes: unknown[] = [];
   const parentNode = {
@@ -116,26 +148,18 @@ Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", 
       removedNodes.push(node);
     },
   };
-  const container = { parentNode };
+  const container = testElement({ parentNode });
   const connection = new MockConnection();
 
   const renderer = new VDomRenderer({
     runtimeClient: {} as any,
     connection: connection as any,
-    document: {
-      createElement: (tagName: string) => ({ tagName }),
-      createTextNode: (text: string) => ({ text }),
-    } as unknown as Document,
+    document: testDocument(),
   });
 
-  const cellRef = {
-    space: "did:key:test",
-    id: "cell-id",
-    path: [],
-    type: "application/json",
-  } as unknown as CellRef;
+  const cellRef = testCellRef();
 
-  await renderer.render(container as unknown as HTMLElement, cellRef);
+  await renderer.render(container, cellRef);
   await renderer.stopRendering();
 
   assertEquals(connection.unmountCalls.length, 1);
@@ -153,15 +177,10 @@ Deno.test("VDomRenderer - forwards trusted event provenance through delivery", a
     document: mock.document,
   });
 
-  const cellRef = {
-    space: "did:key:test",
-    id: "cell-id",
-    path: [],
-    type: "application/json",
-  } as unknown as CellRef;
+  const cellRef = testCellRef();
 
   const container = mock.document.getElementById("root")!;
-  await renderer.render(container as unknown as HTMLElement, cellRef);
+  await renderer.render(container, cellRef);
   const mountId = renderer.getMountId();
   if (mountId === null) {
     throw new Error("expected renderer to have an active mount");
@@ -210,15 +229,10 @@ Deno.test("VDomRenderer - acknowledges applied batches", async () => {
     document: mock.document,
   });
 
-  const cellRef = {
-    space: "did:key:test",
-    id: "cell-id",
-    path: [],
-    type: "application/json",
-  } as unknown as CellRef;
+  const cellRef = testCellRef();
 
   const container = mock.document.getElementById("root")!;
-  await renderer.render(container as unknown as HTMLElement, cellRef);
+  await renderer.render(container, cellRef);
   const mountId = renderer.getMountId();
   if (mountId === null) {
     throw new Error("expected renderer to have an active mount");
@@ -246,10 +260,7 @@ Deno.test("VDomRenderer - constructs without throwing against an already-dispose
   const renderer = new VDomRenderer({
     runtimeClient: {} as any,
     connection: connection as any,
-    document: {
-      createElement: (tagName: string) => ({ tagName }),
-      createTextNode: (text: string) => ({ text }),
-    } as unknown as Document,
+    document: testDocument(),
   });
 
   // The renderer is torn down, not half-built: no active mount, and the batch
@@ -257,13 +268,8 @@ Deno.test("VDomRenderer - constructs without throwing against an already-dispose
   assertEquals(renderer.getMountId(), null);
 
   // A torn-down renderer refuses to mount rather than proceeding half-built.
-  const cellRef = {
-    space: "did:key:test",
-    id: "cell-id",
-    path: [],
-    type: "application/json",
-  } as unknown as CellRef;
-  const cancel = await renderer.render({} as unknown as HTMLElement, cellRef);
+  const cellRef = testCellRef();
+  const cancel = await renderer.render(testElement(), cellRef);
   assertEquals(renderer.getMountId(), null);
   assertEquals(connection.unmountCalls.length, 0);
   await cancel();
@@ -273,14 +279,8 @@ function workerCellHandle(
   connection: MockConnection,
   id: string,
 ): CellHandle<unknown> {
-  const worker = { [$conn]: () => connection } as unknown as RuntimeClient;
-  const cellRef = {
-    space: "did:key:test",
-    id,
-    path: [],
-    scope: "space",
-    type: "application/json",
-  } as unknown as CellRef;
+  const worker = testRuntimeClient(connection);
+  const cellRef = testCellRef(id);
   return new CellHandle(worker, cellRef);
 }
 
@@ -293,7 +293,7 @@ Deno.test("render() drives worker rendering and tears down via the connection", 
   const cellHandle = workerCellHandle(connection, "of:render-cell");
 
   const cancel = render(
-    container as unknown as HTMLElement,
+    container,
     cellHandle as CellHandle<any>,
     { document: mock.document },
   );
@@ -302,14 +302,14 @@ Deno.test("render() drives worker rendering and tears down via the connection", 
   // render is registered.
   await new Promise((resolve) => setTimeout(resolve, 0));
   assertEquals(
-    getActiveRenders().has(container as unknown as HTMLElement),
+    getActiveRenders().has(container),
     true,
   );
 
   cancel();
   // Cancelling drops the registry entry and unmounts worker-side.
   assertEquals(
-    getActiveRenders().has(container as unknown as HTMLElement),
+    getActiveRenders().has(container),
     false,
   );
   assertEquals(connection.unmountCalls.length, 1);
@@ -330,7 +330,7 @@ Deno.test("render() reports a mount failure through onError while alive", async 
 
   const errors: Error[] = [];
   const cancel = render(
-    container as unknown as HTMLElement,
+    container,
     cellHandle as CellHandle<any>,
     { document: mock.document, onError: (error) => errors.push(error) },
   );
