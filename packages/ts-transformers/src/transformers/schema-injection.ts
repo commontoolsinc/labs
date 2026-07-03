@@ -259,6 +259,19 @@ function findCapabilitySummaryForParameter(
       checker: options?.checker,
     });
   if (!summary) return undefined;
+  if (context && summary.unreadableCellArguments) {
+    // A cell argument reached an imported parameter the capability contract
+    // could not classify, so its capability was silently lost. Deduped by
+    // source range across the per-parameter calls that share this summary.
+    for (const unreadable of summary.unreadableCellArguments) {
+      context.reportDiagnosticOnce({
+        severity: "error",
+        type: "capability:unreadable-cell-argument",
+        message: unreadable.message,
+        node: unreadable.node,
+      });
+    }
+  }
   const parameter = fn.parameters[index];
   if (!parameter) return undefined;
   const paramName = ts.isIdentifier(parameter.name)
