@@ -225,6 +225,8 @@ type WishContext = {
 type BaseResolution = {
   cell: Cell<unknown>;
   pathPrefix?: readonly string[];
+  // When true, pathPrefix is the full path to resolve from cell.
+  pathConsumed?: boolean;
 };
 
 type SharedHashtagState = {
@@ -283,6 +285,18 @@ function resolvePath(
     current = current.key(segment);
   }
   return current.resolveAsCell();
+}
+
+function buildResolutionPath(
+  baseResolution: BaseResolution,
+  parsedPath: readonly string[],
+): readonly string[] {
+  if (baseResolution.pathConsumed) {
+    return baseResolution.pathPrefix ?? [];
+  }
+  return baseResolution.pathPrefix
+    ? [...baseResolution.pathPrefix, ...parsedPath]
+    : parsedPath;
 }
 
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
@@ -762,6 +776,7 @@ function resolveHomeSpaceTarget(
       return [{
         cell: match.cell,
         pathPrefix: parsed.path.slice(1),
+        pathConsumed: true,
       }];
     }
 
@@ -1051,9 +1066,10 @@ function createSharedHashtagResolver(
         queryKey,
         () =>
           baseResolutions.map((baseResolution) => {
-            const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...sharedParsed.path]
-              : sharedParsed.path;
+            const combinedPath = buildResolutionPath(
+              baseResolution,
+              sharedParsed.path,
+            );
             return resolvePath(baseResolution.cell, combinedPath);
           }),
       );
@@ -1969,9 +1985,10 @@ export function wish(
               queryKey,
               () =>
                 baseResolutions.map((baseResolution) => {
-                  const combinedPath = baseResolution.pathPrefix
-                    ? [...baseResolution.pathPrefix, ...activeParsed.path]
-                    : activeParsed.path;
+                  const combinedPath = buildResolutionPath(
+                    baseResolution,
+                    activeParsed.path,
+                  );
                   const resolvedCell = resolvePath(
                     baseResolution.cell,
                     combinedPath,
