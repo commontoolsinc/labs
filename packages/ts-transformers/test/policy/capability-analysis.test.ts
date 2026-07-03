@@ -3122,6 +3122,29 @@ Deno.test(
 );
 
 Deno.test(
+  "Mergeable-push misuse: scans past a nested function declaration in a guard statement",
+  () => {
+    // The first early-exit sibling contains a function declaration; its name
+    // must read as a declaration name, not a value reference, and scanning
+    // continues to the real dedup guard.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        const existing = input.key("users").get();
+        if (event.flag) {
+          function helper() { return 0; }
+          return;
+        }
+        if (existing.some((u) => u.name === event.name)) return;
+        input.key("users").push({ name: event.name });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
   "Mergeable-push misuse: classifies a destructuring iterate-dedup as read-dependent",
   () => {
     // The loop destructures the tainted element, dedups against it, and the
