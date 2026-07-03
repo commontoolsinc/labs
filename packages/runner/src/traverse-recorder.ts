@@ -127,8 +127,8 @@ export class TraverseCaptureRecorder {
       index = this.links.length;
       this.links.push(
         cloneIfNecessary(
-          link as unknown as FabricValue,
-        ) as unknown as NormalizedFullLink,
+          link as Parameters<typeof cloneIfNecessary>[0],
+        ) as NormalizedFullLink,
       );
       this.linkIndex.set(key, index);
     }
