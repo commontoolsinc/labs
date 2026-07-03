@@ -48,9 +48,63 @@ const ONE_PIXEL_PNG = decodeBase64(
 const resolvePublicTestHost = () => Promise.resolve(["93.184.216.34"]);
 
 interface FakeHttpConn {
-  conn: Deno.Conn;
+  conn: Deno.TcpConn;
   writes: string[];
   isClosed: () => boolean;
+}
+
+type MockDenoConnect = (options: Deno.ConnectOptions) => Promise<Deno.TcpConn>;
+
+interface FakeTcpConnHandlers {
+  read?: (buffer: Uint8Array) => Promise<number | null>;
+  write?: (buffer: Uint8Array) => Promise<number>;
+  close?: () => void;
+}
+
+class FakeTcpConn implements Deno.TcpConn {
+  readonly localAddr: Deno.NetAddr = {
+    transport: "tcp",
+    hostname: "127.0.0.1",
+    port: 0,
+  };
+  readonly remoteAddr: Deno.NetAddr = {
+    transport: "tcp",
+    hostname: "93.184.216.34",
+    port: 80,
+  };
+  readonly readable = new ReadableStream<Uint8Array<ArrayBuffer>>();
+  readonly writable = new WritableStream<Uint8Array<ArrayBufferLike>>();
+
+  constructor(private readonly handlers: FakeTcpConnHandlers = {}) {}
+
+  read(buffer: Uint8Array): Promise<number | null> {
+    return this.handlers.read?.(buffer) ?? Promise.resolve(null);
+  }
+
+  write(buffer: Uint8Array): Promise<number> {
+    return this.handlers.write?.(buffer) ??
+      Promise.resolve(buffer.byteLength);
+  }
+
+  close(): void {
+    this.handlers.close?.();
+  }
+
+  closeWrite(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  ref(): void {}
+
+  unref(): void {}
+
+  setNoDelay(): void {}
+
+  setKeepAlive(): void {}
+
+  [Symbol.dispose](): void {
+    this.close();
+  }
 }
 
 const createFakeHttpConn = (responseText: string): FakeHttpConn => {
@@ -58,7 +112,7 @@ const createFakeHttpConn = (responseText: string): FakeHttpConn => {
   const writes: string[] = [];
   let offset = 0;
   let closed = false;
-  const conn = {
+  const conn = new FakeTcpConn({
     read(buffer: Uint8Array): Promise<number | null> {
       if (closed) {
         return Promise.resolve(null);
@@ -81,7 +135,7 @@ const createFakeHttpConn = (responseText: string): FakeHttpConn => {
     close(): void {
       closed = true;
     },
-  } as unknown as Deno.Conn;
+  });
   return {
     conn,
     writes,
@@ -90,7 +144,7 @@ const createFakeHttpConn = (responseText: string): FakeHttpConn => {
 };
 
 const installMockDenoConnect = (
-  connect: typeof Deno.connect,
+  connect: MockDenoConnect,
 ): () => void => {
   const originalConnect = Deno.connect;
   Object.defineProperty(Deno, "connect", {
@@ -880,12 +934,10 @@ Deno.test("web_fetch applies timeout while validating redirect target", async ()
 
 Deno.test("web_fetch applies timeout while connecting", async () => {
   let sawConnectSignal = false;
-  const restoreConnect = installMockDenoConnect(
-    ((options: Deno.ConnectOptions) => {
-      sawConnectSignal = options.signal instanceof AbortSignal;
-      return new Promise(() => {});
-    }) as unknown as typeof Deno.connect,
-  );
+  const restoreConnect = installMockDenoConnect((options) => {
+    sawConnectSignal = options.signal instanceof AbortSignal;
+    return new Promise<Deno.TcpConn>(() => {});
+  });
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,
   });
@@ -926,7 +978,7 @@ Deno.test("web_fetch applies timeout while connecting", async () => {
 
 Deno.test("web_fetch applies timeout while writing the request", async () => {
   let closed = false;
-  const conn = {
+  const conn = new FakeTcpConn({
     read(): Promise<number | null> {
       return Promise.resolve(null);
     },
@@ -936,10 +988,8 @@ Deno.test("web_fetch applies timeout while writing the request", async () => {
     close(): void {
       closed = true;
     },
-  } as unknown as Deno.Conn;
-  const restoreConnect = installMockDenoConnect(
-    (() => Promise.resolve(conn)) as unknown as typeof Deno.connect,
-  );
+  });
+  const restoreConnect = installMockDenoConnect(() => Promise.resolve(conn));
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,
   });
@@ -986,8 +1036,8 @@ Deno.test("web_fetch rejects oversized chunked size lines", async () => {
     "\r\n",
     "1".repeat(5000),
   ].join(""));
-  const restoreConnect = installMockDenoConnect(
-    (() => Promise.resolve(fakeConn.conn)) as unknown as typeof Deno.connect,
+  const restoreConnect = installMockDenoConnect(() =>
+    Promise.resolve(fakeConn.conn)
   );
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,
@@ -1026,8 +1076,8 @@ Deno.test("web_fetch rejects oversized chunked trailers", async () => {
     trailers,
     "\r\n",
   ].join(""));
-  const restoreConnect = installMockDenoConnect(
-    (() => Promise.resolve(fakeConn.conn)) as unknown as typeof Deno.connect,
+  const restoreConnect = installMockDenoConnect(() =>
+    Promise.resolve(fakeConn.conn)
   );
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,

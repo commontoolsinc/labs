@@ -1,12 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cf-harness/test/tools-execution.test.ts": [
-    "84:4:gdbejt",
-    "887:7:bop05r",
-    "939:4:yqhkoj",
-    "941:34:1vl8r4d",
-    "990:43:1ouojr6",
-    "1030:43:1ouojr6",
-  ],
   "packages/cli/lib/console-capture.ts": [
     "51:28:6ngwuo",
   ],
