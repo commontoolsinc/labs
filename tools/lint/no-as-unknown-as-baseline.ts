@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/fuse/platform-darwin.ts": [
-    "173:32:c442fh",
-    "180:23:c442fh",
-    "328:26:o4d2cp",
-    "361:26:o4d2cp",
-    "371:26:o4d2cp",
-  ],
   "packages/fuse/platform-linux.ts": [
     "189:32:c442fh",
     "196:23:c442fh",

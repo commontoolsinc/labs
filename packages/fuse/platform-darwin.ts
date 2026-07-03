@@ -170,14 +170,14 @@ let fullLib: DarwinLib | null = null;
 
 const darwinPlatform: FusePlatform = {
   openFuse(): FuseLib {
-    if (fullLib) return fullLib as unknown as FuseLib;
+    if (fullLib) return fullLib as FuseLib;
 
     const errors: string[] = [];
     for (const path of LIBFUSE_PATHS) {
       try {
         fullLib = Deno.dlopen(path, DARWIN_SYMBOLS);
         console.log(`Loaded ${path}`);
-        return fullLib as unknown as FuseLib;
+        return fullLib as FuseLib;
       } catch (e) {
         errors.push(`  ${path}: ${e}`);
       }
@@ -324,8 +324,7 @@ const darwinPlatform: FusePlatform = {
   ): MountHandle {
     const lib = fullLib!;
 
-    // Cast Uint8Array to BufferSource for Deno FFI "buffer" params
-    const mp = mountpoint as unknown as BufferSource;
+    const mp = mountpoint as BufferSource;
 
     const chan = lib.symbols.fuse_mount(
       mp,
@@ -358,7 +357,7 @@ const darwinPlatform: FusePlatform = {
     handle: MountHandle,
     mountpoint: Uint8Array,
   ): void {
-    const mp = mountpoint as unknown as BufferSource;
+    const mp = mountpoint as BufferSource;
     fullLib!.symbols.fuse_unmount(mp, handle.notifyTarget);
   },
 
@@ -368,7 +367,7 @@ const darwinPlatform: FusePlatform = {
     mountpoint: Uint8Array,
     alreadyUnmounted: boolean,
   ): void {
-    const mp = mountpoint as unknown as BufferSource;
+    const mp = mountpoint as BufferSource;
     fullLib!.symbols.fuse_session_remove_chan(handle.notifyTarget);
     lib.symbols.fuse_session_destroy(handle.session);
     if (!alreadyUnmounted) {
