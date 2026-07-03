@@ -6,7 +6,7 @@ import type { Action } from "../src/scheduler/types.ts";
 import { recordVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 
 function makeAction(props: Record<string, unknown>): Action {
-  const fn = (() => {}) as unknown as Action;
+  const fn: Action = () => {};
   Object.assign(fn, props);
   return fn;
 }

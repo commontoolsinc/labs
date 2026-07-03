@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/action-fingerprint.test.ts": [
-    "9:24:lqf4o0",
-  ],
   "packages/runner/test/array-push-mergeable.test.ts": [
     "214:41:1pxtp17",
   ],
