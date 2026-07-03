@@ -13,12 +13,6 @@ const NON_PATTERN_PREFIXES = [
   "packages/patterns/tools/",
 ];
 
-// deno-lint-ignore ban-untagged-todo
-// TODO: Drive this list to zero so cfcheck covers every authored pattern file.
-const EXCLUDED_PATTERN_FILES = new Set<string>([
-  // BURNDOWN
-]);
-
 async function collectPatternFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
 
@@ -55,8 +49,7 @@ function formatError(error: unknown): string {
 // the files where (index % n) == (i - 1). Pattern compiles are single-threaded
 // CPU work that doesn't parallelize within one process, so the way to use more
 // cores is more PROCESSES — run n shards as n parallel CI jobs (mirrors the
-// existing "Pattern Tests (1/4..4/4)" fan-out). Stale-exclusion validation
-// runs on shard 1 only (it needs the full file list).
+// existing "Pattern Tests (1/4..4/4)" fan-out).
 function parseShard(): { index: number; count: number } {
   const raw = Deno.env.get("CFCHECK_SHARD");
   if (!raw) return { index: 0, count: 1 };
@@ -77,32 +70,15 @@ function parseShard(): { index: number; count: number } {
 const shard = parseShard();
 
 const allFiles = await collectPatternFiles(PATTERNS_DIR);
-const eligibleFiles = allFiles.filter((file) =>
-  !EXCLUDED_PATTERN_FILES.has(file)
-);
-const filesToCheck = eligibleFiles.filter((_file, i) =>
+const filesToCheck = allFiles.filter((_file, i) =>
   i % shard.count === shard.index
 );
-const excludedPresent = allFiles.filter((file) =>
-  EXCLUDED_PATTERN_FILES.has(file)
-);
-const staleExclusions = [...EXCLUDED_PATTERN_FILES].filter((file) =>
-  !allFiles.includes(file)
-);
-
-// Stale exclusions reference the full corpus, so only the first shard checks.
-if (shard.index === 0 && staleExclusions.length > 0) {
-  console.error("Stale cfcheck exclusions:");
-  for (const file of staleExclusions) console.error(`  ${file}`);
-  Deno.exit(1);
-}
 
 const shardLabel = shard.count > 1
   ? ` [shard ${shard.index + 1}/${shard.count}]`
   : "";
 console.log(
-  `Common Fabric checking ${filesToCheck.length} pattern files` +
-    ` (${excludedPresent.length} excluded)${shardLabel}.`,
+  `Common Fabric checking ${filesToCheck.length} pattern files${shardLabel}.`,
 );
 
 const failures: Array<{ file: string; error: string }> = [];
